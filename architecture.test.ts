@@ -26,8 +26,9 @@ const SOURCE_DIRS = ["app", "features", "backend", "shared"];
 // WHY テストを対象外にする: テストは組み立てのために規則の外側を参照する（例: presentation のテストが
 //   infra の InMemory リポジトリを new して createTodoContainer に渡す。rules/code/architecture.md の「テストの置き方」）。
 //   規則は本番のコードの依存の向きを縛るもので、テストの組み立てまで縛ると正当なテストが書けなくなる。
-const SOURCE_FILE = /\.tsx?$/;
-const TEST_FILE = /\.test\.tsx?$/;
+// WHY .js / .jsx も対象にする: tsconfig.json が allowJs: true で、JS のファイルも同じビルドに入り、同じ規則の対象になるため。
+const SOURCE_FILE = /\.[jt]sx?$/;
+const TEST_FILE = /\.test\.[jt]sx?$/;
 
 type ImportStatement = {
   // import / export の from に書かれた文字列そのもの（"@/backend/..."、"../x"、"next/link" など）。
@@ -52,10 +53,12 @@ type Reference = {
 //   コメントの中の引用符はコメントとして一致するので、文字列の開始と誤認しない。
 // WHY '' と "" は改行をまたがせない: JSX のテキスト（<p>Don't</p>）の閉じない ' が、以降の行を文字列として飲み込まないようにする。
 //   閉じない ' は一致しないまま読み飛ばされる。
-// 限界（仕様として受け入れる）: 正規表現リテラル（/"/ や /\/\//）は文字列やコメントの開始と誤認しうる。テンプレートリテラルの
-//   ${} の中にさらに ` がある入れ子は正しく区切れない。どちらも import 文の近くに書くことはまれで、誤認しても
-//   多く拾う（違反を見逃す）方向ではなく、コメントを残す・消しすぎる方向に働く。失敗したときに出る「ファイル → 参照先」を
-//   見て判断できる。
+// 限界（仕様として受け入れる）: 正規表現リテラル（/"/ や /\/\// や /a\/*/）は文字列やコメントの開始と誤認しうる。
+//   テンプレートリテラルの ${} の中にさらに ` がある入れ子は正しく区切れない。誤認の影響は 2 方向ある。
+//   - コメントを残してしまう: コメント中の例示を参照として拾い、多く検出する（見逃しにはならない。失敗したときに出る
+//     「ファイル → 参照先」を見て判断できる）。
+//   - 消しすぎる: 正規表現リテラル中の /* をコメントの開始と見なすと、次の */ までを消し、その間にある本物の import を
+//     見逃す。こちらは検査の抜けになるが、正規表現リテラルと import 文を近くに書くことはまれなため受け入れる。
 const STRING_OR_COMMENT =
   /("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`)|\/\/[^\n]*|\/\*[\s\S]*?\*\//g;
 
@@ -70,8 +73,12 @@ function stripComments(source: string): string {
 // `import <句> from "x"` / `export <句> from "x"`。<句> は識別子・空白・{} , * $ だけからなる（名前の並び）。
 // WHY <句> の文字を限定する: `export const GET = ...;` や `export default function ...() {` のような、from を持たない
 //   export 文から後ろの別の文の from まで一致を伸ばさないため。= ( ; . を含む時点で一致しなくなる。
+// WHY 文の先頭（行頭か ; の直後）に限り、<句> が行頭の import / export をまたがないようにする: `export enum E { A }` のように
+//   <句> の文字だけでできていてセミコロンの無い文があると、その直後の `import type { X } from "y"` まで 1 つの export 文と
+//   見なし、先頭の type を見落として値の参照と誤判定するため。; の直後も文の先頭に含めるのは、`a(); import { b } from "c";`
+//   のように 1 行に複数の文を書いた場合も拾うため（本リポジトリの Biome の format では起きないが、抽出の仕様として固定している）。
 const IMPORT_EXPORT_FROM =
-  /\b(?:import|export)\s+(type\s+)?([\w\s{},*$]*?)\s*\bfrom\s*["']([^"']+)["']/g;
+  /(?:^|;)\s*(?:import|export)\s+(type\s+)?((?:(?!^\s*(?:import|export)\b)[\w\s{},*$])*?)\s*\bfrom\s*["']([^"']+)["']/gm;
 // `import "x"`（副作用だけの import。CSS など）。
 const SIDE_EFFECT_IMPORT = /\bimport\s*["']([^"']+)["']/g;
 // `import("x")`（dynamic import）。文字列以外（変数）を渡したものは参照先を静的に決められないため拾わない。
@@ -230,38 +237,119 @@ const PRESENTATION_API = /^backend\/[^/]+\/presentation\/[^/]+\.api$/;
 // feature の公開 API（`features/<f>/index.ts`）。"features/todo" と "features/todo/index" のどちらの書き方も同じファイルを指す。
 const FEATURE_INDEX = /^features\/[^/]+(?:\/index)?$/;
 
+function isFeatureApi(path: string): boolean {
+  return /^features\/[^/]+\/api\//.test(path);
+}
+
+// features/<f>/api/ から、同じ feature の api ファイル（backend/<f>/presentation/*.api）への参照か。
+function isOwnFeatureApiFile(ref: Reference): boolean {
+  return (
+    PRESENTATION_API.test(ref.to) &&
+    backendLayerOf(ref.to)?.feature === featureOf(ref.from)
+  );
+}
+
+// backend/shared/ のうち、domain（DomainError など）と層に属さないものか。
+// WHY backend/shared/ の presentation などを外す: domain / infra から presentation を参照すると、backend/shared の中でも
+//   依存の向き（presentation → application → domain）が逆になるため。
+function isBackendSharedInner(path: string): boolean {
+  const layer = backendLayerOf(path)?.layer;
+  return (
+    isUnder(path, "backend/shared") &&
+    (layer === undefined || layer === "domain")
+  );
+}
+
+function domainMayUse(ref: Reference): boolean {
+  const self = backendLayerOf(ref.from)?.feature;
+  return (
+    isUnder(ref.to, `backend/${self}/domain`) || isBackendSharedInner(ref.to)
+  );
+}
+
+const INFRA_MAY_USE_LAYERS = new Set(["domain", "application", "infra"]);
+
+function infraMayUse(ref: Reference): boolean {
+  const target = backendLayerOf(ref.to);
+  const sameFeature =
+    target !== undefined &&
+    target.feature === backendLayerOf(ref.from)?.feature &&
+    INFRA_MAY_USE_LAYERS.has(target.layer);
+  return sameFeature || isUnder(ref.to, "backend/shared");
+}
+
+function isInfraOtherThanContainer(ref: Reference): boolean {
+  return (
+    ref.own &&
+    backendLayerOf(ref.to)?.layer === "infra" &&
+    !/^backend\/[^/]+\/infra\/container$/.test(ref.to)
+  );
+}
+
+// feature の domain（backend/shared/domain 以外）への値の参照か。
+function isValueImportOfFeatureDomain(ref: Reference): boolean {
+  const target = ref.own ? backendLayerOf(ref.to) : undefined;
+  return (
+    !ref.typeOnly && target?.layer === "domain" && target.feature !== "shared"
+  );
+}
+
+// 規則の識別子。規則ごとの判定テスト（RULE_EXAMPLES）から規則を引くために使う。
+type RuleId =
+  | "screen-to-backend"
+  | "feature-api-to-backend"
+  | "feature-to-feature"
+  | "screen-to-app"
+  | "shared-to-features"
+  | "domain"
+  | "application"
+  | "presentation"
+  | "infra"
+  | "backend-shared"
+  | "app"
+  | "app-api";
+
 type Rule = {
+  id: RuleId;
   // テスト名。rules/code/architecture.md の文言に対応する仕様文。
   name: string;
   appliesTo: (from: string) => boolean;
   isViolation: (ref: Reference) => boolean;
 };
 
-// 1 規則 = 1 テスト。規則を足す・変えるときは rules/code/architecture.md と合わせてここを直す。
+// 1 規則 = 1 テスト。規則を足す・変えるときは rules/code/architecture.md と合わせてここと RULE_EXAMPLES（判定の例）を直す。
 const RULES: Rule[] = [
   {
     // 「`features/<feature>/` の `api/` 以外は backend を参照せず、`api/` が re-export した型を使う」
-    name: "features/<f>/ の api/ 以外は backend/ を参照しない",
+    // WHY 画面側の shared/ も含める: 画面側で backend を参照してよいのは features/<f>/api/ だけ（「画面側とサーバ側の境界」）で、
+    //   shared/ から参照すると境界が api/ の 1 か所に集まらなくなるため。
+    id: "screen-to-backend",
+    name: "features/<f>/ の api/ 以外と shared/ は backend/ を参照しない",
     appliesTo: (from) =>
-      featureOf(from) !== undefined && !/^features\/[^/]+\/api\//.test(from),
+      (isUnder(from, "features") && !isFeatureApi(from)) ||
+      isUnder(from, "shared"),
     isViolation: (ref) => ownUnder(ref, "backend"),
   },
   {
-    // 「画面側で backend を参照してよいのは `features/<feature>/api/` だけ。参照先は presentation の api ファイルと
-    //   `backend/shared/presentation/` で、いずれも `import type` のみ」
+    // 「画面側で backend を参照してよいのは `features/<feature>/api/` だけ。参照先は
+    //   `backend/<feature>/presentation/<name>.api.ts` と `backend/shared/presentation/` で、いずれも `import type` のみ」
     // WHY 型だけに限る: import type はビルド時に消えるので、サーバ専用のコードが画面のバンドルに入らない。
-    name: "features/<f>/api/ から backend/ への参照は型だけで、参照先は backend/<x>/presentation/*.api か backend/shared/presentation/ だけ",
-    appliesTo: (from) => /^features\/[^/]+\/api\//.test(from),
+    // WHY 自 feature の api ファイルに限る: 別 feature の API の契約を使うなら、その feature の api/ を通すべきで、
+    //   feature 同士は index 経由でしか参照しない（規則 feature-to-feature）方針と揃えるため。
+    id: "feature-api-to-backend",
+    name: "features/<f>/api/ から backend/ への参照は型だけで、参照先は自 feature の backend/<f>/presentation/*.api か backend/shared/presentation/ だけ",
+    appliesTo: isFeatureApi,
     isViolation: (ref) =>
       ownUnder(ref, "backend") &&
       !(
         ref.typeOnly &&
-        (PRESENTATION_API.test(ref.to) ||
+        (isOwnFeatureApiFile(ref) ||
           isUnder(ref.to, "backend/shared/presentation"))
       ),
   },
   {
     // 「feature 同士は原則 import しない。必要なときは相手の `index.ts` だけを import する」
+    id: "feature-to-feature",
     name: "別の feature を参照するときは features/<other>（index）だけ",
     appliesTo: (from) => featureOf(from) !== undefined,
     isViolation: (ref) =>
@@ -270,28 +358,33 @@ const RULES: Rule[] = [
       !FEATURE_INDEX.test(ref.to),
   },
   {
+    // 「画面側: `app → features → shared`」。app/ はルーティングで、features / shared から参照すると向きが逆になる。
+    id: "screen-to-app",
+    name: "features/ と shared/ は app/ を参照しない",
+    appliesTo: (from) => isUnder(from, "features") || isUnder(from, "shared"),
+    isViolation: (ref) => ownUnder(ref, "app"),
+  },
+  {
     // 「`shared/` は `features/` を import しない（逆向きの依存を作らない）」
+    id: "shared-to-features",
     name: "shared/ は features/ を参照しない",
     appliesTo: (from) => isUnder(from, "shared"),
     isViolation: (ref) => ownUnder(ref, "features"),
   },
   {
     // 「domain は Next・React・DB に依存させない」「依存してよい先は backend/shared だけ」
-    // WHY node:* は許す: Entity の id の生成（node:crypto の randomUUID）などに使い、フレームワークや永続化の都合ではないため。
-    name: "backend/**/domain/ は next・react・画面側・自 feature の application / presentation / infra を参照しない",
+    // WHY 自前コードを許可の一覧で書く: domain はビジネスルールだけを持ち、他 feature のどの層や画面側にも依存させないため。
+    //   自 feature の domain/ の中の参照（Repository の interface が Entity を参照するなど）は許す。
+    // WHY node:* などのパッケージは next・react 以外許す: Entity の id の生成（node:crypto の randomUUID）などに使い、
+    //   フレームワークや永続化の都合ではないため。
+    id: "domain",
+    name: "backend/<f>/domain/ が参照してよい自前コードは backend/<f>/domain/ と backend/shared/ だけで、next・react も参照しない",
     appliesTo: (from) => backendLayerOf(from)?.layer === "domain",
-    isViolation: (ref) => {
-      const target = backendLayerOf(ref.to);
-      const sameFeatureOuterLayer =
-        ref.own &&
-        target !== undefined &&
-        target.feature === backendLayerOf(ref.from)?.feature &&
-        target.layer !== "domain";
-      return usesFramework(ref) || usesScreenSide(ref) || sameFeatureOuterLayer;
-    },
+    isViolation: (ref) => usesFramework(ref) || (ref.own && !domainMayUse(ref)),
   },
   {
     // 「application の依存してよい先は domain と backend/shared」「依存の向き: presentation → application → domain」
+    id: "application",
     name: "backend/**/application/ は presentation・infra・next・react・画面側を参照しない",
     appliesTo: (from) => backendLayerOf(from)?.layer === "application",
     isViolation: (ref) => {
@@ -306,22 +399,33 @@ const RULES: Rule[] = [
   },
   {
     // 「presentation は query / command を infra/container.ts で組み立てたコンテナからだけ受け取る。Repository の実装を直接 new しない」
+    // 「domain（Entity の型の参照のみ。query / command が返す Entity を DTO に変換するため `import type { Todo }` する）」
+    // WHY domain は型だけ: Entity の生成や操作は application（query / command）を通し、presentation が domain のロジックを
+    //   直接呼ばないようにするため。backend/shared/domain（DomainError）は「依存してよい先」の backend/shared に含まれ、
+    //   エラーの変換（instanceof DomainError）に値として使うため対象外にする。
     // WHY next も禁止する: api ファイルは Web 標準の Request / Response で書き、Next を起動せずにテストできるようにしているため
     //   （rules/code/architecture.md の「テストの置き方」）。
-    name: "backend/**/presentation/ は infra のうち infra/container 以外・next・react・画面側を参照しない",
+    id: "presentation",
+    name: "backend/**/presentation/ は infra のうち infra/container 以外・next・react・画面側を参照せず、domain は型だけを参照する",
     appliesTo: (from) => backendLayerOf(from)?.layer === "presentation",
-    isViolation: (ref) => {
-      const infraOtherThanContainer =
-        ref.own &&
-        backendLayerOf(ref.to)?.layer === "infra" &&
-        !/^backend\/[^/]+\/infra\/container$/.test(ref.to);
-      return (
-        infraOtherThanContainer || usesFramework(ref) || usesScreenSide(ref)
-      );
-    },
+    isViolation: (ref) =>
+      isInfraOtherThanContainer(ref) ||
+      isValueImportOfFeatureDomain(ref) ||
+      usesFramework(ref) ||
+      usesScreenSide(ref),
+  },
+  {
+    // 「infra: Repository の実装、container.ts（組み立て = DI）」「依存してよい先: domain（interface を実装する）、
+    //   application（container で組み立てる）」。container.ts が同じ infra の Repository の実装を組み立てるので、自 feature の
+    //   infra/ の中の参照も許す。backend/shared/ は他の層と同じく feature をまたぐ共通部品として許す。
+    id: "infra",
+    name: "backend/<f>/infra/ が参照してよい自前コードは backend/<f>/ の domain・application・infra と backend/shared/ だけで、next・react も参照しない",
+    appliesTo: (from) => backendLayerOf(from)?.layer === "infra",
+    isViolation: (ref) => usesFramework(ref) || (ref.own && !infraMayUse(ref)),
   },
   {
     // 「backend/shared/: feature をまたいで使う型や処理」。各 feature が shared に依存するので、逆向きにすると循環する。
+    id: "backend-shared",
     name: "backend/shared/ は backend/<feature>/・画面側を参照しない",
     appliesTo: (from) => isUnder(from, "backend/shared"),
     isViolation: (ref) =>
@@ -331,18 +435,22 @@ const RULES: Rule[] = [
   {
     // 「`app/` はルーティングだけ。`page.tsx` は screen を返すだけ」「feature の外から import してよいのは index.ts だけ」
     // WHY 自前のコード（features/ backend/ shared/）への参照だけを検査する: 画面の組み立ては feature の公開 API に閉じ込め、
-    //   app/ から feature の内部や backend・shared を直接使ってロジックを書くのを防ぐため。
+    //   app/ から feature の内部や backend を直接使ってロジックを書くのを防ぐため。
+    // WHY shared/ は許す: 画面側の依存の向き `app → features → shared` の連鎖として、app/ から shared/ を参照するのは
+    //   向きに沿っている（オーケストレータの判断。Issue #47）。
     // WHY パッケージと app/ の中の相対参照は検査しない: レイアウトが next/font や他のパッケージを使うこと、Next の慣例どおり
     //   import "./globals.css" のように app/ のファイルを読むことはルーティングの範囲で正当で、許可の一覧で縛ると
     //   追加のたびに規則を直すことになる（オーケストレータの判断。Issue #47）。
-    name: "app/（app/api 以外）が features/・backend/・shared/ を参照するときは features/<f>（index）だけ",
+    id: "app",
+    name: "app/（app/api 以外）が features/・backend/・shared/ を参照するときは features/<f>（index）か shared/ だけ",
     appliesTo: (from) => isUnder(from, "app") && !isUnder(from, "app/api"),
     isViolation: (ref) =>
-      ["features", "backend", "shared"].some((dir) => ownUnder(ref, dir)) &&
+      (ownUnder(ref, "features") || ownUnder(ref, "backend")) &&
       !FEATURE_INDEX.test(ref.to),
   },
   {
     // 「`app/api/**/route.ts` は backend の api ファイルが export する HTTP メソッド名の関数を re-export するだけ」
+    id: "app-api",
     name: "app/api/ は backend/<x>/presentation/*.api だけを参照する",
     appliesTo: (from) => isUnder(from, "app/api"),
     isViolation: (ref) => !(ref.own && PRESENTATION_API.test(ref.to)),
@@ -363,6 +471,283 @@ describe("依存の向き（rules/code/architecture.md）", () => {
         .filter((ref) => rule.appliesTo(ref.from) && rule.isViolation(ref))
         .map((ref) => `${ref.from} → ${ref.to}`);
       expect(violations).toEqual([]);
+    });
+  }
+});
+
+// --- 規則ごとの判定の仕様 ---
+// 上の「依存の向き」のテストは今のコードに違反が無いことしか確かめないため、規則そのものが緩すぎても（常に違反なしと
+// 判定しても）通ってしまう。規則ごとに「違反になる例」「ならない例」を架空の参照で固定し、規則の判定が仕様どおりかを確かめる。
+// 例は [参照元のファイル, import に書く specifier, 値の参照か型だけの参照か]。
+
+type Example = [from: string, specifier: string, kind: "value" | "type"];
+
+const RULE_EXAMPLES: Record<
+  RuleId,
+  { violating: Example[]; allowed: Example[] }
+> = {
+  "screen-to-backend": {
+    violating: [
+      [
+        "features/todo/components/x.ts",
+        "@/backend/todo/presentation/list-todos.api",
+        "type",
+      ],
+      [
+        "features/todo/screens/s/s.hook.ts",
+        "@/backend/todo/domain/todo",
+        "value",
+      ],
+      ["shared/x.ts", "@/backend/shared/presentation/http-error", "type"],
+    ],
+    allowed: [
+      ["features/todo/components/x.ts", "@/features/todo/api/todo-api", "type"],
+      [
+        "features/todo/api/todo-api.ts",
+        "@/backend/todo/presentation/list-todos.api",
+        "type",
+      ],
+    ],
+  },
+  "feature-api-to-backend": {
+    violating: [
+      [
+        "features/todo/api/todo-api.ts",
+        "@/backend/todo/presentation/list-todos.api",
+        "value",
+      ],
+      ["features/todo/api/todo-api.ts", "@/backend/todo/domain/todo", "type"],
+      [
+        "features/todo/api/todo-api.ts",
+        "@/backend/other/presentation/list-others.api",
+        "type",
+      ],
+    ],
+    allowed: [
+      [
+        "features/todo/api/todo-api.ts",
+        "@/backend/todo/presentation/list-todos.api",
+        "type",
+      ],
+      [
+        "features/todo/api/todo-api.ts",
+        "@/backend/shared/presentation/http-error",
+        "type",
+      ],
+    ],
+  },
+  "feature-to-feature": {
+    violating: [
+      [
+        "features/other/components/x.ts",
+        "@/features/todo/components/todo-item",
+        "value",
+      ],
+    ],
+    allowed: [
+      ["features/other/components/x.ts", "@/features/todo", "value"],
+      ["features/other/components/x.ts", "@/features/todo/index", "value"],
+      [
+        "features/todo/screens/todo-screen/todo-screen.tsx",
+        "../../components/todo-item",
+        "value",
+      ],
+    ],
+  },
+  "screen-to-app": {
+    violating: [
+      ["features/todo/components/x.ts", "@/app/page", "value"],
+      ["shared/x.ts", "@/app/layout", "type"],
+    ],
+    allowed: [["features/todo/components/x.ts", "next/link", "value"]],
+  },
+  "shared-to-features": {
+    violating: [["shared/x.ts", "@/features/todo", "value"]],
+    allowed: [["shared/x.ts", "react", "value"]],
+  },
+  domain: {
+    violating: [
+      ["backend/todo/domain/x.ts", "next/server", "value"],
+      [
+        "backend/todo/domain/x.ts",
+        "../application/create-todo.command",
+        "value",
+      ],
+      ["backend/todo/domain/x.ts", "@/backend/other/domain/other", "type"],
+      [
+        "backend/todo/domain/x.ts",
+        "@/backend/shared/presentation/http-error",
+        "value",
+      ],
+      ["backend/todo/domain/x.ts", "@/features/todo", "value"],
+    ],
+    allowed: [
+      ["backend/todo/domain/x.ts", "@/backend/todo/domain/todo", "value"],
+      [
+        "backend/todo/domain/x.ts",
+        "@/backend/shared/domain/domain-error",
+        "value",
+      ],
+      ["backend/todo/domain/x.ts", "node:crypto", "value"],
+    ],
+  },
+  application: {
+    violating: [
+      [
+        "backend/todo/application/x.ts",
+        "@/backend/todo/infra/container",
+        "value",
+      ],
+      [
+        "backend/todo/application/x.ts",
+        "@/backend/todo/presentation/list-todos.api",
+        "type",
+      ],
+      ["backend/todo/application/x.ts", "react", "value"],
+    ],
+    allowed: [
+      [
+        "backend/todo/application/x.ts",
+        "@/backend/todo/domain/todo-repository",
+        "type",
+      ],
+      [
+        "backend/todo/application/x.ts",
+        "@/backend/shared/domain/domain-error",
+        "value",
+      ],
+    ],
+  },
+  presentation: {
+    violating: [
+      [
+        "backend/todo/presentation/x.api.ts",
+        "@/backend/todo/infra/todo-repository.in-memory",
+        "value",
+      ],
+      ["backend/todo/presentation/x.api.ts", "next/server", "value"],
+      [
+        "backend/todo/presentation/x.api.ts",
+        "@/backend/todo/domain/todo",
+        "value",
+      ],
+    ],
+    allowed: [
+      [
+        "backend/todo/presentation/x.api.ts",
+        "@/backend/todo/infra/container",
+        "value",
+      ],
+      [
+        "backend/todo/presentation/x.api.ts",
+        "@/backend/todo/domain/todo",
+        "type",
+      ],
+      [
+        "backend/shared/presentation/http-error.ts",
+        "@/backend/shared/domain/domain-error",
+        "value",
+      ],
+    ],
+  },
+  infra: {
+    violating: [
+      [
+        "backend/todo/infra/x.ts",
+        "@/backend/todo/presentation/list-todos.api",
+        "type",
+      ],
+      ["backend/todo/infra/x.ts", "@/backend/other/domain/other", "type"],
+      ["backend/todo/infra/x.ts", "@/features/todo", "value"],
+      ["backend/todo/infra/x.ts", "@/shared/x", "value"],
+      ["backend/todo/infra/x.ts", "@/app/page", "value"],
+      ["backend/todo/infra/x.ts", "next/server", "value"],
+    ],
+    allowed: [
+      ["backend/todo/infra/x.ts", "@/backend/todo/domain/todo", "value"],
+      [
+        "backend/todo/infra/x.ts",
+        "@/backend/todo/application/create-todo.command",
+        "value",
+      ],
+      [
+        "backend/todo/infra/x.ts",
+        "@/backend/shared/domain/domain-error",
+        "value",
+      ],
+      [
+        "backend/todo/infra/container.ts",
+        "./todo-repository.in-memory",
+        "value",
+      ],
+      ["backend/todo/infra/x.ts", "node:crypto", "value"],
+    ],
+  },
+  "backend-shared": {
+    violating: [
+      [
+        "backend/shared/presentation/x.ts",
+        "@/backend/todo/domain/todo",
+        "type",
+      ],
+      ["backend/shared/presentation/x.ts", "@/features/todo", "value"],
+    ],
+    allowed: [
+      [
+        "backend/shared/presentation/x.ts",
+        "@/backend/shared/domain/domain-error",
+        "value",
+      ],
+    ],
+  },
+  app: {
+    violating: [
+      ["app/page.tsx", "@/backend/todo/presentation/list-todos.api", "value"],
+      ["app/page.tsx", "@/features/todo/components/todo-item", "value"],
+    ],
+    allowed: [
+      ["app/page.tsx", "@/features/todo", "value"],
+      ["app/page.tsx", "@/shared/x", "value"],
+      ["app/layout.tsx", "./globals.css", "value"],
+      ["app/page.tsx", "react", "value"],
+    ],
+  },
+  "app-api": {
+    violating: [
+      ["app/api/todos/route.ts", "@/backend/todo/infra/container", "value"],
+      ["app/api/todos/route.ts", "next/server", "value"],
+    ],
+    allowed: [
+      [
+        "app/api/todos/route.ts",
+        "@/backend/todo/presentation/list-todos.api",
+        "value",
+      ],
+    ],
+  },
+};
+
+function judge(id: RuleId, [from, specifier, kind]: Example): boolean {
+  const rule = RULES.find((candidate) => candidate.id === id);
+  if (rule === undefined) {
+    throw new Error(`規則 ${id} が RULES にない`);
+  }
+  const ref = toReference(from, { specifier, typeOnly: kind === "type" });
+  return rule.appliesTo(ref.from) && rule.isViolation(ref);
+}
+
+describe("規則ごとの判定", () => {
+  for (const [id, { violating, allowed }] of Object.entries(RULE_EXAMPLES) as [
+    RuleId,
+    { violating: Example[]; allowed: Example[] },
+  ][]) {
+    describe(id, () => {
+      it.each(violating)("%s → %s（%s）は違反", (...example) => {
+        expect(judge(id, example)).toBe(true);
+      });
+      it.each(allowed)("%s → %s（%s）は違反ではない", (...example) => {
+        expect(judge(id, example)).toBe(false);
+      });
     });
   }
 });
@@ -433,6 +818,16 @@ describe("参照の抽出（extractImports）", () => {
     expect(extractImports(source)).toEqual([
       { specifier: "after-string", typeOnly: false },
       { specifier: "after-quote", typeOnly: false },
+    ]);
+  });
+
+  it("セミコロンの無い文の直後の import type を、前の文とつなげずに型だけの参照として取り出す", () => {
+    const source = [
+      "export enum E { A }",
+      'import type { X } from "after-enum";',
+    ].join("\n");
+    expect(extractImports(source)).toEqual([
+      { specifier: "after-enum", typeOnly: true },
     ]);
   });
 
