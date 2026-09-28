@@ -15,8 +15,10 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 
 ## セットアップ
 
-```
+```sh
 asdf plugin add nodejs
 asdf plugin add pnpm
 asdf install
 ```
+
+バージョンの確認方法や更新手順の詳細は `rules/env.md` を参照。
