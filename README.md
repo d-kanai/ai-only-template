@@ -12,10 +12,10 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 | パッケージマネージャ | [pnpm](https://pnpm.io/) | latest を使う。npm / yarn は使わない |
 | フレームワーク | [Next.js](https://nextjs.org/) | App Router を使う |
 | UI ライブラリ | [React](https://react.dev/) | Next.js（create-next-app）が指定するバージョンに合わせる |
-| 言語 | [TypeScript](https://www.typescriptlang.org/) | |
+| 言語 | [TypeScript](https://www.typescriptlang.org/) | 最新版を使う |
 | テスト | [Vitest](https://vitest.dev/) | React Testing Library + jsdom でコンポーネントをテストする |
 
-ツールのバージョンは `.tool-versions` が正（決め方と更新手順は `rules/env.md`）。npm パッケージのバージョンは `package.json` / `pnpm-lock.yaml` が正。pnpm のサプライチェーン保護設定は `pnpm-workspace.yaml` を参照。
+ツールのバージョンは `.tool-versions` が正（決め方と更新手順は `rules/code/env.md`）。npm パッケージのバージョンは `package.json` / `pnpm-lock.yaml` が正。pnpm のサプライチェーン保護設定は `pnpm-workspace.yaml` を参照。
 
 ## セットアップ
 
@@ -25,7 +25,7 @@ asdf plugin add pnpm
 asdf install
 ```
 
-バージョンの確認方法や更新手順の詳細は `rules/env.md` を参照。
+バージョンの確認方法や更新手順の詳細は `rules/code/env.md` を参照。
 
 ## 開発
 
