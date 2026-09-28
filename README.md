@@ -19,6 +19,30 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 
 ツールのバージョンは `.tool-versions` が正（決め方と更新手順は `rules/code/env.md`）。npm パッケージのバージョンは `package.json` / `pnpm-lock.yaml` が正。pnpm のサプライチェーン保護設定は `pnpm-workspace.yaml` を参照。
 
+## ディレクトリ構成
+
+機能（feature）単位で置く。`src/` は使わず、ルート直下に置く（例は Todo）。
+
+```
+app/                  # ルーティングだけ（page.tsx は screen を返すだけ、api/**/route.ts はコントローラを公開するだけ）
+features/todo/        # 画面側
+  screens/todo-screen/  # todo-screen.tsx（見た目）+ todo-screen.hook.ts（状態・データ取得）+ テスト
+  api/                  # /api/... を fetch する薄いラッパー
+  index.ts              # 公開 API（外から import してよいのはここだけ）
+server/todo/          # API 側（DDD 4 層）
+  presentation/         # Request → 入力検証 → use case → Response、dto.ts（画面側と共有する型）
+  application/          # 1 ユースケース = 1 ファイル
+  domain/               # Entity / Value Object / Repository の interface
+  infra/                # Repository の実装（当面 InMemory）、container.ts（DI）
+shared/               # 画面側で feature をまたぐ共通部品（必要になったら作る）
+```
+
+- 画面は SSR を前提にせず、データは hook から `/api/...` を呼んで取る。サーバの処理はすべて `server/` に置く。
+- 画面側からサーバ側へは `dto.ts` の型を `import type` で参照するだけ。
+- テストは対象の隣に置く（`app/` には置かない）。
+
+詳細（依存の向き、命名、テストの置き方、採用しなかった案）は `rules/code/architecture.md` を参照。
+
 ## セットアップ
 
 ```sh
