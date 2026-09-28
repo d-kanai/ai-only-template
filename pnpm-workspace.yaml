@@ -44,3 +44,12 @@ blockExoticSubdeps: true
 # strictDepBuilds: allowBuilds で許可・不許可をレビューしていないビルドスクリプトがあれば、警告ではなく install を失敗させる。
 #   既定で true だが明示している。
 strictDepBuilds: true
+
+# ---- 依存の版の書き方 ----
+
+# savePrefix: `pnpm add` が package.json に書く版の接頭辞（https://pnpm.io/settings/other#saveprefix ）。
+#   既定は '^'（例: 1.2.3 → ^1.2.3。マイナー更新を許す範囲指定になる）。'' にすると接頭辞なしの 1.2.3（完全固定）で書かれる。
+#   依存はすべて完全固定する方針のため（rules/code/dependencies.md）、`pnpm add <pkg>` で版を書き忘れても範囲指定にならないようにしている。
+#   注意: 公式ドキュメントのとおり、`pnpm add foo@2` のように範囲を指定して追加した場合はこの設定は無視され、
+#   package.json には "2" と範囲のまま書かれる。そのため版は `pnpm add <pkg>@<x.y.z>` で明示し、package.test.ts でも検査している。
+savePrefix: ''

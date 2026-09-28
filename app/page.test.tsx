@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { expect, test } from "vitest";
-import Page from "./page";
+import Page from "@/app/page";
 
 test("トップページをレンダリングすると level 1 の見出しに ai-only-template が表示される", () => {
   render(<Page />);

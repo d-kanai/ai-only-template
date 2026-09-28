@@ -30,8 +30,9 @@
 @LEARNINGS.md
 
 ## ルール詳細
-- ブランチ・PR: @rules/branch.md
-- コミットメッセージ: @rules/commit.md
-- 作業ログ: @rules/log.md
-- オーケストレーション: @rules/orchestration.md
-- 実行環境: @rules/env.md
+- ブランチ・PR: @rules/general/branch.md
+- コミットメッセージ: @rules/general/commit.md
+- 作業ログ: @rules/general/log.md
+- オーケストレーション: @rules/general/orchestration.md
+- 実行環境: @rules/code/env.md
+- 依存パッケージ: @rules/code/dependencies.md
