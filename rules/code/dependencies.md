@@ -13,6 +13,10 @@ npm パッケージの版は `package.json` と `pnpm-lock.yaml` の両方で固
   curl -s https://registry.npmjs.org/<pkg> | jq -r '.["dist-tags"].latest'
   ```
 - ただし safe-chain（開発機）と pnpm の `minimumReleaseAge`（`pnpm-workspace.yaml`）により、公開直後の版は入らない。その場合は入る版のうち最新を使い、理由を PR に書く。
+  - 開発機の safe-chain は公開から 14 日（`~/.aikido/config.json` の最小パッケージ年齢）、リポジトリの pnpm は 5 日（`minimumReleaseAge: 7200`、単位は分）。pnpm 側を 14 日に揃えないのは、Next.js などの更新に 2 週間遅れで追随することになるため（Issue #32 でのユーザー判断）。pnpm 側の設定は safe-chain の有無（クラウドセッション・CI）に関係なく効く。値は `pnpm-workspace.test.ts` で検査している。例外: `packageManager`（pnpm 本体）の解決は対象外で、公開 5 日未満の pnpm でも拒否されない（2026-09-28 実測。公式仕様は未確認）。pnpm の版は `.tool-versions` と `packageManager` で明示するので影響はない。
+  - 版の選び方: `curl -s https://registry.npmjs.org/<pkg> | jq '.time'` で公開日時を見て、公開から 5 日以上経った版のうち最新を選ぶ。
+  - lockfile の再解決: 既存の lockfile にポリシーを満たさないエントリがあると、`pnpm install --frozen-lockfile` / `pnpm update`（引数なし）は `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`、`pnpm add <pkg>@<x.y.z>` / `pnpm update <pkg>` は lockfile に残る別の拒否エントリで `ERR_PNPM_NO_MATURE_MATCHING_VERSION` になり、lockfile を部分的に直せない（2026-09-28、pnpm 12.7.0 で確認）。直接依存の版を `package.json` で直したうえで、`pnpm clean --lockfile` → `pnpm install` で作り直し、`pnpm install --frozen-lockfile` が通ることを確認する。作り直した後は、lockfile の差分で意図しない版の変化がないかを確認する。
+  - 拒否されたエントリを入れ替えるには、それを要求している親パッケージも条件を満たす版である必要がある。開発機では safe-chain が 14 日未満の親パッケージ（例: 2026-09-28 時点の `next@16.3.6` / `jsdom@30.1.1`、どちらも 09-22 公開）を隠すため、5 日の条件では入るはずの親が見つからず再解決できなかった（Issue #32）。その場合はクラウドセッション（safe-chain なし）で再解決する。
 - TypeScript は最新版を使う（2026-09-28 時点 7.0.2。Next.js 16.3.6 の `next build` の型チェックと Vitest で動作することを確認済み）。
 
 ## 例外
