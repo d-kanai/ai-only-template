@@ -397,6 +397,24 @@ function isFrontendRootFile(path: string): boolean {
 const BACKEND_ENV_MODULE = "apps/backend/shared/infra/env";
 
 // features/<f>/api/ から、同じ feature の api ファイル（backend/<f>/presentation/*.api）への参照か。
+// frontend-to-backend-specifier の例外（Issue #68 の段階 2。オーケストレータの判断）: リポジトリ直下の vitest.global-setup.ts
+//   （テスト基盤）だけは、database.test-support を相対パスで参照してよい。
+// WHY: database.test-support はテストのための処理（前の実行が残したテスト用スキーマの後始末）で、パッケージの公開面（exports。
+//   frontend / e2e / 設定が使うアプリの入口だけ、というユーザー判断）に含めない。exports に無いので @repo/backend では
+//   解決できず、相対パスで読むしかない。例外はファイルと参照先の組で絞り、ほかのファイルからの test-support、global-setup から
+//   ほかの backend のファイル（env など）への相対参照は違反のままにする。
+const TEST_INFRA_RELATIVE_EXCEPTION = {
+  from: "vitest.global-setup.ts",
+  to: "apps/backend/shared/infra/database.test-support",
+};
+
+function isTestInfraRelativeException(ref: Reference): boolean {
+  return (
+    ref.from === TEST_INFRA_RELATIVE_EXCEPTION.from &&
+    ref.to === TEST_INFRA_RELATIVE_EXCEPTION.to
+  );
+}
+
 function isOwnFeatureApiFile(ref: Reference): boolean {
   return (
     PRESENTATION_API.test(ref.to) &&
@@ -502,13 +520,15 @@ const RULES: Rule[] = [
     // WHY e2e/ とリポジトリ直下も対象にする: playwright.config.ts・vitest.global-setup.ts・e2e/database.ts も env.ts などを
     //   使う。相対パスを許すと、exports に無いファイルを使っていても気づけない。
     id: "frontend-to-backend-specifier",
-    name: 'apps/frontend/・e2e/・リポジトリ直下のファイルから apps/backend/ への参照は "@repo/backend/..." の書き方だけ（相対パスや "@/../backend/" を使わない）',
+    name: 'apps/frontend/・e2e/・リポジトリ直下のファイルから apps/backend/ への参照は "@repo/backend/..." の書き方だけ（相対パスや "@/../backend/" を使わない。例外は vitest.global-setup.ts → database.test-support の相対パスだけ）',
     appliesTo: (from) =>
       isUnder(from, FRONTEND_ROOT) ||
       isUnder(from, "e2e") ||
       !from.includes("/"),
     isViolation: (ref) =>
-      ownUnder(ref, BACKEND_ROOT) && !isBackendPackage(ref.specifier),
+      ownUnder(ref, BACKEND_ROOT) &&
+      !isBackendPackage(ref.specifier) &&
+      !isTestInfraRelativeException(ref),
   },
   {
     // 「backend → frontend は禁止」（Issue #68）。backend は Next / React・画面側に依存しない pure な TypeScript にし、
@@ -1124,6 +1144,19 @@ const RULE_EXAMPLES: Record<
       ],
       ["e2e/database.ts", "../apps/backend/shared/infra/env", "value"],
       ["playwright.config.ts", "./apps/backend/shared/infra/env", "value"],
+      // 例外（vitest.global-setup.ts → database.test-support）は、そのファイルとその参照先の組だけ。
+      //   global-setup からでも env を相対パスで参照するのは違反。別のルート直下のファイルから test-support も違反。
+      ["vitest.global-setup.ts", "./apps/backend/shared/infra/env", "value"],
+      [
+        "vitest.config.mts",
+        "./apps/backend/shared/infra/database.test-support",
+        "value",
+      ],
+      [
+        "e2e/database.ts",
+        "../apps/backend/shared/infra/database.test-support",
+        "value",
+      ],
     ],
     allowed: [
       [
@@ -1132,9 +1165,11 @@ const RULE_EXAMPLES: Record<
         "value",
       ],
       ["e2e/database.ts", "@repo/backend/shared/infra/env", "value"],
+      ["vitest.global-setup.ts", "@repo/backend/shared/infra/env", "value"],
+      // 例外: テスト基盤の vitest.global-setup.ts だけは、database.test-support を相対パスで参照してよい。
       [
         "vitest.global-setup.ts",
-        "@repo/backend/shared/infra/database.test-support",
+        "./apps/backend/shared/infra/database.test-support",
         "value",
       ],
       // apps/frontend の中の参照（相対パス・"@/"）は backend を指さないので対象外。
@@ -2472,8 +2507,14 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "e2e/bad-relative.ts": lines(
     'import { env } from "../apps/backend/shared/infra/env";',
   ),
+  // 例外（vitest.global-setup.ts → database.test-support の相対パス）は名前まで一致したときだけ。.mts の別ファイルは違反。
   "vitest.global-setup.mts": lines(
     'import { cleanupTestSchemas } from "./apps/backend/shared/infra/database.test-support";',
+  ),
+  // vitest.global-setup.ts でも、test-support 以外（env）を相対パスで参照するのは違反（test-support の相対参照は許される）。
+  "vitest.global-setup.ts": lines(
+    'import { cleanupTestSchemas } from "./apps/backend/shared/infra/database.test-support";',
+    'import { env } from "./apps/backend/shared/infra/env";',
   ),
   // backend-exports（Issue #68 の段階 2）: exports の過不足。
   //   "./todo/presentation/*.api" は上の fixture の *.api への参照で使われ、bad-presentation.api.ts などに当たる（違反なし）。
@@ -2784,6 +2825,7 @@ const MUST_REJECT_VIOLATIONS = [
     "apps/frontend/shared/bad-shared.tsx → apps/backend/todo/presentation/list-todos.api",
     "e2e/bad-relative.ts → apps/backend/shared/infra/env",
     "vitest.global-setup.mts → apps/backend/shared/infra/database.test-support",
+    "vitest.global-setup.ts → apps/backend/shared/infra/env",
   ].map((line) => `frontend-to-backend-specifier: ${line}`),
   // Issue #68 の段階 2: backend-exports。"@repo/backend/..." の参照のうち、fixture の exports のどのキーにも当たらないもの
   //   （container・domain・application・他 feature・.api の付かない presentation・パッケージ名だけ）と、exports の各キーの違反。
@@ -3149,12 +3191,13 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { defineConfig } from "@playwright/test";',
     'import { env, toolEnv } from "@repo/backend/shared/infra/env";',
   ),
+  // テスト基盤の vitest.global-setup.ts だけは、database.test-support を相対パスで参照する（exports に含めない例外）。
   "vitest.global-setup.ts": lines(
+    'import { env, toolEnv } from "@repo/backend/shared/infra/env";',
     "import {",
     "  cleanupTestSchemas,",
     "  testSchemaPrefix,",
-    '} from "@repo/backend/shared/infra/database.test-support";',
-    'import { env, toolEnv } from "@repo/backend/shared/infra/env";',
+    '} from "./apps/backend/shared/infra/database.test-support";',
   ),
   // exports（Issue #68 の段階 2）: 外が "@repo/backend/..." で参照するものだけを、キーのパスの .ts で公開する。
   //   すべてのキーが上の参照で使われ、指すファイルがある（パターンは *.api の 5 ファイルに当たる）。
@@ -3164,8 +3207,6 @@ const MUST_PASS_FILES: Record<string, string> = {
       "./todo/presentation/*.api": "./todo/presentation/*.api.ts",
       "./shared/presentation/http-error": "./shared/presentation/http-error.ts",
       "./shared/infra/env": "./shared/infra/env.ts",
-      "./shared/infra/database.test-support":
-        "./shared/infra/database.test-support.ts",
     },
   }),
   "apps/backend/shared/infra/drizzle-transaction-runner.ts": lines(
