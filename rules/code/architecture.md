@@ -197,7 +197,7 @@ backend/
     - must-pass: 許可される参照を網羅したツリーで違反 0 件を確かめる。今のリポジトリの本番コードの参照（参照元・参照先・型だけか）はすべて含めている。コメント・文字列の中の import 風の文字列、テストファイル、TS / JS 以外のファイルも置く。
     - 理由: 抽出の取りこぼし（書き方によって import を拾えない）は、規則が正しくても違反の見逃しになる。1 件の参照を規則に渡すだけのテストではそこを検証できない。
   - テストを対象外にする理由: テストは組み立てのために規則の外側を参照する（presentation のテストが infra の InMemory リポジトリを使うなど。上の「テストの置き方」）。
-  - 抽出は正規表現で行う（依存は足さない）。コメントと文字列リテラルの中の import 風の文字列は除く。dynamic import は ``import(`x`)``（`${}` 無し）と第 2 引数つきの `import("x", { with: ... })` も拾う。限界: 正規表現リテラルやテンプレートリテラルの入れ子はコメント・文字列の区切りを誤認しうる、`${}` の中の `import()` と `}` の直後に同じ行で続けた `export ... from` は拾わない（見逃す方向）、型の位置の `import("x").T` は値の参照として数える（多く検出する方向）（詳細と WHY は `architecture.test.ts` のコメント。抽出の仕様は同ファイルの「参照の抽出」「参照先の正規化」のテストで固定している）。
+  - 抽出は正規表現で行う（依存は足さない）。コメントと文字列リテラルの中の import 風の文字列は除く。dynamic import は ``import(`x`)``（`${}` 無し）と第 2 引数つきの `import("x", { with: ... })` も拾う。限界: 正規表現リテラルやテンプレートリテラルの入れ子はコメント・文字列の区切りを誤認しうる、`${}` の中の `import()`、`${}` を含むテンプレートリテラルを渡した ``import(`@/backend/${name}`)``（参照先を静的に決められない）、`}` の直後に同じ行で続けた `export ... from` は拾わない（見逃す方向）、型の位置の `import("x").T` は値の参照として数える（多く検出する方向）（詳細と WHY は `architecture.test.ts` のコメント。抽出の仕様は同ファイルの「参照の抽出」「参照先の正規化」のテストで固定している）。
   - この節や上の「画面側とサーバ側の境界」「`backend/<feature>/`」の依存の規則を足す・変えるときは、`architecture.test.ts` の `RULES` と `RULE_EXAMPLES`（判定の例）、置き場所の規則 `BACKEND_PLACEMENT` と `PLACEMENT_EXAMPLES`、fixture の must-reject / must-pass（`MUST_REJECT_FILES` / `MUST_REJECT_VIOLATIONS` / `MUST_PASS_FILES`）も合わせて直す。本番コードに新しい import の形（新しい層の組み合わせや書き方）を足したときも、must-pass に同じ形を足す。
   - Biome の `noRestrictedImports` を使わなかった理由: `import type` だけを許すことを表現できない（Biome 2.5.13 で、制限したパスへの `import type` も違反になることを実測。Issue #47）。また参照元のディレクトリごとに制限を変えるには feature・層ごとに `overrides` を書く必要があり、feature を足すたびに `biome.json` を直すことになる。
 

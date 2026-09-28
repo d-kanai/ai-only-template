@@ -155,6 +155,8 @@ function isInsideString(ranges: [number, number][], index: number): boolean {
 //   specifier（"x"）も文字列だが、一致の始まり（import / export、行頭、; の位置）は文字列の外にあるので残る。
 // 限界（仕様として受け入れる）:
 //   - テンプレートリテラルの ${} の中に書いた import("x") は、文字列の中とみなして拾わない（見逃す方向）。
+//   - ${} を含むテンプレートリテラルを渡した import(`@/backend/${name}`) は、参照先を静的に決められないので拾わない
+//     （見逃す方向。DYNAMIC_IMPORT が specifier に $ を許さない）。
 //   - `}` の直後に同じ行で続けた `export { x } from "y"`（`function f() {} export { x } from "y"`）は、文の先頭（行頭か ;
 //     の直後）でないため拾わない（見逃す方向）。Biome の format は文ごとに改行するので、本リポジトリのコードでは起きない。
 //   - 型の位置の `import("x").T`（`let a: import("x").T`）は dynamic import と同じ形なので、値の参照として拾う（型だけの
@@ -793,6 +795,12 @@ const RULE_EXAMPLES: Record<
       [
         "backend/shared/presentation/x.ts",
         "@/backend/todo/infra/container",
+        "value",
+      ],
+      // backend/shared の infra は container という名前でも不可（presentation が受け取ってよいのは自 feature の container だけ）。
+      [
+        "backend/todo/presentation/x.api.ts",
+        "@/backend/shared/infra/container",
         "value",
       ],
     ],
@@ -1731,6 +1739,18 @@ describe("参照の抽出（extractImports）", () => {
       "const t = `",
       'import { c } from "@/backend/z";',
       "`;",
+      'import { real } from "real";',
+    ].join("\n");
+    expect(extractImports(source)).toEqual([
+      { specifier: "real", typeOnly: false },
+    ]);
+  });
+
+  it("埋め込み式（ドル記号と波かっこ）を含むテンプレートリテラルの import() は、参照先を静的に決められないので拾わない（見逃す方向の限界）", () => {
+    // WHY テンプレートリテラルで書く: 普通の文字列の中に埋め込み式の形を書くと Biome の noTemplateCurlyInString が
+    //   書き間違いとして検出するため、\${ でエスケープして同じ文字列を作る。
+    const source = [
+      `const m = import(\`@/backend/\${name}/presentation/x.api\`);`,
       'import { real } from "real";',
     ].join("\n");
     expect(extractImports(source)).toEqual([
