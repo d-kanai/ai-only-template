@@ -122,11 +122,39 @@ describe("エラー時", () => {
     await expect(getTodo("missing")).rejects.toThrow("Todo が見つかりません");
   });
 
-  test("本文が ErrorResponse の形でなければ、HTTP ステータスを message に持つ Error を投げる", async () => {
+  // backend を通らないエラー（プロキシや Next のエラーページなど）は、本文が JSON でないことも、
+  // JSON でも ErrorResponse の形でないこともある。どちらも message を取り出せないので HTTP ステータスを伝える。
+  test("本文が JSON でなければ、HTTP ステータスを message に持つ Error を投げる", async () => {
     fetchMock.mockResolvedValue(
       new Response("Internal Server Error", { status: 500 }),
     );
 
     await expect(listTodos()).rejects.toThrow("HTTP 500");
+  });
+
+  test.each([
+    ["error を持たないオブジェクト", {}],
+    ["null", null],
+    ["error.message が文字列でない", { error: { code: "x", message: 1 } }],
+  ])(
+    "本文が JSON でも ErrorResponse の形でなければ（%s）、HTTP ステータスを message に持つ Error を投げる",
+    async (_label, body) => {
+      fetchMock.mockResolvedValue(jsonResponse(body, 502));
+
+      await expect(listTodos()).rejects.toThrow("HTTP 502");
+    },
+  );
+
+  test("削除に失敗したら、ErrorResponse の error.message を message に持つ Error を投げる", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(
+        { error: { code: "not_found", message: "Todo が見つかりません" } },
+        404,
+      ),
+    );
+
+    await expect(deleteTodo("missing")).rejects.toThrow(
+      "Todo が見つかりません",
+    );
   });
 });

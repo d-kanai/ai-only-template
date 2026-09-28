@@ -1,5 +1,7 @@
 // @vitest-environment node
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import type { ErrorResponse } from "@/backend/shared/presentation/http-error";
+import type { TodoRepository } from "@/backend/todo/domain/todo-repository";
 import { createTodoContainer } from "@/backend/todo/infra/container";
 import { InMemoryTodoRepository } from "@/backend/todo/infra/todo-repository.in-memory";
 import {
@@ -12,6 +14,21 @@ function setup() {
   const container = createTodoContainer(new InMemoryTodoRepository());
   return { container, GET: listTodosApi(container) };
 }
+
+// 想定外の例外（DB の接続断など）を再現するため、一覧の取得が必ず失敗するリポジトリ。
+// InMemory の実装は失敗しないので、500 の経路はこのスタブでしか通せない。
+function failingRepository(error: Error): TodoRepository {
+  return {
+    findAll: () => Promise.reject(error),
+    findById: () => Promise.reject(error),
+    save: () => Promise.reject(error),
+    delete: () => Promise.reject(error),
+  };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function listRequest(): Request {
   return new Request("http://localhost/api/todos");
@@ -54,5 +71,26 @@ describe("GET /api/todos", () => {
         },
       ],
     });
+  });
+
+  test("一覧の取得で想定外の例外が起きたら、500 と内部の情報を含まない internal_error を返し、例外をログに残す", async () => {
+    // toErrorResponse が想定外の例外を console.error に出す。テストの出力を汚さないよう抑制し、呼ばれたことだけを確かめる。
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const cause = new Error("connection refused: db.internal:5432");
+    const GET = listTodosApi(createTodoContainer(failingRepository(cause)));
+
+    const response = await GET(listRequest());
+
+    expect(response.status).toBe(500);
+    const body: ErrorResponse = await response.json();
+    expect(body).toEqual({
+      error: {
+        code: "internal_error",
+        message: "サーバでエラーが発生しました",
+      },
+    });
+    expect(consoleError).toHaveBeenCalledWith(cause);
   });
 });
