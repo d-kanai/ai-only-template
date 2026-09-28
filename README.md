@@ -27,6 +27,8 @@ asdf install
 
 バージョンの確認方法や更新手順の詳細は `rules/code/env.md` を参照。
 
+Claude Code のクラウドセッション（asdf が無い環境）では、`scripts/cloud-session-start.sh` で `.tool-versions` どおりの Node.js / pnpm を用意する（環境設定の setup script に `bash scripts/cloud-session-start.sh --install-only` を書くと初回だけで済む）。`.tool-versions` の版を上げたら setup script も更新してキャッシュを作り直す。詳細は `rules/code/env.md` の「クラウドセッション」を参照。
+
 ## 開発
 
 ```sh
