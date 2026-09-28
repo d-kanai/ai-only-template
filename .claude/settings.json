@@ -1,3 +1,13 @@
 {
-  "model": "claude-fable-5-1"
+  "model": "claude-fable-5-1",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR\"/scripts/cloud-session-start.sh" }
+        ]
+      }
+    ]
+  }
 }
