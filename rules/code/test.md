@@ -98,11 +98,31 @@ Stryker でコードに変異（条件の反転、戻り値の差し替え、文
   - テストを足す・書き換えるときの確認（上の節）も、その場で行う。日次の結果を待たずに、書いたテストが守っているコードを壊すと落ちることを確かめる。
 - Postgres が要る（Issue #57。単体テストに実 Postgres を使うテストがあるため。先に `pnpm db:up`）。日次実行（`mutation.yml`）も `ci.yml` と同じく Postgres を起動し、`pnpm db:migrate` を当ててから実行する。
 - Stryker の実行後は、テスト用のスキーマ（`test_<UUID>`）が後始末されずに残る（2026-09-28 のローカル実行で 1 回あたり 12 個残った。原因は、Stryker が worker のプロセスを afterAll の前に止めるためと推定しているが未確認）。Stryker の中では globalSetup が消さない（上の「テスト用スキーマの後始末（globalSetup）」）ので、次の `pnpm test` の最初に消える。
-- 実行: `pnpm test:mutation`（`stryker run`）。レポートは `reports/mutation/mutation.html`（ブラウザで開く）と `mutation.json`。`reports/` と作業用の `.stryker-tmp/` は `.gitignore` 済み。ローカル（4 コア）で約 2.5 分（384 変異、147 秒。2026-09-28 実測）。
+- 実行: `pnpm test:mutation`（`stryker run`）。レポートは `reports/mutation/mutation.html`（ブラウザで開く）と `mutation.json`。`reports/` と作業用の `.stryker-tmp/` は `.gitignore` 済み。ローカル（4 コア）で約 3.5 分（572 変異、3 分 21 秒。Issue #55 の後、2026-09-28 実測）。
 - 対象: `features/` `backend/` `shared/` の `.ts` / `.tsx`（テスト `*.test.ts(x)` と `*.d.ts` を除く）。`vitest.config.mts` の coverage.include のうち TypeScript の実装がある範囲と同じにしている。`app/`、`scripts/`（実装はシェルスクリプトだけ）、ルート直下の設定ファイル・ルール検査テスト、`e2e/` は対象外。
 - Vitest のカバレッジ（100% のしきい値）は Stryker の実行では効かない。vitest-runner が coverage を無効にして、Stryker 自身のテストごとのカバレッジ分析で「変異を通るテスト」だけを実行するため（https://stryker-mutator.io/docs/stryker-js/vitest-runner/ ）。
 - 日次実行: `.github/workflows/mutation.yml` が main を毎日 08:55 JST（UTC 23:55）に実行し、`reports/mutation/` を artifact（`mutation-report`、30 日保存）に残す。Actions の画面から手動でも実行できる（`workflow_dispatch`）。PR ごとには実行しない（ユーザー判断、Issue #52）。
-- しきい値: 当面は設定しない（`thresholds.break` なし）。score が低くてもジョブは失敗せず、レポートを出すだけ。日次の結果を見てから値を決める（Issue #52）。
+- 目標と失敗ライン（Issue #55。`stryker.config.mjs` の `thresholds: { high: 95, low: 90, break: 90 }`）:
+  - 目標は mutation score 95% 以上。生き残り（survived）が出たら、まずテストを足して殺す。
+  - 失敗ライン（`break`）は 90。score が 90 を下回ると `stryker run` が非 0 で終わり、日次のジョブが失敗する（`break` を 90 にした状態で、テストを外して score 50% にすると「Final mutation score 50.00 under breaking threshold 90」で exit 1 になることを確認）。目標より 5 ポイント低いのは、数件の生き残りで日次のジョブを赤にしないため。
+  - 経緯: Issue #52 では `break` を入れず、日次の結果を見てから決めることにしていた。Issue #55 で生き残りを殺したうえで上の値にした。
+- 生き残りの扱い:
+  - ロジック（条件・分岐・戻り値・状態の更新・依存配列など）の変異は、テストを足して殺す。テストは仕様文の名前で書き、その変異で落ちることをレポートか手作業の変異で確かめる。
+  - 文言の変異: API のエラーの message（`ErrorResponse` として画面に出る、クライアントとの契約）は検証して殺す。検証しなくてよい文言（内部のログの文言など）だけ、下の disable コメントで除く。
+  - `// Stryker disable next-line <Mutator>: <理由>`（または `// Stryker disable <Mutator>: <理由>` 〜 `// Stryker restore <Mutator>`）で除いてよいのは、**等価な変異**（変えても振る舞いが変わらず、どのテストでも検出できないもの）と**検証しない文言の変異**だけ。理由をコメントに必ず書く（レポートで Ignored と理由が出る）。殺せるのにテストを書く手間を省くために使わない。
+    - `next-line` は、コメントを直前（leading comment）に持つ文や式の開始行にだけ効く（@stryker-mutator/instrumenter 10.0.0 の `directive-bookkeeper.js`）。`}, []);` のように配列の直前にコメントを置けない形では、`disable` 〜 `restore` で範囲を囲む。
+    - 今の除外（すべて等価な変異。Issue #55）: `todo-screen.hook.ts` の依存配列 5 か所（`reloadTodos` / `mutateAndReload` は作り直されないため、依存配列を変えても同じ）と、unmount 時の片付け（React 18 以降は unmount 後の setState が何もしないため観測できない）。`todo-detail-screen.hook.ts` の世代の `+=`（`-=` でも毎回別の値になり判定が変わらない）。
+  - 判定の結果を変えない検査（`"error" in value` の後に `value.error` の型を見る、など）は等価な変異を生む。除外するより、結果を変えない検査を書かない形に直す（`features/todo/api/todo-api.ts` の `isErrorResponse`）。
+  - 例外を握りつぶす範囲は、握りつぶしたい呼び出しだけにする。判定まで `try` に入れると、判定の書き間違いで投げた例外も同じ扱いになり、変異が生き残る（`todo-api.ts` の `toError`。Issue #55 で判明）。
+  - 失敗（reject / throw）の検証は `rejects.toEqual(new Error("..."))` のように、例外のクラスと message を比べる。Vitest 5.0.1 の `rejects.toThrow("文字列")` / `rejects.toThrowError("文字列")` は、reject された値が `undefined` だと文字列を照合せずに通る（2026-09-28 実測）。`todo-api.ts` の `toError` が `undefined` を返す変異が、これで生き残っていた。
+- static な変異（`ignoreStatic: true`。Issue #55）: モジュールの読み込み時にだけ実行される変異（最上位の定数・`schema.ts` の列定義など）は数えない（Ignored）。
+  - 理由: Stryker は static な変異を通るテストを選べず、全テストを読み込み直して実行する（公式 https://stryker-mutator.io/docs/stryker-js/configuration/ の `ignoreStatic`、https://stryker-mutator.io/docs/mutation-testing-elements/static-mutants/ ）。読み込み時の変異がテストファイルの読み込みを壊すと、テストが 1 件も動かないまま Survived と数えられる（`env.ts` の `export const env = readEnv(process.env)` で、readEnv の変異が testsCompleted 0 の Survived になっていた。Issue #59）。
+  - 読み込み時とテスト中の両方で実行される変異（hybrid。`env.ts` の `readEnv` など）は、有効にしてもテスト中の実行だけで判定される（数えなくなるわけではない）。`readEnv` の変異は `env.test.ts` で killed になる。
+  - Ignored は score の分母に入らない（killed / (killed + survived)。実測で確認）。数えなくなるのは読み込み時にだけ評価される式で、`schema.ts` の列名・既定値など（アプリの実行時には使わず、単体テストで検出できない）を含む。
+  - 実行時間も短くなる（既定では static な変異 124 件が実行時間の 83% を占めると Stryker が警告し、全体で約 5 分。有効にして約 3.5 分）。
+- 実測の score（2026-09-28、ローカル）:
+  - Issue #55 の前: 85.52%（killed 502 / survived 85、static も全テストで実行）。`ignoreStatic` だけを有効にすると 89.86%（killed 505 / survived 57 / ignored 25）。
+  - Issue #55 の後: 100.00%（killed 540 / survived 0 / ignored 32。ignored は static 25 件と disable コメント 7 件）。
 - 入れていないもの: `@stryker-mutator/typescript-checker`（型エラーになる変異を実行前に除く checker）。TypeScript の JS API（`ts.createSolutionBuilderWithWatch` / `ts.parseConfigFileTextToJson`。typescript-checker 10.0.0 の `dist` で確認）を使うが、TypeScript 7.0.2 の `typescript` パッケージは `version` / `versionMajorMinor` しか export しない（2026-09-28 に `import("typescript")` で確認）ため、動かないと判断した（入れて実行はしていない）。同じ理由で、Stryker 本体の tsconfig の書き換えも `stryker.config.mjs` の `tsconfigFile` で止めている。型エラーになる変異は checker なしでも、実行時に失敗するか生き残るかで数えられる（Vitest は型を検査しない）。
 - vitest-runner の patch: `@stryker-mutator/vitest-runner` 10.0.0 は、そのままでは Vitest 5.0.1 と組み合わせると `describe` の中のテストで変異を検出できず、survived と数えられる（テスト名の連結の区切りが、vitest-runner はスペース、Vitest 5.0.1 の testNamePattern の照合は ` > ` で合わず、変異を通るテストが skip されるため）。`pnpm patch` で連結を ` > ` に直して対応している（`patches/`。2026-09-28 実測で score は patch なし 26.82% → patch あり 85.68%）。上流が直ったら patch を外す（`rules/code/dependencies.md` の「pnpm patch」）。詳細は `stryker.config.mjs` のコメント。
 

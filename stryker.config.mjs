@@ -104,12 +104,13 @@ export default {
   //     「What Stryker does」。@stryker-mutator/core 10.0.0 の dist/src/mutants/mutant-test-planner.js の planMutant）。
   //     そのため readEnv の変異は env.test.ts で正しく killed になる。
   //   - 実行時間: 既定では static な変異 124 件（全体の 21%）が実行時間の 83% を占めると警告され、全体で約 5 分かかった。
-  //     有効にすると約 3.8 分（2026-09-28、ローカル 4 コアで実測）。
+  //     有効にすると約 3.5 分（2026-09-28、ローカル 4 コアで実測。Issue #55 の後で 572 変異、3 分 21 秒）。
   //   数えなくなるもの: 読み込み時にだけ評価される式（テストを通る実行経路の無いもの）25 件。そのうち schema.ts の列名・
   //   既定値など 7 件は、アプリの実行時には使われず（DDL は drizzle/ の生成済み SQL で当てる）、単体テストで検出できない。
   //   残りの 18 件（UUID の正規表現、定数など）は既定の実行では killed だったが、数えなくなる。
   //   Ignored は score の分母に入らない（mutation score = killed / (killed + survived)。有効にした実行で
-  //   killed 505・survived 57・ignored 25 → 89.86% となり、505 / 562 と一致することを確認した）。
+  //   killed 505・survived 57・ignored 25 → 89.86% となり、505 / 562 と一致することを確認した。Issue #55 の後は
+  //   killed 540・survived 0・ignored 32（static 25 件と disable コメント 7 件）で 100%）。
   ignoreStatic: true,
 
   // thresholds: レポートでの色分け（high 以上が緑、low 以上 high 未満が黄、low 未満が赤）と、失敗ライン（break）。

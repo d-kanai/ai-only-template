@@ -1,7 +1,7 @@
 # mutation testing（Stryker）を main ブランチで毎日実行し、レポートを artifact に保存する（Issue #52）。
 # 設定は stryker.config.mjs、位置づけと運用は rules/code/test.md の「mutation testing（Stryker）」。
 # WHY PR ごとではなく日次: ユーザー判断（Issue #52）。PR の CI（ci.yml）には入れないので、実行時間（ローカル 4 コアで
-#   約 2.5 分、2026-09-28 実測。変異の数はコードの量に応じて増える）が PR のマージを待たせない。
+#   約 3.5 分、2026-09-28 実測。変異の数はコードの量に応じて増える）が PR のマージを待たせない。
 # いまはレポートを出すだけで、score が低くてもジョブは失敗しない（stryker.config.mjs で thresholds.break を
 #   設定していない）。しきい値は結果を見て決める。
 name: Mutation
@@ -25,7 +25,7 @@ permissions:
 jobs:
   mutation:
     runs-on: ubuntu-latest
-    # WHY 30 分: ローカル（4 コア）の実測は `pnpm test:mutation` 全体で約 2.5 分（384 変異、147 秒。2026-09-28）。
+    # WHY 30 分: ローカル（4 コア）の実測は `pnpm test:mutation` 全体で約 3.5 分（572 変異、201 秒。2026-09-28、Issue #55 時点）。
     #   ubuntu-latest も 4 コアなので同程度の見込みで、コードが増えても余裕のある上限にする。
     #   変異がテストを無限ループさせたときなどに、既定の 360 分まで止まらないようにするため。
     timeout-minutes: 30
