@@ -44,9 +44,9 @@
 
 | テスト | 検査する規則・設定 |
 | --- | --- |
-| `lint.test.ts` | Biome の違反が `--error-on-warnings` で失敗になること、`pnpm lint` / `pnpm check` / pre-commit の引数、`noProcessEnv` が `env.ts` とテスト以外で効くこと（`rules/code/lint.md`） |
-| `package.test.ts` | `package.json` の版が完全固定であること（`rules/code/dependencies.md`） |
-| `pnpm-workspace.test.ts` | `minimumReleaseAge` などのサプライチェーン保護の値（`rules/code/dependencies.md`） |
+| `lint.test.ts` | Biome の違反が `--error-on-warnings` で失敗になること（代表ルールごとに違反の例と許可される書き方の例）、`pnpm lint` / `pnpm check` / pre-commit の引数（判定 `runsBiomeCheckWithErrorOnWarnings`）、`noProcessEnv` が `env.ts` とテスト以外で効くこと（`rules/code/lint.md`） |
+| `package.test.ts` | `package.json` の `dependencies` / `devDependencies` の版が完全固定であること（判定 `isPinnedVersion`、列挙 `listDependencies`。`rules/code/dependencies.md`） |
+| `pnpm-workspace.test.ts` | `minimumReleaseAge` / `minimumReleaseAgeStrict` / `savePrefix` / `allowBuilds` の値（読み取り `readTopLevelSettings`、判定 `findWorkspaceSettingViolations`。`rules/code/dependencies.md`） |
 | `scripts/cloud-session-start.test.ts` | クラウドセッションのスクリプトが `.tool-versions` どおりの版を、検証付きで入れること（`rules/code/env.md`） |
 | `architecture.test.ts`（Issue #47 で追加） | 依存の向き（`rules/code/architecture.md` の「依存の向き（全体）」）と、環境変数の直参照の禁止（規則 `env-direct-access`。Issue #59。`rules/code/env.md` の「環境変数」） |
 
@@ -57,10 +57,11 @@
   - 理由: must reject だけだと「何でも違反にする」壊れ方（誤検知でリポジトリ全体が落ちる。直すために規則を緩めたくなる）を、must pass だけだと「何も違反にしない」壊れ方（常に緑）を検出できない。後者は緑のまま気づかれないので、とくに危ない。
   - 「今のリポジトリで違反が 0 件」（`expect(violations).toEqual([])`）だけでは must pass の 1 例にすぎない。判定が常に「違反なし」を返しても通るため、must reject の例を必ず別に持つ。
   - 既存の例: `lint.test.ts` は「未使用変数と == を含むファイルは非 0 で終わる」（must reject）と「違反のないファイルは 0 で終わる」（must pass）を両方持つ。
+  - `package.test.ts` / `pnpm-workspace.test.ts` / `lint.test.ts` も must pass と must reject の両方を持つ（Issue #50 で揃えた）。判定を関数に切り出し、架空の入力（版の文字列、YAML の文字列、コマンドの文字列）で許可・拒否を固定したうえで、同じ関数で実ファイル（リポジトリの設定と、一時ディレクトリに置いた違反入りの fixture）を検査する。
 - must reject は、その検査が取り違えやすい境界のケースを網羅する。検査の種類ごとに列挙し、許可か違反かを決めてテストで固定する。
   - import の検査: alias（`@/...`）と相対パス（`../...`）、値の import と `import type` / inline の `type`、`index` と深いパス、自 feature と他 feature、`export ... from`（re-export）と dynamic `import()`、複数行にまたがる import、拡張子の違い（`.ts` / `.tsx` / `.js` / `.jsx`）、パッケージとそのサブパス（`next` と `next/link`）。コメントや文字列の中の import の例示は must pass（誤検知しない）側に入れる。
-  - 版の検査: `^` / `~` / `>=` / `*` / `x` / `latest` / `workspace:` / `npm:` の別名、プレリリース（`1.2.3-beta.1`）など。
-  - 設定値の検査: 値の違い、コメントアウトされた行、同名のキーがネストの中にある場合。
+  - 版の検査: `^` / `~` / `>=` / `*` / `x` / `latest` / `workspace:` / `npm:` の別名、プレリリース（`1.2.3-beta.1`）など（`package.test.ts`。プレリリースとビルドメタは拒否に決めている。`rules/code/dependencies.md`）。
+  - 設定値の検査: 値の違い、キーが無い、コメントアウトされた行、同名のキーがネストの中にある場合（`pnpm-workspace.test.ts`）。
   - lint / フックの検査: 違反を単独で含むファイル（他の違反に巻き込まれて落ちているのではないことを示す）、違反のないファイル、対象外のファイル（`.md` のみのコミットなど）。
 - 検査の対象を列挙する処理（glob、ディレクトリの走査など）が空を返したら失敗させる。
   - 理由: 対象が 0 件なら違反も 0 件になり、常に緑になる。パスの変更や glob の書き間違いで起きやすい。
