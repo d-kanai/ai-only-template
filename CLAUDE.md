@@ -26,3 +26,4 @@
 ## ルール詳細
 - コミットメッセージ: @rules/commit.md
 - 作業ログ: @rules/log.md
+- オーケストレーション: @rules/orchestration.md
