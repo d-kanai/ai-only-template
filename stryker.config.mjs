@@ -49,9 +49,10 @@ export default {
   //   Stryker が起動直後に失敗した（2026-09-28 実測。@stryker-mutator/core 10.0.0 の
   //   dist/src/sandbox/ts-config-preprocessor.js）。この処理は、指定したパスが
   //   サンドボックスにコピーするファイルの中に無ければ何もしない（同ファイルの rewriteTSConfigFile）。
-  //   書き換えを止めても問題ない理由: tsconfig.json に extends / references が無く、include / exclude にも
-  //   サンドボックスの外（../）を指すパスが無いため、書き換える対象がそもそも無い。extends / references を足すときは
-  //   この設定を見直す。
+  //   書き換えを止めても問題ない理由: tsconfig（リポジトリ直下・apps/frontend・apps/backend）に extends / references が無く、
+  //   include / exclude / paths にもサンドボックスの外を指すパスが無いため、書き換える対象がそもそも無い
+  //   （apps/frontend/tsconfig.json の paths の "../backend/*" はリポジトリの中の apps/backend を指し、サンドボックスにも
+  //   コピーされる。Issue #68）。extends / references を足すときはこの設定を見直す。
   //   typescript-checker（型エラーになる変異を除く checker）も同じ JS API を使うため、TS 7 では動かないと判断して
   //   入れていない（rules/code/test.md の「mutation testing（Stryker）」）。
   tsconfigFile: "stryker-skips-tsconfig-rewrite.json",
@@ -93,7 +94,7 @@ export default {
   jsonReporter: { fileName: "reports/mutation/mutation.json" },
 
   // ignoreStatic: static な変異（モジュールの読み込み時にだけ実行される変異）を数えない（status が Ignored になる）。
-  //   static な変異とは、モジュールの最上位で評価される式（backend/todo/infra/schema.ts の列定義など）の変異。
+  //   static な変異とは、モジュールの最上位で評価される式（apps/backend/todo/infra/schema.ts の列定義など）の変異。
   //   Stryker はテストごとのカバレッジで「その変異を通るテスト」を選べないため、既定（false）では環境を読み込み直して
   //   全テストを実行する（公式 https://stryker-mutator.io/docs/stryker-js/configuration/ の ignoreStatic、
   //   https://stryker-mutator.io/docs/mutation-testing-elements/static-mutants/ ）。
@@ -117,11 +118,11 @@ export default {
   //     （drizzle-orm 0.45.3 の column-builder.js の setName は、名前が "" のときだけキー名を入れる）。キー名が列名と同じ
   //     なので同じ SQL になる（"created_at" はキー名 createdAt と違うので Killed になる）。
   //   - completed の .default(false) → true: Repository は保存時に completed を必ず渡すので、drizzle の既定値は使われない
-  //     （表の既定値は drizzle/ の生成済み SQL で決まる）。
+  //     （表の既定値は apps/backend/drizzle/ の生成済み SQL で決まる）。
   //   - timestamp の { withTimezone: true, mode: "date" } → {}、withTimezone → false、mode → "": mode が "string" で
   //     なければ Date の列になる点は同じ（pg-core/columns/timestamp.js）。withTimezone は型名（DDL）と、ドライバが
   //     文字列を返したときの変換にだけ使われ、node-postgres は timestamptz を Date で返すので実行時の結果は変わらない。
-  //   schema.ts はテーブルの形の宣言で、DDL は drizzle-kit が drizzle/ に生成した SQL で当てる（rules/code/architecture.md）。
+  //   schema.ts はテーブルの形の宣言で、DDL は drizzle-kit が apps/backend/drizzle/ に生成した SQL で当てる（rules/code/architecture.md）。
   //   Ignored は score の分母に入らない（mutation score = killed / (killed + survived)。ignoreStatic だけを有効にした実行で
   //   killed 505・survived 57・ignored 25 → 89.86% となり、505 / 562 と一致することを確認した）。
   ignoreStatic: true,

@@ -17,7 +17,7 @@
 - `rules/code/architecture.md` の「テストの置き方」に従う（置き場所、`// @vitest-environment node`、層ごとのテスト方法）。ここには重複して書かない。
 
 ## テスト用スキーマの後始末（globalSetup）
-- `vitest.config.mts` の `globalSetup`（`vitest.global-setup.ts`）が、Vitest の実行の最初（テストファイルを動かす前）に 1 回だけ、`test_` で始まるスキーマをすべて `DROP SCHEMA ... CASCADE` で消す（処理は `backend/shared/infra/database.test-support.ts` の `cleanupTestSchemas`）。
+- `vitest.config.mts` の `globalSetup`（`vitest.global-setup.ts`）が、Vitest の実行の最初（テストファイルを動かす前）に 1 回だけ、`test_` で始まるスキーマをすべて `DROP SCHEMA ... CASCADE` で消す（処理は `apps/backend/shared/infra/database.test-support.ts` の `cleanupTestSchemas`）。
   - 理由: 実 Postgres を使うテストは、テストファイルごとの別スキーマ（`test_<UUID>`）を `afterAll` で消す（`database.test-support.ts` の `close()`）が、プロセスが `afterAll` の前に止まると（Stryker が worker を止める、Ctrl-C など）残る。テストの前なら消してよいのは前の実行の残りだけになる。`afterAll` での削除も残す（普段の実行で残さないため）。
   - 探し方は `starts_with(schema_name, 'test_')`。LIKE の `_` は任意の 1 文字に一致し、`testX...` のようなテスト用でないスキーマまで消すため使わない。
   - Postgres に接続できないときは、ここで「`pnpm db:up` で起動してから実行してください」というエラーにして止める（単体テストは Postgres が前提。各テストファイルの接続エラーが並ぶより原因が分かりやすい）。
@@ -26,16 +26,16 @@
   - `cleanupTestSchemas` のテストは、`test_` ではなくテストごとの接頭辞（`test_cleanup_<UUID>_`）で行う。`test_` で呼ぶと並列に動いている他のテストファイルのスキーマを消すため。
 
 ## テストダブル
-- backend（`backend/**`）: InMemory リポジトリ（`InMemoryTodoRepository`。本番でも使う実装）を `createTodoContainer` に渡して組み立てる。モックは最小限にする。
+- backend（`apps/backend/**`）: InMemory リポジトリ（`InMemoryTodoRepository`。本番でも使う実装）を `createTodoContainer` に渡して組み立てる。モックは最小限にする。
   - 理由: モックは「こう呼ばれるはず」という前提をテストに書き込むため、実装と前提がずれても緑のままになる。本物の実装を通せば、層をまたいだ振る舞い（command で保存したものが query で読めるなど）まで検証できる。
-  - Postgres の実装（`*.postgres.ts`、`drizzle-transaction-runner.ts`、`database.ts`）は、モックせず実 Postgres（compose.yaml）に対してテストする。`createTestDatabase()`（`backend/shared/infra/database.test-support.ts`）でテストファイルごとに別のスキーマを作ってマイグレーションを当て、各テストの前に `TRUNCATE` する（詳細と WHY は `rules/code/architecture.md` の「永続化（Drizzle + Postgres）」の「テスト」）。
+  - Postgres の実装（`*.postgres.ts`、`drizzle-transaction-runner.ts`、`database.ts`）は、モックせず実 Postgres（compose.yaml）に対してテストする。`createTestDatabase()`（`apps/backend/shared/infra/database.test-support.ts`）でテストファイルごとに別のスキーマを作ってマイグレーションを当て、各テストの前に `TRUNCATE` する（詳細と WHY は `rules/code/architecture.md` の「永続化（Drizzle + Postgres）」の「テスト」）。
     - 理由: SQL の組み立て（upsert・並び順・uuid 型）やトランザクションの commit / rollback は、DB を差し替えると何も検証できない。
-    - そのため `pnpm test` / `pnpm test:unit` / `pnpm test:mutation` は Postgres が起動している前提（`pnpm db:up`）。接続先は `.env` の `DATABASE_URL`（`backend/shared/infra/env.ts`。既定値は無い）。
-  - 例外: InMemory では起こせない失敗の経路は、その経路に必要な分だけ差し替える。例: `backend/todo/presentation/list-todos.api.test.ts` は 500 の経路のために、常に reject する `TodoRepository`（`failingRepository`）で `createTodoContainer` を組み立て、`console.error` を `vi.spyOn` で抑制しつつ呼ばれたことを検証する。
-- 画面側の hook / screen（`features/**/screens/**`）: `vi.mock("@/features/todo/api/todo-api")` で `api/` を差し替え、`vi.mocked(listTodos).mockResolvedValue(...)` で応答を与える。
+    - そのため `pnpm test` / `pnpm test:unit` / `pnpm test:mutation` は Postgres が起動している前提（`pnpm db:up`）。接続先は `.env` の `DATABASE_URL`（`apps/backend/shared/infra/env.ts`。既定値は無い）。
+  - 例外: InMemory では起こせない失敗の経路は、その経路に必要な分だけ差し替える。例: `apps/backend/todo/presentation/list-todos.api.test.ts` は 500 の経路のために、常に reject する `TodoRepository`（`failingRepository`）で `createTodoContainer` を組み立て、`console.error` を `vi.spyOn` で抑制しつつ呼ばれたことを検証する。
+- 画面側の hook / screen（`apps/frontend/features/**/screens/**`）: `vi.mock("@/features/todo/api/todo-api")` で `api/` を差し替え、`vi.mocked(listTodos).mockResolvedValue(...)` で応答を与える。
   - 理由: 画面側と API 側の境界は `api/` の 1 ファイル（`rules/code/architecture.md` の「画面側とサーバ側の境界」）なので、そこで切るとテストが HTTP やサーバの状態に依存しない。
-- `api/`（`features/**/api/*.ts`）: `vi.stubGlobal("fetch", vi.fn<typeof fetch>())` で `fetch` を差し替え、送った URL・メソッド・本文と、応答の扱いを検証する（`features/todo/api/todo-api.test.ts`）。
-- 非同期の順序（古い応答が後から届く、画面を離れた後に失敗が届く、など）は、テストから任意のタイミングで resolve できる Promise（`deferred()`）で順序を作って検証する（`features/todo/screens/todo-screen/todo-screen.hook.test.ts`、`features/todo/screens/todo-detail-screen/todo-detail-screen.hook.test.ts`）。
+- `api/`（`apps/frontend/features/**/api/*.ts`）: `vi.stubGlobal("fetch", vi.fn<typeof fetch>())` で `fetch` を差し替え、送った URL・メソッド・本文と、応答の扱いを検証する（`apps/frontend/features/todo/api/todo-api.test.ts`）。
+- 非同期の順序（古い応答が後から届く、画面を離れた後に失敗が届く、など）は、テストから任意のタイミングで resolve できる Promise（`deferred()`）で順序を作って検証する（`apps/frontend/features/todo/screens/todo-screen/todo-screen.hook.test.ts`、`apps/frontend/features/todo/screens/todo-detail-screen/todo-detail-screen.hook.test.ts`）。
   - 理由: `mockResolvedValue` は即時に resolve するため、「新しい応答の後に古い応答が届く」順序を再現できない。タイマー（`setTimeout` での遅延）に頼ると順序が実行環境の速さに左右される。
   - `deferred()` は各テストファイルの中に定義している（共通化はしていない）。
 
@@ -48,7 +48,7 @@
 | `package.test.ts` | `package.json` の `dependencies` / `devDependencies` の版が完全固定であること（判定 `isPinnedVersion`、列挙 `listDependencies`。`rules/code/dependencies.md`） |
 | `pnpm-workspace.test.ts` | `minimumReleaseAge` / `minimumReleaseAgeStrict` / `savePrefix` / `allowBuilds` の値（読み取り `readTopLevelSettings`、判定 `findWorkspaceSettingViolations`。`rules/code/dependencies.md`） |
 | `scripts/cloud-session-start.test.ts` | クラウドセッションのスクリプトが `.tool-versions` どおりの版を、検証付きで入れること（`rules/code/env.md`） |
-| `architecture.test.ts`（Issue #47 で追加） | 依存の向き（`rules/code/architecture.md` の「依存の向き（全体）」）と、環境変数の直参照の禁止（規則 `env-direct-access`。Issue #59。`rules/code/env.md` の「環境変数」） |
+| `architecture.test.ts`（Issue #47 で追加） | 依存の向き（`rules/code/architecture.md` の「依存の向き（全体）」。Issue #68 で apps/frontend と apps/backend の境界の規則を追加）と、環境変数の直参照の禁止（規則 `env-direct-access`。Issue #59。`rules/code/env.md` の「環境変数」） |
 
 テスト以外のゲート（カバレッジのしきい値、pre-commit のフック、CI の required status check、型チェック）も、「違反があれば止まる」ことを検査する仕組みなので、下の「fault injection」は同じように行う。
 
@@ -100,7 +100,7 @@ Stryker でコードに変異（条件の反転、戻り値の差し替え、文
 - Postgres が要る（Issue #57。単体テストに実 Postgres を使うテストがあるため。先に `pnpm db:up`）。日次実行（`mutation.yml`）も `ci.yml` と同じく Postgres を起動し、`pnpm db:migrate` を当ててから実行する。
 - Stryker の実行後は、テスト用のスキーマ（`test_<UUID>`）が後始末されずに残る（2026-09-28 のローカル実行で 1 回あたり 12 個残った。原因は、Stryker が worker のプロセスを afterAll の前に止めるためと推定しているが未確認）。Stryker の中では globalSetup が消さない（上の「テスト用スキーマの後始末（globalSetup）」）ので、次の `pnpm test` の最初に消える。
 - 実行: `pnpm test:mutation`（`stryker run`）。レポートは `reports/mutation/mutation.html`（ブラウザで開く）と `mutation.json`。`reports/` と作業用の `.stryker-tmp/` は `.gitignore` 済み。ローカル（4 コア）で約 3.3 分（576 変異、3 分 18 秒。Issue #55 の後、2026-09-28 実測）。
-- 対象: `features/` `backend/` `shared/` の `.ts` / `.tsx`（テスト `*.test.ts(x)` と `*.d.ts` を除く）。`vitest.config.mts` の coverage.include のうち TypeScript の実装がある範囲と同じにしている。`app/`、`scripts/`（実装はシェルスクリプトだけ）、ルート直下の設定ファイル・ルール検査テスト、`e2e/` は対象外。
+- 対象: `apps/frontend/features/` `apps/backend/` `apps/frontend/shared/` の `.ts` / `.tsx`（テスト `*.test.ts(x)` と `*.d.ts` を除く）。`vitest.config.mts` の coverage.include のうち TypeScript の実装がある範囲と同じにしている。`apps/frontend/app/`、`scripts/`（実装はシェルスクリプトだけ）、ルート直下の設定ファイル・ルール検査テスト、`e2e/` は対象外。
 - Vitest のカバレッジ（100% のしきい値）は Stryker の実行では効かない。vitest-runner が coverage を無効にして、Stryker 自身のテストごとのカバレッジ分析で「変異を通るテスト」だけを実行するため（https://stryker-mutator.io/docs/stryker-js/vitest-runner/ ）。
 - 日次実行: `.github/workflows/mutation.yml` が main を毎日 08:55 JST（UTC 23:55）に実行し、`reports/mutation/` を artifact（`mutation-report`、30 日保存）に残す。Actions の画面から手動でも実行できる（`workflow_dispatch`）。PR ごとには実行しない（ユーザー判断、Issue #52）。
 - 目標と失敗ライン（Issue #55。`stryker.config.mjs` の `thresholds: { high: 100, low: 95, break: 100 }`）:
@@ -115,14 +115,14 @@ Stryker でコードに変異（条件の反転、戻り値の差し替え、文
     - `next-line` は、コメントを直前（leading comment）に持つ文や式の開始行にだけ効く（@stryker-mutator/instrumenter 10.0.0 の `directive-bookkeeper.js`）。依存配列など式の途中に効かせたいときは、その式を別の行に書いて直前にコメントを置く（`}, []);` の形のままでは置けない）。`disable` 〜 `restore` の範囲指定は、`next-line` で書けないときだけ、範囲を最小にして使う。
     - 今の除外（すべて等価な変異。Issue #55。disable の一覧はここで管理する）: `todo-screen.hook.ts` の依存配列 5 か所（`reloadTodos` は依存の無い useCallback で作り直されず、それを依存に持つ effect・`mutateAndReload`・`toggleTodo`・`removeTodo` も作り直されないため、依存配列を変えても同じ。すべて依存配列の行だけの `disable next-line`）、`todo-detail-screen.hook.ts` の世代の `+=`（`-=` でも毎回別の値になり判定が変わらない）。
   - 「等価」と判断する前に、ほかの実行経路を探す。Issue #55 では `todo-screen.hook.ts` の effect の片付け（unmount 時に送信中の GET を古い扱いにする）を「unmount 後の setState は何もしないので観測できない」として除外していたが、React 19.2 の `<Activity mode="hidden">`（Next 16 の `cacheComponents` で画面遷移時に使われる）では、隠すときに片付けが走り、隠れている間の state 更新も反映されるため検出できた（reviewer 指摘。テストを足して除外をやめた）。
-  - 判定の結果を変えない検査（`"error" in value` の後に `value.error` の型を見る、など）は等価な変異を生む。除外するより、結果を変えない検査を書かない形に直す（`features/todo/api/todo-api.ts` の `isErrorResponse`）。
+  - 判定の結果を変えない検査（`"error" in value` の後に `value.error` の型を見る、など）は等価な変異を生む。除外するより、結果を変えない検査を書かない形に直す（`apps/frontend/features/todo/api/todo-api.ts` の `isErrorResponse`）。
   - 例外を握りつぶす範囲は、握りつぶしたい呼び出しだけにする。判定まで `try` に入れると、判定の書き間違いで投げた例外も同じ扱いになり、変異が生き残る（`todo-api.ts` の `toError`。Issue #55 で判明）。
   - 失敗（reject / throw）の検証は、新規・既存のテストとも `rejects.toEqual(new Error("..."))` のように、例外のクラスと message を比べる（Error のクラスまで決まらないときは `rejects.toBeInstanceOf(Error)` と `rejects.toMatchObject({ message: ... })` を併用する）。Vitest 5.0.1 の `rejects.toThrow("文字列")` / `rejects.toThrowError("文字列")` は、reject された値が `undefined` だと文字列を照合せずに通る（2026-09-28 実測。同期の `expect(fn).toThrow("文字列")` も `throw undefined` で通る）。`todo-api.ts` の `toError` が `undefined` を返す変異が、これで生き残っていた。
 - static な変異（`ignoreStatic: true`。Issue #55）: モジュールの読み込み時にだけ実行される変異（最上位の式）は数えない（Ignored）。
   - 理由: Stryker は static な変異を通るテストを選べず、全テストを読み込み直して実行する（公式 https://stryker-mutator.io/docs/stryker-js/configuration/ の `ignoreStatic`、https://stryker-mutator.io/docs/mutation-testing-elements/static-mutants/ ）。読み込み時の変異がテストファイルの読み込みを壊すと、テストが 1 件も動かないまま Survived と数えられる（`env.ts` の `export const env = readEnv(process.env)` で、readEnv の変異が testsCompleted 0 の Survived になっていた。Issue #59）。
   - 読み込み時とテスト中の両方で実行される変異（hybrid。`env.ts` の `readEnv` など）は、有効にしてもテスト中の実行だけで判定される（数えなくなるわけではない）。`readEnv` の変異は `env.test.ts` で killed になる。
   - ロジックの定数は最上位に置かない: 正規表現・変換表・URL・接頭辞など、テストで検出できる値は呼び出し時に評価する関数の中に置く（`isUuid`、`statusOf`、`todosPath`、`testSchemaPrefix`）。最上位の定数だと static になり、検査から外れる（Issue #55 で 18 件が該当。reviewer 指摘）。
-  - 残る static は `backend/todo/infra/schema.ts` の 10 件（テーブルの形の宣言で、最上位に置くのが Drizzle の書き方）。`ignoreStatic` を外して `--mutate` した実測で 3 件は Killed、7 件は Survived で、Survived の理由は次のとおり（等価。詳細は `stryker.config.mjs` のコメント）:
+  - 残る static は `apps/backend/todo/infra/schema.ts` の 10 件（テーブルの形の宣言で、最上位に置くのが Drizzle の書き方）。`ignoreStatic` を外して `--mutate` した実測で 3 件は Killed、7 件は Survived で、Survived の理由は次のとおり（等価。詳細は `stryker.config.mjs` のコメント）:
     - 列名 `"id"` / `"title"` / `"completed"` → `""`: drizzle は空の列名をキー名で補う（drizzle-orm 0.45.3 の `column-builder.js` の `setName`）。キー名と列名が同じなので同じ SQL になる（`"created_at"` → `""` はキー名 `createdAt` と違うので Killed）。
     - `completed` の `.default(false)` → `true`: Repository は保存時に `completed` を必ず渡すので使われない。
     - `timestamp` の設定（`{}`、`withTimezone: false`、`mode: ""`）: `mode` が `"string"` 以外なら Date の列で同じ。`withTimezone` は DDL の型名と、ドライバが文字列を返したときの変換にだけ使われ、node-postgres は timestamptz を Date で返す。

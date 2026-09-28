@@ -74,8 +74,8 @@ jobs:
       - name: Create .env from .env.example
         run: cp .env.example .env
 
-      # drizzle/ のマイグレーションを当てる（ci.yml と同じ）。
-      # 単体テストはテストファイルごとに別のスキーマを作ってそこに当てる（backend/shared/infra/database.test-support.ts）ので
+      # apps/backend/drizzle/ のマイグレーションを当てる（ci.yml と同じ）。
+      # 単体テストはテストファイルごとに別のスキーマを作ってそこに当てる（apps/backend/shared/infra/database.test-support.ts）ので
       #   この結果には依存しないが、ci.yml と同じ状態の DB でテストを動かすためにそろえる。
       - name: Apply database migrations
         run: pnpm db:migrate

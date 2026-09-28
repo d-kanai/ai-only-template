@@ -68,19 +68,19 @@ jobs:
 
       # .env を .env.example から作る（Issue #59）。
       # WHY: アプリ・テスト・drizzle-kit・Playwright は必須の環境変数（DATABASE_URL など）を .env から読み
-      #   （backend/shared/infra/env.ts）、コードに既定値を持たない。.env はコミットしない（.gitignore）ので、手元と同じく
+      #   （apps/backend/shared/infra/env.ts）、コードに既定値を持たない。.env はコミットしない（.gitignore）ので、手元と同じく
       #   `cp .env.example .env` で作る。値は compose.yaml の開発用 DB に合わせた開発用の値で、秘密ではない。
       # WHY ワークフローの env: に書かない: 値を .env.example の 1 か所にし、手元・クラウド・CI で同じ値を使うため。
       #   ここで作った .env は、以降のステップ（migrate / lint / test / build / E2E）がすべて読む。
       - name: Create .env from .env.example
         run: cp .env.example .env
 
-      # drizzle/ のマイグレーションを Postgres に当てる（drizzle-kit migrate。Issue #57）。
+      # apps/backend/drizzle/ のマイグレーションを Postgres に当てる（drizzle-kit migrate。Issue #57）。
       # WHY ここで当てるか: E2E（pnpm test:e2e）の next start は Postgres の todos 表を使うが、webServer の中では
       #   マイグレーションを当てない方針（playwright.config.ts）。E2E より前に 1 回だけ当てておく。
-      #   単体テスト（pnpm test）は、テストごとに別のスキーマを作ってそこに当てる（backend/shared/infra/database.test-support.ts）ので、
+      #   単体テスト（pnpm test）は、テストごとに別のスキーマを作ってそこに当てる（apps/backend/shared/infra/database.test-support.ts）ので、
       #   この結果には依存しない。
-      # 接続先は上で作った .env の DATABASE_URL（drizzle.config.ts が env.ts 経由で読む）。
+      # 接続先は上で作った .env の DATABASE_URL（apps/backend/drizzle.config.ts が env.ts 経由で読む）。
       - name: Apply database migrations
         run: pnpm db:migrate
       - run: pnpm lint

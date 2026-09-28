@@ -1,7 +1,7 @@
 // 環境変数の唯一の入口（Issue #59）。アプリ・テスト・ツールの設定ファイルは、process.env を直接読まずにここの env / toolEnv を使う。
 // 規則と WHY は rules/code/env.md の「環境変数」。process.env を直接読むと Biome（style/noProcessEnv）と
 // architecture.test.ts（規則 env-direct-access）で失敗する。process.env に触ってよいのはこのファイルだけ
-// （例外はルート直下の instrumentation.ts が Next.js の規約の NEXT_RUNTIME を読む 1 か所だけ）。
+// （例外は apps/frontend/instrumentation.ts が Next.js の規約の NEXT_RUNTIME を読む 1 か所だけ）。
 //
 // WHY 1 か所にまとめる: 変数ごとに読む場所が散らばると、既定値や検証（数として使えるか）が場所ごとにずれ、
 //   どの変数が必要かを一覧できない。ここで型を付けて検証した値だけを配ると、使う側は string | undefined を扱わずに済む。
@@ -40,7 +40,7 @@ export type ToolEnv = {
   // E2E で使う Chromium の実行ファイル（クラウド VM 用。playwright.config.ts）。空なら未設定と同じ。
   PLAYWRIGHT_CHROMIUM_EXECUTABLE: string | undefined;
   // Stryker（mutation testing）の worker の中で動いているか。Stryker が子プロセスに渡す（@stryker-mutator/core 10.0.0 の
-  //   child-process-proxy.js）。テスト用スキーマの後始末を止めるのに使う（backend/shared/infra/database.test-support.ts）。
+  //   child-process-proxy.js）。テスト用スキーマの後始末を止めるのに使う（apps/backend/shared/infra/database.test-support.ts）。
   STRYKER_MUTATOR_WORKER: boolean;
 };
 

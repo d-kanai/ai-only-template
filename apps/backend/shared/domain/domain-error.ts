@@ -4,7 +4,7 @@
 // WHY code を持たせる: HTTP のステータスや画面側の分岐は message（人間向けの文言）ではなく、
 //   機械可読な code で決める。文言を変えても挙動が変わらないようにするため。
 // WHY domain に置く: domain 層は HTTP を知らない。「何が起きたか」だけを表し、
-//   HTTP のステータスへの変換は presentation 層（backend/shared/presentation/http-error.ts）が行う。
+//   HTTP のステータスへの変換は presentation 層（apps/backend/shared/presentation/http-error.ts）が行う。
 
 // validation_error: 不変条件（例: タイトルの長さ）を満たさない。
 // not_found: 指定された集約が存在しない。

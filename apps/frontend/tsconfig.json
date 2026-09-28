@@ -1,3 +1,5 @@
+// apps/frontend の tsconfig（Issue #68）。Next（next build / next dev apps/frontend）が読む。
+// ベースは create-next-app@16.3.6 が生成した tsconfig（Next の plugin、jsx、DOM の型）。
 {
   "compilerOptions": {
     "target": "ES2017",
@@ -18,6 +20,14 @@
         "name": "next"
       }
     ],
+    // paths:
+    //   "@/*": frontend の中の参照（apps/frontend/*）。
+    //   "@repo/backend/*": frontend から backend への参照（apps/backend/*）。Issue #68 の段階 1 では workspace パッケージに
+    //     せず paths で解決する（Next 16.3.6 の next build が通ることを確認）。段階 2 で workspace パッケージにしても import の
+    //     書き方を変えずに済むよう、パッケージ名の形にしている。
+    //   注意: Next（Turbopack）は backend のファイルの "@/" にもこの paths を当てるので、backend の中では "@/" を使わない
+    //   （architecture.test.ts の backend-relative-only）。
+    //   リポジトリ直下の tsconfig.json の paths と同じ行き先にする。
     "paths": {
       "@/*": ["./*"],
       "@repo/backend/*": ["../backend/*"]

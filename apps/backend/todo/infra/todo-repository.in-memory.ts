@@ -5,7 +5,7 @@ import type { TodoRepository } from "../domain/todo-repository";
 // DATABASE_URL が無いとき（DB を起動せずに画面を触るとき）と、単体テストで使う（本番の永続化は Postgres。
 // todo-repository.postgres.ts と container.ts）。
 // WHY Map を使う: id での取得・上書き・削除がそのまま書け、挿入順も保つ（作成日時が同じ Todo の並びが安定する）。
-// WHY Todo をそのまま保持してよい: Todo は不変（backend/todo/domain/todo.ts）なので、
+// WHY Todo をそのまま保持してよい: Todo は不変（apps/backend/todo/domain/todo.ts）なので、
 //   呼び出し側が取り出した Todo を通して保持中のデータが書き換わることはない。
 // WHY テストで直接 new できる形にする: テストごとに空のリポジトリを作り、テスト同士がデータを共有しないようにするため。
 //   アプリ全体で共有する 1 インスタンスは infra/container.ts が持つ。
