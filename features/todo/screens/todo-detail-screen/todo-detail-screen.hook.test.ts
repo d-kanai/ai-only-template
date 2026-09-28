@@ -71,6 +71,15 @@ describe("初回の読み込み", () => {
     expect(result.current.error).toBe("Todo が見つかりません");
   });
 
+  test("Error 以外の値で取得に失敗すると、固定の文言が error に入る", async () => {
+    vi.mocked(getTodo).mockRejectedValue("network down");
+
+    const { result } = await renderLoaded();
+
+    expect(result.current.todo).toBeNull();
+    expect(result.current.error).toBe("予期しないエラーが発生しました");
+  });
+
   test("todoId が変わると、新しい todoId の Todo を取得し直す", async () => {
     vi.mocked(getTodo).mockImplementation(async (id) =>
       id === "todo-1" ? milk : bread,
@@ -97,6 +106,26 @@ describe("初回の読み込み", () => {
 
     expect(result.current.todo).toEqual(bread);
     expect(result.current.title).toBe("パンを買う");
+  });
+
+  test("todoId が変わった後に前の todoId の取得が失敗しても、新しい Todo の画面にエラーを出さない", async () => {
+    const milkResponse = deferred<void>();
+    vi.mocked(getTodo).mockImplementation((id) =>
+      id === "todo-1"
+        ? milkResponse.promise.then(() => {
+            throw new Error("Todo が見つかりません");
+          })
+        : Promise.resolve(bread),
+    );
+    const { result, rerender } = renderWithTodoId("todo-1");
+
+    rerender({ todoId: "todo-2" });
+    await waitFor(() => expect(result.current.todo).toEqual(bread));
+    await act(async () => milkResponse.resolve());
+
+    expect(result.current.todo).toEqual(bread);
+    expect(result.current.error).toBeNull();
+    expect(result.current.isLoading).toBe(false);
   });
 });
 
@@ -252,5 +281,17 @@ describe("完了の切り替え", () => {
 
     await act(() => result.current.toggleCompleted());
     expect(result.current.error).toBeNull();
+  });
+
+  test("Todo の取得が終わる前に切り替えても、反転元の completed が無いので更新を送らない", async () => {
+    const todoResponse = deferred<typeof milk>();
+    vi.mocked(getTodo).mockReturnValue(todoResponse.promise);
+    const { result } = renderHook(() => useTodoDetailScreen("todo-1"));
+
+    await act(() => result.current.toggleCompleted());
+
+    expect(updateTodo).not.toHaveBeenCalled();
+    expect(result.current.todo).toBeNull();
+    expect(result.current.isLoading).toBe(true);
   });
 });

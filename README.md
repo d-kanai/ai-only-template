@@ -64,7 +64,8 @@ Claude Code のクラウドセッション（asdf が無い環境）では、`sc
 ```sh
 pnpm install   # 依存をインストール
 pnpm dev       # 開発サーバを起動（http://localhost:3000）
-pnpm test      # テストを実行（Vitest）
+pnpm test      # 単体テストを実行し、カバレッジ 100% 未満なら失敗（Vitest。詳細は rules/code/architecture.md）
+pnpm test:unit # 単体テストだけを実行（カバレッジを計測しない。速く回したいとき）
 pnpm test:e2e  # E2E テストを実行（Playwright。本番ビルドを起動してブラウザで操作する。詳細は rules/code/architecture.md）
 pnpm lint      # lint + format の違反を検査（Biome。変更しない）
 pnpm check     # 安全な自動修正を適用して再検査（Biome）

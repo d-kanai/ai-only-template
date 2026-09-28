@@ -77,6 +77,28 @@ describe("初回の読み込み", () => {
     expect(result.current.todos).toEqual([milk]);
   });
 
+  test("初回の取得が遅れて失敗しても、追加後に取り直した一覧を残し、エラーも出さない", async () => {
+    const initialResponse = deferred<void>();
+    vi.mocked(listTodos)
+      .mockReturnValueOnce(
+        initialResponse.promise.then(() => {
+          throw new Error("初回の取得に失敗しました");
+        }),
+      )
+      .mockResolvedValueOnce({ todos: [milk] });
+    vi.mocked(createTodo).mockResolvedValue(milk);
+    const { result } = renderHook(() => useTodoScreen());
+
+    act(() => result.current.setNewTitle("牛乳を買う"));
+    await act(() => result.current.addTodo());
+    expect(result.current.todos).toEqual([milk]);
+    await act(async () => initialResponse.resolve());
+
+    expect(result.current.todos).toEqual([milk]);
+    expect(result.current.error).toBeNull();
+    expect(result.current.isLoading).toBe(false);
+  });
+
   test("一覧の取得に失敗すると、エラーの message が error に入る", async () => {
     vi.mocked(listTodos).mockRejectedValue(new Error("サーバエラー"));
 
@@ -84,6 +106,14 @@ describe("初回の読み込み", () => {
 
     expect(result.current.error).toBe("サーバエラー");
     expect(result.current.todos).toEqual([]);
+  });
+
+  test("Error 以外の値で失敗すると、固定の文言が error に入る", async () => {
+    vi.mocked(listTodos).mockRejectedValue("network down");
+
+    const { result } = await renderLoaded();
+
+    expect(result.current.error).toBe("予期しないエラーが発生しました");
   });
 });
 

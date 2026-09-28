@@ -196,6 +196,19 @@ backend/
   - 理由: サーバのコードはブラウザ上では動かないため、DOM のない Node 環境で検証する。ファイル単位のコメントで環境を切り替えられることは、Vitest 5.0.1 で実測済み（既定を jsdom にした状態で、このコメントを付けたテストでは `document` が undefined、付けないテストでは object になった）。
 - Route Handler は Web 標準の `Request` / `Response` で書ける（`15-route-handlers.md` の「Route Handlers」）ため、api ファイルの handler は Next を起動せずに `Request` → `Response` の関数としてテストできる。
 
+### カバレッジ
+- `pnpm test`（`vitest run --coverage`）は単体テストのカバレッジを計測し、Statements / Branches / Functions / Lines のいずれかが 100% を下回ると失敗する。CI の `ci` ジョブもこの `pnpm test` を実行するので、100% 未満では PR をマージできない。設定は `vitest.config.mts` の `coverage`（WHY はファイル内のコメント）。
+- カバレッジなしで速く回したいときは `pnpm test:unit`（`vitest run`）。完了前には必ず `pnpm test` を通す。
+- 計測対象: `features/` `backend/` `shared/` の `.ts` / `.tsx` と `scripts/` の `.ts`（テスト `*.test.ts(x)` と型宣言 `*.d.ts` は除く）。
+- 計測しないもの（ユーザー判断、Issue #45）:
+  - `app/`: ルーティングだけで、テストを置かない方針（上の「`app/`（ルーティング）」）。結線は E2E で確かめる。
+  - ルート直下の設定ファイル（`next.config.ts` / `playwright.config.ts` など）: ツールに渡す値を並べるだけで、単体テストで検証する振る舞いを持たない。
+  - `scripts/` のシェルスクリプト（`.sh`）: V8 のカバレッジは JS しか計測できない（include に入れても解析に失敗して自動で外される）。
+- 100% に満たないときは、テストを足して埋める。`/* v8 ignore */` などのコメントで計測から外すことはしない。
+  - 理由: テスト = 仕様なので、テストが通らないコードは仕様のないコードになる。ignore で逃がすと数字だけが 100% になり、仕様の抜けが見えなくなる。
+  - 分岐を通すだけのテストにしない。その分岐で起きること（返り値・状態・呼び出し）を検証する。
+  - 計測の対象外を増やすときは、上の方針に当てはまることを確かめ、`vitest.config.mts` とこの節に理由を書く。
+
 ### E2E テスト（Playwright）
 - 置き場所: ルート直下の `e2e/` に `<feature>.spec.ts` で置く（例: `e2e/todo.spec.ts`）。対象の隣には置かない。
   - 理由: E2E は画面・API・ルーティングをまたいで 1 つの操作の流れを検証するもので、特定のファイルに対応しない。
