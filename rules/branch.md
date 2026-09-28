@@ -10,7 +10,7 @@ main は常にマージ可能な状態を保つ。作業はすべて Issue → �
 - main から切る。
 - 命名: `<type>/<Issue番号>-<内容>`（例: `feat/12-branch-rules`）
 - type: `feat` / `fix` / `docs` / `chore` / `refactor`
-- マージ後のブランチは GitHub 側で自動削除する（ローカルは `git fetch --prune` で掃除）。
+- マージ後のブランチは GitHub 側で自動削除し、ローカルも下記「マージ後の後始末」で削除する。
 
 ## PR
 - 作成は `gh pr create`。本文は `.github/PULL_REQUEST_TEMPLATE.md` の項目（WHY / WHAT / 実装経緯 / 検証内容）を埋める。
@@ -25,3 +25,15 @@ main は常にマージ可能な状態を保つ。作業はすべて Issue → �
   3. main との競合がない
 - マージはオーケストレータ（メイン）が行う。人間の承認は不要。マージ後にユーザーへ報告する。
 - サブエージェントは PR 作成・マージをしない。
+
+## マージ後の後始末（オーケストレータが必ず行う）
+マージしたら、ユーザーへ報告する前に次を実行し、ローカルにブランチを残さない。
+
+```
+git checkout main
+git pull
+git fetch --prune
+git branch -d <ブランチ名>
+```
+
+- `git branch -d` が「not fully merged」で失敗したら、マージが完了していない可能性がある。`-D` で強制削除せず、PR の状態を確認する。
