@@ -1,7 +1,7 @@
 # Issue → ブランチ → PR → マージ（常時）
 
 main は常にマージ可能に保つ。main への直接 commit / push はしない（GitHub の Ruleset `protect-main` と、PreToolUse フック `scripts/hooks/guard-git.sh` で拒否）。
-手順（コマンド・CI の待ち方・クラウドでの読み替え・後始末）はスキル `pr-flow`。GitHub 側の設定（Projects・Ruleset）は `.claude/skills/pr-flow/github-settings.md`。
+PR の作成・マージの前にスキル `pr-flow` を読む（手順: コマンド・CI の待ち方・クラウドでの読み替え・後始末）。GitHub 側の設定（Projects・Ruleset）は `.claude/skills/pr-flow/github-settings.md`。
 
 - Issue: 作業は Issue から始める（無ければ目的・完了条件を書いて作る）。1 Issue = 1 PR。type ラベルを 1 つ（`feat` / `fix` / `docs` / `chore` / `refactor`）。Projects の Status は GitHub 側のワークフローが変える（API は呼ばない）。
 - ブランチ: main から `<type>/<Issue番号>-<内容>`（例: `feat/12-branch-rules`）。type は Issue・PR のラベルと同じ。

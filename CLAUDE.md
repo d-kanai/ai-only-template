@@ -62,7 +62,7 @@
 | `frontend.md` | `apps/frontend/**` | app はルーティングだけ、features の構成、画面側とサーバ側の境界、SSR を前提にしない |
 | `architecture-check.md` | `architecture.test.ts` | 依存の向きの 21 規則、足すときの手順、限界 |
 | `testing.md` | `**/*.test.ts(x)`・`e2e/**`・テストの設定 | テスト = 仕様、置き方、テストダブル、ルール検査テスト、Stryker、E2E |
-| `lint.md` | `biome.json`・`lint.test.ts` | Biome の方針と設定の WHY、pre-commit |
+| `lint.md` | `biome.json`・`lint.test.ts`・`lefthook.yml`・`package.json` | Biome の方針と設定の WHY、pre-commit |
 | `env.md` | `.env.example`・`env.ts`・`instrumentation*`・`compose.yaml`・`.tool-versions` | Node / pnpm の版、環境変数の一元化と検査 |
 | `cloud-session.md` | `scripts/cloud-session-start*`・`.claude/settings.json` | クラウドセッションの setup script とフック |
 | `dependencies.md` | `package.json`・`pnpm-workspace.yaml`・lockfile・`patches/**` | 完全固定、置き場所、版の決め方、pnpm patch |
@@ -71,7 +71,7 @@
 | `worktree.md` | worktree のフックと生成規則 | worktree ごとの `.env`・DB・ポート |
 
 ### スキル（手順。`/<name>` でも呼べる）
-- `pr-flow`: Issue → ブランチ → PR → CI → マージ → 後始末（`/pr-flow` でだけ起動）。
+- `pr-flow`: Issue → ブランチ → PR → CI → マージ → 後始末（PR の作成・マージの前に読む）。
 - `rule-check-test`: ルール検査テストとゲートの must pass / must reject と fault injection。
 - `mutation-testing`: Stryker の実行と生き残りの扱い。
 - `db-migration`: スキーマの変更とマイグレーション。

@@ -2,6 +2,8 @@
 paths:
   - "biome.json"
   - "lint.test.ts"
+  - "lefthook.yml"
+  - "package.json"
 ---
 
 # Lint / Format ルール
@@ -38,7 +40,7 @@ pnpm format   # biome format --write .                  … format だけを適�
 - 環境変数 `CI` が有効（`"0"` / `"false"` 以外）なときは postinstall がフックを入れない（lefthook@2.1.12 の `postinstall.js` で確認）。CI ではフックは不要で、`pnpm lint` を直接実行する。
 - フックが入っているかの確認: `git rev-parse --git-path hooks` の場所にある `pre-commit` が Lefthook のスクリプト（`call_lefthook run "pre-commit"` を含む）になっていること。入っていなければ `pnpm exec lefthook install` を実行する。
 - git worktree の注意: フックのディレクトリ（`.git/hooks`）はメインの作業ツリーと全 worktree で共有される。worktree で `pnpm install` や `lefthook run`（設定が変わっていると自動で `lefthook install` する）を実行すると、共有のフックが書き換わる。WorktreeCreate フック（`scripts/hooks/worktree-create.sh`）と SubagentStop フック（`scripts/hooks/subagent-stop.sh`）が共有のフックを修復する（LEARNINGS.md）。
-- フックを一時的に飛ばす: `LEFTHOOK=0 git commit ...`。**緊急時のみ**使い、使ったら理由を PR に書き、直後に `pnpm lint` を通す。`git commit --no-verify` は PreToolUse フック `scripts/hooks/guard-git.sh` が拒否する（AI からは使えない）。
+- フックを一時的に飛ばす: `LEFTHOOK=0 git commit ...` は**人間だけが使える**（緊急時のみ。使ったら理由を PR に書き、直後に `pnpm lint` を通す）。AI は `permissions.deny` と PreToolUse フック `scripts/hooks/guard-git.sh` で止まる（`git commit --no-verify` も同じ。`.claude/rules/git-guard.md`）。
 
 ## biome.json の設定の WHY
 JSON にはコメントを書けないため、ここに書く。ベースは create-next-app@16.3.6 の `--biome` テンプレート（`biome.json`、Biome 2.4.2 向け）。

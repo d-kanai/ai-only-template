@@ -1,10 +1,11 @@
 ---
 name: pr-flow
-description: Issue からブランチ・PR・CI・マージ・後始末までの流れ。作業を始めるとき（Issue とブランチを作る）と、PR を作る・マージするときに使う。
-disable-model-invocation: true
+description: Issue からブランチ・PR・CI・マージ・後始末までの手順。作業を始める（Issue とブランチを作る）、PR を作る、CI を待つ、マージする、マージ後に後始末するときに使う。
 ---
 
 # pr-flow（Issue → ブランチ → PR → マージ → 後始末）
+
+WHY 自動起動にしている（`disable-model-invocation` を付けない）: マージはオーケストレータ（モデル）が人間の承認なしに行うので、モデル自身がこの手順を呼べる必要がある。危険な操作（main への push、squash、force push）はスキルを隠すのではなく、PreToolUse フック `scripts/hooks/guard-git.sh` と `permissions.deny`（`.claude/settings.json`）が止める（`.claude/rules/git-guard.md`）。
 
 main は常にマージ可能に保つ。main への直接コミット・push はしない（GitHub の Ruleset `protect-main` でも禁止）。
 コマンドは `gh` で書く。クラウドセッション（`gh` が無い）での読み替えは最後の節。GitHub 側の設定（Projects・Ruleset）の詳細は `${CLAUDE_SKILL_DIR}/github-settings.md`。
@@ -16,7 +17,7 @@ main は常にマージ可能に保つ。main への直接コミット・push �
 2. **ブランチ**: main の最新から切る。`git checkout main && git pull && git checkout -b <type>/<Issue番号>-<内容>`（例: `feat/12-branch-rules`）。type は Issue のラベルと同じ。
 3. **実装**: テストから書く（CLAUDE.md の Test Driven）。作業の分担は `.claude/agents/`（worker / researcher / reviewer）。
 4. **作業ログ**: `logs/<YYYY-MM-DD>.md` に、このタスクでやったこと・根拠・判断を追記する。WHY: CI が PR の差分に `logs/*.md` の変更が無いと失敗する（文書だけの PR も例外なし）。
-5. **コミット**: 1 行目にサマリ、本文に 🎯 WHY / 📝 WHAT / 🛠️ 実装経緯 / ✅ 検証内容、末尾に `Co-Authored-By: <モデル名>`（メールアドレスは付けない。詳細は CLAUDE.md から読み込むコミットのルール）。
+5. **コミット**: 1 行目にサマリ、本文に 🎯 WHY / 📝 WHAT / 🛠️ 実装経緯 / ✅ 検証内容、末尾に `Co-Authored-By: <モデル名>`（メールアドレスは任意。詳細は CLAUDE.md から読み込むコミットのルール）。
 6. **PR 作成**: `gh pr create --label <type>`。
    - タイトル: コミットメッセージの 1 行目と同じ書き方（何をしたか）。
    - 本文: `.github/PULL_REQUEST_TEMPLATE.md` の 🎯 WHY / 📝 WHAT / 🛠️ 実装経緯 / ✅ 検証内容を埋め、`Closes #<Issue番号>` を入れる。WHY: マージで Issue が自動クローズされ、Projects の Status も進む。

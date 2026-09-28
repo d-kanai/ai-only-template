@@ -18,4 +18,4 @@
 <何をどう確認したか。未確認のことは未確認と書く>
 ```
 
-- 末尾に `Co-Authored-By: <モデル名>` を付ける（例: `Co-Authored-By: Claude Opus 5.5`）。メールアドレスは付けない。
+- 末尾に `Co-Authored-By: <モデル名>` を付ける（例: `Co-Authored-By: Claude Opus 5.5`）。メールアドレスは任意（Claude Code が付ける `<noreply@anthropic.com>` はそのままでよい）。commit-msg フックが見るのは `Co-Authored-By:` の行があるかだけ。
