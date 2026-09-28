@@ -8,9 +8,10 @@ import { env } from "./shared/infra/env";
 
 // このファイルの置き場所（apps/backend/）からのパスを、カレントディレクトリからの相対パスにして返す。
 // WHY: drizzle-kit は schema / out をカレントディレクトリからのパスとして解決する（drizzle-kit 0.31.11 の bin.cjs の
-//   prepareFilenames が glob.sync(path) と path.resolve(path) を使う）。今は pnpm のスクリプトがリポジトリ直下で
-//   drizzle-kit --config apps/backend/drizzle.config.ts を実行するが、workspace パッケージ化（Issue #68 の段階 2）で
-//   apps/backend から実行するようになっても同じ場所を指すよう、このファイルの場所から決める。
+//   prepareFilenames が glob.sync(path) と path.resolve(path) を使う）。pnpm db:generate / db:migrate は workspace パッケージ
+//   @repo/backend の script として apps/backend で drizzle-kit --config drizzle.config.ts を実行する（Issue #68 の段階 2）が、
+//   リポジトリ直下から drizzle-kit --config apps/backend/drizzle.config.ts を実行しても同じ場所を指すよう、このファイルの
+//   場所から決める。
 // WHY 絶対パスにしない: drizzle-kit generate は out の前に "./" を付けて読むため、絶対パスだと
 //   ".//home/.../drizzle/meta/0000_snapshot.json" を開こうとして ENOENT で失敗した（2026-09-28 実測）。
 // WHY import.meta.url を使う（import.meta.dirname を使わない）: drizzle-kit は設定ファイルを CommonJS に変換して読み込み、

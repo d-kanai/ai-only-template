@@ -18,7 +18,7 @@
   ```
   asdf list all pnpm | tail -1
   ```
-- `package.json` を作るときは、`packageManager` フィールドにも同じバージョンを書く（`pnpm@x.y.z`）。
+- リポジトリ直下の `package.json` の `packageManager` フィールドにも同じバージョンを書く（`pnpm@x.y.z`）。workspace の `apps/*/package.json` には書かない（書くと版を複数の場所で管理することになる。コマンドはリポジトリ直下で実行する）。
 
 ## 手順（初回・更新時）
 ```
@@ -57,8 +57,8 @@ node --version && pnpm --version   # .tool-versions と一致することを確�
   - `.env.local`（や `.env.development` など）は使わない。残っていれば消す。理由: Next.js は `.env.local` を `.env` より優先して読む（Next.js 16.3.6 同梱ドキュメント `01-app/02-guides/environment-variables.md` の「Environment Variable Load Order」）が、`env.ts` は `.env` だけを読むので、`pnpm dev` と `pnpm test` / `pnpm db:migrate` で値がずれる。
   - 置き場所はリポジトリ直下に 1 つ（Issue #68 のユーザー判断。`apps/frontend/.env` や `apps/backend/.env` は置かない）。
   - 読み込み: `env.ts` が読み込み時に、カレントディレクトリから上に向かって `pnpm-workspace.yaml` のあるディレクトリ（リポジトリ直下）を探し（`findRepoRoot`。見つからなければカレントディレクトリ）、そこの `.env` を Node 標準の `process.loadEnvFile` で読む（`loadRepoDotEnv`）。依存（dotenv など）は足さない。
-    - 理由: 今の pnpm のスクリプト（next / vitest / playwright / drizzle-kit）はリポジトリ直下で動くが、workspace パッケージ化（Issue #68 の段階 2）の `pnpm --filter` はパッケージのディレクトリ（`apps/backend` など）で動くため、カレントディレクトリの `.env` だけを読むと見つからない。`pnpm-workspace.yaml` を目印にするのは、リポジトリ直下にだけあり、`.git` のように worktree でファイルになったり Stryker のサンドボックスに無かったりしないため。`env.ts` の場所（`import.meta.dirname`）から探さないのは、Next のビルドでバンドルされると元の場所を指さないため。
-    - Next.js（`next dev/build/start apps/frontend`）は、プロジェクトのディレクトリ（`apps/frontend`）の `.env` を探す（`next/dist/server/config.js` の `loadEnvConfig(dir, ...)`）ので、リポジトリ直下の `.env` は Next.js 自身は読まない（起動時のログに「Environments: .env」が出ない）。`env.ts` が読むので問題ない: `apps/frontend/.env` が無い状態で `next start apps/frontend` / `next dev apps/frontend` が `/api/todos` に 200 を返し、`DATABASE_POOL_MAX=abc` を付けると `instrumentation.ts` の検証で exit 1 になった（2026-09-28 実測）。
+    - 理由: vitest / playwright はリポジトリ直下で動くが、workspace パッケージの script（Issue #68 の段階 2。`pnpm dev/build/start` → `pnpm --filter @repo/frontend <script>`、`pnpm db:generate/db:migrate` → `pnpm --filter @repo/backend <script>`）はパッケージのディレクトリ（`apps/frontend`・`apps/backend`）をカレントディレクトリにして動くため、カレントディレクトリの `.env` だけを読むと見つからない。`apps/backend` で `pnpm db:migrate` を直接実行しても、リポジトリ直下の `.env` を読む（2026-09-28 実測。シェルに `DATABASE_*` が無い状態で migrate が通り、`DATABASE_POOL_MAX=abc` を付けると欠けた・不正な変数の名前で止まった）。`pnpm-workspace.yaml` を目印にするのは、リポジトリ直下にだけあり、`.git` のように worktree でファイルになったり Stryker のサンドボックスに無かったりしないため。`env.ts` の場所（`import.meta.dirname`）から探さないのは、Next のビルドでバンドルされると元の場所を指さないため。
+    - Next.js（`apps/frontend` の `next dev/build/start`）は、プロジェクトのディレクトリ（`apps/frontend`）の `.env` を探す（`next/dist/server/config.js` の `loadEnvConfig(dir, ...)`）ので、リポジトリ直下の `.env` は Next.js 自身は読まない（起動時のログに「Environments: .env」が出ない）。`env.ts` が読むので問題ない: `apps/frontend/.env` が無い状態で `next start apps/frontend` / `next dev apps/frontend` が `/api/todos` に 200 を返し、`DATABASE_POOL_MAX=abc` を付けると `instrumentation.ts` の検証で exit 1 になった（2026-09-28 実測）。段階 2 の `pnpm start -p <port>`（`apps/frontend` で `next start`）でも、`apps/frontend/.env` が無い状態で `/api/todos` が 200 を返した（2026-09-28 実測）。
   - `.env` が無いとき（`ENOENT`）だけ何もしない（環境変数だけで渡す動かし方を許すため。足りなければ `readEnv` が名前を挙げて止める）。それ以外の読み込みエラーは投げる。
   - 環境変数が優先: `process.loadEnvFile` は、すでに環境にある変数をファイルの値で上書きしない（Node 24.21.0 で実測）。`DATABASE_URL=... pnpm db:migrate` のように前に付けた値が `.env` より優先される。
   - CI（`.github/workflows/ci.yml` / `mutation.yml`）は Postgres の起動後に `cp .env.example .env` のステップで作る（ワークフローの `env:` には書かない。値を `.env.example` の 1 か所にするため）。Stryker は `.env` もサンドボックスにコピーする（`.gitignore` を見ない。Issue #59 で `stryker run --mutate backend/shared/infra/env.ts` で確認。サンドボックスにも `pnpm-workspace.yaml` があるので、`env.ts` はサンドボックスの `.env` を読む）。

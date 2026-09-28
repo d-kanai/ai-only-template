@@ -16,8 +16,9 @@ import { describe, expect, it } from "vitest";
 
 // ディレクトリ構成ルール（rules/code/architecture.md）の依存の向きを、仕様として機械的に検査するテスト。
 // 対象は「依存の向き（全体）」「画面側とサーバ側の境界」「backend の 4 層の依存してよい先」、apps/frontend と apps/backend の
-// 境界（Issue #68。backend → frontend の禁止、backend の中は相対パスだけ）と、環境変数の直参照の禁止
-// （rules/code/env.md の「環境変数」。規則 env-direct-access）。
+// 境界（Issue #68。backend → frontend の禁止、backend の中は相対パスだけ、frontend などから backend へは "@repo/backend/..." の
+// 書き方だけ、apps/backend/package.json の exports の過不足）と、環境変数の直参照の禁止（rules/code/env.md の「環境変数」。
+// 規則 env-direct-access）。
 //
 // WHY 自前のテストにする（Biome の noRestrictedImports を使わない）:
 //   「features/<f>/api/ から backend へは import type だけ許す」を表現できない。Biome 2.5.13 の noRestrictedImports は
@@ -195,7 +196,8 @@ function toPosix(path: string): string {
   return path.split(sep).join("/");
 }
 
-// frontend から backend を指す書き方（Issue #68）。段階 1 では tsconfig の paths で apps/backend/* に解決する。
+// frontend から backend を指す書き方（Issue #68）。段階 2 では apps/backend が workspace パッケージ @repo/backend になり、
+//   node_modules/@repo/backend（apps/backend への symlink）と apps/backend/package.json の exports で解決する。
 const BACKEND_PACKAGE = "@repo/backend";
 
 // "@repo/backend" と "@repo/backend/x" だけ（"@repo/backend-extra" のような前方一致だけが同じ別パッケージは含めない）。
@@ -208,9 +210,13 @@ function isBackendPackage(specifier: string): boolean {
 // 参照先を、規則で比べる形にそろえる。
 //   "@/x" → "apps/frontend/x"（tsconfig の paths で "@/*" は apps/frontend/*。backend のファイルに書いても、Next の
 //     Turbopack は frontend の tsconfig の paths を当てるので apps/frontend を指す。Issue #68 の researcher の実測）
-//   "@repo/backend/x" → "apps/backend/x"（tsconfig の paths で apps/backend/*）
+//   "@repo/backend/x" → "apps/backend/x"（apps/backend/package.json の exports は、キーのパスに .ts を付けたファイルを
+//     指すことを BACKEND_EXPORTS で検査しているので、キーのパスがそのまま参照先になる）
 //   相対パス → 参照元のファイルの位置から解決したリポジトリ相対のパス
 //   それ以外 → パッケージ（specifier のまま）
+// WHY "@/" と "@repo/backend/" の後ろも posix.normalize で ".." を解決する: "@/../backend/x" は tsconfig の paths で
+//   apps/frontend/../backend/x、つまり apps/backend/x に解決される。".." を残すと apps/frontend の下の参照に見え、
+//   backend への参照を検査する規則（frontend-to-backend-specifier など）を素通りする。
 function toReference(
   from: string,
   { specifier, typeOnly }: ImportStatement,
@@ -219,16 +225,17 @@ function toReference(
   if (specifier.startsWith("@/")) {
     return {
       ...own,
-      to: `${FRONTEND_ROOT}/${specifier.slice(2)}`.replace(CODE_EXTENSION, ""),
+      to: posix
+        .normalize(`${FRONTEND_ROOT}/${specifier.slice(2)}`)
+        .replace(CODE_EXTENSION, ""),
     };
   }
   if (isBackendPackage(specifier)) {
     return {
       ...own,
-      to: `${BACKEND_ROOT}${specifier.slice(BACKEND_PACKAGE.length)}`.replace(
-        CODE_EXTENSION,
-        "",
-      ),
+      to: posix
+        .normalize(`${BACKEND_ROOT}${specifier.slice(BACKEND_PACKAGE.length)}`)
+        .replace(CODE_EXTENSION, ""),
     };
   }
   if (specifier.startsWith(".")) {
@@ -297,8 +304,22 @@ function referencesOf(root: string, files: string[]): Reference[] {
   );
 }
 
+// 参照を取り出すファイル。依存の向きの対象（listAllSourceFiles）に、e2e/ のソースとリポジトリ直下のファイル
+//   （playwright.config.ts・vitest.global-setup.ts など。テストは除く）を足す。
+// WHY e2e/ とリポジトリ直下を足す: backend を @repo/backend として使う側（frontend-to-backend-specifier・BACKEND_EXPORTS）の
+//   検査の対象にするため（Issue #68 の段階 2）。ほかの規則は参照元を apps/ の下に絞っているので、足しても影響しない。
+// 限界: リポジトリ直下のほかのディレクトリ（scripts/ の .ts のテスト以外など）は見ない。今は該当するソースが無い
+//   （scripts/ はシェルスクリプトとテストだけ）。そこに backend を参照するソースを置くなら、ここと fixture に足す。
+function listReferencingFiles(root: string): string[] {
+  return [
+    ...listAllSourceFiles(root),
+    ...listSourceFiles(root, "e2e"),
+    ...listDirectFiles(root, "").filter(isSourceNonTest),
+  ];
+}
+
 function collectReferences(root: string): Reference[] {
-  return referencesOf(root, listAllSourceFiles(root));
+  return referencesOf(root, listReferencingFiles(root));
 }
 
 // --- 規則で使う判定 ---
@@ -378,6 +399,24 @@ function isFrontendRootFile(path: string): boolean {
 const BACKEND_ENV_MODULE = "apps/backend/shared/infra/env";
 
 // features/<f>/api/ から、同じ feature の api ファイル（backend/<f>/presentation/*.api）への参照か。
+// frontend-to-backend-specifier の例外（Issue #68 の段階 2。オーケストレータの判断）: リポジトリ直下の vitest.global-setup.ts
+//   （テスト基盤）だけは、database.test-support を相対パスで参照してよい。
+// WHY: database.test-support はテストのための処理（前の実行が残したテスト用スキーマの後始末）で、パッケージの公開面（exports。
+//   frontend / e2e / 設定が使うアプリの入口だけ、というユーザー判断）に含めない。exports に無いので @repo/backend では
+//   解決できず、相対パスで読むしかない。例外はファイルと参照先の組で絞り、ほかのファイルからの test-support、global-setup から
+//   ほかの backend のファイル（env など）への相対参照は違反のままにする。
+const TEST_INFRA_RELATIVE_EXCEPTION = {
+  from: "vitest.global-setup.ts",
+  to: "apps/backend/shared/infra/database.test-support",
+};
+
+function isTestInfraRelativeException(ref: Reference): boolean {
+  return (
+    ref.from === TEST_INFRA_RELATIVE_EXCEPTION.from &&
+    ref.to === TEST_INFRA_RELATIVE_EXCEPTION.to
+  );
+}
+
 function isOwnFeatureApiFile(ref: Reference): boolean {
   return (
     PRESENTATION_API.test(ref.to) &&
@@ -445,6 +484,7 @@ function violatesBackendLayer(ref: Reference): boolean {
 
 // 規則の識別子。規則ごとの判定テスト（RULE_EXAMPLES）から規則を引くために使う。
 type RuleId =
+  | "frontend-to-backend-specifier"
   | "backend-to-frontend"
   | "backend-relative-only"
   | "frontend-root-to-backend"
@@ -472,6 +512,26 @@ type Rule = {
 
 // 1 規則 = 1 テスト。規則を足す・変えるときは rules/code/architecture.md と合わせてここと RULE_EXAMPLES（判定の例）を直す。
 const RULES: Rule[] = [
+  {
+    // 「frontend（と e2e/・リポジトリ直下の設定ファイル）から backend への参照は "@repo/backend/..." だけ」（Issue #68 の段階 2）。
+    // WHY 相対パス（"../backend/..."）と "@/../backend/..." を禁止する: apps/backend/package.json の exports（公開する入口）を
+    //   通らずに backend の中のファイルを指せてしまい、exports を明示した意味がなくなる。後で backend を別パッケージ・別プロセスに
+    //   分けたときも、相対パスの参照は壊れる。書き方を 1 つにそろえ、公開の過不足は BACKEND_EXPORTS で検査する。
+    //   段階 1 の限界（参照先で判定するので、相対パスでも許される場所なら違反にしない）を、この規則で解消する。
+    // WHY 参照先が backend のものだけを見る: apps/frontend の中の参照（"@/..." や "./x"）はこの規則の対象外。
+    // WHY e2e/ とリポジトリ直下も対象にする: playwright.config.ts・vitest.global-setup.ts・e2e/database.ts も env.ts などを
+    //   使う。相対パスを許すと、exports に無いファイルを使っていても気づけない。
+    id: "frontend-to-backend-specifier",
+    name: 'apps/frontend/・e2e/・リポジトリ直下のファイルから apps/backend/ への参照は "@repo/backend/..." の書き方だけ（相対パスや "@/../backend/" を使わない。例外は vitest.global-setup.ts → database.test-support の相対パスだけ）',
+    appliesTo: (from) =>
+      isUnder(from, FRONTEND_ROOT) ||
+      isUnder(from, "e2e") ||
+      !from.includes("/"),
+    isViolation: (ref) =>
+      ownUnder(ref, BACKEND_ROOT) &&
+      !isBackendPackage(ref.specifier) &&
+      !isTestInfraRelativeException(ref),
+  },
   {
     // 「backend → frontend は禁止」（Issue #68）。backend は Next / React・画面側に依存しない pure な TypeScript にし、
     //   後で別プロセスに分けるときに frontend を持ち出さずに済むようにする。
@@ -794,6 +854,131 @@ function findEnvViolations(root: string): string[] {
   );
 }
 
+// --- apps/backend/package.json の exports（規則 backend-exports。Issue #68 の段階 2） ---
+// exports は、@repo/backend として外（apps/frontend・e2e/・リポジトリ直下の設定ファイル）に公開するファイルの一覧。
+//   ユーザー判断で、全ファイル（"./*"）ではなく、外が使う入口だけを明示する（rules/code/architecture.md の「exports」）。
+// 検査すること（1 つでも破ると「backend-exports: ...」の行を出す）:
+//   (1) 外から "@repo/backend/<path>" で参照するものは、すべて exports のどれかのキーに当たる。
+//       WHY: 当たらないと Next / Vitest / tsc の解決で失敗するが、その前に「どのファイルのどの参照か」を一覧で出す。
+//       exports を足すときに、何を公開するかをこのテストの失敗で決めさせる。
+//   (2) exports の各キーは、外から少なくとも 1 か所で参照されている。
+//       WHY: 使わなくなった公開を残すと、公開の範囲が黙って広がったままになる（公開を最小に保つ）。
+//   (3) キーは "./" で始まり、値はキーのパスに ".ts" を付けた文字列（"./x" → "./x.ts"、"./a/*.api" → "./a/*.api.ts"）。
+//       WHY: 依存の向きの規則は "@repo/backend/x" を apps/backend/x として判定する（toReference）。キーと違うファイルを
+//       指せると、規則が見ている参照先と、実際に読み込まれるファイルがずれる。条件付きの object（{ "import": ... }）も
+//       条件ごとに別のファイルを指せるので使わない。
+//   (4) キーが指すファイルが存在する（パターンなら、当たるファイルが 1 つ以上ある）。
+// キーの照合は Node.js の exports の解決（packageExportsResolve）に合わせる: 完全一致を優先し、次に "*" を 1 つだけ含む
+//   パターンのうち、"*" の前が最も長いもの（同じ長さならキーが長いもの）。"*" は 1 文字以上に当たり、"/" も含みうる。
+// WHY apps/backend の中の参照は対象外: backend の中は相対パスだけ（規則 backend-relative-only）で、exports を通らない。
+const BACKEND_MANIFEST = `${BACKEND_ROOT}/package.json`;
+
+const BACKEND_EXPORTS = {
+  id: "backend-exports",
+  name: 'apps/backend/package.json の exports は、外（apps/frontend・e2e/・リポジトリ直下）が "@repo/backend/..." で参照するものをすべて含み、参照されないキーを持たず、各キーはそのパスの .ts を指す',
+};
+
+type BackendExports = Record<string, unknown>;
+
+// WHY package.json が無い・exports が object でないときは空にする: 外からの "@repo/backend/..." の参照がすべて (1) の違反になり、
+//   見逃す方向に倒れない。本番の検査では、exports を 1 件以上読めることを別に確かめる。
+function readBackendExports(root: string): BackendExports {
+  const path = join(root, BACKEND_MANIFEST);
+  if (!existsSync(path)) {
+    return {};
+  }
+  const { exports } = JSON.parse(readFileSync(path, "utf8")) as {
+    exports?: unknown;
+  };
+  return typeof exports === "object" && exports !== null
+    ? (exports as BackendExports)
+    : {};
+}
+
+// "@repo/backend/x" → "./x"、"@repo/backend" → "."（exports のキーと同じ形）
+function exportSubpath(specifier: string): string {
+  return `.${specifier.slice(BACKEND_PACKAGE.length)}`;
+}
+
+// "*" を 1 つだけ含むパターンに当たるか。"*" は 1 文字以上（Node.js と同じく、長さがパターン以上のものだけ）。
+function matchesPattern(path: string, pattern: string): boolean {
+  const star = pattern.indexOf("*");
+  if (star === -1 || pattern.lastIndexOf("*") !== star) {
+    return false;
+  }
+  return (
+    path.length >= pattern.length &&
+    path.startsWith(pattern.slice(0, star)) &&
+    path.endsWith(pattern.slice(star + 1))
+  );
+}
+
+// subpath（"./x"）を解決する exports のキー。当たらなければ undefined。
+function resolveExportKey(subpath: string, keys: string[]): string | undefined {
+  if (!subpath.includes("*") && keys.includes(subpath)) {
+    return subpath;
+  }
+  return keys
+    .filter((key) => matchesPattern(subpath, key))
+    .sort((a, b) => b.indexOf("*") - a.indexOf("*") || b.length - a.length)[0];
+}
+
+// キーが指すはずのファイル（apps/backend/<キーのパス>.ts。パターンなら "*" を含む）が backendFiles にあるか。
+function exportTargetExists(key: string, backendFiles: string[]): boolean {
+  const target = `${BACKEND_ROOT}/${key.slice(2)}.ts`;
+  return target.includes("*")
+    ? backendFiles.some((file) => matchesPattern(file, target))
+    : backendFiles.includes(target);
+}
+
+function exportEntryViolations(
+  key: string,
+  value: unknown,
+  used: ReadonlySet<string>,
+  backendFiles: string[],
+): string[] {
+  const entry = `${BACKEND_MANIFEST} の exports "${key}"`;
+  return [
+    ...(used.has(key) ? [] : [`${entry} はどこからも参照されていない`]),
+    ...(key.startsWith("./") && value === `${key}.ts`
+      ? []
+      : [
+          `${entry} の値 ${JSON.stringify(value)} は、キーのパスに .ts を付けたものではない`,
+        ]),
+    ...(exportTargetExists(key, backendFiles)
+      ? []
+      : [`${entry} が指すファイルが無い`]),
+  ];
+}
+
+// exports の違反の一覧（(1) は「参照元 → specifier」、(2)〜(4) は「apps/backend/package.json の exports "キー" ...」）。
+function findExportsViolations(
+  exports: BackendExports,
+  references: Reference[],
+  backendFiles: string[],
+): string[] {
+  const keys = Object.keys(exports);
+  const used = new Set<string>();
+  const unexported: string[] = [];
+  for (const ref of references) {
+    if (isUnder(ref.from, BACKEND_ROOT) || !isBackendPackage(ref.specifier)) {
+      continue;
+    }
+    const key = resolveExportKey(exportSubpath(ref.specifier), keys);
+    if (key === undefined) {
+      unexported.push(`${ref.from} → ${ref.specifier}`);
+    } else {
+      used.add(key);
+    }
+  }
+  return [
+    ...unexported,
+    ...Object.entries(exports).flatMap(([key, value]) =>
+      exportEntryViolations(key, value, used, backendFiles),
+    ),
+  ];
+}
+
 function findViolations(references: Reference[], rule: Rule): string[] {
   return references
     .filter((ref) => rule.appliesTo(ref.from) && rule.isViolation(ref))
@@ -805,9 +990,10 @@ function findViolations(references: Reference[], rule: Rule): string[] {
 //   置き場所の違反は「backend-placement: ファイル」「frontend-placement: ファイル」の 1 行で出す。
 //   環境変数の直参照は「env-direct-access: ファイル:行」を参照ごとに 1 行で出す（同じファイルの複数の書き方を、
 //   1 つずつ拾えているかまで比べるため）。
+//   exports の違反は「backend-exports: ...」の 1 行で出す（findExportsViolations）。
 function collectViolations(root: string): string[] {
   const files = listAllSourceFiles(root);
-  const references = referencesOf(root, files);
+  const references = referencesOf(root, listReferencingFiles(root));
   return [
     ...RULES.flatMap((rule) =>
       findViolations(references, rule).map((line) => `${rule.id}: ${line}`),
@@ -820,6 +1006,11 @@ function collectViolations(root: string): string[] {
     ...findEnvViolations(root).map(
       (line) => `${ENV_DIRECT_ACCESS.id}: ${line}`,
     ),
+    ...findExportsViolations(
+      readBackendExports(root),
+      references,
+      listSourceFiles(root, BACKEND_ROOT),
+    ).map((line) => `${BACKEND_EXPORTS.id}: ${line}`),
   ].sort();
 }
 
@@ -852,6 +1043,35 @@ describe("依存の向き（rules/code/architecture.md）", () => {
   it(ENV_DIRECT_ACCESS.name, () => {
     // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
     expect(findEnvViolations(repoRoot)).toEqual([]);
+  });
+
+  it(BACKEND_EXPORTS.name, () => {
+    expect(
+      findExportsViolations(
+        readBackendExports(repoRoot),
+        references,
+        listSourceFiles(repoRoot, BACKEND_ROOT),
+      ),
+    ).toEqual([]);
+  });
+
+  it("exports を 1 件以上読め、apps/frontend・e2e/・リポジトリ直下の @repo/backend の参照を取り出せている（読み込みや列挙が壊れて素通りするのを防ぐ）", () => {
+    expect(Object.keys(readBackendExports(repoRoot)).length).toBeGreaterThan(0);
+    const consumers = new Set(
+      references
+        .filter((ref) => isBackendPackage(ref.specifier))
+        .map((ref) => ref.from),
+    );
+    expect([...consumers]).toEqual(
+      expect.arrayContaining([
+        "apps/frontend/app/api/todos/route.ts",
+        "apps/frontend/features/todo/api/todo-api.ts",
+        "apps/frontend/instrumentation-node.ts",
+        "e2e/database.ts",
+        "playwright.config.ts",
+        "vitest.global-setup.ts",
+      ]),
+    );
   });
 
   it("環境変数の直参照の検査は、各ディレクトリとルート直下の設定ファイルを対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
@@ -901,6 +1121,72 @@ const RULE_EXAMPLES: Record<
   RuleId,
   { violating: Example[]; allowed: Example[] }
 > = {
+  "frontend-to-backend-specifier": {
+    violating: [
+      [
+        "apps/frontend/app/api/todos/[id]/route.ts",
+        "../../../../../backend/todo/presentation/get-todo.api",
+        "value",
+      ],
+      [
+        "apps/frontend/features/todo/api/todo-api.ts",
+        "../../../../backend/todo/presentation/list-todos.api",
+        "type",
+      ],
+      [
+        "apps/frontend/instrumentation-node.ts",
+        "../backend/shared/infra/env",
+        "value",
+      ],
+      // "@/" の後ろの ".." で apps/frontend の外に出る書き方も、backend への参照として数える（toReference の normalize）。
+      [
+        "apps/frontend/features/todo/api/todo-api.ts",
+        "@/../backend/todo/presentation/list-todos.api",
+        "type",
+      ],
+      ["e2e/database.ts", "../apps/backend/shared/infra/env", "value"],
+      ["playwright.config.ts", "./apps/backend/shared/infra/env", "value"],
+      // 例外（vitest.global-setup.ts → database.test-support）は、そのファイルとその参照先の組だけ。
+      //   global-setup からでも env を相対パスで参照するのは違反。別のルート直下のファイルから test-support も違反。
+      ["vitest.global-setup.ts", "./apps/backend/shared/infra/env", "value"],
+      [
+        "vitest.config.mts",
+        "./apps/backend/shared/infra/database.test-support",
+        "value",
+      ],
+      [
+        "e2e/database.ts",
+        "../apps/backend/shared/infra/database.test-support",
+        "value",
+      ],
+    ],
+    allowed: [
+      [
+        "apps/frontend/app/api/todos/route.ts",
+        "@repo/backend/todo/presentation/list-todos.api",
+        "value",
+      ],
+      ["e2e/database.ts", "@repo/backend/shared/infra/env", "value"],
+      ["vitest.global-setup.ts", "@repo/backend/shared/infra/env", "value"],
+      // 例外: テスト基盤の vitest.global-setup.ts だけは、database.test-support を相対パスで参照してよい。
+      [
+        "vitest.global-setup.ts",
+        "./apps/backend/shared/infra/database.test-support",
+        "value",
+      ],
+      // apps/frontend の中の参照（相対パス・"@/"）は backend を指さないので対象外。
+      ["apps/frontend/app/page.tsx", "../features/todo", "value"],
+      [
+        "apps/frontend/features/todo/components/x.ts",
+        "@/features/todo/api/todo-api",
+        "type",
+      ],
+      // 前方一致だけが同じ別ディレクトリ（apps/backend-x）は backend ではない。
+      ["apps/frontend/app/page.tsx", "../../backend-x/y", "value"],
+      // backend の中の相対パスは、この規則の対象外（参照元が backend。backend-relative-only が見る）。
+      ["apps/backend/drizzle.config.ts", "./shared/infra/env", "value"],
+    ],
+  },
   "backend-to-frontend": {
     violating: [
       ["apps/backend/todo/infra/x.ts", "@/features/todo", "value"],
@@ -1716,6 +2002,162 @@ describe("規則ごとの判定", () => {
   }
 });
 
+// --- exports の判定（BACKEND_EXPORTS）の仕様 ---
+// 参照 1 件ごとではなく、exports の中身と参照の集まりで決まるので、RULES の外で例を持つ。
+
+const EXPORT_KEY_EXAMPLES: {
+  keys: string[];
+  resolved: [specifier: string, key: string][];
+  unresolved: string[];
+} = {
+  keys: [
+    "./todo/presentation/*.api",
+    "./todo/presentation/*",
+    "./shared/infra/env",
+  ],
+  resolved: [
+    // "*" の前が同じ長さのパターンが 2 つ当たるときは、キーが長い方（Node.js の解決と同じ）。
+    [
+      "@repo/backend/todo/presentation/list-todos.api",
+      "./todo/presentation/*.api",
+    ],
+    // "*" は "/" を含んでもよい。
+    [
+      "@repo/backend/todo/presentation/nested/x.api",
+      "./todo/presentation/*.api",
+    ],
+    ["@repo/backend/todo/presentation/list-todos", "./todo/presentation/*"],
+    ["@repo/backend/shared/infra/env", "./shared/infra/env"],
+  ],
+  unresolved: [
+    // 完全一致のキーの前方一致だけ・拡張子つきは当たらない。
+    "@repo/backend/shared/infra/env-helper",
+    "@repo/backend/shared/infra/env.ts",
+    // "*" は 1 文字以上。
+    "@repo/backend/todo/presentation/",
+    // パターンの "*" の前が一致しない（前方一致だけが同じ別ディレクトリ）。
+    "@repo/backend/todo/presentationx/a.api",
+    "@repo/backend/todo/infra/container",
+    // パッケージ名だけ（"."）はキーに無い。
+    "@repo/backend",
+  ],
+};
+
+describe("exports のキーの照合（resolveExportKey）", () => {
+  it("当たる例・当たらない例はそれぞれ 3 件以上ある", () => {
+    expect(EXPORT_KEY_EXAMPLES.resolved.length).toBeGreaterThanOrEqual(3);
+    expect(EXPORT_KEY_EXAMPLES.unresolved.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it.each(EXPORT_KEY_EXAMPLES.resolved)(
+    "%s は %s に当たる",
+    (specifier, key) => {
+      expect(
+        resolveExportKey(exportSubpath(specifier), EXPORT_KEY_EXAMPLES.keys),
+      ).toBe(key);
+    },
+  );
+
+  it.each(EXPORT_KEY_EXAMPLES.unresolved)(
+    "%s はどのキーにも当たらない",
+    (specifier) => {
+      expect(
+        resolveExportKey(exportSubpath(specifier), EXPORT_KEY_EXAMPLES.keys),
+      ).toBeUndefined();
+    },
+  );
+});
+
+describe("exports の違反の検出（findExportsViolations）", () => {
+  const ref = (from: string, specifier: string): Reference =>
+    toReference(from, { specifier, typeOnly: false });
+  const backendFiles = [
+    "apps/backend/todo/presentation/list-todos.api.ts",
+    "apps/backend/shared/infra/env.ts",
+    "apps/backend/unused.ts",
+    "apps/backend/mismatch.ts",
+    "apps/backend/object.ts",
+  ];
+
+  it("すべての参照がキーに当たり、すべてのキーが使われ、値がキーのパスの .ts でファイルがあれば、違反は 0 件", () => {
+    expect(
+      findExportsViolations(
+        {
+          "./todo/presentation/*.api": "./todo/presentation/*.api.ts",
+          "./shared/infra/env": "./shared/infra/env.ts",
+        },
+        [
+          ref(
+            "apps/frontend/app/api/todos/route.ts",
+            "@repo/backend/todo/presentation/list-todos.api",
+          ),
+          ref("e2e/database.ts", "@repo/backend/shared/infra/env"),
+          // backend の中の参照（backend-relative-only が見る）と、前方一致だけが同じ別パッケージは数えない。
+          ref(
+            "apps/backend/todo/infra/x.ts",
+            "@repo/backend/todo/infra/container",
+          ),
+          ref("apps/frontend/app/page.tsx", "@repo/backend-extra/x"),
+        ],
+        backendFiles,
+      ),
+    ).toEqual([]);
+  });
+
+  it("キーに当たらない参照、使われないキー、キーと違う値、ファイルの無いキーを、それぞれ検出する", () => {
+    expect(
+      findExportsViolations(
+        {
+          "./todo/presentation/*.api": "./todo/presentation/*.api.ts",
+          "./unused": "./unused.ts",
+          "./mismatch": "./todo/presentation/list-todos.api.ts",
+          "./object": { import: "./object.ts" },
+          "./missing": "./missing.ts",
+          "./todo/domain/*": "./todo/domain/*.ts",
+        },
+        [
+          ref(
+            "apps/frontend/app/api/todos/route.ts",
+            "@repo/backend/todo/presentation/list-todos.api",
+          ),
+          ref(
+            "apps/frontend/features/todo/api/x.ts",
+            "@repo/backend/todo/infra/container",
+          ),
+          ref("playwright.config.ts", "@repo/backend"),
+          ref("e2e/a.ts", "@repo/backend/mismatch"),
+          ref("e2e/a.ts", "@repo/backend/object"),
+          ref("e2e/a.ts", "@repo/backend/missing"),
+          ref("e2e/a.ts", "@repo/backend/todo/domain/todo"),
+        ],
+        backendFiles,
+      ),
+    ).toEqual([
+      "apps/frontend/features/todo/api/x.ts → @repo/backend/todo/infra/container",
+      "playwright.config.ts → @repo/backend",
+      'apps/backend/package.json の exports "./unused" はどこからも参照されていない',
+      'apps/backend/package.json の exports "./mismatch" の値 "./todo/presentation/list-todos.api.ts" は、キーのパスに .ts を付けたものではない',
+      'apps/backend/package.json の exports "./object" の値 {"import":"./object.ts"} は、キーのパスに .ts を付けたものではない',
+      'apps/backend/package.json の exports "./missing" が指すファイルが無い',
+      'apps/backend/package.json の exports "./todo/domain/*" が指すファイルが無い',
+    ]);
+  });
+
+  it('キーが "./" で始まらないものは、値の形の違反にする', () => {
+    expect(
+      findExportsViolations(
+        { "./x": "./x.ts", x: "x.ts" },
+        [ref("e2e/a.ts", "@repo/backend/x")],
+        ["apps/backend/x.ts"],
+      ),
+    ).toEqual([
+      'apps/backend/package.json の exports "x" はどこからも参照されていない',
+      'apps/backend/package.json の exports "x" の値 "x.ts" は、キーのパスに .ts を付けたものではない',
+      'apps/backend/package.json の exports "x" が指すファイルが無い',
+    ]);
+  });
+});
+
 // --- 抽出 → 正規化 → 判定を通した fixture テスト ---
 // 上の「規則ごとの判定」は、正規化済みの参照 1 件を規則に渡すだけで、ファイルの列挙・import の抽出・相対パスの解決を
 // 通らない。抽出の取りこぼし（書き方によって import を拾えない）は、規則が正しくても違反の見逃しになる。
@@ -1739,13 +2181,14 @@ function violationsOfFixture(files: Record<string, string>): string[] {
   }
 }
 
-// must-reject: 依存の向きの 16 規則（RULES）それぞれについて、alias（@/・@repo/backend/）と相対パス、値の import / import type / inline の type /
+// must-reject: 依存の向きの 17 規則（RULES）それぞれについて、alias（@/・@repo/backend/）と相対パス、値の import / import type / inline の type /
 // export { X } from / export type { X } from / dynamic import() / 副作用だけの import のうち規則に関係する形と、
 // .ts / .tsx / .js / .jsx の各拡張子、境界ぎりぎりのケース（他 feature の深いパス、自 feature の禁止層、
 // 名前の前方一致だけが同じ別ディレクトリ、next / react / react-dom のサブパス）を置く。
-// あわせて、置き場所の規則（BACKEND_PLACEMENT / FRONTEND_PLACEMENT）と環境変数の直参照の規則（ENV_DIRECT_ACCESS）の違反も置く。
-// 規則は全部で 19（RULES の 16 + 置き場所 2 + 環境変数の直参照）。Issue #68 で RULES に 3 規則（backend-to-frontend・
-// backend-relative-only・frontend-root-to-backend）を足した。
+// あわせて、置き場所の規則（BACKEND_PLACEMENT / FRONTEND_PLACEMENT）、環境変数の直参照の規則（ENV_DIRECT_ACCESS）、
+// exports の規則（BACKEND_EXPORTS。fixture の apps/backend/package.json）の違反も置く。
+// 規則は全部で 21（RULES の 17 + 置き場所 2 + 環境変数の直参照 + exports）。Issue #68 で RULES に 3 規則（backend-to-frontend・
+// backend-relative-only・frontend-root-to-backend）を足し、段階 2 で frontend-to-backend-specifier と BACKEND_EXPORTS を足した。
 const MUST_REJECT_FILES: Record<string, string> = {
   // screen-to-backend: apps/frontend/features/<f>/ の api/ 以外から backend への参照は、型でも相対でも違反。
   "apps/frontend/features/todo/components/bad-backend.ts": lines(
@@ -2050,6 +2493,50 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/backend/.lib/x.ts": lines(
     'import { TodoScreen } from "@/features/todo";',
   ),
+  // frontend-to-backend-specifier（Issue #68 の段階 2）: 参照先はほかの規則で許される（自 feature の api ファイルの型、
+  //   app/api からの api ファイル、直下からの env）が、相対パスや "@/../backend/" で書いたもの。この規則だけにかかる。
+  //   e2e/ とリポジトリ直下のファイル（.ts / .mts）からの相対パスも同じ。
+  "apps/frontend/features/todo/api/bad-specifier.ts": lines(
+    'import type { TodoDto } from "../../../../backend/todo/presentation/list-todos.api";',
+    'export type { GetTodoResponse } from "@/../backend/todo/presentation/get-todo.api";',
+  ),
+  "apps/frontend/app/api/todos/[id]/bad-relative.ts": lines(
+    'export { PUT } from "../../../../../backend/todo/presentation/update-todo.api";',
+  ),
+  "apps/frontend/instrumentation-node.ts": lines(
+    'const env = import("../backend/shared/infra/env");',
+  ),
+  "e2e/bad-relative.ts": lines(
+    'import { env } from "../apps/backend/shared/infra/env";',
+  ),
+  // 例外（vitest.global-setup.ts → database.test-support の相対パス）は名前まで一致したときだけ。.mts の別ファイルは違反。
+  "vitest.global-setup.mts": lines(
+    'import { cleanupTestSchemas } from "./apps/backend/shared/infra/database.test-support";',
+  ),
+  // vitest.global-setup.ts でも、test-support 以外（env）を相対パスで参照するのは違反（test-support の相対参照は許される）。
+  "vitest.global-setup.ts": lines(
+    'import { cleanupTestSchemas } from "./apps/backend/shared/infra/database.test-support";',
+    'import { env } from "./apps/backend/shared/infra/env";',
+  ),
+  // backend-exports（Issue #68 の段階 2）: exports の過不足。
+  //   "./todo/presentation/*.api" は上の fixture の *.api への参照で使われ、bad-presentation.api.ts などに当たる（違反なし）。
+  //   "./shared/presentation/http-error" は使われるが、指すファイルが無い。"./todo/domain/bad-domain" は使われない。
+  //   "./mismatch" は使われるが、値が別のファイル（キーのパスのファイルも無い）。
+  //   exports に無い参照（上の fixture の container・domain など）は、参照ごとに違反になる（下の MUST_REJECT_VIOLATIONS）。
+  "apps/backend/package.json": JSON.stringify({
+    name: "@repo/backend",
+    exports: {
+      "./todo/presentation/*.api": "./todo/presentation/*.api.ts",
+      "./shared/presentation/http-error": "./shared/presentation/http-error.ts",
+      "./todo/domain/bad-domain": "./todo/domain/bad-domain.ts",
+      "./mismatch": "./todo/domain/bad-domain.ts",
+    },
+  }),
+  "e2e/bad-exports.ts": lines(
+    'import { x } from "@repo/backend/mismatch";',
+    'import { todoContainer } from "@repo/backend/todo/infra/container";',
+    'import { env } from "@repo/backend";',
+  ),
 };
 
 const MUST_REJECT_VIOLATIONS = [
@@ -2321,6 +2808,51 @@ const MUST_REJECT_VIOLATIONS = [
       `core-to-persistence: apps/backend/todo/application/bad-application-db.command.ts → ${to}`,
   ),
   "core-to-persistence: apps/backend/shared/domain/bad-shared-domain-db.ts → drizzle-orm/node-postgres",
+  // Issue #68 の段階 2: frontend-to-backend-specifier。上の fixture のうち、frontend・e2e/・リポジトリ直下から相対パス
+  //   （と "@/../backend/"）で backend を指すものは、ほかの規則の結果に関係なくすべてかかる。
+  ...[
+    "apps/frontend/app/api/todos/[id]/bad-relative.ts → apps/backend/todo/presentation/update-todo.api",
+    "apps/frontend/app/api/todos/bad-route.ts → apps/backend/todo/application/create-todo.command",
+    "apps/frontend/app/bad-page.tsx → apps/backend/todo/presentation/get-todo.api",
+    "apps/frontend/features/todo/api/bad-api.ts → apps/backend/shared/presentation/http-error",
+    "apps/frontend/features/todo/api/bad-api.ts → apps/backend/todo/domain/todo",
+    "apps/frontend/features/todo/api/bad-specifier.ts → apps/backend/todo/presentation/get-todo.api",
+    "apps/frontend/features/todo/api/bad-specifier.ts → apps/backend/todo/presentation/list-todos.api",
+    "apps/frontend/features/todo/components/bad-backend.ts → apps/backend/shared/presentation/json-body",
+    "apps/frontend/features/todo/components/bad-backend.ts → apps/backend/todo/domain/todo",
+    "apps/frontend/features/todo/components/bad-backend.ts → apps/backend/todo/presentation/delete-todo.api",
+    "apps/frontend/features/todo/components/bad-ext.mjs → apps/backend/shared/presentation/http-error",
+    "apps/frontend/instrumentation-node.ts → apps/backend/shared/infra/env",
+    "apps/frontend/next.config.ts → apps/backend/shared/infra/database",
+    "apps/frontend/shared/bad-shared.tsx → apps/backend/todo/presentation/list-todos.api",
+    "e2e/bad-relative.ts → apps/backend/shared/infra/env",
+    "vitest.global-setup.mts → apps/backend/shared/infra/database.test-support",
+    "vitest.global-setup.ts → apps/backend/shared/infra/env",
+  ].map((line) => `frontend-to-backend-specifier: ${line}`),
+  // Issue #68 の段階 2: backend-exports。"@repo/backend/..." の参照のうち、fixture の exports のどのキーにも当たらないもの
+  //   （container・domain・application・他 feature・.api の付かない presentation・パッケージ名だけ）と、exports の各キーの違反。
+  ...[
+    "apps/frontend/app/api/todos/bad-route.ts → @repo/backend/todo/infra/container",
+    "apps/frontend/app/api/todos/bad-route.ts → @repo/backend/todo/presentation/update-todo",
+    "apps/frontend/features/todo/api/bad-api.ts → @repo/backend/other/presentation/list-others.api",
+    "apps/frontend/features/todo/api/bad-api.ts → @repo/backend/shared/domain/domain-error",
+    "apps/frontend/features/todo/api/bad-api.ts → @repo/backend/todo/presentation/list-todos",
+    "apps/frontend/features/todo/components/bad-backend.ts → @repo/backend/todo/infra/container",
+    "apps/frontend/features/todo/components/bad-ext.cjs → @repo/backend/todo/infra/todo-repository.in-memory",
+    "apps/frontend/features/todo/components/bad-ext.mts → @repo/backend/todo/domain/todo",
+    "apps/frontend/features/todo/components/bad-ext.mts → @repo/backend/todo/infra/container",
+    "apps/frontend/features/todo/components/test-helper.tsx → @repo/backend/todo/domain/todo",
+    "apps/frontend/lib/db.ts → @repo/backend/todo/infra/container",
+    "apps/frontend/next.config.ts → @repo/backend/shared/infra/env-helper",
+    "apps/frontend/next.config.ts → @repo/backend/todo/infra/container",
+    "apps/frontend/shared/bad-shared.tsx → @repo/backend/shared/domain/domain-error",
+    "e2e/bad-exports.ts → @repo/backend",
+    "e2e/bad-exports.ts → @repo/backend/todo/infra/container",
+    'apps/backend/package.json の exports "./mismatch" が指すファイルが無い',
+    'apps/backend/package.json の exports "./mismatch" の値 "./todo/domain/bad-domain.ts" は、キーのパスに .ts を付けたものではない',
+    'apps/backend/package.json の exports "./shared/presentation/http-error" が指すファイルが無い',
+    'apps/backend/package.json の exports "./todo/domain/bad-domain" はどこからも参照されていない',
+  ].map((line) => `backend-exports: ${line}`),
 ];
 
 // must-pass: 許可される参照を網羅する。今のリポジトリの本番コードにある import の形
@@ -2352,7 +2884,6 @@ const MUST_PASS_FILES: Record<string, string> = {
     'export { DELETE } from "@repo/backend/todo/presentation/delete-todo.api";',
     'export { GET } from "@repo/backend/todo/presentation/get-todo.api";',
     'export { PUT } from "@repo/backend/todo/presentation/update-todo.api";',
-    'export { PUT as PUT2 } from "../../../../../backend/todo/presentation/update-todo.api";',
   ),
   "apps/frontend/features/todo/index.ts": lines(
     'export { TodoDetailScreen } from "./screens/todo-detail-screen/todo-detail-screen";',
@@ -2373,7 +2904,7 @@ const MUST_PASS_FILES: Record<string, string> = {
     "  UpdateTodoRequest,",
     "  UpdateTodoResponse,",
     '} from "@repo/backend/todo/presentation/update-todo.api";',
-    'import { type UpdateTodoRequest as Req, type UpdateTodoResponse as Res } from "../../../../backend/todo/presentation/update-todo.api";',
+    'import { type UpdateTodoRequest as Req, type UpdateTodoResponse as Res } from "@repo/backend/todo/presentation/update-todo.api";',
     'export type { DeleteTodoResponse } from "@repo/backend/todo/presentation/delete-todo.api";',
     "export type {",
     "  CreateTodoRequest,",
@@ -2647,15 +3178,39 @@ const MUST_PASS_FILES: Record<string, string> = {
     '  await import("@repo/backend/shared/infra/env");',
     "}",
   ),
-  // 設定ファイル（apps/backend/drizzle.config.ts）・e2e/ は env.ts を相対パスで import する。
+  // apps/backend の設定ファイル（apps/backend/drizzle.config.ts）は env.ts を相対パスで import する（backend の中）。
+  //   e2e/ とリポジトリ直下の設定ファイルは、frontend と同じく "@repo/backend/..." で import する（Issue #68 の段階 2）。
   "apps/backend/drizzle.config.ts": lines(
     'import { env } from "./shared/infra/env";',
     "export default { url: env.DATABASE_URL };",
   ),
   "e2e/database.ts": lines(
-    'import { env } from "../apps/backend/shared/infra/env";',
+    'import { Client } from "pg";',
+    'import { env } from "@repo/backend/shared/infra/env";',
     "export const url = env.DATABASE_URL;",
   ),
+  "playwright.config.ts": lines(
+    'import { defineConfig } from "@playwright/test";',
+    'import { env, toolEnv } from "@repo/backend/shared/infra/env";',
+  ),
+  // テスト基盤の vitest.global-setup.ts だけは、database.test-support を相対パスで参照する（exports に含めない例外）。
+  "vitest.global-setup.ts": lines(
+    'import { env, toolEnv } from "@repo/backend/shared/infra/env";',
+    "import {",
+    "  cleanupTestSchemas,",
+    "  testSchemaPrefix,",
+    '} from "./apps/backend/shared/infra/database.test-support";',
+  ),
+  // exports（Issue #68 の段階 2）: 外が "@repo/backend/..." で参照するものだけを、キーのパスの .ts で公開する。
+  //   すべてのキーが上の参照で使われ、指すファイルがある（パターンは *.api の 5 ファイルに当たる）。
+  "apps/backend/package.json": JSON.stringify({
+    name: "@repo/backend",
+    exports: {
+      "./todo/presentation/*.api": "./todo/presentation/*.api.ts",
+      "./shared/presentation/http-error": "./shared/presentation/http-error.ts",
+      "./shared/infra/env": "./shared/infra/env.ts",
+    },
+  }),
   "apps/backend/shared/infra/drizzle-transaction-runner.ts": lines(
     'import type { TransactionRunner } from "../domain/transaction-runner";',
     'import type { Database, Executor } from "./database";',
@@ -2866,6 +3421,21 @@ describe("参照先の正規化（toReference）", () => {
     expect(
       toReference(from, { specifier: "@repo/backend", typeOnly: false }).to,
     ).toBe("apps/backend");
+  });
+
+  it('"@/" と "@repo/backend/" の後ろの ".." は解決する（"@/../backend/x" は apps/backend/x）', () => {
+    expect(
+      toReference(from, {
+        specifier: "@/../backend/todo/presentation/list-todos.api",
+        typeOnly: true,
+      }).to,
+    ).toBe("apps/backend/todo/presentation/list-todos.api");
+    expect(
+      toReference(from, {
+        specifier: "@repo/backend/../frontend/features/todo",
+        typeOnly: false,
+      }).to,
+    ).toBe("apps/frontend/features/todo");
   });
 
   it('名前の前方一致だけが同じ別パッケージ（"@repo/backend-extra/x"）は自前のコードにしない', () => {

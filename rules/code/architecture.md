@@ -7,44 +7,86 @@ Next.js（App Router）のコードを、機能（feature）単位で置く。�
 
 | ディレクトリ | 役割 |
 | --- | --- |
-| `apps/frontend/` | Next.js のアプリ。`app/` `features/` `next.config.ts` `instrumentation*.ts` `tsconfig.json`。Next は `next dev/build/start apps/frontend` で動かす |
+| `apps/frontend/` | workspace パッケージ `@repo/frontend`（Next.js のアプリ）。`app/` `features/` `next.config.ts` `instrumentation*.ts` `tsconfig.json` `package.json`。Next は `apps/frontend` をカレントディレクトリにして `next dev/build/start` で動かす（リポジトリ直下の `pnpm dev/build/start` が `pnpm --filter @repo/frontend <script>` を呼ぶ） |
 | `apps/frontend/app/` | ルーティングだけ。`page.tsx` は screen を返すだけ、`app/api/**/route.ts` は backend の api ファイルの関数を re-export するだけ |
 | `apps/frontend/features/<feature>/` | 画面側。screen（見た目 + hook）、feature 内の部品、`/api/...` を呼ぶラッパー |
 | `apps/frontend/shared/` | 画面側で feature をまたぐ共通部品。**まだ無いので作らない**。必要になったら作る |
-| `apps/backend/` | API 側。Next・React に依存しない TypeScript。サーバの起動口は持たない（Next の Route Handler から呼ばれる） |
+| `apps/backend/` | workspace パッケージ `@repo/backend`（API 側）。Next・React に依存しない TypeScript。サーバの起動口は持たない（Next の Route Handler から呼ばれる）。外に公開するファイルは `package.json` の `exports` に明示する（下の「workspace パッケージと exports」） |
 | `apps/backend/<feature>/` | DDD の 4 層（presentation / application / domain / infra） |
 | `apps/backend/shared/` | API 側で feature をまたぐ共通部品（DomainError・TransactionRunner の interface、DomainError → HTTP ステータスの変換と `ErrorResponse` 型、環境変数の入口 `env.ts`、Postgres の接続とトランザクションの実装など） |
 | `apps/backend/drizzle/`・`apps/backend/drizzle.config.ts` | マイグレーション（生成物）と drizzle-kit の設定 |
 
 - 理由: Next.js はプロジェクトの構成について方針を持たない（unopinionated）。`app/` の外にコードを置き、`app/` をルーティング専用にする構成は公式の例の 1 つ（下の「一次情報」）。ルーティング（URL）と機能のコードを分けることで、URL を変えてもコードを動かさずに済む。
-- frontend と backend を `apps/` で分ける理由（Issue #68。ユーザー指示）: ディレクトリ（段階 2 ではパッケージ）の単位で画面側と API 側を分け、後で API を別プロセスに分離しやすくする。プロセスは増やさず、Next 1 プロセスのまま（Hono などの別サーバは入れない）。分離するときは、`apps/backend` に起動口（`server.ts`）を足し、`app/api` の re-export を Next の `rewrites` に置き換える。
-- 段階（Issue #68）: 段階 1（いまの形）はディレクトリの移動と import・設定・検査の書き換えだけで、`package.json` はリポジトリ直下の 1 つ。段階 2 で `apps/backend` を workspace パッケージ `@repo/backend`（`exports` を明示し、公開するのは frontend が使う入口だけ）にする。
+- frontend と backend を `apps/` で分ける理由（Issue #68。ユーザー指示）: パッケージの単位で画面側と API 側を分け、後で API を別プロセスに分離しやすくする。プロセスは増やさず、Next 1 プロセスのまま（Hono などの別サーバは入れない）。分離するときの差分は下の「後で別プロセスに分けるとき」。
+- 段階（Issue #68）: 段階 1 でディレクトリを `apps/` に移し、import・設定・検査を書き換えた（`package.json` はリポジトリ直下の 1 つ、`@repo/backend/*` は tsconfig の paths で解決）。段階 2（いまの形）で pnpm workspace にし、`apps/backend` を workspace パッケージ `@repo/backend`（`exports` を明示し、公開するのは外が使う入口だけ）、`apps/frontend` を `@repo/frontend` にした。
 
-### import の書き方とパスの解決（段階 1）
+### workspace パッケージと exports（段階 2）
+pnpm workspace（`pnpm-workspace.yaml` の `packages: ["apps/*"]`）で、`package.json` は 3 つ。版はすべて完全固定（`workspace:*` だけ例外。`rules/code/dependencies.md`）。
+
+| package.json | name | 持つもの |
+| --- | --- | --- |
+| リポジトリ直下 | `ai-only-template`（private） | ツールと共通の devDependencies（Biome・Lefthook・Vitest・Testing Library・Playwright・Stryker・TypeScript・`@types/node`）、E2E が DB を直接見るための `pg` / `@types/pg`、リポジトリ直下のファイル（`playwright.config.ts`・`vitest.global-setup.ts`・`e2e/`）が使う `"@repo/backend": "workspace:*"`。scripts は `dev` / `build` / `start` → `pnpm --filter @repo/frontend <script>`、`db:generate` / `db:migrate` → `pnpm --filter @repo/backend <script>`、テスト・lint・型チェック・`db:up` などはリポジトリ直下のまま。`packageManager` もここ |
+| `apps/frontend/package.json` | `@repo/frontend`（private） | dependencies に `next` / `react` / `react-dom` と `"@repo/backend": "workspace:*"`、devDependencies に `@types/react` / `@types/react-dom`。scripts は `dev` / `build` / `start`（`next dev` など。ディレクトリの引数なし） |
+| `apps/backend/package.json` | `@repo/backend`（private） | dependencies に `drizzle-orm` / `pg`、devDependencies に `drizzle-kit` / `@types/pg`。scripts は `db:generate` / `db:migrate`（`drizzle-kit ... --config drizzle.config.ts`）。`exports`（下） |
+
+- 依存の置き場所: そのパッケージのコードが import するものを、そのパッケージの `package.json` に置く（pnpm は宣言した依存だけを `<パッケージ>/node_modules` に置くので、宣言していないパッケージは import できない）。テストだけが使うもの（Vitest・Testing Library）とツールはリポジトリ直下に置く（テストはリポジトリ直下の Vitest が動かし、Node の解決は親のディレクトリの `node_modules` も探すので、`apps/*` のテストからも見える）。
+  - 同じパッケージを 2 か所に置くときの版のずれは `package.test.ts` が止める（`rules/code/dependencies.md`）。
+  - `@testing-library/react` の peer（`react` / `react-dom`）は、リポジトリ直下に `react` が無いので pnpm が workspace の中の `react@19.2.8` で解決している（lockfile の importers の `.` の `@testing-library/react` の版の文字列で確認）。frontend の `react` と別の版になると、画面のテストで React が 2 つ読み込まれて hook が動かない見込み（未確認）。React を上げるときは lockfile のこの行も同じ版になっていることを確かめる。
+- `pnpm --filter` で動く script のカレントディレクトリはパッケージのディレクトリ（`apps/frontend` / `apps/backend`）。`.env` はリポジトリ直下の 1 つを `env.ts` が探して読む（`rules/code/env.md` の「環境変数」）。
+- 引数はそのまま渡る: `pnpm start -p 3100` は `pnpm --filter @repo/frontend start -p 3100` → `next start -p 3100`、`pnpm db:generate --name <内容>` も同じ（2026-09-28 実測。`playwright.config.ts` の `webServer.command` もこの形で動く）。
+
+#### exports（`apps/backend/package.json`）
+外（apps/frontend・e2e/・リポジトリ直下の設定ファイル）が `@repo/backend/<path>` で使ってよいファイルの一覧。全ファイル（`"./*"`）は公開しない（Issue #68 のユーザー判断）。今の一覧:
+
+| キー | 値 | 使う側 |
+| --- | --- | --- |
+| `./todo/presentation/*.api` | `./todo/presentation/*.api.ts` | `apps/frontend/app/api/**/route.ts`（Route Handler の re-export）、`apps/frontend/features/todo/api/todo-api.ts`（リクエスト / レスポンスの型） |
+| `./shared/presentation/http-error` | `./shared/presentation/http-error.ts` | `apps/frontend/features/todo/api/todo-api.ts`（`ErrorResponse` の型） |
+| `./shared/infra/env` | `./shared/infra/env.ts` | `apps/frontend/instrumentation-node.ts`（起動時の検証）、`playwright.config.ts`、`e2e/database.ts`、`vitest.global-setup.ts` |
+
+- 値は TS のソースそのもの（ビルドしない）。Next（Turbopack は workspace パッケージを自動で変換する。`transpilePackages` は不要）、Vitest（Vite）、tsc（`moduleResolution: bundler` は exports を読む）、Playwright はそのまま読める（2026-09-28 実測: `pnpm build` / `pnpm test` / `pnpm typecheck` / `pnpm test:e2e`）。
+- exports に無いファイルを外から import すると、`tsc` / `next build` が「Cannot find module」で止まる（2026-09-28 実測。`todo-api.ts` に `@repo/backend/todo/infra/container` の import を置いて確認）。依存の向きの規則（どこから何を参照してよいか）は exports とは別に `architecture.test.ts` が検査する（exports は「外に見せる範囲」、規則は「どこから使ってよいか」）。
+- パターン（`*`）は 1 キーに 1 つ。`./todo/presentation/*.api` は todo の api ファイル（1 API = 1 ファイル）をまとめて公開する。api ファイルを足しても exports を直さなくてよい。feature を足したら `./<feature>/presentation/*.api` を足す。それ以外は 1 ファイルずつ列挙する。
+- テスト基盤は公開しない: exports は frontend / e2e / 設定が使うアプリの入口だけにする（ユーザー判断）。`vitest.global-setup.ts`（前の実行が残したテスト用スキーマの後始末。`rules/code/test.md`）が使う `apps/backend/shared/infra/database.test-support` はテストのための処理なので exports に入れず、`vitest.global-setup.ts` からだけ相対パス（`./apps/backend/shared/infra/database.test-support`）で参照する。これは規則 `frontend-to-backend-specifier` の唯一の例外で、ファイルと参照先の組で絞っている（`TEST_INFRA_RELATIVE_EXCEPTION`。ほかのファイルからの test-support、`vitest.global-setup.ts` からほかの backend のファイルへの相対参照は違反）。
+- 足し方: 外で `@repo/backend/<path>` の import を書くと、`architecture.test.ts` の `backend-exports` が「exports に無い」と失敗する。`"./<path>": "./<path>.ts"` を足す（キーのパスに `.ts` を付けた値だけを許す。別のファイルを指すキーや条件付きの object は不可）。使わなくなったキーは消す（使われないキーも `backend-exports` が失敗にする）。
+- backend の中は exports を通らない: backend の中の import は相対パスだけ（規則 `backend-relative-only`）。自パッケージ名（`@repo/backend/...`）で書くと exports を通り、公開していない内部のファイルを指せなくなるため。
+
+#### 後で別プロセスに分けるとき
+1. `apps/backend` に起動口（`server.ts`。HTTP サーバと api ファイルの結線）と、その起動の script を足す。
+2. `apps/frontend/app/api/**` を消し、Next の `rewrites` で `/api/*` を backend のサーバに向ける。
+3. `apps/frontend/package.json` の `@repo/backend` は型だけの依存になる（`features/*/api/` の `import type`。exports から `*.api` の値の利用が無くなる）。`instrumentation-node.ts` の env の検証は backend のサーバ側に移す。
+- backend は Next・React に依存せず、中の import は相対パスだけなので、backend 側のコードはそのまま動く想定（Node で直接動かすときの TS の扱い（`constructor(private readonly ...)` は Node の型除去だけでは動かない見込み）は未確認）。
+
+### import の書き方とパスの解決（段階 2）
 | 参照元 → 参照先 | 書き方 | 解決 |
 | --- | --- | --- |
 | frontend → frontend | `@/<path>`（例: `@/features/todo`） | tsconfig の paths `@/*` → `apps/frontend/*` |
-| frontend → backend | `@repo/backend/<path>`（例: `@repo/backend/todo/presentation/list-todos.api`、`@repo/backend/shared/infra/env`） | tsconfig の paths `@repo/backend/*` → `apps/backend/*`（段階 2 では workspace パッケージとして解決し、書き方は変えない） |
+| frontend → backend | `@repo/backend/<path>`（例: `@repo/backend/todo/presentation/list-todos.api`、`@repo/backend/shared/infra/env`）だけ。相対パス（`../backend/...`）と `@/../backend/...` は使わない | workspace パッケージ: `apps/frontend/node_modules/@repo/backend`（`apps/backend` への symlink）と `apps/backend/package.json` の `exports` |
 | backend → backend | 相対パスだけ（例: `../domain/todo`、`../../shared/infra/database`） | ファイルの位置から |
-| リポジトリ直下の設定・E2E → backend | 相対パス（例: `./apps/backend/shared/infra/env`） | ファイルの位置から（drizzle-kit・Playwright は tsconfig の paths を解決する保証がないため） |
+| リポジトリ直下の設定・E2E → backend | `@repo/backend/<path>`（例: `@repo/backend/shared/infra/env`）だけ。例外は `vitest.global-setup.ts` → `./apps/backend/shared/infra/database.test-support`（相対パス。テスト基盤は exports に含めないため） | workspace パッケージ: リポジトリ直下の `node_modules/@repo/backend`（リポジトリ直下の `package.json` の devDependencies）と `exports`。tsconfig の paths には頼らない（Playwright は自前の変換で読むため） |
+| `apps/backend/drizzle.config.ts` → backend | 相対パス（`./shared/infra/env`） | backend の中なので相対パス（drizzle-kit は tsconfig の paths を解決する保証もない） |
 
 - backend の中で `@/` を使わない理由: Next（Turbopack）は backend のファイルの `@/` にも frontend の tsconfig の paths を当て、`apps/frontend` の中を探してビルドが失敗する（Issue #68 の researcher の実測）。
-- backend の中で `@repo/backend/` を使わない理由: 段階 2 で `exports` を明示すると、自パッケージ名の参照は `exports` を通り、公開していない内部のファイルを指せなくなる。相対パスなら `exports` に関係なく解決する。
-- 検査: `architecture.test.ts` の規則 `backend-relative-only`（下の「依存の向き（全体）」）。
+- backend の中で `@repo/backend/` を使わない理由: 自パッケージ名の参照は `exports` を通り、公開していない内部のファイルを指せなくなる。相対パスなら `exports` に関係なく解決する。
+- frontend などから相対パスで backend を指さない理由: `exports`（公開する入口）を通らずに backend の中のどのファイルでも指せてしまい、`exports` を明示した意味がなくなる。後で backend を別プロセスに分けたときにも壊れる。
+- 検査: `architecture.test.ts` の規則 `backend-relative-only`・`frontend-to-backend-specifier` と `backend-exports`（下の「依存の向き（全体）」）。
 - tsconfig は 3 つ（WHY は各ファイルのコメント）:
-  - `apps/frontend/tsconfig.json`: Next（`next build apps/frontend` の型チェックとエディタ）用。Next の plugin・jsx・DOM の型、paths は `@/*` → `./*` と `@repo/backend/*` → `../backend/*`。frontend が import した backend のファイルも、この設定で型チェックされる。
+  - `apps/frontend/tsconfig.json`: Next（`apps/frontend` の `next build` の型チェックとエディタ）用。Next の plugin・jsx・DOM の型、paths は `@/*` → `./*` だけ。`@repo/backend/...` は paths に書かず、workspace パッケージとして解決する（paths に書くと exports を通らずに backend のどのファイルも指せてしまうため）。frontend が import した backend のファイルも、この設定で型チェックされる。
   - `apps/backend/tsconfig.json`: backend 単体の型チェック（`pnpm exec tsc -p apps/backend --noEmit`）用。Next の plugin・jsx・DOM の型を入れず、paths も持たない。DOM の型が無いので、`Response#json()` は `unknown` を返す（テストでは `as` で型を付ける）。
-  - リポジトリ直下の `tsconfig.json`: Vitest（`resolve.tsconfigPaths`）とリポジトリ全体の型チェック（`pnpm exec tsc -p . --noEmit`）用。paths は `@/*` → `./apps/frontend/*`、`@repo/backend/*` → `./apps/backend/*`（frontend の tsconfig と同じ行き先）。
+  - リポジトリ直下の `tsconfig.json`: Vitest（`resolve.tsconfigPaths`）とリポジトリ全体の型チェック（`pnpm exec tsc -p . --noEmit`）用。paths は `@/*` → `./apps/frontend/*`（frontend の tsconfig と同じ行き先）だけ。
   - 強制: `pnpm typecheck`（`tsc -p . --noEmit && tsc -p apps/backend --noEmit`）を CI の `ci` ジョブで `pnpm lint` の後・`pnpm build` の前に実行する。script の中身と CI のステップ（失敗を無視する書き方でないこと、build より前にあること）は `typecheck.test.ts` が検査する。
-    - 理由: `next build apps/frontend` は frontend と、そこから import された backend のファイルしか型チェックしない。monorepo にする前はリポジトリ直下の tsconfig（`**/*.ts`）で `next build` がテスト・ルール検査テスト・e2e・設定ファイルまで型チェックしていたが、移動後は backend のテストや `architecture.test.ts` に型エラーを置いても `pnpm build` が exit 0 になった（Issue #68 の reviewer の実測）。Vitest は型を検査しない。
+    - 理由: `apps/frontend` の `next build` は frontend と、そこから import された backend のファイルしか型チェックしない。monorepo にする前はリポジトリ直下の tsconfig（`**/*.ts`）で `next build` がテスト・ルール検査テスト・e2e・設定ファイルまで型チェックしていたが、移動後は backend のテストや `architecture.test.ts` に型エラーを置いても `pnpm build` が exit 0 になった（Issue #68 の reviewer の実測）。Vitest は型を検査しない。
 - `.env` はリポジトリ直下に 1 つ（`rules/code/env.md` の「環境変数」）。
 
 ## 例（Todo）
 ファイル名は例。実際のファイルはリポジトリを正とする。
 
 ```
+pnpm-workspace.yaml                     # packages: ["apps/*"]（workspace の範囲）と pnpm の設定
+package.json                            # リポジトリ直下（ツール・共通の devDependencies、pnpm --filter で apps の script を呼ぶ）
 apps/
   frontend/
+    package.json                        # @repo/frontend（next / react / "@repo/backend": "workspace:*"）
     next.config.ts                      # Next の設定
     instrumentation.ts                  # Next の規約ファイル（起動時の環境変数の検証。rules/code/env.md）
     instrumentation-node.ts             # Node.js runtime 用の処理。@repo/backend/shared/infra/env を読み込む
@@ -83,8 +125,9 @@ apps/
             todo-detail-screen.test.tsx
             todo-detail-screen.hook.test.ts
   backend/
+    package.json                        # @repo/backend（drizzle-orm / pg、exports で公開する入口、db:generate / db:migrate）
     tsconfig.json
-    drizzle.config.ts                   # drizzle-kit の設定（pnpm db:generate / db:migrate が --config で指す）
+    drizzle.config.ts                   # drizzle-kit の設定（apps/backend の db:generate / db:migrate が --config で指す）
     drizzle/                            # 生成したマイグレーション（SQL と meta/）。pnpm db:generate が作り、コミットする
     shared/
       domain/
@@ -226,7 +269,7 @@ Issue #57 で導入した。Todo は Postgres（`compose.yaml`）に保存する
   2. `pnpm db:generate`（`drizzle-kit generate`）で、前回のスナップショット（`apps/backend/drizzle/meta/`）との差分から SQL（`apps/backend/drizzle/<番号>_<名前>.sql`）を作る。DB には接続しない。名前は `pnpm db:generate --name <内容>` で付ける。
   3. 生成された SQL を読んで意図どおりか確かめ、`apps/backend/drizzle/` をまとめてコミットする。生成済みの SQL は手で直さない（直すと `apps/backend/drizzle/meta/` のスナップショットとずれる）。
   4. `pnpm db:migrate`（`drizzle-kit migrate`）で、DB にまだ当てていない SQL を当てる。当てた記録は DB の `drizzle.__drizzle_migrations` 表に残り、何度実行しても同じ結果になる。
-- 設定は `apps/backend/drizzle.config.ts`（WHAT / WHY はファイル内のコメント）。`pnpm db:generate` / `pnpm db:migrate` は `drizzle-kit ... --config apps/backend/drizzle.config.ts` をリポジトリ直下で実行する。`schema` / `out` は、drizzle-kit がカレントディレクトリからのパスとして読むので、設定ファイルの場所（`apps/backend/`）から求めたカレントディレクトリからの相対パスにしている（`apps/backend` で実行しても同じ場所を指す。2026-09-28 にリポジトリ直下と `apps/backend` の両方で generate / migrate を実測。絶対パスは generate が `./` を前に付けて ENOENT になった）。`dbCredentials.url` は `env.DATABASE_URL`（`apps/backend/shared/infra/env.ts` を相対パスで import する。drizzle-kit 自身は `.env` を読まないが、`env.ts` が読み込み時に `.env` を読む）。既定値は持たない。
+- 設定は `apps/backend/drizzle.config.ts`（WHAT / WHY はファイル内のコメント）。`pnpm db:generate` / `pnpm db:migrate`（リポジトリ直下）は `pnpm --filter @repo/backend <script>` を呼び、`apps/backend` をカレントディレクトリにして `drizzle-kit ... --config drizzle.config.ts` を実行する（Issue #68 の段階 2。`apps/backend` で `pnpm db:migrate` を直接実行しても同じ）。`schema` / `out` は、drizzle-kit がカレントディレクトリからのパスとして読むので、設定ファイルの場所（`apps/backend/`）から求めたカレントディレクトリからの相対パスにしている（`apps/backend` で実行しても同じ場所を指す。2026-09-28 にリポジトリ直下と `apps/backend` の両方で generate / migrate を実測。絶対パスは generate が `./` を前に付けて ENOENT になった）。`dbCredentials.url` は `env.DATABASE_URL`（`apps/backend/shared/infra/env.ts` を相対パスで import する。drizzle-kit 自身は `.env` を読まないが、`env.ts` が読み込み時に `.env` を読む）。既定値は持たない。
 - `drizzle-kit push`（DB をスキーマに直接合わせる）は使わない。
   - 理由: push は差分を DB に直接当て、SQL をファイルに残さない。どの環境にどの変更を当てたかが記録されず、レビューもできない。列の改名を「削除 + 追加」と解釈してデータを消すような変更も、SQL を読まずに当たってしまう。generate + migrate なら、当てる SQL を PR で読み、すべての環境で同じ SQL を同じ順に当てられる。
 - `apps/backend/drizzle/` は Biome の対象外（`biome.json` の `files.includes`。`rules/code/lint.md`）。生成物で、整形すると次の generate で書き戻されるため。
@@ -288,7 +331,7 @@ Issue #57 で導入した。Todo は Postgres（`compose.yaml`）に保存する
   - URL を型で担保したくなったら、各 api ファイルから path の定数を export して画面側で使う案を検討する（今回は入れない）。
 
 ## 依存の向き（全体）
-- frontend と backend: `apps/frontend → apps/backend` の向きだけ（Issue #68）。backend は frontend を参照しない。frontend から backend への参照は次の 3 か所だけ。
+- frontend と backend: `apps/frontend → apps/backend` の向きだけ（Issue #68）。backend は frontend を参照しない。frontend から backend への参照は、`@repo/backend/...` の書き方（exports を通る）で、次の 3 か所だけ。
   - `apps/frontend/app/api/**`: `apps/backend/<feature>/presentation/*.api` の値（Route Handler の re-export）。
   - `apps/frontend/features/<feature>/api/`: `apps/backend/<feature>/presentation/<name>.api.ts` と `apps/backend/shared/presentation/` の `import type` だけ（上の「画面側とサーバ側の境界」）。
   - `apps/frontend/instrumentation-node.ts`（`apps/frontend/` 直下）: `apps/backend/shared/infra/env`（起動時の環境変数の検証。`rules/code/env.md`）。
@@ -297,8 +340,11 @@ Issue #57 で導入した。Todo は Postgres（`compose.yaml`）に保存する
 - 画面側 → API 側: `apps/frontend/features/<feature>/` の `api/` 以外は backend を参照せず、`api/` が re-export した型を使う。
 - feature 同士は原則 import しない。必要なときは相手の `index.ts` だけを import する。
 - `apps/frontend/shared/` は `apps/frontend/features/` を import しない（逆向きの依存を作らない）。
-- 検査: ルート直下の `architecture.test.ts`（`pnpm test` に含まれ、CI の `ci` ジョブで失敗する）が、`apps/frontend/` と `apps/backend/` の全体（再帰。除くのは `node_modules/` と `.next/` だけで、ほかの `.` で始まるディレクトリも検査する）の `.ts` / `.tsx` / `.mts` / `.cts` / `.js` / `.jsx` / `.mjs` / `.cjs`（テスト `*.test.*` は除く。JS は tsconfig の `allowJs: true` に合わせる）の import / re-export / dynamic import を抜き出し、次の規則を 1 規則 = 1 テストで検査する。違反があると「ファイル → 参照先」の一覧を出して失敗する。
-  - 参照先の正規化: `@/x` は `apps/frontend/x`（backend のファイルに書いても frontend の paths が当たるため）、`@repo/backend/x` は `apps/backend/x`（`@repo/backend-extra` のような前方一致だけが同じ別パッケージは含めない）、相対パスはファイルの位置から解決したリポジトリ相対のパス、それ以外はパッケージとして扱う。
+- e2e/ とリポジトリ直下の設定ファイル（`playwright.config.ts`・`vitest.global-setup.ts` など）から backend への参照も、`@repo/backend/...` の書き方だけ（exports を通る）。
+- 検査: ルート直下の `architecture.test.ts`（`pnpm test` に含まれ、CI の `ci` ジョブで失敗する）が、`apps/frontend/` と `apps/backend/` の全体（再帰。除くのは `node_modules/` と `.next/` だけで、ほかの `.` で始まるディレクトリも検査する）と、`e2e/` とリポジトリ直下のファイル（下の `frontend-to-backend-specifier` と `backend-exports` のため）の `.ts` / `.tsx` / `.mts` / `.cts` / `.js` / `.jsx` / `.mjs` / `.cjs`（テスト `*.test.*` は除く。JS は tsconfig の `allowJs: true` に合わせる）の import / re-export / dynamic import を抜き出し、次の規則を 1 規則 = 1 テストで検査する。違反があると「ファイル → 参照先」の一覧を出して失敗する。
+  - 参照先の正規化: `@/x` は `apps/frontend/x`（backend のファイルに書いても frontend の paths が当たるため）、`@repo/backend/x` は `apps/backend/x`（`@repo/backend-extra` のような前方一致だけが同じ別パッケージは含めない。exports の値がキーのパスの `.ts` であることは `backend-exports` で検査しているので、キーのパスがそのまま参照先になる）、相対パスはファイルの位置から解決したリポジトリ相対のパス、それ以外はパッケージとして扱う。`@/` と `@repo/backend/` の後ろの `..` も解決する（`@/../backend/x` は `apps/backend/x`）。
+  - `apps/frontend/`・`e2e/`・リポジトリ直下のファイルから `apps/backend/` への参照は `@repo/backend/...` の書き方だけ（規則 `frontend-to-backend-specifier`。Issue #68 の段階 2）。相対パス（`../backend/...`・`./apps/backend/...`）と `@/../backend/...` は、参照先がほかの規則で許される場所でも違反。例外は `vitest.global-setup.ts` から `apps/backend/shared/infra/database.test-support` への相対参照だけ（上の「exports」の「テスト基盤は公開しない」）。参照先が backend のものだけを見るので、frontend の中の参照（`@/...`・`./x`）は対象外。
+  - `apps/backend/package.json` の `exports`（規則 `backend-exports`。Issue #68 の段階 2。上の「exports」）: (1) 外（apps/backend の外）の `@repo/backend/<path>` の参照は、すべて exports のキーに当たる（Node.js の解決と同じく、完全一致を優先し、次に `*` の前が最も長いパターン）、(2) 各キーは外から 1 か所以上で参照されている、(3) キーは `./` で始まり、値はキーのパスに `.ts` を付けた文字列、(4) キーが指すファイルがある（パターンなら当たるファイルが 1 つ以上）。違反は「参照元 → specifier」か「apps/backend/package.json の exports "キー" …」の行で出す。本番の検査では、exports を 1 件以上読めることと、apps/frontend・e2e/・リポジトリ直下の `@repo/backend` の参照を取り出せていることも確かめる（読み込みや列挙が壊れて素通りするのを防ぐ）。
   - `apps/backend/` は `apps/frontend/` を参照しない（規則 `backend-to-frontend`。Issue #68）。4 層の規則は層の下のファイルにしかかからないので、`apps/backend/` 直下の `drizzle.config.ts` からの参照もこの規則で止める。
   - `apps/backend/` の中の import は相対パスだけで、`@/` と `@repo/backend/` を使わない（規則 `backend-relative-only`。Issue #68）。参照先ではなく書き方（specifier）で判定する（`@repo/backend/x` と `../x` は同じファイルを指すため）。
   - `apps/frontend/` 直下のファイルが `apps/backend/` を参照するときは `apps/backend/shared/infra/env` だけ（規則 `frontend-root-to-backend`。Issue #68）。
@@ -320,12 +366,13 @@ Issue #57 で導入した。Todo は Postgres（`compose.yaml`）に保存する
   - `apps/frontend/app/api/` が参照してよいのは `apps/backend/<x>/presentation/*.api` だけ。
   - 規則の判定そのものも、規則ごとに「違反になる例」「ならない例」を架空の参照で 3 件以上ずつ固定している（`architecture.test.ts` の「規則ごとの判定」）。今のコードに違反が無いことだけでは、規則が緩すぎても気づけないため。
   - さらに、一時ディレクトリに架空のツリーを作って実ファイルを置き、本番と同じ列挙 → 抽出 → 正規化 → 判定（`collectViolations(root)`）に通す fixture テストがある（同ファイルの「fixture のツリーを検査したときに検出される違反」）。
-    - must-reject: 依存の 16 規則と置き場所の 2 規則それぞれの違反を、alias（`@/`・`@repo/backend/`）と相対パス、値の import / `import type` / inline の `type` / `export { X } from` / `export type { X } from` / dynamic `import()` / 副作用だけの import、`.ts` / `.tsx` / `.mts` / `.cts` / `.js` / `.jsx` / `.mjs` / `.cjs` で置き、前方一致の境界（`apps/backend/shared-x`、`apps/frontend/app/api-x`、`apps/frontend/features/todo-extra`）やパスに `test` を含む本番のファイルも含めて、検出される「規則: ファイル → 参照先」の一覧を丸ごと比較する（見逃しも余分な検出も失敗にする）。
+    - must-reject: 依存の 17 規則と置き場所の 2 規則、`backend-exports` の (1)〜(4) それぞれの違反を、alias（`@/`・`@repo/backend/`）と相対パス、値の import / `import type` / inline の `type` / `export { X } from` / `export type { X } from` / dynamic `import()` / 副作用だけの import、`.ts` / `.tsx` / `.mts` / `.cts` / `.js` / `.jsx` / `.mjs` / `.cjs` で置き、前方一致の境界（`apps/backend/shared-x`、`apps/frontend/app/api-x`、`apps/frontend/features/todo-extra`）やパスに `test` を含む本番のファイルも含めて、検出される「規則: ファイル → 参照先」の一覧を丸ごと比較する（見逃しも余分な検出も失敗にする）。
     - must-pass: 許可される参照を網羅したツリーで違反 0 件を確かめる。今のリポジトリの本番コードの参照（参照元・参照先・型だけか）はすべて含めている。コメント・文字列の中の import 風の文字列、テストファイル、TS / JS 以外のファイル、生成物・依存（`apps/frontend/.next/`・`apps/backend/node_modules/`）の中の違反も置く。
     - 理由: 抽出の取りこぼし（書き方によって import を拾えない）は、規則が正しくても違反の見逃しになる。1 件の参照を規則に渡すだけのテストではそこを検証できない。
   - 環境変数の直参照（規則 `env-direct-access`。Issue #59）: `process.env` を読んでよいのは `apps/backend/shared/infra/env.ts` だけ（例外は `apps/frontend/instrumentation.ts` の `NEXT_RUNTIME` だけで、変数の名前まで絞っている）。対象は依存の向きの検査と同じファイル（`apps/frontend/next.config.ts`・`apps/backend/drizzle.config.ts` を含む）に、`e2e/` のソースとリポジトリ直下の設定・セットアップファイルを足したもの（テストは除く）。依存の向きとは別に、ソースの中身（`process.env` / `process["env"]` など）で判定し、「ファイル:行」を出して失敗する。判定の例（`ENV_ACCESS_EXAMPLES`）と fixture の must-reject / must-pass も持つ。規則の中身・限界（分割代入は拾わない）・Biome の `noProcessEnv` との二重化の理由は `rules/code/env.md` の「環境変数」。
-  - 規則は全部で 19（依存の 16 規則 `RULES` + 置き場所 `BACKEND_PLACEMENT`・`FRONTEND_PLACEMENT` + 環境変数の直参照 `ENV_DIRECT_ACCESS`）。`RULES` のすべての規則に判定の例（`RULE_EXAMPLES`）があることもテストで確かめる。
-  - 限界: frontend から backend を相対パス（`../../../../backend/...`）で参照しても、参照先が許される場所なら違反にしない（参照先で判定するため）。段階 2 の workspace パッケージ化では `@repo/backend/` 以外の書き方は `exports` を通らないので、そのときに書き方の規則を足すかを検討する（未対応）。
+  - 規則は全部で 21（依存の 17 規則 `RULES` + 置き場所 `BACKEND_PLACEMENT`・`FRONTEND_PLACEMENT` + 環境変数の直参照 `ENV_DIRECT_ACCESS` + exports の `BACKEND_EXPORTS`）。`RULES` のすべての規則に判定の例（`RULE_EXAMPLES`）があることもテストで確かめる。exports のキーの照合（`resolveExportKey`）とキーごとの違反（`findExportsViolations`）にも、当たる例・当たらない例と違反の例を持つ。
+  - 段階 1 の限界（frontend から backend を相対パスで参照しても、参照先が許される場所なら違反にしない）は、段階 2 の `frontend-to-backend-specifier` で解消した。
+  - 限界: `frontend-to-backend-specifier` と `backend-exports` が参照を取り出すのは `apps/`・`e2e/`・リポジトリ直下のファイルだけで、リポジトリ直下のほかのディレクトリ（`scripts/*.ts` のテスト以外など）は見ない。今は該当するソースが無い（`scripts/` はシェルスクリプトとテストだけ）。足すときは `architecture.test.ts` の `listReferencingFiles` と fixture も直す。
   - テストを対象外にする理由: テストは組み立てのために規則の外側を参照する（presentation のテストが infra の InMemory リポジトリを使うなど。上の「テストの置き方」）。
   - 抽出は正規表現で行う（依存は足さない）。コメントと文字列リテラルの中の import 風の文字列は除く。dynamic import は ``import(`x`)``（`${}` 無し）と第 2 引数つきの `import("x", { with: ... })` も拾う。限界: 正規表現リテラルやテンプレートリテラルの入れ子はコメント・文字列の区切りを誤認しうる、`${}` の中の `import()`、`${}` を含むテンプレートリテラルを渡した ``import(`@repo/backend/${name}`)``（参照先を静的に決められない）、`}` の直後に同じ行で続けた `export ... from` は拾わない（見逃す方向）、型の位置の `import("x").T` は値の参照として数える（多く検出する方向）（詳細と WHY は `architecture.test.ts` のコメント。抽出の仕様は同ファイルの「参照の抽出」「参照先の正規化」のテストで固定している）。
   - この節や上の「画面側とサーバ側の境界」「`apps/backend/<feature>/`」の依存の規則を足す・変えるときは、`architecture.test.ts` の `RULES` と `RULE_EXAMPLES`（判定の例）、置き場所の規則 `BACKEND_PLACEMENT` と `PLACEMENT_EXAMPLES`、fixture の must-reject / must-pass（`MUST_REJECT_FILES` / `MUST_REJECT_VIOLATIONS` / `MUST_PASS_FILES`）も合わせて直す。本番コードに新しい import の形（新しい層の組み合わせや書き方）を足したときも、must-pass に同じ形を足す。
@@ -373,7 +420,7 @@ Issue #57 で導入した。Todo は Postgres（`compose.yaml`）に保存する
 ### E2E テスト（Playwright）
 - 置き場所: ルート直下の `e2e/` に `<feature>.spec.ts` で置く（例: `e2e/todo.spec.ts`）。対象の隣には置かない。
   - 理由: E2E は画面・API・ルーティングをまたいで 1 つの操作の流れを検証するもので、特定のファイルに対応しない。
-- 実行: `pnpm test:e2e`（`playwright test`）。設定は `playwright.config.ts`。`webServer` が `pnpm build && pnpm start -p 3100`（`next build apps/frontend` と `next start apps/frontend -p 3100`）で本番ビルドを起動してからテストする（ローカルで 3100 番にサーバが起動済みなら、それを使う）。`pnpm test`（Vitest）には含めない（`vitest.config.mts` で `e2e/**` を除外）。
+- 実行: `pnpm test:e2e`（`playwright test`）。設定は `playwright.config.ts`。`webServer` が `pnpm build && pnpm start -p 3100`（`pnpm --filter @repo/frontend` 経由で、`apps/frontend` の `next build` と `next start -p 3100`）で本番ビルドを起動してからテストする（ローカルで 3100 番にサーバが起動済みなら、それを使う）。`pnpm test`（Vitest）には含めない（`vitest.config.mts` で `e2e/**` を除外）。
 - E2E は Postgres で動かす（アプリは常に Postgres）。`playwright.config.ts` が `webServer.env` に `env.DATABASE_URL`（`.env` / 環境変数を `env.ts` で検証した値）を渡し、テスト側（`e2e/database.ts`）も同じ `env.DATABASE_URL` に接続する。必須の変数が欠けていれば、`playwright.config.ts` の読み込み（`env.ts`）でサーバを起動する前に失敗する。
   - 理由: E2E は利用者に届く構成（Postgres に保存する）を検証する。テストの中でも、画面で追加した Todo が DB に行として入っていることを直接確かめる。サーバとテストが同じ値を使うので、コマンドの前に付けた `DATABASE_URL` で接続先を変えても両者がずれない。
   - 前提: Postgres が起動していて（`pnpm db:up`）、マイグレーションを当ててある（`pnpm db:migrate`）こと。`webServer.command` の中では当てない（Issue #57 の方針）。CI とクラウドのフックは E2E の前に `pnpm db:migrate` を実行する。
@@ -391,6 +438,8 @@ Issue #57 で導入した。Todo は Postgres（`compose.yaml`）に保存する
 - `src/` の下に置く構成: ユーザーの判断で不要。`apps/frontend/` `apps/backend/` の直下に置く。
 - API を別プロセス（Hono + `@hono/node-server`、Next の `rewrites`、契約用の `packages/contracts`、2 サーバ）にする案（Issue #68 の最初の調査）: ユーザーの指示でプロセスは増やさない方針に変え、取り下げた（実測結果は `logs/2026-09-28.md`）。
 - frontend から backend を tsconfig の paths の `@backend/*` のような独自の別名で参照する案（Issue #68）: 段階 2 の workspace パッケージでは import の書き方を変える必要がある。パッケージ名の形（`@repo/backend/*`）にしておけば、段階 1 は paths、段階 2 はパッケージで、同じ書き方のまま解決できる。
+- `apps/backend/package.json` の `exports` を `"./*": "./*.ts"`（全ファイル公開）にする案（Issue #68 の researcher の推奨）: 境界は `architecture.test.ts` で守れるが、ユーザー判断で、公開する入口だけを明示する形にした（公開の範囲をパッケージの設定そのもので読めるようにし、型チェック・ビルドでも公開外の import を止める）。
+- 段階 2 でも tsconfig の paths に `@repo/backend/*` を残す案: paths は exports より先に解決に使われ、公開していないファイルも型チェックを通る（exports を明示した意味がなくなる）ため、paths から外した。
 - `apps/frontend/features/<feature>/` の中に `client/` と `server/` を並べる構成: 同じ feature ディレクトリに `"use client"` のコードとサーバ専用のコードが混在し、画面からサーバの実装を import する誤りが起きやすい。API 側は `apps/backend/` として最上位で分離する。
 - 依存の向きの検査に dependency-cruiser を使う案: 18.4.0（2026-09-28 時点の latest）は `supportedTranspilers.typescript` が `>=2.0.0 <7.0.0` で、本リポジトリの TypeScript 7.0.2 が範囲外（npm レジストリの 18.4.0 のメタデータで確認）。`import type` の区別や層ごとのルールは書けるので、TS 7 に対応したら再検討する。
 - 旧案（Issue #39 の最初の案）: API 側のディレクトリ名を `server/` にし、presentation に feature 共通の型ファイル `dto.ts` と、複数の API をまとめたコントローラを置き、application のユースケースを `.use-case.ts` の 1 種類にする構成。ユーザーの判断で、ディレクトリ名は `apps/backend/`、presentation は 1 API = 1 ファイル（型もその中で定義）、application は query / command に分ける形に変えた。

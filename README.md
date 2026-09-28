@@ -23,15 +23,18 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 | ORM / マイグレーション | [Drizzle ORM](https://orm.drizzle.team/) + [drizzle-kit](https://orm.drizzle.team/docs/kit-overview) | スキーマを TypeScript で宣言し、`pnpm db:generate` で SQL を生成、`pnpm db:migrate` で当てる（`push` は使わない。`rules/code/architecture.md` の「永続化」） |
 | DB ドライバ | [node-postgres（pg）](https://node-postgres.com/) | 接続先とプールの設定は `.env` から読む（`apps/backend/shared/infra/env.ts`。値は `.env.example`。本番用の値は Issue #58 で決める） |
 
-ツールのバージョンは `.tool-versions` が正（決め方と更新手順は `rules/code/env.md`）。npm パッケージのバージョンは `package.json` / `pnpm-lock.yaml` が正。pnpm のサプライチェーン保護設定は `pnpm-workspace.yaml` を参照。
+ツールのバージョンは `.tool-versions` が正（決め方と更新手順は `rules/code/env.md`）。npm パッケージのバージョンは各 `package.json`（リポジトリ直下・`apps/frontend`・`apps/backend`）と `pnpm-lock.yaml` が正（`rules/code/dependencies.md`）。pnpm のサプライチェーン保護設定は `pnpm-workspace.yaml` を参照。
 
 ## ディレクトリ構成
 
-機能（feature）単位で置く。画面側（Next.js）を `apps/frontend/`、API 側（Next・React に依存しない TypeScript）を `apps/backend/` に分ける（Issue #68。プロセスは Next 1 つのまま）。`src/` は使わない（例は Todo）。
+機能（feature）単位で置く。画面側（Next.js）を `apps/frontend/`、API 側（Next・React に依存しない TypeScript）を `apps/backend/` に分け、それぞれ pnpm workspace のパッケージ（`@repo/frontend` / `@repo/backend`）にする（Issue #68。プロセスは Next 1 つのまま）。`src/` は使わない（例は Todo）。
 
 ```
+pnpm-workspace.yaml     # packages: apps/*（workspace の範囲）と pnpm の設定
+package.json            # ツールと共通の devDependencies。pnpm dev/build/start・db:generate/db:migrate は pnpm --filter で apps の script を呼ぶ
 apps/
-  frontend/             # Next.js（next dev/build/start apps/frontend）
+  frontend/             # @repo/frontend。Next.js（apps/frontend で next dev/build/start）
+    package.json        # next / react / "@repo/backend": "workspace:*"
     app/                # ルーティングだけ（page.tsx は screen を返すだけ、api/**/route.ts は backend の api ファイルの GET / POST などを re-export するだけ）
     features/todo/      # 画面側
       screens/todo-screen/  # 一覧画面。todo-screen.tsx（見た目）+ todo-screen.hook.ts（状態・データ取得）+ テスト
@@ -42,6 +45,7 @@ apps/
     shared/             # 画面側で feature をまたぐ共通部品（必要になったら作る）
     instrumentation.ts  # 起動時の環境変数の検証（Next の規約ファイル）
   backend/
+    package.json        # @repo/backend。drizzle-orm / pg、exports（外に公開するファイルの一覧）、db:generate / db:migrate
     todo/               # API 側（DDD 4 層）
       presentation/       # 1 API = 1 ファイル（list-todos.api.ts など）。コンテナを受け取って handler を返す関数（listTodosApi(container)）、本番用の GET / POST など、リクエスト / レスポンスの型を export
       application/        # 読むだけの query（list-todos.query.ts）と状態を変える command（create-todo.command.ts）
@@ -54,7 +58,7 @@ e2e/                    # Playwright の E2E
 ```
 
 - 画面は SSR を前提にせず、データは hook から `/api/...` を呼んで取る。サーバの処理はすべて `apps/backend/` に置く。
-- frontend から backend へは `@repo/backend/<path>` で参照する（段階 1 の今は tsconfig の paths で `apps/backend/*` に解決）。参照してよいのは `app/api/**`（api ファイルの値）、`features/*/api/`（型だけ）、`instrumentation-node.ts`（`env.ts`）だけ。backend は frontend を参照せず、backend の中の import は相対パスだけにする（`architecture.test.ts` で検査）。
+- frontend（と `e2e/`・リポジトリ直下の設定ファイル）から backend へは `@repo/backend/<path>` でだけ参照する（相対パスは使わない。例外はテスト基盤の `vitest.global-setup.ts` → `database.test-support` だけ）。使えるのは `apps/backend/package.json` の `exports` に書いたファイルだけ。frontend で参照してよいのは `app/api/**`（api ファイルの値）、`features/*/api/`（型だけ）、`instrumentation-node.ts`（`env.ts`）だけ。backend は frontend を参照せず、backend の中の import は相対パスだけにする（`architecture.test.ts` で検査。`rules/code/architecture.md` の「workspace パッケージと exports」）。
 - 画面側からサーバ側へは、各 api ファイル（`apps/backend/<feature>/presentation/<name>.api.ts`）の型を `import type` で参照するだけ。型で担保されるのはリクエスト / レスポンスの形で、URL・メソッド・実行時の JSON の形は担保されない。
 - テストは対象の隣に置く（`app/` には置かない）。
 
@@ -100,8 +104,8 @@ Claude Code のクラウドセッション（asdf が無い環境）では、`sc
 ## 開発
 
 ```sh
-pnpm install   # 依存をインストール
-pnpm dev       # 開発サーバを起動（http://localhost:3000）
+pnpm install   # 依存をインストール（リポジトリ直下で実行する。workspace のすべてのパッケージに入る）
+pnpm dev       # 開発サーバを起動（http://localhost:3000。pnpm --filter @repo/frontend dev。引数は pnpm dev -p 3001 のように渡せる）
 pnpm typecheck # 型チェック（リポジトリ全体と apps/backend の tsconfig。next build は frontend から import したファイルしか見ないため）
 pnpm test      # 単体テストを実行し、カバレッジ 100% 未満なら失敗（Vitest。詳細は rules/code/architecture.md）
 pnpm test:unit # 単体テストだけを実行（カバレッジを計測しない。速く回したいとき）
@@ -110,8 +114,11 @@ pnpm test:mutation # mutation testing を実行し、reports/mutation/ にレポ
 pnpm lint      # lint + format の違反を検査（Biome。変更しない）
 pnpm check     # 安全な自動修正を適用して再検査（Biome）
 pnpm format    # format だけを適用（Biome）
-pnpm build     # 本番ビルド
+pnpm build     # 本番ビルド（pnpm --filter @repo/frontend build。apps/frontend/.next/ に出力）
+pnpm start     # 本番ビルドを起動（pnpm --filter @repo/frontend start）
 ```
+
+- コマンドはリポジトリ直下で実行する。`dev` / `build` / `start` は `apps/frontend`、`db:generate` / `db:migrate` は `apps/backend` の script を `pnpm --filter` で呼ぶ（そのパッケージのディレクトリで動くが、`.env` はリポジトリ直下の 1 つを読む）。依存の追加は `pnpm --filter @repo/backend add <pkg>@<x.y.z>` のように置き場所のパッケージを指定する（`rules/code/dependencies.md`）。
 
 - どのコマンドも `.env` がある前提（上の「セットアップ」）。
 - `pnpm dev` は Postgres の起動とマイグレーションが前提（先に `pnpm db:up && pnpm db:migrate`）。

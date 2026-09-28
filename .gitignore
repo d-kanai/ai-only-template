@@ -1,7 +1,7 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# dependencies
-/node_modules
+# dependencies（pnpm workspace では apps/*/node_modules もできる。Issue #68 の段階 2）
+node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -13,7 +13,7 @@
 # testing
 /coverage
 
-# next.js（next build apps/frontend は apps/frontend/.next/ に出力する。Issue #68）
+# next.js（pnpm build → pnpm --filter @repo/frontend build → apps/frontend の next build は apps/frontend/.next/ に出力する。Issue #68）
 /apps/frontend/.next/
 /out/
 

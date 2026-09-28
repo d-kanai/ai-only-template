@@ -17,13 +17,14 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
-    // paths: apps/frontend/tsconfig.json と同じ行き先にする（どちらの tsconfig で解決しても同じファイルになるように）。
-    //   "@/*": frontend の中の参照（apps/frontend/*）。
-    //   "@repo/backend/*": frontend から backend への参照（apps/backend/*）。workspace パッケージ化（Issue #68 の段階 2）でも
-    //     import の書き方を変えずに済むよう、パッケージ名の形にしている。backend の中では使わない（相対パスだけ）。
+    // paths: "@/*" は frontend の中の参照（apps/frontend/*）。apps/frontend/tsconfig.json と同じ行き先にする
+    //   （どちらの tsconfig で解決しても同じファイルになるように）。
+    //   "@repo/backend/..." は paths に書かない（Issue #68 の段階 2）。apps/backend は workspace パッケージ @repo/backend で、
+    //   node_modules/@repo/backend（apps/backend への symlink）と apps/backend/package.json の exports で解決する
+    //   （moduleResolution: bundler は exports を読む）。paths に書くと exports を通らずに backend の中のどのファイルも
+    //   指せてしまい、公開の範囲（exports）を型チェックで確かめられなくなる。
     "paths": {
-      "@/*": ["./apps/frontend/*"],
-      "@repo/backend/*": ["./apps/backend/*"]
+      "@/*": ["./apps/frontend/*"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx", "**/*.mts"],
