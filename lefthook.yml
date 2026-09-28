@@ -1,0 +1,23 @@
+# Lefthook の設定（Git フックの定義）。書式: https://github.com/evilmartians/lefthook （docs/configuration）
+# フックは `pnpm install` 時に lefthook の postinstall が `lefthook install` を実行して .git/hooks に入る
+# （pnpm-workspace.yaml の allowBuilds で許可している。仕組みと緊急時の飛ばし方は rules/code/lint.md）。
+
+# pre-commit: `git commit` の直前に実行され、いずれかのコマンドが非 0 で終わるとコミットを中止する。
+pre-commit:
+  commands:
+    # biome: ステージ済みファイルを Biome で lint + format 検査する。
+    #   Biome 公式レシピ（https://biomejs.dev/recipes/git-hooks/ の「Check formatting and lint before committing」）をベースにし、
+    #   次の 3 点を変えている: npx → pnpm exec、--error-on-warnings を追加、glob（拡張子の絞り込み）を省略。理由は各行のコメント。
+    biome:
+      # {staged_files}: Lefthook がステージ済みファイルのパスに展開するテンプレート。
+      #   コミット対象だけを検査するため、作業途中の未ステージのファイルがあってもコミットを妨げない。
+      #   ステージ済みファイルがなければ Lefthook がこのコマンドをスキップする。
+      # pnpm exec biome: package.json で固定した版の Biome を使う（公式レシピは npx だが、本リポジトリは pnpm のみを使うため）。
+      # --error-on-warnings: pnpm lint と同じく warn でも失敗させる（warn は放置されるため。rules/code/lint.md）。
+      # --no-errors-on-unmatched: ステージ済みファイルがすべて Biome の対象外（例: .md だけ）でもエラーにしない。
+      # --files-ignore-unknown=true: Biome が扱えない拡張子（.md / .yml など）を渡しても無視する。
+      #   公式レシピは glob: "*.{js,ts,cjs,mjs,d.cts,d.mts,jsx,tsx,json,jsonc,css}" で拡張子を絞るが、ここでは絞らない。
+      #   --files-ignore-unknown があれば対象外の拡張子は無視され、Biome が将来対応する言語も設定変更なしで対象になるため。
+      # 自動修正（--write と stage_fixed）はしない。コミット内容がフックで暗黙に書き換わるのを避け、
+      #   修正は開発者が `pnpm check` で明示的に行い、差分を確認してからステージする。
+      run: pnpm exec biome check --error-on-warnings --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}

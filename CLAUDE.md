@@ -41,3 +41,4 @@
 - オーケストレーション: @rules/general/orchestration.md
 - 実行環境: @rules/code/env.md
 - 依存パッケージ: @rules/code/dependencies.md
+- Lint / Format: @rules/code/lint.md

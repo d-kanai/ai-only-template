@@ -14,6 +14,8 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 | UI ライブラリ | [React](https://react.dev/) | Next.js（create-next-app）が指定するバージョンに合わせる |
 | 言語 | [TypeScript](https://www.typescriptlang.org/) | 最新版を使う |
 | テスト | [Vitest](https://vitest.dev/) | React Testing Library + jsdom でコンポーネントをテストする |
+| Lint / Format | [Biome](https://biomejs.dev/) | typescript-eslint が TypeScript 7 未対応のため ESLint ではなく Biome を使う（`rules/code/lint.md`） |
+| Git フック | [Lefthook](https://github.com/evilmartians/lefthook) | pre-commit でステージ済みファイルを Biome で検査する |
 
 ツールのバージョンは `.tool-versions` が正（決め方と更新手順は `rules/code/env.md`）。npm パッケージのバージョンは `package.json` / `pnpm-lock.yaml` が正。pnpm のサプライチェーン保護設定は `pnpm-workspace.yaml` を参照。
 
@@ -35,5 +37,10 @@ Claude Code のクラウドセッション（asdf が無い環境）では、`sc
 pnpm install   # 依存をインストール
 pnpm dev       # 開発サーバを起動（http://localhost:3000）
 pnpm test      # テストを実行（Vitest）
+pnpm lint      # lint + format の違反を検査（Biome。変更しない）
+pnpm check     # 安全な自動修正を適用して再検査（Biome）
+pnpm format    # format だけを適用（Biome）
 pnpm build     # 本番ビルド
 ```
+
+`pnpm install` で pre-commit フック（Lefthook）も入り、コミット時にステージ済みファイルが Biome で検査される。詳細は `rules/code/lint.md` を参照。

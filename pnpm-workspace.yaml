@@ -8,9 +8,23 @@
 #   - sharp: Next.js の画像最適化で使うネイティブモジュール。2026-09-28 時点、ビルドスクリプトなしで
 #     プリビルドバイナリ（@img/sharp-darwin-arm64 など）がインストールされることを node_modules で確認済み。
 #   - unrs-resolver: 現状の依存（ESLint なし）ではインストールされない。create-next-app の出力に合わせて残している。
+#
+# lefthook: true … Git フック管理ツール（rules/code/lint.md）。postinstall で `lefthook install -f` を実行し、
+#   .git/hooks/pre-commit を Lefthook のスクリプトに置き換える（-f: 既存フックの退避ファイル .old を上書きし、
+#   core.hooksPath が設定されていても続行する。`lefthook install --help` で確認）。これにより `pnpm install` するだけで
+#   pre-commit の Biome 検査が有効になり、人間・AI どちらもフックの入れ忘れがなくなる。
+#   postinstall の中身は node_modules/lefthook/postinstall.js（lefthook@2.1.12）を読んで確認した: 環境変数 CI が有効
+#   （"0" / "false" 以外）で LEFTHOOK が有効でなければ何もせず終了し、それ以外はプラットフォーム別パッケージ
+#   （lefthook-darwin-arm64 など）に同梱されたバイナリで `lefthook install -f` を実行するだけ。ネットワークアクセスはしない。
+#   許可にしたのは、Lefthook 公式ドキュメント（docs/installation/node.md）が pnpm 利用時に lefthook の postinstall の実行を
+#   許可するよう案内しているため。package.json の prepare スクリプトで `lefthook install` を呼ぶ方法もあるが、
+#   公式の案内に合わせ、フックの導入経路を postinstall の 1 本にしている。
+#   @biomejs/biome と各プラットフォーム別パッケージ（@biomejs/cli-* / lefthook-*）はビルドスクリプトを持たないため載せていない
+#   （npm レジストリのメタデータで scripts が null であることを確認）。
 allowBuilds:
   sharp: false
   unrs-resolver: false
+  lefthook: true
 
 # ---- サプライチェーン保護設定 ----
 # 設定の意味は pnpm 公式ドキュメント（https://pnpm.io/settings 、https://pnpm.io/supply-chain-security ）に基づく。
