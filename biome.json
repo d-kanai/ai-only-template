@@ -1,0 +1,91 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": ["**", "!node_modules", "!.next", "!dist", "!build"]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "complexity": {
+        "noExcessiveCognitiveComplexity": "error",
+        "noExtraBooleanCast": "error",
+        "noFlatMapIdentity": "error",
+        "noUselessCatch": "error",
+        "noUselessConstructor": "error",
+        "noUselessContinue": "error",
+        "noUselessEmptyExport": "error",
+        "noUselessEscapeInRegex": "error",
+        "noUselessFragments": "error",
+        "noUselessLabel": "error",
+        "noUselessLoneBlockStatements": "error",
+        "noUselessRename": "error",
+        "noUselessStringRaw": "error",
+        "noUselessSwitchCase": "error",
+        "noUselessTernary": "error",
+        "noUselessThisAlias": "error",
+        "noUselessTypeConstraint": "error",
+        "noUselessUndefinedInitialization": "error",
+        "useFlatMap": "error",
+        "useIndexOf": "error",
+        "useLiteralKeys": "error"
+      },
+      "correctness": {
+        "noNestedComponentDefinitions": "error",
+        "noNextAsyncClientComponent": "error",
+        "useParseIntRadix": "error",
+        "useUniqueElementIds": "error"
+      },
+      "performance": {
+        "useGoogleFontPreconnect": "error"
+      },
+      "style": {
+        "noParameterAssign": "error",
+        "useArrayLiterals": "error",
+        "useExponentiationOperator": "error",
+        "useNodejsImportProtocol": "error",
+        "useShorthandFunctionType": "error",
+        "useTemplate": "error",
+        "useThrowOnlyError": "error"
+      },
+      "suspicious": {
+        "noConsole": {
+          "level": "error",
+          "options": {
+            "allow": ["error", "warn"]
+          }
+        },
+        "noConstantBinaryExpressions": "error",
+        "noEmptyBlockStatements": "error",
+        "noLeakedRender": "error",
+        "noSkippedTests": "error",
+        "noVar": "error",
+        "noQuickfixBiome": "error",
+        "noDuplicateFields": "error"
+      }
+    },
+    "domains": {
+      "next": "recommended",
+      "react": "recommended",
+      "test": "recommended"
+    }
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  }
+}

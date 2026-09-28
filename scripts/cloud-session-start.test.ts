@@ -7,8 +7,8 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -78,7 +78,10 @@ describe("scripts/cloud-session-start.sh", () => {
   // 値が undefined のキーは「その変数を渡さない」を意味する（HOME 未設定のテスト用）。
   // 型を NodeJS.ProcessEnv にしているのは、Next.js の型定義が ProcessEnv の NODE_ENV を必須にしており、
   // Record<string, string> だと `next build` の型チェックで spawnSync の env に渡せないため。
-  function runScript(args: string[], extraEnv: Record<string, string | undefined>) {
+  function runScript(
+    args: string[],
+    extraEnv: Record<string, string | undefined>,
+  ) {
     const env: NodeJS.ProcessEnv = { ...process.env };
     delete env.CLAUDE_CODE_REMOTE;
     delete env.CLAUDE_ENV_FILE;
@@ -119,14 +122,20 @@ describe("scripts/cloud-session-start.sh", () => {
     const name = `node-v${nodeVersion}-${platform}`;
     const stage = join(tmp, "stage");
     mkdirSync(join(stage, name, "bin"), { recursive: true });
-    writeFileSync(join(stage, name, "bin", "node"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    writeFileSync(join(stage, name, "bin", "node"), "#!/bin/sh\nexit 1\n", {
+      mode: 0o755,
+    });
     const tarball = join(fixtureDir, `${name}.tar.xz`);
-    const tar = spawnSync("tar", ["-cJf", tarball, "-C", stage, name], { encoding: "utf8" });
+    const tar = spawnSync("tar", ["-cJf", tarball, "-C", stage, name], {
+      encoding: "utf8",
+    });
     if (tar.status !== 0) {
       // スクリプトは tar -xJf で展開するので、xz を扱えない環境ではスクリプト自体も動かない。
       throw new Error(`tar -cJf に失敗（xz が必要）: ${tar.stderr}`);
     }
-    const sha = createHash("sha256").update(readFileSync(tarball)).digest("hex");
+    const sha = createHash("sha256")
+      .update(readFileSync(tarball))
+      .digest("hex");
     const lines = {
       ok: `${sha}  ${name}.tar.xz\n`,
       mismatch: `${"0".repeat(64)}  ${name}.tar.xz\n`,
@@ -135,7 +144,10 @@ describe("scripts/cloud-session-start.sh", () => {
     writeFileSync(join(fixtureDir, "SHASUMS256.txt"), lines[shasums]);
   }
 
-  const remoteEnv = () => ({ CLAUDE_CODE_REMOTE: "true", CLAUDE_ENV_FILE: envFile });
+  const remoteEnv = () => ({
+    CLAUDE_CODE_REMOTE: "true",
+    CLAUDE_ENV_FILE: envFile,
+  });
 
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "cloud-session-start-"));
@@ -164,7 +176,10 @@ describe("scripts/cloud-session-start.sh", () => {
     // DRY_RUN を付けるのは、変異などで CLAUDE_CODE_REMOTE の判定が外れたときに本物のダウンロードや
     // pnpm install を走らせないため。DRY_RUN でも実行予定が stdout に出るので、判定漏れは検出できる。
     it("CLAUDE_CODE_REMOTE が未設定なら何もせず exit 0（ローカルのセッションに影響しない）", () => {
-      const result = runScript([], { CLOUD_SESSION_START_DRY_RUN: "1", CLAUDE_ENV_FILE: envFile });
+      const result = runScript([], {
+        CLOUD_SESSION_START_DRY_RUN: "1",
+        CLAUDE_ENV_FILE: envFile,
+      });
       expect(result.status).toBe(0);
       expect(result.stdout).toBe("");
       expect(readFileSync(envFile, "utf8")).toBe("export EXISTING=1\n");
@@ -184,17 +199,20 @@ describe("scripts/cloud-session-start.sh", () => {
     it.each([
       ["空", ""],
       ["未設定", undefined],
-    ])("HOME が%sなら warn を出して何もせず exit 0（インストール先が /.local/node-<版> になるのを防ぐ）", (_label, homeValue) => {
-      const result = runScript([], {
-        ...remoteEnv(),
-        CLOUD_SESSION_START_DRY_RUN: "1",
-        HOME: homeValue,
-      });
-      expect(result.status).toBe(0);
-      expect(result.stdout).toBe("");
-      expect(result.stderr).toContain("HOME");
-      expect(readFileSync(envFile, "utf8")).toBe("export EXISTING=1\n");
-    });
+    ])(
+      "HOME が%sなら warn を出して何もせず exit 0（インストール先が /.local/node-<版> になるのを防ぐ）",
+      (_label, homeValue) => {
+        const result = runScript([], {
+          ...remoteEnv(),
+          CLOUD_SESSION_START_DRY_RUN: "1",
+          HOME: homeValue,
+        });
+        expect(result.status).toBe(0);
+        expect(result.stdout).toBe("");
+        expect(result.stderr).toContain("HOME");
+        expect(readFileSync(envFile, "utf8")).toBe("export EXISTING=1\n");
+      },
+    );
   });
 
   describe("--print-plan", () => {
@@ -203,7 +221,9 @@ describe("scripts/cloud-session-start.sh", () => {
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(`nodejs ${nodeVersion}`);
       expect(result.stdout).toContain(`pnpm ${pnpmVersion}`);
-      expect(result.stdout).toContain(join(home, ".local", `node-${nodeVersion}`));
+      expect(result.stdout).toContain(
+        join(home, ".local", `node-${nodeVersion}`),
+      );
     });
 
     it("/opt に書き込めるなら /opt/node-<版> に入れる", () => {
@@ -222,7 +242,9 @@ describe("scripts/cloud-session-start.sh", () => {
         join(project, ".tool-versions"),
         `nodejs ${nodeVersion}\r\npnpm ${pnpmVersion}\r\n`,
       );
-      const result = runScript(["--print-plan"], { CLAUDE_PROJECT_DIR: project });
+      const result = runScript(["--print-plan"], {
+        CLAUDE_PROJECT_DIR: project,
+      });
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(`nodejs ${nodeVersion}\n`);
       expect(result.stdout).toContain(`pnpm ${pnpmVersion}\n`);
@@ -232,7 +254,10 @@ describe("scripts/cloud-session-start.sh", () => {
 
   describe("DRY_RUN", () => {
     it("CLAUDE_CODE_REMOTE=true（未インストール）なら、インストール予定を表示し CLAUDE_ENV_FILE に PATH を追記する", () => {
-      const result = runScript([], { ...remoteEnv(), CLOUD_SESSION_START_DRY_RUN: "1" });
+      const result = runScript([], {
+        ...remoteEnv(),
+        CLOUD_SESSION_START_DRY_RUN: "1",
+      });
 
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(nodeTarballUrl);
@@ -268,7 +293,10 @@ describe("scripts/cloud-session-start.sh", () => {
         const nodeDir = nodeDirOf();
         placeFakeNode(nodeDir);
 
-        const result = runScript([], { ...remoteEnv(), CLOUD_SESSION_START_DRY_RUN: "1" });
+        const result = runScript([], {
+          ...remoteEnv(),
+          CLOUD_SESSION_START_DRY_RUN: "1",
+        });
 
         expect(result.status).toBe(0);
         expect(result.stdout).not.toContain(nodeTarballUrl);
@@ -293,7 +321,9 @@ describe("scripts/cloud-session-start.sh", () => {
       expect(result.status).toBe(0);
       expect(existsSync(join(nodeDirIn(), "bin", "node"))).toBe(true);
       // ダウンロード用の一時ディレクトリが残っていない
-      expect(readdirSync(join(home, ".local"))).toEqual([`node-${nodeVersion}`]);
+      expect(readdirSync(join(home, ".local"))).toEqual([
+        `node-${nodeVersion}`,
+      ]);
       expect(readFileSync(envFile, "utf8")).toBe(
         `export EXISTING=1\nexport PATH="${join(nodeDirIn(), "bin")}:$PATH"\n`,
       );
@@ -317,16 +347,19 @@ describe("scripts/cloud-session-start.sh", () => {
     it.each([
       ["SHASUMS のハッシュが一致しない", "mismatch"],
       ["SHASUMS に対象の行が無い", "missing"],
-    ] as const)("%s: 展開せず、一時ディレクトリも残さず、PATH も書かずに exit 0", (_label, shasums) => {
-      buildNodeFixture("linux-x64", shasums);
+    ] as const)(
+      "%s: 展開せず、一時ディレクトリも残さず、PATH も書かずに exit 0",
+      (_label, shasums) => {
+        buildNodeFixture("linux-x64", shasums);
 
-      const result = runScript([], remoteEnv());
+        const result = runScript([], remoteEnv());
 
-      expect(result.status).toBe(0);
-      expect(result.stderr).toContain("sha256 mismatch");
-      expect(readdirSync(join(home, ".local"))).toEqual([]);
-      expect(readFileSync(envFile, "utf8")).toBe("export EXISTING=1\n");
-    });
+        expect(result.status).toBe(0);
+        expect(result.stderr).toContain("sha256 mismatch");
+        expect(readdirSync(join(home, ".local"))).toEqual([]);
+        expect(readFileSync(envFile, "utf8")).toBe("export EXISTING=1\n");
+      },
+    );
 
     it("uname -m が aarch64 なら linux-arm64 の配布物を取得する", () => {
       buildNodeFixture("linux-arm64", "ok");
@@ -360,7 +393,9 @@ describe("scripts/cloud-session-start.sh", () => {
 
       expect(result.status).toBe(0);
       expect(existsSync(join(nodeDirIn(), "bin", "node"))).toBe(true);
-      expect(existsSync(join(nodeDirIn(), `node-v${nodeVersion}-linux-x64`))).toBe(false);
+      expect(
+        existsSync(join(nodeDirIn(), `node-v${nodeVersion}-linux-x64`)),
+      ).toBe(false);
       expect(existsSync(join(nodeDirIn(), "leftover"))).toBe(false);
     });
   });
