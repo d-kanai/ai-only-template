@@ -25,6 +25,29 @@ npm パッケージの版は `package.json` と `pnpm-lock.yaml` の両方で固
   - React / React DOM 19.2.8: create-next-app@16.3.6 が生成する `package.json` の版に合わせる（create-next-app@16.3.6 の `dist/index.js` で `react` / `react-dom` に `19.2.8` を指定していることを確認済み）。
   - `@types/node`: latest ではなく、`.tool-versions` の Node メジャー（24）に合わせた 24.x の最新を使う。理由: 実行環境より新しい Node の API の型が使えてしまい、実行時に存在しない API を呼ぶコードが型チェックを通ってしまうため。Node の LTS を上げるとき（`rules/code/env.md`）に一緒に上げる。
 
+## pnpm patch（依存パッケージへのパッチ）
+依存パッケージの不具合を、上流の修正を待たずに手元で直すときに使う。パッチは `pnpm install` のたびに node_modules に当たるので、手元・CI・クラウドセッションのどこでも同じ中身になる。
+
+- 使ってよい条件（すべて満たすこと）:
+  - 上流の不具合で、このリポジトリの設定や使い方では避けられない。
+  - 修正が数行で、差分を読めば何を変えたか分かる。
+  - 上流に Issue / PR があるかを確認し、あれば `pnpm-workspace.yaml` の `patchedDependencies` のコメントにリンクを書く。無い・確認できないときはその旨と理由を書く。
+  - パッチを当てた状態と当てない状態を実測で比べ、パッチで直ることを確かめる（テスト = 仕様。当てる前に失敗・不具合を再現してから当てる）。
+- 置き場所: パッチファイルは `patches/<パッケージ名>@<版>.patch`（`pnpm patch-commit` が作る。スコープの `/` は `__` になる）。対応は `pnpm-workspace.yaml` の `patchedDependencies`。パッチファイルにはコメントを書けないので、何を・なぜ直したかは `pnpm-workspace.yaml` のコメントと、そのパッケージを使う設定ファイルのコメントに書く。
+- 手順:
+  ```
+  pnpm patch <pkg>@<x.y.z> --edit-dir <作業用ディレクトリ>   # 展開された中身を編集する
+  pnpm patch-commit <作業用ディレクトリ>                     # patches/ に差分を書き、patchedDependencies と lockfile を更新する
+  ```
+  - `patches/`・`pnpm-workspace.yaml`・`pnpm-lock.yaml` は同じコミットに入れる。lockfile にパッチのハッシュが入るため、パッチだけを変えると `pnpm install --frozen-lockfile` が「"patchedDependencies" configuration doesn't match the value found in the lockfile」で失敗する（2026-09-28、pnpm 12.7.0 で実測）。
+- 外す条件: 上流が直した版が出たら、その版に上げてパッチと `patchedDependencies` の行を消す。キーは版まで固定なので、版を上げるときは必ずパッチの要否を見直す（残すなら新しい版で作り直す）。
+- 確認方法:
+  - `CI=true pnpm install --frozen-lockfile` が通ること。
+  - 当たっていること: `node_modules/<pkg>/` の該当ファイルにパッチの変更が入っていることを grep で見る。
+  - パッチで直したい挙動が直っていること（パッチを入れたときの実測と同じ方法で確かめる）。
+- 現在のパッチ:
+  - `@stryker-mutator/vitest-runner@10.0.0`（Issue #52）: テスト名の連結を ` > ` にする（Vitest 5.0.1 と組み合わせたときの不具合）。上流の Issue / PR の有無は、GitHub の Issue 検索がこの環境から使えず（API は 403）未確認。2026-09-28 時点で上流の master の `packages/vitest-runner/src/test-helpers.ts` もスペース区切りのまま（raw.githubusercontent.com で確認）。詳細は `stryker.config.mjs` と `rules/code/test.md` の「mutation testing（Stryker）」。
+
 ## 追加・更新の手順
 - 版を明示して追加する。
   ```

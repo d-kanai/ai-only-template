@@ -84,13 +84,13 @@ Stryker でコードに変異（条件の反転、戻り値の差し替え、文
 - 位置づけ: 上の「通常のテストでの確認（ミューテーション）」を自動化し、検証の弱いテスト（呼び出すだけ・値を見ていない）を日次でまとめて拾う。手作業の確認を置き換えるものではない。
   - ルール検査テストの fault injection は引き続き手作業で行う。Stryker が変異させるのは `mutate` の実装コードだけで、ルール検査テストが検査する規則・設定（`biome.json`、`package.json`、import の向きなど）は変異させないため。
   - テストを足す・書き換えるときの確認（上の節）も、その場で行う。日次の結果を待たずに、書いたテストが守っているコードを壊すと落ちることを確かめる。
-- 実行: `pnpm test:mutation`（`stryker run`）。レポートは `reports/mutation/mutation.html`（ブラウザで開く）と `mutation.json`。`reports/` と作業用の `.stryker-tmp/` は `.gitignore` 済み。ローカル（4 コア）で約 3 分（384 変異、2026-09-28 実測）。
+- 実行: `pnpm test:mutation`（`stryker run`）。レポートは `reports/mutation/mutation.html`（ブラウザで開く）と `mutation.json`。`reports/` と作業用の `.stryker-tmp/` は `.gitignore` 済み。ローカル（4 コア）で約 2.5 分（384 変異、147 秒。2026-09-28 実測）。
 - 対象: `features/` `backend/` `shared/` の `.ts` / `.tsx`（テスト `*.test.ts(x)` と `*.d.ts` を除く）。`vitest.config.mts` の coverage.include のうち TypeScript の実装がある範囲と同じにしている。`app/`、`scripts/`（実装はシェルスクリプトだけ）、ルート直下の設定ファイル・ルール検査テスト、`e2e/` は対象外。
 - Vitest のカバレッジ（100% のしきい値）は Stryker の実行では効かない。vitest-runner が coverage を無効にして、Stryker 自身のテストごとのカバレッジ分析で「変異を通るテスト」だけを実行するため（https://stryker-mutator.io/docs/stryker-js/vitest-runner/ ）。
-- 日次実行: `.github/workflows/mutation.yml` が main を毎日 09:00 JST（UTC 00:00）に実行し、`reports/mutation/` を artifact（`mutation-report`、30 日保存）に残す。Actions の画面から手動でも実行できる（`workflow_dispatch`）。PR ごとには実行しない（ユーザー判断、Issue #52）。
+- 日次実行: `.github/workflows/mutation.yml` が main を毎日 08:55 JST（UTC 23:55）に実行し、`reports/mutation/` を artifact（`mutation-report`、30 日保存）に残す。Actions の画面から手動でも実行できる（`workflow_dispatch`）。PR ごとには実行しない（ユーザー判断、Issue #52）。
 - しきい値: 当面は設定しない（`thresholds.break` なし）。score が低くてもジョブは失敗せず、レポートを出すだけ。日次の結果を見てから値を決める（Issue #52）。
 - 入れていないもの: `@stryker-mutator/typescript-checker`（型エラーになる変異を実行前に除く checker）。TypeScript の JS API（`ts.createSolutionBuilderWithWatch` / `ts.parseConfigFileTextToJson`。typescript-checker 10.0.0 の `dist` で確認）を使うが、TypeScript 7.0.2 の `typescript` パッケージは `version` / `versionMajorMinor` しか export しない（2026-09-28 に `import("typescript")` で確認）ため、動かないと判断した（入れて実行はしていない）。同じ理由で、Stryker 本体の tsconfig の書き換えも `stryker.config.mjs` の `tsconfigFile` で止めている。型エラーになる変異は checker なしでも、実行時に失敗するか生き残るかで数えられる（Vitest は型を検査しない）。
-- 既知の問題（未解決）: `@stryker-mutator/vitest-runner` 10.0.0 と Vitest 5.0.1 の組み合わせでは、`describe` の中のテストで変異を検出できず、survived と数えられる。テスト名の連結の区切り（vitest-runner はスペース、Vitest 5.0.1 の testNamePattern の照合は ` > `）が合わず、変異を通るテストが skip されるため（2026-09-28 実測。そのままだと score 26.82%、区切りを ` > ` に直した一時コピーでは 85.68%）。詳細は `stryker.config.mjs` のコメント。対応が決まるまで、レポートの score は実際より低く出る。
+- vitest-runner の patch: `@stryker-mutator/vitest-runner` 10.0.0 は、そのままでは Vitest 5.0.1 と組み合わせると `describe` の中のテストで変異を検出できず、survived と数えられる（テスト名の連結の区切りが、vitest-runner はスペース、Vitest 5.0.1 の testNamePattern の照合は ` > ` で合わず、変異を通るテストが skip されるため）。`pnpm patch` で連結を ` > ` に直して対応している（`patches/`。2026-09-28 実測で score は patch なし 26.82% → patch あり 85.68%）。上流が直ったら patch を外す（`rules/code/dependencies.md` の「pnpm patch」）。詳細は `stryker.config.mjs` のコメント。
 
 ## E2E テスト
 - `rules/code/architecture.md` の「E2E テスト（Playwright）」に従う。ここには重複して書かない。

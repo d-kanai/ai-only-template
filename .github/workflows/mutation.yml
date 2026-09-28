@@ -1,19 +1,20 @@
 # mutation testing（Stryker）を main ブランチで毎日実行し、レポートを artifact に保存する（Issue #52）。
 # 設定は stryker.config.mjs、位置づけと運用は rules/code/test.md の「mutation testing（Stryker）」。
 # WHY PR ごとではなく日次: ユーザー判断（Issue #52）。PR の CI（ci.yml）には入れないので、実行時間（ローカル 4 コアで
-#   約 3 分、2026-09-28 実測。変異の数はコードの量に応じて増える）が PR のマージを待たせない。
+#   約 2.5 分、2026-09-28 実測。変異の数はコードの量に応じて増える）が PR のマージを待たせない。
 # いまはレポートを出すだけで、score が低くてもジョブは失敗しない（stryker.config.mjs で thresholds.break を
 #   設定していない）。しきい値は結果を見て決める。
 name: Mutation
 
 on:
   schedule:
-    # 毎日 UTC 00:00 = 09:00 JST。cron は UTC で解釈される。
-    # GitHub の schedule は負荷の高い時間帯に遅れて始まることがあり、混雑がひどいとキューから落とされる（実行されない）
-    # こともある。毎時 0 分は混みやすいと明記されている（GitHub Docs「Events that trigger workflows」の schedule）。
-    # 時刻どおりの実行は保証されない。09:00 JST ちょうどに動くことより、1 日 1 回回ることが目的。
+    # 毎日 UTC 23:55 = 08:55 JST。cron は UTC で解釈される。
+    # WHY 09:00 JST（UTC 00:00）ではなく 5 分前: GitHub の schedule は負荷の高い時間帯に遅れて始まることがあり、
+    #   混雑がひどいとキューから落とされる（実行されない）こともある。毎時 0 分は混みやすいと明記されている
+    #   （GitHub Docs「Events that trigger workflows」の schedule）。ユーザー希望の朝 09:00 に近いまま、0 分を避けて 5 分前にした（Issue #52）。
+    #   それでも時刻どおりの実行は保証されない。
     # schedule は既定ブランチ（main）の最新コミットで動く。
-    - cron: "0 0 * * *"
+    - cron: "55 23 * * *"
   # Actions の画面から手動でも実行できるようにする（設定を変えた直後の確認など）。
   workflow_dispatch:
 
@@ -24,7 +25,7 @@ permissions:
 jobs:
   mutation:
     runs-on: ubuntu-latest
-    # WHY 30 分: ローカル（4 コア）の実測は `pnpm test:mutation` 全体で約 3 分（384 変異、2026-09-28）。
+    # WHY 30 分: ローカル（4 コア）の実測は `pnpm test:mutation` 全体で約 2.5 分（384 変異、147 秒。2026-09-28）。
     #   ubuntu-latest も 4 コアなので同程度の見込みで、コードが増えても余裕のある上限にする。
     #   変異がテストを無限ループさせたときなどに、既定の 360 分まで止まらないようにするため。
     timeout-minutes: 30

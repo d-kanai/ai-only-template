@@ -19,13 +19,18 @@ export default {
   //   ルート直下の node_modules（直接の依存）までさかのぼって見つける。
   //   既定を置き換えるので、ほかの Stryker プラグインを足すときはここにも書く。
   plugins: ["@stryker-mutator/vitest-runner"],
-  // 既知の問題（未解決。Issue #52 で対応を判断する）: vitest-runner 10.0.0 は Vitest 5.0.1 と組み合わせると、
+  // pnpm patch で直している不具合（Issue #52）: vitest-runner 10.0.0 は、そのままでは Vitest 5.0.1 と組み合わせると
   //   describe の中のテストで変異を検出できない（killed にならず Survived と数えられる）。
   //   原因: 変異ごとに「その変異を通るテスト」だけを実行するため、テスト名を describe 名とスペース区切りで連結した
   //   正規表現を testNamePattern に渡す（vitest-runner の dist/src/test-helpers.js の collectTestName）。Vitest 5.0.1 は
   //   testNamePattern をフルネーム（describe 名と " > " 区切り。dist/task-utils.js の createTaskName）と照合するため
   //   一致せず、対象のテストがすべて skip される（2026-09-28 実測）。describe の外に書いたテストだけが正しく動く。
-  //   実測: そのままだと score 26.82%。連結を " > " に直した vitest-runner の一時コピーで同じ設定を動かすと 85.68%。
+  //   対応: patches/@stryker-mutator__vitest-runner@10.0.0.patch で、collectTestName の連結を " > " にしている
+  //   （dist/src/test-helpers.js と dist/src/stryker-setup.js の各 1 行。pnpm-workspace.yaml の patchedDependencies）。
+  //   実測: patch なしで score 26.82%（killed 103 / survived 281）、patch ありで 85.68%（killed 329 / survived 55）。
+  //   patch を外す条件: 上流の vitest-runner が Vitest 5 の " > " 区切りに対応した版を出したら、その版に上げて patch を消す
+  //   （rules/code/dependencies.md の「pnpm patch」）。2026-09-28 時点で上流の master の src/test-helpers.ts も
+  //   スペース区切りのまま（devDependencies の vitest は 4.1.11）。
 
   vitest: {
     // configFile: pnpm test と同じ vitest.config.mts（jsdom、tsconfigPaths、e2e/** の除外）でテストを動かす。

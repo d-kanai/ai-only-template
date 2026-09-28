@@ -75,3 +75,16 @@ strictDepBuilds: true
 #   注意: 公式ドキュメントのとおり、`pnpm add foo@2` のように範囲を指定して追加した場合はこの設定は無視され、
 #   package.json には "2" と範囲のまま書かれる。そのため版は `pnpm add <pkg>@<x.y.z>` で明示し、package.test.ts でも検査している。
 savePrefix: ''
+
+# patchedDependencies: 依存パッケージに当てるパッチ（pnpm patch / pnpm patch-commit で作る）。キーは「パッケージ@版」、
+#   値はパッチファイルのパス。pnpm install のたびに node_modules の中身へ当てられ、lockfile にもパッチのハッシュが入る
+#   （パッチを変えると --frozen-lockfile が lockfile とのずれで失敗するので、パッチと lockfile は同じコミットで直す）。
+#   使ってよい条件・外す条件・確認方法は rules/code/dependencies.md の「pnpm patch」。
+#   - @stryker-mutator/vitest-runner@10.0.0（Issue #52）: テスト名の連結をスペースから " > " に直す（dist の 2 ファイル各 1 行）。
+#     Vitest 5.0.1 の testNamePattern はフルネームを " > " 区切りで照合するため、直さないと describe の中のテストが
+#     変異ごとの実行で skip され、mutation score が実際より低く出る（2026-09-28 実測で 26.82% → 85.68%。詳細は
+#     stryker.config.mjs のコメント）。版を上げるとキーの版と合わなくなるので、上げるときに patch の要否を見直す。
+#     上流の Issue / PR の有無は未確認（この環境から GitHub の Issue 検索が 403）。2026-09-28 時点で上流の master の
+#     packages/vitest-runner/src/test-helpers.ts もスペース区切りのまま（raw.githubusercontent.com で確認）。
+patchedDependencies:
+  '@stryker-mutator/vitest-runner@10.0.0': patches/@stryker-mutator__vitest-runner@10.0.0.patch
