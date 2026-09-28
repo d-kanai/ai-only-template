@@ -1,0 +1,70 @@
+# mutation testing（Stryker）を main ブランチで毎日実行し、レポートを artifact に保存する（Issue #52）。
+# 設定は stryker.config.mjs、位置づけと運用は rules/code/test.md の「mutation testing（Stryker）」。
+# WHY PR ごとではなく日次: ユーザー判断（Issue #52）。PR の CI（ci.yml）には入れないので、実行時間（ローカル 4 コアで
+#   約 2.5 分、2026-09-28 実測。変異の数はコードの量に応じて増える）が PR のマージを待たせない。
+# いまはレポートを出すだけで、score が低くてもジョブは失敗しない（stryker.config.mjs で thresholds.break を
+#   設定していない）。しきい値は結果を見て決める。
+name: Mutation
+
+on:
+  schedule:
+    # 毎日 UTC 23:55 = 08:55 JST。cron は UTC で解釈される。
+    # WHY 09:00 JST（UTC 00:00）ではなく 5 分前: GitHub の schedule は負荷の高い時間帯に遅れて始まることがあり、
+    #   混雑がひどいとキューから落とされる（実行されない）こともある。毎時 0 分は混みやすいと明記されている
+    #   （GitHub Docs「Events that trigger workflows」の schedule）。ユーザー希望の朝 09:00 に近いまま、0 分を避けて 5 分前にした（Issue #52）。
+    #   それでも時刻どおりの実行は保証されない。
+    # schedule は既定ブランチ（main）の最新コミットで動く。
+    - cron: "55 23 * * *"
+  # Actions の画面から手動でも実行できるようにする（設定を変えた直後の確認など）。
+  workflow_dispatch:
+
+# 読み取りだけにする。mutation testing はリポジトリに書き込まない（最小権限）。
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    # WHY 30 分: ローカル（4 コア）の実測は `pnpm test:mutation` 全体で約 2.5 分（384 変異、147 秒。2026-09-28）。
+    #   ubuntu-latest も 4 コアなので同程度の見込みで、コードが増えても余裕のある上限にする。
+    #   変異がテストを無限ループさせたときなどに、既定の 360 分まで止まらないようにするため。
+    timeout-minutes: 30
+    # GitHub Actions は CI=true を既定で設定するので、pnpm install の lefthook postinstall はフックを入れない（rules/code/lint.md）。
+    steps:
+      # ref: main: schedule は既定ブランチで動くが、workflow_dispatch で別ブランチを選んだときも main を検査するように明示する。
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      # Node / pnpm の版の取り方は ci.yml と同じ（rules/code/env.md）。
+      # Node の版は .tool-versions が正。ワークフローに直書きせず、nodejs 行から読む。
+      - name: Read Node.js version from .tool-versions
+        run: echo "NODE_VERSION=$(awk '$1 == "nodejs" { print $2 }' .tool-versions)" >> "$GITHUB_ENV"
+
+      # pnpm の版は package.json の packageManager から取る（version を省略すると pnpm/action-setup が packageManager を読む）。
+      # setup-node の cache: pnpm より先に pnpm を入れておく必要がある。
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      # --frozen-lockfile: lockfile と package.json がずれていたら更新せず失敗させる（rules/code/dependencies.md）。
+      - run: pnpm install --frozen-lockfile
+
+      # stryker run。単体テスト（Vitest）だけを使うので、ci.yml と違って Postgres や Playwright のブラウザは用意しない。
+      - run: pnpm test:mutation
+
+      # レポート（stryker.config.mjs の htmlReporter / jsonReporter の出力先 reports/mutation/）を保存する。
+      # if: always(): Stryker が途中で失敗しても、出力済みのレポートがあれば残して原因を調べられるようにする。
+      # retention-days: 30: 1 か月分の推移を見られる程度に残し、それより古いものは自動で消す。
+      # if-no-files-found: warn（既定）: Stryker が起動前に失敗してレポートが無いときは、このステップでは失敗させない
+      #   （失敗は pnpm test:mutation のステップで分かる）。
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutation-report
+          path: reports/mutation/
+          retention-days: 30
+          if-no-files-found: warn

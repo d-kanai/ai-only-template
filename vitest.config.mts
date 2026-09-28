@@ -30,7 +30,11 @@ export default defineConfig({
     //   のエラーで失敗する（2026-09-28 に実測）。E2E は pnpm test:e2e（Playwright）で実行する。
     //   configDefaults.exclude（node_modules など Vitest の既定の除外）と結合する。exclude を指定すると既定を
     //   置き換えるため、結合しないと node_modules 配下のテストまで拾ってしまう。
-    exclude: [...configDefaults.exclude, "e2e/**"],
+    //   .stryker-tmp/**: Stryker（pnpm test:mutation）が作る作業用のサンドボックス。Stryker を途中で止めると
+    //   .stryker-tmp/sandbox-*/ にリポジトリのコピー（変異を入れたコードとテスト）が残り、そのままだと pnpm test が
+    //   コピーの中のテストまで拾って件数が倍になり、コピーの e2e/（"e2e/**" はルート相対なので効かない）で失敗する
+    //   （2026-09-28 に reviewer が実測）。
+    exclude: [...configDefaults.exclude, "e2e/**", ".stryker-tmp/**"],
     // coverage: 単体テストのカバレッジを計測し、100% に満たなければ失敗させる（Issue #45）。
     //   `vitest run --coverage`（= pnpm test）のときだけ有効。enabled は既定の false のままにし、
     //   pnpm test:unit（vitest run）ではカバレッジを計測せず速く回せるようにしている。

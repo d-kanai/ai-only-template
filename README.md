@@ -14,6 +14,7 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 | UI ライブラリ | [React](https://react.dev/) | Next.js（create-next-app）が指定するバージョンに合わせる |
 | 言語 | [TypeScript](https://www.typescriptlang.org/) | 最新版を使う |
 | テスト | [Vitest](https://vitest.dev/) | React Testing Library + jsdom でコンポーネントをテストする |
+| mutation testing | [Stryker](https://stryker-mutator.io/) | 単体テストが変異（コードの一部を壊したもの）を検出できるかを測る。GitHub Actions で main を毎日実行し、レポートを artifact に残す（`pnpm test:mutation`。`rules/code/test.md`） |
 | E2E テスト | [Playwright](https://playwright.dev/) | Chromium のみ。本番ビルドを起動し、ブラウザで画面を操作して検証する（`pnpm test:e2e`） |
 | Lint / Format | [Biome](https://biomejs.dev/) | typescript-eslint が TypeScript 7 未対応のため ESLint ではなく Biome を使う（`rules/code/lint.md`） |
 | Git フック | [Lefthook](https://github.com/evilmartians/lefthook) | pre-commit でステージ済みファイルを Biome で検査する |
@@ -80,6 +81,7 @@ pnpm dev       # 開発サーバを起動（http://localhost:3000）
 pnpm test      # 単体テストを実行し、カバレッジ 100% 未満なら失敗（Vitest。詳細は rules/code/architecture.md）
 pnpm test:unit # 単体テストだけを実行（カバレッジを計測しない。速く回したいとき）
 pnpm test:e2e  # E2E テストを実行（Playwright。本番ビルドを起動してブラウザで操作する。詳細は rules/code/architecture.md）
+pnpm test:mutation # mutation testing を実行し、reports/mutation/ にレポートを出す（Stryker。数分かかる。詳細は rules/code/test.md）
 pnpm lint      # lint + format の違反を検査（Biome。変更しない）
 pnpm check     # 安全な自動修正を適用して再検査（Biome）
 pnpm format    # format だけを適用（Biome）
