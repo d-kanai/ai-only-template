@@ -5,6 +5,23 @@ main は常にマージ可能な状態を保つ。作業はすべて Issue → �
 ## Issue
 - 作業は Issue を起点にする。なければ AI が作成する（目的・完了条件を書く）。
 - 1 Issue = 1 PR を基本とする。大きければ Issue を分ける。
+- 作成した Issue は GitHub Projects（下記）に追加する。
+
+## GitHub Projects（ステータス管理）
+- プロジェクト: https://github.com/users/d-kanai/projects/4（ユーザー単位のプロジェクトで、このリポジトリに紐付け済み）。Status は `Todo` / `In Progress` / `Done` の 3 つ。
+- Issue を作ったら AI がプロジェクトに追加する（新規 Issue の自動追加ワークフローは GitHub の API から有効化できず UI 操作が必要なため、AI が明示的に追加する）。追加直後の Status は `Todo`。
+  ```
+  gh project item-add 4 --owner d-kanai --url <IssueのURL>
+  ```
+- ブランチを切って着手したら Status を `In Progress` にする。
+  ```
+  ITEM_ID=$(gh project item-list 4 --owner d-kanai --format json | jq -r '.items[] | select(.content.number==<Issue番号>) | .id')
+  gh project item-edit --project-id PVT_kwHOBcmZm84Bk6yN --id "$ITEM_ID" --field-id PVTSSF_lAHOBcmZm84Bk6yNzhjpji8 --single-select-option-id 47fc9ee4
+  ```
+  （`--project-id` はプロジェクトの ID、`--field-id` は Status フィールドの ID、`--single-select-option-id` は `In Progress` の ID。変わったら `gh project field-list 4 --owner d-kanai --format json` で確認して書き換える）
+- PR のマージで Issue がクローズされると、プロジェクトの既定ワークフローで Status が `Done` になる（PR #19 のマージで確認済み）。手で Done にはしない。
+- `--owner` は `@me` ではなく `d-kanai` を明示する（`@me` だと `gh project link` がオーナー不一致で失敗し、`item-add` の JSON 出力も欠ける）。
+- gh のトークンに `project` スコープが必要。無ければ `gh auth refresh -s project` をユーザーが実行する（認証操作なので AI は実行しない）。
 
 ## ブランチ
 - main から切る。
