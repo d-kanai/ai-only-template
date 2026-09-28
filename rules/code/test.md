@@ -97,7 +97,7 @@ Stryker でコードに変異（条件の反転、戻り値の差し替え、文
   - ルール検査テストの fault injection は引き続き手作業で行う。Stryker が変異させるのは `mutate` の実装コードだけで、ルール検査テストが検査する規則・設定（`biome.json`、`package.json`、import の向きなど）は変異させないため。
   - テストを足す・書き換えるときの確認（上の節）も、その場で行う。日次の結果を待たずに、書いたテストが守っているコードを壊すと落ちることを確かめる。
 - Postgres が要る（Issue #57。単体テストに実 Postgres を使うテストがあるため。先に `pnpm db:up`）。日次実行（`mutation.yml`）も `ci.yml` と同じく Postgres を起動し、`pnpm db:migrate` を当ててから実行する。
-- Stryker の実行後は、テスト用のスキーマ（`test_<UUID>`）が後始末されずに残る（2026-09-28 のローカル実行で 1 回あたり 12 個残った。原因は、Stryker が worker のプロセスを afterAll の前に止めるためと推定しているが未確認）。Stryker の中では globalSetup が消さない（下の「テスト用スキーマの後始末（globalSetup）」）ので、次の `pnpm test` の最初に消える。
+- Stryker の実行後は、テスト用のスキーマ（`test_<UUID>`）が後始末されずに残る（2026-09-28 のローカル実行で 1 回あたり 12 個残った。原因は、Stryker が worker のプロセスを afterAll の前に止めるためと推定しているが未確認）。Stryker の中では globalSetup が消さない（上の「テスト用スキーマの後始末（globalSetup）」）ので、次の `pnpm test` の最初に消える。
 - 実行: `pnpm test:mutation`（`stryker run`）。レポートは `reports/mutation/mutation.html`（ブラウザで開く）と `mutation.json`。`reports/` と作業用の `.stryker-tmp/` は `.gitignore` 済み。ローカル（4 コア）で約 2.5 分（384 変異、147 秒。2026-09-28 実測）。
 - 対象: `features/` `backend/` `shared/` の `.ts` / `.tsx`（テスト `*.test.ts(x)` と `*.d.ts` を除く）。`vitest.config.mts` の coverage.include のうち TypeScript の実装がある範囲と同じにしている。`app/`、`scripts/`（実装はシェルスクリプトだけ）、ルート直下の設定ファイル・ルール検査テスト、`e2e/` は対象外。
 - Vitest のカバレッジ（100% のしきい値）は Stryker の実行では効かない。vitest-runner が coverage を無効にして、Stryker 自身のテストごとのカバレッジ分析で「変異を通るテスト」だけを実行するため（https://stryker-mutator.io/docs/stryker-js/vitest-runner/ ）。

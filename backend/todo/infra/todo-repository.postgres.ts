@@ -25,12 +25,15 @@ export class PostgresTodoRepository implements TodoRepository {
   constructor(private readonly executor: Executor) {}
 
   // WHY 作成日時の昇順で返す: TodoRepository は順序を約束しない（並べ替えは ListTodosQuery が行う）が、
-  //   DB は ORDER BY が無いと返す順が決まらない。毎回同じ順で返し、作成日時が同じ Todo の並びも安定させる。
+  //   DB は ORDER BY が無いと返す順が決まらない。毎回同じ順で返すため、並び順をここで決める。
+  // WHY id を第 2 キーにする: 作成日時が同じ時刻の行が複数あると、作成日時だけでは Postgres が返す順が決まらない
+  //   （行の物理的な位置や実行計画で変わりうる）。一意な id で並べれば、同じ時刻の行どうしの順序も毎回固定される
+  //   （ListTodosQuery の並べ替えは安定ソートなので、この順が一覧の順になる）。
   async findAll(): Promise<Todo[]> {
     const rows = await this.executor
       .select()
       .from(todos)
-      .orderBy(asc(todos.createdAt));
+      .orderBy(asc(todos.createdAt), asc(todos.id));
     return rows.map(toTodo);
   }
 

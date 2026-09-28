@@ -282,6 +282,17 @@ function usesFramework(ref: Reference): boolean {
   return !ref.own && FRAMEWORK_PACKAGES.has(packageName(ref.to));
 }
 
+// DB（永続化）のパッケージ。domain / application からは参照しない（規則 core-to-persistence）。
+// WHY パッケージ名で比べる（サブパスもまとめて扱う）: drizzle-orm/pg-core・drizzle-orm/node-postgres も同じ DB への依存で、
+//   前方一致の文字列比較にすると pg-format のような別パッケージまで巻き込むため。
+// WHY drizzle-orm と pg だけ: 今のリポジトリで使っている DB のパッケージがこの 2 つ（Issue #57）。DB のパッケージを足したら
+//   ここにも足す（drizzle-kit は開発時のツールで、アプリのコードからは import しない）。
+const PERSISTENCE_PACKAGES = new Set(["drizzle-orm", "pg"]);
+
+function usesPersistence(ref: Reference): boolean {
+  return !ref.own && PERSISTENCE_PACKAGES.has(packageName(ref.to));
+}
+
 // backend の api ファイル（1 API = 1 ファイル `backend/<x>/presentation/<verb>-<noun>.api.ts`）。
 const PRESENTATION_API = /^backend\/[^/]+\/presentation\/[^/]+\.api$/;
 
@@ -367,6 +378,7 @@ type RuleId =
   | "shared-to-features"
   | "domain"
   | "application"
+  | "core-to-persistence"
   | "presentation"
   | "infra"
   | "backend-shared"
@@ -442,6 +454,22 @@ const RULES: Rule[] = [
     name: "backend/<f>/domain/ が参照してよい自前コードは自 feature と backend/shared/ の domain/ だけで、next・react も参照しない",
     appliesTo: (from) => backendLayerOf(from)?.layer === "domain",
     isViolation: violatesBackendLayer,
+  },
+  {
+    // 「domain は Next・React・DB に依存させない」。application も DB に直接依存させない（Repository の interface 越しに使う）。
+    // WHY 層の許可の一覧（domain / application の規則）と別の規則にする: 許可の一覧はパッケージを next / react / react-dom 以外
+    //   すべて許すので、DB のパッケージはそこでは止まらない。DB への依存は infra に閉じ込める（schema.ts・Repository の実装・
+    //   database.ts）という別の観点なので、1 規則 = 1 テストで独立に検査する。
+    // WHY backend/shared の domain / application も含める: TransactionRunner の interface（shared/domain）が Drizzle の型に
+    //   依存すると、domain から DB が見えてしまうため（Tx をジェネリックにしている理由。transaction-runner.ts）。
+    // 型だけの参照（import type）も違反にする: 型でも DB の形が domain に入り込み、DB を差し替えると domain を直すことになる。
+    id: "core-to-persistence",
+    name: "backend の domain/・application/ は DB のパッケージ（drizzle-orm とそのサブパス、pg）を参照しない（型だけでも）",
+    appliesTo: (from) => {
+      const layer = backendLayerOf(from)?.layer;
+      return layer === "domain" || layer === "application";
+    },
+    isViolation: usesPersistence,
   },
   {
     // 「application の依存してよい先は domain と backend/shared」「依存の向き: presentation → application → domain」
@@ -717,6 +745,28 @@ const RULE_EXAMPLES: Record<
         "@/backend/shared/domain/domain-error",
         "value",
       ],
+      ["backend/todo/domain/x.ts", "node:crypto", "value"],
+    ],
+  },
+  "core-to-persistence": {
+    violating: [
+      ["backend/todo/domain/x.ts", "drizzle-orm", "type"],
+      ["backend/todo/domain/x.ts", "pg", "value"],
+      ["backend/todo/application/x.ts", "drizzle-orm/pg-core", "value"],
+      ["backend/todo/application/x.ts", "pg", "type"],
+      ["backend/shared/domain/x.ts", "drizzle-orm/node-postgres", "type"],
+      ["backend/shared/application/x.ts", "drizzle-orm", "value"],
+    ],
+    allowed: [
+      // infra / presentation は対象外（infra は永続化の実装を持つ層）。
+      ["backend/todo/infra/schema.ts", "drizzle-orm/pg-core", "value"],
+      ["backend/shared/infra/database.ts", "pg", "value"],
+      ["backend/todo/presentation/x.api.ts", "drizzle-orm", "type"],
+      // 名前の前方一致だけが同じ別のパッケージは対象外（パッケージ名で比べる）。
+      ["backend/todo/domain/x.ts", "pg-format", "value"],
+      ["backend/todo/application/x.ts", "drizzle-orm-extra", "value"],
+      // 自前コードのパスに pg / drizzle-orm を含んでも、パッケージではない。
+      ["backend/todo/domain/x.ts", "@/backend/todo/domain/pg", "value"],
       ["backend/todo/domain/x.ts", "node:crypto", "value"],
     ],
   },
@@ -1025,7 +1075,7 @@ function violationsOfFixture(files: Record<string, string>): string[] {
   }
 }
 
-// must-reject: 12 規則それぞれについて、alias（@/）と相対パス、値の import / import type / inline の type /
+// must-reject: 13 規則それぞれについて、alias（@/）と相対パス、値の import / import type / inline の type /
 // export { X } from / export type { X } from / dynamic import() / 副作用だけの import のうち規則に関係する形と、
 // .ts / .tsx / .js / .jsx の各拡張子、境界ぎりぎりのケース（他 feature の深いパス、自 feature の禁止層、
 // 名前の前方一致だけが同じ別ディレクトリ、next / react / react-dom のサブパス）を置く。
@@ -1240,6 +1290,22 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import { todos } from "../infra/schema";',
     'import { PostgresTodoRepository } from "@/backend/todo/infra/todo-repository.postgres";',
   ),
+  // core-to-persistence: domain / application から DB のパッケージ（drizzle-orm とそのサブパス、pg）。型だけの参照・re-export・
+  //   dynamic import も違反。名前の前方一致だけが同じ別パッケージ（pg-format）は対象外。
+  "backend/todo/domain/bad-domain-db.ts": lines(
+    'import type { PgTable } from "drizzle-orm/pg-core";',
+    'import { eq } from "drizzle-orm";',
+    'import type { Pool } from "pg";',
+    'import format from "pg-format";',
+  ),
+  "backend/todo/application/bad-application-db.command.ts": lines(
+    'import { sql } from "drizzle-orm";',
+    'const lazy = import("drizzle-orm/node-postgres");',
+    'export type { PoolConfig } from "pg";',
+  ),
+  "backend/shared/domain/bad-shared-domain-db.ts": lines(
+    'import type { NodePgDatabase } from "drizzle-orm/node-postgres";',
+  ),
   //   backend/shared/infra は feature の infra を参照できず、next も参照できない。backend/shared/presentation も参照できない（infra の規則）。
   "backend/shared/infra/bad-shared-infra.ts": lines(
     'import { todos } from "@/backend/todo/infra/schema";',
@@ -1436,6 +1502,14 @@ const MUST_REJECT_VIOLATIONS = [
   "infra: backend/shared/infra/bad-shared-infra.ts → next/server",
   "backend-shared: backend/shared/infra/bad-shared-infra.ts → next/server",
   "infra: backend/shared/infra/bad-shared-infra.ts → backend/shared/presentation/http-error",
+  ...["drizzle-orm/pg-core", "drizzle-orm", "pg"].map(
+    (to) => `core-to-persistence: backend/todo/domain/bad-domain-db.ts → ${to}`,
+  ),
+  ...["drizzle-orm", "drizzle-orm/node-postgres", "pg"].map(
+    (to) =>
+      `core-to-persistence: backend/todo/application/bad-application-db.command.ts → ${to}`,
+  ),
+  "core-to-persistence: backend/shared/domain/bad-shared-domain-db.ts → drizzle-orm/node-postgres",
 ];
 
 // must-pass: 許可される参照を網羅する。今のリポジトリの本番コードにある import の形

@@ -144,8 +144,8 @@ drizzle.config.ts                     # drizzle-kit の設定
 | 層 | 置くもの | 依存してよい先 |
 | --- | --- | --- |
 | `presentation/` | api ファイル。1 API = 1 ファイル `<verb>-<noun>.api.ts`（例: `list-todos.api.ts`、`create-todo.api.ts`）。コンテナを受け取って handler（Request → 入力の形の検証 → query / command → Response）を返す関数（`listTodosApi(container)`）、それを本番用のコンテナで組み立てた HTTP メソッド名の定数（`export const GET = listTodosApi(todoContainer)`）、その API のリクエスト / レスポンスの型を export する | 許可の一覧（ここに無い自前コードは不可）: 自 feature と `backend/shared` の `application`、`domain`（feature の domain は Entity の型の参照のみ。query / command が返す Entity を DTO に変換するため `import type { Todo }` する。`backend/shared/domain` は値でも可）、同じ `presentation`（re-export など）、自 feature の `infra/container.ts`（コンテナの型と本番用のコンテナの受け取りだけ）。パッケージは `next` / `react` / `react-dom` 以外 |
-| `application/` | ユースケース。1 ユースケース = 1 ファイルで、読むだけ（副作用なし）のものは `<verb>-<noun>.query.ts`、状態を変えるものは `<verb>-<noun>.command.ts`（例: `list-todos.query.ts`、`create-todo.command.ts`） | 許可の一覧: 自 feature と `backend/shared` の `domain`・`application`。パッケージは `next` / `react` / `react-dom` 以外 |
-| `domain/` | Entity / Value Object / Repository の interface（DomainError は feature をまたいで使うため `backend/shared/domain/` に置く） | 許可の一覧: 自 feature と `backend/shared` の `domain` だけ（Next・React・DB に依存しない）。パッケージは `next` / `react` / `react-dom` 以外（`node:crypto` など） |
+| `application/` | ユースケース。1 ユースケース = 1 ファイルで、読むだけ（副作用なし）のものは `<verb>-<noun>.query.ts`、状態を変えるものは `<verb>-<noun>.command.ts`（例: `list-todos.query.ts`、`create-todo.command.ts`） | 許可の一覧: 自 feature と `backend/shared` の `domain`・`application`。パッケージは `next` / `react` / `react-dom` と DB のパッケージ（`drizzle-orm` とそのサブパス、`pg`。型だけでも不可）以外 |
+| `domain/` | Entity / Value Object / Repository の interface（DomainError は feature をまたいで使うため `backend/shared/domain/` に置く） | 許可の一覧: 自 feature と `backend/shared` の `domain` だけ（Next・React・DB に依存しない）。パッケージは `next` / `react` / `react-dom` と DB のパッケージ（`drizzle-orm` とそのサブパス、`pg`。型だけでも不可）以外（`node:crypto` など） |
 | `infra/` | Repository の実装、Drizzle のスキーマ（`schema.ts`）、TransactionRunner の実装、`container.ts`（組み立て = DI。runner と Repository の作り方を受け取ってコンテナを作る `createTodoContainer`、InMemory / Postgres 用の `createInMemoryTodoContainer` / `createPostgresTodoContainer`、アプリで共有する `todoContainer`） | 許可の一覧: 自 feature と `backend/shared` の `domain`（interface を実装する）・`application`（container で組み立てる）・`infra`（container が Repository の実装を組み立てる）。パッケージは `next` / `react` / `react-dom` 以外 |
 
 - 依存の向き: `app/api → presentation → application → domain`。`infra` は `domain` の interface を実装する（依存性の逆転）。
@@ -264,13 +264,14 @@ Issue #57 で導入した。Todo は Postgres（`compose.yaml`）に保存し、
     - `backend/<f>/application/`: `domain/`・`application/`。
     - `backend/<f>/presentation/`: `application/`・`domain/`（feature の domain は `import type` だけ。`backend/shared/domain/` は値でも可）・`presentation/`・自 feature の `infra/container` だけ（他 feature の container は不可）。
     - `backend/<f>/infra/`: `domain/`・`application/`・`infra/`。
+  - `backend/` の `domain/`・`application/`（`backend/shared/` を含む）は DB のパッケージ（`drizzle-orm` とそのサブパス、`pg`）を参照しない（`import type` も不可）。上の許可の一覧はパッケージを `next` / `react` / `react-dom` 以外すべて許すので、DB への依存を infra に閉じ込めることは別の規則（`core-to-persistence`）で検査する。前方一致だけが同じ別パッケージ（`pg-format` など）は対象外。DB のパッケージを足したら `architecture.test.ts` の `PERSISTENCE_PACKAGES` にも足す。
   - `backend/shared/` が参照してよい自前コードは `backend/shared/` の中だけ。`next` / `react` / `react-dom` も参照しない。
   - `backend/` のソースファイルは `backend/<x>/` の `domain/`・`application/`・`presentation/`・`infra/` のどれかの下に置く（置き場所の検査。参照の有無に関係なく違反）。
   - `app/`（`app/api` 以外）が `features/` / `backend/` / `shared/` を参照するときは `features/<f>`（`features/<f>/index`）か `shared/` だけ（`backend/` と feature の深いパスは不可）。パッケージ（`next` / `react` など）と、`app/` の中の相対参照（`import "./globals.css"` など）は検査しない。
   - `app/api/` が参照してよいのは `backend/<x>/presentation/*.api` だけ。
   - 規則の判定そのものも、規則ごとに「違反になる例」「ならない例」を架空の参照で 3 件以上ずつ固定している（`architecture.test.ts` の「規則ごとの判定」）。今のコードに違反が無いことだけでは、規則が緩すぎても気づけないため。
   - さらに、一時ディレクトリに架空のツリーを作って実ファイルを置き、本番と同じ列挙 → 抽出 → 正規化 → 判定（`collectViolations(root)`）に通す fixture テストがある（同ファイルの「fixture のツリーを検査したときに検出される違反」）。
-    - must-reject: 12 規則と置き場所の規則それぞれの違反を、alias（`@/`）と相対パス、値の import / `import type` / inline の `type` / `export { X } from` / `export type { X } from` / dynamic `import()` / 副作用だけの import、`.ts` / `.tsx` / `.mts` / `.cts` / `.js` / `.jsx` / `.mjs` / `.cjs` で置き、前方一致の境界（`backend/shared-x`、`app/api-x`、`features/todo-extra`）やパスに `test` を含む本番のファイルも含めて、検出される「規則: ファイル → 参照先」の一覧を丸ごと比較する（見逃しも余分な検出も失敗にする）。
+    - must-reject: 13 規則と置き場所の規則それぞれの違反を、alias（`@/`）と相対パス、値の import / `import type` / inline の `type` / `export { X } from` / `export type { X } from` / dynamic `import()` / 副作用だけの import、`.ts` / `.tsx` / `.mts` / `.cts` / `.js` / `.jsx` / `.mjs` / `.cjs` で置き、前方一致の境界（`backend/shared-x`、`app/api-x`、`features/todo-extra`）やパスに `test` を含む本番のファイルも含めて、検出される「規則: ファイル → 参照先」の一覧を丸ごと比較する（見逃しも余分な検出も失敗にする）。
     - must-pass: 許可される参照を網羅したツリーで違反 0 件を確かめる。今のリポジトリの本番コードの参照（参照元・参照先・型だけか）はすべて含めている。コメント・文字列の中の import 風の文字列、テストファイル、TS / JS 以外のファイルも置く。
     - 理由: 抽出の取りこぼし（書き方によって import を拾えない）は、規則が正しくても違反の見逃しになる。1 件の参照を規則に渡すだけのテストではそこを検証できない。
   - テストを対象外にする理由: テストは組み立てのために規則の外側を参照する（presentation のテストが infra の InMemory リポジトリを使うなど。上の「テストの置き方」）。

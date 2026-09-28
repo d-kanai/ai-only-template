@@ -53,10 +53,33 @@ describe("PostgresTodoRepository", () => {
     await expect(repository().findAll()).resolves.toEqual([todo]);
   });
 
-  test("findAll は作成日時の昇順で返す（保存した順によらない）", async () => {
-    const newer = Todo.create("新しい", new Date("2026-09-28T10:00:00.000Z"));
-    const older = Todo.create("古い", new Date("2026-09-28T09:00:00.000Z"));
-    const middle = Todo.create("真ん中", new Date("2026-09-28T09:30:00.000Z"));
+  // 並び順のテスト用に id を固定した Todo を作る（Todo.create の id は乱数で、id の大小が決まらないため）。
+  function todoWith(id: string, title: string, createdAt: string): Todo {
+    return Todo.restore({
+      id,
+      title,
+      completed: false,
+      createdAt: new Date(createdAt),
+    });
+  }
+
+  test("findAll は作成日時の昇順で返す（保存した順・id の順によらない）", async () => {
+    // id の順（小さい順）は 新しい → 真ん中 → 古い で、作成日時の順と逆にする。id 順に並べる実装では通らない。
+    const newer = todoWith(
+      "00000000-0000-4000-8000-000000000001",
+      "新しい",
+      "2026-09-28T10:00:00.000Z",
+    );
+    const middle = todoWith(
+      "00000000-0000-4000-8000-000000000002",
+      "真ん中",
+      "2026-09-28T09:30:00.000Z",
+    );
+    const older = todoWith(
+      "00000000-0000-4000-8000-000000000003",
+      "古い",
+      "2026-09-28T09:00:00.000Z",
+    );
     await repository().save(newer);
     await repository().save(older);
     await repository().save(middle);
@@ -68,6 +91,27 @@ describe("PostgresTodoRepository", () => {
       "真ん中",
       "新しい",
     ]);
+  });
+
+  test("作成日時が同じ Todo は id の昇順で返す（保存した順によらず、毎回同じ順になる）", async () => {
+    const createdAt = "2026-09-28T09:00:00.000Z";
+    const larger = todoWith(
+      "ffffffff-0000-4000-8000-000000000000",
+      "大きい id",
+      createdAt,
+    );
+    const smaller = todoWith(
+      "00000000-0000-4000-8000-000000000000",
+      "小さい id",
+      createdAt,
+    );
+    // id の大きい方から保存し、保存した順ではなく id の順に並ぶことを確かめる。
+    await repository().save(larger);
+    await repository().save(smaller);
+
+    const todos = await repository().findAll();
+
+    expect(todos.map((todo) => todo.title)).toEqual(["小さい id", "大きい id"]);
   });
 
   test("同じ id で save すると title と completed を上書きし（upsert）、行は増えない", async () => {

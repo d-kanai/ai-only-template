@@ -56,7 +56,7 @@ jobs:
       # 開発用の PostgreSQL を compose.yaml で起動する（ci.yml と同じ手順。WHY の詳細は ci.yml のコメント）。
       # WHY 用意するか: 単体テスト（pnpm test）に実 Postgres を使うテスト（*.postgres.test.ts など。Issue #57）があり、
       #   Stryker はそれを実行する。Postgres が無いと、Vitest の globalSetup（vitest.global-setup.ts）が接続できないエラーで止めるので、
-#   最初のテスト実行（dry run）から失敗する（pnpm test で確認。Stryker 経由では未確認）。
+      #   最初のテスト実行（dry run）から失敗する（pnpm test で確認。Stryker 経由では未確認）。
       # -d: バックグラウンドで起動する。--wait: healthcheck（pg_isready）が healthy になるまで待つ。--wait-timeout 120: 待つ上限（秒）。
       - name: Start Postgres
         run: docker compose up -d --wait --wait-timeout 120

@@ -56,15 +56,19 @@ describe("createTodoContainer", () => {
 
     const todo = await container.createTodo.execute({ title: "牛乳を買う" });
     expect(run).toHaveBeenCalledTimes(1);
-    expect(repositoryFor).toHaveBeenLastCalledWith("tx");
-
     await container.updateTodo.execute({ id: todo.id, completed: true });
     expect(run).toHaveBeenCalledTimes(2);
-    expect(repositoryFor).toHaveBeenLastCalledWith("tx");
-
     await container.deleteTodo.execute(todo.id);
     expect(run).toHaveBeenCalledTimes(3);
-    expect(repositoryFor).toHaveBeenLastCalledWith("tx");
+
+    // 呼び出しを丸ごと比べる: 組み立て時の読み取り用 1 回と、command ごとに tx で 1 回ずつ。
+    //   最後の呼び出しだけを見ると、ある command が tx 以外（readExecutor）でリポジトリを作っても見逃す。
+    expect(repositoryFor.mock.calls).toEqual([
+      ["read"],
+      ["tx"],
+      ["tx"],
+      ["tx"],
+    ]);
   });
 
   test("command は結果（作った・更新した Todo）を runner.run 越しにそのまま返す", async () => {
@@ -116,21 +120,56 @@ describe("createInMemoryTodoContainer", () => {
     await expect(second.listTodos.execute()).resolves.toEqual([]);
   });
 
-  test("command が途中で失敗すると、その command の変更は残らない（InMemory でも rollback する）", async () => {
+  // save / delete の後で失敗させ、「書き込みはしたが command は失敗した」状態を作る。
+  function failAfterWrite(repository: InMemoryTodoRepository) {
+    const originalSave = repository.save.bind(repository);
+    const originalDelete = repository.delete.bind(repository);
+    vi.spyOn(repository, "save").mockImplementation(async (value) => {
+      await originalSave(value);
+      throw new Error("書き込みの後で失敗");
+    });
+    vi.spyOn(repository, "delete").mockImplementation(async (id) => {
+      await originalDelete(id);
+      throw new Error("書き込みの後で失敗");
+    });
+  }
+
+  test("作成の command が保存の後で失敗すると、作った Todo は残らない（InMemory でも rollback する）", async () => {
+    const repository = new InMemoryTodoRepository();
+    failAfterWrite(repository);
+    const container = createInMemoryTodoContainer(repository);
+
+    await expect(
+      container.createTodo.execute({ title: "牛乳を買う" }),
+    ).rejects.toThrow("書き込みの後で失敗");
+
+    await expect(repository.findAll()).resolves.toEqual([]);
+  });
+
+  test("更新の command が保存の後で失敗すると、更新前の Todo のまま残る（InMemory でも rollback する）", async () => {
     const repository = new InMemoryTodoRepository();
     const todo = Todo.create("牛乳を買う");
     await repository.save(todo);
-    // save の後で失敗させ、「保存はしたが command は失敗した」状態を作る。
-    const originalSave = repository.save.bind(repository);
-    vi.spyOn(repository, "save").mockImplementation(async (value) => {
-      await originalSave(value);
-      throw new Error("保存の後で失敗");
-    });
+    failAfterWrite(repository);
     const container = createInMemoryTodoContainer(repository);
 
     await expect(
       container.updateTodo.execute({ id: todo.id, title: "卵を買う" }),
-    ).rejects.toThrow("保存の後で失敗");
+    ).rejects.toThrow("書き込みの後で失敗");
+
+    await expect(repository.findById(todo.id)).resolves.toEqual(todo);
+  });
+
+  test("削除の command が削除の後で失敗すると、Todo は消えずに残る（InMemory でも rollback する）", async () => {
+    const repository = new InMemoryTodoRepository();
+    const todo = Todo.create("牛乳を買う");
+    await repository.save(todo);
+    failAfterWrite(repository);
+    const container = createInMemoryTodoContainer(repository);
+
+    await expect(container.deleteTodo.execute(todo.id)).rejects.toThrow(
+      "書き込みの後で失敗",
+    );
 
     await expect(repository.findById(todo.id)).resolves.toEqual(todo);
   });
@@ -186,20 +225,58 @@ describe("createPostgresTodoContainer", () => {
     await expect(container.getTodo.execute(todo.id)).resolves.toEqual(todo);
   });
 
-  test("command が保存の後で失敗すると、保存した変更は DB に残らない（rollback）", async () => {
-    const container = createPostgresTodoContainer(database.db);
-    const todo = await container.createTodo.execute({ title: "牛乳を買う" });
+  // save / delete の後で失敗させ、「書き込みはしたが command は失敗した」状態を作る。
+  function failAfterWrite() {
     const originalSave = PostgresTodoRepository.prototype.save;
+    const originalDelete = PostgresTodoRepository.prototype.delete;
     vi.spyOn(PostgresTodoRepository.prototype, "save").mockImplementation(
       async function (this: PostgresTodoRepository, value) {
         await originalSave.call(this, value);
-        throw new Error("保存の後で失敗");
+        throw new Error("書き込みの後で失敗");
       },
     );
+    vi.spyOn(PostgresTodoRepository.prototype, "delete").mockImplementation(
+      async function (this: PostgresTodoRepository, id) {
+        await originalDelete.call(this, id);
+        throw new Error("書き込みの後で失敗");
+      },
+    );
+  }
+
+  test("作成の command が保存の後で失敗すると、作った Todo は DB に残らない（rollback）", async () => {
+    const container = createPostgresTodoContainer(database.db);
+    const before = await container.listTodos.execute();
+    failAfterWrite();
+
+    await expect(
+      container.createTodo.execute({ title: "rollback される作成" }),
+    ).rejects.toThrow("書き込みの後で失敗");
+
+    vi.restoreAllMocks();
+    await expect(container.listTodos.execute()).resolves.toEqual(before);
+  });
+
+  test("更新の command が保存の後で失敗すると、DB は更新前の Todo のまま（rollback）", async () => {
+    const container = createPostgresTodoContainer(database.db);
+    const todo = await container.createTodo.execute({ title: "牛乳を買う" });
+    failAfterWrite();
 
     await expect(
       container.updateTodo.execute({ id: todo.id, title: "卵を買う" }),
-    ).rejects.toThrow("保存の後で失敗");
+    ).rejects.toThrow("書き込みの後で失敗");
+
+    vi.restoreAllMocks();
+    await expect(container.getTodo.execute(todo.id)).resolves.toEqual(todo);
+  });
+
+  test("削除の command が削除の後で失敗すると、Todo は DB から消えずに残る（rollback）", async () => {
+    const container = createPostgresTodoContainer(database.db);
+    const todo = await container.createTodo.execute({ title: "牛乳を買う" });
+    failAfterWrite();
+
+    await expect(container.deleteTodo.execute(todo.id)).rejects.toThrow(
+      "書き込みの後で失敗",
+    );
 
     vi.restoreAllMocks();
     await expect(container.getTodo.execute(todo.id)).resolves.toEqual(todo);
