@@ -5,7 +5,7 @@ npm パッケージの版は `package.json` と `pnpm-lock.yaml` の両方で固
 ## workspace の package.json（Issue #68 の段階 2）
 - pnpm workspace（`pnpm-workspace.yaml` の `packages: ["apps/*"]`）で、`package.json` はリポジトリ直下・`apps/frontend`（`@repo/frontend`）・`apps/backend`（`@repo/backend`）の 3 つ。lockfile（`pnpm-lock.yaml`）と pnpm の設定（`pnpm-workspace.yaml`。サプライチェーン保護・`allowBuilds`・`patchedDependencies`）はリポジトリ直下に 1 つで、workspace 全体に効く。
 - どこに置くか: そのパッケージのコードが import するものを、そのパッケージの `package.json` に置く（`next` / `react` は frontend、`drizzle-orm` / `pg` / `drizzle-kit` は backend）。ツールとテストだけが使うもの（Biome・Vitest・Testing Library・Playwright・Stryker・TypeScript・`@types/node`）はリポジトリ直下。何をどこに置いたかの一覧と WHY は `rules/code/architecture.md` の「workspace パッケージと exports」。
-  - 同じパッケージを複数の `package.json` に置くときは同じ版にする（今は `pg` / `@types/pg` がリポジトリ直下（E2E 用）と `apps/backend` の両方）。版を上げるときは両方を上げる。
+  - 同じパッケージを複数の `package.json` に置くときの版のずれは、`package.test.ts` の `findInconsistentVersions` が止める（dependencies / devDependencies をまたいで、同じ名前は同じ版）。理由: 片方だけ上げると、同じ workspace に 2 つの版が入り、どのコードがどの版で動くかが `package.json` から読めなくなる。
 - `apps/backend/package.json` の `exports` は、frontend / e2e / 設定が使うアプリの入口だけを公開する（一覧と足し方は `rules/code/architecture.md` の「exports」）。テスト基盤（`database.test-support`）は公開面に含めず、`vitest.global-setup.ts` から相対パスで読む。
 - `packageManager`（pnpm の版）はリポジトリ直下の `package.json` にだけ書く（`rules/code/env.md`）。
 

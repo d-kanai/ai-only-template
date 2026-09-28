@@ -45,7 +45,7 @@
 | テスト | 検査する規則・設定 |
 | --- | --- |
 | `lint.test.ts` | Biome の違反が `--error-on-warnings` で失敗になること（代表ルールごとに違反の例と許可される書き方の例）、`pnpm lint` / `pnpm check` / pre-commit の引数（判定 `runsBiomeCheckWithErrorOnWarnings`。失敗を無効化するつなぎやフラグも拒否）、`noProcessEnv` が `env.ts` とテスト以外で効くこと（`rules/code/lint.md`） |
-| `package.test.ts` | workspace のすべての `package.json`（リポジトリ直下と `apps/*`）の `dependencies` / `devDependencies` の版が完全固定であること（`workspace:*` だけ例外。判定 `isPinnedVersion` / `isAllowedVersion`、列挙 `listDependencies` / `listWorkspaceManifests`。`rules/code/dependencies.md`） |
+| `package.test.ts` | workspace のすべての `package.json`（リポジトリ直下と `apps/*`）の `dependencies` / `devDependencies` の版が完全固定であること（`workspace:*` だけ例外。判定 `isPinnedVersion` / `isAllowedVersion`、列挙 `listDependencies` / `listWorkspaceManifests`）と、package.json をまたいで同じ名前の依存が同じ版であること（`findInconsistentVersions`。`rules/code/dependencies.md`） |
 | `pnpm-workspace.test.ts` | `minimumReleaseAge` / `minimumReleaseAgeStrict` / `savePrefix` / `allowBuilds` の値（読み取り `readTopLevelSettings`、判定 `findWorkspaceSettingViolations`。`rules/code/dependencies.md`） |
 | `scripts/cloud-session-start.test.ts` | クラウドセッションのスクリプトが `.tool-versions` どおりの版を、検証付きで入れること（`rules/code/env.md`） |
 | `typecheck.test.ts`（Issue #68 で追加） | `pnpm typecheck` がリポジトリ直下と `apps/backend` の tsconfig を `tsc --noEmit` で検査すること（判定 `typechecksAllProjects`。失敗を打ち消すつなぎや `--noCheck` / `false` を渡す書き方も拒否）、CI の `ci.yml` が `pnpm typecheck` を `pnpm build` より前に無条件で実行すること（判定 `runsTypecheckBeforeBuild`）（`rules/code/architecture.md` の tsconfig の節） |

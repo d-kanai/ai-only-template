@@ -75,6 +75,31 @@ function findNonPinnedVersions(manifest: Manifest): Dependency[] {
   );
 }
 
+type Occurrence = { path: string; field: DependencyField; spec: string };
+type Inconsistency = { name: string; occurrences: Occurrence[] };
+
+// workspace の package.json をまたいで、同じ名前の依存が 2 通り以上の版で書かれているものを返す（Issue #68 の段階 2）。
+//   dependencies と devDependencies を区別せずに比べる（同じ package.json の中でのずれも検出する）。
+//   occurrences は、その依存が出てくる場所を manifests の順・フィールドの順に並べたもの（ずれていない場所も含める。
+//   失敗時に、どこをそろえればよいかが出力に出るように）。
+// WHY 版の文字列をそのまま比べる: 版は完全固定（x.y.z か workspace:*）なので、文字列が違えば入る版も違う。
+function findInconsistentVersions(
+  manifests: { path: string; manifest: Manifest }[],
+): Inconsistency[] {
+  const byName = new Map<string, Occurrence[]>();
+  for (const { path, manifest } of manifests) {
+    for (const { field, name, spec } of listDependencies(manifest)) {
+      byName.set(name, [...(byName.get(name) ?? []), { path, field, spec }]);
+    }
+  }
+  return [...byName]
+    .filter(
+      ([, occurrences]) =>
+        new Set(occurrences.map((occurrence) => occurrence.spec)).size > 1,
+    )
+    .map(([name, occurrences]) => ({ name, occurrences }));
+}
+
 function readManifest(path: string): Manifest {
   return JSON.parse(readFileSync(path, "utf8")) as Manifest;
 }
@@ -247,6 +272,94 @@ describe("範囲指定の検出（findNonPinnedVersions）", () => {
   });
 });
 
+describe("workspace の中での版のずれの検出（findInconsistentVersions）", () => {
+  const root = (manifest: Manifest) => ({ path: "package.json", manifest });
+  const backend = (manifest: Manifest) => ({
+    path: "apps/backend/package.json",
+    manifest,
+  });
+
+  it("同じ名前の依存が、すべての package.json で同じ版なら何も検出しない", () => {
+    expect(
+      findInconsistentVersions([
+        root({ devDependencies: { pg: "8.23.0", "@types/pg": "8.23.1" } }),
+        backend({
+          dependencies: { pg: "8.23.0" },
+          devDependencies: { "@types/pg": "8.23.1" },
+        }),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("名前が違えば版が違っても検出しない（前方一致だけが同じ別パッケージも別名）", () => {
+    expect(
+      findInconsistentVersions([
+        root({ devDependencies: { pg: "8.23.0" } }),
+        backend({
+          dependencies: { "pg-format": "1.0.4", "@types/pg": "8.23.1" },
+        }),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("片方の package.json にだけある依存は検出しない", () => {
+    expect(
+      findInconsistentVersions([
+        root({ devDependencies: { vitest: "5.0.1" } }),
+        backend({ dependencies: { "drizzle-orm": "0.45.3" } }),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("リポジトリ直下と app で版が違う依存を、出てくる場所ごとに検出する", () => {
+    expect(
+      findInconsistentVersions([
+        root({ devDependencies: { pg: "8.23.0", typescript: "7.0.2" } }),
+        backend({ dependencies: { pg: "8.22.0" } }),
+      ]),
+    ).toEqual([
+      {
+        name: "pg",
+        occurrences: [
+          { path: "package.json", field: "devDependencies", spec: "8.23.0" },
+          {
+            path: "apps/backend/package.json",
+            field: "dependencies",
+            spec: "8.22.0",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("同じ package.json の dependencies と devDependencies で版が違う依存も検出する", () => {
+    expect(
+      findInconsistentVersions([
+        backend({
+          dependencies: { pg: "8.23.0" },
+          devDependencies: { pg: "8.23.1" },
+        }),
+      ]),
+    ).toEqual([
+      {
+        name: "pg",
+        occurrences: [
+          {
+            path: "apps/backend/package.json",
+            field: "dependencies",
+            spec: "8.23.0",
+          },
+          {
+            path: "apps/backend/package.json",
+            field: "devDependencies",
+            spec: "8.23.1",
+          },
+        ],
+      },
+    ]);
+  });
+});
+
 describe("package.json の実ファイル", () => {
   let dir: string;
 
@@ -365,6 +478,24 @@ describe("package.json の実ファイル", () => {
       ).toBeGreaterThan(0);
     },
   );
+
+  // WHY: 同じパッケージを複数の package.json に置く（pg / @types/pg はリポジトリ直下の E2E 用と apps/backend の両方）と、
+  //   片方だけ版を上げたときに、同じ workspace に同じパッケージの 2 つの版が入り、どちらのコードがどちらの版で動くかが
+  //   package.json を見ても分からなくなる。版を上げるときに両方を上げ忘れないよう、機械的に止める（rules/code/dependencies.md）。
+  it("workspace の package.json をまたいで、同じ名前の依存は同じ版で書かれている", () => {
+    expect(findInconsistentVersions(manifests)).toEqual([]);
+  });
+
+  // WHY: 上の検査は 2 か所以上に出てくる依存が無いと何も比べない。今のリポジトリで比べる対象（pg）が列挙できていることを確かめる。
+  it("2 つ以上の package.json に出てくる依存（pg）を、比べる対象として列挙できる", () => {
+    expect(
+      manifests.filter(({ manifest }) =>
+        listDependencies(manifest).some(
+          (dependency) => dependency.name === "pg",
+        ),
+      ).length,
+    ).toBeGreaterThanOrEqual(2);
+  });
 
   it("workspace のすべての package.json の dependencies / devDependencies は完全固定（x.y.z）か workspace:* で書かれている", () => {
     // 失敗時にどの package.json のどのパッケージがどの値かが出力に出るよう、条件を満たさない依存を集めて空配列と比較する。

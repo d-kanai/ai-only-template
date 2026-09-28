@@ -308,6 +308,8 @@ function referencesOf(root: string, files: string[]): Reference[] {
 //   （playwright.config.ts・vitest.global-setup.ts など。テストは除く）を足す。
 // WHY e2e/ とリポジトリ直下を足す: backend を @repo/backend として使う側（frontend-to-backend-specifier・BACKEND_EXPORTS）の
 //   検査の対象にするため（Issue #68 の段階 2）。ほかの規則は参照元を apps/ の下に絞っているので、足しても影響しない。
+// 限界: リポジトリ直下のほかのディレクトリ（scripts/ の .ts のテスト以外など）は見ない。今は該当するソースが無い
+//   （scripts/ はシェルスクリプトとテストだけ）。そこに backend を参照するソースを置くなら、ここと fixture に足す。
 function listReferencingFiles(root: string): string[] {
   return [
     ...listAllSourceFiles(root),

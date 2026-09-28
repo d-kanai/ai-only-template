@@ -1,4 +1,4 @@
-// apps/frontend の tsconfig（Issue #68）。Next（next build / next dev apps/frontend）が読む。
+// apps/frontend の tsconfig（Issue #68）。Next（pnpm build / pnpm dev → pnpm --filter @repo/frontend → apps/frontend の next build / next dev）が読む。
 // ベースは create-next-app@16.3.6 が生成した tsconfig（Next の plugin、jsx、DOM の型）。
 {
   "compilerOptions": {

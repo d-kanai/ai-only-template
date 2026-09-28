@@ -72,9 +72,10 @@ export default {
   //     ルール検査テスト（architecture.test.ts など）、e2e/: 実装ではない（vitest.config.mts の coverage.include と同じ）。
   //   apps/frontend/shared/ はまだ無い（rules/code/architecture.md）が、作ったときに自動で対象になるよう入れておく。
   // 注意（Issue #68 の段階 2。workspace パッケージ @repo/backend）: "@repo/backend/..." で import したファイルは、サンドボックスの
-  //   中でも変異していない元の apps/backend を読む。Stryker はリポジトリの中の node_modules（リポジトリ直下・apps/frontend・
-  //   apps/backend）をサンドボックスへの symlink にし（@stryker-mutator/core 10.0.0 の sandbox.js の symlinkNodeModulesIfNeeded と
-  //   file-utils.js の findNodeModulesList）、その中の @repo/backend は pnpm が作った相対の symlink（../../../backend など）で、
+  //   中でも変異していない元の apps/backend を読む。Stryker はサンドボックスの中に、元のリポジトリの node_modules（リポジトリ直下・
+  //   apps/frontend・apps/backend）を指す symlink を作り（@stryker-mutator/core 10.0.0 の sandbox.js の symlinkNodeModulesIfNeeded
+  //   の symlinkJunction(path.resolve(nodeModules), path.join(this.workingDirectory, nodeModules)) と file-utils.js の
+  //   findNodeModulesList）、その先の @repo/backend は pnpm が作った相対の symlink（../../../backend など）で、
   //   元のリポジトリの apps/backend に解決されるため（2026-09-28、実行中のサンドボックスで readlink -f して確認）。
   //   今は影響しない: backend のテストは backend の中を相対パスで import する（サンドボックスの変異したファイルを読む）。
   //   "@repo/backend/..." を使うのは、frontend の型だけの import（実行時に消える）、テストの無い app/api と instrumentation-node.ts、
