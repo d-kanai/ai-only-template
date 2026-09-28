@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pkg from "./package.json";
 
-// Biome と Lefthook の導入（rules/code/lint.md）を仕様として固定するテスト。
+// Biome と Lefthook の導入（.claude/rules/lint.md）を仕様として固定するテスト。
 // 設定ファイルの中身を文字列で照合するのではなく、実際に biome / lefthook を起動して「違反が検出されること」を確かめる。
 // 設定を壊した（例: linter を無効にした、pre-commit から biome を消した）ときにテストで気づけるようにするため。
 
@@ -23,7 +23,7 @@ const ERROR_ON_WARNINGS = "--error-on-warnings";
 //   `biome check . && echo --error-on-warnings` のように、別のコマンドの引数に置かれたフラグや、`biome lint` / `biome format` に
 //   付いたフラグを「付いている」と誤判定しないため（Issue #50）。
 // 許す起動の仕方は `biome ...`（package.json の scripts。node_modules/.bin が PATH に入る）と `pnpm exec biome ...`（lefthook）だけ。
-//   npx などは pnpm のみを使う方針（rules/code/env.md）から外れるので、許可しない。
+//   npx などは pnpm のみを使う方針（.claude/rules/env.md）から外れるので、許可しない。
 // WHY `&&` 以外のつなぎ（`||` / `;` / 改行 / `|` / 単独の `&`）を含むコマンドは丸ごと拒否する:
 //   どれも biome check の失敗をコマンド全体の失敗にしない書き方になりうる。`biome check ... || true` は失敗を打ち消し、
 //   `; exit 0` と改行は後ろのコマンドの終了コードになり、`| cat` はパイプの最後のコマンドの終了コードになり、
@@ -144,7 +144,7 @@ describe("biome check（pnpm lint と同じ引数）", () => {
   });
 
   // style/noProcessEnv（Issue #59）: process.env を読んでよいのは apps/backend/shared/infra/env.ts とテストだけ
-  //   （rules/code/env.md の「環境変数」）。既定 severity が info なので、biome.json で error にしている。
+  //   （.claude/rules/env.md の「環境変数」）。既定 severity が info なので、biome.json で error にしている。
   // WHY 一時ディレクトリに置いたファイルで must-reject を確かめる: overrides の includes はリポジトリ直下からの相対パスで
   //   照合され、リポジトリの外のファイルは env.ts と同じ名前（.../apps/backend/shared/infra/env.ts）でも一致しない（2026-09-28 実測）。
   //   そのため「env.ts という名前なら何でも許す」ような緩い overrides になっていないことも、同じ仕組みで確かめられる。

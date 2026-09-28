@@ -14,10 +14,10 @@ import { tmpdir } from "node:os";
 import { dirname, join, posix, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// ディレクトリ構成ルール（rules/code/architecture.md）の依存の向きを、仕様として機械的に検査するテスト。
+// ディレクトリ構成ルール（.claude/rules/backend.md・frontend.md。規則の一覧は .claude/rules/architecture-check.md）の依存の向きを、仕様として機械的に検査するテスト。
 // 対象は「依存の向き（全体）」「画面側とサーバ側の境界」「backend の 4 層の依存してよい先」、apps/frontend と apps/backend の
 // 境界（Issue #68。backend → frontend の禁止、backend の中は相対パスだけ、frontend などから backend へは "@repo/backend/..." の
-// 書き方だけ、apps/backend/package.json の exports の過不足）と、環境変数の直参照の禁止（rules/code/env.md の「環境変数」。
+// 書き方だけ、apps/backend/package.json の exports の過不足）と、環境変数の直参照の禁止（.claude/rules/env.md の「環境変数」。
 // 規則 env-direct-access）。
 //
 // WHY 自前のテストにする（Biome の noRestrictedImports を使わない）:
@@ -28,12 +28,12 @@ import { describe, expect, it } from "vitest";
 //
 // WHY 依存を増やさず正規表現で抽出する: 検査に必要なのは import / export の参照先と「型だけか」の 2 つで、
 //   TypeScript の構文木までは要らない。dependency-cruiser は 18.4.0 の supportedTranspilers.typescript が <7.0.0 で、
-//   本リポジトリの TypeScript 7.0.2 に対応していない（rules/code/architecture.md の「採用しなかった案」）。
+//   本リポジトリの TypeScript 7.0.2 に対応していない（docs/architecture-decisions.md の「採用しなかった案」）。
 //   抽出の限界は stripComments / extractImports の WHY に書き、仕様を下の describe と fixture テストで固定する。
 
 const repoRoot = import.meta.dirname;
 
-// 検査の対象（rules/code/architecture.md の「全体像」。Issue #68 で apps/frontend と apps/backend に分けた）。
+// 検査の対象（.claude/rules/architecture-check.md の「対象と抽出」。Issue #68 で apps/frontend と apps/backend に分けた）。
 //   apps/frontend と apps/backend の全体（再帰）。除くのは依存と生成物のディレクトリ（EXCLUDED_DIRS）だけ。
 // WHY 全体を再帰する（app/・features/・shared/ だけにしない）: 以前は app/・features/・shared/ と直下のファイルだけを見ていたため、
 //   apps/frontend/lib/db.ts のような場所のファイルは、backend の container を値で import しても検査に出なかった（Issue #68 の
@@ -43,7 +43,7 @@ const FRONTEND_ROOT = "apps/frontend";
 const BACKEND_ROOT = "apps/backend";
 
 // WHY テストを対象外にする: テストは組み立てのために規則の外側を参照する（例: presentation のテストが
-//   infra の InMemory リポジトリを new して createTodoContainer に渡す。rules/code/architecture.md の「テストの置き方」）。
+//   infra の InMemory リポジトリを new して createTodoContainer に渡す。.claude/rules/testing.md の「置き方と環境」）。
 //   規則は本番のコードの依存の向きを縛るもので、テストの組み立てまで縛ると正当なテストが書けなくなる。
 // WHY .js / .jsx / .mjs / .cjs と .mts / .cts も対象にする: tsconfig.json が allowJs: true で、include が **/*.ts / **/*.tsx /
 //   **/*.mts を含み、JS のファイルや ESM / CJS を明示した拡張子のファイルも同じビルドに入り、同じ規則の対象になるため。
@@ -424,7 +424,7 @@ function isOwnFeatureApiFile(ref: Reference): boolean {
   );
 }
 
-// 参照元の層ごとに、自 feature と backend/shared の中で参照してよい層（rules/code/architecture.md の 4 層の表）。
+// 参照元の層ごとに、自 feature と backend/shared の中で参照してよい層（.claude/rules/backend.md の 4 層の表）。
 // WHY 許可の一覧で書く: 禁止の一覧だと、書き忘れた参照先（他 feature の層、画面側の shared/ など）が黙って通る。
 //   許可の一覧なら、ここに無い自前コードはすべて違反になる。
 // WHY backend/shared の中も層で縛る: backend/shared も domain / presentation などの層に分かれており、その中で
@@ -504,13 +504,13 @@ type RuleId =
 
 type Rule = {
   id: RuleId;
-  // テスト名。rules/code/architecture.md の文言に対応する仕様文。
+  // テスト名。.claude/rules/architecture-check.md の規則の文に対応する仕様文。
   name: string;
   appliesTo: (from: string) => boolean;
   isViolation: (ref: Reference) => boolean;
 };
 
-// 1 規則 = 1 テスト。規則を足す・変えるときは rules/code/architecture.md と合わせてここと RULE_EXAMPLES（判定の例）を直す。
+// 1 規則 = 1 テスト。規則を足す・変えるときは .claude/rules/architecture-check.md と合わせてここと RULE_EXAMPLES（判定の例）を直す。
 const RULES: Rule[] = [
   {
     // 「frontend（と e2e/・リポジトリ直下の設定ファイル）から backend への参照は "@repo/backend/..." だけ」（Issue #68 の段階 2）。
@@ -656,7 +656,7 @@ const RULES: Rule[] = [
     // 「presentation の依存してよい先: application、domain（Entity の型の参照のみ）、infra/container.ts、backend/shared」
     //   同じ presentation の中の参照（api ファイル間の re-export など）は許す。
     // WHY next も禁止する: api ファイルは Web 標準の Request / Response で書き、Next を起動せずにテストできるようにしているため
-    //   （rules/code/architecture.md の「テストの置き方」）。
+    //   （.claude/rules/testing.md の「置き方と環境」）。
     id: "presentation",
     name: "apps/backend/<f>/presentation/ が参照してよい自前コードは自 feature と apps/backend/shared/ の application/・domain/（feature の domain は型だけ）・presentation/ と自 feature の infra/container だけで、next・react も参照しない",
     appliesTo: (from) => backendLayerOf(from)?.layer === "presentation",
@@ -715,7 +715,7 @@ const RULES: Rule[] = [
 //   かからず、そこから何を参照しても検査を素通りする。層を決めて置かせることで、すべての backend のコードに依存の向きの
 //   検査がかかるようにする。
 // WHY backend/shared/ も同じに扱う（直下を許さない）: backend/shared/ も domain / presentation の層に分けて置いており
-//   （rules/code/architecture.md の「backend/shared/」）、直下を許すと同じ抜け道になるため。
+//   （.claude/rules/backend.md の「置き場所（DDD 4 層）」）、直下を許すと同じ抜け道になるため。
 // WHY 設定ファイルを例外にする: drizzle-kit の設定（drizzle.config.ts）は backend のマイグレーションの設定で、Issue #68 で
 //   apps/backend に置いた。層のコードではなく、依存の規則は backend-to-frontend・backend-relative-only でかける。
 //   直下に限り、名前を <name>.config.<拡張子> に限るのは、層に属さないコードの置き場所にさせないため。
@@ -760,7 +760,7 @@ const FRONTEND_PLACEMENT = {
 // 置き場所の規則（参照ではなくファイルの場所で決まる）。collectViolations で使う。
 const PLACEMENT_RULES = [BACKEND_PLACEMENT, FRONTEND_PLACEMENT];
 
-// --- 環境変数の直参照（規則 env-direct-access。rules/code/env.md の「環境変数」） ---
+// --- 環境変数の直参照（規則 env-direct-access。.claude/rules/env.md の「環境変数」） ---
 // process.env を読んでよいのは apps/backend/shared/infra/env.ts だけ。ほかは env.ts の env / toolEnv を使う。
 // WHY 参照（import）の規則と別に持つ: 参照先ではなくソースの中身（process.env という式）で決まり、対象のファイルも違う
 //   （e2e/ とルート直下の設定ファイルも含める）ため。置き場所の規則（BACKEND_PLACEMENT / FRONTEND_PLACEMENT）と同じく、RULES の外に置く。
@@ -856,7 +856,7 @@ function findEnvViolations(root: string): string[] {
 
 // --- apps/backend/package.json の exports（規則 backend-exports。Issue #68 の段階 2） ---
 // exports は、@repo/backend として外（apps/frontend・e2e/・リポジトリ直下の設定ファイル）に公開するファイルの一覧。
-//   ユーザー判断で、全ファイル（"./*"）ではなく、外が使う入口だけを明示する（rules/code/architecture.md の「exports」）。
+//   ユーザー判断で、全ファイル（"./*"）ではなく、外が使う入口だけを明示する（.claude/rules/backend.md の「import の書き方と公開の範囲（exports）」）。
 // 検査すること（1 つでも破ると「backend-exports: ...」の行を出す）:
 //   (1) 外から "@repo/backend/<path>" で参照するものは、すべて exports のどれかのキーに当たる。
 //       WHY: 当たらないと Next / Vitest / tsc の解決で失敗するが、その前に「どのファイルのどの参照か」を一覧で出す。
@@ -1014,7 +1014,7 @@ function collectViolations(root: string): string[] {
   ].sort();
 }
 
-describe("依存の向き（rules/code/architecture.md）", () => {
+describe("依存の向き（.claude/rules/architecture-check.md）", () => {
   const references = collectReferences(repoRoot);
 
   it("検査の対象から参照を取り出せている（抽出が壊れて 0 件になり、すべての規則が素通りするのを防ぐ）", () => {

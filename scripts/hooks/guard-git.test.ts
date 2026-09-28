@@ -414,7 +414,8 @@ describe("入力を読めないとき", () => {
         tool_input: { command: "git push --force" },
         cwd: featureRepo,
       },
-      { PATH: join(workDir, "no-such-bin") },
+      // WHY process.env を展開する: 型（Next の型定義で NODE_ENV が必須）を満たすため。node を見つけられなくするのは PATH だけで足りる。
+      { ...process.env, PATH: join(workDir, "no-such-bin") },
     );
     expect([result.status, result.stdout]).toEqual([0, ""]);
     expect(result.stderr).toContain("node");

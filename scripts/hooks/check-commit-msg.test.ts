@@ -197,7 +197,7 @@ describe("lefthook.yml の commit-msg", () => {
     // WHY --no-auto-install: lefthook run は設定が変わったと判断すると lefthook install を自動で実行する。
     const repo = join(dir, "repo");
     mkdirSync(join(repo, "scripts", "hooks"), { recursive: true });
-    const gitIn = (args: string[], env: NodeJS.ProcessEnv = {}) =>
+    const gitIn = (args: string[], env: Record<string, string> = {}) =>
       spawnSync(
         "git",
         ["-c", "user.name=t", "-c", "user.email=t@example.com", ...args],

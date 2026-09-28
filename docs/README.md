@@ -13,5 +13,8 @@
 | [testing.md](testing.md) | テストのルールの根拠になった実例と実測 | `.claude/rules/testing.md` |
 | [mutation-testing.md](mutation-testing.md) | Stryker の score・時間の実測、static な変異の分析、vitest-runner の patch の経緯 | `.claude/rules/testing.md` |
 | [claude-code-mechanics.md](claude-code-mechanics.md) | CLAUDE.md・rules・スキル・フック・サブエージェントの公式の仕様と実測 | `CLAUDE.md` |
+| [git-guard.md](git-guard.md) | git 操作の強制（権限・PreToolUse フック・commit-msg）の実測と一次情報 | `.claude/rules/git-guard.md` |
+| [work-log.md](work-log.md) | 作業ログの強制（Stop フック・CI）の実測と経緯 | `.claude/rules/work-log.md` |
+| [worktree.md](worktree.md) | worktree ごとの外部リソースの分離の実測と一次情報 | `.claude/rules/worktree.md` |
 
 - 作業ログ（日ごとの行動・判断）は `logs/`。

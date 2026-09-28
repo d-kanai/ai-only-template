@@ -762,15 +762,15 @@ describe("scripts/cloud-session-start.sh", () => {
     });
   });
 
-  // SessionStart フックで dockerd を起動し、compose.yaml の Postgres を立てる（rules/code/env.md の「クラウドセッション」）。
+  // SessionStart フックで dockerd を起動し、compose.yaml の Postgres を立てる（.claude/rules/cloud-session.md）。
   describe("Postgres の起動（docker compose）", () => {
     const nodeDirIn = () => join(home, ".local", `node-${nodeVersion}`);
     const composePull = `${projectDir} compose pull`;
-    // docker compose pull 1 回の上限（秒）。値の根拠は scripts/cloud-session-start.sh と rules/code/env.md の見積もり。
+    // docker compose pull 1 回の上限（秒）。値の根拠は scripts/cloud-session-start.sh と docs/cloud-session.md の「時間の上限の見積もり」。
     const pullTimeout = 45;
     const timeoutCalls = () => logLines(join(tmp, "timeout.log"));
     const composeUp = `${projectDir} compose up -d --wait --wait-timeout 120`;
-    // pnpm db:migrate 1 回の上限（秒）。値の根拠は scripts/cloud-session-start.sh と rules/code/env.md の見積もり。
+    // pnpm db:migrate 1 回の上限（秒）。値の根拠は scripts/cloud-session-start.sh と docs/cloud-session.md の「時間の上限の見積もり」。
     const migrateTimeout = 15;
     // pnpm db:migrate の呼び出しのログ。url は呼び出し時の DATABASE_URL（スクリプトは差し込まないので、既定は空）。
     const migrate = (url = "") =>
@@ -934,7 +934,7 @@ describe("scripts/cloud-session-start.sh", () => {
       rmSync(dockerReady);
       const result = runScript([], remoteEnv());
       expect(result.status).toBe(0);
-      // 既定のソケット・データ置き場で使うので、引数なしで起動する（rules/code/env.md の実測）
+      // 既定のソケット・データ置き場で使うので、引数なしで起動する（docs/cloud-session.md の実測）
       expect(logLines(dockerdLog)).toEqual(["dockerd "]);
       expect(readFileSync(join(tmp, "dockerd.log"), "utf8")).toContain(
         "fake dockerd started",

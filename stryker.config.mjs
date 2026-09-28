@@ -1,5 +1,5 @@
 // Stryker（mutation testing）の設定。`pnpm test:mutation`（= stryker run）で読み込まれる（Issue #52）。
-// 位置づけと運用は rules/code/test.md の「mutation testing（Stryker）」。
+// 位置づけと運用は .claude/rules/testing.md の「mutation testing（Stryker）」。
 // JSON ではなく .mjs にしているのは、設定ごとの WHY をコメントで残すため（JSON にはコメントを書けない）。
 // 型注釈（@type {import('@stryker-mutator/api/core').PartialStrykerOptions}）は付けない。
 //   @stryker-mutator/api は core の依存で、直接の依存ではないためルートから解決できない（pnpm は直接の依存だけを
@@ -29,7 +29,7 @@ export default {
   //   （dist/src/test-helpers.js と dist/src/stryker-setup.js の各 1 行。pnpm-workspace.yaml の patchedDependencies）。
   //   実測: patch なしで score 26.82%（killed 103 / survived 281）、patch ありで 85.68%（killed 329 / survived 55）。
   //   patch を外す条件: 上流の vitest-runner が Vitest 5 の " > " 区切りに対応した版を出したら、その版に上げて patch を消す
-  //   （rules/code/dependencies.md の「pnpm patch」）。2026-09-28 時点で上流の master の src/test-helpers.ts も
+  //   （.claude/rules/dependencies.md の「pnpm patch」）。2026-09-28 時点で上流の master の src/test-helpers.ts も
   //   スペース区切りのまま（devDependencies の vitest は 4.1.11）。
 
   vitest: {
@@ -53,7 +53,7 @@ export default {
   //   include / exclude / paths にもサンドボックスの外を指すパスが無いため、書き換える対象がそもそも無い
   //   （paths は "@/*" だけで、apps/frontend の中を指す。Issue #68）。extends / references を足すときはこの設定を見直す。
   //   typescript-checker（型エラーになる変異を除く checker）も同じ JS API を使うため、TS 7 では動かないと判断して
-  //   入れていない（rules/code/test.md の「mutation testing（Stryker）」）。
+  //   入れていない（.claude/rules/testing.md の「mutation testing（Stryker）」）。
   tsconfigFile: "stryker-skips-tsconfig-rewrite.json",
 
   // coverageAnalysis は書かない。vitest-runner はこの値を無視し、常に perTest（変異を通るテストだけを実行する）で動く
@@ -66,11 +66,11 @@ export default {
   //   - テスト（*.test.ts / *.test.tsx）と型宣言（*.d.ts）: 変異させる対象（実装）ではない。
   //   - scripts/: いまある実装は cloud-session-start.sh（シェル）だけで、Stryker は JS / TS しか変異させられない。
   //     scripts/ の .ts はテストだけなので、coverage.include の scripts/**/*.ts は入れていない。
-  //   - apps/frontend/app/: ルーティングだけで単体テストを置かない方針（rules/code/architecture.md）。変異させても単体テストで
+  //   - apps/frontend/app/: ルーティングだけで単体テストを置かない方針（.claude/rules/frontend.md）。変異させても単体テストで
   //     落とせないため、生き残りとして数えるだけになる。
   //   - 設定ファイル（リポジトリ直下のもの、apps/frontend/next.config.ts・instrumentation*.ts、apps/backend/drizzle.config.ts）、
   //     ルール検査テスト（architecture.test.ts など）、e2e/: 実装ではない（vitest.config.mts の coverage.include と同じ）。
-  //   apps/frontend/shared/ はまだ無い（rules/code/architecture.md）が、作ったときに自動で対象になるよう入れておく。
+  //   apps/frontend/shared/ はまだ無い（.claude/rules/frontend.md）が、作ったときに自動で対象になるよう入れておく。
   // 注意（Issue #68 の段階 2。workspace パッケージ @repo/backend）: "@repo/backend/..." で import したファイルは、サンドボックスの
   //   中でも変異していない元の apps/backend を読む。Stryker はサンドボックスの中に、元のリポジトリの node_modules（リポジトリ直下・
   //   apps/frontend・apps/backend）を指す symlink を作り（@stryker-mutator/core 10.0.0 の sandbox.js の symlinkNodeModulesIfNeeded
@@ -133,7 +133,7 @@ export default {
   //   - timestamp の { withTimezone: true, mode: "date" } → {}、withTimezone → false、mode → "": mode が "string" で
   //     なければ Date の列になる点は同じ（pg-core/columns/timestamp.js）。withTimezone は型名（DDL）と、ドライバが
   //     文字列を返したときの変換にだけ使われ、node-postgres は timestamptz を Date で返すので実行時の結果は変わらない。
-  //   schema.ts はテーブルの形の宣言で、DDL は drizzle-kit が apps/backend/drizzle/ に生成した SQL で当てる（rules/code/architecture.md）。
+  //   schema.ts はテーブルの形の宣言で、DDL は drizzle-kit が apps/backend/drizzle/ に生成した SQL で当てる（.claude/rules/backend.md）。
   //   Ignored は score の分母に入らない（mutation score = killed / (killed + survived)。ignoreStatic だけを有効にした実行で
   //   killed 505・survived 57・ignored 25 → 89.86% となり、505 / 562 と一致することを確認した）。
   ignoreStatic: true,
@@ -144,7 +144,7 @@ export default {
   //   WHY 100: 等価な変異（変えても振る舞いが変わらず、どのテストでも検出できないもの）は `// Stryker disable` で理由を書いて
   //     除外できる（Ignored は score の分母に入らない）。除外できないものは殺せる変異なので、残りは全部テストで殺す前提にする
   //     （ユーザー判断、Issue #55）。survived が出たら、テストを足して殺すか、等価な変異なら理由付きで disable する
-  //     （rules/code/test.md の「mutation testing（Stryker）」。disable の一覧もそこで管理する）。
+  //     （.claude/rules/testing.md の「mutation testing（Stryker）」。disable の一覧もそこで管理する）。
   //   high 100 / low 95: レポートの色分け。100% だけを緑にする。
   //   経緯: Issue #52 では break を入れず、日次のレポートで実際の score を見てから決めることにしていた（ユーザー判断）。
   //     Issue #55 は当初「95% 以上・break 90（100% は狙わない）」の方針だったが、生き残りを殺して 100% にできたため、

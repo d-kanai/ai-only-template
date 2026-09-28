@@ -118,6 +118,12 @@ describe("check-logs-diff.sh", () => {
       expect(run(["main"]).status).toBe(1);
     });
 
+    it("logs/ の .md を削除しただけの PR は 1 で終わる（追加・変更だけを数える）", () => {
+      git(["rm", "-q", "logs/2026-09-27.md"]);
+      git(["commit", "-q", "-m", "remove log"]);
+      expect(run(["main"]).status).toBe(1);
+    });
+
     it("logs/ の .md 以外のファイル（logs/x.txt）だけなら 1 で終わる", () => {
       commitFiles({ "logs/x.txt": "x\n" });
       expect(run(["main"]).status).toBe(1);

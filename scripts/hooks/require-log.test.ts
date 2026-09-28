@@ -34,13 +34,24 @@ const yesterdayNoon = new Date(
   12,
 );
 const yesterday = localDate(yesterdayNoon);
+// 最後の人間のターンの時刻（transcript の timestamp。実セッションでは ISO 8601 の UTC、ミリ秒付き）。
+// テストの中で作るコミット（既定の日時 = 実行時刻）はこれより後になり、「このターンの間のコミット」になる。
+const turnStart = new Date(now.getTime() - 60_000);
+// このターンより前だが今日（通常は）のコミットの日時。git の raw 形式（<unix 秒> <タイムゾーン>）で渡す。
+// 限界: 0 時の直後 2 分以内に実行すると昨日の日付になるが、その場合も期待値（拒否）は同じ。
+const beforeTurnGitDate = `${Math.floor(turnStart.getTime() / 1000) - 60} +0000`;
 const todayLog = `logs/${today}.md`;
 
 type Entry = Record<string, unknown>;
 
 // transcript の 1 行（Claude Code の JSONL と同じ形。2026-09-28 に実セッションの transcript で type と content の形を確認）。
-const human = (text: string): Entry => ({
+// timestamp に null を渡すと timestamp の無い行になる（undefined だと既定値が入るため null で表す）。
+const human = (
+  text: string,
+  timestamp: string | null = turnStart.toISOString(),
+): Entry => ({
   type: "user",
+  ...(timestamp === null ? {} : { timestamp }),
   message: { role: "user", content: text },
 });
 const humanArray = (text: string): Entry => ({
@@ -228,6 +239,30 @@ describe("require-log.sh（Stop フック）", () => {
       expectBlocked(run(stopInput()));
     });
 
+    it("logs/<今日>.md が、今日だが最後の人間のターンより前のコミットでしか変わっていなければ拒否する", () => {
+      // 1 日の中で 1 度ログをコミットすると、以後のターンが素通りしていた（Issue #64 の worker の実測で 66 件）。
+      writeTranscript(turnWithTool());
+      writeRepoFile(todayLog, "# 今日\n");
+      commit("log", {
+        GIT_AUTHOR_DATE: beforeTurnGitDate,
+        GIT_COMMITTER_DATE: beforeTurnGitDate,
+      });
+      expectBlocked(run(stopInput()));
+    });
+
+    it("最後の人間のターンに timestamp が無ければ今日の 0 時にフォールバックし、昨日のコミットだけなら拒否する", () => {
+      writeTranscript([human("調べて", null), toolUse("t1"), toolResult("t1")]);
+      writeRepoFile(todayLog, "# 今日\n");
+      const yesterdayDate = `${yesterday}T13:00:00`;
+      commit("log", {
+        GIT_AUTHOR_DATE: yesterdayDate,
+        GIT_COMMITTER_DATE: yesterdayDate,
+      });
+      const result = run(stopInput());
+      expectBlocked(result);
+      expect(result.stderr).toContain("今日の 0 時以降のコミットで判定する");
+    });
+
     it("logs/<今日>.md が昨日の日付のコミットにしか無ければ拒否する", () => {
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# 今日\n");
@@ -282,12 +317,43 @@ describe("require-log.sh（Stop フック）", () => {
       expectAllowed(run(stopInput()));
     });
 
-    it("logs/<今日>.md が今日のコミットで変更されていれば（作業ツリーはきれいでも）許可する", () => {
+    it("logs/<今日>.md が最後の人間のターン以降のコミットで変更されていれば（作業ツリーはきれいでも）許可する", () => {
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# 今日\n");
       commit("log");
       expect(git(["status", "--porcelain"])).toBe("");
-      expectAllowed(run(stopInput()));
+      const result = run(stopInput());
+      expectAllowed(result);
+      // timestamp が読めたので、フォールバックの理由は出さない。
+      expect(result.stderr).toBe("");
+    });
+
+    it("最後の人間のターンに timestamp が無ければ今日の 0 時にフォールバックし、今日のコミットなら許可して理由を stderr に出す", () => {
+      writeTranscript([human("調べて", null), toolUse("t1"), toolResult("t1")]);
+      writeRepoFile(todayLog, "# 今日\n");
+      commit("log", {
+        GIT_AUTHOR_DATE: beforeTurnGitDate,
+        GIT_COMMITTER_DATE: beforeTurnGitDate,
+      });
+      const result = run(stopInput());
+      expectAllowed(result);
+      expect(result.stderr).toContain("今日の 0 時以降のコミットで判定する");
+    });
+
+    it("timestamp が日時として読めない値でも今日の 0 時にフォールバックする", () => {
+      writeTranscript([
+        human("調べて", "not-a-date"),
+        toolUse("t1"),
+        toolResult("t1"),
+      ]);
+      writeRepoFile(todayLog, "# 今日\n");
+      commit("log", {
+        GIT_AUTHOR_DATE: beforeTurnGitDate,
+        GIT_COMMITTER_DATE: beforeTurnGitDate,
+      });
+      const result = run(stopInput());
+      expectAllowed(result);
+      expect(result.stderr).toContain("今日の 0 時以降のコミットで判定する");
     });
 
     it("cwd がリポジトリのサブディレクトリでも、リポジトリ直下の logs/<今日>.md の変更を見て許可する", () => {

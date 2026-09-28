@@ -47,7 +47,7 @@ export default defineConfig({
     exclude: [...configDefaults.exclude, "e2e/**", ".stryker-tmp/**"],
     // globalSetup: テストファイルを動かす前に 1 回だけ実行する処理（Vitest のプロセスで動く）。
     //   前の実行が残したテスト用のスキーマ（test_<UUID>）を消し、Postgres に接続できなければ分かりやすいエラーで止める
-    //   （Issue #57。WHY は vitest.global-setup.ts と rules/code/test.md）。
+    //   （Issue #57。WHY は vitest.global-setup.ts と .claude/rules/testing.md）。
     globalSetup: ["./vitest.global-setup.ts"],
     // coverage: 単体テストのカバレッジを計測し、100% に満たなければ失敗させる（Issue #45）。
     //   `vitest run --coverage`（= pnpm test）のときだけ有効。enabled は既定の false のままにし、
@@ -60,18 +60,18 @@ export default defineConfig({
       //   テストが 1 度も触らないファイルが計測から漏れる（Vitest 5.0.1 の型定義「By default only files covered by
       //   tests are included」）。テストを置くべきディレクトリを明示し、触られていないファイルも 0% として数える。
       //   含めないもの（ユーザー判断。Issue #45）:
-      //   - apps/frontend/app/: ルーティングだけで、テストを置かない方針（rules/code/architecture.md の「`app/`（ルーティング）」）。
+      //   - apps/frontend/app/: ルーティングだけで、テストを置かない方針（.claude/rules/frontend.md の「app/（ルーティングだけ）」）。
       //     仕様は screen と api ファイルのテストで固定し、app/ の結線は E2E（pnpm test:e2e）で確かめる。
       //   - 設定ファイル（リポジトリ直下の playwright.config.ts など、apps/frontend/next.config.ts、
       //     apps/backend/drizzle.config.ts）: ツールに渡す値を並べるだけで、単体テストで検証する振る舞いを持たない。
       //     apps/frontend 直下の Next の規約ファイル instrumentation.ts / instrumentation-node.ts（起動時の環境変数の検証。Issue #59）も
       //     含めない: next start / next dev の起動でだけ動き、プロセスを終える処理なので、起動時に止まることを実測で確かめている
-      //     （rules/code/env.md の「環境変数」）。検証の中身は env.ts（計測の対象）のテストで固定している。
+      //     （.claude/rules/env.md の「環境変数」）。検証の中身は env.ts（計測の対象）のテストで固定している。
       //   - e2e/: Playwright の E2E テストそのもの（Vitest では実行しない。上の test.exclude）。
       //   - scripts/ のシェルスクリプト（.sh）: include に入れても、@vitest/coverage-v8 が JS として解析しようとして
       //     失敗し、「Failed to parse ... cloud-session-start.sh. Excluding it from coverage.」とエラーを出して結局外す
       //     （2026-09-28 に実測）。テスト（scripts/*.test.ts）が子プロセスで実行する bash の中身は計測されない。
-      //   apps/frontend/shared/ はまだ無い（rules/code/architecture.md）が、作ったときに自動で対象になるよう入れておく。
+      //   apps/frontend/shared/ はまだ無い（.claude/rules/frontend.md）が、作ったときに自動で対象になるよう入れておく。
       //   apps/backend/ は全体を対象にし、直下の drizzle.config.ts だけを下の exclude で外す（apps/backend/ の中は
       //   drizzle.config.ts 以外すべて 4 層の下にある。architecture.test.ts の backend-placement）。
       include: [

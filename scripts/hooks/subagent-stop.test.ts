@@ -97,7 +97,7 @@ function readHook(name: string) {
   return readFileSync(join(mainRepo, ".git", "hooks", name), "utf8");
 }
 
-function run(cwd: string, env: NodeJS.ProcessEnv = {}) {
+function run(cwd: string, env: Record<string, string> = {}) {
   const input = {
     session_id: "s",
     transcript_path: "/dev/null",

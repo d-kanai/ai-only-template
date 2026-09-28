@@ -3,7 +3,7 @@ import { boolean, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 // todos テーブルの定義（Drizzle のスキーマ）。
 // WHY スキーマを TypeScript で宣言し、SQL はここから生成する（codebase-first）: テーブルの形の正をこのファイルに置き、
 //   `pnpm db:generate`（drizzle-kit generate）が前回との差分からマイグレーションの SQL（drizzle/）を作る。
-//   手で SQL を書くと、このファイルと DB の形がずれても気づけない。変え方は rules/code/architecture.md の「永続化」。
+//   手で SQL を書くと、このファイルと DB の形がずれても気づけない。変え方は .claude/rules/backend.md の「永続化（Drizzle + Postgres）」。
 // WHY infra に置く: テーブルの形は永続化の都合で、domain（Todo）は知らない。Todo との変換は
 //   todo-repository.postgres.ts が行う。
 export const todos = pgTable("todos", {

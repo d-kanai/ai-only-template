@@ -7,8 +7,8 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-// pnpm-workspace.yaml のサプライチェーン保護と版の書き方の設定（rules/code/dependencies.md）を仕様として固定するテスト。
-// ルール検査テスト（rules/code/test.md）なので、読み取り（readTopLevelSettings）と判定（findWorkspaceSettingViolations）を
+// pnpm-workspace.yaml のサプライチェーン保護と版の書き方の設定（.claude/rules/dependencies.md）を仕様として固定するテスト。
+// ルール検査テスト（.claude/rules/testing.md）なので、読み取り（readTopLevelSettings）と判定（findWorkspaceSettingViolations）を
 // 関数に切り出し、許可される例（must pass）と違反の例（must reject）の両方で固定する。
 
 const repoRoot = import.meta.dirname;
@@ -122,7 +122,7 @@ function readTopLevelSettings(yaml: string): Settings {
 //   - minimumReleaseAgeStrict: true: 非 strict だと条件を満たす版がないときに古い版へ黙ってフォールバックし、
 //     lockfile の内容が意図しない版に変わりうる。失敗させて人間・AI に気づかせる。
 //   - savePrefix: ''（空文字）: `pnpm add <pkg>` で版を書き忘れても範囲指定（既定の '^'）にならないようにする
-//     （依存は完全固定。rules/code/dependencies.md）。
+//     （依存は完全固定。.claude/rules/dependencies.md）。
 //   - allowBuilds: 依存のビルドスクリプト（postinstall 等）は任意コードを実行できるため、許可・不許可をパッケージごとに
 //     レビューして決めている（各パッケージの理由は pnpm-workspace.yaml のコメント）。許可（true）が黙って増えたり、
 //     lefthook（pre-commit の導入に必要）が false になったりしないよう、中身を丸ごと比較する。
@@ -414,7 +414,7 @@ describe("設定の読み取りと判定（must reject）", () => {
   });
 
   it("トップレベルのキーが重複していると例外にする", () => {
-    // WHY toThrow(Error) と message の両方: toThrow("文字列") は throw undefined でも通る（rules/code/test.md）。
+    // WHY toThrow(Error) と message の両方: toThrow("文字列") は throw undefined でも通る（.claude/rules/testing.md）。
     expect(() =>
       readTopLevelSettings(`${VALID_YAML}minimumReleaseAge: 1440\n`),
     ).toThrow(
@@ -438,7 +438,7 @@ describe("pnpm-workspace.yaml の実ファイル", () => {
   });
 
   // 読み込み → 読み取り → 判定を、本番と同じ readWorkspaceSettings で実ファイルから通す
-  //   （rules/code/test.md の「判定だけでなく、実ファイルで end-to-end に通す」）。
+  //   （.claude/rules/testing.md の「ルール検査テスト」）。
   it("違反を含む pnpm-workspace.yaml からは、違反の設定と実際の値をすべて検出する", () => {
     const file = join(dir, "pnpm-workspace.yaml");
     writeFileSync(
