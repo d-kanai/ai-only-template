@@ -322,6 +322,32 @@ describe("scripts/cloud-session-start.sh", () => {
       expect(result.stdout).not.toContain("pnpm install --frozen-lockfile");
       expect(readFileSync(envFile, "utf8")).toBe("export EXISTING=1\n");
     });
+
+    // 既存インストールの検出（find_installed_node_dir）の確認。フックでは導入を一時停止しているので、
+    // 検出を通る経路は --install-only だけになった。ここで確かめないと、検出が壊れて毎回ダウンロードしても気づけない。
+    it.each([
+      ["$HOME/.local", () => join(home, ".local", `node-${nodeVersion}`)],
+      ["/opt", () => join(optDir, `node-${nodeVersion}`)],
+    ])(
+      "既存インストール（%s）があればダウンロード予定を出さず、その node_dir に pnpm を入れる予定を出し、CLAUDE_ENV_FILE に書かない",
+      (_label, nodeDirOf) => {
+        const nodeDir = nodeDirOf();
+        placeFakeNode(nodeDir);
+
+        const result = runScript(["--install-only"], {
+          CLAUDE_ENV_FILE: envFile,
+          CLOUD_SESSION_START_DRY_RUN: "1",
+        });
+
+        expect(result.status).toBe(0);
+        expect(result.stdout).not.toContain(nodeTarballUrl);
+        expect(result.stdout).not.toContain("SHASUMS256.txt");
+        expect(result.stdout).toContain(
+          `npm install -g pnpm@${pnpmVersion} --prefix ${nodeDir}`,
+        );
+        expect(readFileSync(envFile, "utf8")).toBe("export EXISTING=1\n");
+      },
+    );
   });
 
   // 偽の curl でダウンロードを差し替え、取得 → SHASUMS 検証 → 展開 → 配置 の実処理を通す。
