@@ -172,6 +172,7 @@ backend/
 - feature 同士は原則 import しない。必要なときは相手の `index.ts` だけを import する。
 - `shared/` は `features/` を import しない（逆向きの依存を作らない）。
 - 検査: 現状はこのルール文書だけで、機械的な検査（Biome の `noRestrictedImports` など）は入れていない。検査できるかは未確認で、別 Issue で検討する。
+  - テストの書き方の要件（must pass / must reject、fault injection）は `rules/code/test.md`。
 
 ## 命名
 - ディレクトリとファイル: kebab-case（例: `todo-screen/`、`create-todo.command.ts`、`todo-repository.in-memory.ts`）。
