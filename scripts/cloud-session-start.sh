@@ -1,11 +1,13 @@
 #!/bin/bash
-# クラウドセッション（Claude Code on the web）の VM に、.tool-versions と同じ Node.js / pnpm を用意する。
+# クラウドセッション（Claude Code on the web）の VM に、.tool-versions と同じ Node.js / pnpm を用意し、
+# compose.yaml の Postgres を起動する（フックのときだけ）。
 # 詳細・役割分担は rules/code/env.md の「クラウドセッション」を参照。
 #
 # 使い方:
 #   bash scripts/cloud-session-start.sh --install-only  # 環境設定の setup script から呼ぶ。Node / pnpm のインストールだけ行う
 #   bash scripts/cloud-session-start.sh                 # SessionStart フック（.claude/settings.json）から呼ぶ。
-#                                                       #   CLAUDE_CODE_REMOTE=true のときだけ動き、PATH の書き出しと pnpm install を行う
+#                                                       #   CLAUDE_CODE_REMOTE=true のときだけ動き、PATH の書き出しと pnpm install、
+#                                                       #   dockerd の起動と docker compose pull / up（Postgres）を行う
 #   bash scripts/cloud-session-start.sh --print-plan    # 読み取った版とインストール先を表示するだけ（テスト・確認用）
 #   CLOUD_SESSION_START_DRY_RUN=1 ...                   # ダウンロード・インストールをせず、実行予定のコマンドを表示する
 #
@@ -420,6 +422,115 @@ install_dependencies() {
   fi
 }
 
+# docker のデーモンが使えるようにする。動いていなければ dockerd をバックグラウンドで起動し、docker info が通るまで待つ。
+# WHY フックで起動するか: クラウド VM には docker CLI・dockerd・containerd・Compose プラグインが入っているが、
+#   デーモンは起動していない（2026-09-28 実測。docker info が失敗する）。VM はセッションごとに新しく、
+#   セッション中に起動したプロセスは次のセッションに残らないので、毎セッション起動する。
+# WHY 既定のソケット（/var/run/docker.sock）・データ置き場（/var/lib/docker）のまま起動するか: root で dockerd を
+#   引数なしで起動すると、約 1 秒で /var/run/docker.sock で待ち受けた（2026-09-28 実測）。既定のままなら
+#   DOCKER_HOST を CLAUDE_ENV_FILE に書き出す必要がなく、以降の Bash の docker / docker compose もそのまま動く。
+# WHY setsid nohup で切り離すか: dockerd はフックが終わった後もセッション中ずっと動いている必要がある。フックの
+#   プロセスグループやセッションが終わるときのシグナルで一緒に止まらないよう、別セッションにする。
+#   setsid は util-linux のコマンドで macOS には無いので、無ければ nohup だけで起動する（テストを macOS でも動かすため）。
+# WHY 標準入出力をすべて付け替えるか: バックグラウンドの dockerd がフックの stdout / stderr を握ったままだと、
+#   フックの呼び出し側が出力の終わりを待ち続けうる（spawnSync のテストでも同じ）。出力はログファイルに残し、
+#   起動に失敗したときに読めるようにする。ログは ${TMPDIR:-/tmp}/dockerd.log（テストで一時ディレクトリに差し替えるため TMPDIR に従う）。
+# WHY 待つのは 30 秒か: 実測では 1 秒程度で使えるようになる。30 秒かかるなら起動に失敗しているとみなし、
+#   フックの 600 秒打ち切りに近づく前に諦める。CLOUD_SESSION_START_DOCKER_WAIT_SECONDS はテストで待ち時間を
+#   縮めるための差し替え口。
+# 失敗したら warn を出して失敗を返す（呼び出し側で Postgres の起動を飛ばす）。
+ensure_docker_daemon() {
+  if ! command -v docker >/dev/null 2>&1; then
+    warn "docker not found; skipping Postgres"
+    return 1
+  fi
+  if docker info >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! command -v dockerd >/dev/null 2>&1; then
+    warn "docker daemon is not running and dockerd not found; skipping Postgres"
+    return 1
+  fi
+
+  local log="${TMPDIR:-/tmp}/dockerd.log"
+  local wait_seconds="${CLOUD_SESSION_START_DOCKER_WAIT_SECONDS:-30}"
+  if is_dry_run; then
+    echo "[dry-run] setsid nohup dockerd </dev/null >${log} 2>&1 &"
+    echo "[dry-run] wait up to ${wait_seconds}s until docker info succeeds"
+    return 0
+  fi
+
+  if command -v setsid >/dev/null 2>&1; then
+    setsid nohup dockerd </dev/null >"$log" 2>&1 &
+  else
+    nohup dockerd </dev/null >"$log" 2>&1 &
+  fi
+
+  local deadline=$((SECONDS + wait_seconds))
+  until docker info >/dev/null 2>&1; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      warn "docker daemon did not become ready within ${wait_seconds}s; see ${log}"
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+# compose.yaml の Postgres のイメージを取得してから起動し、healthcheck が通る（healthy になる）まで待つ。
+# WHY pull を分けて再試行するか: イメージの取得はネットワークに左右される唯一の段で、一時的な失敗（レート制限・
+#   通信の切断）で Postgres が起動しないのを減らすため。2026-09-28 のクラウド VM では Docker Hub の匿名 pull が
+#   429（出口 IP の残り回数 0）で失敗し、直後の再試行では通った。イメージは compose.yaml で mirror.gcr.io に
+#   しているが、ミラーでも一時的な失敗はありうるので再試行は残す。
+#   最大 3 回、間隔は 2 秒・4 秒（倍々）。最後の失敗の後は待たない。取得済みのイメージなら pull は数秒で終わる。
+# WHY --wait: コンテナの起動だけでなく healthcheck（pg_isready）が通るまで待つ。フックが終わった時点で
+#   psql やアプリから接続できる状態にするため。
+# WHY --wait-timeout 120: healthcheck は約 30 秒（2 秒 × 15 回）で unhealthy になり --wait は失敗で返るが、
+#   コンテナの作成・起動そのものが止まった場合にも上限を設け、フックの 600 秒打ち切りに近づく前に諦める。
+#   pull は up の前に済ませているので、この 120 秒に pull の時間は含まれない。実測では 3 秒で healthy になった。
+# WHY 出力を stderr に回すか: SessionStart フックの stdout は Claude のコンテキストに入るため、pull の進捗などで
+#   埋めない（pnpm install と同じ）。
+# イメージの pull は毎セッション行う（約 10 秒、2026-09-28 実測）。setup script（--install-only）で pull して
+#   環境キャッシュに残す案は、キャッシュに /var/lib/docker が含まれるかを確かめていないため入れていない。
+start_database() {
+  local project_dir="$1"
+  if is_dry_run; then
+    echo "[dry-run] (cd ${project_dir} && docker compose pull) up to 3 times, waiting 2s / 4s between attempts"
+    echo "[dry-run] (cd ${project_dir} && docker compose up -d --wait --wait-timeout 120)"
+    return 0
+  fi
+
+  local attempt delay=2
+  for attempt in 1 2 3; do
+    if (cd "$project_dir" && docker compose pull >&2); then
+      break
+    fi
+    if [ "$attempt" -eq 3 ]; then
+      warn "docker compose pull failed 3 times; skipping Postgres"
+      return 1
+    fi
+    sleep "$delay"
+    delay=$((delay * 2))
+  done
+
+  if ! (cd "$project_dir" && docker compose up -d --wait --wait-timeout 120 >&2); then
+    warn "docker compose up -d --wait --wait-timeout 120 failed; run it manually to see the details"
+    return 1
+  fi
+}
+
+# フック: Node / pnpm を用意して pnpm install する。失敗しても呼び出し側は続けて Postgres を起動する。
+setup_node_and_dependencies() {
+  local node_version="$1" pnpm_version="$2" project_dir="$3"
+  NODE_DIR=""
+  ensure_node "$node_version" || return 0
+
+  # setup script で入れ済みなら、ここはダウンロードせず PATH の書き出しと pnpm install だけの速い経路になる。
+  # pnpm の導入より先に PATH を書き出す: pnpm の導入に失敗しても、少なくとも .tool-versions の Node は使えるようにするため。
+  export_path "$NODE_DIR/bin"
+  install_pnpm "$pnpm_version" "$NODE_DIR" || return 0
+  install_dependencies "$project_dir" || return 0
+}
+
 main() {
   local mode="hook"
   case "${1:-}" in
@@ -484,20 +595,21 @@ main() {
     return 0
   fi
 
-  NODE_DIR=""
-  ensure_node "$node_version" || return 0
-
   if [ "$mode" = "install-only" ]; then
     # setup script ではセッションがまだ無いので、PATH の書き出しと pnpm install はしない（フック側の仕事）。
+    # docker も触らない: setup script の後にキャッシュされるのはファイルシステムのスナップショット（公式 cloud-environments
+    #   ドキュメント）なので、ここで起動したデーモン（プロセス）はセッションに残らない。イメージの事前 pull は start_database のコメント。
+    NODE_DIR=""
+    ensure_node "$node_version" || return 0
     install_pnpm "$pnpm_version" "$NODE_DIR" || return 0
     return 0
   fi
 
-  # フック: setup script で入れ済みなら、ここはダウンロードせず PATH の書き出しと pnpm install だけの速い経路になる。
-  # pnpm の導入より先に PATH を書き出す: pnpm の導入に失敗しても、少なくとも .tool-versions の Node は使えるようにするため。
-  export_path "$NODE_DIR/bin"
-  install_pnpm "$pnpm_version" "$NODE_DIR" || return 0
-  install_dependencies "$project_dir" || return 0
+  # WHY Node / pnpm の失敗で Postgres の起動を止めないか: Postgres はコンテナで動き、Node に依存しない。
+  #   Node の取得に失敗しても（VM 既定の Node 22 で作業は続けられる）、DB は使えるようにしておく。
+  setup_node_and_dependencies "$node_version" "$pnpm_version" "$project_dir"
+  ensure_docker_daemon || return 0
+  start_database "$project_dir" || return 0
 }
 
 # サブシェルで実行する: set -u の違反など想定外の理由で main が異常終了しても、下の exit 0 まで到達させるため。

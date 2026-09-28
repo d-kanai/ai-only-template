@@ -49,14 +49,14 @@ Claude Code on the web（クラウドセッション）では asdf が使えな�
 - セッション中にインストールしたものは次のセッションに残らない（VM が毎回新しいため）。残るのは setup script が書いたファイルだけ（環境キャッシュ = ファイルシステムのスナップショット）。
 - 役割分担（公式 cloud-environments / hooks ドキュメント）:
   - **setup script（推奨）**: 環境設定ダイアログに書く。root で実行され、約 5 分以内に終わればファイルシステムがキャッシュされ、以後のセッションは setup script を飛ばしてキャッシュから始まる。重い作業（Node のダウンロード・展開、pnpm の導入）はここで行う。
-  - **SessionStart フック**: `.claude/settings.json` の `hooks.SessionStart`（matcher `startup|resume`）が毎セッション（resume を含む）`scripts/cloud-session-start.sh` を実行する。軽い作業だけにする。既存のインストールを見つけて PATH を書き出し、`pnpm install --frozen-lockfile` を行う。setup script を設定していない場合は、フックが自分で Node / pnpm を入れる（フォールバック）。
+  - **SessionStart フック**: `.claude/settings.json` の `hooks.SessionStart`（matcher `startup|resume`）が毎セッション（resume を含む）`scripts/cloud-session-start.sh` を実行する。軽い作業だけにする。既存のインストールを見つけて PATH を書き出し、`pnpm install --frozen-lockfile` を行う。setup script を設定していない場合は、フックが自分で Node / pnpm を入れる（フォールバック）。続けて `dockerd` を起動し、`docker compose pull`（再試行つき）と `docker compose up -d --wait --wait-timeout 120` で Postgres を立ち上げる（下の「Docker / Postgres」）。
   - JSON にはコメントを書けないため、フックの説明はこの節に書く。
 - 環境設定ダイアログの setup script に貼る内容:
   ```
   bash scripts/cloud-session-start.sh --install-only
   ```
   - リポジトリがクローン済みのカレントディレクトリで実行される前提。setup script がクローン前に走る可能性は未確認。その場合は相対パスでスクリプトが見つからないので、スクリプトの内容を直接貼る（`.tool-versions` も読めないため、版は貼る側で合わせる必要がある）。
-  - `--install-only` は Node / pnpm のインストールだけを行い、`CLAUDE_CODE_REMOTE` は見ない（setup script は Claude の起動前に走るため、この変数が無い可能性がある。未確認）。PATH の書き出しと `pnpm install` はしない。
+  - `--install-only` は Node / pnpm のインストールだけを行い、`CLAUDE_CODE_REMOTE` は見ない（setup script は Claude の起動前に走るため、この変数が無い可能性がある。未確認）。PATH の書き出しと `pnpm install` はしない。docker も触らない（起動したデーモンはセッションに引き継がれない。イメージの事前 pull は下の「Docker / Postgres」）。
 - スクリプトの動き:
   - 版は `.tool-versions` の `nodejs` / `pnpm` の行から読む。スクリプトに直書きしない（`.tool-versions` が正）。
   - インストール先: `/opt` に書き込めれば `/opt/node-<版>`（setup script は root）、書けなければ `$HOME/.local/node-<版>`（フックの実行ユーザーは未確認）。検出は `/opt/node-<版>` → `$HOME/.local/node-<版>` の順で両方を見る。
@@ -67,6 +67,13 @@ Claude Code on the web（クラウドセッション）では asdf が使えな�
   - 何が失敗しても exit 0 で終わる（stderr に理由を出す）。setup script は exit 0 以外だとセッションが開始できない（公式）。フックも、失敗しても VM 既定の Node 22 でセッションは続けられる。
   - curl には `--connect-timeout 15` と `--max-time`（数十 MB の tarball は 60 秒、SHASUMS256.txt・レジストリのメタデータ・1 MB の pnpm tarball は 20 秒）を付けている。通信が止まったままフックの 600 秒打ち切りに達しないようにするため。最悪ケース（nodejs.org の 2 回が上限まで粘って失敗し、レジストリで Node 2 回・pnpm 4 回を取得）の合計は、接続タイムアウトも足す保守的な見積もりで (15 + 60) + (15 + 20) + (15 + 20) + (15 + 60) + (15 + 20) + (15 + 20) + (15 + 20) + (15 + 60) = 400 秒（`--max-time` は接続を含む全体の上限なので、実際は max-time の和の 280 秒が上限）。実測はいずれも数秒なので、60 秒かかるなら止まっているとみなせる。setup script の約 5 分はキャッシュされるかどうかの目安で、超えても失敗はしない。
   - アーキテクチャは x86_64 / aarch64 のみ対応。それ以外は何も入れない。
+- Docker / Postgres（Issue #51。フックのときだけ）:
+  - 前提（2026-09-28 実測）: クラウド VM には `docker` CLI 29.3.1、`/usr/bin/dockerd`、`containerd`、Compose プラグイン v5.1.1（`/usr/libexec/docker/cli-plugins/docker-compose`）、`psql` が入っているが、デーモンは起動していない（`docker info` が失敗する）。Podman は無い。
+  - スクリプトの動き: `docker info` が通れば何もしない。通らなければ `setsid nohup dockerd </dev/null >${TMPDIR:-/tmp}/dockerd.log 2>&1 &` でバックグラウンドに起動し（`setsid` が無ければ `nohup` だけ）、`docker info` が通るまで最大 30 秒待つ。その後リポジトリ直下で `docker compose pull` を最大 3 回（失敗したら 2 秒・4 秒待って再試行）実行し、続けて `docker compose up -d --wait --wait-timeout 120` で `compose.yaml` の healthcheck（`pg_isready`）が healthy になるまで待つ（上限 120 秒。pull は含まない）。どの段で失敗しても warn を出して exit 0（Node と同じ設計）。Node / pnpm の導入に失敗しても Postgres の起動は行う（Postgres は Node に依存しない）。`docker` / `dockerd` が無ければ warn を出して飛ばす。
+  - 既定のソケット（`/var/run/docker.sock`）とデータ置き場（`/var/lib/docker`）のまま使える: root で `dockerd` を引数なしで起動すると約 1.1 秒で `API listen on /var/run/docker.sock` になった（storage driver は overlayfs）。そのため `DOCKER_HOST` を `CLAUDE_ENV_FILE` に書き出す必要はなく、以降の Bash の `docker` / `pnpm db:psql` もそのまま動く。
+  - 実測（この VM、2026-09-28、イメージは `mirror.gcr.io/library/postgres:18-alpine`）: `docker pull` 単体は約 10.5 秒。デーモン停止・イメージ未取得の状態から、スクリプト全体（Node / pnpm はインストール済み → `pnpm install` → `dockerd` 起動 → pull → up で healthy）は 14.7 秒。2 回目（デーモン・コンテナ起動済み。pull は取得済みの確認だけ）は 2.5 秒。`docker compose exec -T db psql -U app -d app -c 'select version()'` は `PostgreSQL 18.6 on x86_64-pc-linux-musl`、ホストの `psql postgresql://app:app@localhost:5432/app` でも接続できた。
+  - Docker Hub のレート制限（イメージをミラーにした理由）: Docker Hub（`postgres:17-alpine`）で試したときは、1 回目の pull が `429 Too Many Requests` になり Postgres が起動しなかった（スクリプトは warn を出して exit 0）。直後の再試行では pull できた。レート制限の確認用 manifest の HEAD では `ratelimit-limit: 100;w=3600`、`ratelimit-remaining: 0`、`docker-ratelimit-source: 160.79.106.139`（クラウドの出口 IP。他の利用者と共有しているとみられる。共有かは未確認）。そのため `compose.yaml` のイメージは `mirror.gcr.io`（Google が運営する Docker Hub のミラー。匿名で manifest の取得・pull ができた）から取り、あわせて pull を再試行する（Issue #51 での判断）。mirror.gcr.io 側のレート制限の有無は未確認。
+  - setup script（`--install-only`）でイメージを pull しておく案は入れていない。環境キャッシュ（ファイルシステムのスナップショット）に `/var/lib/docker` が含まれ、次のセッションの `dockerd` がそれを使えるかを確かめていないため（未確認）。
 - ローカルでもフックは毎回実行されるが、`CLAUDE_CODE_REMOTE` が `true` でなければ何もしない（ローカルは asdf を使う）。
 - setup script を使わない場合は、**毎セッション**フックが Node / pnpm をダウンロードする（VM が毎回新しく、セッション中のインストールは残らないため）。そのぶん毎回の開始が遅くなる（上の実測で数秒）。
 - `.tool-versions` の Node / pnpm を上げたとき:
@@ -76,8 +83,10 @@ Claude Code on the web（クラウドセッション）では asdf が使えな�
   ```
   bash scripts/cloud-session-start.sh --print-plan   # 読み取った版・インストール先・インストール済みかを表示するだけ
   CLOUD_SESSION_START_DRY_RUN=1 bash scripts/cloud-session-start.sh --install-only                  # setup script の実行予定を表示するだけ
-  CLAUDE_CODE_REMOTE=true CLOUD_SESSION_START_DRY_RUN=1 bash scripts/cloud-session-start.sh      # フックの実行予定を表示するだけ（CLAUDE_ENV_FILE があれば PATH は書く）
+  CLAUDE_CODE_REMOTE=true CLOUD_SESSION_START_DRY_RUN=1 bash scripts/cloud-session-start.sh      # フックの実行予定を表示するだけ（CLAUDE_ENV_FILE があれば PATH は書く。デーモンが動いていなければ dockerd の起動予定も出す）
   ```
 - 検証状況（2026-09-28 時点）:
   - クラウド VM 上で確認済み: スクリプトを `CLAUDE_CODE_REMOTE=true` で直接実行すると、nodejs.org が 403 → レジストリへのフォールバックで `/opt/node-24.21.0/bin/node --version` が v24.21.0、`/opt/node-24.21.0/bin/pnpm --version` が 12.7.0 になり、`CLAUDE_ENV_FILE` に PATH の行が追記され、`pnpm install --frozen-lockfile` まで通った（3.6 秒）。2 回目はインストール済みとして取得をせず 0.06 秒で終わった。テスト（`scripts/cloud-session-start.test.ts`）も通る。
+  - クラウド VM 上で確認済み（Issue #51）: `CLAUDE_CODE_REMOTE=true` で直接実行すると、`dockerd` の起動から Postgres が healthy になるまで通った（上の「Docker / Postgres」の実測）。
+  - 未確認: SessionStart フックとして起動したときに `dockerd` がフックの終了後も動き続けるか（`setsid nohup` で切り離しているが、フックとしての実行では確かめていない）。
   - 未確認: SessionStart フックとして起動したときにこの経路で成功し、書き出した PATH で以降の Bash の `node --version` / `pnpm --version` が `.tool-versions` どおりになるか。setup script に設定したときの動き。次のクラウドセッションで確認し、結果をここに反映する。

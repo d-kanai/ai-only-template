@@ -1,0 +1,57 @@
+# 開発用の PostgreSQL を Docker Compose で起動する（Issue #51）。
+# 同じこのファイルを 3 つの環境で使う:
+#   - 手元: `pnpm db:up`（Docker Desktop などの docker compose。Podman なら `podman compose up -d --wait`）
+#   - GitHub Actions: .github/workflows/ci.yml の「Start Postgres」ステップ
+#   - Claude Code のクラウドセッション: SessionStart フック（scripts/cloud-session-start.sh）が dockerd を起動してから up する
+# WHY ファイル名が compose.yaml か: Compose Specification の推奨名で、docker compose / podman compose のどちらも
+#   カレントディレクトリのこの名前を自動で読む（-f の指定が要らない）。
+# アプリからの接続（DATABASE_URL を読む実装）は別 Issue。今回はコンテナの起動と psql での接続まで。
+
+services:
+  # サービス名 db: `docker compose exec db psql ...`（package.json の db:psql）で使う名前。
+  db:
+    # PostgreSQL 18 の Alpine 版（Docker 公式イメージ postgres を、Google の Docker Hub ミラーから取る）。
+    # WHY mirror.gcr.io から取るか: Docker Hub の匿名 pull は出口 IP ごとに 100 回/時のレート制限がある。
+    #   クラウド VM は出口 IP を他と共有しており、2026-09-28 に残り 0 回（ratelimit-remaining: 0）で pull が 429 になった。
+    #   mirror.gcr.io は Docker Hub の公開イメージのミラーで、匿名で manifest を取得でき（200）、pull もできた。
+    #   GitHub Actions・手元でも同じイメージ名を使うので、どの環境でも Docker Hub のレート制限を避けられる。
+    #   中身は Docker Hub の library/postgres と同じ（ミラーのため）。
+    # WHY 18: 2026-09-28 時点の最新メジャー（mirror.gcr.io のタグ一覧に 18-alpine があり、19-alpine は無い）。
+    #   この VM で pull・起動・psql 接続まで動いた（PostgreSQL 18.6）。
+    # WHY alpine: Debian 版より小さく、毎セッション pull するクラウドでの待ち時間が短い。
+    # WHY ダイジェストで固定しないか: 18 系のパッチ（セキュリティ修正）は自動で取り込みたい。メジャー版はタグで固定しているので、
+    #   データの互換性が崩れる更新（メジャーアップ）は起きない。
+    image: mirror.gcr.io/library/postgres:18-alpine
+    environment:
+      # 初回起動時に作るスーパーユーザー・パスワード・データベース（公式イメージの環境変数）。
+      # WHY 固定値を直書きするか: ローカル・CI・クラウドの開発用 DB で、外部に公開しないので秘密ではない。
+      #   3 環境で同じ値にし、.env.example の DATABASE_URL（postgresql://app:app@localhost:5432/app）とそろえる。
+      #   本番の接続情報はここに書かない（本番の DB は別途決める）。
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    ports:
+      # ホストの 5432 → コンテナの 5432。アプリや psql から localhost:5432 で接続するため。
+      # 手元で別の PostgreSQL が 5432 を使っていると起動に失敗する（そのときは片方を止める）。
+      - "5432:5432"
+    healthcheck:
+      # pg_isready: 接続を受け付けられる状態かを確かめる PostgreSQL 付属のコマンド。
+      # WHY healthcheck を書くか: `docker compose up -d --wait` が healthy になるまで待てるようにし、
+      #   up が返った時点で接続できる状態にする（CI の psql ステップ・クラウドのフックがすぐに使えるように）。
+      # -U / -d: 上の POSTGRES_USER / POSTGRES_DB と同じ値。環境変数を展開する書き方にすると、
+      #   compose が自分のホスト側の環境変数で展開してしまうため、値を直書きしている。
+      test: ["CMD", "pg_isready", "-U", "app", "-d", "app"]
+      # 2 秒ごとに確認し、15 回（約 30 秒）続けて失敗したら unhealthy にする（--wait も失敗で返る）。
+      # 実測では起動から 3 秒で pg_isready が通った（2026-09-28）。30 秒通らなければ起動に失敗しているとみなす。
+      interval: 2s
+      retries: 15
+    volumes:
+      # データを名前付きボリュームに置き、コンテナを作り直しても（`pnpm db:down` → `pnpm db:up`）データを残す。
+      # /var/lib/postgresql: postgres:18 系イメージの VOLUME。データは PGDATA=/var/lib/postgresql/18/docker に置かれる
+      #   （18-alpine の `docker image inspect` で確認）。17 系までの /var/lib/postgresql/data ではない点に注意。
+      # データも消すときは `docker compose down -v`。
+      - pgdata:/var/lib/postgresql
+
+volumes:
+  # 上の db が使う名前付きボリューム。Compose がプロジェクト名を前に付けて作る（例: ai-only-template_pgdata）。
+  pgdata:

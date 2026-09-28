@@ -17,6 +17,8 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 | E2E テスト | [Playwright](https://playwright.dev/) | Chromium のみ。本番ビルドを起動し、ブラウザで画面を操作して検証する（`pnpm test:e2e`） |
 | Lint / Format | [Biome](https://biomejs.dev/) | typescript-eslint が TypeScript 7 未対応のため ESLint ではなく Biome を使う（`rules/code/lint.md`） |
 | Git フック | [Lefthook](https://github.com/evilmartians/lefthook) | pre-commit でステージ済みファイルを Biome で検査する |
+| コンテナ | [Docker Compose](https://docs.docker.com/compose/) | `compose.yaml` を手元・GitHub Actions・クラウドセッションの 3 環境で共通に使う。Podman（`podman compose`）でも同じファイルを使う想定 |
+| データベース | [PostgreSQL](https://www.postgresql.org/) | 18（`mirror.gcr.io/library/postgres:18-alpine`。Docker Hub の匿名 pull のレート制限を避けるためミラーから取る）。開発用で、アプリからの接続は未実装 |
 
 ツールのバージョンは `.tool-versions` が正（決め方と更新手順は `rules/code/env.md`）。npm パッケージのバージョンは `package.json` / `pnpm-lock.yaml` が正。pnpm のサプライチェーン保護設定は `pnpm-workspace.yaml` を参照。
 
@@ -57,7 +59,18 @@ asdf install
 
 バージョンの確認方法や更新手順の詳細は `rules/code/env.md` を参照。
 
-Claude Code のクラウドセッション（asdf が無い環境）では、`scripts/cloud-session-start.sh` で `.tool-versions` どおりの Node.js / pnpm を用意する（環境設定の setup script に `bash scripts/cloud-session-start.sh --install-only` を書くと初回だけで済む）。`.tool-versions` の版を上げたら setup script も更新してキャッシュを作り直す。詳細は `rules/code/env.md` の「クラウドセッション」を参照。
+開発用の PostgreSQL は Docker Compose（`compose.yaml`）で起動する。
+
+```sh
+pnpm db:up     # Postgres を起動し、healthcheck が通るまで待つ（docker compose up -d --wait）
+pnpm db:psql   # psql で接続する（docker compose exec db psql -U app -d app）
+pnpm db:down   # 止める（データは名前付きボリューム pgdata に残る。消すときは docker compose down -v）
+```
+
+- 接続先は `postgresql://app:app@localhost:5432/app`（`.env.example`。開発用の固定値で秘密ではない）。アプリから読む実装はまだ無い。
+- Docker Desktop は、従業員 250 人以上または年間売上 1,000 万ドル以上の企業での業務利用などに有料サブスクリプションが必要になる（[Docker Desktop license agreement](https://docs.docker.com/subscription/desktop-license/)）。該当する場合は [Podman](https://podman.io/) の `podman compose up -d --wait` でも同じ `compose.yaml` を使える想定（Podman での実動作は未確認）。
+
+Claude Code のクラウドセッション（asdf が無い環境）では、`scripts/cloud-session-start.sh` で `.tool-versions` どおりの Node.js / pnpm を用意する（環境設定の setup script に `bash scripts/cloud-session-start.sh --install-only` を書くと初回だけで済む）。`.tool-versions` の版を上げたら setup script も更新してキャッシュを作り直す。あわせて SessionStart フックが毎セッション `dockerd` を起動し、`docker compose pull`（最大 3 回再試行）と `docker compose up -d --wait --wait-timeout 120` で Postgres を立ち上げる。詳細は `rules/code/env.md` の「クラウドセッション」を参照。
 
 ## 開発
 

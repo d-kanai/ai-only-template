@@ -43,6 +43,28 @@ jobs:
 
       # --frozen-lockfile: lockfile と package.json がずれていたら更新せず失敗させる（rules/code/dependencies.md）。
       - run: pnpm install --frozen-lockfile
+
+      # 開発用の PostgreSQL を compose.yaml で起動する（Issue #51）。
+      # WHY GitHub Actions の services: を使わないか: 手元・クラウドセッションと同じ compose.yaml を使い、
+      #   イメージ・ユーザー・ポート・healthcheck の定義を 1 か所にする（services: に書くと CI だけ別の定義になる）。
+      #   ubuntu-latest のランナーには Docker と Compose プラグインが入っている。
+      # イメージは compose.yaml で mirror.gcr.io（Docker Hub のミラー）から取るので、Docker Hub の匿名 pull の
+      #   レート制限（出口 IP ごとに 100 回/時）を Actions のランナーでも避けられる。
+      # -d: バックグラウンドで起動する。--wait: compose.yaml の healthcheck（pg_isready）が healthy になるまで待つ。
+      #   unhealthy になったら失敗で返り、このステップが赤になる。
+      # --wait-timeout 120: 待つ上限（秒）。クラウドのフック（scripts/cloud-session-start.sh）と同じ値。healthcheck は
+      #   約 30 秒で unhealthy になるが、コンテナの起動そのものが止まったときにもジョブを長く止めないようにする。
+      # 後片付け（docker compose down）はしない: ジョブが終わるとランナーごと破棄される。
+      - name: Start Postgres
+        run: docker compose up -d --wait --wait-timeout 120
+
+      # 起動した Postgres に psql で接続できることを確かめる（compose.yaml の POSTGRES_USER / POSTGRES_DB と同じ app / app）。
+      # -T: TTY を割り当てない。GitHub Actions のステップには TTY が無い。Compose v5.1.1 では -T なしでも
+      #   TTY の無い環境で動いた（2026-09-28 実測）が、既定は TTY を割り当てる動作なので、自動判定に頼らず明示する。
+      # psql はコンテナ内のものを使う（ランナーに psql が入っているかに依存しない）。
+      # アプリからの接続はまだ無い（別 Issue）ので、ここでは接続確認だけを行う。
+      - name: Check Postgres connection
+        run: docker compose exec -T db psql -U app -d app -c 'select 1'
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
