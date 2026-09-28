@@ -252,25 +252,64 @@ describe("scripts/cloud-session-start.sh", () => {
     });
   });
 
-  describe("DRY_RUN", () => {
-    it("CLAUDE_CODE_REMOTE=true（未インストール）なら、インストール予定を表示し CLAUDE_ENV_FILE に PATH を追記する", () => {
+  // フック（引数なし、CLAUDE_CODE_REMOTE=true）の Node / pnpm の導入は一時停止中（スクリプトの main の WHY コメント）。
+  // クラウド環境の Network access が nodejs.org を拒否して毎回失敗し、pnpm install まで進まなかったため、
+  // フックは PATH 上の pnpm（VM 既定）で pnpm install だけを行う。nodejs.org を許可して導入を戻すときは、
+  // このブロックの期待（ダウンロード予定を出さない・PATH を書かない）も戻す。
+  describe("フック（Node / pnpm の導入は一時停止中）", () => {
+    const pnpmInstallPlan = `[dry-run] (cd ${repoRoot} && pnpm install --frozen-lockfile)\n`;
+
+    it("DRY_RUN: nodejs.org からの取得・pnpm の導入の予定を出さず、pnpm install の予定だけを出し、CLAUDE_ENV_FILE に書かない", () => {
       const result = runScript([], {
         ...remoteEnv(),
         CLOUD_SESSION_START_DRY_RUN: "1",
       });
 
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain(nodeTarballUrl);
-      expect(result.stdout).toContain(`SHASUMS256.txt`);
-      expect(result.stdout).toContain(`npm install -g pnpm@${pnpmVersion}`);
-      expect(result.stdout).toContain("pnpm install --frozen-lockfile");
-
-      const nodeBin = join(home, ".local", `node-${nodeVersion}`, "bin");
-      expect(readFileSync(envFile, "utf8")).toBe(
-        `export EXISTING=1\nexport PATH="${nodeBin}:$PATH"\n`,
-      );
+      expect(result.stdout).not.toContain(nodeTarballUrl);
+      expect(result.stdout).not.toContain("SHASUMS256.txt");
+      expect(result.stdout).not.toContain("npm install -g pnpm");
+      expect(result.stdout).toBe(pnpmInstallPlan);
+      expect(readFileSync(envFile, "utf8")).toBe("export EXISTING=1\n");
     });
 
+    it.each([
+      ["$HOME/.local", () => join(home, ".local", `node-${nodeVersion}`)],
+      ["/opt", () => join(optDir, `node-${nodeVersion}`)],
+    ])(
+      "DRY_RUN: 既存インストール（%s）があっても使わず（PATH を書かず）、pnpm install の予定だけを出す",
+      (_label, nodeDirOf) => {
+        const nodeDir = nodeDirOf();
+        placeFakeNode(nodeDir);
+
+        const result = runScript([], {
+          ...remoteEnv(),
+          CLOUD_SESSION_START_DRY_RUN: "1",
+        });
+
+        expect(result.status).toBe(0);
+        expect(result.stdout).toBe(pnpmInstallPlan);
+        expect(readFileSync(envFile, "utf8")).toBe("export EXISTING=1\n");
+      },
+    );
+
+    it("実行: curl を 1 回も呼ばず、PATH 上の pnpm で pnpm install --frozen-lockfile を実行する。失敗しても warn だけで exit 0", () => {
+      // 取得できる配布物を置いておく。導入処理が動けば curl が呼ばれ、$HOME/.local に展開されるので検出できる。
+      buildNodeFixture("linux-x64", "ok");
+
+      const result = runScript([], remoteEnv());
+
+      expect(result.status).toBe(0);
+      expect(curlCalls()).toEqual([]);
+      expect(existsSync(join(home, ".local"))).toBe(false);
+      // 偽の pnpm（fakeBin）が受け取った引数を stderr に出すので、PATH 上の pnpm が呼ばれたことを確認できる。
+      expect(result.stderr).toContain("fake pnpm install --frozen-lockfile");
+      expect(result.stderr).toContain("pnpm install --frozen-lockfile failed");
+      expect(readFileSync(envFile, "utf8")).toBe("export EXISTING=1\n");
+    });
+  });
+
+  describe("DRY_RUN（--install-only）", () => {
     it("--install-only は CLAUDE_CODE_REMOTE が無くてもインストール予定を出し、CLAUDE_ENV_FILE に書かず pnpm install もしない（setup script 用）", () => {
       const result = runScript(["--install-only"], {
         CLAUDE_ENV_FILE: envFile,
@@ -283,40 +322,19 @@ describe("scripts/cloud-session-start.sh", () => {
       expect(result.stdout).not.toContain("pnpm install --frozen-lockfile");
       expect(readFileSync(envFile, "utf8")).toBe("export EXISTING=1\n");
     });
-
-    it.each([
-      ["$HOME/.local", () => join(home, ".local", `node-${nodeVersion}`)],
-      ["/opt", () => join(optDir, `node-${nodeVersion}`)],
-    ])(
-      "既存インストール（%s）があればダウンロード予定を出さず、その bin を PATH に追記して pnpm install する",
-      (_label, nodeDirOf) => {
-        const nodeDir = nodeDirOf();
-        placeFakeNode(nodeDir);
-
-        const result = runScript([], {
-          ...remoteEnv(),
-          CLOUD_SESSION_START_DRY_RUN: "1",
-        });
-
-        expect(result.status).toBe(0);
-        expect(result.stdout).not.toContain(nodeTarballUrl);
-        expect(result.stdout).not.toContain("SHASUMS256.txt");
-        expect(result.stdout).toContain("pnpm install --frozen-lockfile");
-        expect(readFileSync(envFile, "utf8")).toBe(
-          `export EXISTING=1\nexport PATH="${join(nodeDir, "bin")}:$PATH"\n`,
-        );
-      },
-    );
   });
 
   // 偽の curl でダウンロードを差し替え、取得 → SHASUMS 検証 → 展開 → 配置 の実処理を通す。
-  describe("実インストール経路（偽の curl）", () => {
+  // フックでは導入を一時停止しているため、導入処理が今も動くことは setup script 用の --install-only で確かめる。
+  // setup script と同じく CLAUDE_CODE_REMOTE は渡さない。CLAUDE_ENV_FILE は「書かれない」ことを確かめるために渡す。
+  describe("実インストール経路（--install-only、偽の curl）", () => {
     const nodeDirIn = () => join(home, ".local", `node-${nodeVersion}`);
+    const installOnlyEnv = () => ({ CLAUDE_ENV_FILE: envFile });
 
-    it("正常: 展開して bin/node を配置し PATH を追記する。ダミー node で pnpm 導入が失敗しても warn だけで exit 0", () => {
+    it("正常: 展開して bin/node を配置し、PATH は書かない。ダミー node で pnpm 導入が失敗しても warn だけで exit 0", () => {
       buildNodeFixture("linux-x64", "ok");
 
-      const result = runScript([], remoteEnv());
+      const result = runScript(["--install-only"], installOnlyEnv());
 
       expect(result.status).toBe(0);
       expect(existsSync(join(nodeDirIn(), "bin", "node"))).toBe(true);
@@ -324,16 +342,14 @@ describe("scripts/cloud-session-start.sh", () => {
       expect(readdirSync(join(home, ".local"))).toEqual([
         `node-${nodeVersion}`,
       ]);
-      expect(readFileSync(envFile, "utf8")).toBe(
-        `export EXISTING=1\nexport PATH="${join(nodeDirIn(), "bin")}:$PATH"\n`,
-      );
+      expect(readFileSync(envFile, "utf8")).toBe("export EXISTING=1\n");
       expect(result.stderr).toContain(`failed to install pnpm@${pnpmVersion}`);
     });
 
     it("curl に接続タイムアウト 15 秒と、tarball は 240 秒・SHASUMS256.txt は 60 秒の全体タイムアウトを付ける（最悪でもフックの 600 秒打ち切りより十分前に終える）", () => {
       buildNodeFixture("linux-x64", "ok");
 
-      runScript([], remoteEnv());
+      runScript(["--install-only"], installOnlyEnv());
 
       const calls = curlCalls();
       const tarballCall = calls.find((c) => c.includes(".tar.xz"));
@@ -352,7 +368,7 @@ describe("scripts/cloud-session-start.sh", () => {
       (_label, shasums) => {
         buildNodeFixture("linux-x64", shasums);
 
-        const result = runScript([], remoteEnv());
+        const result = runScript(["--install-only"], installOnlyEnv());
 
         expect(result.status).toBe(0);
         expect(result.stderr).toContain("sha256 mismatch");
@@ -364,7 +380,10 @@ describe("scripts/cloud-session-start.sh", () => {
     it("uname -m が aarch64 なら linux-arm64 の配布物を取得する", () => {
       buildNodeFixture("linux-arm64", "ok");
 
-      const result = runScript([], { ...remoteEnv(), FAKE_UNAME_M: "aarch64" });
+      const result = runScript(["--install-only"], {
+        ...installOnlyEnv(),
+        FAKE_UNAME_M: "aarch64",
+      });
 
       expect(result.status).toBe(0);
       const urls = curlCalls().join("\n");
@@ -376,7 +395,10 @@ describe("scripts/cloud-session-start.sh", () => {
     it("uname -m が x86_64 / aarch64 以外なら warn を出してダウンロードせず、PATH も書かずに exit 0", () => {
       buildNodeFixture("linux-x64", "ok");
 
-      const result = runScript([], { ...remoteEnv(), FAKE_UNAME_M: "armv7l" });
+      const result = runScript(["--install-only"], {
+        ...installOnlyEnv(),
+        FAKE_UNAME_M: "armv7l",
+      });
 
       expect(result.status).toBe(0);
       expect(result.stderr).toContain("armv7l");
@@ -389,7 +411,7 @@ describe("scripts/cloud-session-start.sh", () => {
       mkdirSync(nodeDirIn(), { recursive: true });
       writeFileSync(join(nodeDirIn(), "leftover"), "broken");
 
-      const result = runScript([], remoteEnv());
+      const result = runScript(["--install-only"], installOnlyEnv());
 
       expect(result.status).toBe(0);
       expect(existsSync(join(nodeDirIn(), "bin", "node"))).toBe(true);

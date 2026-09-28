@@ -5,7 +5,8 @@
 # 使い方:
 #   bash scripts/cloud-session-start.sh --install-only  # 環境設定の setup script から呼ぶ。Node / pnpm のインストールだけ行う
 #   bash scripts/cloud-session-start.sh                 # SessionStart フック（.claude/settings.json）から呼ぶ。
-#                                                       #   CLAUDE_CODE_REMOTE=true のときだけ動き、PATH の書き出しと pnpm install を行う
+#                                                       #   CLAUDE_CODE_REMOTE=true のときだけ動き、PATH 上の pnpm で pnpm install を行う
+#                                                       #   （Node / pnpm の導入と PATH の書き出しは一時停止中。下の「一時停止」を参照）
 #   bash scripts/cloud-session-start.sh --print-plan    # 読み取った版とインストール先を表示するだけ（テスト・確認用）
 #   CLOUD_SESSION_START_DRY_RUN=1 ...                   # ダウンロード・インストールをせず、実行予定のコマンドを表示する
 #
@@ -13,6 +14,10 @@
 #   SessionStart フックは毎セッション実行される（公式 cloud-environments / hooks ドキュメント）。重いダウンロードは
 #   setup script（--install-only）に寄せ、フックは「既存のインストールを見つけて PATH を通し pnpm install する」
 #   だけの速い経路にする。setup script を設定していない環境でも動くよう、フックは未インストールなら自分で入れる。
+#
+# 一時停止（2026-09-28〜）: クラウド環境の Network access が nodejs.org を拒否するため、フックでの Node / pnpm の
+#   導入と PATH の書き出しを main でコメントアウトしている。フックは VM 既定の Node 22 / pnpm で pnpm install だけを行う。
+#   nodejs.org を許可したら main のコメントを外して上の二段構えに戻す。詳細は main のコメントと rules/code/env.md。
 #
 # WHY set -e を使わない: このスクリプトは「どんな失敗でも exit 0 で終える」設計にしている。
 #   フックが失敗するとセッション開始時にエラーが出るが、Node の取得に失敗しても
@@ -314,18 +319,24 @@ main() {
   fi
 
   NODE_DIR=""
-  ensure_node "$node_version" || return 0
-
   if [ "$mode" = "install-only" ]; then
     # setup script ではセッションがまだ無いので、PATH の書き出しと pnpm install はしない（フック側の仕事）。
+    ensure_node "$node_version" || return 0
     install_pnpm "$pnpm_version" "$NODE_DIR" || return 0
     return 0
   fi
 
-  # フック: setup script で入れ済みなら、ここはダウンロードせず PATH の書き出しと pnpm install だけの速い経路になる。
-  # pnpm の導入より先に PATH を書き出す: pnpm の導入に失敗しても、少なくとも .tool-versions の Node は使えるようにするため。
-  export_path "$NODE_DIR/bin"
-  install_pnpm "$pnpm_version" "$NODE_DIR" || return 0
+  # WHY フックでの Node / pnpm の導入を一時停止している（2026-09-28〜）:
+  #   クラウド環境の Network access が nodejs.org を拒否し（プロキシが CONNECT に 403 を返す）、フックは毎セッション
+  #   Node のダウンロードに失敗して、その先の pnpm install まで進まなかった（rules/code/env.md のクラウドセッション節）。
+  #   VM 既定の Node 22.22.2 / pnpm 12.7.0 で pnpm build / pnpm test が通ることは実測済みなので、nodejs.org を許可するまでは
+  #   PATH 上の pnpm（VM 既定）で pnpm install だけを行う。registry.npmjs.org は許可されているので pnpm install は通る。
+  # 戻し方: 環境設定の Network access で nodejs.org を許可したら、下の 3 行のコメントを外す（関数は削除せず残してある）。
+  #   ensure_node は既存インストール（setup script が入れたもの）があればダウンロードせずに使う。
+  #   pnpm の導入より先に PATH を書き出す: pnpm の導入に失敗しても、少なくとも .tool-versions の Node は使えるようにするため。
+  # ensure_node "$node_version" || return 0
+  # export_path "$NODE_DIR/bin"
+  # install_pnpm "$pnpm_version" "$NODE_DIR" || return 0
   install_dependencies "$project_dir" || return 0
 }
 
