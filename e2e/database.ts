@@ -1,5 +1,5 @@
 import { Client } from "pg";
-import { env } from "../backend/shared/infra/env";
+import { env } from "../apps/backend/shared/infra/env";
 
 // E2E テストが使う Postgres（compose.yaml）への接続と、データのリセット。
 // e2e/*.spec.ts（テストの前のリセット・DB の確認）が使う。

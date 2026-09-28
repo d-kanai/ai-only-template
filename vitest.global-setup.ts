@@ -1,8 +1,8 @@
 import {
   cleanupTestSchemas,
   testSchemaPrefix,
-} from "./backend/shared/infra/database.test-support";
-import { env, toolEnv } from "./backend/shared/infra/env";
+} from "./apps/backend/shared/infra/database.test-support";
+import { env, toolEnv } from "./apps/backend/shared/infra/env";
 
 // Vitest の globalSetup（vitest.config.mts の test.globalSetup）。テストファイルを動かす前に、Vitest のプロセスで 1 回だけ実行される。
 // 前の実行が afterAll の前に止まって残ったテスト用のスキーマ（test_<UUID>。backend/shared/infra/database.test-support.ts）を消す。

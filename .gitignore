@@ -13,8 +13,8 @@
 # testing
 /coverage
 
-# next.js
-/.next/
+# next.js（next build apps/frontend は apps/frontend/.next/ に出力する。Issue #68）
+/apps/frontend/.next/
 /out/
 
 # production

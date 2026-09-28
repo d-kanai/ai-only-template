@@ -7,7 +7,14 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!node_modules", "!.next", "!dist", "!build", "!drizzle"]
+    "includes": [
+      "**",
+      "!node_modules",
+      "!**/.next",
+      "!dist",
+      "!build",
+      "!apps/backend/drizzle"
+    ]
   },
   "formatter": {
     "enabled": true,
@@ -85,7 +92,7 @@
   "overrides": [
     {
       "includes": [
-        "backend/shared/infra/env.ts",
+        "apps/backend/shared/infra/env.ts",
         "**/*.test.ts",
         "**/*.test.tsx"
       ],

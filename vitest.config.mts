@@ -10,10 +10,15 @@ export default defineConfig({
   // react: テスト対象の .tsx を React の JSX として変換するため。
   plugins: [react()],
   resolve: {
-    // tsconfigPaths: tsconfig.json の paths（"@/*"）を Vitest（Vite）側でも解決させるため。
+    // tsconfigPaths: tsconfig の paths を Vitest（Vite）側でも解決させるため。
     //   Next.js は tsconfig の paths を自前で解決するが、Vite は既定では解決しない（vite 8.3.1 の型定義で @default false）。
-    //   これがないとテスト対象を "@/..." で import したときに解決に失敗する（features/ のテストが "@/features/..."、
-    //   backend/ のテストが "@/backend/..." を import しており、解決できなければそれらのテストが失敗することで担保）。
+    //   解決するのは frontend の "@/*"（apps/frontend/*）と、frontend から backend を指す "@repo/backend/*"
+    //   （apps/backend/*。Issue #68 の段階 1 では workspace パッケージではなく paths で解決する）。paths はリポジトリ直下の
+    //   tsconfig.json と apps/frontend/tsconfig.json の両方に同じ行き先で書いている（どちらが使われても同じファイルになる）。
+    //   backend の中は相対パスだけなので paths を使わない（architecture.test.ts の backend-relative-only）。
+    //   これがないとテスト対象を "@/..." で import したときに解決に失敗する（apps/frontend/features/ のテストが
+    //   "@/features/..." を、apps/frontend/features/todo/api/ が "@repo/backend/..." を import しており、解決できなければ
+    //   それらのテストが失敗することで担保）。
     //   Next.js 公式ガイドは vite-tsconfig-paths プラグインを案内しているが、Vite 8 には同等の標準オプションがある。
     //   プラグインの依存 tsconfck@3.1.6 は任意 peer として typescript ^5.0.0 を宣言しており、本リポジトリの
     //   TypeScript 7 では `pnpm peers check` が unmet peer と報告した（2026-09-28 に確認）。TS 7 との組み合わせが
@@ -24,6 +29,11 @@ export default defineConfig({
     // jsdom: コンポーネントを render して DOM（見出しの role など）を検証するため、Node 上にブラウザ相当の DOM が必要。
     //   Vitest のデフォルトは "node" で document が存在しない。
     environment: "jsdom",
+    // include: テストファイルの場所。apps/ の中（対象の隣に置いた *.test.ts(x)）、リポジトリ直下のルール検査テスト
+    //   （architecture.test.ts など）、scripts/ のテスト（scripts/cloud-session-start.test.ts）。
+    //   WHY 既定（**/*.{test,spec}.?(c|m)[jt]s?(x)）にしない: 置き場所を明示し、apps/frontend/.next/ などの生成物や
+    //   想定外の場所のテストを拾わないようにする（Issue #68 で apps/ に移したときに範囲を決め直した）。
+    include: ["apps/**/*.test.{ts,tsx}", "*.test.ts", "scripts/**/*.test.ts"],
     // e2e/**: Playwright の E2E テスト（e2e/*.spec.ts）を Vitest の対象から外す。
     //   Vitest の既定 include（**/*.{test,spec}.?(c|m)[jt]s?(x)）は *.spec.ts も拾うため、除外しないと
     //   pnpm test が Playwright の test() を Vitest 上で読み込み、「test() from an async test.describe()」
@@ -50,27 +60,30 @@ export default defineConfig({
       //   テストが 1 度も触らないファイルが計測から漏れる（Vitest 5.0.1 の型定義「By default only files covered by
       //   tests are included」）。テストを置くべきディレクトリを明示し、触られていないファイルも 0% として数える。
       //   含めないもの（ユーザー判断。Issue #45）:
-      //   - app/: ルーティングだけで、テストを置かない方針（rules/code/architecture.md の「`app/`（ルーティング）」）。
+      //   - apps/frontend/app/: ルーティングだけで、テストを置かない方針（rules/code/architecture.md の「`app/`（ルーティング）」）。
       //     仕様は screen と api ファイルのテストで固定し、app/ の結線は E2E（pnpm test:e2e）で確かめる。
-      //   - ルート直下の設定ファイル（next.config.ts / playwright.config.ts など）: ツールに渡す値を並べるだけで、
-      //     単体テストで検証する振る舞いを持たない。
-      //     ルート直下の Next の規約ファイル instrumentation.ts / instrumentation-node.ts（起動時の環境変数の検証。Issue #59）も
+      //   - 設定ファイル（リポジトリ直下の playwright.config.ts など、apps/frontend/next.config.ts、
+      //     apps/backend/drizzle.config.ts）: ツールに渡す値を並べるだけで、単体テストで検証する振る舞いを持たない。
+      //     apps/frontend 直下の Next の規約ファイル instrumentation.ts / instrumentation-node.ts（起動時の環境変数の検証。Issue #59）も
       //     含めない: next start / next dev の起動でだけ動き、プロセスを終える処理なので、起動時に止まることを実測で確かめている
       //     （rules/code/env.md の「環境変数」）。検証の中身は env.ts（計測の対象）のテストで固定している。
       //   - e2e/: Playwright の E2E テストそのもの（Vitest では実行しない。上の test.exclude）。
       //   - scripts/ のシェルスクリプト（.sh）: include に入れても、@vitest/coverage-v8 が JS として解析しようとして
       //     失敗し、「Failed to parse ... cloud-session-start.sh. Excluding it from coverage.」とエラーを出して結局外す
       //     （2026-09-28 に実測）。テスト（scripts/*.test.ts）が子プロセスで実行する bash の中身は計測されない。
-      //   shared/ はまだ無い（rules/code/architecture.md）が、作ったときに自動で対象になるよう入れておく。
+      //   apps/frontend/shared/ はまだ無い（rules/code/architecture.md）が、作ったときに自動で対象になるよう入れておく。
+      //   apps/backend/ は全体を対象にし、直下の drizzle.config.ts だけを下の exclude で外す（apps/backend/ の中は
+      //   drizzle.config.ts 以外すべて 4 層の下にある。architecture.test.ts の backend-placement）。
       include: [
-        "features/**/*.{ts,tsx}",
-        "backend/**/*.{ts,tsx}",
-        "shared/**/*.{ts,tsx}",
+        "apps/frontend/features/**/*.{ts,tsx}",
+        "apps/frontend/shared/**/*.{ts,tsx}",
+        "apps/backend/**/*.{ts,tsx}",
         "scripts/**/*.ts",
       ],
       // exclude: include のうち計測から外すもの。
       //   - **/*.test.{ts,tsx}: テストそのもの。Vitest もテストの include パターンを常に除外に足すが、意図を明示する。
       //   - **/*.d.ts: 型宣言だけで実行されるコードを持たない。
+      //   - apps/backend/*.config.ts: drizzle-kit の設定（上の「設定ファイル」）。
       //   coverageConfigDefaults.exclude（Vitest の既定の除外。5.0.1 では空配列）と結合し、将来の版で既定が増えても
       //   消さないようにする。なお Vitest は設定ファイル（vitest.config.*）・setupFiles・node_modules を、
       //   この設定とは別に常に除外する（5.0.1 の dist/chunks/index.*.js の resolveConfig で確認）。
@@ -78,6 +91,7 @@ export default defineConfig({
         ...coverageConfigDefaults.exclude,
         "**/*.test.{ts,tsx}",
         "**/*.d.ts",
+        "apps/backend/*.config.ts",
       ],
       // thresholds: 4 指標すべて 100%。1 つでも下回ると vitest（pnpm test、CI の ci ジョブ）が失敗する。
       //   WHY 100: ユーザー判断（Issue #45）。テスト = 仕様なので、テストが通らないコードは仕様のないコードになる。

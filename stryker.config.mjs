@@ -60,20 +60,22 @@ export default {
   //   （公式ドキュメントの「Limitations」）。
 
   // mutate: 変異を入れるファイル。vitest.config.mts の coverage.include のうち、TypeScript の実装がある
-  //   features/ backend/ shared/ と同じ範囲にする（カバレッジ 100% で「実行されている」ことを担保した範囲に対して、
-  //   「テストが結果を検証している」かを確かめる）。
+  //   apps/frontend/features/ apps/frontend/shared/ apps/backend/ と同じ範囲にする（カバレッジ 100% で「実行されている」
+  //   ことを担保した範囲に対して、「テストが結果を検証している」かを確かめる）。
   //   含めないもの:
   //   - テスト（*.test.ts / *.test.tsx）と型宣言（*.d.ts）: 変異させる対象（実装）ではない。
   //   - scripts/: いまある実装は cloud-session-start.sh（シェル）だけで、Stryker は JS / TS しか変異させられない。
   //     scripts/ の .ts はテストだけなので、coverage.include の scripts/**/*.ts は入れていない。
-  //   - app/: ルーティングだけで単体テストを置かない方針（rules/code/architecture.md）。変異させても単体テストで
+  //   - apps/frontend/app/: ルーティングだけで単体テストを置かない方針（rules/code/architecture.md）。変異させても単体テストで
   //     落とせないため、生き残りとして数えるだけになる。
-  //   - ルート直下の設定ファイルやルール検査テスト（architecture.test.ts など）、e2e/: 実装ではない。
-  //   shared/ はまだ無い（rules/code/architecture.md）が、作ったときに自動で対象になるよう入れておく。
+  //   - 設定ファイル（リポジトリ直下のもの、apps/frontend/next.config.ts・instrumentation*.ts、apps/backend/drizzle.config.ts）、
+  //     ルール検査テスト（architecture.test.ts など）、e2e/: 実装ではない（vitest.config.mts の coverage.include と同じ）。
+  //   apps/frontend/shared/ はまだ無い（rules/code/architecture.md）が、作ったときに自動で対象になるよう入れておく。
   mutate: [
-    "features/**/*.{ts,tsx}",
-    "backend/**/*.{ts,tsx}",
-    "shared/**/*.{ts,tsx}",
+    "apps/frontend/features/**/*.{ts,tsx}",
+    "apps/frontend/shared/**/*.{ts,tsx}",
+    "apps/backend/**/*.{ts,tsx}",
+    "!apps/backend/*.config.ts",
     "!**/*.test.{ts,tsx}",
     "!**/*.d.ts",
   ],
