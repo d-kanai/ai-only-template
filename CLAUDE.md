@@ -25,3 +25,4 @@
 
 ## ルール詳細
 - コミットメッセージ: @rules/commit.md
+- 作業ログ: @rules/log.md
