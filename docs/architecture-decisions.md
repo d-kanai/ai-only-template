@@ -12,6 +12,118 @@
 - frontend と backend を `apps/` で分ける理由（Issue #68。ユーザー指示）: パッケージの単位で画面側と API 側を分け、後で API を別プロセスに分離しやすくする。プロセスは増やさず Next 1 つのまま（Hono などの別サーバは入れない）。
 - 段階: 段階 1 でディレクトリを `apps/` に移し、import・設定・検査を書き換えた（`package.json` は 1 つ、`@repo/backend/*` は tsconfig の paths で解決）。段階 2（今の形）で pnpm workspace にし、`apps/backend` を `exports` を明示した `@repo/backend`、`apps/frontend` を `@repo/frontend` にした。段階 1 の限界（frontend から backend を相対パスで参照しても、参照先が許される場所なら違反にしない）は段階 2 の `frontend-to-backend-specifier` で解消した。
 
+## 例（Todo）のファイル構成
+ファイル名は例。実際のファイルはリポジトリを正とする。
+
+```
+pnpm-workspace.yaml                     # packages: ["apps/*"]（workspace の範囲）と pnpm の設定
+package.json                            # リポジトリ直下（ツール・共通の devDependencies、pnpm --filter で apps の script を呼ぶ）
+apps/
+  frontend/
+    package.json                        # @repo/frontend（next / react / "@repo/backend": "workspace:*"）
+    next.config.ts                      # Next の設定
+    instrumentation.ts                  # Next の規約ファイル（起動時の環境変数の検証。.claude/rules/env.md）
+    instrumentation-node.ts             # Node.js runtime 用の処理。@repo/backend/shared/infra/env を読み込む
+    tsconfig.json
+    app/
+      layout.tsx                        # Next の規約ファイル（loading.tsx / error.tsx なども app/ に置く）
+      page.tsx                          # return <TodoScreen />
+      todo/
+        [id]/
+          page.tsx                      # await params で id を取り出し、return <TodoDetailScreen todoId={id} />
+      api/
+        todos/
+          route.ts                      # export { GET } from "@repo/backend/todo/presentation/list-todos.api"
+                                        # export { POST } from "@repo/backend/todo/presentation/create-todo.api"
+          [id]/
+            route.ts                    # get-todo.api の GET / update-todo.api の PUT / delete-todo.api の DELETE を re-export
+    features/
+      todo/
+        index.ts                        # 公開 API。外から import してよいのはここだけ
+        api/
+          todo-api.ts                   # /api/todos を fetch する薄いラッパー（型は backend の api ファイルから import type し、画面側に re-export）
+          todo-api.test.ts
+        components/
+          todo-item.tsx                 # feature 内で画面をまたぐ部品
+          todo-item.test.tsx
+        hooks/                          # 画面をまたぐ hook（必要になったら作る）
+        screens/
+          todo-screen/
+            todo-screen.tsx             # 見た目。"use client"。hook の戻り値を描くだけ
+            todo-screen.hook.ts         # 状態・イベント・データ取得（useTodoScreen）
+            todo-screen.test.tsx
+            todo-screen.hook.test.ts
+          todo-detail-screen/
+            todo-detail-screen.tsx      # props は todoId（app/todo/[id]/page.tsx から受け取る）
+            todo-detail-screen.hook.ts  # useTodoDetailScreen(todoId)
+            todo-detail-screen.test.tsx
+            todo-detail-screen.hook.test.ts
+  backend/
+    package.json                        # @repo/backend（drizzle-orm / pg、exports で公開する入口、db:generate / db:migrate）
+    tsconfig.json
+    drizzle.config.ts                   # drizzle-kit の設定（apps/backend の db:generate / db:migrate が --config で指す）
+    drizzle/                            # 生成したマイグレーション（SQL と meta/）。pnpm db:generate が作り、コミットする
+    shared/
+      domain/
+        domain-error.ts                 # DomainError（code: validation_error / not_found）
+        transaction-runner.ts           # TransactionRunner<Tx> の interface（command をトランザクションで実行する窓口）
+      presentation/
+        http-error.ts                   # DomainError → HTTP ステータスの変換、ErrorResponse 型、InvalidRequestError
+        http-error.test.ts
+        json-body.ts                    # リクエスト本文を JSON のオブジェクトとして読む（readJsonObject）
+        json-body.test.ts
+      infra/
+        env.ts                          # 環境変数の唯一の入口（env: 必須の設定を検証した値、toolEnv: 開発ツールのフラグ）。リポジトリ直下の .env を読む
+        env.test.ts
+        database.ts                     # Postgres のプール（env から設定）と Drizzle の db、Executor 型、getDatabase / closeDatabase
+        database.test.ts
+        database.test-support.ts        # 実 Postgres を使うテスト用。テストファイルごとの別スキーマにマイグレーションを当てる
+        database.test-support.test.ts
+        drizzle-transaction-runner.ts   # TransactionRunner の Drizzle 実装（db.transaction）
+        drizzle-transaction-runner.test.ts
+    todo/
+      presentation/                     # 1 API = 1 ファイル。リクエスト / レスポンスの型もこの中で定義して export する
+        list-todos.api.ts               # export function listTodosApi(container) → handler / export const GET = listTodosApi(todoContainer)
+        list-todos.api.test.ts
+        get-todo.api.ts                 # getTodoApi(container) の handler は (request, ctx: { params: Promise<{ id: string }> }) / export const GET
+        get-todo.api.test.ts
+        create-todo.api.ts              # createTodoApi(container) / export const POST
+        create-todo.api.test.ts
+        update-todo.api.ts              # updateTodoApi(container) / export const PUT
+        update-todo.api.test.ts
+        delete-todo.api.ts              # deleteTodoApi(container) / export const DELETE
+        delete-todo.api.test.ts
+      application/
+        list-todos.query.ts             # 読むだけ（副作用なし）
+        list-todos.query.test.ts
+        get-todo.query.ts
+        get-todo.query.test.ts
+        create-todo.command.ts          # 状態を変える
+        create-todo.command.test.ts
+        update-todo.command.ts
+        update-todo.command.test.ts
+        delete-todo.command.ts
+        delete-todo.command.test.ts
+      domain/
+        todo.ts                         # Entity / Value Object
+        todo.test.ts
+        todo-repository.ts              # Repository の interface
+      infra/
+        schema.ts                       # todos テーブルの定義（Drizzle のスキーマ。マイグレーションの生成元）
+        todo-repository.postgres.ts     # Repository の実装（Postgres。Executor を受け取る）
+        todo-repository.postgres.test.ts
+        todo-repository.in-memory.ts    # Repository の実装（InMemory。テスト用）
+        todo-repository.in-memory.test.ts
+        in-memory-transaction-runner.ts # TransactionRunner の InMemory 実装（スナップショットで rollback）
+        in-memory-transaction-runner.test.ts
+        container.ts                    # 組み立て（DI）。createTodoContainer({ runner, repositoryFor, readExecutor })、
+                                        #   createInMemoryTodoContainer / createPostgresTodoContainer、アプリ共有の todoContainer
+        container.test.ts
+e2e/                                    # Playwright の E2E（リポジトリ直下）
+architecture.test.ts lint.test.ts …     # ルール検査テスト（リポジトリ直下）
+tsconfig.json                           # Vitest とリポジトリ全体の型チェック用
+```
+
 ## 実測（2026-09-28）
 - `exports` の値は TS のソースのまま読める: Next（Turbopack は workspace パッケージを自動で変換する。`transpilePackages` は不要）、Vitest（Vite）、tsc（`moduleResolution: bundler` は exports を読む）、Playwright（`pnpm build` / `pnpm test` / `pnpm typecheck` / `pnpm test:e2e` で確認）。
 - exports に無いファイルを外から import すると `tsc` / `next build` が「Cannot find module」で止まる（`todo-api.ts` に `@repo/backend/todo/infra/container` の import を置いて確認）。

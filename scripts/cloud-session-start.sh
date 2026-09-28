@@ -1,7 +1,7 @@
 #!/bin/bash
 # クラウドセッション（Claude Code on the web）の VM に、.tool-versions と同じ Node.js / pnpm を用意し、
 # compose.yaml の Postgres を起動してマイグレーション（apps/backend/drizzle/）を当てる（フックのときだけ）。
-# 詳細・役割分担は .claude/rules/cloud-session.mdを参照。
+# 詳細・役割分担は .claude/rules/cloud-session.md を参照。
 #
 # 使い方:
 #   bash scripts/cloud-session-start.sh --install-only  # 環境設定の setup script から呼ぶ。Node / pnpm のインストールだけ行う
@@ -565,7 +565,7 @@ ensure_dotenv() {
 #   ensure_dotenv が用意済み）。スクリプトは接続先を持たず、DATABASE_URL を差し込まない（既定値を 1 か所 = .env.example に
 #   するため。Issue #59）。フックの環境に DATABASE_URL があれば、そのまま引き継がれて .env より優先される。
 # WHY timeout 15: 実測は約 1 秒（2026-09-28、表 1 つ）。15 秒かかるなら止まっているとみなす。フック全体の最悪ケースを
-#   600 秒に収めるための見積もりは .claude/rules/env.md（571 + 15 = 586 秒）。
+#   600 秒に収めるための見積もりは docs/cloud-session.md の「時間の上限の見積もり」（571 + 15 = 586 秒）。
 # WHY Node / pnpm の導入に失敗していても試すか: VM 既定の pnpm でも packageManager の版を取って動く（docs/cloud-session.md の実測）。
 #   失敗しても warn を出すだけで、セッションは続けられる。
 # 出力は stderr に回す（stdout は Claude のコンテキストに入るため。start_database と同じ）。

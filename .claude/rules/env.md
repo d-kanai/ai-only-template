@@ -17,6 +17,7 @@ paths:
   - 決め方: `curl -s https://nodejs.org/dist/index.json | jq -r '[.[] | select(.lts != false)][0] | .version + " " + .lts'`。`asdf nodejs resolve lts --latest-available` には頼らない（古い LTS を返した実測がある）。
   - 新しい LTS が出たら Issue → PR で上げる。`@types/node` も同じメジャーに合わせる（`.claude/rules/dependencies.md`）。
 - pnpm: パッケージマネージャは pnpm だけ（npm / yarn、`package-lock.json` / `yarn.lock` は使わない）。版は latest（`asdf list all pnpm | tail -1`）。リポジトリ直下の `package.json` の `packageManager`（`pnpm@x.y.z`）にも同じ版を書く。`apps/*/package.json` には書かない（版を 1 か所で管理する）。
+- 初回・更新時: `asdf plugin add nodejs` / `asdf plugin add pnpm`（未追加なら）→ `asdf install` → `node --version && pnpm --version`。
 - `.tool-versions` を変えたら `asdf install` し、`node --version` / `pnpm --version` の一致を確かめてからコミットする。
   - Claude Code から実行するシェルでは素の `node` が `.tool-versions` と一致しない（Claude Code を入れた asdf の Node の bin が PATH の先頭に入る）。AI は `asdf which node` / `~/.asdf/shims/node --version` で確かめる。
   - パッケージのインストール・実行はリポジトリ直下で素の `pnpm` を使う（`~/.asdf/shims/pnpm` を直接叩かない。LEARNINGS.md）。
