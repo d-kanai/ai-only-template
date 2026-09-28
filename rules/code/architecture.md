@@ -35,7 +35,7 @@ features/
   todo/
     index.ts                          # 公開 API。外から import してよいのはここだけ
     api/
-      todo-api.ts                     # /api/todos を fetch する薄いラッパー（型は backend の api ファイルから import type）
+      todo-api.ts                     # /api/todos を fetch する薄いラッパー（型は backend の api ファイルから import type し、画面側に re-export）
       todo-api.test.ts
     components/
       todo-item.tsx                   # feature 内で画面をまたぐ部品
@@ -112,7 +112,7 @@ backend/
   - 理由: 見た目とロジックを分けると、ロジックは hook 単体（`renderHook`）で、見た目は操作ベースで、それぞれ小さくテストできる。1 画面のファイルを 1 か所にまとめ、画面を消すときはディレクトリごと消せるようにする。
 - `components/`: feature 内で画面をまたぐ部品。
 - `hooks/`: feature 内で画面をまたぐ hook。
-- `api/`: `/api/...` を fetch する薄いラッパー。リクエスト / レスポンスの型は `backend/<feature>/presentation/<name>.api.ts` から `import type` で参照する（下の「画面側とサーバ側の境界」）。
+- `api/`: `/api/...` を fetch する薄いラッパー。feature の中で backend を参照してよいのはここだけ。リクエスト / レスポンスの型は `backend/<feature>/presentation/<name>.api.ts`（エラー時の `ErrorResponse` は `backend/shared/presentation/`）から `import type` で参照し、画面側の他のコード（screens / components / hooks）が使う型は `api/` から re-export する（下の「画面側とサーバ側の境界」）。
 - `index.ts`: feature の公開 API。feature の外（`app/`・他の feature）から import してよいのはここだけ。
   - 理由: feature の内部構成を変えても、外側の import を直さずに済むようにする。
 - `components/` `hooks/` は、使うものが出てくるまで作らない（空のディレクトリを置かない）。
@@ -126,7 +126,7 @@ backend/
 ## `backend/<feature>/`（API 側、DDD 4 層）
 | 層 | 置くもの | 依存してよい先 |
 | --- | --- | --- |
-| `presentation/` | api ファイル。1 API = 1 ファイル `<verb>-<noun>.api.ts`（例: `list-todos.api.ts`、`create-todo.api.ts`）。コンテナを受け取って handler（Request → 入力の形の検証 → query / command → Response）を返す関数（`listTodosApi(container)`）、それを本番用のコンテナで組み立てた HTTP メソッド名の定数（`export const GET = listTodosApi(todoContainer)`）、その API のリクエスト / レスポンスの型を export する | `application`、`infra/container.ts`（コンテナの型と本番用のコンテナの受け取りだけ）、`backend/shared` |
+| `presentation/` | api ファイル。1 API = 1 ファイル `<verb>-<noun>.api.ts`（例: `list-todos.api.ts`、`create-todo.api.ts`）。コンテナを受け取って handler（Request → 入力の形の検証 → query / command → Response）を返す関数（`listTodosApi(container)`）、それを本番用のコンテナで組み立てた HTTP メソッド名の定数（`export const GET = listTodosApi(todoContainer)`）、その API のリクエスト / レスポンスの型を export する | `application`、`domain`（Entity の型の参照のみ。query / command が返す Entity を DTO に変換するため `import type { Todo }` する）、`infra/container.ts`（コンテナの型と本番用のコンテナの受け取りだけ）、`backend/shared` |
 | `application/` | ユースケース。1 ユースケース = 1 ファイルで、読むだけ（副作用なし）のものは `<verb>-<noun>.query.ts`、状態を変えるものは `<verb>-<noun>.command.ts`（例: `list-todos.query.ts`、`create-todo.command.ts`） | `domain`、`backend/shared` |
 | `domain/` | Entity / Value Object / Repository の interface（DomainError は feature をまたいで使うため `backend/shared/domain/` に置く） | `backend/shared` だけ（Next・React・DB に依存しない） |
 | `infra/` | Repository の実装、`container.ts`（組み立て = DI。リポジトリを受け取ってコンテナを作る `createTodoContainer(repository)` と、アプリで共有する `todoContainer`） | `domain`（interface を実装する）、`application`（container で組み立てる） |
@@ -155,8 +155,10 @@ backend/
   - 理由: 同じ規則を presentation と domain の 2 か所に書くと、片方だけ直してずれる。どちらの違反もレスポンスは同じ 400 / `validation_error` になるので、クライアントから見た結果は変わらない。
 
 ## 画面側とサーバ側の境界
-- 画面側（`features/<feature>/api/`）からサーバ側へは、`backend/<feature>/presentation/<name>.api.ts` が export するリクエスト / レスポンスの型を `import type` で参照するだけにする。api ファイルの関数や、application・domain・infra の実装は import しない。
+- 画面側で backend を参照してよいのは `features/<feature>/api/` だけ。参照先は `backend/<feature>/presentation/<name>.api.ts`（リクエスト / レスポンスの型）と `backend/shared/presentation/`（エラー時の `ErrorResponse`）で、いずれも `import type` のみ。api ファイルの関数や、application・domain・infra の実装は import しない。
   - 理由: 画面とサーバで同じ契約（型）を使い、ずれを型チェックで検出する。`import type` はビルド時に消えるので、サーバ専用のコードが画面のバンドルに入らない。
+- 画面側の他のコード（screens / components / hooks）は backend を直接参照せず、`api/` が re-export した型を使う（例: `import type { TodoDto } from "@/features/todo/api/todo-api"`）。
+  - 理由: 画面とサーバの境界を `api/` の 1 ファイルに集約し、契約（型）が変わったときの影響と変更点を 1 か所で追えるようにする。
 - 型で担保されること: リクエスト / レスポンスの「形」。api ファイルの型を変えると、それを使う画面側のコードの不一致が `pnpm build` の型チェックで検出される。
 - 型で担保されないこと（画面側に文字列で書く）:
   - URL と HTTP メソッド（`fetch("/api/todos", { method: "POST" })` の `"/api/todos"` と `"POST"`）。`app/api/**/route.ts` の置き場所や re-export するメソッドを変えても、型チェックでは検出されない。
@@ -166,7 +168,7 @@ backend/
 ## 依存の向き（全体）
 - 画面側: `app → features → shared`
 - API 側: `app/api → backend`
-- 画面側 → API 側: `features/<feature>/api → backend/<feature>/presentation/<name>.api.ts` の `import type` だけ（上の「画面側とサーバ側の境界」）。
+- 画面側 → API 側: `features/<feature>/api → backend/<feature>/presentation/<name>.api.ts` と `backend/shared/presentation/` の `import type` だけ（上の「画面側とサーバ側の境界」）。`features/<feature>/` の `api/` 以外は backend を参照せず、`api/` が re-export した型を使う。
 - feature 同士は原則 import しない。必要なときは相手の `index.ts` だけを import する。
 - `shared/` は `features/` を import しない（逆向きの依存を作らない）。
 - 検査: 現状はこのルール文書だけで、機械的な検査（Biome の `noRestrictedImports` など）は入れていない。検査できるかは未確認で、別 Issue で検討する。

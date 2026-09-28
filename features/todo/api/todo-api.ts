@@ -4,7 +4,10 @@ import type {
   CreateTodoResponse,
 } from "@/backend/todo/presentation/create-todo.api";
 import type { GetTodoResponse } from "@/backend/todo/presentation/get-todo.api";
-import type { ListTodosResponse } from "@/backend/todo/presentation/list-todos.api";
+import type {
+  ListTodosResponse,
+  TodoDto,
+} from "@/backend/todo/presentation/list-todos.api";
 import type {
   UpdateTodoRequest,
   UpdateTodoResponse,
@@ -13,6 +16,19 @@ import type {
 // /api/todos を呼ぶ薄いラッパー。画面側のデータ取得は必ず「hook → ここ → Route Handler」を通す（SSR を前提にしない構成）。
 // リクエスト / レスポンスの型は backend の presentation 層の型を import type で参照するだけにする。
 // 実装を import しないことでサーバ専用のコードが画面のバンドルに入らず、型を共有することで契約のずれを型チェックで検出できる。
+
+// 画面側で backend を参照してよいのはこのファイル（features/<feature>/api/）だけにする。
+// WHY: 画面とサーバの境界（契約の型）を 1 ファイルに集約し、契約が変わったときの影響をここ 1 か所で追えるようにする。
+//   hook や components は、ここで re-export した型を使い、backend のパスを直接書かない。
+export type {
+  CreateTodoRequest,
+  CreateTodoResponse,
+  GetTodoResponse,
+  ListTodosResponse,
+  TodoDto,
+  UpdateTodoRequest,
+  UpdateTodoResponse,
+};
 
 const BASE_PATH = "/api/todos";
 

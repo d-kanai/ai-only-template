@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { TodoDto } from "@/backend/todo/presentation/list-todos.api";
+import type { TodoDto } from "@/features/todo/api/todo-api";
 
 type TodoItemProps = {
   todo: TodoDto;

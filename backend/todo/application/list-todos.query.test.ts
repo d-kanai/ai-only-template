@@ -2,6 +2,7 @@
 import { describe, expect, test } from "vitest";
 import { ListTodosQuery } from "@/backend/todo/application/list-todos.query";
 import { Todo } from "@/backend/todo/domain/todo";
+import type { TodoRepository } from "@/backend/todo/domain/todo-repository";
 import { InMemoryTodoRepository } from "@/backend/todo/infra/todo-repository.in-memory";
 
 describe("ListTodosQuery", () => {
@@ -22,5 +23,22 @@ describe("ListTodosQuery", () => {
     const todos = await new ListTodosQuery(repository).execute();
 
     expect(todos.map((todo) => todo.title)).toEqual(["古い", "新しい"]);
+  });
+
+  test("リポジトリが返した配列は並べ替えない（キャッシュした配列を返す実装でも中身を書き換えない）", async () => {
+    const newer = Todo.create("新しい", new Date("2026-09-28T10:00:00.000Z"));
+    const older = Todo.create("古い", new Date("2026-09-28T09:00:00.000Z"));
+    const cached = [newer, older];
+    // findAll が毎回同じ配列を返す実装を模す。InMemory は毎回新しい配列を返すので、この性質は確かめられない。
+    const repository: TodoRepository = {
+      findAll: async () => cached,
+      findById: async () => undefined,
+      save: async () => undefined,
+      delete: async () => undefined,
+    };
+
+    await new ListTodosQuery(repository).execute();
+
+    expect(cached).toEqual([newer, older]);
   });
 });

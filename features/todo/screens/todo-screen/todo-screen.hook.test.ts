@@ -31,6 +31,17 @@ const bread = {
   createdAt: "2026-09-28T00:01:00.000Z",
 };
 
+// テストから任意のタイミングで resolve できる Promise。即時 resolve のモックでは「古い応答が後から届く」順序を再現できないため使う。
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {
+    throw new Error("Promise の初期化前に resolve が呼ばれた");
+  };
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
 async function renderLoaded() {
   const view = renderHook(() => useTodoScreen());
   await waitFor(() => expect(view.result.current.isLoading).toBe(false));
@@ -47,6 +58,23 @@ describe("初回の読み込み", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.todos).toEqual([milk]);
     expect(result.current.error).toBeNull();
+  });
+
+  test("初回の取得が遅れて届いても、追加後に取り直した一覧を上書きしない", async () => {
+    const initialResponse = deferred<{ todos: (typeof milk)[] }>();
+    vi.mocked(listTodos)
+      .mockReturnValueOnce(initialResponse.promise)
+      .mockResolvedValueOnce({ todos: [milk] });
+    vi.mocked(createTodo).mockResolvedValue(milk);
+    const { result } = renderHook(() => useTodoScreen());
+
+    act(() => result.current.setNewTitle("牛乳を買う"));
+    await act(() => result.current.addTodo());
+    expect(result.current.todos).toEqual([milk]);
+    expect(result.current.isLoading).toBe(false);
+    await act(async () => initialResponse.resolve({ todos: [] }));
+
+    expect(result.current.todos).toEqual([milk]);
   });
 
   test("一覧の取得に失敗すると、エラーの message が error に入る", async () => {

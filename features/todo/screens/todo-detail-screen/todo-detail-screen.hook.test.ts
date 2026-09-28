@@ -19,6 +19,28 @@ const milk = {
   completed: false,
   createdAt: "2026-09-28T00:00:00.000Z",
 };
+const bread = { ...milk, id: "todo-2", title: "パンを買う" };
+
+// テストから任意のタイミングで resolve できる Promise。即時 resolve のモックでは「古い応答が後から届く」順序を再現できないため使う。
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {
+    throw new Error("Promise の初期化前に resolve が呼ばれた");
+  };
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
+// todo-1 → todo-2 の遷移を再現するため、todoId を props で変えられる形で描画する。
+function renderWithTodoId(todoId: string) {
+  return renderHook(
+    (props: { todoId: string }) => useTodoDetailScreen(props.todoId),
+    {
+      initialProps: { todoId },
+    },
+  );
+}
 
 async function renderLoaded(todoId = "todo-1") {
   const view = renderHook(() => useTodoDetailScreen(todoId));
@@ -50,20 +72,108 @@ describe("初回の読み込み", () => {
   });
 
   test("todoId が変わると、新しい todoId の Todo を取得し直す", async () => {
-    const bread = { ...milk, id: "todo-2", title: "パンを買う" };
     vi.mocked(getTodo).mockImplementation(async (id) =>
       id === "todo-1" ? milk : bread,
     );
-    const { result, rerender } = renderHook(
-      ({ todoId }) => useTodoDetailScreen(todoId),
-      { initialProps: { todoId: "todo-1" } },
-    );
+    const { result, rerender } = renderWithTodoId("todo-1");
     await waitFor(() => expect(result.current.todo).toEqual(milk));
 
     rerender({ todoId: "todo-2" });
 
     await waitFor(() => expect(result.current.todo).toEqual(bread));
     expect(result.current.title).toBe("パンを買う");
+  });
+
+  test("todoId が変わった後に前の todoId の取得結果が届いても、新しい Todo の表示を上書きしない", async () => {
+    const milkResponse = deferred<typeof milk>();
+    vi.mocked(getTodo).mockImplementation((id) =>
+      id === "todo-1" ? milkResponse.promise : Promise.resolve(bread),
+    );
+    const { result, rerender } = renderWithTodoId("todo-1");
+
+    rerender({ todoId: "todo-2" });
+    await waitFor(() => expect(result.current.todo).toEqual(bread));
+    await act(async () => milkResponse.resolve(milk));
+
+    expect(result.current.todo).toEqual(bread);
+    expect(result.current.title).toBe("パンを買う");
+  });
+});
+
+describe("todoId が変わった後に届いた前の Todo の更新結果", () => {
+  test("title の保存の結果で、新しい Todo の表示と編集中の title を上書きしない", async () => {
+    const putResponse = deferred<typeof milk>();
+    vi.mocked(getTodo).mockImplementation(async (id) =>
+      id === "todo-1" ? milk : bread,
+    );
+    vi.mocked(updateTodo).mockReturnValue(putResponse.promise);
+    const { result, rerender } = renderWithTodoId("todo-1");
+    await waitFor(() => expect(result.current.todo).toEqual(milk));
+
+    act(() => result.current.setTitle("豆乳を買う"));
+    let saving: Promise<void> = Promise.resolve();
+    act(() => {
+      saving = result.current.saveTitle();
+    });
+    rerender({ todoId: "todo-2" });
+    await waitFor(() => expect(result.current.todo).toEqual(bread));
+    await act(async () => {
+      putResponse.resolve({ ...milk, title: "豆乳を買う" });
+      await saving;
+    });
+
+    expect(result.current.todo).toEqual(bread);
+    expect(result.current.title).toBe("パンを買う");
+  });
+
+  test("完了の切り替えの結果で、新しい Todo の表示を上書きしない", async () => {
+    const putResponse = deferred<typeof milk>();
+    vi.mocked(getTodo).mockImplementation(async (id) =>
+      id === "todo-1" ? milk : bread,
+    );
+    vi.mocked(updateTodo).mockReturnValue(putResponse.promise);
+    const { result, rerender } = renderWithTodoId("todo-1");
+    await waitFor(() => expect(result.current.todo).toEqual(milk));
+
+    let toggling: Promise<void> = Promise.resolve();
+    act(() => {
+      toggling = result.current.toggleCompleted();
+    });
+    rerender({ todoId: "todo-2" });
+    await waitFor(() => expect(result.current.todo).toEqual(bread));
+    await act(async () => {
+      putResponse.resolve({ ...milk, completed: true });
+      await toggling;
+    });
+
+    expect(result.current.todo).toEqual(bread);
+  });
+
+  test("更新の失敗で、新しい Todo の画面に前の Todo のエラーを出さない", async () => {
+    const putResponse = deferred<typeof milk>();
+    vi.mocked(getTodo).mockImplementation(async (id) =>
+      id === "todo-1" ? milk : bread,
+    );
+    vi.mocked(updateTodo).mockReturnValue(
+      putResponse.promise.then(() => {
+        throw new Error("更新に失敗しました");
+      }),
+    );
+    const { result, rerender } = renderWithTodoId("todo-1");
+    await waitFor(() => expect(result.current.todo).toEqual(milk));
+
+    let toggling: Promise<void> = Promise.resolve();
+    act(() => {
+      toggling = result.current.toggleCompleted();
+    });
+    rerender({ todoId: "todo-2" });
+    await waitFor(() => expect(result.current.todo).toEqual(bread));
+    await act(async () => {
+      putResponse.resolve(milk);
+      await toggling;
+    });
+
+    expect(result.current.error).toBeNull();
   });
 });
 

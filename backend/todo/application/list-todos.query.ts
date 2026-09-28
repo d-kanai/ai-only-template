@@ -10,6 +10,10 @@ export class ListTodosQuery {
   async execute(): Promise<Todo[]> {
     const todos = await this.repository.findAll();
     // Array#sort は安定ソート（ES2019 以降）なので、作成日時が同じ Todo はリポジトリが返した順を保つ。
-    return todos.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    // WHY コピーしてから並べ替える: Array#sort は配列をその場で書き換える。リポジトリの実装がキャッシュした配列を
+    //   そのまま返すと、読むだけの query がリポジトリ側の状態を書き換えてしまうため、受け取った配列には触らない。
+    return [...todos].sort(
+      (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
+    );
   }
 }
