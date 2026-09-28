@@ -430,3 +430,245 @@ describe("入力を読めないとき", () => {
     expect(result.denied).toBe(false);
   });
 });
+
+// reviewer の指摘（Issue #64）で足したケース。見逃す書き方（must reject）と、似ているが危険でない書き方（must pass）を並べる。
+describe("長いオプションの省略形（git は一意な接頭辞を受け付ける）", () => {
+  // 最短の接頭辞の根拠（git 2.43.0 の builtin/commit.c・push.c・merge.c のオプション定義）:
+  // - --no-v: commit / push / merge の --no-verify。--no-v〜--no-ver は --no-verbose とも一致して git では曖昧（エラー）に
+  //   なるが、止めても害はないので止める側に倒す。--no-veri から --no-verify に決まる。
+  // - --for: push の --force / --force-with-lease / --force-if-includes（--fo は --follow-tags と曖昧）。
+  // - --m: push の --mirror（push に m で始まるオプションはほかに無い）。
+  // - --sq: merge の --squash（--s は --stat / --summary / --strategy / --signoff と曖昧）。
+  it.each([
+    ["git commit --no-verif -m x"],
+    ["git commit --no-veri -m x"],
+    ["git commit --no-v -m x"],
+    ["git merge --no-verif main"],
+    ["git push --no-verif origin feat/1-x"],
+    ["git push --forc origin feat/1-x"],
+    ["git push --for origin feat/1-x"],
+    ["git push --force-with-l origin feat/1-x"],
+    ["git push --force-w=feat/1-x origin feat/1-x"],
+    ["git push --force-if origin feat/1-x"],
+    ["git push --mirror"],
+    ["git push --mirr origin"],
+    ["git push --m origin"],
+    ["git merge --squas feat/2-y"],
+    ["git merge --sq feat/2-y"],
+  ])("%s は拒否する", (command) => {
+    expect(bash(command, () => featureRepo)().denied).toBe(true);
+  });
+
+  it.each([
+    ["git commit --no-verb -m x"],
+    ["git commit --no-edit"],
+    ["git commit --verbose -m x"],
+    ["git merge --no-verify-signatures main"],
+    ["git merge --stat main"],
+    ["git merge --strategy=ort main"],
+    ["git merge --st main"],
+    ["git push --fol origin feat/1-x"],
+    ["git push --follow-tags origin feat/1-x"],
+    ["git push --dry-run origin feat/1-x"],
+    ["git log --no-walk"],
+    // 最短の接頭辞より短いもの。git では複数のオプションに当たって曖昧（エラー。git 2.43.0 の parse-options.c）になり、
+    // 危険なオプションとしては動かないので止めない（最短の接頭辞を短くしすぎていないことの確認）。
+    ["git commit --no- -m x"],
+    ["git merge --s main"],
+    ["git push --fo origin feat/1-x"],
+    ["git push --a origin feat/1-x"],
+  ])("%s は許可する", (command) => {
+    expect(bash(command, () => featureRepo)().denied).toBe(false);
+  });
+});
+
+describe("フックを飛ばす設定と環境変数", () => {
+  it.each([
+    ["git -c core.hooksPath=/dev/null commit -m x"],
+    ["git -c core.hookspath=/tmp/x commit -m x"],
+    ["git --config-env=core.hooksPath=HOOKS commit -m x"],
+    ["git config core.hooksPath /tmp/empty"],
+    ['GIT_CONFIG_PARAMETERS="core.hooksPath=/x" git commit -m x'],
+    // 誤検知として受け入れる例: 読むだけでも core.hooksPath という文字列があれば拒否する。
+    ["git config --get core.hooksPath"],
+    ["LEFTHOOK_EXCLUDE=biome git commit -m x"],
+    ["export LEFTHOOK_EXCLUDE=biome"],
+    ["LEFTHOOK_BIN=true git commit -m x"],
+    ["LEFTHOOK_CONFIG=/tmp/empty.yml git commit -m x"],
+  ])("%s は拒否する", (command) => {
+    expect(bash(command, () => featureRepo)().denied).toBe(true);
+  });
+
+  it.each([
+    ["git -c color.ui=never commit -m x"],
+    ["git config --get core.editor"],
+    ["LEFTHOOK_VERBOSE=1 git commit -m x"],
+    ["LEFTHOOK_OUTPUT=summary git commit -m x"],
+  ])("%s は許可する", (command) => {
+    expect(bash(command, () => featureRepo)().denied).toBe(false);
+  });
+});
+
+describe("gh pr merge の書き方（pflag は省略形を受け付けないが、= の値と短いオプションの束は受け付ける）", () => {
+  it.each([
+    ["gh pr merge 12 --squash=true"],
+    ["gh pr merge 12 --rebase=1"],
+    ["gh pr merge 12 -sd"],
+    ["gh pr merge 12 -ds"],
+    ["gh pr merge 12 -rd"],
+    ["gh pr merge 12 --delete-branch --squash"],
+  ])("%s は拒否する", (command) => {
+    expect(bash(command, () => featureRepo)().denied).toBe(true);
+  });
+
+  it.each([
+    ["gh pr merge 12 --squash=false"],
+    ["gh pr merge 12 -md"],
+    ["gh pr merge 12 --merge --delete-branch"],
+    // -t の値（件名）の中の s は -s ではない。
+    ["gh pr merge 12 --merge -tsubject"],
+  ])("%s は許可する", (command) => {
+    expect(bash(command, () => featureRepo)().denied).toBe(false);
+  });
+});
+
+describe("push のオプションの値を読み飛ばす", () => {
+  // -o / --push-option の値をブランチ名として数えると、「リモートだけ（= カレントブランチへの push）」を見逃す。
+  it.each([
+    ["git push origin -o ci.skip"],
+    ["git push origin --push-option ci.skip"],
+    ["git push -o ci.skip"],
+  ])("main で %s は拒否する", (command) => {
+    expect(bash(command, () => mainRepo)().denied).toBe(true);
+  });
+
+  it("feature で git push origin -o ci.skip は許可する", () => {
+    expect(bash("git push origin -o ci.skip", () => featureRepo)().denied).toBe(
+      false,
+    );
+  });
+});
+
+describe("コマンド置換・cd・--git-dir でブランチの場所が変わる書き方", () => {
+  it.each([
+    ["cd MAIN && git commit -m x"],
+    ["cd MAIN; git merge feat/1-x"],
+    ["pushd MAIN && git commit -m x"],
+    ["git --git-dir=MAIN/.git commit -m x"],
+    ["git --git-dir MAIN/.git commit -m x"],
+  ])("feature から %s は拒否する（main のリポジトリで判定する）", (command) => {
+    const resolved = command.replace("MAIN", mainRepo);
+    expect(bash(resolved, () => featureRepo)().denied).toBe(true);
+  });
+
+  it.each([
+    ["cd FEATURE && git commit -m x"],
+    ["git --git-dir=FEATURE/.git commit -m x"],
+    ["cd FEATURE && git merge main"],
+  ])("main から %s は許可する（feature のリポジトリで判定する）", (command) => {
+    const resolved = command.replace("FEATURE", featureRepo);
+    expect(bash(resolved, () => mainRepo)().denied).toBe(false);
+  });
+
+  it("サブシェルの中の cd は、サブシェルを閉じた後のコマンドに効かない", () => {
+    const outside = `(cd ${featureRepo}) && git commit -m x`;
+    const inside = `(cd ${featureRepo} && git commit -m x)`;
+    expect([
+      bash(outside, () => mainRepo)().denied,
+      bash(inside, () => mainRepo)().denied,
+    ]).toEqual([true, false]);
+  });
+});
+
+describe("サブエージェントの追加の拒否", () => {
+  it.each([
+    ['git -C "$(pwd)" commit -m x'],
+    ["git -C $(pwd) push"],
+    ["git -C `pwd` commit -m x"],
+    ["echo $(git -C $(pwd) commit -m x)"],
+    ["git cherry-pick abc123"],
+    ["git revert HEAD"],
+    ["git am 0001.patch"],
+    ["git pull"],
+    ["git pull --rebase origin main"],
+    ["git -c alias.ci=commit ci -m x"],
+    ["git -c ALIAS.ci=commit ci -m x"],
+    ["git config alias.ci commit"],
+    ["git config --global alias.ci commit"],
+  ])("%s は拒否する", (command) => {
+    const result = bash(command, () => featureRepo, SUBAGENT)();
+    expect(result.denied).toBe(true);
+    expect(result.reason).toContain("サブエージェント");
+  });
+
+  it.each([
+    ["git -C $(pwd) status"],
+    ["git -c color.ui=never log --oneline"],
+    ["git config --get user.name"],
+    ["git log --grep=alias.x"],
+    ["git fetch origin"],
+  ])("%s は許可する", (command) => {
+    expect(bash(command, () => featureRepo, SUBAGENT)().denied).toBe(false);
+  });
+});
+
+describe("同じコマンドの中でブランチを切り替えてから commit / merge する書き方", () => {
+  it.each([
+    ["git checkout main && git commit -m x"],
+    ["git switch main; git merge feat/1-x"],
+    ["git checkout -q main && git commit -m x"],
+  ])(
+    "feature から %s は拒否する（切り替えた後の main で判定する）",
+    (command) => {
+      expect(bash(command, () => featureRepo)().denied).toBe(true);
+    },
+  );
+
+  it.each([
+    ["git checkout -b feat/2-y && git commit -m x"],
+    ["git switch -c feat/2-y && git commit -m x"],
+    ["git checkout main && git checkout -b feat/2-y && git commit -m x"],
+  ])("main から %s は許可する（新しいブランチで判定する）", (command) => {
+    expect(bash(command, () => mainRepo)().denied).toBe(false);
+  });
+
+  it("ブランチでないもの（ファイル）の checkout の後は、今のブランチで判定する", () => {
+    expect(
+      bash("git checkout -- x.ts && git commit -m x", () => mainRepo)().denied,
+    ).toBe(true);
+  });
+});
+
+describe("main を含みうる push", () => {
+  it.each([
+    ["git push --all origin"],
+    ["git push --al origin"],
+    ["git push --branches origin"],
+    ["git push origin refs/heads/*:refs/heads/*"],
+    ["git push origin *:*"],
+  ])("%s は拒否する", (command) => {
+    expect(bash(command, () => featureRepo)().denied).toBe(true);
+  });
+
+  it.each([["git push --atomic origin feat/1-x"], ["git push --tags origin"]])(
+    "%s は許可する",
+    (command) => {
+      expect(bash(command, () => featureRepo)().denied).toBe(false);
+    },
+  );
+});
+
+describe("サブエージェントの低レベルのコミット操作", () => {
+  it.each([
+    ["git commit-tree HEAD^{tree} -m x"],
+    ["git update-ref refs/heads/main 0123abc"],
+  ])("%s は拒否する", (command) => {
+    expect(bash(command, () => featureRepo, SUBAGENT)().denied).toBe(true);
+  });
+
+  it("git rev-parse HEAD は許可する", () => {
+    expect(
+      bash("git rev-parse HEAD", () => featureRepo, SUBAGENT)().denied,
+    ).toBe(false);
+  });
+});

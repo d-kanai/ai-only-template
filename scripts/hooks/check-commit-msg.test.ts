@@ -69,6 +69,13 @@ describe("通すメッセージ（must pass）", () => {
   it.each<[string, string]>([
     ["4 つの見出しと Co-Authored-By がある", VALID],
     ["末尾に改行がある", `${VALID}\n`],
+    [
+      "見出しの行の前後に空白がある",
+      VALID.replace("🎯 WHY", "  🎯 WHY").replace(
+        "✅ 検証内容",
+        "✅ 検証内容 \t",
+      ),
+    ],
     ["CRLF の改行", VALID.replaceAll("\n", "\r\n")],
     [
       "Co-Authored-By の大文字小文字が違う（git の trailer は大文字小文字を区別しない）",
@@ -90,6 +97,15 @@ describe("通すメッセージ（must pass）", () => {
     ["fixup!", "fixup! Biome の設定を直す\n"],
     ["squash!", "squash! Biome の設定を直す\n"],
     ["amend!", "amend! Biome の設定を直す\n\n本文だけ"],
+    [
+      "Revert でも 4 つの見出しと Co-Authored-By があれば通る",
+      `Revert "Biome の設定を直す"\n${VALID.split("\n").slice(1).join("\n")}`,
+    ],
+    [
+      // # の行を読み飛ばしてから 1 行目を決めるので、先頭のコメントの後の Merge もマージコミットとして扱う。
+      "先頭にコメント行があるマージコミット",
+      "# Conflicts:\n#\tx.ts\nMerge branch 'main' into feat/1-x\n",
+    ],
   ])("%s", (_label, message) => {
     const result = check(message);
     expect(result.status, result.stderr).toBe(0);
@@ -125,7 +141,18 @@ describe("拒否するメッセージ（must reject）", () => {
     [
       "見出しがコメント行の中にだけある",
       `${without("✅ 検証内容")}\n# ✅ 検証内容\n`,
-      ["✅ 検証内容"],
+      ["見出し「✅ 検証内容」の行がありません"],
+    ],
+    [
+      // # の行を読み飛ばさないと、コメントが 1 行目（サマリ）として数えられて通ってしまう。
+      "コメント行を除くと 1 行目が空（git のテンプレートのコメントだけが先頭にある）",
+      `# Please enter the commit message\n\n${VALID.split("\n").slice(1).join("\n")}`,
+      ["1 行目（サマリ）が空です"],
+    ],
+    [
+      "Revert もほかのコミットと同じく検査する（取り消す理由を書く）",
+      'Revert "Biome の設定を直す"\n\nThis reverts commit 0123abc.\n',
+      ["見出し「🎯 WHY」の行がありません"],
     ],
     [
       "見出しが 1 行目（サマリ）にしか無い",
@@ -147,7 +174,27 @@ describe("拒否するメッセージ（must reject）", () => {
     [
       "見出しが切り取り線より下にしか無い",
       `${without("🎯 WHY")}\n# ------------------------ >8 ------------------------\n🎯 WHY\n`,
-      ["🎯 WHY"],
+      ["見出し「🎯 WHY」の行がありません"],
+    ],
+    [
+      // git commit -v の差分では、変更していない行が先頭に空白 1 つを付けて並ぶ（前後の空白を除くと見出しと同じになる）。
+      "見出しが git commit -v の差分の行（先頭に空白）にしか無い",
+      [
+        "Biome の設定を直す",
+        "",
+        "Co-Authored-By: x",
+        "# ------------------------ >8 ------------------------",
+        "# Do not modify or remove the line above.",
+        "diff --git a/msg.txt b/msg.txt",
+        " 🎯 WHY",
+        " 📝 WHAT",
+        " 🛠️ 実装経緯",
+        " ✅ 検証内容",
+      ].join("\n"),
+      [
+        "見出し「🎯 WHY」の行がありません",
+        "見出し「✅ 検証内容」の行がありません",
+      ],
     ],
     ["1 行目が空", `\n${VALID}`, ["1 行目"]],
     ["空のメッセージ", "", ["1 行目"]],

@@ -33,9 +33,21 @@ claude 2.1.283 の `claude -p ... --setting-sources project`。公式は `https:
   - SubagentStop: `decision: "block"` はサブエージェントを動かし続け、`reason` を次の指示として渡す。
   - 「Disable or remove hooks」: `disableAllHooks: true` で全フックを止める（`--settings '{"disableAllHooks": true}'` で 1 回だけ）。個々のフックを設定に残したまま止める方法は無い。
   - 「Workspace trust」: プロジェクトのサブエージェントのフロントマターの hooks は、信頼ダイアログを受け入れた後だけ動く。`-p` は受け入れたことにならない。
+- permission-modes（https://code.claude.com/docs/en/permission-modes.md）
+  - deny のルールは `bypassPermissions` を含むすべてのモードで効く。allow のルールは `bypassPermissions` では意味を持たない。
+  - 「Protected paths」: `.git`・`.claude` などへの書き込みは、`default` / `acceptEdits` で確認、`auto` で分類器、`bypassPermissions` で確認なし。
+  - `permissions.defaultMode: "bypassPermissions"` を読むのは user / `--settings` / managed の設定とある（プロジェクトの `.claude/settings.json` で効くかは未確認。`settings.test.ts` はどこにあっても拒否する）。
+- git 2.43.0 のオプション定義（https://raw.githubusercontent.com/git/git/v2.43.0/builtin/commit.c ・ `push.c` ・ `merge.c`）。git は長いオプションを一意な接頭辞で受け付ける（parse-options）ので、`guard-git.sh` は最短の接頭辞から拾う。
+  - commit: `OPT_BOOL('n', "no-verify", ...)` と `OPT__VERBOSE`（`--no-verbose` がある）。`--no-v`〜`--no-ver` は両方に当たり、`--no-veri` から `--no-verify` に決まる。
+  - push: 長いオプションの名前は repo / all / branches / mirror / delete / tags / dry-run / porcelain / force / recurse-submodules / thin / receive-pack / exec / set-upstream / progress / prune / no-verify / follow-tags / signed / atomic / push-option（ほかに force-with-lease / force-if-includes）。`m` で始まるのは mirror だけ、`--fo` は follow-tags と曖昧、`--a` は atomic と曖昧、`b` で始まるのは branches だけ。
+  - merge: stat / summary / squash / commit / edit / ff / ff-only / verify-signatures / strategy / strategy-option / message / into-name / abort / quit / continue / allow-unrelated-histories / progress / overwrite-ignore / signoff / no-verify。`--s` は stat・summary・squash・strategy・signoff と曖昧で、`--sq` から squash に決まる。`--no-verify-signatures` は `--no-verify` の接頭辞ではない。
+- lefthook 2.1.12 のバイナリ（`node_modules/.pnpm/lefthook-linux-x64@2.1.12/.../bin/lefthook`）の文字列に含まれる環境変数: `LEFTHOOK_BIN`・`LEFTHOOK_CONFIG`・`LEFTHOOK_EXCLUDE`・`LEFTHOOK_OUTPUT`・`LEFTHOOK_VERBOSE`（`strings | grep LEFTHOOK_`、2026-09-28）。`.git/hooks/pre-commit`（lefthook が書くスクリプト）は `LEFTHOOK=0` で終わり、`LEFTHOOK_BIN` があればそれを lefthook の代わりに実行する。`LEFTHOOK_CONFIG` / `LEFTHOOK_EXCLUDE` の効果は実行して確かめていない（名前から設定の差し替え・除外と判断し、止める側に倒した）。
 - sub-agents（https://code.claude.com/docs/en/sub-agents.md）
   - `disallowedTools` に `Bash(git push *)` のような指定を書くと、ツール全体（Bash）が外れる。
   - `skills:` は起動時にスキルの本文をすべて読み込む。`disable-model-invocation: true` のスキルは事前読み込みできない。
+
+## reviewer の指摘で直した見逃し（2026-09-28）
+reviewer が `guard-git.sh` に JSON を直接渡して、次が許可されることを確かめた: `--no-verif` / `--forc` / `--squas` などの省略形、`git -c core.hooksPath=...`、`LEFTHOOK_EXCLUDE=`、`--mirror`、`gh pr merge --squash=true` と `-sd`、サブエージェントの `git -C "$(pwd)" commit`（`( )` を区切りにしていたため git と commit が分かれた）と `cherry-pick` / `revert` / `am` / `pull`、`cd <dir> && git commit` と `--git-dir`（ブランチを cwd で見ていた）。`-o <値>` の読み飛ばしは、壊しても落ちるテストが無かった。すべてテスト（`scripts/hooks/guard-git.test.ts`）に足して直した。残る見逃しは `.claude/rules/git-guard.md` の「見逃す方向の限界」。
 
 ## 未確認
 - メイン（オーケストレータ）の Bash・GitHub MCP のツールで、フックが実際に拒否すること（テストでは入力の JSON を直接渡して確かめた）。

@@ -190,6 +190,55 @@ function findBrokenScripts(root: string, scripts: string[]) {
   });
 }
 
+// 権限・フックを黙って効かなくする設定を返す。
+// - disableAllHooks: true: guard-git.sh を含むすべてのフックが止まる（公式 hooks の「Disable or remove hooks」）。
+// - permissions.defaultMode: "bypassPermissions": deny は効くが、.git・.claude への書き込みも確認なしになり
+//   （公式 permissions の「Permission modes」）、settings.json や .git/hooks を黙って書き換えられる。公式ではこのモードを
+//   設定ファイルから有効にできるのは user / --settings / managed とあり、プロジェクトの settings.json で効くかは未確認。
+// - permissions.allow の Bash / Bash(*): すべての Bash を確認なしで許す（公式: Bash(*) は Bash と同じ）。
+function findUnsafeSettings(settings: unknown): string[] {
+  const s = (settings ?? {}) as {
+    disableAllHooks?: unknown;
+    permissions?: { defaultMode?: unknown; allow?: unknown };
+  };
+  const allow = Array.isArray(s.permissions?.allow) ? s.permissions.allow : [];
+  return [
+    ...(s.disableAllHooks === true ? ["disableAllHooks: true"] : []),
+    ...(s.permissions?.defaultMode === "bypassPermissions"
+      ? ["permissions.defaultMode: bypassPermissions"]
+      : []),
+    ...allow
+      .filter((rule) => rule === "Bash" || rule === "Bash(*)")
+      .map((rule) => `permissions.allow: ${String(rule)}`),
+  ];
+}
+
+// EXPECTED_HOOKS に無い登録（想定外のイベント・matcher・コマンド・timeout）を返す。
+// WHY: 登録の有無（findHookProblems）だけでは、同じイベントに足された別のフック（例: PreToolUse で常に allow を返すもの）や
+//   Stop に足された別の処理に気づけない。登録を足すときは EXPECTED_HOOKS も直す。
+function findUnexpectedHooks(settings: unknown, expected: ExpectedHook[]) {
+  const hooks = (settings as { hooks?: Record<string, unknown> })?.hooks ?? {};
+  return Object.keys(hooks).flatMap((event) =>
+    hookGroups(settings, event).flatMap((group) => {
+      const entries = groupEntries(group);
+      const unexpected = (entry: HookEntry) =>
+        !expected.some(
+          (hook) =>
+            hook.event === event &&
+            hook.matcher === group.matcher &&
+            entry.type === "command" &&
+            hook.command === entry.command &&
+            hook.timeout === entry.timeout,
+        );
+      const found = entries.length === 0 ? [{}] : entries.filter(unexpected);
+      return found.map(
+        (entry) =>
+          `${event}: matcher=${String(group.matcher)} command=${String(entry.command)} は想定外`,
+      );
+    }),
+  );
+}
+
 // 架空の settings。EXPECTED_HOOKS と REQUIRED_DENY_RULES をすべて満たす形を作り、テストごとに 1 か所だけ壊す。
 function validSettings() {
   const hooks: Record<string, HookGroup[]> = {};
@@ -413,6 +462,92 @@ describe("hooks の登録の判定", () => {
   });
 });
 
+describe("権限・フックを黙って効かなくする設定の判定", () => {
+  it("期待どおりの settings（ほかの allow があっても）は問題なし（must pass）", () => {
+    const settings = {
+      ...validSettings(),
+      disableAllHooks: false,
+      permissions: {
+        ...validSettings().permissions,
+        defaultMode: "default",
+        allow: ["Bash(pnpm test *)", "Bash(git status)", "Read"],
+      },
+    };
+    expect(findUnsafeSettings(settings)).toEqual([]);
+    expect(findUnexpectedHooks(settings, EXPECTED_HOOKS)).toEqual([]);
+  });
+
+  it.each<[string, Record<string, unknown>, string[]]>([
+    [
+      "disableAllHooks: true",
+      { disableAllHooks: true },
+      ["disableAllHooks: true"],
+    ],
+    [
+      "defaultMode: bypassPermissions",
+      { permissions: { defaultMode: "bypassPermissions" } },
+      ["permissions.defaultMode: bypassPermissions"],
+    ],
+    [
+      "allow に Bash(*)",
+      { permissions: { allow: ["Read", "Bash(*)"] } },
+      ["permissions.allow: Bash(*)"],
+    ],
+    [
+      "allow に Bash",
+      { permissions: { allow: ["Bash"] } },
+      ["permissions.allow: Bash"],
+    ],
+  ])("%s は問題として返す（must reject）", (_label, extra, expected) => {
+    expect(findUnsafeSettings({ ...validSettings(), ...extra })).toEqual(
+      expected,
+    );
+  });
+
+  it.each<[string, (s: ReturnType<typeof validSettings>) => void, string]>([
+    [
+      "PreToolUse に想定外のグループ（常に allow を返すフックなど）",
+      (s) => {
+        s.hooks.PreToolUse.push({
+          matcher: "Bash",
+          hooks: [{ type: "command", command: "echo allow" }],
+        });
+      },
+      "PreToolUse: matcher=Bash command=echo allow は想定外",
+    ],
+    [
+      "Stop の同じグループに想定外のコマンド",
+      (s) => {
+        s.hooks.Stop[0].hooks = [
+          ...groupEntries(s.hooks.Stop[0]),
+          { type: "command", command: "true" },
+        ];
+      },
+      "Stop: matcher=undefined command=true は想定外",
+    ],
+    [
+      "想定外のイベント",
+      (s) => {
+        s.hooks.PostToolUse = [
+          { hooks: [{ type: "command", command: "echo post" }] },
+        ];
+      },
+      "PostToolUse: matcher=undefined command=echo post は想定外",
+    ],
+    [
+      "フックが空のグループ",
+      (s) => {
+        s.hooks.Stop.push({ hooks: [] });
+      },
+      "Stop: matcher=undefined command=undefined は想定外",
+    ],
+  ])("%s は想定外として返す（must reject）", (_label, breakIt, expected) => {
+    const settings = validSettings();
+    breakIt(settings);
+    expect(findUnexpectedHooks(settings, EXPECTED_HOOKS)).toEqual([expected]);
+  });
+});
+
 describe("スクリプトの存在と構文の判定（fixture）", () => {
   let dir: string;
 
@@ -457,6 +592,14 @@ describe(".claude/settings.json（実ファイル）", () => {
 
   it("各イベントに指定のスクリプトが登録されている", () => {
     expect(findHookProblems(settings, EXPECTED_HOOKS)).toEqual([]);
+  });
+
+  it("想定外のフックの登録が無い", () => {
+    expect(findUnexpectedHooks(settings, EXPECTED_HOOKS)).toEqual([]);
+  });
+
+  it("フックや権限を黙って効かなくする設定が無い", () => {
+    expect(findUnsafeSettings(settings)).toEqual([]);
   });
 
   it("guard-git.sh を登録した PreToolUse の matcher が Bash と MCP の書き込みツールをすべて含む", () => {

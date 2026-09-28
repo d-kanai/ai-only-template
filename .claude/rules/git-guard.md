@@ -21,7 +21,7 @@ JSON にはコメントを書けないので、`.claude/settings.json` の各項
 | commit-msg（Lefthook） | `lefthook.yml` → `scripts/hooks/check-commit-msg.sh` | 形式（`.claude/general/commit.md`）に合わないコミットメッセージ |
 | SubagentStop フック | `scripts/hooks/subagent-stop.sh` | （止めない）共有の Git フックが worktree を指していたら直し、lockfile の未コミットの変更を知らせる |
 
-検査: `settings.test.ts`（deny とフックの登録・matcher・スクリプトの存在と `bash -n`）、`scripts/hooks/guard-git.test.ts`、`scripts/hooks/check-commit-msg.test.ts`、`scripts/hooks/subagent-stop.test.ts`。
+検査: `settings.test.ts`（deny とフックの登録・matcher・スクリプトの存在と `bash -n`、想定外のフックの登録、`disableAllHooks: true`・`permissions.defaultMode: bypassPermissions`・`permissions.allow` の `Bash` / `Bash(*)` が無いこと）、`scripts/hooks/guard-git.test.ts`、`scripts/hooks/check-commit-msg.test.ts`、`scripts/hooks/subagent-stop.test.ts`。
 deny やフックを足す・変えるときは `settings.test.ts` の `REQUIRED_DENY_RULES` / `EXPECTED_HOOKS` と、スクリプトのテストの must pass / must reject も同じ変更で直す（手順はスキル `rule-check-test`）。
 
 ## settings.json の各項目
@@ -46,21 +46,36 @@ deny やフックを足す・変えるときは `settings.test.ts` の `REQUIRED
 
 ## guard-git.sh の判定
 - サブエージェント = 入力に `agent_id` か `agent_type` があるとき。公式では `agent_id` はサブエージェントの中だけ、`agent_type` は `--agent` で起動したメインにも付く。片方だけでも止める側に倒す（`--agent` でメインを起動すると、メインもサブエージェント扱いになる。このリポジトリでは使わない）。
-  - サブエージェントには `git commit` / `push` / `merge` / `rebase` / `tag` / `reset --hard` / `checkout main`、`gh pr create` / `gh pr merge`、GitHub MCP の書き込みツールを許さない（オーケストレータだけが行う。`.claude/general/orchestration.md`）。
+  - サブエージェントには `git commit` / `push` / `merge` / `rebase` / `tag` / `cherry-pick` / `revert` / `am` / `pull` / `commit-tree` / `update-ref` / `reset --hard` / `checkout main`、`gh pr create` / `gh pr merge`、GitHub MCP の書き込みツールを許さない（オーケストレータだけが行う。`.claude/general/orchestration.md`）。
+  - サブエージェントには、その場で別名を作る `git -c alias.*=...` と `git config alias.*` も許さない（`git ci` のような別名はサブコマンドの名前から判定できないため）。
   - `.claude/agents/*.md` の `hooks:` と `disallowedTools` は使わない。WHY: プロジェクトのサブエージェントのフロントマターの hooks は、ワークスペースの信頼ダイアログを受け入れた後だけ動き、`-p` では動かなかった（公式 hooks の「Workspace trust」、Issue #64 の実測）。`disallowedTools` に `Bash(git push *)` のような指定を書くと、Bash そのものが外れる（公式 sub-agents の `disallowedTools`）。
 - 全員（メインとサブエージェント）:
-  - force push（`--force` / `--force-with-lease` / `--force-if-includes` / `-f` を含む短いオプションの束 / `+` 付きの refspec）。
-  - main への push（`main` / `HEAD:main` / `x:main` / `refs/heads/main` / `:main` / `--delete main`）。プッシュ先が無い（`git push` / `git push origin`）か `HEAD` のときはカレントブランチで判定する。
-  - カレントブランチが main での `git commit` / `git merge`。ブランチは `-C <dir>` があればその場所、無ければ入力の `cwd` で `git symbolic-ref --short HEAD` を見る（コミットの無いブランチでも取れるため。取れなければ判定しない）。
-  - `--no-verify`、`git commit -n`、`LEFTHOOK=0` / `LEFTHOOK=false`、`git merge --squash`、`gh pr merge --squash / -s / --rebase / -r`、MCP の `merge_pull_request` の `merge_method: squash / rebase`、MCP の push_files / create_or_update_file / delete_file の `branch: main`。
+  - force push（`--force` / `--force-with-lease` / `--force-if-includes` / `--mirror` / `-f` を含む短いオプションの束 / `+` 付きの refspec）。
+  - main への push（`main` / `HEAD:main` / `x:main` / `refs/heads/main` / `:main` / `--delete main`、main を含みうる `--all` / `--branches` / ワイルドカードの refspec）。プッシュ先が無い（`git push` / `git push origin`）か `HEAD` のときはカレントブランチで判定する。`-o` / `--push-option` などの値はブランチ名として数えない。
+  - カレントブランチが main での `git commit` / `git merge`。ブランチは、区切りの前の `cd` / `pushd`（サブシェルの `( )` を閉じたら戻す）と `git -C <dir>` / `--git-dir` を反映した場所で `git symbolic-ref --short HEAD` を見る（コミットの無いブランチでも取れるため。取れなければ判定しない）。同じコマンドの中の `git checkout main` / `git switch main` の後は main、`-b` / `-c` で作った後はそのブランチとみなす（フックは実行の前に動くため）。
+  - `--no-verify`、`git commit -n`、`git merge --squash`、`gh pr merge --squash / --squash=true / -s / --rebase / -r`（`-sd` のような束も）、MCP の `merge_pull_request` の `merge_method: squash / rebase`、MCP の push_files / create_or_update_file / delete_file の `branch: main`。
+  - 長いオプションの省略形: git は一意な接頭辞を受け付けるので、`--no-v` 以上の `--no-verify` の接頭辞、`--for` 以上の force 系、`--m` 以上の `--mirror`、`--sq` 以上の `--squash`、`--al` 以上の `--all`、`--b` 以上の `--branches` を拾う。最短の長さは、ほかのオプションと曖昧にならない長さ（git 2.43.0 のオプション定義。`docs/git-guard.md`）。曖昧な短さ（`--no-ver` は `--no-verbose` とも一致）も止める（git がエラーにするので害はない）。
+  - フックを飛ばす・差し替える設定: `core.hooksPath`（`-c` / `--config-env` / `git config` / `GIT_CONFIG_PARAMETERS` など書き方を問わず、文字列にあれば）、`LEFTHOOK=0` / `LEFTHOOK=false`、`LEFTHOOK_EXCLUDE=` / `LEFTHOOK_BIN=` / `LEFTHOOK_CONFIG=`（lefthook 2.1.12 が読む変数。`LEFTHOOK_VERBOSE` / `LEFTHOOK_OUTPUT` は表示だけなので許す）。
+- コマンド置換（`$(...)` / `` `...` ``）は、中身を別のコマンドとして検査し、外側では 1 語に置き換える（`git -C "$(pwd)" commit` の git と commit が分かれないように）。行き先が変数やコマンド置換の `cd` / `-C` は、場所が分からないので main の判定をしない（サブエージェントの commit などは場所に関係なく止まる）。
 - 拒否は stdout の JSON（`permissionDecision: "deny"`、理由は Claude に渡る）で返し、exit 0。exit 2 を使わないのは、フックの失敗と区別するため。
 - 読めないとき（node が無い・JSON でない）は止めず（fail open）、stderr に理由を出す。WHY: 判定できない入力で全コマンドを止めると作業が止まり、フックを外したくなる。主な操作は deny でも止まる。
 
 ## 誤検知（受け入れている）
-- シェルの構文解析をせず、クォートとバックスラッシュを消した文字列から拾うので、文字列の中の git も止める: `echo "git push --force"`、`grep "git commit" ...`、本文に `git push --force` などを含む `git commit -m "..."`、ヒアドキュメントの中身。
+- シェルの構文解析をせず、クォートとバックスラッシュを消した文字列から拾うので、文字列の中の git も止める: `echo "git push --force"`、`grep "git commit" ...`、本文に `git push --force` などを含む `git commit -m "..."`、ヒアドキュメントの中身。`core.hooksPath` は読むだけ（`git config --get core.hooksPath`）でも止まる。`gh pr merge` の `-b` / `-t` の値の中の単語が `-s` / `-r` に見えると止まる。
   - WHY 受け入れるか: シェルを正しく解析するにはパーサが要り（依存を足さない）、解析の漏れは見逃し（止めるべきものが通る）になる。誤検知は止める側の誤りで、書き方を変えれば済む。
   - 回避: コミットメッセージは Write ツールでファイルに書いて `git commit -F <file>` で渡す。禁止のパターンを含む文章は Bash のヒアドキュメントではなく Write / Edit ツールで書く（matcher は Bash と MCP だけなので、Write / Edit は検査されない）。
   - 2026-09-28、このフックを入れた直後のサブエージェントの Bash（`git commit / push` という文字列を含む Python のヒアドキュメント）が実際に拒否された（`docs/git-guard.md`）。
+
+## 見逃す方向の限界（止まらない書き方）
+フックは Bash のコマンド文字列だけを見るので、次は止まらない。サブエージェントの commit / push は、GitHub の Ruleset（main への直接 push の禁止）と、オーケストレータが差分とコミットを確かめる運用でも防ぐ。
+- 既に設定（`~/.gitconfig`・`.git/config`）にある git の別名（`git ci`）。止められるのは同じコマンドの中で作る別名だけ。
+- 別のファイル・プログラムの中で実行する git（`bash script.sh`、`pnpm run <script>`、`make`、Python の `subprocess`、Node の `child_process`）。
+- 変数・`eval`・エンコードで組み立てたコマンド（`G=git; $G commit`、`git $SUB`、`eval "$(echo ... | base64 -d)"`）。
+- 環境変数でリポジトリを変える書き方（`GIT_DIR=... git commit`、`GIT_WORK_TREE`）。ブランチは cwd・`cd`・`-C`・`--git-dir` で見る。
+- 行き先が変数・コマンド置換・`cd -` の `cd` / `-C`（場所が分からず main の判定をしない）。パイプの中の `cd`、`popd`、`cd` の後の別のサブシェルなどの細かいスコープも追わない。
+- main で `git commit-tree` と `git update-ref refs/heads/main` を組み合わせて作るコミット（メインには止めない。サブエージェントには止める）。`git branch -f main`、`git replace` など、ほかの ref を動かすコマンド。
+- GitHub への直接の API 呼び出し（`gh api -X PUT repos/.../pulls/<n>/merge`、`curl` で GitHub API、matcher に入れていない MCP のツール）。
+- Bash 以外のツールでのファイルの書き換え（Write / Edit で `.git/hooks/*` や `.claude/settings.json` を書く）。これらは Claude Code の保護されたパス（`.git`・`.claude`）で、`default` / `acceptEdits` では確認が出て、`auto` では分類器が判断し、`bypassPermissions` では確認なしで書ける（公式 permission-modes の「Protected paths」）。`settings.test.ts` が `bypassPermissions` と `disableAllHooks` を検査する。
 
 ## 緊急時（フックを外す）
 - フックを 1 つだけ止める設定や環境変数は用意していない（公式にも個別に無効にする方法は無い。`disableAllHooks` は全フックを止める）。WHY: `LEFTHOOK=0` のような抜け道は、Claude 自身が同じコマンドに付けられ、禁止が効かなくなる。
