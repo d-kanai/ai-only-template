@@ -90,3 +90,34 @@ describe("Todo#changeCompletion", () => {
     expect(original.completed).toBe(false);
   });
 });
+
+describe("Todo.restore", () => {
+  test("保存済みの値（id・title・completed・作成日時）をそのまま持つ Todo を作る", () => {
+    const createdAt = new Date("2026-09-28T00:00:00.000Z");
+
+    const todo = Todo.restore({
+      id: "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e",
+      title: "牛乳を買う",
+      completed: true,
+      createdAt,
+    });
+
+    expect(todo).toBeInstanceOf(Todo);
+    expect(todo.id).toBe("8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e");
+    expect(todo.title).toBe("牛乳を買う");
+    expect(todo.completed).toBe(true);
+    expect(todo.createdAt).toEqual(createdAt);
+  });
+
+  test("タイトルの不変条件で弾かない（今の規則に合わない保存済みの Todo も読める）", () => {
+    // 保存した後で規則（上限の文字数など）を厳しくしても、既存のデータを読んだ時点で例外にしないため。
+    const todo = Todo.restore({
+      id: "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e",
+      title: `   ${"a".repeat(101)}`,
+      completed: false,
+      createdAt: new Date("2026-09-28T00:00:00.000Z"),
+    });
+
+    expect(todo.title).toBe(`   ${"a".repeat(101)}`);
+  });
+});

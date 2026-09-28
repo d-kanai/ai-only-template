@@ -2,8 +2,10 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { ErrorResponse } from "@/backend/shared/presentation/http-error";
 import type { TodoRepository } from "@/backend/todo/domain/todo-repository";
-import { createTodoContainer } from "@/backend/todo/infra/container";
-import { InMemoryTodoRepository } from "@/backend/todo/infra/todo-repository.in-memory";
+import {
+  createInMemoryTodoContainer,
+  createTodoContainer,
+} from "@/backend/todo/infra/container";
 import {
   type ListTodosResponse,
   listTodosApi,
@@ -11,7 +13,7 @@ import {
 
 // テストごとに空のリポジトリで組み立てる（アプリ共有のコンテナを使うとテストの順序で結果が変わるため）。
 function setup() {
-  const container = createTodoContainer(new InMemoryTodoRepository());
+  const container = createInMemoryTodoContainer();
   return { container, GET: listTodosApi(container) };
 }
 
@@ -79,7 +81,15 @@ describe("GET /api/todos", () => {
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
     const cause = new Error("connection refused: db.internal:5432");
-    const GET = listTodosApi(createTodoContainer(failingRepository(cause)));
+    // InMemory の runner はスナップショットを取れるリポジトリが要るので、失敗するリポジトリはそのまま渡す runner で組み立てる。
+    const repository = failingRepository(cause);
+    const GET = listTodosApi(
+      createTodoContainer({
+        runner: { run: (fn) => fn(repository) },
+        repositoryFor: (executor: TodoRepository) => executor,
+        readExecutor: repository,
+      }),
+    );
 
     const response = await GET(listRequest());
 

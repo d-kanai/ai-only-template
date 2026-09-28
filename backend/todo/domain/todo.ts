@@ -25,6 +25,28 @@ export class Todo {
     return new Todo(randomUUID(), normalizeTitle(title), false, createdAt);
   }
 
+  // 永続化した値から Todo を組み立て直す（Repository の実装が読み込みに使う）。
+  // WHY create と分ける: create は新しい Todo を作る操作で、id と作成日時を自分で決め、未完了から始める。
+  //   保存済みの Todo は id・完了状態・作成日時が決まっているので、それをそのまま受け取る口が要る
+  //   （コンストラクタは private のため、Repository の実装から new できない）。
+  // WHY タイトルの不変条件で検査しない: 値は保存するときに create / rename で検査済み。後から規則を厳しくした
+  //   （上限の文字数を減らすなど）ときに、既存のデータを読んだだけで例外になり一覧が 500 になるのを避ける。
+  //   そのため、利用者の入力から Todo を作るときには使わない（入力は create / rename を通す）。
+  // WHY 引数をオブジェクトにする: 同じ型（string / boolean）の引数が並ぶので、順番の取り違えを防ぐ。
+  static restore(values: {
+    id: string;
+    title: string;
+    completed: boolean;
+    createdAt: Date;
+  }): Todo {
+    return new Todo(
+      values.id,
+      values.title,
+      values.completed,
+      values.createdAt,
+    );
+  }
+
   rename(title: string): Todo {
     return new Todo(
       this.id,

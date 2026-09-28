@@ -35,6 +35,10 @@ export default defineConfig({
     //   コピーの中のテストまで拾って件数が倍になり、コピーの e2e/（"e2e/**" はルート相対なので効かない）で失敗する
     //   （2026-09-28 に reviewer が実測）。
     exclude: [...configDefaults.exclude, "e2e/**", ".stryker-tmp/**"],
+    // globalSetup: テストファイルを動かす前に 1 回だけ実行する処理（Vitest のプロセスで動く）。
+    //   前の実行が残したテスト用のスキーマ（test_<UUID>）を消し、Postgres に接続できなければ分かりやすいエラーで止める
+    //   （Issue #57。WHY は vitest.global-setup.ts と rules/code/test.md）。
+    globalSetup: ["./vitest.global-setup.ts"],
     // coverage: 単体テストのカバレッジを計測し、100% に満たなければ失敗させる（Issue #45）。
     //   `vitest run --coverage`（= pnpm test）のときだけ有効。enabled は既定の false のままにし、
     //   pnpm test:unit（vitest run）ではカバレッジを計測せず速く回せるようにしている。

@@ -1,13 +1,13 @@
 #!/bin/bash
 # クラウドセッション（Claude Code on the web）の VM に、.tool-versions と同じ Node.js / pnpm を用意し、
-# compose.yaml の Postgres を起動する（フックのときだけ）。
+# compose.yaml の Postgres を起動してマイグレーション（drizzle/）を当てる（フックのときだけ）。
 # 詳細・役割分担は rules/code/env.md の「クラウドセッション」を参照。
 #
 # 使い方:
 #   bash scripts/cloud-session-start.sh --install-only  # 環境設定の setup script から呼ぶ。Node / pnpm のインストールだけ行う
 #   bash scripts/cloud-session-start.sh                 # SessionStart フック（.claude/settings.json）から呼ぶ。
 #                                                       #   CLAUDE_CODE_REMOTE=true のときだけ動き、PATH の書き出しと pnpm install、
-#                                                       #   dockerd の起動と docker compose pull / up（Postgres）を行う
+#                                                       #   dockerd の起動と docker compose pull / up（Postgres）、pnpm db:migrate を行う
 #   bash scripts/cloud-session-start.sh --print-plan    # 読み取った版とインストール先を表示するだけ（テスト・確認用）
 #   CLOUD_SESSION_START_DRY_RUN=1 ...                   # ダウンロード・インストールをせず、実行予定のコマンドを表示する
 #
@@ -527,6 +527,30 @@ start_database() {
   fi
 }
 
+# 起動した Postgres に drizzle/ のマイグレーションを当てる（pnpm db:migrate = drizzle-kit migrate。Issue #57）。
+# WHY フックで当てるか: VM はセッションごとに新しく、Postgres もデータの無い状態で起動する。表が無いままだと、
+#   DATABASE_URL を付けた pnpm dev / pnpm test:e2e が「relation "todos" does not exist」で失敗する。
+#   当て済みのものは飛ばす（drizzle.__drizzle_migrations に記録がある）ので、何度実行しても同じ結果になる。
+# WHY DATABASE_URL が無ければ compose.yaml の開発用 DB を渡すか: フックの環境には DATABASE_URL が無い。drizzle.config.ts も
+#   同じ既定値を持つが、どの DB に当てるかをこのスクリプトの表示（DRY_RUN）とテストで確かめられるように明示する。
+# WHY timeout 15: 実測は約 1 秒（2026-09-28、表 1 つ）。15 秒かかるなら止まっているとみなす。フック全体の最悪ケースを
+#   600 秒に収めるための見積もりは rules/code/env.md（571 + 15 = 586 秒）。
+# WHY Node / pnpm の導入に失敗していても試すか: VM 既定の pnpm でも packageManager の版を取って動く（rules/code/env.md の実測）。
+#   失敗しても warn を出すだけで、セッションは続けられる。
+# 出力は stderr に回す（stdout は Claude のコンテキストに入るため。start_database と同じ）。
+migrate_database() {
+  local project_dir="$1"
+  local url="${DATABASE_URL:-postgresql://app:app@localhost:5432/app}"
+  if is_dry_run; then
+    echo "[dry-run] (cd ${project_dir} && DATABASE_URL=${url} timeout 15 pnpm db:migrate)"
+    return 0
+  fi
+  if ! (cd "$project_dir" && DATABASE_URL="$url" timeout 15 pnpm db:migrate >&2); then
+    warn "pnpm db:migrate failed; run it manually to see the details"
+    return 1
+  fi
+}
+
 # フック: Node / pnpm を用意して pnpm install する。失敗しても呼び出し側は続けて Postgres を起動する。
 setup_node_and_dependencies() {
   local node_version="$1" pnpm_version="$2" project_dir="$3"
@@ -619,6 +643,7 @@ main() {
   setup_node_and_dependencies "$node_version" "$pnpm_version" "$project_dir"
   ensure_docker_daemon || return 0
   start_database "$project_dir" || return 0
+  migrate_database "$project_dir" || return 0
 }
 
 # サブシェルで実行する: set -u の違反など想定外の理由で main が異常終了しても、下の exit 0 まで到達させるため。

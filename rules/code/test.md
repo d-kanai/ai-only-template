@@ -16,10 +16,22 @@
 ## 置き方と環境
 - `rules/code/architecture.md` の「テストの置き方」に従う（置き場所、`// @vitest-environment node`、層ごとのテスト方法）。ここには重複して書かない。
 
+## テスト用スキーマの後始末（globalSetup）
+- `vitest.config.mts` の `globalSetup`（`vitest.global-setup.ts`）が、Vitest の実行の最初（テストファイルを動かす前）に 1 回だけ、`test_` で始まるスキーマをすべて `DROP SCHEMA ... CASCADE` で消す（処理は `backend/shared/infra/database.test-support.ts` の `cleanupTestSchemas`）。
+  - 理由: 実 Postgres を使うテストは、テストファイルごとの別スキーマ（`test_<UUID>`）を `afterAll` で消す（`database.test-support.ts` の `close()`）が、プロセスが `afterAll` の前に止まると（Stryker が worker を止める、Ctrl-C など）残る。テストの前なら消してよいのは前の実行の残りだけになる。`afterAll` での削除も残す（普段の実行で残さないため）。
+  - 探し方は `starts_with(schema_name, 'test_')`。LIKE の `_` は任意の 1 文字に一致し、`testX...` のようなテスト用でないスキーマまで消すため使わない。
+  - Postgres に接続できないときは、ここで「`pnpm db:up` で起動してから実行してください」というエラーにして止める（単体テストは Postgres が前提。各テストファイルの接続エラーが並ぶより原因が分かりやすい）。
+  - Stryker の worker の中（環境変数 `STRYKER_MUTATOR_WORKER` がある。@stryker-mutator/core 10.0.0 の `child-process-proxy.js` が子プロセスに渡す）では消さない。Stryker は複数の worker（それぞれ 1 つの Vitest）を並行して動かし、途中で作り直しもするので、後から始まった worker の globalSetup が他の worker の使用中のスキーマを消してしまうため。
+  - 同じ DB に対して `pnpm test` を 2 つ同時に動かすと、後から始まった方が先の方の使用中のスキーマを消しうる。同時には動かさない。
+  - `cleanupTestSchemas` のテストは、`test_` ではなくテストごとの接頭辞（`test_cleanup_<UUID>_`）で行う。`test_` で呼ぶと並列に動いている他のテストファイルのスキーマを消すため。
+
 ## テストダブル
 - backend（`backend/**`）: InMemory リポジトリ（`InMemoryTodoRepository`。本番でも使う実装）を `createTodoContainer` に渡して組み立てる。モックは最小限にする。
   - 理由: モックは「こう呼ばれるはず」という前提をテストに書き込むため、実装と前提がずれても緑のままになる。本物の実装を通せば、層をまたいだ振る舞い（command で保存したものが query で読めるなど）まで検証できる。
-  - 例外: InMemory では起こせない失敗の経路は、その経路に必要な分だけ差し替える。例: `backend/todo/presentation/list-todos.api.test.ts` は 500 の経路のために、常に reject する `TodoRepository`（`failingRepository`）を `createTodoContainer` に渡し、`console.error` を `vi.spyOn` で抑制しつつ呼ばれたことを検証する。
+  - Postgres の実装（`*.postgres.ts`、`drizzle-transaction-runner.ts`、`database.ts`）は、モックせず実 Postgres（compose.yaml）に対してテストする。`createTestDatabase()`（`backend/shared/infra/database.test-support.ts`）でテストファイルごとに別のスキーマを作ってマイグレーションを当て、各テストの前に `TRUNCATE` する（詳細と WHY は `rules/code/architecture.md` の「永続化（Drizzle + Postgres）」の「テスト」）。
+    - 理由: SQL の組み立て（upsert・並び順・uuid 型）やトランザクションの commit / rollback は、DB を差し替えると何も検証できない。
+    - そのため `pnpm test` / `pnpm test:unit` / `pnpm test:mutation` は Postgres が起動している前提（`pnpm db:up`）。接続先は `DATABASE_URL`、未設定なら compose.yaml の開発用 DB。
+  - 例外: InMemory では起こせない失敗の経路は、その経路に必要な分だけ差し替える。例: `backend/todo/presentation/list-todos.api.test.ts` は 500 の経路のために、常に reject する `TodoRepository`（`failingRepository`）で `createTodoContainer` を組み立て、`console.error` を `vi.spyOn` で抑制しつつ呼ばれたことを検証する。
 - 画面側の hook / screen（`features/**/screens/**`）: `vi.mock("@/features/todo/api/todo-api")` で `api/` を差し替え、`vi.mocked(listTodos).mockResolvedValue(...)` で応答を与える。
   - 理由: 画面側と API 側の境界は `api/` の 1 ファイル（`rules/code/architecture.md` の「画面側とサーバ側の境界」）なので、そこで切るとテストが HTTP やサーバの状態に依存しない。
 - `api/`（`features/**/api/*.ts`）: `vi.stubGlobal("fetch", vi.fn<typeof fetch>())` で `fetch` を差し替え、送った URL・メソッド・本文と、応答の扱いを検証する（`features/todo/api/todo-api.test.ts`）。
@@ -84,6 +96,8 @@ Stryker でコードに変異（条件の反転、戻り値の差し替え、文
 - 位置づけ: 上の「通常のテストでの確認（ミューテーション）」を自動化し、検証の弱いテスト（呼び出すだけ・値を見ていない）を日次でまとめて拾う。手作業の確認を置き換えるものではない。
   - ルール検査テストの fault injection は引き続き手作業で行う。Stryker が変異させるのは `mutate` の実装コードだけで、ルール検査テストが検査する規則・設定（`biome.json`、`package.json`、import の向きなど）は変異させないため。
   - テストを足す・書き換えるときの確認（上の節）も、その場で行う。日次の結果を待たずに、書いたテストが守っているコードを壊すと落ちることを確かめる。
+- Postgres が要る（Issue #57。単体テストに実 Postgres を使うテストがあるため。先に `pnpm db:up`）。日次実行（`mutation.yml`）も `ci.yml` と同じく Postgres を起動し、`pnpm db:migrate` を当ててから実行する。
+- Stryker の実行後は、テスト用のスキーマ（`test_<UUID>`）が後始末されずに残る（2026-09-28 のローカル実行で 1 回あたり 12 個残った。原因は、Stryker が worker のプロセスを afterAll の前に止めるためと推定しているが未確認）。Stryker の中では globalSetup が消さない（上の「テスト用スキーマの後始末（globalSetup）」）ので、次の `pnpm test` の最初に消える。
 - 実行: `pnpm test:mutation`（`stryker run`）。レポートは `reports/mutation/mutation.html`（ブラウザで開く）と `mutation.json`。`reports/` と作業用の `.stryker-tmp/` は `.gitignore` 済み。ローカル（4 コア）で約 2.5 分（384 変異、147 秒。2026-09-28 実測）。
 - 対象: `features/` `backend/` `shared/` の `.ts` / `.tsx`（テスト `*.test.ts(x)` と `*.d.ts` を除く）。`vitest.config.mts` の coverage.include のうち TypeScript の実装がある範囲と同じにしている。`app/`、`scripts/`（実装はシェルスクリプトだけ）、ルート直下の設定ファイル・ルール検査テスト、`e2e/` は対象外。
 - Vitest のカバレッジ（100% のしきい値）は Stryker の実行では効かない。vitest-runner が coverage を無効にして、Stryker 自身のテストごとのカバレッジ分析で「変異を通るテスト」だけを実行するため（https://stryker-mutator.io/docs/stryker-js/vitest-runner/ ）。
