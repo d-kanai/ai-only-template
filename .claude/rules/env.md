@@ -25,8 +25,10 @@ paths:
 
 ## 環境変数
 - 入口は `apps/backend/shared/infra/env.ts` に一元化する。`process.env` を直接読んでよいのは `env.ts` だけ。ほかは `import { env, toolEnv } from ...` で使う（Issue #59）。
-  - `env`（型 `Env`）: アプリの設定。**すべて必須で、コードに既定値を持たない**。今は `DATABASE_URL` / `DATABASE_POOL_MAX` / `DATABASE_POOL_IDLE_TIMEOUT_MS` / `DATABASE_CONNECTION_TIMEOUT_MS` / `E2E_PORT`（値の意味と開発用の値は `.env.example`）。
-  - `toolEnv`（型 `ToolEnv`）: 開発ツールの切り替え（任意）。`CI`・`PLAYWRIGHT_CHROMIUM_EXECUTABLE`・`STRYKER_MUTATOR_WORKER`。ツールが設定する・ツールの動かし方を切り替えるフラグだけを足す。アプリの設定は必ず `env` に足して必須にする。
+  - `env`（型 `Env`）: アプリの設定。**すべて必須で、コードに既定値を持たない**。今は `DATABASE_URL` / `DATABASE_POOL_MAX` / `DATABASE_POOL_IDLE_TIMEOUT_MS` / `DATABASE_CONNECTION_TIMEOUT_MS`（値の意味と開発用の値は `.env.example`）。
+  - `toolEnv`（型 `ToolEnv`）: 開発ツールの切り替え（任意）。`CI`・`PLAYWRIGHT_CHROMIUM_EXECUTABLE`・`STRYKER_MUTATOR_WORKER`・`E2E_PORT`（ツールの動かし方 = E2E のポート。未設定なら `playwright.config.ts` が 3100 を使う）。ツールが設定する・ツールの動かし方を切り替えるものだけを足す。アプリの設定は必ず `env` に足して必須にする。
+    - 任意でも、値があれば検証し、不正なら読み込み時にエラーにする（`E2E_PORT` は 1〜65535 の整数。黙って既定値に戻すと worktree ごとに分けたポートが 3100 に戻るため）。
+    - WHY `E2E_PORT` を `env`（必須）にしない: E2E 専用でアプリ（`next start`）は使わない。必須にすると本番や既存の `.env` にテスト用の変数を要求し、足すまで全コマンドが止まる（Issue #64 の reviewer 指摘）。
 - WHY 一元化: 読む場所が散らばると既定値や検証が場所ごとにずれ、要る変数を一覧できない。検証した値だけを配れば、使う側で `string | undefined` を扱わずに済む。
 - WHY 必須・既定値なし: 既定値があると `.env` の書き忘れや CI での渡し忘れが黙って既定値で動き、意図しない DB に接続しても気づけない（以前は `DATABASE_URL` が無いと InMemory に落ちていた）。開発用の値は `.env.example` の 1 か所だけ。
 - WHY ツールのフラグを分ける: 手元では `CI` も `PLAYWRIGHT_CHROMIUM_EXECUTABLE` も無いのが正常。必須にすると `.env.example` に嘘の値を置くことになり、コピーした `.env` で CI として動く。

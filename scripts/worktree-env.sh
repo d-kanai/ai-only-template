@@ -19,7 +19,8 @@
 #   DATABASE_URL → derive_DATABASE_URL: パスのデータベース名を app_wt_<sanitize した名前>（63 文字以内）にする
 #   E2E_PORT     → derive_E2E_PORT:     3101 + (cksum(名前) % 800)。3101〜3900（メインの 3100 と重ねない）
 # リソース（Redis の DB 番号やキーの接頭辞、バケット名の接頭辞など）を足すとき:
-#   1. env.ts の Env / PARSERS と .env.example に変数を足す（必須、既定値なし。.claude/rules/env.md）
+#   1. env.ts（アプリの設定は Env / PARSERS で必須、ツールの切り替えは ToolEnv で任意）と .env.example に変数を足す
+#      （.claude/rules/env.md）。.env.example には必ず値を書く（ここで置き換える元の行になる）
 #   2. ここに derive_<変数名> 関数を足し、RESOURCES と上の一覧に変数名を足す
 #   3. 作成が要るもの（create database など）は scripts/hooks/worktree-create.sh に、削除は同じファイルの孤立の掃除と
 #      worktree-remove.sh に足す

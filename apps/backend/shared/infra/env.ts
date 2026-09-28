@@ -25,11 +25,6 @@ export type Env = {
   DATABASE_POOL_IDLE_TIMEOUT_MS: number;
   // 接続待ちの上限（ミリ秒、0 以上。0 は無制限）。
   DATABASE_CONNECTION_TIMEOUT_MS: number;
-  // E2E（Playwright）が起動する本番ビルドのポート（1〜65535。playwright.config.ts）。
-  // WHY Env（必須）に置く: worktree ごとに別の値にする外部リソースの 1 つで（Issue #64。scripts/worktree-env.sh が
-  //   worktree の名前から導いて .env に書く）、並列の worktree が同じポートを使うと、reuseExistingServer により
-  //   別の worktree のサーバを検証してしまう。既定値を持つと .env の書き忘れで全 worktree が同じポートに戻る。
-  E2E_PORT: number;
 };
 
 // 開発ツールの切り替え（任意）。アプリの設定ではなく、テストや CI の実行のしかたを変えるだけのフラグ。
@@ -47,6 +42,13 @@ export type ToolEnv = {
   // Stryker（mutation testing）の worker の中で動いているか。Stryker が子プロセスに渡す（@stryker-mutator/core 10.0.0 の
   //   child-process-proxy.js）。テスト用スキーマの後始末を止めるのに使う（apps/backend/shared/infra/database.test-support.ts）。
   STRYKER_MUTATOR_WORKER: boolean;
+  // E2E（Playwright）が本番ビルドを起動するポート（1〜65535。playwright.config.ts）。未設定なら undefined で、
+  //   playwright.config.ts が既定の 3100 を使う。ツールの動かし方（E2E のポート）の切り替え。
+  // WHY Env（必須）でなくここ: E2E 専用で、アプリ（next start）は使わない。必須にすると本番や既存の .env にテスト用の
+  //   変数を要求し、足すまで全コマンドが止まる（Issue #64 の reviewer 指摘）。
+  // WHY 任意でも不正な値はエラーにする: 0 や範囲外を黙って既定値にすると、worktree ごとに分けたつもりのポートが
+  //   3100 に戻り、reuseExistingServer で別の worktree のサーバを検証してしまう（.claude/rules/worktree.md）。
+  E2E_PORT: number | undefined;
 };
 
 // 必須の変数の検証。欠けていれば "未設定"、値が不正なら理由を返し、正しければ値を返す。
@@ -88,7 +90,6 @@ const PARSERS: { [K in keyof Env]: (raw: string) => Check<Env[K]> } = {
   DATABASE_POOL_MAX: positiveInteger,
   DATABASE_POOL_IDLE_TIMEOUT_MS: nonNegativeInteger,
   DATABASE_CONNECTION_TIMEOUT_MS: nonNegativeInteger,
-  E2E_PORT: portNumber,
 };
 
 // source（本番は process.env）から Env を読む。純粋関数にして、テストで偽の source を渡せるようにしている。
@@ -129,7 +130,43 @@ function nonEmpty(raw: string | undefined): string | undefined {
   return raw === "" ? undefined : raw;
 }
 
+// 任意の数の変数: 未設定・空文字なら undefined、値があれば parse で検証し、不正なら problems に積む。
+function optionalNumber(
+  name: string,
+  raw: string | undefined,
+  parse: (raw: string) => Check<number>,
+  problems: string[],
+): number | undefined {
+  const value = nonEmpty(raw);
+  if (value === undefined) {
+    return undefined;
+  }
+  const checked = parse(value);
+  if ("problem" in checked) {
+    problems.push(`${name}: ${checked.problem}`);
+    return undefined;
+  }
+  return checked.value;
+}
+
+// WHY 不正な値は投げる（readEnv と同じく、読み込み時の起動エラーにする）: 任意の変数でも、書いた値が黙って無視されると
+//   意図と違う動き（E2E_PORT なら既定の 3100 に戻る）に気づけないため。
 export function readToolEnv(source: EnvSource): ToolEnv {
+  const problems: string[] = [];
+  const e2ePort = optionalNumber(
+    "E2E_PORT",
+    source.E2E_PORT,
+    portNumber,
+    problems,
+  );
+  if (problems.length > 0) {
+    throw new Error(
+      [
+        "環境変数の値が正しくありません。",
+        ...problems.map((problem) => `  - ${problem}`),
+      ].join("\n"),
+    );
+  }
   return {
     CI: nonEmpty(source.CI) !== undefined,
     PLAYWRIGHT_CHROMIUM_EXECUTABLE: nonEmpty(
@@ -137,6 +174,7 @@ export function readToolEnv(source: EnvSource): ToolEnv {
     ),
     STRYKER_MUTATOR_WORKER:
       nonEmpty(source.STRYKER_MUTATOR_WORKER) !== undefined,
+    E2E_PORT: e2ePort,
   };
 }
 

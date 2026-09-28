@@ -13,7 +13,7 @@ paths:
 1. worktree の一意な名前（WorktreeCreate の入力の `name`。例 `agent-a3f2`）を決める（Claude Code が決める）。
 2. `scripts/worktree-env.sh <name>` が、`.env.example` の変数のうち「リソースの一覧」にあるものを、名前から決定的に導いた値に置き換えて出す。
    - `DATABASE_URL`: パスのデータベース名を `app_wt_<sanitize した名前>`（`[a-z0-9_]` 以外は `_`、先頭が数字なら `_` を前置、`app_wt_` を含めて 63 文字以内）にする。
-   - `E2E_PORT`: `3101 + (cksum(名前) % 800)`（3101〜3900。メインの 3100 と pnpm dev の 3000 に重ねない）。
+   - `E2E_PORT`: `3101 + (cksum(名前) % 800)`（3101〜3900。メインの 3100 と pnpm dev の 3000 に重ねない）。`env.ts` では任意（`toolEnv`。未設定なら 3100）だが、`.env.example` に行が無ければ導出は失敗する。
    - それ以外の行はそのまま。一覧の変数が `.env.example` に無ければ失敗する（分離されないまま共有のリソースを指す `.env` を作らない）。
 3. WorktreeCreate フック（`scripts/hooks/worktree-create.sh`）がその出力を worktree の `.env` に書き、必要な作成（`create database`、`pnpm db:migrate`）まで行う。
 4. アプリ・テスト・ツールは `apps/backend/shared/infra/env.ts` 経由で worktree の `.env` を読む（`findRepoRoot` は worktree の `pnpm-workspace.yaml` で止まる）ので、コードは何も変えずに worktree 専用のリソースを使う。
@@ -23,7 +23,7 @@ paths:
 - InMemory / WASM の DB には置き換えない（テストは本物のリソースで行う。Issue #64 のユーザー判断）。
 
 ## リソースを足す手順（Redis の DB 番号・キーの接頭辞、バケット名の接頭辞など）
-1. `env.ts` の `Env` / `PARSERS` と `.env.example` に変数を足す（必須、既定値なし。`.claude/rules/env.md`）。
+1. `env.ts` と `.env.example` に変数を足す。アプリの設定は `Env` / `PARSERS`（必須、既定値なし）、ツールの動かし方の切り替え（`E2E_PORT` など）は `ToolEnv`（任意）に置く（`.claude/rules/env.md`）。どちらでも `.env.example` には値を書く（`worktree-env.sh` の導出の元。無ければ失敗する）。
 2. `scripts/worktree-env.sh` に `derive_<変数名>` の関数を 1 つ足し、`RESOURCES` と先頭の「リソースの一覧」のコメントに変数名を足す。
 3. 作成が要るものは `worktree-create.sh` に、削除は同じファイルの孤立の掃除（`cleanup_orphan_databases` と同じ形）と `worktree-remove.sh` に足す。
 4. テストを先に足す: 導出は `scripts/worktree-env.test.ts`、作成・削除は偽のコマンドを PATH に置く `scripts/hooks/worktree-*.test.ts`。
