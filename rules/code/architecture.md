@@ -190,10 +190,20 @@ backend/
 | `backend/**/presentation`（`.api.ts`） | 空の InMemory リポジトリで組み立てた handler（`listTodosApi(createTodoContainer(new InMemoryTodoRepository()))`）に `new Request()` を渡し（動的セグメントがあれば `ctx` も）、返る `Response` を検証。共有の `todoContainer` は使わない（上の「`backend/<feature>/`」）。Next の起動は不要 | Node |
 | `features/**/*.hook.ts` | `renderHook` で状態とイベントを検証 | jsdom |
 | `features/**/*-screen.tsx` | render して操作（クリック・入力）し、表示を検証 | jsdom |
+| 画面から API まで通した動作（`e2e/*.spec.ts`） | Playwright で本番ビルドを起動し、ブラウザ（Chromium）で画面を操作して表示を検証 | Chromium |
 
 - `backend/` のテストはファイル先頭に `// @vitest-environment node` を書き、Node 環境で実行する。画面側のテストは `vitest.config.mts` の既定（jsdom）で実行する。
   - 理由: サーバのコードはブラウザ上では動かないため、DOM のない Node 環境で検証する。ファイル単位のコメントで環境を切り替えられることは、Vitest 5.0.1 で実測済み（既定を jsdom にした状態で、このコメントを付けたテストでは `document` が undefined、付けないテストでは object になった）。
 - Route Handler は Web 標準の `Request` / `Response` で書ける（`15-route-handlers.md` の「Route Handlers」）ため、api ファイルの handler は Next を起動せずに `Request` → `Response` の関数としてテストできる。
+
+### E2E テスト（Playwright）
+- 置き場所: ルート直下の `e2e/` に `<feature>.spec.ts` で置く（例: `e2e/todo.spec.ts`）。対象の隣には置かない。
+  - 理由: E2E は画面・API・ルーティングをまたいで 1 つの操作の流れを検証するもので、特定のファイルに対応しない。
+- 実行: `pnpm test:e2e`（`playwright test`）。設定は `playwright.config.ts`。`webServer` が `pnpm build && pnpm start -p 3100` で本番ビルドを起動してからテストする（ローカルで 3100 番にサーバが起動済みなら、それを使う）。`pnpm test`（Vitest）には含めない（`vitest.config.mts` で `e2e/**` を除外）。
+- 1 テストで CRUD を一周する（追加 → 完了 → 詳細で title を変更 → 一覧から削除）。テストを増やすときも、1 テストの中で作ったデータはそのテストの中で消す。
+  - 理由: API は InMemory で、`webServer` の 1 プロセスを全テストが共有する（`workers: 1` で順番に実行）。テスト間でデータが残ると結果が実行順に依存するため、テスト間の独立性ではなく 1 本の中の操作の順序で状態を担保する。
+- Chromium のビルド: `@playwright/test` が要求するビルドと、環境に入っているブラウザが一致しないときは、環境変数 `PLAYWRIGHT_CHROMIUM_EXECUTABLE` に Chromium の実行ファイルを渡す（例: クラウド VM では `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium pnpm test:e2e`）。CI では `pnpm exec playwright install --with-deps chromium`（OS の依存ライブラリも入れる）、ローカルでは `pnpm exec playwright install chromium` で版の合ったブラウザを入れ、この変数は使わない。
+  - 理由: クラウド VM の `/opt/pw-browsers` にある Chromium はビルド 1194 で、`@playwright/test@1.63.0` の要求（1243）と一致しない。変数なしで実行すると、Playwright が 1243 の実行ファイル（`/opt/pw-browsers/chromium_headless_shell-1243/...`）を探して `Executable doesn't exist` で失敗し、この変数で 1194 の Chromium（141）を渡すと通った（2026-09-28 実測）。
 
 ## 採用しなかった案
 - `app/` 内に `_components` などの private folder を置き、ルート単位でコードを分ける構成（公式の「Split project files by feature or route」）: URL とコードの置き場所が結びつき、ルートを移動・改名するとコードも動かすことになる。

@@ -1,4 +1,4 @@
-# main 宛の PR と main への push で lint / test / build を実行する。
+# main 宛の PR と main への push で lint / test / build / E2E テストを実行する。
 # main の Ruleset（protect-main）でこのワークフローの `ci` ジョブを required status check にしており、
 # 通らないと PR をマージできない（rules/general/branch.md の「CI」）。
 name: CI
@@ -46,3 +46,17 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+
+      # E2E テスト（Playwright）に使う Chromium を入れる。
+      # chromium: playwright.config.ts のプロジェクトは Chromium だけなので、他のブラウザは入れない
+      #   （版は @playwright/test が要求するビルド。本体と headless shell の両方が入る。--dry-run で確認）。
+      # --with-deps: Chromium が必要とする OS の依存ライブラリ（apt パッケージ）も一緒に入れる。
+      #   ランナーのイメージにどのライブラリが入っているかに依存せず、ブラウザが起動できるようにする。
+      # PLAYWRIGHT_CHROMIUM_EXECUTABLE は設定しない（クラウド VM 用。playwright.config.ts のコメント）。
+      - run: pnpm exec playwright install --with-deps chromium
+
+      # E2E テストを実行する（playwright test）。
+      # webServer（playwright.config.ts）が pnpm build && pnpm start -p 3100 でサーバを起動する。
+      #   上の pnpm build の成果物を使い回さず build し直すが、ローカルと同じコマンドで動かすことを優先する（単純さのため）。
+      # CI=true（GitHub Actions の既定）なので reuseExistingServer は無効になり、必ずこのコードでサーバを新しく起動する。
+      - run: pnpm test:e2e

@@ -1,5 +1,5 @@
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 // Next.js 公式の Vitest ガイド（https://nextjs.org/docs/app/guides/testing/vitest）の構成をベースにしている。
 export default defineConfig({
@@ -20,5 +20,12 @@ export default defineConfig({
     // jsdom: コンポーネントを render して DOM（見出しの role など）を検証するため、Node 上にブラウザ相当の DOM が必要。
     //   Vitest のデフォルトは "node" で document が存在しない。
     environment: "jsdom",
+    // e2e/**: Playwright の E2E テスト（e2e/*.spec.ts）を Vitest の対象から外す。
+    //   Vitest の既定 include（**/*.{test,spec}.?(c|m)[jt]s?(x)）は *.spec.ts も拾うため、除外しないと
+    //   pnpm test が Playwright の test() を Vitest 上で読み込み、「test() from an async test.describe()」
+    //   のエラーで失敗する（2026-09-28 に実測）。E2E は pnpm test:e2e（Playwright）で実行する。
+    //   configDefaults.exclude（node_modules など Vitest の既定の除外）と結合する。exclude を指定すると既定を
+    //   置き換えるため、結合しないと node_modules 配下のテストまで拾ってしまう。
+    exclude: [...configDefaults.exclude, "e2e/**"],
   },
 });
