@@ -11,7 +11,10 @@
     "test:e2e": "playwright test",
     "lint": "biome check --error-on-warnings .",
     "format": "biome format --write .",
-    "check": "biome check --write --error-on-warnings ."
+    "check": "biome check --write --error-on-warnings .",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "db:psql": "docker compose exec db psql -U app -d app"
   },
   "dependencies": {
     "next": "16.3.6",

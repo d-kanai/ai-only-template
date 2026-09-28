@@ -32,6 +32,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# .env.example は接続情報の例（開発用の固定値だけで秘密を含まない）。コピー元としてコミットする。
+!.env.example
 
 # vercel
 .vercel

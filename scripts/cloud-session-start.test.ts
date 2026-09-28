@@ -79,6 +79,59 @@ echo "fake $(basename "$0") $*" >&2
 exit 1
 `;
 
+// Postgres の起動（docker compose）のテストで PATH の先頭に置く偽コマンド。
+// WHY 偽物にするか: この VM や GitHub Actions には本物の docker / dockerd があり、テストから本物のデーモンを
+//   起動したりコンテナを立てたりしないため。どのテストでも既定で fakeBin に置く。
+// - docker: 呼ばれたときのカレントディレクトリと引数を 1 行ずつ DOCKER_LOG に記録する（compose をリポジトリ直下で
+//   実行したかを確かめるため）。`docker info` はデーモンが動いている印のファイル（FAKE_DOCKER_READY）があるときだけ
+//   成功する。`docker compose pull` は最初の FAKE_COMPOSE_PULL_FAILS 回（既定 0）だけ失敗する（回数は
+//   FAKE_COMPOSE_PULL_COUNT のファイルで数える。再試行を確かめるため）。それ以外の `docker compose` は
+//   FAKE_COMPOSE_EXIT（既定 0）で終わる。
+// - docker はさらに、自分のセッション ID（= dockerd を切り離さなかった場合にスクリプトと共有するセッション）を
+//   DOCKER_SID_LOG に書く。dockerd が別セッション（setsid）で起動されたかを比べるため。
+// - dockerd: 呼ばれたこと（"dockerd <引数>"。引数なしでも空行にならないよう名前を付ける）を DOCKERD_LOG に記録し、stdout に 1 行出す（ログファイルへのリダイレクトを確かめるため）。
+//   FAKE_DOCKERD_STARTS が 0 でなければ FAKE_DOCKER_READY を作り、「起動したらデーモンが使えるようになる」を再現する。
+//   自分のセッション ID を DOCKERD_SID_LOG に書く。FAKE_DOCKERD_SLEEP_SECONDS があれば、その後その秒数だけ動き続ける
+//   （本物の dockerd のように終わらないプロセスを再現し、スクリプトがバックグラウンドで起動して待たないことを確かめる）。
+//   sleep は絶対パスで呼ぶ: 再試行のテストで fakeBin に置く偽 sleep（待たない）に当たらないようにするため。
+const FAKE_DOCKER = `#!/bin/bash
+echo "$PWD $*" >> "$DOCKER_LOG"
+ps -o sid= -p $$ | tr -d ' ' > "$DOCKER_SID_LOG"
+case "$1" in
+  info) [ -f "$FAKE_DOCKER_READY" ] ;;
+  compose)
+    if [ "$2" = "pull" ]; then
+      n=$(( $(cat "$FAKE_COMPOSE_PULL_COUNT" 2>/dev/null || echo 0) + 1 ))
+      echo "$n" > "$FAKE_COMPOSE_PULL_COUNT"
+      [ "$n" -gt "\${FAKE_COMPOSE_PULL_FAILS:-0}" ]
+      exit
+    fi
+    exit "\${FAKE_COMPOSE_EXIT:-0}" ;;
+  *) exit 1 ;;
+esac
+`;
+// pull の再試行の間隔を確かめるための偽 sleep。待たずに、引数（秒数）を SLEEP_LOG に記録するだけ。
+// WHY 再試行のテストでだけ置く: dockerd の起動待ち（sleep 1 を挟んで docker info を繰り返す）のテストに置くと、
+//   待たずに docker info を連打することになるため。
+const FAKE_SLEEP = `#!/bin/bash
+echo "$*" >> "$SLEEP_LOG"
+`;
+const FAKE_DOCKERD = `#!/bin/bash
+echo "dockerd $*" >> "$DOCKERD_LOG"
+echo "fake dockerd started"
+if [ "\${FAKE_DOCKERD_STARTS:-1}" != "0" ]; then touch "$FAKE_DOCKER_READY"; fi
+ps -o sid= -p $$ | tr -d ' ' > "$DOCKERD_SID_LOG"
+if [ -n "\${FAKE_DOCKERD_SLEEP_SECONDS:-}" ]; then /bin/sleep "$FAKE_DOCKERD_SLEEP_SECONDS"; fi
+`;
+// docker compose pull を囲む timeout の代わり。上限の秒数と囲んだコマンドを TIMEOUT_LOG に記録し、コマンドをそのまま実行する。
+// WHY 偽物にするか: timeout は GNU coreutils のコマンドで macOS には無い。実行マシンに左右されずに、
+//   何秒で囲んだかを検査するため（クラウド VM・GitHub Actions の Ubuntu には /usr/bin/timeout がある）。
+const FAKE_TIMEOUT = `#!/bin/bash
+echo "$*" >> "$TIMEOUT_LOG"
+shift
+exec "$@"
+`;
+
 describe("scripts/cloud-session-start.sh", () => {
   let tmp: string;
   let home: string;
@@ -89,6 +142,9 @@ describe("scripts/cloud-session-start.sh", () => {
   let fakeBin: string;
   let fixtureDir: string;
   let curlLog: string;
+  let dockerLog: string;
+  let dockerdLog: string;
+  let dockerReady: string;
 
   // 実行元（ローカル / CI / クラウド）の CLAUDE_CODE_REMOTE や CLAUDE_ENV_FILE がテストに漏れると、
   // 本物のインストールが走ったり実セッションの env ファイルに書き込んだりしうる。
@@ -104,6 +160,7 @@ describe("scripts/cloud-session-start.sh", () => {
     delete env.CLAUDE_CODE_REMOTE;
     delete env.CLAUDE_ENV_FILE;
     delete env.CLOUD_SESSION_START_DRY_RUN;
+    delete env.CLOUD_SESSION_START_DOCKER_WAIT_SECONDS;
     Object.assign(env, {
       CLAUDE_PROJECT_DIR: repoRoot,
       HOME: home,
@@ -111,6 +168,17 @@ describe("scripts/cloud-session-start.sh", () => {
       PATH: `${fakeBin}:${process.env.PATH}`,
       FIXTURE_DIR: fixtureDir,
       CURL_LOG: curlLog,
+      DOCKER_LOG: dockerLog,
+      DOCKERD_LOG: dockerdLog,
+      FAKE_DOCKER_READY: dockerReady,
+      FAKE_COMPOSE_PULL_COUNT: join(tmp, "compose-pull-count"),
+      SLEEP_LOG: join(tmp, "sleep.log"),
+      TIMEOUT_LOG: join(tmp, "timeout.log"),
+      DOCKER_SID_LOG: join(tmp, "docker-sid"),
+      DOCKERD_SID_LOG: join(tmp, "dockerd-sid"),
+      // dockerd のログは $TMPDIR（既定 /tmp）に書く。実行マシンの本物の /tmp/dockerd.log を上書きしないよう、
+      // テストごとの一時ディレクトリを渡す。
+      TMPDIR: tmp,
     });
     for (const [key, value] of Object.entries(extraEnv)) {
       if (value === undefined) delete env[key];
@@ -119,10 +187,14 @@ describe("scripts/cloud-session-start.sh", () => {
     return spawnSync("bash", [scriptPath, ...args], { env, encoding: "utf8" });
   }
 
-  function curlCalls(): string[] {
-    return existsSync(curlLog)
-      ? readFileSync(curlLog, "utf8").split("\n").filter(Boolean)
+  function logLines(file: string): string[] {
+    return existsSync(file)
+      ? readFileSync(file, "utf8").split("\n").filter(Boolean)
       : [];
+  }
+
+  function curlCalls(): string[] {
+    return logLines(curlLog);
   }
 
   // 既存インストールの検出はファイルの有無（実行可能か）だけで行うので、中身はダミーでよい。
@@ -249,6 +321,14 @@ describe("scripts/cloud-session-start.sh", () => {
     writeFileSync(join(fakeBin, "uname"), FAKE_UNAME, { mode: 0o755 });
     writeFileSync(join(fakeBin, "npm"), FAKE_FAIL, { mode: 0o755 });
     writeFileSync(join(fakeBin, "pnpm"), FAKE_FAIL, { mode: 0o755 });
+    writeFileSync(join(fakeBin, "docker"), FAKE_DOCKER, { mode: 0o755 });
+    writeFileSync(join(fakeBin, "dockerd"), FAKE_DOCKERD, { mode: 0o755 });
+    writeFileSync(join(fakeBin, "timeout"), FAKE_TIMEOUT, { mode: 0o755 });
+    dockerLog = join(tmp, "docker.log");
+    dockerdLog = join(tmp, "dockerd-args.log");
+    // 既定は「デーモンが起動済み」。Postgres の起動を主題にしない既存のテストで、デーモンの起動待ちが入らないようにするため。
+    dockerReady = join(tmp, "docker-ready");
+    writeFileSync(dockerReady, "");
     fixtureDir = join(tmp, "fixtures");
     mkdirSync(fixtureDir);
     curlLog = join(tmp, "curl.log");
@@ -649,6 +729,256 @@ describe("scripts/cloud-session-start.sh", () => {
       expect(result.stderr).toContain(
         "fake native pnpm install --frozen-lockfile",
       );
+    });
+  });
+
+  // SessionStart フックで dockerd を起動し、compose.yaml の Postgres を立てる（rules/code/env.md の「クラウドセッション」）。
+  describe("Postgres の起動（docker compose）", () => {
+    const nodeDirIn = () => join(home, ".local", `node-${nodeVersion}`);
+    const composePull = `${repoRoot} compose pull`;
+    // docker compose pull 1 回の上限（秒）。値の根拠は scripts/cloud-session-start.sh と rules/code/env.md の見積もり。
+    const pullTimeout = 45;
+    const timeoutCalls = () => logLines(join(tmp, "timeout.log"));
+    const composeUp = `${repoRoot} compose up -d --wait --wait-timeout 120`;
+    // Node / pnpm の導入を速い経路（インストール済み）にして、Postgres の起動だけを見る。
+    const placeInstalledNodeAndPnpm = () => {
+      placeFakeNode(nodeDirIn());
+      writeFileSync(join(nodeDirIn(), "bin", "pnpm"), FAKE_NATIVE_PNPM, {
+        mode: 0o755,
+      });
+    };
+    // docker / dockerd の有無を切り替えるための PATH。fakeBin は使わず、スクリプトが使うコマンドだけを置く。
+    // WHY: 本物の docker / dockerd が /usr/bin にある環境（この VM・GitHub Actions）でも「見つからない」を再現するため。
+    const limitedPath = (withDocker: boolean) => {
+      const dir = join(tmp, "limited-bin");
+      mkdirSync(dir);
+      for (const tool of ["bash", "awk", "dirname"]) {
+        const found = spawnSync("bash", ["-c", `command -v ${tool}`], {
+          encoding: "utf8",
+        }).stdout.trim();
+        writeFileSync(join(dir, tool), `#!/bin/sh\nexec ${found} "$@"\n`, {
+          mode: 0o755,
+        });
+      }
+      if (withDocker) {
+        writeFileSync(join(dir, "docker"), FAKE_DOCKER, { mode: 0o755 });
+      }
+      return dir;
+    };
+
+    it("ローカル（CLAUDE_CODE_REMOTE が true でない）では docker を一切呼ばない", () => {
+      const result = runScript([], {
+        CLOUD_SESSION_START_DRY_RUN: "1",
+        CLAUDE_ENV_FILE: envFile,
+      });
+      expect(result.status).toBe(0);
+      expect(logLines(dockerLog)).toEqual([]);
+      expect(logLines(dockerdLog)).toEqual([]);
+    });
+
+    it("--install-only（setup script）では docker を一切呼ばない", () => {
+      const result = runScript(["--install-only"], {
+        CLOUD_SESSION_START_DRY_RUN: "1",
+      });
+      expect(result.status).toBe(0);
+      expect(result.stdout).not.toContain("docker");
+      expect(logLines(dockerLog)).toEqual([]);
+      expect(logLines(dockerdLog)).toEqual([]);
+    });
+
+    it("DRY_RUN でデーモンが動いていなければ、dockerd の起動予定と docker compose pull / up の予定を表示し、実際には起動しない", () => {
+      rmSync(dockerReady);
+      const result = runScript([], {
+        ...remoteEnv(),
+        CLOUD_SESSION_START_DRY_RUN: "1",
+      });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("dockerd");
+      expect(result.stdout).toContain(join(tmp, "dockerd.log"));
+      // 既定の待ち時間は 30 秒（CLOUD_SESSION_START_DOCKER_WAIT_SECONDS は runScript で消している）
+      expect(result.stdout).toContain("wait up to 30s");
+      expect(result.stdout).toContain(
+        `(cd ${repoRoot} && timeout ${pullTimeout} docker compose pull)`,
+      );
+      expect(result.stdout).toContain(
+        `(cd ${repoRoot} && docker compose up -d --wait --wait-timeout 120)`,
+      );
+      expect(logLines(dockerdLog)).toEqual([]);
+      expect(logLines(dockerLog)).toEqual([`${process.cwd()} info`]);
+    });
+
+    it("DRY_RUN でデーモンが動いていれば、dockerd の起動予定は出さず docker compose pull / up の予定だけを表示する", () => {
+      const result = runScript([], {
+        ...remoteEnv(),
+        CLOUD_SESSION_START_DRY_RUN: "1",
+      });
+      expect(result.status).toBe(0);
+      expect(result.stdout).not.toContain("dockerd");
+      expect(result.stdout).toContain(
+        `(cd ${repoRoot} && timeout ${pullTimeout} docker compose pull)`,
+      );
+      expect(result.stdout).toContain(
+        `(cd ${repoRoot} && docker compose up -d --wait --wait-timeout 120)`,
+      );
+      expect(logLines(dockerLog)).not.toContain(composeUp);
+    });
+
+    it("デーモンが動いていれば dockerd は起動せず、リポジトリ直下で docker compose pull → up -d --wait --wait-timeout 120 の順に実行する", () => {
+      placeInstalledNodeAndPnpm();
+      const result = runScript([], remoteEnv());
+      expect(result.status).toBe(0);
+      expect(logLines(dockerdLog)).toEqual([]);
+      const calls = logLines(dockerLog);
+      expect(calls.filter((c) => c === composePull)).toHaveLength(1);
+      expect(calls.indexOf(composeUp)).toBeGreaterThan(
+        calls.indexOf(composePull),
+      );
+      // pull は timeout で上限を付けて実行する（up は --wait-timeout で上限がある）
+      expect(timeoutCalls()).toEqual([`${pullTimeout} docker compose pull`]);
+      expect(result.stderr).not.toContain("cloud-session-start:");
+    });
+
+    it("docker compose pull が 2 回失敗しても、2 秒・4 秒待って 3 回目で成功すれば up に進む", () => {
+      placeInstalledNodeAndPnpm();
+      writeFileSync(join(fakeBin, "sleep"), FAKE_SLEEP, { mode: 0o755 });
+      const result = runScript([], {
+        ...remoteEnv(),
+        FAKE_COMPOSE_PULL_FAILS: "2",
+      });
+      expect(result.status).toBe(0);
+      const calls = logLines(dockerLog);
+      expect(calls.filter((c) => c === composePull)).toHaveLength(3);
+      expect(calls).toContain(composeUp);
+      expect(logLines(join(tmp, "sleep.log"))).toEqual(["2", "4"]);
+      expect(result.stderr).not.toContain("docker compose pull failed");
+    });
+
+    it("docker compose pull が 3 回とも失敗したら、warn を出して up は実行せず exit 0（4 回目は試さない）", () => {
+      placeInstalledNodeAndPnpm();
+      writeFileSync(join(fakeBin, "sleep"), FAKE_SLEEP, { mode: 0o755 });
+      const result = runScript([], {
+        ...remoteEnv(),
+        FAKE_COMPOSE_PULL_FAILS: "3",
+      });
+      expect(result.status).toBe(0);
+      const calls = logLines(dockerLog);
+      expect(calls.filter((c) => c === composePull)).toHaveLength(3);
+      expect(calls).not.toContain(composeUp);
+      // 最後の失敗の後は待たない
+      expect(logLines(join(tmp, "sleep.log"))).toEqual(["2", "4"]);
+      // 3 回とも timeout で上限を付けている
+      expect(timeoutCalls()).toEqual(
+        Array(3).fill(`${pullTimeout} docker compose pull`),
+      );
+      expect(result.stderr).toContain("docker compose pull failed");
+    });
+
+    it("デーモンが動いていなければ dockerd をバックグラウンドで起動し（出力は $TMPDIR/dockerd.log）、docker info が通ってから docker compose up を実行する", () => {
+      placeInstalledNodeAndPnpm();
+      rmSync(dockerReady);
+      const result = runScript([], remoteEnv());
+      expect(result.status).toBe(0);
+      // 既定のソケット・データ置き場で使うので、引数なしで起動する（rules/code/env.md の実測）
+      expect(logLines(dockerdLog)).toEqual(["dockerd "]);
+      expect(readFileSync(join(tmp, "dockerd.log"), "utf8")).toContain(
+        "fake dockerd started",
+      );
+      const calls = logLines(dockerLog);
+      expect(calls).toContain(composeUp);
+      // compose は docker info が通った後に呼ぶ
+      const lastInfo = calls.lastIndexOf(`${process.cwd()} info`);
+      expect(calls.indexOf(composeUp)).toBeGreaterThan(lastInfo);
+      expect(result.stderr).not.toContain("cloud-session-start:");
+    });
+
+    it("dockerd はバックグラウンドで起動し、終わるのを待たない（本物の dockerd は終わらない）", () => {
+      placeInstalledNodeAndPnpm();
+      rmSync(dockerReady);
+      const started = Date.now();
+      const result = runScript([], {
+        ...remoteEnv(),
+        FAKE_DOCKERD_SLEEP_SECONDS: "5",
+      });
+      expect(result.status).toBe(0);
+      expect(logLines(dockerLog)).toContain(composeUp);
+      // 偽 dockerd は 5 秒動き続ける。待っていれば 5 秒以上かかる（docker info の再確認の 1 秒を見込んで 3 秒未満）
+      expect(Date.now() - started).toBeLessThan(3_000);
+    });
+
+    it("dockerd は setsid があれば別セッションで起動する（フックの終了で一緒に止まらないように）。無ければ nohup だけで同じセッション", () => {
+      placeInstalledNodeAndPnpm();
+      rmSync(dockerReady);
+      const hasSetsid =
+        spawnSync("bash", ["-c", "command -v setsid"]).status === 0;
+      const result = runScript([], remoteEnv());
+      expect(result.status).toBe(0);
+      const scriptSid = readFileSync(join(tmp, "docker-sid"), "utf8").trim();
+      const dockerdSid = readFileSync(join(tmp, "dockerd-sid"), "utf8").trim();
+      expect(scriptSid).not.toBe("");
+      if (hasSetsid) {
+        expect(dockerdSid).not.toBe(scriptSid);
+      } else {
+        expect(dockerdSid).toBe(scriptSid);
+      }
+    });
+
+    it("dockerd を起動しても待ち時間内に docker info が通らなければ、warn を出して compose は実行せず exit 0", () => {
+      placeInstalledNodeAndPnpm();
+      rmSync(dockerReady);
+      const started = Date.now();
+      const result = runScript([], {
+        ...remoteEnv(),
+        FAKE_DOCKERD_STARTS: "0",
+        CLOUD_SESSION_START_DOCKER_WAIT_SECONDS: "1",
+      });
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain("docker daemon did not become ready");
+      expect(result.stderr).toContain(join(tmp, "dockerd.log"));
+      expect(logLines(dockerLog)).not.toContain(composeUp);
+      // 待ち時間（1 秒）で諦める。既定の 30 秒まで待たない
+      expect(Date.now() - started).toBeLessThan(10_000);
+    });
+
+    it("docker compose up が失敗しても warn を出して exit 0", () => {
+      placeInstalledNodeAndPnpm();
+      const result = runScript([], { ...remoteEnv(), FAKE_COMPOSE_EXIT: "1" });
+      expect(result.status).toBe(0);
+      expect(logLines(dockerLog)).toContain(composeUp);
+      expect(result.stderr).toContain(
+        "docker compose up -d --wait --wait-timeout 120 failed",
+      );
+    });
+
+    it("Node の取得に失敗しても Postgres は起動する（Postgres は Node に依存しない）", () => {
+      // フィクスチャを置かないので、nodejs.org もレジストリも 22 で失敗する。
+      const result = runScript([], remoteEnv());
+      expect(result.status).toBe(0);
+      expect(existsSync(nodeDirIn())).toBe(false);
+      expect(logLines(dockerLog)).toContain(composeUp);
+    });
+
+    it("docker が無ければ warn を出して何もせず exit 0", () => {
+      placeInstalledNodeAndPnpm();
+      const result = runScript([], {
+        ...remoteEnv(),
+        CLOUD_SESSION_START_DRY_RUN: "1",
+        PATH: limitedPath(false),
+      });
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain("docker not found");
+      expect(result.stdout).not.toContain("docker compose");
+    });
+
+    it("デーモンが動いておらず dockerd も無ければ、待たずに warn を出して compose は実行せず exit 0", () => {
+      placeInstalledNodeAndPnpm();
+      rmSync(dockerReady);
+      const result = runScript([], {
+        ...remoteEnv(),
+        PATH: limitedPath(true),
+      });
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain("dockerd not found");
+      expect(logLines(dockerLog)).not.toContain(composeUp);
     });
   });
 });

@@ -45,13 +45,13 @@ main は常にマージ可能な状態を保つ。作業はすべて Issue → �
 - 方式: merge commit（`gh pr merge --merge`）。squash / rebase は使わない。
 - マージ条件（すべて満たすこと）:
   1. reviewer サブエージェントの検証で問題なし（reviewer が使えない場合はオーケストレータ自身がテスト実行・差分確認で確認し、その旨を報告に書く）
-  2. CI（GitHub Actions の `ci` ジョブ: `pnpm lint` / `pnpm test` / `pnpm build`）が緑。main の Ruleset `protect-main` の required status check にしているので、赤のままではマージできない（下の「CI」）
+  2. CI（GitHub Actions の `ci` ジョブ: Postgres の起動と接続確認 / `pnpm lint` / `pnpm test` / `pnpm build` / `pnpm test:e2e`）が緑。main の Ruleset `protect-main` の required status check にしているので、赤のままではマージできない（下の「CI」）
   3. main との競合がない
 - マージはオーケストレータ（メイン）が行う。人間の承認は不要。マージ後にユーザーへ報告する。
 - サブエージェントは PR 作成・マージをしない。
 
 ## CI（GitHub Actions）
-- `.github/workflows/ci.yml` が、main 宛の PR と main への push で `pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm test` → `pnpm build` を実行する（ジョブ名 `ci`）。
+- `.github/workflows/ci.yml` が、main 宛の PR と main への push で `pnpm install --frozen-lockfile` → Postgres の起動（`docker compose up -d --wait --wait-timeout 120`）→ psql での接続確認（`docker compose exec -T db psql -U app -d app -c 'select 1'`）→ `pnpm lint` → `pnpm test` → `pnpm build` → Chromium の導入（`pnpm exec playwright install --with-deps chromium`）→ `pnpm test:e2e` を実行する（ジョブ名 `ci`）。
 - Node の版は `.tool-versions` の `nodejs` 行、pnpm の版は `package.json` の `packageManager` から取る（ワークフローに版を直書きしない。`rules/code/env.md`）。
 - GitHub Actions は `CI=true` を既定で設定するため、lefthook の postinstall はフックを入れない（`rules/code/lint.md`）。
 - マージ条件への組み込み: main の Ruleset `protect-main`（https://github.com/d-kanai/ai-only-template/rules/24101231 ）の `required_status_checks` に `ci` を入れている。
