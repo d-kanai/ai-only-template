@@ -114,14 +114,17 @@ export default {
   ignoreStatic: true,
 
   // thresholds: レポートでの色分け（high 以上が緑、low 以上 high 未満が黄、low 未満が赤）と、失敗ライン（break）。
-  //   high 95: 目標値。生き残った変異は、テストを足して殺すか、等価な変異・文言の変異だけ理由を書いて除外する
-  //     （rules/code/test.md の「mutation testing（Stryker）」。Issue #55）。
-  //   low 90 / break 90: score が 90 を下回ると stryker run が非 0 で終わり、日次のジョブ（.github/workflows/mutation.yml）が
-  //     失敗する。目標（95）より 5 ポイント低くしているのは、テストを足さない小さな変更（数件の生き残り）で日次のジョブを
-  //     赤にしないため。break を目標と同じにすると、1 件の生き残りで赤になり、除外コメントで数字を合わせたくなる。
+  //   break 100: survived が 1 件でもあれば score が 100 を下回り、stryker run が非 0 で終わって日次のジョブ
+  //     （.github/workflows/mutation.yml）が失敗する。
+  //   WHY 100: 等価な変異（変えても振る舞いが変わらず、どのテストでも検出できないもの）は `// Stryker disable` で理由を書いて
+  //     除外できる（Ignored は score の分母に入らない）。除外できないものは殺せる変異なので、残りは全部テストで殺す前提にする
+  //     （ユーザー判断、Issue #55）。survived が出たら、テストを足して殺すか、等価な変異なら理由付きで disable する
+  //     （rules/code/test.md の「mutation testing（Stryker）」。disable の一覧もそこで管理する）。
+  //   high 100 / low 95: レポートの色分け。100% だけを緑にする。
   //   経緯: Issue #52 では break を入れず、日次のレポートで実際の score を見てから決めることにしていた（ユーザー判断）。
-  //     Issue #55 で生き残りを殺して 95% 以上にしたうえで、この値にした。
-  thresholds: { high: 95, low: 90, break: 90 },
+  //     Issue #55 は当初「95% 以上・break 90（100% は狙わない）」の方針だったが、生き残りを殺して 100% にできたため、
+  //     ユーザー判断で break を 100 にした。
+  thresholds: { high: 100, low: 95, break: 100 },
 
   // concurrency / tempDirName（.stryker-tmp、.gitignore 済み）は既定のまま。
   //   concurrency の既定は「論理コア数 n が 4 以下なら n、それより多ければ n-1」（Stryker の JSON Schema の説明）。

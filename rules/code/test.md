@@ -102,10 +102,11 @@ Stryker でコードに変異（条件の反転、戻り値の差し替え、文
 - 対象: `features/` `backend/` `shared/` の `.ts` / `.tsx`（テスト `*.test.ts(x)` と `*.d.ts` を除く）。`vitest.config.mts` の coverage.include のうち TypeScript の実装がある範囲と同じにしている。`app/`、`scripts/`（実装はシェルスクリプトだけ）、ルート直下の設定ファイル・ルール検査テスト、`e2e/` は対象外。
 - Vitest のカバレッジ（100% のしきい値）は Stryker の実行では効かない。vitest-runner が coverage を無効にして、Stryker 自身のテストごとのカバレッジ分析で「変異を通るテスト」だけを実行するため（https://stryker-mutator.io/docs/stryker-js/vitest-runner/ ）。
 - 日次実行: `.github/workflows/mutation.yml` が main を毎日 08:55 JST（UTC 23:55）に実行し、`reports/mutation/` を artifact（`mutation-report`、30 日保存）に残す。Actions の画面から手動でも実行できる（`workflow_dispatch`）。PR ごとには実行しない（ユーザー判断、Issue #52）。
-- 目標と失敗ライン（Issue #55。`stryker.config.mjs` の `thresholds: { high: 95, low: 90, break: 90 }`）:
-  - 目標は mutation score 95% 以上。生き残り（survived）が出たら、まずテストを足して殺す。
-  - 失敗ライン（`break`）は 90。score が 90 を下回ると `stryker run` が非 0 で終わり、日次のジョブが失敗する（`break` を 90 にした状態で、テストを外して score 50% にすると「Final mutation score 50.00 under breaking threshold 90」で exit 1 になることを確認）。目標より 5 ポイント低いのは、数件の生き残りで日次のジョブを赤にしないため。
-  - 経緯: Issue #52 では `break` を入れず、日次の結果を見てから決めることにしていた。Issue #55 で生き残りを殺したうえで上の値にした。
+- 目標と失敗ライン（Issue #55。`stryker.config.mjs` の `thresholds: { high: 100, low: 95, break: 100 }`）:
+  - mutation score 100%（`break` 100）。survived が 1 件でもあると `stryker run` が非 0 で終わり、日次のジョブが失敗する（テストを 1 つ外して score を下げると「under breaking threshold 100」で exit 1 になることを確認）。
+  - survived が出たら、テストで殺すか、等価な変異なら理由付きで disable する（下の「生き残りの扱い」）。disable の一覧はこの節で管理する。
+  - 理由（ユーザー判断）: 等価な変異は disable で除外でき、Ignored は score の分母に入らない。除外できないものは殺せる変異なので、残りは全部殺せる。
+  - 経緯: Issue #52 では `break` を入れず、日次の結果を見てから決めることにしていた。Issue #55 は当初「95% 以上を目標、`break` 90（100% は狙わない）」の方針だったが、生き残りを殺して 100% にできたため、ユーザー判断で `break` を 100 に変えた。
 - 生き残りの扱い:
   - ロジック（条件・分岐・戻り値・状態の更新・依存配列など）の変異は、テストを足して殺す。テストは仕様文の名前で書き、その変異で落ちることをレポートか手作業の変異で確かめる。
   - 文言の変異: API のエラーの message（`ErrorResponse` として画面に出る、クライアントとの契約）は検証して殺す。検証しなくてよい文言（内部のログの文言など）だけ、下の disable コメントで除く。
