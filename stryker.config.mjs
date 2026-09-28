@@ -91,10 +91,10 @@ export default {
   jsonReporter: { fileName: "reports/mutation/mutation.json" },
 
   // ignoreStatic: static な変異（モジュールの読み込み時にだけ実行される変異）を数えない（status が Ignored になる）。
-  //   static な変異とは、例えば backend/todo/infra/schema.ts の列定義や、todo-repository.postgres.ts の UUID の正規表現の
-  //   ように、モジュールの最上位で評価される式の変異。Stryker はテストごとのカバレッジで「その変異を通るテスト」を
-  //   選べないため、既定（false）では環境を読み込み直して全テストを実行する（公式 https://stryker-mutator.io/docs/stryker-js/configuration/
-  //   の ignoreStatic、https://stryker-mutator.io/docs/mutation-testing-elements/static-mutants/ ）。
+  //   static な変異とは、モジュールの最上位で評価される式（backend/todo/infra/schema.ts の列定義など）の変異。
+  //   Stryker はテストごとのカバレッジで「その変異を通るテスト」を選べないため、既定（false）では環境を読み込み直して
+  //   全テストを実行する（公式 https://stryker-mutator.io/docs/stryker-js/configuration/ の ignoreStatic、
+  //   https://stryker-mutator.io/docs/mutation-testing-elements/static-mutants/ ）。
   //   WHY 有効にする（Issue #55）:
   //   - 読み込み時の変異は、その結果を読み込むテストファイル自体の読み込みを壊すことがある。env.ts の
   //     `export const env = readEnv(process.env)` は読み込み時に readEnv を実行するので、readEnv の中の変異で
@@ -104,13 +104,24 @@ export default {
   //     「What Stryker does」。@stryker-mutator/core 10.0.0 の dist/src/mutants/mutant-test-planner.js の planMutant）。
   //     そのため readEnv の変異は env.test.ts で正しく killed になる。
   //   - 実行時間: 既定では static な変異 124 件（全体の 21%）が実行時間の 83% を占めると警告され、全体で約 5 分かかった。
-  //     有効にすると約 3.5 分（2026-09-28、ローカル 4 コアで実測。Issue #55 の後で 572 変異、3 分 21 秒）。
-  //   数えなくなるもの: 読み込み時にだけ評価される式（テストを通る実行経路の無いもの）25 件。そのうち schema.ts の列名・
-  //   既定値など 7 件は、アプリの実行時には使われず（DDL は drizzle/ の生成済み SQL で当てる）、単体テストで検出できない。
-  //   残りの 18 件（UUID の正規表現、定数など）は既定の実行では killed だったが、数えなくなる。
-  //   Ignored は score の分母に入らない（mutation score = killed / (killed + survived)。有効にした実行で
-  //   killed 505・survived 57・ignored 25 → 89.86% となり、505 / 562 と一致することを確認した。Issue #55 の後は
-  //   killed 540・survived 0・ignored 32（static 25 件と disable コメント 7 件）で 100%）。
+  //     有効にすると約 3.3 分（2026-09-28、ローカル 4 コアで実測。576 変異、3 分 18 秒）。
+  //   ロジックの定数は static にしない: 読み込み時に固定される定数（正規表現・変換表・URL・接頭辞など）は、呼び出し時に
+  //   評価する関数の中に置く（todo-repository.postgres.ts の isUuid、http-error.ts の statusOf、todo-api.ts の todosPath、
+  //   database.test-support.ts の testSchemaPrefix）。最上位の定数のままだと、既定の実行では killed になる変異も
+  //   ignoreStatic で数えなくなるため（reviewer 指摘。Issue #55 で 18 件が該当した）。
+  //   残る static（数えないもの）: schema.ts の 10 件だけ。ignoreStatic を false にして schema.ts を --mutate した実測で、
+  //   表名 "todos" → ""、pgTable に渡す列の定義のオブジェクト → {}、"created_at" → "" の 3 件は Killed、次の 7 件は Survived だった:
+  //   - uuid("id") / text("title") / boolean("completed") の列名 → "": drizzle は空の列名をキー名で補う
+  //     （drizzle-orm 0.45.3 の column-builder.js の setName は、名前が "" のときだけキー名を入れる）。キー名が列名と同じ
+  //     なので同じ SQL になる（"created_at" はキー名 createdAt と違うので Killed になる）。
+  //   - completed の .default(false) → true: Repository は保存時に completed を必ず渡すので、drizzle の既定値は使われない
+  //     （表の既定値は drizzle/ の生成済み SQL で決まる）。
+  //   - timestamp の { withTimezone: true, mode: "date" } → {}、withTimezone → false、mode → "": mode が "string" で
+  //     なければ Date の列になる点は同じ（pg-core/columns/timestamp.js）。withTimezone は型名（DDL）と、ドライバが
+  //     文字列を返したときの変換にだけ使われ、node-postgres は timestamptz を Date で返すので実行時の結果は変わらない。
+  //   schema.ts はテーブルの形の宣言で、DDL は drizzle-kit が drizzle/ に生成した SQL で当てる（rules/code/architecture.md）。
+  //   Ignored は score の分母に入らない（mutation score = killed / (killed + survived)。ignoreStatic だけを有効にした実行で
+  //   killed 505・survived 57・ignored 25 → 89.86% となり、505 / 562 と一致することを確認した）。
   ignoreStatic: true,
 
   // thresholds: レポートでの色分け（high 以上が緑、low 以上 high 未満が黄、low 未満が赤）と、失敗ライン（break）。
