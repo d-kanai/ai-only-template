@@ -1,0 +1,46 @@
+# pnpm の設定ファイル。ワークスペース（モノレポ）用ではなく、単一パッケージのまま pnpm の設定を書く場所として使っている。
+#
+# allowBuilds: 依存パッケージのインストール時ビルドスクリプト（postinstall 等）の実行可否をパッケージごとに指定する。
+#   false は「実行しない」。ビルドスクリプトは任意コードを実行できるため、許可するパッケージを明示的に絞る。
+#
+# 下記 2 つを false にしているのは、create-next-app@16.3.6（pnpm 12.7.0）が生成した pnpm-workspace.yaml を
+# そのまま流用しているため（根拠は create-next-app の出力。値の妥当性を本リポジトリで個別に検証したわけではない）。
+#   - sharp: Next.js の画像最適化で使うネイティブモジュール。2026-09-28 時点、ビルドスクリプトなしで
+#     プリビルドバイナリ（@img/sharp-darwin-arm64 など）がインストールされることを node_modules で確認済み。
+#   - unrs-resolver: 現状の依存（ESLint なし）ではインストールされない。create-next-app の出力に合わせて残している。
+allowBuilds:
+  sharp: false
+  unrs-resolver: false
+
+# ---- サプライチェーン保護設定 ----
+# 設定の意味は pnpm 公式ドキュメント（https://pnpm.io/settings 、https://pnpm.io/supply-chain-security ）に基づく。
+
+# minimumReleaseAge: 公開から指定時間（分単位。1440 = 24 時間）経っていないバージョンは、推移的依存も含めてインストールしない。
+#   悪意あるリリースは多くの場合 1 時間以内に検知・削除されるため。
+#   pnpm 11 以降は既定でも 1440 だが、既定値のままだと非 strict（条件を満たす版がないと古い版にフォールバック）
+#   になるため、下の minimumReleaseAgeStrict と合わせて明示している。
+minimumReleaseAge: 1440
+
+# minimumReleaseAgeStrict: minimumReleaseAge を満たす版がなければ、フォールバックせず install を失敗させる。
+#   minimumReleaseAge を明示設定したときは既定で true だが、意図を明確にするため書いている。
+minimumReleaseAgeStrict: true
+
+# trustPolicy: no-downgrade は、過去の版より信頼度（trusted publisher / provenance の有無）が下がった版の
+#   インストールを拒否する。パッケージ乗っ取りへの対策。
+trustPolicy: no-downgrade
+
+# trustPolicyIgnoreAfter: 公開から指定時間（分単位。525600 = 1 年）以上経った版は trustPolicy の検査対象外にする。
+#   2026-09-28 時点の lockfile で undici-types@6.21.0（2024-11-13 公開、@types/node の依存）と
+#   why-is-node-running@3.2.2（2025-01-08 公開、vitest の依存）が trust downgrade と判定され、
+#   ERR_PNPM_TRUST_DOWNGRADE で install が失敗した。古い版は provenance 付きで公開する仕組みが整う前のものが多く、
+#   公式ドキュメントもこの用途に trustPolicyIgnoreAfter を案内している。
+#   パッケージごとの個別除外（trustPolicyExclude）ではなく、期間で一律にした。
+trustPolicyIgnoreAfter: 525600
+
+# blockExoticSubdeps: 推移的依存が git リポジトリや直接 URL の tarball から取得されるのを禁止する（直接依存のみ許可）。
+#   pnpm 10.26 以降は既定で true だが明示している。
+blockExoticSubdeps: true
+
+# strictDepBuilds: allowBuilds で許可・不許可をレビューしていないビルドスクリプトがあれば、警告ではなく install を失敗させる。
+#   既定で true だが明示している。
+strictDepBuilds: true
