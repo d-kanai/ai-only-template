@@ -45,10 +45,19 @@ main は常にマージ可能な状態を保つ。作業はすべて Issue → �
 - 方式: merge commit（`gh pr merge --merge`）。squash / rebase は使わない。
 - マージ条件（すべて満たすこと）:
   1. reviewer サブエージェントの検証で問題なし（reviewer が使えない場合はオーケストレータ自身がテスト実行・差分確認で確認し、その旨を報告に書く）
-  2. テストが通っている（CI 導入後は CI 緑を必須にする）
+  2. CI（GitHub Actions の `ci` ジョブ: `pnpm lint` / `pnpm test` / `pnpm build`）が緑。main の Ruleset `protect-main` の required status check にしているので、赤のままではマージできない（下の「CI」）
   3. main との競合がない
 - マージはオーケストレータ（メイン）が行う。人間の承認は不要。マージ後にユーザーへ報告する。
 - サブエージェントは PR 作成・マージをしない。
+
+## CI（GitHub Actions）
+- `.github/workflows/ci.yml` が、main 宛の PR と main への push で `pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm test` → `pnpm build` を実行する（ジョブ名 `ci`）。
+- Node の版は `.tool-versions` の `nodejs` 行、pnpm の版は `package.json` の `packageManager` から取る（ワークフローに版を直書きしない。`rules/code/env.md`）。
+- GitHub Actions は `CI=true` を既定で設定するため、lefthook の postinstall はフックを入れない（`rules/code/lint.md`）。
+- マージ条件への組み込み: main の Ruleset `protect-main`（https://github.com/d-kanai/ai-only-template/rules/24101231 ）の `required_status_checks` に `ci` を入れている。
+  - `strict_required_status_checks_policy` は `false`（PR ブランチが main の最新を取り込んでいなくてもマージできる）。理由: 有効にすると main が進むたびに取り込み直して CI を待つ必要があり、AI が並行して複数 PR を進める運用で待ち時間が増える。main との競合が無いことは別途マージ条件で確認する。
+  - Ruleset の変更は REST API（`PUT /repos/d-kanai/ai-only-template/rulesets/24101231`）で行った。クラウドセッションからでも、セッションの `GH_TOKEN` を `Authorization: Bearer` に付けた `curl` で読み書きできた（2026-09-28 実測。GitHub MCP ツールには Ruleset の操作が無い）。Ruleset の rules は PUT で丸ごと置き換わるので、先に GET で現在の rules を取り、追加した配列を送る。
+- CI が赤のときは、原因を PR のブランチで直して push する。テストの skip や無効化で緑にしない（`rules/code/lint.md` の `noSkippedTests`）。
 
 ## マージ後の後始末（オーケストレータが必ず行う）
 マージしたら、ユーザーへ報告する前に次を実行し、ローカルにブランチを残さない。
