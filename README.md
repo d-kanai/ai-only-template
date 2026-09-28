@@ -19,6 +19,33 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 
 ツールのバージョンは `.tool-versions` が正（決め方と更新手順は `rules/code/env.md`）。npm パッケージのバージョンは `package.json` / `pnpm-lock.yaml` が正。pnpm のサプライチェーン保護設定は `pnpm-workspace.yaml` を参照。
 
+## ディレクトリ構成
+
+機能（feature）単位で置く。`src/` は使わず、ルート直下に置く（例は Todo）。
+
+```
+app/                  # ルーティングだけ（page.tsx は screen を返すだけ、api/**/route.ts は backend の api ファイルの GET / POST などを re-export するだけ）
+features/todo/        # 画面側
+  screens/todo-screen/  # 一覧画面。todo-screen.tsx（見た目）+ todo-screen.hook.ts（状態・データ取得）+ テスト
+  screens/todo-detail-screen/  # 詳細画面（/todo/[id]）。構成は todo-screen/ と同じ
+  components/           # feature 内で画面をまたぐ部品（todo-item.tsx）
+  api/                  # /api/... を fetch する薄いラッパー（型は backend の api ファイルから import type）
+  index.ts              # 公開 API（外から import してよいのはここだけ）
+backend/todo/         # API 側（DDD 4 層）
+  presentation/         # 1 API = 1 ファイル（list-todos.api.ts など）。コンテナを受け取って handler を返す関数（listTodosApi(container)）、本番用の GET / POST など、リクエスト / レスポンスの型を export
+  application/          # 読むだけの query（list-todos.query.ts）と状態を変える command（create-todo.command.ts）
+  domain/               # Entity / Value Object / Repository の interface
+  infra/                # Repository の実装（当面 InMemory）、container.ts（DI）
+backend/shared/       # API 側で feature をまたぐ共通部品（domain/domain-error.ts に DomainError、presentation/http-error.ts に HTTP ステータス変換と ErrorResponse 型、presentation/json-body.ts に本文の読み取り）
+shared/               # 画面側で feature をまたぐ共通部品（必要になったら作る）
+```
+
+- 画面は SSR を前提にせず、データは hook から `/api/...` を呼んで取る。サーバの処理はすべて `backend/` に置く。
+- 画面側からサーバ側へは、各 api ファイル（`backend/<feature>/presentation/<name>.api.ts`）の型を `import type` で参照するだけ。型で担保されるのはリクエスト / レスポンスの形で、URL・メソッド・実行時の JSON の形は担保されない。
+- テストは対象の隣に置く（`app/` には置かない）。
+
+詳細（依存の向き、命名、テストの置き方、採用しなかった案）は `rules/code/architecture.md` を参照。
+
 ## セットアップ
 
 ```sh

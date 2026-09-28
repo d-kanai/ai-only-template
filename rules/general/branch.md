@@ -56,7 +56,7 @@ main は常にマージ可能な状態を保つ。作業はすべて Issue → �
 - GitHub Actions は `CI=true` を既定で設定するため、lefthook の postinstall はフックを入れない（`rules/code/lint.md`）。
 - マージ条件への組み込み: main の Ruleset `protect-main`（https://github.com/d-kanai/ai-only-template/rules/24101231 ）の `required_status_checks` に `ci` を入れている。
   - `strict_required_status_checks_policy` は `false`（PR ブランチが main の最新を取り込んでいなくてもマージできる）。理由: 有効にすると main が進むたびに取り込み直して CI を待つ必要があり、AI が並行して複数 PR を進める運用で待ち時間が増える。main との競合が無いことは別途マージ条件で確認する。
-  - Ruleset の変更は REST API（`PUT /repos/d-kanai/ai-only-template/rulesets/24101231`）で行った。クラウドセッションからでも、セッションの `GH_TOKEN` を `Authorization: Bearer` に付けた `curl` で読み書きできた（2026-09-28 実測。GitHub MCP ツールには Ruleset の操作が無い）。Ruleset の rules は PUT で丸ごと置き換わるので、先に GET で現在の rules を取り、追加した配列を送る。
+  - Ruleset の変更はユーザーが行う（UI: https://github.com/d-kanai/ai-only-template/rules/24101231 → Edit → 「Require status checks to pass」に `ci` を追加。または手元の `gh api -X PUT repos/d-kanai/ai-only-template/rulesets/24101231 --input <json>`。rules は PUT で丸ごと置き換わるので、先に GET で現在の rules を取り、追加した配列を送る）。クラウドセッションからは、セッションの `GH_TOKEN` を付けた `curl` で GET は 200 で読めるが、PUT はプロキシが 403「Write access to this GitHub API path is not permitted through this proxy」で拒否する（2026-09-28 実測。GitHub MCP ツールにも Ruleset の操作は無い）。
 - CI が赤のときは、原因を PR のブランチで直して push する。テストの skip や無効化で緑にしない（`rules/code/lint.md` の `noSkippedTests`）。
 
 ## マージ後の後始末（オーケストレータが必ず行う）
