@@ -569,9 +569,18 @@ const ENV_CHECK_DIRS = [...SOURCE_DIRS, "e2e"];
 
 const ENV_DIRECT_ACCESS = {
   id: "env-direct-access",
-  name: "process.env を直接読んでよいのは backend/shared/infra/env.ts だけ（app/・features/・backend/・shared/・e2e/ とルート直下の設定ファイルが対象。テストは除く）",
-  // 例外の 1 ファイル。
+  name: "process.env を直接読んでよいのは backend/shared/infra/env.ts だけ（例外は instrumentation.ts の NEXT_RUNTIME だけ。app/・features/・backend/・shared/・e2e/ とルート直下の設定ファイルが対象。テストは除く）",
+  // 何を読んでもよいファイル（環境変数の唯一の入口）。
   allowedFile: "backend/shared/infra/env.ts",
+  // ファイルごとに、読んでよい変数だけを許す例外。
+  // WHY instrumentation.ts の NEXT_RUNTIME: Next.js がビルド時に値を埋め込む規約の変数で、Edge 向けのビルドから Node.js 専用の
+  //   import を消すために process.env.NEXT_RUNTIME の形で書く必要がある（Next.js 16.3.6 同梱ドキュメント
+  //   01-app/02-guides/instrumentation.md の「Importing runtime-specific code」。WHY の詳細は instrumentation.ts）。
+  //   ファイルごと許すと、同じファイルに別の変数の直参照が入っても通るので、変数の名前まで絞る。
+  allowedVariables: { "instrumentation.ts": ["NEXT_RUNTIME"] } as Record<
+    string,
+    string[]
+  >,
   // 対象のファイルか。ENV_CHECK_DIRS の下か、ルート直下（"/" を含まない）の、テストでない TS / JS。
   // WHY ルート直下の設定ファイルを含める: drizzle.config.ts・playwright.config.ts・vitest.global-setup.ts などは、
   //   接続先やフラグを読むので、既定値や直参照が入り込みやすい。ルート直下のテスト（architecture.test.ts など）は除く。
@@ -584,18 +593,34 @@ const ENV_DIRECT_ACCESS = {
 
 // process.env / process?.env / process["env"] / process['env'] / process[`env`]。空白や改行を挟んでもよい。
 // \bprocess なので globalThis.process.env も拾い、processEnv のような別の識別子や myprocess.env は拾わない。
+// 続けて .NAME / ?.NAME と書いた変数の名前をグループ 2 で取る（例外の変数を絞るため）。["NAME"] の形や、
+// process.env をそのまま渡す書き方では名前を取らない（例外に当たらず、違反になる）。
 const PROCESS_ENV =
-  /\bprocess\s*(?:\??\.\s*env\b|(?:\?\.)?\s*\[\s*(["'`])env\1\s*\])/g;
+  /\bprocess\s*(?:\??\.\s*env\b|(?:\?\.)?\s*\[\s*(["'`])env\1\s*\])(?:\s*\??\.\s*([A-Za-z_$][\w$]*))?/g;
 
-// source の中の process.env の参照を、書かれた行番号（1 始まり）の並びで返す。
+type EnvAccess = { line: number; variable: string | undefined };
+
+// source の中の process.env の参照を、書かれた順に「行番号（1 始まり）と読んだ変数の名前」で返す。
 // コメントの中と文字列リテラルの中は拾わない（extractImports と同じ stripComments / stringRanges を使う）。
 // stripComments はコメントを同じ長さの空白に置き換え、改行を残すので、位置から元の行番号を数えられる。
-function findProcessEnvAccesses(source: string): number[] {
+function findProcessEnvAccesses(source: string): EnvAccess[] {
   const code = stripComments(source);
   const ranges = stringRanges(code);
   return [...code.matchAll(PROCESS_ENV)]
     .filter((match) => !isInsideString(ranges, match.index))
-    .map((match) => code.slice(0, match.index).split("\n").length);
+    .map((match) => ({
+      line: code.slice(0, match.index).split("\n").length,
+      variable: match[2],
+    }));
+}
+
+// file で、この参照が許されるか。env.ts は何でも、例外のファイルは決めた変数だけ。
+function isAllowedEnvAccess(file: string, { variable }: EnvAccess): boolean {
+  return (
+    file === ENV_DIRECT_ACCESS.allowedFile ||
+    (variable !== undefined &&
+      (ENV_DIRECT_ACCESS.allowedVariables[file] ?? []).includes(variable))
+  );
 }
 
 // ルート直下のファイル（ディレクトリの中は見ない）。node_modules/ や .next/ の中は対象外。
@@ -612,15 +637,13 @@ function listEnvCheckedFiles(root: string): string[] {
   ].filter(ENV_DIRECT_ACCESS.appliesTo);
 }
 
-// 「ファイル:行」の一覧。env.ts は除く。
+// 「ファイル:行」の一覧。許される参照（isAllowedEnvAccess）は除く。
 function findEnvViolations(root: string): string[] {
-  return listEnvCheckedFiles(root)
-    .filter((file) => file !== ENV_DIRECT_ACCESS.allowedFile)
-    .flatMap((file) =>
-      findProcessEnvAccesses(readFileSync(join(root, file), "utf8")).map(
-        (line) => `${file}:${line}`,
-      ),
-    );
+  return listEnvCheckedFiles(root).flatMap((file) =>
+    findProcessEnvAccesses(readFileSync(join(root, file), "utf8"))
+      .filter((access) => !isAllowedEnvAccess(file, access))
+      .map(({ line }) => `${file}:${line}`),
+  );
 }
 
 function findViolations(references: Reference[], rule: Rule): string[] {
@@ -690,6 +713,8 @@ describe("依存の向き（rules/code/architecture.md）", () => {
         "vitest.global-setup.ts",
         "stryker.config.mjs",
         "next.config.ts",
+        "instrumentation.ts",
+        "instrumentation-node.ts",
       ]),
     );
     expect(files).not.toContain("architecture.test.ts");
@@ -1155,6 +1180,12 @@ const ENV_ACCESS_EXAMPLES: {
     // env.ts と名前の前方一致だけが同じ別ファイル。
     ["backend/shared/infra/env-helper.ts", "export const v = process.env;"],
     ["shared/x.cjs", "module.exports = process[`env`];"],
+    // instrumentation.ts の例外は NEXT_RUNTIME だけで、ほかの変数・名前を取れない書き方・ほかのファイルは違反。
+    ["instrumentation.ts", "const url = process.env.DATABASE_URL;"],
+    ["instrumentation.ts", "const r = process.env.NEXT_RUNTIME_X;"],
+    ["instrumentation.ts", 'const r = process.env["NEXT_RUNTIME"];'],
+    ["instrumentation.ts", "const all = process.env;"],
+    ["backend/todo/infra/x.ts", "const r = process.env.NEXT_RUNTIME;"],
   ],
   allowed: [
     // 例外の env.ts。
@@ -1174,14 +1205,21 @@ const ENV_ACCESS_EXAMPLES: {
     ["architecture.test.ts", "const path = process.env.PATH;"],
     ["scripts/x.ts", "const path = process.env.PATH;"],
     ["README.md", "process.env.DATABASE_URL"],
+    // instrumentation.ts の NEXT_RUNTIME（Next.js の規約。改行を挟んでも同じ）。
+    [
+      "instrumentation.ts",
+      'if (process.env.NEXT_RUNTIME === "nodejs") { await import("./instrumentation-node"); }',
+    ],
+    ["instrumentation.ts", "const r = process\n  .env\n  ?.NEXT_RUNTIME;"],
   ],
 };
 
 function judgeEnvAccess([file, source]: [string, string]): boolean {
   return (
     ENV_DIRECT_ACCESS.appliesTo(file) &&
-    file !== ENV_DIRECT_ACCESS.allowedFile &&
-    findProcessEnvAccesses(source).length > 0
+    findProcessEnvAccesses(source).some(
+      (access) => !isAllowedEnvAccess(file, access),
+    )
   );
 }
 
@@ -1202,6 +1240,19 @@ describe("環境変数の直参照の判定", () => {
 });
 
 describe("環境変数の直参照の抽出（findProcessEnvAccesses）", () => {
+  it("参照ごとに、読んだ変数の名前を返す（.NAME / ?.NAME の形だけ。取れない形は undefined）", () => {
+    const source = [
+      "const a = process.env.NEXT_RUNTIME;",
+      "const b = process?.env?.DATABASE_URL;",
+      'const c = process["env"].X;',
+      'const d = process.env["Y"];',
+      "const e = process.env;",
+    ].join("\n");
+    expect(
+      findProcessEnvAccesses(source).map(({ variable }) => variable),
+    ).toEqual(["NEXT_RUNTIME", "DATABASE_URL", "X", undefined, undefined]);
+  });
+
   it("参照ごとに、書かれた行番号を返す（コメントを消しても行はずれない）", () => {
     const source = [
       "/*",
@@ -1211,7 +1262,9 @@ describe("環境変数の直参照の抽出（findProcessEnvAccesses）", () => 
       "// process.env",
       'const c = process["env"].C;',
     ].join("\n");
-    expect(findProcessEnvAccesses(source)).toEqual([4, 4, 6]);
+    expect(findProcessEnvAccesses(source).map(({ line }) => line)).toEqual([
+      4, 4, 6,
+    ]);
   });
 
   it("分割代入（const { env } = process）と別名経由の参照は拾わない（見逃す方向の限界。Biome の noProcessEnv も検出しない）", () => {
@@ -1530,6 +1583,13 @@ const MUST_REJECT_FILES: Record<string, string> = {
     "const e = process?.env.X;",
     "// process.env.COMMENT",
     'const f = "process.env.STRING";',
+    //   instrumentation.ts 以外の NEXT_RUNTIME も違反（9 行目）。
+    "const g = process.env.NEXT_RUNTIME;",
+  ),
+  //   instrumentation.ts でも NEXT_RUNTIME 以外は違反（2 行目。1 行目の NEXT_RUNTIME は許す）。
+  "instrumentation.ts": lines(
+    'if (process.env.NEXT_RUNTIME === "nodejs") {}',
+    "export const url = process.env.DATABASE_URL;",
   ),
   //   e2e/ とルート直下の設定ファイル（.ts / .mjs / .cjs）、env.ts と名前の前方一致だけが同じ別ファイル。
   "e2e/bad-env.ts": lines("export const url = process.env.DATABASE_URL;"),
@@ -1540,7 +1600,8 @@ const MUST_REJECT_FILES: Record<string, string> = {
 };
 
 const MUST_REJECT_VIOLATIONS = [
-  ...[1, 2, 4, 5, 6].map(
+  "env-direct-access: instrumentation.ts:2",
+  ...[1, 2, 4, 5, 6, 9].map(
     (line) => `env-direct-access: backend/todo/infra/bad-env.ts:${line}`,
   ),
   "env-direct-access: e2e/bad-env.ts:1",
@@ -2025,6 +2086,20 @@ const MUST_PASS_FILES: Record<string, string> = {
   "node_modules/pkg/index.js": lines("module.exports = process.env;"),
   ".next/server/chunk.js": lines("module.exports = process.env;"),
   "README.md": "process.env.DATABASE_URL",
+  // instrumentation.ts は NEXT_RUNTIME だけを読み、Node.js 用の処理（instrumentation-node.ts）が env.ts を読み込む。
+  "instrumentation.ts": lines(
+    "export async function register() {",
+    '  if (process.env.NEXT_RUNTIME === "nodejs") {',
+    '    const { verifyEnvAtStartup } = await import("./instrumentation-node");',
+    "    await verifyEnvAtStartup();",
+    "  }",
+    "}",
+  ),
+  "instrumentation-node.ts": lines(
+    "export async function verifyEnvAtStartup() {",
+    '  await import("@/backend/shared/infra/env");',
+    "}",
+  ),
   // ルート直下の設定ファイル・e2e/ は env.ts を相対パスで import する。
   "drizzle.config.ts": lines(
     'import { env } from "./backend/shared/infra/env";',

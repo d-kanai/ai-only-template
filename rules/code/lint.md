@@ -78,7 +78,7 @@ Biome の recommended 全体を有効にする（個別に列挙しない）。�
 - `correctness/useUniqueElementIds`（react domain・recommended 外）: 固定文字列の `id` はコンポーネントを複数回使うと DOM 上で重複する。`useId` を使わせる。
 - `complexity/noExcessiveCognitiveComplexity`: 認知的複雑度が既定の上限（15）を超える関数を防ぎ、分割を促す。
 - `style/noParameterAssign`: 引数への再代入で、呼び出し元の値と関数内の値の対応が追いにくくなるのを防ぐ。
-- `style/noProcessEnv`（既定 severity は info。Issue #59）: 環境変数を `backend/shared/infra/env.ts` 以外で `process.env` から直接読むのを防ぐ（読む場所が散らばると、既定値や検証が場所ごとにずれるため。`rules/code/env.md` の「環境変数」）。`env.ts` とテストは `overrides` で off。`architecture.test.ts` の規則 `env-direct-access` でも同じことを検査している（2 系統にする理由と、分割代入 `const { env } = process` をどちらも拾わない限界は `rules/code/env.md`）。
+- `style/noProcessEnv`（既定 severity は info。Issue #59）: 環境変数を `backend/shared/infra/env.ts` 以外で `process.env` から直接読むのを防ぐ（読む場所が散らばると、既定値や検証が場所ごとにずれるため。`rules/code/env.md` の「環境変数」）。`env.ts` とテストは `overrides` で off。ルート直下の `instrumentation.ts` の `process.env.NEXT_RUNTIME`（Next.js の規約の変数）だけは、その行の `biome-ignore` で理由を書いて許している（ファイルごと off にすると、同じファイルの別の直参照も通るため）。`architecture.test.ts` の規則 `env-direct-access` でも同じことを検査している（2 系統にする理由と、分割代入 `const { env } = process` をどちらも拾わない限界は `rules/code/env.md`）。
 - `style/useThrowOnlyError`: `Error` 以外を throw するとスタックトレースが失われる（ESLint の no-throw-literal 相当）。
 - `suspicious/noConsole`（`console.error` / `console.warn` は許可）: デバッグ用の `console.log` の消し忘れを防ぐ。エラー・警告の出力は正当な用途があるため許可する。
 - `suspicious/noConstantBinaryExpressions`: 常に同じ結果になる比較・論理式（書き間違い）を検出する（ESLint の recommended にある no-constant-binary-expression 相当）。

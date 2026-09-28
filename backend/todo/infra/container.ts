@@ -122,7 +122,8 @@ export function createPostgresTodoContainer(db: Database): TodoContainer {
 //   Postgres ではデータが DB にあるので、コンテナが分かれても結果は変わらない。
 // WHY 読み込んだ時点で組み立ててよい: プールを作るだけで、接続は最初のクエリまで張らない（node-postgres の Pool）。
 //   `next build` がこのモジュールを読み込んでも DB には接続しない。環境変数の検証（env.ts）は読み込み時に行われるので、
-//   必須の変数が欠けていれば `next build` / `next start` がここで止まる。
+//   必須の変数が欠けていれば `next build` はここで止まる。`next start` / `next dev` は、このモジュールを読む前に
+//   ルート直下の instrumentation.ts が起動時に env.ts を読み込んで止まる。
 export const todoContainer: TodoContainer = createPostgresTodoContainer(
   getDatabase().db,
 );

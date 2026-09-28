@@ -69,7 +69,7 @@ asdf install
 cp .env.example .env
 ```
 
-- `.env` はコミットしない（`.gitignore` 済み）。変数はすべて必須で、コードに既定値は無い。`.env` が無い・変数が欠けていると、`pnpm build` / `pnpm test` / `pnpm test:e2e` / `pnpm db:migrate` は欠けた変数の名前を出して起動時に止まる。`pnpm dev` / `pnpm start` はサーバ自体は起動し、最初の API リクエストが 500 になって、同じメッセージがサーバのログに出る（API のモジュールを読み込むのがそのときのため）。
+- `.env` はコミットしない（`.gitignore` 済み）。変数はすべて必須で、コードに既定値は無い。`.env` が無い・変数が欠けていると、`pnpm dev` / `pnpm start` / `pnpm build` / `pnpm test` / `pnpm test:e2e` / `pnpm db:migrate` は欠けた変数の名前を出して起動時に止まる（非 0 で終わる。`pnpm dev` / `pnpm start` はルート直下の `instrumentation.ts` で検証する）。
 - コマンドの前に付けた環境変数（`DATABASE_URL=... pnpm db:migrate`）は `.env` より優先される。
 - 仕組み（`backend/shared/infra/env.ts` への一元化、`process.env` の直参照の禁止）は `rules/code/env.md` の「環境変数」を参照。
 

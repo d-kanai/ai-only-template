@@ -115,6 +115,7 @@ drizzle.config.ts                     # drizzle-kit の設定
 
 ## `app/`（ルーティング）
 - 置くもの: `page.tsx` / `layout.tsx` / `loading.tsx` / `error.tsx` などの Next の規約ファイルと、`app/api/**/route.ts` だけ。
+- `instrumentation.ts`（起動時の環境変数の検証。`rules/code/env.md` の「環境変数」）は Next の規約でルート直下に置く（`app/` の中には置けない。Next.js 16.3.6 同梱ドキュメント `01-app/02-guides/instrumentation.md`）。Node.js 専用の処理はルート直下の `instrumentation-node.ts` に置く。
 - `page.tsx` は screen を返すだけにする（`return <TodoScreen />`）。状態・データ取得・見た目は screen 側に書く。
 - `app/api/**/route.ts` は `backend/<feature>/presentation` の api ファイルが export する HTTP メソッド名の関数を re-export するだけにする（`export { GET } from "@/backend/todo/presentation/list-todos.api";`）。入力検証やレスポンスの組み立ては書かない。
   - 同じ URL の複数のメソッド（`/api/todos` の GET と POST など）は、それぞれ別の api ファイルから re-export する。
@@ -278,7 +279,7 @@ Issue #57 で導入した。Todo は Postgres（`compose.yaml`）に保存する
     - must-reject: 依存の 13 規則と置き場所の規則それぞれの違反を、alias（`@/`）と相対パス、値の import / `import type` / inline の `type` / `export { X } from` / `export type { X } from` / dynamic `import()` / 副作用だけの import、`.ts` / `.tsx` / `.mts` / `.cts` / `.js` / `.jsx` / `.mjs` / `.cjs` で置き、前方一致の境界（`backend/shared-x`、`app/api-x`、`features/todo-extra`）やパスに `test` を含む本番のファイルも含めて、検出される「規則: ファイル → 参照先」の一覧を丸ごと比較する（見逃しも余分な検出も失敗にする）。
     - must-pass: 許可される参照を網羅したツリーで違反 0 件を確かめる。今のリポジトリの本番コードの参照（参照元・参照先・型だけか）はすべて含めている。コメント・文字列の中の import 風の文字列、テストファイル、TS / JS 以外のファイルも置く。
     - 理由: 抽出の取りこぼし（書き方によって import を拾えない）は、規則が正しくても違反の見逃しになる。1 件の参照を規則に渡すだけのテストではそこを検証できない。
-  - 環境変数の直参照（規則 `env-direct-access`。Issue #59）: `process.env` を読んでよいのは `backend/shared/infra/env.ts` だけ。対象は `app/` `features/` `backend/` `shared/` `e2e/` のソースとルート直下の設定・セットアップファイル（テストは除く）。依存の向きとは別に、ソースの中身（`process.env` / `process["env"]` など）で判定し、「ファイル:行」を出して失敗する。判定の例（`ENV_ACCESS_EXAMPLES`）と fixture の must-reject / must-pass も持つ。規則の中身・限界（分割代入は拾わない）・Biome の `noProcessEnv` との二重化の理由は `rules/code/env.md` の「環境変数」。
+  - 環境変数の直参照（規則 `env-direct-access`。Issue #59）: `process.env` を読んでよいのは `backend/shared/infra/env.ts` だけ（例外はルート直下の `instrumentation.ts` の `NEXT_RUNTIME` だけで、変数の名前まで絞っている）。対象は `app/` `features/` `backend/` `shared/` `e2e/` のソースとルート直下の設定・セットアップファイル（テストは除く）。依存の向きとは別に、ソースの中身（`process.env` / `process["env"]` など）で判定し、「ファイル:行」を出して失敗する。判定の例（`ENV_ACCESS_EXAMPLES`）と fixture の must-reject / must-pass も持つ。規則の中身・限界（分割代入は拾わない）・Biome の `noProcessEnv` との二重化の理由は `rules/code/env.md` の「環境変数」。
   - 規則は全部で 15（依存の 13 規則 `RULES` + 置き場所 `BACKEND_PLACEMENT` + 環境変数の直参照 `ENV_DIRECT_ACCESS`）。
   - テストを対象外にする理由: テストは組み立てのために規則の外側を参照する（presentation のテストが infra の InMemory リポジトリを使うなど。上の「テストの置き方」）。
   - 抽出は正規表現で行う（依存は足さない）。コメントと文字列リテラルの中の import 風の文字列は除く。dynamic import は ``import(`x`)``（`${}` 無し）と第 2 引数つきの `import("x", { with: ... })` も拾う。限界: 正規表現リテラルやテンプレートリテラルの入れ子はコメント・文字列の区切りを誤認しうる、`${}` の中の `import()`、`${}` を含むテンプレートリテラルを渡した ``import(`@/backend/${name}`)``（参照先を静的に決められない）、`}` の直後に同じ行で続けた `export ... from` は拾わない（見逃す方向）、型の位置の `import("x").T` は値の参照として数える（多く検出する方向）（詳細と WHY は `architecture.test.ts` のコメント。抽出の仕様は同ファイルの「参照の抽出」「参照先の正規化」のテストで固定している）。
@@ -317,6 +318,7 @@ Issue #57 で導入した。Todo は Postgres（`compose.yaml`）に保存する
 - 計測しないもの（ユーザー判断、Issue #45）:
   - `app/`: ルーティングだけで、テストを置かない方針（上の「`app/`（ルーティング）」）。結線は E2E で確かめる。
   - ルート直下の設定ファイル（`next.config.ts` / `playwright.config.ts` など）: ツールに渡す値を並べるだけで、単体テストで検証する振る舞いを持たない。
+  - ルート直下の `instrumentation.ts` / `instrumentation-node.ts`: `next start` / `next dev` の起動でだけ動き、失敗時にプロセスを終える。起動時に止まることは実測で確かめ、検証の中身は `env.ts` のテストで固定している。
   - `scripts/` のシェルスクリプト（`.sh`）: V8 のカバレッジは JS しか計測できない（include に入れても解析に失敗して自動で外される）。
 - 100% に満たないときは、テストを足して埋める。`/* v8 ignore */` などのコメントで計測から外すことはしない。
   - 理由: テスト = 仕様なので、テストが通らないコードは仕様のないコードになる。ignore で逃がすと数字だけが 100% になり、仕様の抜けが見えなくなる。

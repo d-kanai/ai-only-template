@@ -44,7 +44,14 @@ node --version && pnpm --version   # .tool-versions と一致することを確�
   - ツールのフラグを分ける: 手元では `CI` も `PLAYWRIGHT_CHROMIUM_EXECUTABLE` も無いのが正常。必須にすると `.env.example` に嘘の値（`CI=` など）を置くことになり、コピーした `.env` で CI として動いてしまう。
 - 起動時に全件検証する: `env.ts` を読み込んだ時点で `readEnv(process.env)` が必須の変数をすべて検査し、欠けている・空文字・不正な値（数でない、負、小数、`DATABASE_POOL_MAX=0`）の名前を**すべて**集めて 1 つのエラーにして止まる。メッセージには `cp .env.example .env` の手順を書く。
   - 1 件ずつ止めないのは、直して起動し直すたびに次の 1 件が見つかる往復を無くすため。
-  - どこで止まるか（2026-09-28 実測。`.env` から `DATABASE_POOL_MAX` を消して確認）: `pnpm build`（ページデータの収集で `/api/todos/[id]` の読み込みが失敗）、`pnpm test`（globalSetup）、`pnpm test:e2e`（`playwright.config.ts` の読み込み）、`pnpm db:migrate`（`drizzle.config.ts` の読み込み）は起動時に止まる。`pnpm start` / `pnpm dev` はサーバが Ready になり、最初の `/api/todos` のリクエストが 500 になって、同じメッセージがサーバのログに出る（Next が API のモジュールを読み込むのがそのときのため）。
+  - どこで止まるか（2026-09-28 実測。`.env` から `DATABASE_POOL_MAX` を消して確認）: `pnpm build`（ページデータの収集で `/api/todos/[id]` の読み込みが失敗）、`pnpm test`（globalSetup）、`pnpm test:e2e`（`playwright.config.ts` の読み込み）、`pnpm db:migrate`（`drizzle.config.ts` の読み込み）、`pnpm start` / `pnpm dev`（下の `instrumentation.ts`）は、すべて exit 1 で止まる。`pnpm start` / `pnpm dev` は Next が「✓ Ready」を出した直後に、欠けた名前を出して exit 1 になる（Ready の表示は `register` の前に出る。`register` はリクエストを受け付ける前に完了する、と Next のドキュメントにある）。
+- `next start` / `next dev` の起動時の検証（ルート直下の `instrumentation.ts` と `instrumentation-node.ts`）:
+  - 理由: API の route は最初のリクエストまで読み込まれないため、`env.ts` の読み込み時の検証だけでは、サーバは起動したまま最初の `/api/todos` が 500 になるまで気づけなかった（2026-09-28 実測）。
+  - Next.js の規約ファイル `instrumentation.ts` の `register` は、サーバの起動時に 1 回だけ呼ばれ、リクエストを受け付ける前に完了する（Next.js 16.3.6 同梱ドキュメント `node_modules/next/dist/docs/01-app/02-guides/instrumentation.md` の「Convention」）。`register` が `process.env.NEXT_RUNTIME === "nodejs"` のときだけ `instrumentation-node.ts` の `verifyEnvAtStartup` を呼び、そこで `env.ts` を読み込む。
+  - `register` が失敗しても、`next start` は「Failed to prepare server」を出すだけで動き続けた（Next.js 16.3.6 で実測。終了しない）。そのため `verifyEnvAtStartup` がエラーを出してから `process.exit(1)` する。
+  - `NEXT_RUNTIME` で分ける理由: `register` は Edge runtime 向けにもビルドされ、分岐が無いと `process.loadEnvFile` / `process.exit` が Edge 向けに入って `next build` が「A Node.js API is used ... not supported in the Edge Runtime」の警告を出した（実測）。`NEXT_RUNTIME` は Next がビルド時に埋め込む規約の変数で、同ドキュメントの「Importing runtime-specific code」の例と同じく `process.env.NEXT_RUNTIME` と書く必要がある。そのため、`instrumentation.ts` のこの 1 か所だけを例外にしている（Biome は行単位の `biome-ignore` と理由、`architecture.test.ts` は `instrumentation.ts` の `NEXT_RUNTIME` という変数の名前まで絞った例外 `allowedVariables`）。
+  - `register` は `next build` では呼ばれない（2026-09-28 に一時的なログで確認）。`next build` は、ページデータの収集で API のモジュールを読み込むときに止まる。
+  - 単体テストは無い（ルート直下の規約ファイルはカバレッジの対象外。`vitest.config.mts`）。起動時に止まることは上の実測で確認した。
 - `.env`:
   - 作り方: リポジトリ直下で `cp .env.example .env`。`.env` はコミットしない（`.gitignore` の `.env*`。`.env.example` だけ `!.env.example` でコミットする）。
   - 読み込み: `next dev` / `next build` / `next start` は Next.js が `.env` を自動で読む。それ以外（Vitest・Playwright・drizzle-kit）は、`env.ts` が読み込み時に Node 標準の `process.loadEnvFile(".env")` でカレントディレクトリ（pnpm のスクリプトはリポジトリ直下で動く）の `.env` を読む。依存（dotenv など）は足さない。
@@ -52,7 +59,7 @@ node --version && pnpm --version   # .tool-versions と一致することを確�
   - 環境変数が優先: `process.loadEnvFile` は、すでに環境にある変数をファイルの値で上書きしない（Node 24.21.0 で実測）。`DATABASE_URL=... pnpm db:migrate` のように前に付けた値が `.env` より優先される。
   - CI（`.github/workflows/ci.yml` / `mutation.yml`）は Postgres の起動後に `cp .env.example .env` のステップで作る（ワークフローの `env:` には書かない。値を `.env.example` の 1 か所にするため）。Stryker は `.env` もサンドボックスにコピーする（`.gitignore` を見ない。`stryker run --mutate backend/shared/infra/env.ts` で動くことを確認）。
   - クラウドセッションはフック（`scripts/cloud-session-start.sh`）が、`.env` が無ければ `.env.example` からコピーする（下の「クラウドセッション」）。
-- 直参照の検査（2 系統。どちらも `pnpm lint` / `pnpm test` に含まれ、CI で止まる）:
+- 直参照の検査（2 系統。どちらも `pnpm lint` / `pnpm test` に含まれ、CI で止まる。例外は `env.ts` と、上の `instrumentation.ts` の `NEXT_RUNTIME` だけ）:
   - Biome の `style/noProcessEnv`（`biome.json`。既定 severity が info なので `"error"` を明示）。`overrides` で `backend/shared/infra/env.ts` とテスト（`**/*.test.ts` / `**/*.test.tsx`。子プロセスに `PATH` を渡すなどで使う）だけ off（`rules/code/lint.md`）。overrides の `includes` はリポジトリ直下からの相対パスで照合される。
   - `architecture.test.ts` の規則 `env-direct-access`: `app/` `features/` `backend/` `shared/` `e2e/` のソースと、ルート直下の設定・セットアップファイル（`drizzle.config.ts`、`playwright.config.ts`、`vitest.config.mts`、`vitest.global-setup.ts`、`stryker.config.mjs`、`next.config.ts` など）で、`process.env`（空白・改行を挟むもの、`process?.env`、`globalThis.process.env` を含む）と `process["env"]` / `process['env']` を拾い、`env.ts` 以外にあれば「ファイル:行」を出して失敗する。テスト（`*.test.*`）は対象外。コメント・文字列の中は拾わない。
   - 2 系統にする理由: Biome は `biome.json` の overrides の書き換えで黙って効かなくなる。テスト側で対象と例外（`env.ts` だけ）を固定し、片方が壊れてももう片方で止まるようにする。
