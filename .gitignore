@@ -47,3 +47,7 @@ next-env.d.ts
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# stryker（mutation testing の実行結果。reports/mutation/ にレポート、.stryker-tmp/ に実行中のサンドボックスが作られる）
+/reports/
+/.stryker-tmp/
