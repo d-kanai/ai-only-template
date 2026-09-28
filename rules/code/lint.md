@@ -23,6 +23,8 @@ pnpm format   # biome format --write .                  … format だけを適�
   - warn: `pnpm lint` / `pnpm check` / pre-commit のすべてで `--error-on-warnings` を付け、warn でも失敗させる。ルールを列挙しないため、Biome の更新で warn のルールが増えても自動で対象になる。
   - info: `--error-on-warnings` では失敗しないため、`biome.json` で個別に `"error"` を指定している（下の「recommended のうち info から error に上げたルール」）。Biome を更新したら、recommended に info のルールが増えていないか確認する。
 - 担保: `lint.test.ts` が、warn（noUnusedVariables）・info（useTemplate）・追加ルール（noConsole）の**代表 1 ルールずつ**と、`noProcessEnv`（`env.ts` 以外・`env.ts` という名前のリポジトリ外のファイル・E2E の spec では失敗し、`env.ts` とテストでは通る）について、違反単独で `biome check --error-on-warnings` が失敗すること、`pnpm lint` / `pnpm check` / pre-commit が `--error-on-warnings` 付きであることを検査する。個々のルールの有無までは検査しないので、`biome.json` を変えるときは下の一覧と `biome explain` で確認する。
+  - 代表 3 ルールには、許可される書き方（使った変数・テンプレートリテラル・`console.error` / `console.warn`）が 0 で終わる must pass もある（Issue #50）。
+  - 引数の検査は判定 `runsBiomeCheckWithErrorOnWarnings` で行う。`biome check`（または `pnpm exec biome check`）に `--error-on-warnings` が付いているかに加え、失敗を無効化する書き方を拒否する: `&&` 以外のつなぎ（`|| true`・`; exit 0`・改行・`| cat`・末尾の `&`）と、warn を効かなくするフラグ `--diagnostic-level` / `--only` / `--skip`（`=` 付きも）。
 
 ## pre-commit（Lefthook）
 - 仕組み: `pnpm install` すると lefthook パッケージの postinstall が `lefthook install -f` を実行し、`.git/hooks/pre-commit` を Lefthook のスクリプトに置き換える（`pnpm-workspace.yaml` の `allowBuilds` で `lefthook: true` にして許可している。postinstall の中身とその判断は同ファイルのコメント）。以後 `git commit` のたびに `lefthook.yml` の pre-commit が実行される。

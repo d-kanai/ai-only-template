@@ -5,7 +5,8 @@ npm パッケージの版は `package.json` と `pnpm-lock.yaml` の両方で固
 ## 完全固定
 - `package.json` の `dependencies` / `devDependencies` はすべて完全固定（`x.y.z`）で書く。`^` `~` `>=` などの範囲指定は使わない。
 - 理由: lockfile だけに頼ると、`pnpm update` や lockfile の再解決で範囲内の別の版が入りうる。`package.json` でも版を固定して意図しない版が入るのを防ぐ。あわせて、PR の差分で「どの版からどの版へ」が `package.json` 上で見えるようにする。
-- 担保: `package.test.ts` が `package.json` に範囲指定が残っていないことを検査する（`pnpm test` に含まれる）。
+- プレリリース（`1.2.3-beta.1`）とビルドメタ（`1.2.3+build`）も使わない（`x.y.z` の数字 3 つだけ。Issue #50 で決定）。理由: プレリリースは安定版の前提（semver の互換性の約束）から外れ、ビルドメタは版の比較で無視されて同じ `x.y.z` の別ビルドを区別できない。`=1.2.3` / `v1.2.3` も、書き方を 1 通りにするため使わない。使う必要が出たら Issue で決める。
+- 担保: `package.test.ts` が `package.json` に範囲指定が残っていないことを検査する（`pnpm test` に含まれる）。判定（`isPinnedVersion`）は、許可する例（`1.2.3` など）と拒否する例（`^` / `~` / `>=` / `1.2.x` / `1.2` / `*` / `latest` / `workspace:*` / `npm:` の別名 / 空文字 / プレリリース / ビルドメタなど）の両方で固定している。
 
 ## 版の決め方
 - 原則 **latest**。npm レジストリの dist-tags を 1 次情報として確認する。
