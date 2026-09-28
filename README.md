@@ -24,21 +24,22 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 機能（feature）単位で置く。`src/` は使わず、ルート直下に置く（例は Todo）。
 
 ```
-app/                  # ルーティングだけ（page.tsx は screen を返すだけ、api/**/route.ts はコントローラを公開するだけ）
+app/                  # ルーティングだけ（page.tsx は screen を返すだけ、api/**/route.ts は backend の api ファイルの GET / POST などを re-export するだけ）
 features/todo/        # 画面側
   screens/todo-screen/  # todo-screen.tsx（見た目）+ todo-screen.hook.ts（状態・データ取得）+ テスト
-  api/                  # /api/... を fetch する薄いラッパー
+  api/                  # /api/... を fetch する薄いラッパー（型は backend の api ファイルから import type）
   index.ts              # 公開 API（外から import してよいのはここだけ）
-server/todo/          # API 側（DDD 4 層）
-  presentation/         # Request → 入力検証 → use case → Response、dto.ts（画面側と共有する型）
-  application/          # 1 ユースケース = 1 ファイル
+backend/todo/         # API 側（DDD 4 層）
+  presentation/         # 1 API = 1 ファイル（list-todos.api.ts など）。GET / POST などの関数と、リクエスト / レスポンスの型を export
+  application/          # 読むだけの query（list-todos.query.ts）と状態を変える command（create-todo.command.ts）
   domain/               # Entity / Value Object / Repository の interface
   infra/                # Repository の実装（当面 InMemory）、container.ts（DI）
+backend/shared/       # API 側で feature をまたぐ共通部品（presentation/http-error.ts に DomainError → HTTP ステータス変換と ErrorResponse 型）
 shared/               # 画面側で feature をまたぐ共通部品（必要になったら作る）
 ```
 
-- 画面は SSR を前提にせず、データは hook から `/api/...` を呼んで取る。サーバの処理はすべて `server/` に置く。
-- 画面側からサーバ側へは `dto.ts` の型を `import type` で参照するだけ。
+- 画面は SSR を前提にせず、データは hook から `/api/...` を呼んで取る。サーバの処理はすべて `backend/` に置く。
+- 画面側からサーバ側へは、各 api ファイル（`backend/<feature>/presentation/<name>.api.ts`）の型を `import type` で参照するだけ。型で担保されるのはリクエスト / レスポンスの形で、URL・メソッド・実行時の JSON の形は担保されない。
 - テストは対象の隣に置く（`app/` には置かない）。
 
 詳細（依存の向き、命名、テストの置き方、採用しなかった案）は `rules/code/architecture.md` を参照。
