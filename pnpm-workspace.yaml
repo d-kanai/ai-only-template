@@ -29,11 +29,19 @@ allowBuilds:
 # ---- サプライチェーン保護設定 ----
 # 設定の意味は pnpm 公式ドキュメント（https://pnpm.io/settings 、https://pnpm.io/supply-chain-security ）に基づく。
 
-# minimumReleaseAge: 公開から指定時間（分単位。1440 = 24 時間）経っていないバージョンは、推移的依存も含めてインストールしない。
-#   悪意あるリリースは多くの場合 1 時間以内に検知・削除されるため。
-#   pnpm 11 以降は既定でも 1440 だが、既定値のままだと非 strict（条件を満たす版がないと古い版にフォールバック）
-#   になるため、下の minimumReleaseAgeStrict と合わせて明示している。
-minimumReleaseAge: 1440
+# minimumReleaseAge: 公開から指定時間（分単位。7200 = 5 日）経っていないバージョンは、推移的依存も含めてインストールしない。
+#   悪意あるリリースは公開後しばらくして検知・削除されることが多く、その期間を待ってから取り込むため。
+#   5 日にした理由（Issue #32、ユーザーの判断）:
+#   - 開発機の safe-chain は最小パッケージ年齢 14 日（~/.aikido/config.json）。これに揃えると Next.js などの更新に
+#     2 週間遅れで追随することになるため、揃えずに 5 日にした。pnpm 11 以降の既定（1440 = 1 日）よりは長くする。
+#   - safe-chain は開発機のシェル関数経由の実行にしか効かない（クラウドセッション・CI・shim 直叩きでは効かない）。
+#     pnpm 側の設定は実行経路に依存せず lockfile の解決・install のたびに効くため、こちらを全環境共通の防御とする。
+#   既定値のままだと非 strict（条件を満たす版がないと古い版にフォールバック）になるため、
+#   下の minimumReleaseAgeStrict と合わせて明示している。値は pnpm-workspace.test.ts で検査している。
+#   対象外: package.json の packageManager（pnpm 本体）の解決。lockfile 先頭の pnpm@12.7.0 / @pnpm/exe.* は
+#   2026-09-25 公開（5 日未満）でも拒否されなかった（2026-09-28 実測。公式仕様は未確認）。pnpm 本体の版は
+#   rules/code/env.md のとおり .tool-versions と packageManager で明示的に固定しているので、勝手に新しい版が入ることはない。
+minimumReleaseAge: 7200
 
 # minimumReleaseAgeStrict: minimumReleaseAge を満たす版がなければ、フォールバックせず install を失敗させる。
 #   minimumReleaseAge を明示設定したときは既定で true だが、意図を明確にするため書いている。
@@ -44,7 +52,7 @@ minimumReleaseAgeStrict: true
 trustPolicy: no-downgrade
 
 # trustPolicyIgnoreAfter: 公開から指定時間（分単位。525600 = 1 年）以上経った版は trustPolicy の検査対象外にする。
-#   2026-09-28 時点の lockfile で undici-types@6.21.0（2024-11-13 公開、@types/node の依存）と
+#   導入時（2026-09-28、PR #14）の lockfile で undici-types@6.21.0（2024-11-13 公開、@types/node の依存）と
 #   why-is-node-running@3.2.2（2025-01-08 公開、vitest の依存）が trust downgrade と判定され、
 #   ERR_PNPM_TRUST_DOWNGRADE で install が失敗した。古い版は provenance 付きで公開する仕組みが整う前のものが多く、
 #   公式ドキュメントもこの用途に trustPolicyIgnoreAfter を案内している。
