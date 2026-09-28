@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   rmSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -237,6 +238,44 @@ describe("require-log.sh（Stop フック）", () => {
   });
 
   describe("停止を拒否する（must reject）", () => {
+    // 前のターンで書いて未コミットのまま残ったログ（ファイルの更新時刻が起点より前）。git status では「変わっている」ままなので、
+    // 作業ツリーの変更だけを見ると、以後のターンはログを書かずに通っていた（reviewer 指摘）。
+    it("前のターンで書いた未コミットのログ（未追跡・更新時刻が最後の人間のターンより前）だけなら拒否する", () => {
+      writeTranscript(turnWithTool());
+      writeRepoFile(todayLog, "# 前のターンで書いた\n");
+      const before = new Date(turnStart.getTime() - 120_000);
+      utimesSync(join(repo, todayLog), before, before);
+      expectBlocked(run(stopInput()));
+    });
+
+    it("前のターンで変更したままの追跡済みのログ（更新時刻が最後の人間のターンより前）だけなら拒否する", () => {
+      writeTranscript(turnWithTool());
+      writeRepoFile(todayLog, "# 今日\n");
+      commit("log", {
+        GIT_AUTHOR_DATE: `${yesterday}T13:00:00`,
+        GIT_COMMITTER_DATE: `${yesterday}T13:00:00`,
+      });
+      writeRepoFile(todayLog, "# 今日\n前のターンの追記\n");
+      const before = new Date(turnStart.getTime() - 120_000);
+      utimesSync(join(repo, todayLog), before, before);
+      expectBlocked(run(stopInput()));
+    });
+
+    it("このターンに別のファイルだけをコミットした（ログはコミットしていない）なら拒否する", () => {
+      // コミット側の判定は logs/<今日>.md に絞る（-- "$log"）。絞らないと、このターンのどのコミットでも通ってしまう。
+      writeTranscript(turnWithTool());
+      writeRepoFile("src.ts", "x\n");
+      commit("code");
+      expectBlocked(run(stopInput()));
+    });
+
+    it("timestamp が無いときは今日の 0 時を起点にし、昨日の更新時刻の未コミットのログだけなら拒否する", () => {
+      writeTranscript([human("調べて", null), toolUse("t1"), toolResult("t1")]);
+      writeRepoFile(todayLog, "# 今日\n");
+      utimesSync(join(repo, todayLog), yesterdayNoon, yesterdayNoon);
+      expectBlocked(run(stopInput()));
+    });
+
     it.each(AUTOMATIC_WAKES)(
       "人間のターン（ログ未追記）の後に自動の wake（%s）でツールを 1 回使ったら、人間のターンを起点に拒否する",
       (_name, wake) => {
@@ -332,7 +371,7 @@ describe("require-log.sh（Stop フック）", () => {
       });
       const result = run(stopInput());
       expectBlocked(result);
-      expect(result.stderr).toContain("今日の 0 時以降のコミットで判定する");
+      expect(result.stderr).toContain("今日の 0 時を起点にして判定する");
     });
 
     it("logs/<今日>.md が昨日の日付のコミットにしか無ければ拒否する", () => {
@@ -365,6 +404,15 @@ describe("require-log.sh（Stop フック）", () => {
   });
 
   describe("停止を許可する（must pass）", () => {
+    it("最後の人間のターン以降に書いた未コミットのログ（更新時刻がちょうど起点の秒）なら許可する", () => {
+      // 起点は timestamp を秒に切り捨てた時刻で、更新時刻が起点以上なら許可する（同じ秒に書いたものも通す）。
+      writeTranscript(turnWithTool());
+      writeRepoFile(todayLog, "# このターンで書いた\n");
+      const atStart = new Date(Math.floor(turnStart.getTime() / 1000) * 1000);
+      utimesSync(join(repo, todayLog), atStart, atStart);
+      expectAllowed(run(stopInput()));
+    });
+
     it.each(AUTOMATIC_WAKES)(
       "人間のターン → ログ追記のコミット → 自動の wake（%s）でツール 1 回、なら許可する",
       (_name, wake) => {
@@ -426,7 +474,7 @@ describe("require-log.sh（Stop フック）", () => {
       });
       const result = run(stopInput());
       expectAllowed(result);
-      expect(result.stderr).toContain("今日の 0 時以降のコミットで判定する");
+      expect(result.stderr).toContain("今日の 0 時を起点にして判定する");
     });
 
     it("timestamp が日時として読めない値でも今日の 0 時にフォールバックする", () => {
@@ -442,7 +490,7 @@ describe("require-log.sh（Stop フック）", () => {
       });
       const result = run(stopInput());
       expectAllowed(result);
-      expect(result.stderr).toContain("今日の 0 時以降のコミットで判定する");
+      expect(result.stderr).toContain("今日の 0 時を起点にして判定する");
     });
 
     it("cwd がリポジトリのサブディレクトリでも、リポジトリ直下の logs/<今日>.md の変更を見て許可する", () => {

@@ -104,6 +104,24 @@ describe("check-logs-diff.sh", () => {
     });
   });
 
+  describe("rename の扱い（--no-renames）", () => {
+    it("ログの名前を変えただけの PR は、追加 + 削除として見えるので 0 で終わる（限界）", () => {
+      // --no-renames: 利用者の diff.renames の設定に左右されず、名前の変更を常に「削除 + 追加」として扱う。
+      //   rename の検出が効くと R になり --diff-filter=AM で外れる（設定で結果が変わる）。
+      // 限界: 中身を足していない名前の変更でも通る（.claude/rules/work-log.md）。
+      git(["mv", "logs/2026-09-27.md", "logs/2026-09-26.md"]);
+      git(["commit", "-q", "-m", "rename log"]);
+      expect(run(["main"]).status).toBe(0);
+    });
+
+    it("diff.renames=false の設定でも結果が同じ（0）", () => {
+      git(["mv", "logs/2026-09-27.md", "logs/2026-09-26.md"]);
+      git(["commit", "-q", "-m", "rename log"]);
+      git(["config", "diff.renames", "false"]);
+      expect(run(["main"]).status).toBe(0);
+    });
+  });
+
   describe("落とす（must reject）", () => {
     it("logs の変更が無い PR は 1 で終わり、理由を stderr に出す", () => {
       commitFiles({ "src.ts": "x\n" });
@@ -134,10 +152,12 @@ describe("check-logs-diff.sh", () => {
       expect(run(["main"]).status).toBe(1);
     });
 
-    it("base 側だけで logs が変わっていても（三点 diff なので）PR 側に変更が無ければ 1 で終わる", () => {
+    it("base 側だけで既存のログが変わっていても（三点 diff なので）PR 側に変更が無ければ 1 で終わる", () => {
+      // WHY 既存のログの変更にする: base 側で新しいログを足すだけだと、二点 diff（..）でも HEAD 側から見て「削除」になり、
+      //   --diff-filter=AM で外れて 1 になる（二点に壊しても落ちない）。変更（M）なら二点では数えてしまい 0 になる。
       commitFiles({ "src.ts": "x\n" });
       git(["checkout", "-q", "main"]);
-      commitFiles({ "logs/2026-09-28.md": "# main\n" });
+      commitFiles({ "logs/2026-09-27.md": "# 27\nmain で追記\n" });
       git(["checkout", "-q", "work"]);
       expect(run(["main"]).status).toBe(1);
     });

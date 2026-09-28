@@ -20,9 +20,13 @@ warn() { echo "require-log: $*" >&2; }
 
 input=$(cat)
 
-# node で入力と transcript を読み、「cwd」「最後の人間のターン以降の tool_use の数」「最後の人間のターンの時刻」を
-# タブ区切りの 1 行で返す。時刻は transcript の行の timestamp（ISO 8601）を秒に切り捨てた UTC（例: 2026-09-28T21:37:27Z）。
-# 人間のターンが無い・timestamp が無い・日時として読めないときは空（下で今日の 0 時にフォールバックする）。
+# node で入力と transcript を読み、「cwd」「最後の人間のターン以降の tool_use の数」「起点の時刻（unix 秒）」
+# 「最後の人間のターンの時刻（ISO）」をタブ区切りの 1 行で返す。
+# 時刻は transcript の行の timestamp（ISO 8601）を秒に切り捨てた UTC（例: 2026-09-28T21:37:27Z）と、同じ時刻の unix 秒。
+# 人間のターンが無い・timestamp が無い・日時として読めないときは、ISO は空、unix 秒は今日の 0 時（ローカル）にする
+# （下で今日の 0 時にフォールバックする）。
+# WHY 空になりうる ISO を最後の列にする: bash の read はタブを空白として扱い、連続したタブを 1 つにまとめるので、
+#   途中の列が空だと後ろの列がずれる。
 # stop_hook_active が true なら transcript を読まずに数を 0 とする（下で「ツールを使っていない」と同じく止めない）。
 # WHY stop_hook_active のときは判定しない: block で続けたターンの終わりにもう一度 block すると、ログを書けない状況
 #   （git が壊れているなど）で上限（8 回）までループする。1 回目の block で Claude はログを書く機会を得ているので、2 回目は見ない。
@@ -52,7 +56,7 @@ parsed=$(
       }
       const cwd = typeof hook.cwd === "string" && hook.cwd !== "" ? hook.cwd : process.cwd();
       if (hook.stop_hook_active === true) {
-        process.stdout.write(`${cwd}\t0\t\n`);
+        process.stdout.write(`${cwd}\t0\t0\t\n`);
         return;
       }
       let text;
@@ -84,11 +88,19 @@ parsed=$(
       };
       let start = 0;
       let since = "";
+      const today = new Date();
+      let sinceEpoch = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() / 1000;
       entries.forEach((e, i) => {
         if (!isHumanTurn(e)) return;
         start = i + 1;
         const time = typeof e.timestamp === "string" ? Date.parse(e.timestamp) : Number.NaN;
-        since = Number.isNaN(time) ? "" : new Date(time).toISOString().replace(/\.\d{3}Z$/, "Z");
+        if (Number.isNaN(time)) {
+          since = "";
+          sinceEpoch = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() / 1000;
+          return;
+        }
+        since = new Date(time).toISOString().replace(/\.\d{3}Z$/, "Z");
+        sinceEpoch = Math.floor(time / 1000);
       });
       let toolUses = 0;
       for (const e of entries.slice(start)) {
@@ -96,12 +108,12 @@ parsed=$(
         if (!Array.isArray(content)) continue;
         toolUses += content.filter((c) => c?.type === "tool_use").length;
       }
-      process.stdout.write(`${cwd}\t${toolUses}\t${since}\n`);
+      process.stdout.write(`${cwd}\t${toolUses}\t${sinceEpoch}\t${since}\n`);
     });
   '
 ) || exit 0
 
-IFS=$'\t' read -r cwd tool_uses since <<<"$parsed"
+IFS=$'\t' read -r cwd tool_uses since_epoch since <<<"$parsed"
 
 # ツールを使っていない（会話だけの）ターンは、記録すべき調査・変更が無いので止めない。
 [ "$tool_uses" -gt 0 ] 2>/dev/null || exit 0
@@ -114,21 +126,30 @@ fi
 # 日付はローカルのタイムゾーン（date +%F）。logs/ のファイル名を付けるときと同じ規則にする（限界は .claude/rules/work-log.md）。
 log="logs/$(date +%F).md"
 
-# 作業ツリーでの変更（未追跡・ステージ済みを含む）。pathspec はリポジトリ直下からのパスなので -C "$root" で実行する。
-if [ -n "$(git -C "$root" status --porcelain -- "$log")" ]; then
-  exit 0
+# 起点は最後の人間のターンの時刻。timestamp が取れないときだけ今日の 0 時にフォールバックする
+# （止め続けないように緩い方へ倒す。理由は stderr）。
+if [ -z "$since" ]; then
+  warn "最後の人間のターンの timestamp を読めないため、今日の 0 時を起点にして判定する"
+  since=midnight
 fi
-# このターンの間のコミットでの変更（コミットの日時が最後の人間の発言の時刻以降）。「ログを追記 → コミット」まで
-# 済ませた後の停止を通すため。
+
+# 作業ツリーでの変更（未追跡・ステージ済みを含む）で、ファイルの更新時刻が起点以降のもの。
+# pathspec はリポジトリ直下からのパスなので -C "$root" で実行する。
+# WHY 更新時刻も見る: git status は「HEAD と違うか」しか見ないので、前のターンで書いて未コミットのまま残ったログがあると、
+#   以後のターンはログを書かずに通っていた（reviewer 指摘）。
+# stat は GNU（Linux: -c %Y）と BSD（macOS: -f %m）で書き方が違うので両方を試す。ファイルが無ければ（削除した変更など）空。
+if [ -n "$(git -C "$root" status --porcelain -- "$log")" ]; then
+  mtime=$(stat -c %Y "$root/$log" 2>/dev/null || stat -f %m "$root/$log" 2>/dev/null)
+  if [ -n "$mtime" ] && [ "$mtime" -ge "$since_epoch" ] 2>/dev/null; then
+    exit 0
+  fi
+fi
+# このターンの間のコミットでの変更（コミットの日時が起点以降で、logs/<今日>.md を変えたもの）。「ログを追記 → コミット」まで
+# 済ませた後の停止を通すため。-- "$log" で絞る（このターンのほかのコミットでは通さない）。
 # WHY コミットも見る: この環境のユーザー側の Stop フックは未コミットの変更があると止めるので、ログはコミットしてから止まる。
 #   作業ツリーだけを見ると、コミットした後に必ずこのフックで止まってしまう。
 # WHY 今日の 0 時ではなくターンの開始: 今日の 0 時以降にすると、その日に 1 度でもログがコミットされれば（main の取り込みを含む）
 #   以後のターンがすべて素通りした（Issue #64 の実測で当日 66 件。docs/work-log.md）。
-# timestamp が取れないときだけ今日の 0 時にフォールバックする（止め続けないように緩い方へ倒す。理由は stderr）。
-if [ -z "$since" ]; then
-  warn "最後の人間のターンの timestamp を読めないため、今日の 0 時以降のコミットで判定する"
-  since=midnight
-fi
 if [ -n "$(git -C "$root" log --since="$since" --format=%H -- "$log")" ]; then
   exit 0
 fi

@@ -5,7 +5,7 @@
 ## 経緯
 - 2026-09-28、調査・質問だけの依頼で作業ログ（`logs/`）の追記が 2 件漏れた（LEARNINGS.md）。文章のルール（作業ログのルールの「調査や質問への回答だけで終わった場合も書く」。今は `.claude/general/log.md`）はあったが効かなかった。
 - ユーザー判断（Issue #64 の 2 つ目のコメント「作業ログの記録漏れをフックと CI で止める」）:
-  - Stop フック: そのターンでツール（Agent / Bash / WebFetch など）を使ったのに `logs/<今日>.md` が作業ツリーでもその日のコミットでも変わっていなければ停止を拒否する。判定は `transcript_path` の JSONL から最後のユーザーターン以降のツール使用を数える。
+  - Stop フック: そのターンでツール（Agent / Bash / WebFetch など）を使ったのに `logs/<今日>.md` が作業ツリーでもその日のコミットでも変わっていなければ停止を拒否する（当初の仕様。その後、起点を最後の人間のターンにし、作業ツリーは更新時刻も見るように変えた。下の「実測」）。判定は `transcript_path` の JSONL から最後のユーザーターン以降のツール使用を数える。
   - CI: PR の差分（`origin/main...HEAD`）に `logs/*.md` の変更が無ければ失敗させる。文書だけの PR も含め、例外なし。PR 本文の「実装経緯」に logs の項目名を書くことはスキル `pr-flow` の手順にする。
 - 同じ Issue の方針 4 で、PreCompact で作業状態を書き出し、InstructionsLoaded で実際に読まれた指示ファイルを記録することにした。PreCompact の書き出し先は、当初の「logs に書く」から `.claude/state/` に変えた（logs に自動の dump を入れると Stop フックの判定が素通りになるため）。
 
@@ -27,6 +27,12 @@
 - 最初の版の `require-log.sh`（今日の 0 時以降のコミットを見る）をこの transcript で実行: 0.19 秒で終わり、許可（出力なし）した。最後の人間のターン（task-notification）以降に tool_use はあったが、`git log --since=midnight -- logs/2026-09-28.md` が 66 件（main に取り込んだ当日のコミット）あり、「今日のコミットで変更」に当たったため。これで「1 日の中で 1 度でもログがコミットされると、以後のターンは素通りする」穴が分かり、オーケストレータの判断で、コミットを見る起点を最後の人間のターンの `timestamp` に変えた（`timestamp` が取れないときだけ今日の 0 時。2026-09-28）。変更後の版（自動の wake を除く前）で同じ transcript と作業ツリーを実行すると、0.25 秒で block を返した（最後の人間のターン 21:37 UTC 以降に `logs/2026-09-28.md` を変えたコミットも作業ツリーの変更も無いため）。
 - fixture（`scripts/hooks/*.test.ts`）で確かめたこと: 一時 git リポジトリと架空の transcript で、未変更 → block、未追跡・変更・ステージ済み・最後の人間のターン以降のコミット → 許可、今日だがターンより前のコミットだけ → block、昨日のコミットだけ → block、`timestamp` が無い・読めない → 今日の 0 時にフォールバック（stderr に理由）、`stop_hook_active: true` → 許可、ツール使用 0 → 許可、`tool_result` / `isMeta` の user 行と自動の wake（3 種の先頭、先頭の空白、配列の content）を人間のターンと数えない、先頭以外に `<task-notification>` を含む人間の発言は人間のターンとする、書きかけの最後の行を飛ばす、サブディレクトリの cwd でもリポジトリ直下で判定する。check-logs-diff は、logs の .md の追加・追記・サブディレクトリ → 0、logs の .md を削除しただけ・logs 以外の .md だけ・`logs/x.txt` だけ・`apps/logs/a.md`・base 側だけの logs の変更・未コミットの変更・存在しない base-ref → 非 0。
 - `actions/checkout@v4` の `fetch-depth: 0` は全ブランチを `refs/remotes/origin/*` に取る（actions/checkout の `src/ref-helper.ts` の `getRefSpecForAllHistory` が `+refs/heads/*:refs/remotes/origin/*`。README「Set fetch-depth: 0 to fetch all history for all branches and tags」）。そのため CI で `origin/<base_ref>...HEAD` が引ける。
+- reviewer の指摘（2026-09-28）と対応:
+  - 作業ツリーの判定が `git status --porcelain` だけだと、前のターンで書いて未コミットのまま残ったログで、以後のターンが素通りした。作業ツリーで変わっているときは、ファイルの更新時刻が起点以上のときだけ許可するように変えた（fixture: 更新時刻を起点より前にした未追跡・追跡済みのログ → block、ちょうど起点の秒 → 許可）。
+  - `git log` から `-- "$log"` を外す変異でも 26 件のテストが通っていた。「このターンに別のファイルだけをコミット → block」を足し、同じ変異で落ちることを確かめた。
+  - check-logs-diff の三点 diff のテストは、base 側で新しいログを足す形だったため、二点（`..`）に壊しても（HEAD から見て削除になり AM で外れて）落ちなかった。base 側で既存のログを変える形に直し、`..` にすると落ちることを確かめた。
+  - `--no-renames` を足した。rename の検出が効くと名前の変更が R になり AM で外れるので、結果が `diff.renames` の設定に左右されていた。`git mv` で名前を変えただけの PR は、付けると 0、外すと 1 になる（テストで固定。付けた状態では `diff.renames=false` でも 0）。
+  - `.claude/rules/work-log.md` の `paths:` から `logs/**` を外した（ログを書くたびに約 9 KB のフックの説明が読み込まれるため）。
 - InstructionsLoaded の実動作（2026-09-28 21:32 UTC、このリポジトリの作業中のセッション。B が `.claude/settings.json` に登録した直後）: `.claude/state/instructions-loaded.jsonl` に `{"file_path":".../.claude/rules/testing.md","load_reason":"path_glob_match","trigger_file_path":".../settings.test.ts","memory_type":"Project"}` の 1 行が書かれた（どのセッション・サブエージェントの読み込みかは記録に無く未確認）。セッションの途中で足したフックの登録が効くことと、`paths:` の一致で読まれたことを記録で確かめられた。
 - `isolation: worktree` の worktree（`.claude/worktrees/agent-<id>`）は、`.gitignore` が無いと本体の `git status` に `?? .claude/` と出る（2026-09-28、使い捨てリポジトリで `git worktree add .claude/worktrees/agent-1` して確認）。
 
