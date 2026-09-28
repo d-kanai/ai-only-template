@@ -92,6 +92,49 @@ const turnWithTool = (prompt = "調べて"): Entry[] => [
   assistantText("調べました"),
 ];
 
+// 自動の wake（バックグラウンドの完了通知など）の時刻。テストの中で作るコミットより後にする。自動の wake を人間のターンと
+// 数えると、起点がこの時刻になり、それより前のログのコミットを見落として止めてしまう（Issue #64 のオーケストレータの実測）。
+const wakeAt = new Date(now.getTime() + 10 * 60_000).toISOString();
+
+// 自動の wake として transcript に記録される user 行（type "user"・isMeta なし・文字列の content）。先頭の文字列で見分ける。
+const AUTOMATIC_WAKES: [string, Entry][] = [
+  [
+    "<task-notification>（バックグラウンドの完了通知）",
+    human(
+      "<task-notification>\n<task-id>b1</task-id>\n</task-notification>",
+      wakeAt,
+    ),
+  ],
+  [
+    "[SYSTEM NOTIFICATION（システムからの通知）",
+    human("[SYSTEM NOTIFICATION - NOT USER INPUT] CI finished", wakeAt),
+  ],
+  [
+    "Stop hook feedback:（isMeta の無い Stop フックのフィードバック）",
+    human(
+      "Stop hook feedback: [~/.claude/stop-hook-git-check.sh]: ...",
+      wakeAt,
+    ),
+  ],
+  [
+    "先頭に空白がある <task-notification>",
+    human("\n  <task-notification>\n</task-notification>", wakeAt),
+  ],
+  [
+    "content が配列の <task-notification>",
+    {
+      type: "user",
+      timestamp: wakeAt,
+      message: {
+        role: "user",
+        content: [
+          { type: "text", text: "<task-notification>x</task-notification>" },
+        ],
+      },
+    },
+  ],
+];
+
 describe("require-log.sh（Stop フック）", () => {
   let tmp: string;
   let repo: string;
@@ -194,6 +237,35 @@ describe("require-log.sh（Stop フック）", () => {
   });
 
   describe("停止を拒否する（must reject）", () => {
+    it.each(AUTOMATIC_WAKES)(
+      "人間のターン（ログ未追記）の後に自動の wake（%s）でツールを 1 回使ったら、人間のターンを起点に拒否する",
+      (_name, wake) => {
+        writeTranscript([
+          human("調べて"),
+          assistantText("バックグラウンドで実行します"),
+          wake,
+          toolUse("t1"),
+          toolResult("t1"),
+        ]);
+        expectBlocked(run(stopInput()));
+      },
+    );
+
+    it("人間の発言が <task-notification> を先頭以外に含むだけなら人間のターンとして起点にする", () => {
+      // 起点が後ろ（wakeAt）になるので、それより前のログのコミットは数えず拒否する。
+      writeTranscript([
+        human("調べて"),
+        toolUse("t1"),
+        toolResult("t1"),
+        human("この <task-notification> は何？", wakeAt),
+        toolUse("t2"),
+        toolResult("t2"),
+      ]);
+      writeRepoFile(todayLog, "# 今日\n");
+      commit("log");
+      expectBlocked(run(stopInput()));
+    });
+
     it("ツールを使ったのに logs/<今日>.md が作業ツリーでもコミットでも変わっていなければ、block と理由を返す", () => {
       writeTranscript(turnWithTool());
       expectBlocked(run(stopInput()));
@@ -293,6 +365,23 @@ describe("require-log.sh（Stop フック）", () => {
   });
 
   describe("停止を許可する（must pass）", () => {
+    it.each(AUTOMATIC_WAKES)(
+      "人間のターン → ログ追記のコミット → 自動の wake（%s）でツール 1 回、なら許可する",
+      (_name, wake) => {
+        writeTranscript([
+          human("調べて"),
+          toolUse("t1"),
+          toolResult("t1"),
+          wake,
+          toolUse("t2"),
+          toolResult("t2"),
+        ]);
+        writeRepoFile(todayLog, "# 今日\n");
+        commit("log");
+        expectAllowed(run(stopInput()));
+      },
+    );
+
     it("logs/<今日>.md が作業ツリーで新しく作られていれば（未追跡）許可する", () => {
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# 今日\n");

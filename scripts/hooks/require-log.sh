@@ -30,6 +30,11 @@ input=$(cat)
 # 人間のターン: type が "user" で、isMeta でなく、message.content が文字列か、配列で tool_result を含まないもの。
 #   WHY tool_result を除く: ツールの結果も type "user" の行として記録される（2026-09-28 に実セッションの transcript で確認）。
 #   WHY isMeta を除く: Stop フックのフィードバックや他セッションからのメッセージは isMeta: true の user 行で、人間の発言ではない。
+#   さらに、自動の wake（文字列、配列なら text 要素の連結が、先頭の空白を除いて <task-notification> / [SYSTEM NOTIFICATION /
+#   Stop hook feedback: で始まる user 行）も除き、その前の本当の人間のターンを起点にする。
+#   WHY: バックグラウンドの完了通知などは isMeta の無い文字列の user 行として記録される（実 transcript で確認）。人間のターンと
+#   数えると、CI の結果を 1 回読むだけの wake のターンで、起点がその通知になり、人間のターンの中で済ませたログのコミットを
+#   見落として止めていた（Issue #64 のオーケストレータの実測）。見分けは文字列の先頭だけ（限界は .claude/rules/work-log.md）。
 # 数えるのは type が "assistant" の行の message.content にある type "tool_use" の要素。
 # JSON として読めない行は飛ばす（transcript は非同期に書かれ、最後の行が途中で切れていることがある）。
 parsed=$(
@@ -64,11 +69,18 @@ parsed=$(
           entries.push(JSON.parse(line));
         } catch {}
       }
+      const isAutomaticWake = (text) =>
+        /^\s*(<task-notification>|\[SYSTEM NOTIFICATION|Stop hook feedback:)/.test(text);
       const isHumanTurn = (e) => {
         if (e?.type !== "user" || e.isMeta === true) return false;
         const content = e.message?.content;
-        if (typeof content === "string") return true;
-        return Array.isArray(content) && !content.some((c) => c?.type === "tool_result");
+        if (typeof content === "string") return !isAutomaticWake(content);
+        if (!Array.isArray(content) || content.some((c) => c?.type === "tool_result")) return false;
+        const text = content
+          .filter((c) => c?.type === "text" && typeof c.text === "string")
+          .map((c) => c.text)
+          .join("");
+        return !isAutomaticWake(text);
       };
       let start = 0;
       let since = "";
