@@ -52,6 +52,27 @@ test("一覧の取得中は読み込み中と表示され、取得後は Todo �
   expect(screen.queryByText("読み込み中…")).toBeNull();
 });
 
+test("エラーが無いときは alert を表示しない", async () => {
+  vi.mocked(listTodos).mockResolvedValue({ todos: [milk] });
+
+  render(<TodoScreen />);
+
+  expect(await screen.findByRole("link", { name: "牛乳を買う" })).toBeDefined();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+// fireEvent.submit は、ハンドラが preventDefault したときだけ false を返す（dispatchEvent の戻り値）。
+test("追加のフォームを送信しても、ブラウザの既定の送信（ページの再読み込み）はしない", async () => {
+  vi.mocked(listTodos).mockResolvedValue({ todos: [] });
+  render(<TodoScreen />);
+  await screen.findByRole("list");
+
+  const form = screen.getByRole("button", { name: "追加" }).closest("form");
+  if (form === null) throw new Error("追加ボタンが form の中にない");
+
+  expect(fireEvent.submit(form)).toBe(false);
+});
+
 test("一覧の取得に失敗すると、エラーの message が alert として表示される", async () => {
   vi.mocked(listTodos).mockRejectedValue(new Error("サーバエラー"));
 

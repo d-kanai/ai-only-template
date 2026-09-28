@@ -32,6 +32,12 @@ export function useTodoScreen() {
   // 後から別の GET を送っていた（この応答が古い）場合は、成功も失敗も反映せず true を返す。
   // 表示は新しい GET の結果に任せ、この取得の失敗を「操作の失敗」として扱わない（追加の入力を残す判断などに使うため）。
   // 成功したら前の操作のエラー表示は古い情報なので消す。
+  //
+  // mutation testing（Stryker）で、ここから addTodo の手前までの依存配列の変異（ArrayDeclaration）は数えない。
+  // WHY: reloadTodos は依存が無い useCallback なので作り直されず、それを依存に持つ effect・mutateAndReload も
+  //   作り直されない。依存配列を [] や別の定数に変えても挙動が変わらない（等価な変異。Issue #55）。
+  //   依存配列を行ごとに除外（disable next-line）しないのは、"}, []);" の形では配列の直前にコメントを置けないため。
+  // Stryker disable ArrayDeclaration: 依存が作り直されない useCallback / useEffect の依存配列で、等価な変異（上のコメント）
   const reloadTodos = useCallback(async (): Promise<boolean> => {
     latestListRequestRef.current += 1;
     const requestId = latestListRequestRef.current;
@@ -56,6 +62,11 @@ export function useTodoScreen() {
     void reloadTodos();
     // unmount 後（StrictMode の二重実行や画面遷移）に遅れて返った結果で state を書き換えないよう、
     // 連番を進めて送信中の GET をすべて古い扱いにする。
+    // mutation testing で、この片付けを空にする変異（BlockStatement）は数えない（等価な変異。Issue #55）。
+    // WHY: React 18 以降、unmount 後の setState は何もしない（警告も出ない）ので、unmount 後に届いた応答を反映しても
+    //   テストで観測できない。StrictMode の 2 回目の effect では reloadTodos が連番を進めるので、1 回目の GET は
+    //   この処理が無くても古い扱いになる。連番を戻す誤り（-=）は StrictMode のテストで検出する。
+    // Stryker disable next-line BlockStatement: unmount 後の反映はテストで観測できない（等価な変異。上のコメント）
     return () => {
       latestListRequestRef.current += 1;
     };
@@ -77,6 +88,7 @@ export function useTodoScreen() {
     [reloadTodos],
   );
 
+  // Stryker restore ArrayDeclaration
   const addTodo = useCallback(async () => {
     // 空白だけの title はサーバで弾かれる入力なので、リクエストを送らずに止める。前後の空白は保存しない。
     const title = newTitle.trim();
@@ -90,6 +102,7 @@ export function useTodoScreen() {
     async (id: string, completed: boolean) => {
       await mutateAndReload(() => updateTodo(id, { completed }));
     },
+    // Stryker disable next-line ArrayDeclaration: mutateAndReload は作り直されないので [] でも同じ（等価な変異。Issue #55）
     [mutateAndReload],
   );
 
@@ -97,6 +110,7 @@ export function useTodoScreen() {
     async (id: string) => {
       await mutateAndReload(() => deleteTodo(id));
     },
+    // Stryker disable next-line ArrayDeclaration: mutateAndReload は作り直されないので [] でも同じ（等価な変異。Issue #55）
     [mutateAndReload],
   );
 

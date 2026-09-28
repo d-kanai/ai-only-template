@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { Client } from "pg";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   cleanupTestSchemas,
   createTestDatabase,
@@ -165,7 +165,25 @@ describe("cleanupTestSchemas", () => {
     }
   });
 
-  test("Postgres に接続できなければ、起動を促すエラーで失敗する", async () => {
+  // 接続を閉じ忘れると、globalSetup の後も Postgres の接続が残る（テストの結果には出ないので、end の呼び出しで確かめる）。
+  // spyOn は本物の end を呼んだうえで回数を数えるだけ（差し替えない）。
+  test("終わったら接続を閉じる（Stryker の worker の中で何も消さないときも閉じる）", async () => {
+    const end = vi.spyOn(Client.prototype, "end");
+    try {
+      await cleanupTestSchemas(options, uniquePrefix());
+      expect(end).toHaveBeenCalledTimes(1);
+
+      await cleanupTestSchemas(
+        { ...options, insideStrykerWorker: true },
+        uniquePrefix(),
+      );
+      expect(end).toHaveBeenCalledTimes(2);
+    } finally {
+      end.mockRestore();
+    }
+  });
+
+  test("Postgres に接続できなければ、起動を促すエラーで失敗し、元の接続エラーを cause に残す", async () => {
     await expect(
       cleanupTestSchemas(
         {
@@ -174,6 +192,9 @@ describe("cleanupTestSchemas", () => {
         },
         uniquePrefix(),
       ),
-    ).rejects.toThrow("pnpm db:up");
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("pnpm db:up"),
+      cause: expect.objectContaining({ code: "ECONNREFUSED" }),
+    });
   });
 });

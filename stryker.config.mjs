@@ -90,11 +90,37 @@ export default {
   htmlReporter: { fileName: "reports/mutation/mutation.html" },
   jsonReporter: { fileName: "reports/mutation/mutation.json" },
 
-  // thresholds: レポートでの色分け（high 以上が緑、low 以上 high 未満が黄、low 未満が赤）。値は Stryker の既定と同じ。
-  //   break（これを下回ると非 0 で終わる）は書かない。初回は日次でレポートを出すだけにして、実際の score を見てから
-  //   しきい値を決める（ユーザー判断、Issue #52）。break を先に入れると、根拠のない値で日次のジョブが赤になり続けるか、
-  //   低すぎて何も止めないかのどちらかになるため。
-  thresholds: { high: 80, low: 60 },
+  // ignoreStatic: static な変異（モジュールの読み込み時にだけ実行される変異）を数えない（status が Ignored になる）。
+  //   static な変異とは、例えば backend/todo/infra/schema.ts の列定義や、todo-repository.postgres.ts の UUID の正規表現の
+  //   ように、モジュールの最上位で評価される式の変異。Stryker はテストごとのカバレッジで「その変異を通るテスト」を
+  //   選べないため、既定（false）では環境を読み込み直して全テストを実行する（公式 https://stryker-mutator.io/docs/stryker-js/configuration/
+  //   の ignoreStatic、https://stryker-mutator.io/docs/mutation-testing-elements/static-mutants/ ）。
+  //   WHY 有効にする（Issue #55）:
+  //   - 読み込み時の変異は、その結果を読み込むテストファイル自体の読み込みを壊すことがある。env.ts の
+  //     `export const env = readEnv(process.env)` は読み込み時に readEnv を実行するので、readEnv の中の変異で
+  //     読み込みが失敗し、テストが 1 件も実行されないまま Survived と数えられていた（testsCompleted 0。Issue #59 で判明）。
+  //   - 読み込み時とテスト中の両方で実行される変異（hybrid。env.ts の readEnv、container.ts の組み立てなど）は、
+  //     ignoreStatic を有効にするとテスト中の実行だけを対象に、その変異を通るテストだけで判定される（上の static-mutants の
+  //     「What Stryker does」。@stryker-mutator/core 10.0.0 の dist/src/mutants/mutant-test-planner.js の planMutant）。
+  //     そのため readEnv の変異は env.test.ts で正しく killed になる。
+  //   - 実行時間: 既定では static な変異 124 件（全体の 21%）が実行時間の 83% を占めると警告され、全体で約 5 分かかった。
+  //     有効にすると約 3.8 分（2026-09-28、ローカル 4 コアで実測）。
+  //   数えなくなるもの: 読み込み時にだけ評価される式（テストを通る実行経路の無いもの）25 件。そのうち schema.ts の列名・
+  //   既定値など 7 件は、アプリの実行時には使われず（DDL は drizzle/ の生成済み SQL で当てる）、単体テストで検出できない。
+  //   残りの 18 件（UUID の正規表現、定数など）は既定の実行では killed だったが、数えなくなる。
+  //   Ignored は score の分母に入らない（mutation score = killed / (killed + survived)。有効にした実行で
+  //   killed 505・survived 57・ignored 25 → 89.86% となり、505 / 562 と一致することを確認した）。
+  ignoreStatic: true,
+
+  // thresholds: レポートでの色分け（high 以上が緑、low 以上 high 未満が黄、low 未満が赤）と、失敗ライン（break）。
+  //   high 95: 目標値。生き残った変異は、テストを足して殺すか、等価な変異・文言の変異だけ理由を書いて除外する
+  //     （rules/code/test.md の「mutation testing（Stryker）」。Issue #55）。
+  //   low 90 / break 90: score が 90 を下回ると stryker run が非 0 で終わり、日次のジョブ（.github/workflows/mutation.yml）が
+  //     失敗する。目標（95）より 5 ポイント低くしているのは、テストを足さない小さな変更（数件の生き残り）で日次のジョブを
+  //     赤にしないため。break を目標と同じにすると、1 件の生き残りで赤になり、除外コメントで数字を合わせたくなる。
+  //   経緯: Issue #52 では break を入れず、日次のレポートで実際の score を見てから決めることにしていた（ユーザー判断）。
+  //     Issue #55 で生き残りを殺して 95% 以上にしたうえで、この値にした。
+  thresholds: { high: 95, low: 90, break: 90 },
 
   // concurrency / tempDirName（.stryker-tmp、.gitignore 済み）は既定のまま。
   //   concurrency の既定は「論理コア数 n が 4 以下なら n、それより多ければ n-1」（Stryker の JSON Schema の説明）。

@@ -3,16 +3,21 @@ import { describe, expect, test } from "vitest";
 import { DomainError } from "@/backend/shared/domain/domain-error";
 import { Todo } from "@/backend/todo/domain/todo";
 
-function expectValidationError(action: () => unknown): void {
+// message は API の ErrorResponse の message として画面に出る（クライアントとの契約）ので、文言まで検証する。
+function expectValidationError(action: () => unknown, message: string): void {
   try {
     action();
   } catch (error) {
     expect(error).toBeInstanceOf(DomainError);
     expect((error as DomainError).code).toBe("validation_error");
+    expect((error as DomainError).message).toBe(message);
     return;
   }
   throw new Error("DomainError(validation_error) が投げられなかった");
 }
+
+const EMPTY_TITLE_MESSAGE = "タイトルを入力してください";
+const TOO_LONG_TITLE_MESSAGE = "タイトルは 100 文字以内で入力してください";
 
 describe("Todo.create", () => {
   test("未完了で作られ、id と作成日時が付く", () => {
@@ -48,13 +53,16 @@ describe("Todo.create", () => {
   });
 
   test.each([
-    ["空文字", ""],
-    ["空白だけ", "   \t\n"],
-    ["101 文字", "a".repeat(101)],
-    ["空白を除いて 101 文字", ` ${"a".repeat(101)} `],
-  ])("タイトルが%sなら validation_error", (_label, title) => {
-    expectValidationError(() => Todo.create(title));
-  });
+    ["空文字", "", EMPTY_TITLE_MESSAGE],
+    ["空白だけ", "   \t\n", EMPTY_TITLE_MESSAGE],
+    ["101 文字", "a".repeat(101), TOO_LONG_TITLE_MESSAGE],
+    ["空白を除いて 101 文字", ` ${"a".repeat(101)} `, TOO_LONG_TITLE_MESSAGE],
+  ])(
+    "タイトルが%sなら validation_error を、理由の message 付きで投げる",
+    (_label, title, message) => {
+      expectValidationError(() => Todo.create(title), message);
+    },
+  );
 });
 
 describe("Todo#rename", () => {
@@ -72,7 +80,7 @@ describe("Todo#rename", () => {
   test("作成時と同じ不変条件を守る（空なら validation_error）", () => {
     const todo = Todo.create("牛乳を買う");
 
-    expectValidationError(() => todo.rename(" "));
+    expectValidationError(() => todo.rename(" "), EMPTY_TITLE_MESSAGE);
   });
 });
 

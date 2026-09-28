@@ -40,6 +40,35 @@ test("取得中は読み込み中と表示され、取得後は level 1 の見�
   expect(getTodo).toHaveBeenCalledWith("todo-1");
 });
 
+test("エラーが無いときは alert を表示しない", async () => {
+  vi.mocked(getTodo).mockResolvedValue(milk);
+
+  render(<TodoDetailScreen todoId={milk.id} />);
+
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "牛乳を買う" }),
+  ).toBeDefined();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+// fireEvent.submit は、ハンドラが preventDefault したときだけ false を返す（dispatchEvent の戻り値）。
+test("title のフォームを送信しても、ブラウザの既定の送信（ページの再読み込み）はしない", async () => {
+  vi.mocked(getTodo).mockResolvedValue(milk);
+  vi.mocked(updateTodo).mockResolvedValue(milk);
+  render(<TodoDetailScreen todoId={milk.id} />);
+
+  const form = (await screen.findByRole("button", { name: "保存" })).closest(
+    "form",
+  );
+  if (form === null) throw new Error("保存ボタンが form の中にない");
+
+  expect(fireEvent.submit(form)).toBe(false);
+  // 送信で始まった保存（updateTodo）の反映を待ってからテストを終える（終了後の state 更新を残さないため）。
+  await waitFor(() =>
+    expect(updateTodo).toHaveBeenCalledWith("todo-1", { title: "牛乳を買う" }),
+  );
+});
+
 test("一覧へ戻るリンクは / を指す", async () => {
   vi.mocked(getTodo).mockResolvedValue(milk);
 

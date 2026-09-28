@@ -7,6 +7,17 @@ import {
   toErrorResponse,
 } from "@/backend/shared/presentation/http-error";
 
+describe("InvalidRequestError", () => {
+  // name はログやスタックトレースの先頭に出る。Error のままだと想定外の例外と見分けられない。
+  test("message を持ち、name は InvalidRequestError になる", () => {
+    const error = new InvalidRequestError("title は文字列で指定してください");
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe("title は文字列で指定してください");
+    expect(error.name).toBe("InvalidRequestError");
+  });
+});
+
 describe("toErrorResponse", () => {
   afterEach(() => {
     vi.restoreAllMocks();

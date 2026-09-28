@@ -110,6 +110,10 @@ describe("deleteTodo", () => {
   });
 });
 
+// WHY 失敗の検証は rejects.toEqual(new Error(...)) で書く（rejects.toThrow("文字列") を使わない）:
+//   Vitest 5.0.1 の rejects.toThrow("文字列") は、reject された値が undefined だと文字列を照合せずに通る
+//   （2026-09-28 実測。Issue #55 の mutation testing で、toError が undefined を返す変異が生き残って判明）。
+//   toEqual なら undefined や別のクラスの例外（判定の書き間違いで投げた TypeError など）では失敗する。
 describe("エラー時", () => {
   test("ErrorResponse が返ったら、その error.message を message に持つ Error を投げる", async () => {
     fetchMock.mockResolvedValue(
@@ -119,7 +123,9 @@ describe("エラー時", () => {
       ),
     );
 
-    await expect(getTodo("missing")).rejects.toThrow("Todo が見つかりません");
+    await expect(getTodo("missing")).rejects.toEqual(
+      new Error("Todo が見つかりません"),
+    );
   });
 
   // backend を通らないエラー（プロキシや Next のエラーページなど）は、本文が JSON でないことも、
@@ -129,19 +135,24 @@ describe("エラー時", () => {
       new Response("Internal Server Error", { status: 500 }),
     );
 
-    await expect(listTodos()).rejects.toThrow("HTTP 500");
+    await expect(listTodos()).rejects.toEqual(new Error("HTTP 500"));
   });
 
   test.each([
     ["error を持たないオブジェクト", {}],
     ["null", null],
+    ["文字列", "Bad Gateway"],
+    ["数値", 502],
+    ["error が null", { error: null }],
+    ["error が文字列", { error: "Bad Gateway" }],
+    ["error.message が無い", { error: { code: "x" } }],
     ["error.message が文字列でない", { error: { code: "x", message: 1 } }],
   ])(
     "本文が JSON でも ErrorResponse の形でなければ（%s）、HTTP ステータスを message に持つ Error を投げる",
     async (_label, body) => {
       fetchMock.mockResolvedValue(jsonResponse(body, 502));
 
-      await expect(listTodos()).rejects.toThrow("HTTP 502");
+      await expect(listTodos()).rejects.toEqual(new Error("HTTP 502"));
     },
   );
 
@@ -153,8 +164,8 @@ describe("エラー時", () => {
       ),
     );
 
-    await expect(deleteTodo("missing")).rejects.toThrow(
-      "Todo が見つかりません",
+    await expect(deleteTodo("missing")).rejects.toEqual(
+      new Error("Todo が見つかりません"),
     );
   });
 });
