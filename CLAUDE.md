@@ -24,6 +24,7 @@
 @LEARNINGS.md
 
 ## ルール詳細
+- ブランチ・PR: @rules/branch.md
 - コミットメッセージ: @rules/commit.md
 - 作業ログ: @rules/log.md
 - オーケストレーション: @rules/orchestration.md
