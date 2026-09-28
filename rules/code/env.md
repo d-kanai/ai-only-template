@@ -66,4 +66,10 @@ Claude Code on the web（クラウドセッション）では asdf が使えな�
   CLOUD_SESSION_START_DRY_RUN=1 bash scripts/cloud-session-start.sh --install-only                  # setup script の実行予定を表示するだけ
   CLAUDE_CODE_REMOTE=true CLOUD_SESSION_START_DRY_RUN=1 bash scripts/cloud-session-start.sh      # フックの実行予定を表示するだけ（CLAUDE_ENV_FILE があれば PATH は書く）
   ```
-- 未検証（2026-09-28 時点）: クラウドセッションで実際に setup script / フックが動き、Node / pnpm が `.tool-versions` どおりになるかは未確認。ローカル（macOS）で確認済みなのは、テスト（`scripts/cloud-session-start.test.ts`）、Linux 用 tarball の取得・SHASUMS 検証・展開、ローカルではフックが何もしないこと。最初のクラウドセッションで `node --version` / `pnpm --version` を確認し、結果をここに反映する。
+- クラウドで実測した結果（2026-09-28、セッション `claude/cloud-connection-check-nzl9a1`）:
+  - フックは `SessionStart:startup` で実行された（`CLAUDE_CODE_REMOTE=true`）。しかし VM から `https://nodejs.org` への接続が環境のネットワークポリシーで拒否され（プロキシが CONNECT に 403 を返す。`curl: (22) The requested URL returned error: 403`）、Node 24.21.0 のダウンロードに失敗した。設計どおり exit 0 で終わり、セッション自体は続行した。
+  - その結果、Node は VM 既定の `/opt/node22/bin/node`（22.22.2）のまま。pnpm は VM に入っていた 12.7.0 で、`.tool-versions` と一致していた（この VM に限る。版は VM 側の都合で変わりうる）。
+  - フックはダウンロード失敗で `pnpm install` まで進まないため、セッション開始時点で `node_modules` は無い。手で `pnpm install --frozen-lockfile` を実行すると成功し（`registry.npmjs.org` は許可されている）、Node 22 でも `pnpm test` は 29 件すべて通った。
+  - `CLAUDE_ENV_FILE` はフック実行時に空だった（Claude Code 側が設定していない）。Node 24 が入っても PATH を引き継げない可能性がある。要再確認。
+  - 対処: 環境設定（セッションのタイトルバーのクラウド環境メニュー → Edit）の Network access で、アクセスレベルを広げるか許可ドメインに `nodejs.org` を追加する。setup script がこの環境に設定されているかは VM 内から判別できず未確認（`/opt/node-24.21.0` は無かったので、未設定か、設定されていても同じ 403 で失敗している）。
+  - ローカル（macOS）で確認済みなのは、テスト（`scripts/cloud-session-start.test.ts`）、Linux 用 tarball の取得・SHASUMS 検証・展開、ローカルではフックが何もしないこと。
