@@ -171,7 +171,21 @@ backend/
 - 画面側 → API 側: `features/<feature>/api → backend/<feature>/presentation/<name>.api.ts` と `backend/shared/presentation/` の `import type` だけ（上の「画面側とサーバ側の境界」）。`features/<feature>/` の `api/` 以外は backend を参照せず、`api/` が re-export した型を使う。
 - feature 同士は原則 import しない。必要なときは相手の `index.ts` だけを import する。
 - `shared/` は `features/` を import しない（逆向きの依存を作らない）。
-- 検査: 現状はこのルール文書だけで、機械的な検査（Biome の `noRestrictedImports` など）は入れていない。検査できるかは未確認で、別 Issue で検討する。
+- 検査: ルート直下の `architecture.test.ts`（`pnpm test` に含まれ、CI の `ci` ジョブで失敗する）が、`app/` `features/` `backend/` `shared/` の `.ts` / `.tsx`（テスト `*.test.*` は除く）の import / re-export / dynamic import を抜き出し、次の規則を 1 規則 = 1 テストで検査する。違反があると「ファイル → 参照先」の一覧を出して失敗する。
+  - `features/<f>/` の `api/` 以外は `backend/` を参照しない。
+  - `features/<f>/api/` から `backend/` への参照は `import type` / `export type` だけで、参照先は `backend/<x>/presentation/*.api` か `backend/shared/presentation/` だけ。
+  - 別の feature を参照するときは `features/<other>`（`features/<other>/index`）だけ。
+  - `shared/` は `features/` を参照しない。
+  - `backend/**/domain/` は `next` / `react` / `react-dom`（サブパスを含む）・`features/` / `app/`・自 feature の `application` / `presentation` / `infra` を参照しない（`backend/shared` と `node:*` は可）。
+  - `backend/**/application/` は `presentation` / `infra` / `next` / `react` / `react-dom` / `features/` / `app/` を参照しない。
+  - `backend/**/presentation/` は `infra` のうち `infra/container` 以外を参照しない。`next` / `react` / `react-dom` / `features/` / `app/` も参照しない。
+  - `backend/shared/` は `backend/<feature>/`（shared 以外）・`features/` / `app/` を参照しない。
+  - `app/`（`app/api` 以外）が `features/` / `backend/` / `shared/` を参照するときは `features/<f>`（`features/<f>/index`）だけ。パッケージ（`next` / `react` など）と、`app/` の中の相対参照（`import "./globals.css"` など）は検査しない。
+  - `app/api/` が参照してよいのは `backend/<x>/presentation/*.api` だけ。
+  - テストを対象外にする理由: テストは組み立てのために規則の外側を参照する（presentation のテストが infra の InMemory リポジトリを使うなど。上の「テストの置き方」）。
+  - 抽出は正規表現で行う（依存は足さない）。コメントは除いてから抽出するが、正規表現リテラルやテンプレートリテラルの入れ子はコメント・文字列の区切りを誤認しうるなど限界がある（詳細と WHY は `architecture.test.ts` のコメント。抽出の仕様は同ファイルの「参照の抽出」「参照先の正規化」のテストで固定している）。
+  - この節や上の「画面側とサーバ側の境界」「`backend/<feature>/`」の依存の規則を足す・変えるときは、`architecture.test.ts` の `RULES` も合わせて直す。
+  - Biome の `noRestrictedImports` を使わなかった理由: `import type` だけを許すことを表現できない（Biome 2.5.13 で、制限したパスへの `import type` も違反になることを実測。Issue #47）。また参照元のディレクトリごとに制限を変えるには feature・層ごとに `overrides` を書く必要があり、feature を足すたびに `biome.json` を直すことになる。
 
 ## 命名
 - ディレクトリとファイル: kebab-case（例: `todo-screen/`、`create-todo.command.ts`、`todo-repository.in-memory.ts`）。
