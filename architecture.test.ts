@@ -36,9 +36,10 @@ const SOURCE_DIRS = ["app", "features", "backend", "shared"];
 // WHY テストを対象外にする: テストは組み立てのために規則の外側を参照する（例: presentation のテストが
 //   infra の InMemory リポジトリを new して createTodoContainer に渡す。rules/code/architecture.md の「テストの置き方」）。
 //   規則は本番のコードの依存の向きを縛るもので、テストの組み立てまで縛ると正当なテストが書けなくなる。
-// WHY .js / .jsx も対象にする: tsconfig.json が allowJs: true で、JS のファイルも同じビルドに入り、同じ規則の対象になるため。
-const SOURCE_FILE = /\.[jt]sx?$/;
-const TEST_FILE = /\.test\.[jt]sx?$/;
+// WHY .js / .jsx / .mjs / .cjs と .mts / .cts も対象にする: tsconfig.json が allowJs: true で、include が **/*.ts / **/*.tsx /
+//   **/*.mts を含み、JS のファイルや ESM / CJS を明示した拡張子のファイルも同じビルドに入り、同じ規則の対象になるため。
+const SOURCE_FILE = /\.(?:[cm]?[jt]s|[jt]sx)$/;
+const TEST_FILE = /\.test\.(?:[cm]?[jt]s|[jt]sx)$/;
 
 type ImportStatement = {
   // import / export の from に書かれた文字列そのもの（"@/backend/..."、"../x"、"next/link" など）。
@@ -90,9 +91,15 @@ function stripComments(source: string): string {
 const IMPORT_EXPORT_FROM =
   /(?:^|;)\s*(?:import|export)\s+(type\s+)?((?:(?!^\s*(?:import|export)\b)[\w\s{},*$])*?)\s*\bfrom\s*["']([^"']+)["']/gm;
 // `import "x"`（副作用だけの import。CSS など）。
+// WHY 名前付きキャプチャ（(?<name>...)）を使わない: tsconfig.json の target が ES2017 で、next build の型チェックが
+//   「Named capturing groups are only available when targeting 'ES2018' or later」で失敗するため（実測）。
+//   specifier のグループ番号を findValueImports に渡す。
 const SIDE_EFFECT_IMPORT = /\bimport\s*["']([^"']+)["']/g;
-// `import("x")`（dynamic import）。文字列以外（変数）を渡したものは参照先を静的に決められないため拾わない。
-const DYNAMIC_IMPORT = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
+// `import("x")` / `import(\`x\`)` / `import("x", { with: { type: "json" } })`（dynamic import）。
+// WHY ${} の無いテンプレートリテラルも拾う: 中身は普通の文字列と同じで、参照先を静的に決められるため。
+// WHY 第 2 引数（import attributes）があっても拾う: 引数の数で参照先は変わらないため、`,` でも `)` でも閉じてよい。
+// 文字列以外（変数や ${} を含むテンプレートリテラル）を渡したものは、参照先を静的に決められないため拾わない。
+const DYNAMIC_IMPORT = /\bimport\s*\(\s*(["'`])([^"'`$]+)\1\s*[,)]/g;
 
 // `{ type A, type B }` のように、名前の並びだけで、すべてに inline の type が付いているか。
 // WHY default import や `* as` が混じるものは型だけにしない: 値の import が含まれ、実行時に参照先のモジュールが読み込まれるため。
@@ -119,15 +126,18 @@ function findFromStatements(code: string): Located[] {
   }));
 }
 
-function findValueImports(code: string, pattern: RegExp): Located[] {
+function findValueImports(
+  code: string,
+  pattern: RegExp,
+  specifierGroup: number,
+): Located[] {
   return [...code.matchAll(pattern)].map((match) => ({
     index: match.index,
-    specifier: match[1] ?? "",
+    specifier: match[specifierGroup] ?? "",
     typeOnly: false,
   }));
 }
 
-// ソースから import / re-export / dynamic import の参照を、書かれた順に取り出す。
 // 文字列リテラルの範囲（[開始, 終了)）。stripComments の後のコードに使うので、一致するのは文字列だけになる。
 function stringRanges(code: string): [number, number][] {
   return [...code.matchAll(STRING_OR_COMMENT)]
@@ -143,15 +153,21 @@ function isInsideString(ranges: [number, number][], index: number): boolean {
 // WHY 一致の始まりが文字列リテラルの中にあるものを捨てる: 'import("@/backend/x")' やテンプレートリテラルの中の行頭の
 //   `import { a } from "..."` のような、コードの例を文字列で持つだけのものを参照と誤認しないため。本物の import の
 //   specifier（"x"）も文字列だが、一致の始まり（import / export、行頭、; の位置）は文字列の外にあるので残る。
-// 限界（仕様として受け入れる）: テンプレートリテラルの ${} の中に書いた import("x") は、文字列の中とみなして拾わない
-//   （見逃す方向）。`require()` と `import x = require()` は拾わない（本リポジトリは ESM だけ）。
+// 限界（仕様として受け入れる）:
+//   - テンプレートリテラルの ${} の中に書いた import("x") は、文字列の中とみなして拾わない（見逃す方向）。
+//   - `}` の直後に同じ行で続けた `export { x } from "y"`（`function f() {} export { x } from "y"`）は、文の先頭（行頭か ;
+//     の直後）でないため拾わない（見逃す方向）。Biome の format は文ごとに改行するので、本リポジトリのコードでは起きない。
+//   - 型の位置の `import("x").T`（`let a: import("x").T`）は dynamic import と同じ形なので、値の参照として拾う（型だけの
+//     参照を値と数えるので、多く検出する方向）。
+//   - `require()` と `import x = require()` は拾わない（本リポジトリは ESM だけ）。
 function extractImports(source: string): ImportStatement[] {
   const code = stripComments(source);
   const ranges = stringRanges(code);
   return [
     ...findFromStatements(code),
-    ...findValueImports(code, SIDE_EFFECT_IMPORT),
-    ...findValueImports(code, DYNAMIC_IMPORT),
+    ...findValueImports(code, SIDE_EFFECT_IMPORT, 1),
+    // DYNAMIC_IMPORT のグループ 1 は開き引用符（閉じ側の \1 で同じ種類にそろえるため）、グループ 2 が specifier。
+    ...findValueImports(code, DYNAMIC_IMPORT, 2),
   ]
     .filter(({ index }) => !isInsideString(ranges, index))
     .sort((a, b) => a.index - b.index)
@@ -160,7 +176,7 @@ function extractImports(source: string): ImportStatement[] {
 
 // WHY 拡張子を外す: 参照先の規則（`backend/<x>/presentation/*.api` など）を拡張子なしの形で 1 通りに書くため。
 //   import には通常拡張子を書かないが、書いた場合（"./x.ts"）も同じ参照として扱う。
-const CODE_EXTENSION = /\.(?:tsx?|jsx?|mjs|cjs)$/;
+const CODE_EXTENSION = /\.(?:[cm]?[jt]s|[jt]sx)$/;
 
 function toPosix(path: string): string {
   return path.split(sep).join("/");
@@ -204,13 +220,20 @@ function listSourceFiles(root: string, dir: string): string[] {
     .filter((path) => SOURCE_FILE.test(path) && !TEST_FILE.test(path));
 }
 
-function collectReferences(root: string): Reference[] {
-  return SOURCE_DIRS.flatMap((dir) => listSourceFiles(root, dir)).flatMap(
-    (file) =>
-      extractImports(readFileSync(join(root, file), "utf8")).map((statement) =>
-        toReference(file, statement),
-      ),
+function listAllSourceFiles(root: string): string[] {
+  return SOURCE_DIRS.flatMap((dir) => listSourceFiles(root, dir));
+}
+
+function referencesOf(root: string, files: string[]): Reference[] {
+  return files.flatMap((file) =>
+    extractImports(readFileSync(join(root, file), "utf8")).map((statement) =>
+      toReference(file, statement),
+    ),
   );
+}
+
+function collectReferences(root: string): Reference[] {
+  return referencesOf(root, listAllSourceFiles(root));
 }
 
 // --- 規則で使う判定 ---
@@ -228,17 +251,18 @@ function featureOf(path: string): string | undefined {
   return /^features\/([^/]+)\//.exec(path)?.[1];
 }
 
+type BackendLayer = "domain" | "application" | "presentation" | "infra";
+type BackendLocation = { feature: string; layer: BackendLayer };
+
 // "backend/todo/presentation/..." → { feature: "todo", layer: "presentation" }
-function backendLayerOf(
-  path: string,
-): { feature: string; layer: string } | undefined {
+function backendLayerOf(path: string): BackendLocation | undefined {
   const match =
     /^backend\/([^/]+)\/(domain|application|presentation|infra)(?:\/|$)/.exec(
       path,
     );
   return match === null
     ? undefined
-    : { feature: match[1] ?? "", layer: match[2] ?? "" };
+    : { feature: match[1] ?? "", layer: (match[2] ?? "") as BackendLayer };
 }
 
 // "next/link" → "next"、"@scope/pkg/sub" → "@scope/pkg"
@@ -254,11 +278,6 @@ const FRAMEWORK_PACKAGES = new Set(["next", "react", "react-dom"]);
 
 function usesFramework(ref: Reference): boolean {
   return !ref.own && FRAMEWORK_PACKAGES.has(packageName(ref.to));
-}
-
-// 画面側（features / app）への参照。backend の各層はこれを参照しない（依存の向きは app → features、app/api → backend の一方向）。
-function usesScreenSide(ref: Reference): boolean {
-  return ownUnder(ref, "features") || ownUnder(ref, "app");
 }
 
 // backend の api ファイル（1 API = 1 ファイル `backend/<x>/presentation/<verb>-<noun>.api.ts`）。
@@ -279,49 +298,62 @@ function isOwnFeatureApiFile(ref: Reference): boolean {
   );
 }
 
-// backend/shared/ のうち、domain（DomainError など）と層に属さないものか。
-// WHY backend/shared/ の presentation などを外す: domain / infra から presentation を参照すると、backend/shared の中でも
-//   依存の向き（presentation → application → domain）が逆になるため。
-function isBackendSharedInner(path: string): boolean {
-  const layer = backendLayerOf(path)?.layer;
-  return (
-    isUnder(path, "backend/shared") &&
-    (layer === undefined || layer === "domain")
-  );
+// 参照元の層ごとに、自 feature と backend/shared の中で参照してよい層（rules/code/architecture.md の 4 層の表）。
+// WHY 許可の一覧で書く: 禁止の一覧だと、書き忘れた参照先（他 feature の層、画面側の shared/ など）が黙って通る。
+//   許可の一覧なら、ここに無い自前コードはすべて違反になる。
+// WHY backend/shared の中も層で縛る: backend/shared も domain / presentation などの層に分かれており、その中で
+//   domain → presentation のような逆向きの依存を作ると、feature の中と同じく依存の向きが崩れるため。
+const LAYERS_MAY_USE: Record<BackendLayer, ReadonlySet<BackendLayer>> = {
+  domain: new Set(["domain"]),
+  application: new Set(["domain", "application"]),
+  // presentation の infra は infra/container だけ、feature の domain は型だけ（presentationAllows で絞る）。
+  presentation: new Set(["domain", "application", "presentation", "infra"]),
+  // container.ts が同じ infra の Repository の実装を組み立てるので、infra 同士の参照も許す。
+  infra: new Set(["domain", "application", "infra"]),
+};
+
+// presentation 固有の絞り込み。
+//   - infra は自 feature の infra/container だけ（「presentation は query / command を infra/container.ts で組み立てた
+//     コンテナからだけ受け取る。Repository の実装を直接 new しない」）。
+//   - feature の domain は import type だけ（「domain（Entity の型の参照のみ）」）。Entity の生成や操作は application を通す。
+//     backend/shared/domain（DomainError）はエラーの変換（instanceof）に値として使うので対象外。
+function presentationAllows(
+  ref: Reference,
+  self: BackendLocation,
+  target: BackendLocation,
+): boolean {
+  if (target.layer === "infra") {
+    return ref.to === `backend/${self.feature}/infra/container`;
+  }
+  if (target.layer === "domain" && target.feature !== "shared") {
+    return ref.typeOnly;
+  }
+  return true;
 }
 
-function domainMayUse(ref: Reference): boolean {
-  const self = backendLayerOf(ref.from)?.feature;
-  return (
-    isUnder(ref.to, `backend/${self}/domain`) || isBackendSharedInner(ref.to)
-  );
-}
-
-const INFRA_MAY_USE_LAYERS = new Set(["domain", "application", "infra"]);
-
-function infraMayUse(ref: Reference): boolean {
+// backend の層にあるファイルから、自前コードへの参照が許可の一覧に入っているか。
+// 許すのは、自 feature か backend/shared の、参照元の層が参照してよい層だけ。他 feature のどの層も、画面側
+// （features/ app/ shared/）も、層に属さない場所も許さない。
+function backendMayUse(ref: Reference): boolean {
+  const self = backendLayerOf(ref.from);
   const target = backendLayerOf(ref.to);
-  const sameFeature =
-    target !== undefined &&
-    target.feature === backendLayerOf(ref.from)?.feature &&
-    INFRA_MAY_USE_LAYERS.has(target.layer);
-  return sameFeature || isUnder(ref.to, "backend/shared");
-}
-
-function isInfraOtherThanContainer(ref: Reference): boolean {
+  if (self === undefined || target === undefined) {
+    return false;
+  }
+  const sameFeatureOrShared =
+    target.feature === self.feature || target.feature === "shared";
   return (
-    ref.own &&
-    backendLayerOf(ref.to)?.layer === "infra" &&
-    !/^backend\/[^/]+\/infra\/container$/.test(ref.to)
+    sameFeatureOrShared &&
+    LAYERS_MAY_USE[self.layer].has(target.layer) &&
+    (self.layer !== "presentation" || presentationAllows(ref, self, target))
   );
 }
 
-// feature の domain（backend/shared/domain 以外）への値の参照か。
-function isValueImportOfFeatureDomain(ref: Reference): boolean {
-  const target = ref.own ? backendLayerOf(ref.to) : undefined;
-  return (
-    !ref.typeOnly && target?.layer === "domain" && target.feature !== "shared"
-  );
+// backend の各層の規則の本体。パッケージは next / react / react-dom 以外を許し、自前コードは許可の一覧で縛る。
+// WHY node:* などのパッケージは next・react 以外許す: Entity の id の生成（node:crypto の randomUUID）などに使い、
+//   フレームワークや永続化の都合ではないため。
+function violatesBackendLayer(ref: Reference): boolean {
+  return usesFramework(ref) || (ref.own && !backendMayUse(ref));
 }
 
 // 規則の識別子。規則ごとの判定テスト（RULE_EXAMPLES）から規則を引くために使う。
@@ -403,64 +435,47 @@ const RULES: Rule[] = [
   },
   {
     // 「domain は Next・React・DB に依存させない」「依存してよい先は backend/shared だけ」
-    // WHY 自前コードを許可の一覧で書く: domain はビジネスルールだけを持ち、他 feature のどの層や画面側にも依存させないため。
     //   自 feature の domain/ の中の参照（Repository の interface が Entity を参照するなど）は許す。
-    // WHY node:* などのパッケージは next・react 以外許す: Entity の id の生成（node:crypto の randomUUID）などに使い、
-    //   フレームワークや永続化の都合ではないため。
     id: "domain",
-    name: "backend/<f>/domain/ が参照してよい自前コードは backend/<f>/domain/ と backend/shared/ だけで、next・react も参照しない",
+    name: "backend/<f>/domain/ が参照してよい自前コードは自 feature と backend/shared/ の domain/ だけで、next・react も参照しない",
     appliesTo: (from) => backendLayerOf(from)?.layer === "domain",
-    isViolation: (ref) => usesFramework(ref) || (ref.own && !domainMayUse(ref)),
+    isViolation: violatesBackendLayer,
   },
   {
     // 「application の依存してよい先は domain と backend/shared」「依存の向き: presentation → application → domain」
+    //   同じ application の中の参照（ユースケースの共通処理など）は許す。
     id: "application",
-    name: "backend/**/application/ は presentation・infra・next・react・画面側を参照しない",
+    name: "backend/<f>/application/ が参照してよい自前コードは自 feature と backend/shared/ の domain/・application/ だけで、next・react も参照しない",
     appliesTo: (from) => backendLayerOf(from)?.layer === "application",
-    isViolation: (ref) => {
-      const layer = ref.own ? backendLayerOf(ref.to)?.layer : undefined;
-      return (
-        layer === "presentation" ||
-        layer === "infra" ||
-        usesFramework(ref) ||
-        usesScreenSide(ref)
-      );
-    },
+    isViolation: violatesBackendLayer,
   },
   {
-    // 「presentation は query / command を infra/container.ts で組み立てたコンテナからだけ受け取る。Repository の実装を直接 new しない」
-    // 「domain（Entity の型の参照のみ。query / command が返す Entity を DTO に変換するため `import type { Todo }` する）」
-    // WHY domain は型だけ: Entity の生成や操作は application（query / command）を通し、presentation が domain のロジックを
-    //   直接呼ばないようにするため。backend/shared/domain（DomainError）は「依存してよい先」の backend/shared に含まれ、
-    //   エラーの変換（instanceof DomainError）に値として使うため対象外にする。
+    // 「presentation の依存してよい先: application、domain（Entity の型の参照のみ）、infra/container.ts、backend/shared」
+    //   同じ presentation の中の参照（api ファイル間の re-export など）は許す。
     // WHY next も禁止する: api ファイルは Web 標準の Request / Response で書き、Next を起動せずにテストできるようにしているため
     //   （rules/code/architecture.md の「テストの置き方」）。
     id: "presentation",
-    name: "backend/**/presentation/ は infra のうち infra/container 以外・next・react・画面側を参照せず、domain は型だけを参照する",
+    name: "backend/<f>/presentation/ が参照してよい自前コードは自 feature と backend/shared/ の application/・domain/（feature の domain は型だけ）・presentation/ と自 feature の infra/container だけで、next・react も参照しない",
     appliesTo: (from) => backendLayerOf(from)?.layer === "presentation",
-    isViolation: (ref) =>
-      isInfraOtherThanContainer(ref) ||
-      isValueImportOfFeatureDomain(ref) ||
-      usesFramework(ref) ||
-      usesScreenSide(ref),
+    isViolation: violatesBackendLayer,
   },
   {
     // 「infra: Repository の実装、container.ts（組み立て = DI）」「依存してよい先: domain（interface を実装する）、
-    //   application（container で組み立てる）」。container.ts が同じ infra の Repository の実装を組み立てるので、自 feature の
-    //   infra/ の中の参照も許す。backend/shared/ は他の層と同じく feature をまたぐ共通部品として許す。
+    //   application（container で組み立てる）」。container.ts が同じ infra の Repository の実装を組み立てるので、infra/ の中の
+    //   参照も許す。
     id: "infra",
-    name: "backend/<f>/infra/ が参照してよい自前コードは backend/<f>/ の domain・application・infra と backend/shared/ だけで、next・react も参照しない",
+    name: "backend/<f>/infra/ が参照してよい自前コードは自 feature と backend/shared/ の domain/・application/・infra/ だけで、next・react も参照しない",
     appliesTo: (from) => backendLayerOf(from)?.layer === "infra",
-    isViolation: (ref) => usesFramework(ref) || (ref.own && !infraMayUse(ref)),
+    isViolation: violatesBackendLayer,
   },
   {
     // 「backend/shared/: feature をまたいで使う型や処理」。各 feature が shared に依存するので、逆向きにすると循環する。
+    //   画面側の shared/ も含め、backend/shared/ の外の自前コードは参照しない。
     id: "backend-shared",
-    name: "backend/shared/ は backend/<feature>/・画面側を参照しない",
+    name: "backend/shared/ が参照してよい自前コードは backend/shared/ の中だけで、next・react も参照しない",
     appliesTo: (from) => isUnder(from, "backend/shared"),
     isViolation: (ref) =>
-      (ownUnder(ref, "backend") && !isUnder(ref.to, "backend/shared")) ||
-      usesScreenSide(ref),
+      usesFramework(ref) || (ref.own && !isUnder(ref.to, "backend/shared")),
   },
   {
     // 「`app/` はルーティングだけ。`page.tsx` は screen を返すだけ」「feature の外から import してよいのは index.ts だけ」
@@ -487,6 +502,22 @@ const RULES: Rule[] = [
   },
 ];
 
+// backend のソースファイルは、backend/<x>/ の 4 層（domain / application / presentation / infra）のどれかの下に置く。
+// WHY 置き場所そのものを規則にする: 層に属さない場所（backend/todo/lib/ や backend/todo/ 直下）のファイルは、どの層の規則も
+//   かからず、そこから何を参照しても検査を素通りする。層を決めて置かせることで、すべての backend のコードに依存の向きの
+//   検査がかかるようにする。
+// WHY backend/shared/ も同じに扱う（直下を許さない）: backend/shared/ も domain / presentation の層に分けて置いており
+//   （rules/code/architecture.md の「backend/shared/」）、直下を許すと同じ抜け道になるため。
+const BACKEND_LAYER_DIR =
+  /^backend\/[^/]+\/(?:domain|application|presentation|infra)\//;
+
+const BACKEND_PLACEMENT = {
+  id: "backend-placement",
+  name: "backend/ のソースファイルは backend/<x>/ の domain/・application/・presentation/・infra/ のどれかの下に置く",
+  isMisplaced: (file: string) =>
+    isUnder(file, "backend") && !BACKEND_LAYER_DIR.test(file),
+};
+
 function findViolations(references: Reference[], rule: Rule): string[] {
   return references
     .filter((ref) => rule.appliesTo(ref.from) && rule.isViolation(ref))
@@ -495,11 +526,18 @@ function findViolations(references: Reference[], rule: Rule): string[] {
 
 // root の下のツリー全体の違反を「<規則の id>: ファイル → 参照先」の一覧（並べ替え済み）で返す。
 //   1 つの参照が複数の規則に違反するときは、規則ごとに 1 行ずつ出す。
+//   置き場所の違反は「backend-placement: ファイル」の 1 行で出す。
 function collectViolations(root: string): string[] {
-  const references = collectReferences(root);
-  return RULES.flatMap((rule) =>
-    findViolations(references, rule).map((line) => `${rule.id}: ${line}`),
-  ).sort();
+  const files = listAllSourceFiles(root);
+  const references = referencesOf(root, files);
+  return [
+    ...RULES.flatMap((rule) =>
+      findViolations(references, rule).map((line) => `${rule.id}: ${line}`),
+    ),
+    ...files
+      .filter(BACKEND_PLACEMENT.isMisplaced)
+      .map((file) => `${BACKEND_PLACEMENT.id}: ${file}`),
+  ].sort();
 }
 
 describe("依存の向き（rules/code/architecture.md）", () => {
@@ -507,6 +545,12 @@ describe("依存の向き（rules/code/architecture.md）", () => {
 
   it("検査の対象から参照を取り出せている（抽出が壊れて 0 件になり、すべての規則が素通りするのを防ぐ）", () => {
     expect(references.length).toBeGreaterThan(0);
+  });
+
+  it(BACKEND_PLACEMENT.name, () => {
+    expect(
+      listAllSourceFiles(repoRoot).filter(BACKEND_PLACEMENT.isMisplaced),
+    ).toEqual([]);
   });
 
   for (const rule of RULES) {
@@ -661,6 +705,7 @@ const RULE_EXAMPLES: Record<
         "value",
       ],
       ["backend/todo/domain/x.ts", "@/features/todo", "value"],
+      ["backend/todo/domain/x.ts", "@/shared/x", "value"],
     ],
     allowed: [
       ["backend/todo/domain/x.ts", "@/backend/todo/domain/todo", "value"],
@@ -687,6 +732,13 @@ const RULE_EXAMPLES: Record<
       ],
       ["backend/todo/application/x.ts", "react", "value"],
       ["backend/todo/application/x.ts", "@/features/todo", "value"],
+      ["backend/todo/application/x.ts", "@/backend/other/domain/other", "type"],
+      [
+        "backend/todo/application/x.ts",
+        "@/backend/other/application/other.query",
+        "value",
+      ],
+      ["backend/todo/application/x.ts", "../../../shared/x", "value"],
     ],
     allowed: [
       [
@@ -695,6 +747,8 @@ const RULE_EXAMPLES: Record<
         "type",
       ],
       ["backend/todo/application/x.ts", "../domain/todo", "value"],
+      ["backend/todo/application/x.ts", "./other.command", "value"],
+      ["backend/todo/application/x.ts", "node:crypto", "value"],
       [
         "backend/todo/application/x.ts",
         "@/backend/shared/domain/domain-error",
@@ -720,6 +774,27 @@ const RULE_EXAMPLES: Record<
         "@/backend/todo/domain/todo",
         "value",
       ],
+      [
+        "backend/todo/presentation/x.api.ts",
+        "@/backend/other/infra/container",
+        "type",
+      ],
+      [
+        "backend/todo/presentation/x.api.ts",
+        "@/backend/other/application/other.query",
+        "type",
+      ],
+      [
+        "backend/todo/presentation/x.api.ts",
+        "@/backend/other/domain/other",
+        "type",
+      ],
+      ["backend/todo/presentation/x.api.ts", "@/shared/x", "value"],
+      [
+        "backend/shared/presentation/x.ts",
+        "@/backend/todo/infra/container",
+        "value",
+      ],
     ],
     allowed: [
       [
@@ -728,6 +803,17 @@ const RULE_EXAMPLES: Record<
         "value",
       ],
       ["backend/todo/presentation/x.api.ts", "../infra/container", "value"],
+      [
+        "backend/todo/presentation/x.api.ts",
+        "../application/list-todos.query",
+        "type",
+      ],
+      ["backend/todo/presentation/x.api.ts", "./get-todo.api", "value"],
+      [
+        "backend/todo/presentation/x.api.ts",
+        "@/backend/shared/presentation/http-error",
+        "value",
+      ],
       [
         "backend/todo/presentation/x.api.ts",
         "@/backend/todo/domain/todo",
@@ -787,6 +873,8 @@ const RULE_EXAMPLES: Record<
       ],
       ["backend/shared/presentation/x.ts", "@/features/todo", "value"],
       ["backend/shared/x.ts", "@/app/page", "value"],
+      ["backend/shared/domain/x.ts", "@/shared/x", "value"],
+      ["backend/shared/presentation/x.ts", "next/server", "value"],
     ],
     allowed: [
       [
@@ -796,6 +884,7 @@ const RULE_EXAMPLES: Record<
       ],
       ["backend/shared/presentation/json-body.ts", "./http-error", "value"],
       ["backend/shared/domain/x.ts", "node:crypto", "value"],
+      ["backend/shared/presentation/x.ts", "some-package/sub", "value"],
     ],
   },
   app: {
@@ -850,6 +939,33 @@ function judge(id: RuleId, [from, specifier, kind]: Example): boolean {
   const ref = toReference(from, { specifier, typeOnly: kind === "type" });
   return rule.appliesTo(ref.from) && rule.isViolation(ref);
 }
+
+// backend の置き場所の規則（BACKEND_PLACEMENT）の判定例。参照ではなくファイルの置き場所で決まるので別に持つ。
+const PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
+  misplaced: [
+    "backend/todo/p-root.ts",
+    "backend/todo/lib/x.ts",
+    "backend/shared/bad-root.ts",
+    "backend/x.ts",
+    "backend/todo/domainx/x.ts",
+  ],
+  placed: [
+    "backend/todo/domain/todo.ts",
+    "backend/shared/presentation/http-error.ts",
+    "backend/todo/infra/container.ts",
+    "backend/todo/presentation/nested/x.api.ts",
+    "features/todo/lib/x.ts",
+  ],
+};
+
+describe("backend の置き場所の判定", () => {
+  it.each(PLACEMENT_EXAMPLES.misplaced)("%s は置き場所の違反", (file) => {
+    expect(BACKEND_PLACEMENT.isMisplaced(file)).toBe(true);
+  });
+  it.each(PLACEMENT_EXAMPLES.placed)("%s は置き場所の違反ではない", (file) => {
+    expect(BACKEND_PLACEMENT.isMisplaced(file)).toBe(false);
+  });
+});
 
 describe("規則ごとの判定", () => {
   // WHY 件数をそろえる: 例が 1 件だけだと、規則の書き方を少し崩した（条件を 1 つ落とした）ときに気づけない。
@@ -1026,7 +1142,54 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'const p = import("@/app/page");',
     'import "@/backend/todo/infra/todo-repository.in-memory";',
   ),
-  // backend-shared: 層に属さない backend/shared 直下のファイルから。
+  // application: 他 feature の domain / application、画面側の shared/。
+  "backend/todo/application/bad-application-2.ts": lines(
+    'import type { Other } from "@/backend/other/domain/other";',
+    'import { x } from "../../../shared/x";',
+    'export { OtherQuery } from "@/backend/other/application/other.query";',
+  ),
+  // presentation: 他 feature の container / application / domain は import type でも違反。画面側の shared/。
+  "backend/todo/presentation/bad-presentation-2.api.ts": lines(
+    'import type { OtherContainer } from "@/backend/other/infra/container";',
+    'import type { OtherQuery } from "../../other/application/other.query";',
+    'import type { Other } from "@/backend/other/domain/other";',
+    'import { x } from "@/shared/x";',
+  ),
+  // domain / backend-shared: backend/shared から画面側の shared/。
+  "backend/shared/domain/bad-shared-screen.ts": lines(
+    'import { x } from "@/shared/x";',
+  ),
+  // backend-placement: backend/<x>/ の 4 層の外のファイル（import の有無に関係なく違反）。
+  "backend/todo/p-root.ts": lines('import { x } from "@/shared/x";'),
+  "backend/todo/lib/x.ts": lines("export const x = 1;"),
+  "backend/x.ts": lines("export const x = 1;"),
+  // 前方一致の境界: backend/shared-x は backend/shared ではなく shared-x という feature。
+  "backend/shared-x/domain/x.ts": lines(
+    'import { TodoScreen } from "@/features/todo";',
+  ),
+  // 前方一致の境界: app/api-x は app/api ではない（app の規則がかかる）。
+  "app/api-x/route.ts": lines(
+    'export { GET } from "@/backend/todo/presentation/list-todos.api";',
+  ),
+  // パスに test を含むがテストファイルではない本番のファイル。
+  "features/todo/components/test-helper.tsx": lines(
+    'import { Todo } from "@/backend/todo/domain/todo";',
+  ),
+  // 拡張子 .mts / .cts / .mjs / .cjs と、テンプレートリテラル・第 2 引数つきの dynamic import。
+  "features/todo/components/bad-ext.mts": lines(
+    "const a = import(`@/backend/todo/domain/todo`);",
+    'const b = import("@/backend/todo/infra/container", { with: { type: "json" } });',
+  ),
+  "features/todo/components/bad-ext.cts": lines(
+    'import { GET } from "@/backend/todo/presentation/get-todo.api";',
+  ),
+  "features/todo/components/bad-ext.mjs": lines(
+    'export { x } from "../../../backend/shared/presentation/http-error";',
+  ),
+  "features/todo/components/bad-ext.cjs": lines(
+    'import "@/backend/todo/infra/todo-repository.in-memory";',
+  ),
+  // backend-shared / backend-placement: 層に属さない backend/shared 直下のファイルから。
   "backend/shared/bad-root.ts": lines(
     'import { CreateTodoCommand } from "@/backend/todo/application/create-todo.command";',
   ),
@@ -1165,6 +1328,8 @@ const MUST_REJECT_VIOLATIONS = [
       `backend-shared: backend/shared/presentation/bad-backend-shared.ts → ${to}`,
   ),
   ...[
+    "backend/todo/domain/todo",
+    "backend/todo/infra/container",
     "backend/todo/domain/todo-factory",
     "features/todo",
     "app/page",
@@ -1173,6 +1338,37 @@ const MUST_REJECT_VIOLATIONS = [
     (to) =>
       `presentation: backend/shared/presentation/bad-backend-shared.ts → ${to}`,
   ),
+  ...[
+    "backend/other/domain/other",
+    "shared/x",
+    "backend/other/application/other.query",
+  ].map(
+    (to) =>
+      `application: backend/todo/application/bad-application-2.ts → ${to}`,
+  ),
+  ...[
+    "backend/other/infra/container",
+    "backend/other/application/other.query",
+    "backend/other/domain/other",
+    "shared/x",
+  ].map(
+    (to) =>
+      `presentation: backend/todo/presentation/bad-presentation-2.api.ts → ${to}`,
+  ),
+  "domain: backend/shared/domain/bad-shared-screen.ts → shared/x",
+  "backend-shared: backend/shared/domain/bad-shared-screen.ts → shared/x",
+  "backend-placement: backend/todo/p-root.ts",
+  "backend-placement: backend/todo/lib/x.ts",
+  "backend-placement: backend/x.ts",
+  "backend-placement: backend/shared/bad-root.ts",
+  "domain: backend/shared-x/domain/x.ts → features/todo",
+  "app: app/api-x/route.ts → backend/todo/presentation/list-todos.api",
+  "screen-to-backend: features/todo/components/test-helper.tsx → backend/todo/domain/todo",
+  "screen-to-backend: features/todo/components/bad-ext.mts → backend/todo/domain/todo",
+  "screen-to-backend: features/todo/components/bad-ext.mts → backend/todo/infra/container",
+  "screen-to-backend: features/todo/components/bad-ext.cts → backend/todo/presentation/get-todo.api",
+  "screen-to-backend: features/todo/components/bad-ext.mjs → backend/shared/presentation/http-error",
+  "screen-to-backend: features/todo/components/bad-ext.cjs → backend/todo/infra/todo-repository.in-memory",
   "backend-shared: backend/shared/bad-root.ts → backend/todo/application/create-todo.command",
   ...[
     "features/todo/components/todo-item",
@@ -1206,6 +1402,7 @@ const MUST_PASS_FILES: Record<string, string> = {
   "app/globals.css": "body { margin: 0; }",
   "app/page.tsx": lines(
     'import { TodoScreen } from "@/features/todo";',
+    "const lazy = import(`@/features/todo`);",
     'import { x } from "@/shared/x";',
     'import { useState } from "react";',
     'import Link from "next/link";',
@@ -1335,7 +1532,8 @@ const MUST_PASS_FILES: Record<string, string> = {
   "backend/todo/application/get-todo.query.ts": lines(
     'import { DomainError } from "@/backend/shared/domain/domain-error";',
     'import type { Todo } from "../domain/todo";',
-    'import { InvalidRequestError } from "../../shared/other-helper";',
+    'import { DomainError as E } from "../../shared/domain/domain-error";',
+    'import { ListTodosQuery } from "./list-todos.query";',
     'import type { TodoRepository } from "@/backend/todo/domain/todo-repository";',
   ),
   "backend/todo/application/list-todos.query.ts": lines(
@@ -1369,6 +1567,16 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { DomainError } from "../../shared/domain/domain-error";',
     'export type { Todo } from "../domain/todo";',
     'import { type Todo as T } from "@/backend/todo/domain/todo";',
+  ),
+  "backend/todo/presentation/reexport.api.ts": lines(
+    'import type { GetTodoResponse } from "./get-todo.api";',
+    'import type { ListTodosQuery } from "@/backend/todo/application/list-todos.query";',
+    'import { GetTodoQuery } from "../application/get-todo.query";',
+    'export { toErrorResponse } from "../../shared/presentation/http-error";',
+  ),
+  "shared/y.mts": lines(
+    'import { x } from "./x";',
+    'const lazy = import(`./x`, { with: { type: "json" } });',
   ),
   "backend/todo/presentation/get-todo.api.ts": lines(
     'import { toErrorResponse } from "@/backend/shared/presentation/http-error";',

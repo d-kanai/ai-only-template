@@ -126,12 +126,17 @@ backend/
 ## `backend/<feature>/`（API 側、DDD 4 層）
 | 層 | 置くもの | 依存してよい先 |
 | --- | --- | --- |
-| `presentation/` | api ファイル。1 API = 1 ファイル `<verb>-<noun>.api.ts`（例: `list-todos.api.ts`、`create-todo.api.ts`）。コンテナを受け取って handler（Request → 入力の形の検証 → query / command → Response）を返す関数（`listTodosApi(container)`）、それを本番用のコンテナで組み立てた HTTP メソッド名の定数（`export const GET = listTodosApi(todoContainer)`）、その API のリクエスト / レスポンスの型を export する | `application`、`domain`（Entity の型の参照のみ。query / command が返す Entity を DTO に変換するため `import type { Todo }` する）、`infra/container.ts`（コンテナの型と本番用のコンテナの受け取りだけ）、`backend/shared` |
-| `application/` | ユースケース。1 ユースケース = 1 ファイルで、読むだけ（副作用なし）のものは `<verb>-<noun>.query.ts`、状態を変えるものは `<verb>-<noun>.command.ts`（例: `list-todos.query.ts`、`create-todo.command.ts`） | `domain`、`backend/shared` |
-| `domain/` | Entity / Value Object / Repository の interface（DomainError は feature をまたいで使うため `backend/shared/domain/` に置く） | `backend/shared` だけ（Next・React・DB に依存しない） |
-| `infra/` | Repository の実装、`container.ts`（組み立て = DI。リポジトリを受け取ってコンテナを作る `createTodoContainer(repository)` と、アプリで共有する `todoContainer`） | `domain`（interface を実装する）、`application`（container で組み立てる） |
+| `presentation/` | api ファイル。1 API = 1 ファイル `<verb>-<noun>.api.ts`（例: `list-todos.api.ts`、`create-todo.api.ts`）。コンテナを受け取って handler（Request → 入力の形の検証 → query / command → Response）を返す関数（`listTodosApi(container)`）、それを本番用のコンテナで組み立てた HTTP メソッド名の定数（`export const GET = listTodosApi(todoContainer)`）、その API のリクエスト / レスポンスの型を export する | 許可の一覧（ここに無い自前コードは不可）: 自 feature と `backend/shared` の `application`、`domain`（feature の domain は Entity の型の参照のみ。query / command が返す Entity を DTO に変換するため `import type { Todo }` する。`backend/shared/domain` は値でも可）、同じ `presentation`（re-export など）、自 feature の `infra/container.ts`（コンテナの型と本番用のコンテナの受け取りだけ）。パッケージは `next` / `react` / `react-dom` 以外 |
+| `application/` | ユースケース。1 ユースケース = 1 ファイルで、読むだけ（副作用なし）のものは `<verb>-<noun>.query.ts`、状態を変えるものは `<verb>-<noun>.command.ts`（例: `list-todos.query.ts`、`create-todo.command.ts`） | 許可の一覧: 自 feature と `backend/shared` の `domain`・`application`。パッケージは `next` / `react` / `react-dom` 以外 |
+| `domain/` | Entity / Value Object / Repository の interface（DomainError は feature をまたいで使うため `backend/shared/domain/` に置く） | 許可の一覧: 自 feature と `backend/shared` の `domain` だけ（Next・React・DB に依存しない）。パッケージは `next` / `react` / `react-dom` 以外（`node:crypto` など） |
+| `infra/` | Repository の実装、`container.ts`（組み立て = DI。リポジトリを受け取ってコンテナを作る `createTodoContainer(repository)` と、アプリで共有する `todoContainer`） | 許可の一覧: 自 feature と `backend/shared` の `domain`（interface を実装する）・`application`（container で組み立てる）・`infra`（container が Repository の実装を組み立てる）。パッケージは `next` / `react` / `react-dom` 以外 |
 
 - 依存の向き: `app/api → presentation → application → domain`。`infra` は `domain` の interface を実装する（依存性の逆転）。
+- 依存してよい先は許可の一覧で決める。一覧に無い自前コード（他 feature のどの層、画面側の `features/` `app/` `shared/`、層に属さない場所）は参照しない。
+  - 理由: 禁止の一覧だと、書き忘れた参照先が黙って通る。
+  - `backend/shared/` の中も同じ層の許可に従う（例: domain から `backend/shared/presentation/` は不可）。`backend/shared/` から参照してよい自前コードは `backend/shared/` の中だけ。
+- backend のファイルは `backend/<feature>/`（`backend/shared/` を含む）の 4 層（`domain/` `application/` `presentation/` `infra/`）のどれかの下に置く。`backend/<feature>/` 直下や `lib/` など層に属さない場所には置かない。
+  - 理由: 層に属さない場所のファイルにはどの層の規則もかからず、何を参照しても依存の向きの検査を素通りする。`backend/shared/` も domain / presentation に分けて置いているので、直下を許すと同じ抜け道になる（直下は許さず、4 層に置く）。
 - presentation は 1 API = 1 ファイルにし、その API のリクエスト / レスポンスの型（DTO）もそのファイルの中で定義して export する。feature で共通の型ファイルは置かない。
   - 例: `list-todos.api.ts` は `listTodosApi(container)`（handler は `(request: Request) => Promise<Response>`）と `export const GET = listTodosApi(todoContainer)` を export する。動的セグメントがある `get-todo.api.ts` の handler は `(request: Request, ctx: { params: Promise<{ id: string }> }) => Promise<Response>`。
   - 複数の API が同じ形を返す場合（`list-todos` / `get-todo` / `create-todo` / `update-todo` が返す `TodoDto` など）も、各ファイルで定義する（共通化しない）。
@@ -171,27 +176,29 @@ backend/
 - 画面側 → API 側: `features/<feature>/api → backend/<feature>/presentation/<name>.api.ts` と `backend/shared/presentation/` の `import type` だけ（上の「画面側とサーバ側の境界」）。`features/<feature>/` の `api/` 以外は backend を参照せず、`api/` が re-export した型を使う。
 - feature 同士は原則 import しない。必要なときは相手の `index.ts` だけを import する。
 - `shared/` は `features/` を import しない（逆向きの依存を作らない）。
-- 検査: ルート直下の `architecture.test.ts`（`pnpm test` に含まれ、CI の `ci` ジョブで失敗する）が、`app/` `features/` `backend/` `shared/` の `.ts` / `.tsx` / `.js` / `.jsx`（テスト `*.test.*` は除く。`.js` は tsconfig の `allowJs: true` に合わせる）の import / re-export / dynamic import を抜き出し、次の規則を 1 規則 = 1 テストで検査する。違反があると「ファイル → 参照先」の一覧を出して失敗する。
+- 検査: ルート直下の `architecture.test.ts`（`pnpm test` に含まれ、CI の `ci` ジョブで失敗する）が、`app/` `features/` `backend/` `shared/` の `.ts` / `.tsx` / `.mts` / `.cts` / `.js` / `.jsx` / `.mjs` / `.cjs`（テスト `*.test.*` は除く。JS は tsconfig の `allowJs: true` に合わせる）の import / re-export / dynamic import を抜き出し、次の規則を 1 規則 = 1 テストで検査する。違反があると「ファイル → 参照先」の一覧を出して失敗する。
   - `features/<f>/` の `api/` 以外と `shared/` は `backend/` を参照しない。
   - `features/<f>/api/` から `backend/` への参照は `import type` / `export type` だけで、参照先は自 feature の `backend/<f>/presentation/*.api` か `backend/shared/presentation/` だけ。
   - 別の feature を参照するときは `features/<other>`（`features/<other>/index`）だけ。
   - `features/` と `shared/` は `app/` を参照しない（`app → features → shared` の向き）。
   - `shared/` は `features/` を参照しない。
-  - `backend/<f>/domain/` が参照してよい自前コードは `backend/<f>/domain/` と `backend/shared/`（`backend/shared/domain/` と層に属さないもの）だけ。`next` / `react` / `react-dom`（サブパスを含む）も参照しない（`node:*` などその他のパッケージは可）。
-  - `backend/**/application/` は `presentation` / `infra` / `next` / `react` / `react-dom` / `features/` / `app/` を参照しない。
-  - `backend/**/presentation/` は `infra` のうち `infra/container` 以外を参照しない。feature の `domain/` は `import type` だけ（`backend/shared/domain/` は値でも可）。`next` / `react` / `react-dom` / `features/` / `app/` も参照しない。
-  - `backend/<f>/infra/` が参照してよい自前コードは `backend/<f>/` の `domain` / `application` / `infra`（container が同じ infra の Repository の実装を組み立てるため）と `backend/shared/` だけ。`next` / `react` / `react-dom` も参照しない。
-  - `backend/shared/` は `backend/<feature>/`（shared 以外）・`features/` / `app/` を参照しない。
+  - backend の 4 層は許可の一覧（上の「`backend/<feature>/`」の表）で検査する。自前コードは、自 feature か `backend/shared/` の、参照元の層が参照してよい層だけ。パッケージは `next` / `react` / `react-dom`（サブパスを含む）以外を許す。
+    - `backend/<f>/domain/`: `domain/`。
+    - `backend/<f>/application/`: `domain/`・`application/`。
+    - `backend/<f>/presentation/`: `application/`・`domain/`（feature の domain は `import type` だけ。`backend/shared/domain/` は値でも可）・`presentation/`・自 feature の `infra/container` だけ（他 feature の container は不可）。
+    - `backend/<f>/infra/`: `domain/`・`application/`・`infra/`。
+  - `backend/shared/` が参照してよい自前コードは `backend/shared/` の中だけ。`next` / `react` / `react-dom` も参照しない。
+  - `backend/` のソースファイルは `backend/<x>/` の `domain/`・`application/`・`presentation/`・`infra/` のどれかの下に置く（置き場所の検査。参照の有無に関係なく違反）。
   - `app/`（`app/api` 以外）が `features/` / `backend/` / `shared/` を参照するときは `features/<f>`（`features/<f>/index`）か `shared/` だけ（`backend/` と feature の深いパスは不可）。パッケージ（`next` / `react` など）と、`app/` の中の相対参照（`import "./globals.css"` など）は検査しない。
   - `app/api/` が参照してよいのは `backend/<x>/presentation/*.api` だけ。
   - 規則の判定そのものも、規則ごとに「違反になる例」「ならない例」を架空の参照で 3 件以上ずつ固定している（`architecture.test.ts` の「規則ごとの判定」）。今のコードに違反が無いことだけでは、規則が緩すぎても気づけないため。
   - さらに、一時ディレクトリに架空のツリーを作って実ファイルを置き、本番と同じ列挙 → 抽出 → 正規化 → 判定（`collectViolations(root)`）に通す fixture テストがある（同ファイルの「fixture のツリーを検査したときに検出される違反」）。
-    - must-reject: 12 規則それぞれの違反を、alias（`@/`）と相対パス、値の import / `import type` / inline の `type` / `export { X } from` / `export type { X } from` / dynamic `import()` / 副作用だけの import、`.ts` / `.tsx` / `.js` / `.jsx` で置き、検出される「規則: ファイル → 参照先」の一覧を丸ごと比較する（見逃しも余分な検出も失敗にする）。
+    - must-reject: 12 規則と置き場所の規則それぞれの違反を、alias（`@/`）と相対パス、値の import / `import type` / inline の `type` / `export { X } from` / `export type { X } from` / dynamic `import()` / 副作用だけの import、`.ts` / `.tsx` / `.mts` / `.cts` / `.js` / `.jsx` / `.mjs` / `.cjs` で置き、前方一致の境界（`backend/shared-x`、`app/api-x`、`features/todo-extra`）やパスに `test` を含む本番のファイルも含めて、検出される「規則: ファイル → 参照先」の一覧を丸ごと比較する（見逃しも余分な検出も失敗にする）。
     - must-pass: 許可される参照を網羅したツリーで違反 0 件を確かめる。今のリポジトリの本番コードの参照（参照元・参照先・型だけか）はすべて含めている。コメント・文字列の中の import 風の文字列、テストファイル、TS / JS 以外のファイルも置く。
     - 理由: 抽出の取りこぼし（書き方によって import を拾えない）は、規則が正しくても違反の見逃しになる。1 件の参照を規則に渡すだけのテストではそこを検証できない。
   - テストを対象外にする理由: テストは組み立てのために規則の外側を参照する（presentation のテストが infra の InMemory リポジトリを使うなど。上の「テストの置き方」）。
-  - 抽出は正規表現で行う（依存は足さない）。コメントは除いてから抽出するが、正規表現リテラルやテンプレートリテラルの入れ子はコメント・文字列の区切りを誤認しうるなど限界がある（詳細と WHY は `architecture.test.ts` のコメント。抽出の仕様は同ファイルの「参照の抽出」「参照先の正規化」のテストで固定している）。
-  - この節や上の「画面側とサーバ側の境界」「`backend/<feature>/`」の依存の規則を足す・変えるときは、`architecture.test.ts` の `RULES` と `RULE_EXAMPLES`（判定の例）、fixture の must-reject / must-pass（`MUST_REJECT_FILES` / `MUST_REJECT_VIOLATIONS` / `MUST_PASS_FILES`）も合わせて直す。本番コードに新しい import の形（新しい層の組み合わせや書き方）を足したときも、must-pass に同じ形を足す。
+  - 抽出は正規表現で行う（依存は足さない）。コメントと文字列リテラルの中の import 風の文字列は除く。dynamic import は ``import(`x`)``（`${}` 無し）と第 2 引数つきの `import("x", { with: ... })` も拾う。限界: 正規表現リテラルやテンプレートリテラルの入れ子はコメント・文字列の区切りを誤認しうる、`${}` の中の `import()` と `}` の直後に同じ行で続けた `export ... from` は拾わない（見逃す方向）、型の位置の `import("x").T` は値の参照として数える（多く検出する方向）（詳細と WHY は `architecture.test.ts` のコメント。抽出の仕様は同ファイルの「参照の抽出」「参照先の正規化」のテストで固定している）。
+  - この節や上の「画面側とサーバ側の境界」「`backend/<feature>/`」の依存の規則を足す・変えるときは、`architecture.test.ts` の `RULES` と `RULE_EXAMPLES`（判定の例）、置き場所の規則 `BACKEND_PLACEMENT` と `PLACEMENT_EXAMPLES`、fixture の must-reject / must-pass（`MUST_REJECT_FILES` / `MUST_REJECT_VIOLATIONS` / `MUST_PASS_FILES`）も合わせて直す。本番コードに新しい import の形（新しい層の組み合わせや書き方）を足したときも、must-pass に同じ形を足す。
   - Biome の `noRestrictedImports` を使わなかった理由: `import type` だけを許すことを表現できない（Biome 2.5.13 で、制限したパスへの `import type` も違反になることを実測。Issue #47）。また参照元のディレクトリごとに制限を変えるには feature・層ごとに `overrides` を書く必要があり、feature を足すたびに `biome.json` を直すことになる。
 
 ## 命名
