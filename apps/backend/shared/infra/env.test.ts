@@ -27,6 +27,7 @@ const VALID = {
   DATABASE_POOL_MAX: "10",
   DATABASE_POOL_IDLE_TIMEOUT_MS: "10000",
   DATABASE_CONNECTION_TIMEOUT_MS: "5000",
+  E2E_PORT: "3100",
 };
 
 const REQUIRED_NAMES = Object.keys(VALID);
@@ -48,6 +49,7 @@ describe("readEnv", () => {
       DATABASE_POOL_MAX: 10,
       DATABASE_POOL_IDLE_TIMEOUT_MS: 10_000,
       DATABASE_CONNECTION_TIMEOUT_MS: 5_000,
+      E2E_PORT: 3100,
     });
   });
 
@@ -97,6 +99,32 @@ describe("readEnv", () => {
       );
     },
   );
+
+  test.each([
+    ["1", 1],
+    ["65535", 65_535],
+  ])(
+    "E2E_PORT=%s はポートの範囲（1〜65535）の端なので受け付ける",
+    (value, port) => {
+      expect(readEnv({ ...VALID, E2E_PORT: value }).E2E_PORT).toBe(port);
+    },
+  );
+
+  test.each([
+    [
+      "0",
+      "0 はポートとして使えない（OS が空きポートを選ぶ意味になり、テストとサーバでずれる）",
+    ],
+    ["65536", "範囲外"],
+    ["-1", "負"],
+    ["3100.5", "小数"],
+    ["abc", "数でない"],
+    ["３１００", "全角数字"],
+  ])("E2E_PORT=%s は不正（%s）なので、名前と値を含むエラーにする", (value) => {
+    expect(errorMessageOf({ ...VALID, E2E_PORT: value })).toContain(
+      `E2E_PORT: 1〜65535 の整数で指定してください（値: ${value}）`,
+    );
+  });
 
   test.each([
     ["DATABASE_POOL_MAX", "abc"],
@@ -338,7 +366,7 @@ describe("env / toolEnv（モジュールを読み込んだ時点の値）", () 
     vi.stubEnv("DATABASE_POOL_MAX", "abc");
     vi.resetModules();
 
-    // rejects.toThrow("文字列") は reject された値が undefined でも通るので、Error であることと message を別に確かめる（rules/code/test.md）。
+    // rejects.toThrow("文字列") は reject された値が undefined でも通るので、Error であることと message を別に確かめる（.claude/rules/testing.md）。
     const loading = import("./env");
     await expect(loading).rejects.toBeInstanceOf(Error);
     await expect(loading).rejects.toMatchObject({

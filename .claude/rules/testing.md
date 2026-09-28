@@ -1,0 +1,90 @@
+---
+paths:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "e2e/**"
+  - "vitest.config.mts"
+  - "vitest.global-setup.ts"
+  - "playwright.config.ts"
+  - "stryker.config.mjs"
+---
+
+# テスト
+
+テストは仕様。仕様が黙って外れたり、壊れたコードを見逃したりしない状態を保つ。このルールの根拠になった実例は `docs/testing.md`。
+
+## 基本
+- テストを先に書き、**失敗することを確認してから**実装する（CLAUDE.md の Test Driven）。WHY: 先に失敗を見ないと、実装に関係なく通る（何も検査していない）テストに気づけない。
+- テスト名は日本語の仕様文（「〜すると〜になる」「〜のときは〜しない」）。WHY: 一覧がそのまま仕様になり、失敗したときにどの仕様が破れたかが分かる。
+- 分岐を通すだけのテストにしない。その分岐で起きること（返り値・状態・呼び出し・出力）を検証する。WHY: 何も検証しないテストでもカバレッジは上がる。
+- `it.skip` / `it.only` を残さない（Biome の `noSkippedTests` / `noFocusedTests` で止まる。`.claude/rules/lint.md`）。WHY: skip は仕様を黙って外し、only はほかのテストを黙って止める。
+- 失敗（reject / throw）の検証は `rejects.toEqual(new Error("..."))` のようにクラスと message を比べる（クラスが決まらなければ `rejects.toBeInstanceOf(Error)` と `rejects.toMatchObject({ message })`）。WHY: Vitest 5.0.1 の `rejects.toThrow("文字列")` / `toThrowError("文字列")`（同期の `toThrow("文字列")` も）は、値が `undefined` だと文字列を照合せずに通る（実測）。
+- テストを足す・書き換えたら、そのテストが守るコードを 1 度壊して落ちることを確かめ、元に戻す（条件の反転・戻り値の変更・呼び出しの削除など）。WHY: 検証が弱いと壊しても緑のまま。書き換えで既存の検証が消えることもある。
+
+## 置き方と環境
+対象と同じディレクトリに `<対象>.test.ts(x)` で置く（`apps/frontend/app/` には置かない）。E2E だけリポジトリ直下の `e2e/<feature>.spec.ts`（画面・API・ルーティングをまたぐため）。
+
+| 対象 | 方法 | 環境 |
+| --- | --- | --- |
+| `apps/backend/**/domain` | 純粋な単体テスト | Node |
+| `apps/backend/**/application` | InMemory リポジトリを渡して検証 | Node |
+| `apps/backend/**/infra` の Postgres の実装（`*.postgres.ts`・`drizzle-transaction-runner.ts`・`database.ts`） | 実 Postgres。`createTestDatabase()` でファイルごとの別スキーマ（`test_<UUID>`）にマイグレーションを当て、各テストの前に `TRUNCATE` | Node |
+| `apps/backend/**/presentation` | 空の InMemory で組み立てた handler（`listTodosApi(createInMemoryTodoContainer())`）に `new Request()`（と `ctx`）を渡し、`Response` を検証。共有の `todoContainer` は使わない | Node |
+| `apps/frontend/features/**/*.hook.ts` | `renderHook` で状態とイベント | jsdom |
+| `apps/frontend/features/**/*-screen.tsx` | render して操作し、表示を検証 | jsdom |
+| `e2e/*.spec.ts` | Playwright で本番ビルドを起動し、Chromium で操作 | Chromium |
+
+- `apps/backend/` のテストは先頭に `// @vitest-environment node`（既定は jsdom）。WHY: サーバのコードは DOM の無い環境で検証する。
+- 実 Postgres を別スキーマに分ける WHY: Vitest はファイルを並列に、Stryker はさらに複数プロセスで実行する。同じ `public.todos` を使うと互いの `TRUNCATE` でデータが消え、`pnpm dev` や E2E の表も消える。drizzle の migrator には同時実行の排他が無い。
+- `pnpm test` / `pnpm test:unit` / `pnpm test:mutation` は Postgres が起動している前提（`pnpm db:up`）。接続先は `.env` の `DATABASE_URL`。
+
+## カバレッジ（100%）
+- `pnpm test`（`vitest run --coverage`）は Statements / Branches / Functions / Lines のどれかが 100% 未満なら失敗する（CI でも止まる）。速く回すだけなら `pnpm test:unit`、完了前は必ず `pnpm test`。設定と WHY は `vitest.config.mts`。
+- 計測対象: `apps/frontend/features/`・`apps/frontend/shared/`・`apps/backend/` の `.ts` / `.tsx` と `scripts/` の `.ts`（テスト・`*.d.ts`・`apps/backend/` 直下の `*.config.ts` を除く）。
+- 計測しないもの（ユーザー判断、Issue #45）: `apps/frontend/app/`（ルーティングだけ。E2E で確かめる）、設定ファイル、`instrumentation*.ts`（起動時だけ動く。中身は `env.ts` のテストで固定）、`.sh`（V8 は JS しか測れない）。
+- 足りなければテストを足して埋める。`/* v8 ignore */` などで逃がさない。対象外を増やすときは上の方針に当てはまるか確かめ、`vitest.config.mts` とここに理由を書く。
+
+## globalSetup（テスト用スキーマの後始末）
+- `vitest.global-setup.ts` が実行の最初に 1 回、`test_` で始まるスキーマを `DROP SCHEMA ... CASCADE` で消す（`cleanupTestSchemas`）。`afterAll` での削除も残す。
+  - WHY: プロセスが `afterAll` の前に止まる（Stryker が worker を止める・Ctrl-C）と残る。テストの前なら消してよいのは前の実行の残りだけ。
+- 探し方は `starts_with(schema_name, 'test_')`（LIKE の `_` は任意の 1 文字に一致するため使わない）。
+- Postgres に接続できなければ「`pnpm db:up` で起動してから実行してください」のエラーで止める。
+- Stryker の worker の中（`STRYKER_MUTATOR_WORKER` がある）では消さない（並行する worker の使用中のスキーマを消すため）。同じ DB に `pnpm test` を 2 つ同時に動かさない。
+- `cleanupTestSchemas` のテストはテストごとの接頭辞（`test_cleanup_<UUID>_`）で行う（`test_` だと並列の他のファイルのスキーマを消す）。
+
+## テストダブル
+- backend: InMemory リポジトリを `createTodoContainer` に渡して組み立てる。モックは最小限。WHY: モックは「こう呼ばれるはず」を書き込むので、実装とずれても緑のまま。
+  - Postgres の実装はモックせず実 Postgres で（SQL の組み立て・uuid・commit / rollback は差し替えると検証できない）。
+  - InMemory で起こせない失敗の経路だけ、必要な分を差し替える（例: `list-todos.api.test.ts` の 500 は常に reject する `failingRepository` と、`console.error` の `vi.spyOn`）。
+- 画面側の hook / screen: `vi.mock("@/features/todo/api/todo-api")` と `vi.mocked(listTodos).mockResolvedValue(...)`。WHY: 境界の `api/` で切ると HTTP やサーバの状態に依存しない。
+- `api/`: `vi.stubGlobal("fetch", vi.fn<typeof fetch>())` で、送った URL・メソッド・本文と応答の扱いを検証する。
+- 非同期の順序（古い応答が後から届く、画面を離れた後に失敗が届く）は、任意のタイミングで resolve できる `deferred()` で作る（各テストファイルの中に定義）。WHY: `mockResolvedValue` は即時に resolve し、タイマーは実行環境の速さに左右される。
+
+## ルール検査テスト（規則・設定が効いていることを検査するテスト）
+今あるもの: `architecture.test.ts`（`.claude/rules/architecture-check.md`）、`lint.test.ts`（`.claude/rules/lint.md`）、`package.test.ts`・`pnpm-workspace.test.ts`（`.claude/rules/dependencies.md`）、`typecheck.test.ts`（`pnpm typecheck` と CI の順序）、`scripts/cloud-session-start.test.ts`（`.claude/rules/cloud-session.md`）、`instructions.test.ts`（CLAUDE.md の行数と @ import、`.claude/rules` の paths、docs の参照、スキルのフロントマター、旧 rules/ の参照）と、git ガード・作業ログ・worktree のフックのテスト（`scripts/hooks/*.test.ts` など）。テスト以外のゲート（カバレッジ・フック・CI の required check・型チェック）も同じ扱い。
+- **must pass と must reject の両方**を持つ。WHY: must reject だけだと「何でも違反にする」壊れ方を、must pass だけだと「何も違反にしない」（常に緑）壊れ方を検出できない。「今のリポジトリで違反 0 件」は must pass の 1 例にすぎない。
+- 判定は関数に切り出し、架空の入力で許可・拒否を固定したうえで、同じ関数で実ファイルを検査する。must reject は取り違えやすい境界を網羅する（import の書き方、版の書き方、設定のキーの有無・コメントアウト・ネスト、違反を単独で含むファイル、対象外のファイル）。
+- 実ファイルで end-to-end に通す fixture を持つ（一時ディレクトリは `mkdtempSync(join(tmpdir(), "<name>-"))` で作り `afterAll` で消す）。違反の集合は `toEqual` で丸ごと比較する。WHY: 判定が正しくても、抽出・列挙が漏れれば見逃す。
+- 列挙が空なら失敗させる（対象 0 件なら常に緑になる）。
+- 規則を足す・変えるときは例と fixture も同じ変更で直し、規則の文書と突き合わせる。
+- **fault injection**（規則を 1 つずつ破る → そのテストだけが落ちる、判定を常に true / false・列挙を空・設定を戻す → 落ちる、元に戻して `git status --short` と `git diff` を確かめる、何を壊して何件落ちたかを報告・PR に書く、reviewer も別の壊し方で独立に行う）は必須。手順はスキル `rule-check-test`。
+
+## mutation testing（Stryker）
+実行手順・生き残りの直し方・日次ジョブはスキル `mutation-testing`、score の実測と経緯は `docs/mutation-testing.md`、各設定の WHY は `stryker.config.mjs`。
+- 目標は score 100%（`thresholds.break: 100`。survived が 1 件でも日次ジョブが失敗する。ユーザー判断、Issue #55）。
+- ロジックの変異はテストを足して殺す。API のエラーの message（`ErrorResponse`）は検証して殺す。
+- `// Stryker disable next-line <Mutator>: <理由>` で除いてよいのは、**等価な変異**と**検証しない文言**（内部のログなど）だけ。理由を必ず書く。殺せるのに手間を省くために使わない。「等価」と決める前にほかの実行経路を探す（React の `<Activity mode="hidden">` では隠すときに effect の片付けが走り、state 更新も反映される）。
+- 等価な変異を生む書き方をしない: 結果を変えない検査（`"error" in value` の後の型の確認）は書かない、例外を握りつぶす `try` は握りつぶしたい呼び出しだけを囲む、ロジックの定数（正規表現・変換表・URL・接頭辞）は最上位に置かず関数の中に置く（最上位は static な変異になり `ignoreStatic` で検査から外れる）。
+- 今の disable の一覧（すべて等価。足す・消すときはここを直す）:
+  - `apps/frontend/features/todo/screens/todo-screen/todo-screen.hook.ts` の依存配列 5 か所（`reloadTodos` は依存の無い useCallback で作り直されず、それを依存に持つ effect・`mutateAndReload`・`toggleTodo`・`removeTodo` も作り直されない）。
+  - `apps/frontend/features/todo/screens/todo-detail-screen/todo-detail-screen.hook.ts` の世代の `+=`（`-=` でも毎回別の値になる）。
+- 残る static は `apps/backend/todo/infra/schema.ts` のテーブル宣言だけ（等価の理由は `stryker.config.mjs` と `docs/mutation-testing.md`）。
+- テストで `@repo/backend/...` から backend の値を import すると、その変異はテストに届かない。backend の振る舞いは backend の中のテスト（相対 import）で確かめる。
+
+## E2E（Playwright）
+- `pnpm test:e2e`（`playwright test`、設定は `playwright.config.ts`）。`webServer` が `pnpm build && pnpm start -p <E2E_PORT>`（`.env` の `E2E_PORT`。メインの作業ツリーは 3100）で本番ビルドを起動する（ローカルで起動済みならそれを使う）。`pnpm test`（Vitest）には含めない。
+- Postgres で動かす。サーバ（`webServer.env`）とテスト（`e2e/database.ts`）は同じ `env.DATABASE_URL` を使う。前提は `pnpm db:up && pnpm db:migrate`（`webServer.command` では当てない）。
+  - ローカルの `reuseExistingServer` で起動済みのサーバを使うときは、そのサーバの環境変数のまま動く（別の DB・古いコードのサーバが残っていないか注意）。
+- 各テストの前に `TRUNCATE todos`（`resetTodos()`）。title に実行時刻を付けるのは補助。WHY: Postgres のデータはサーバを起動し直しても残る。
+- 1 テストで CRUD を一周する（`workers: 1`。1 本の中の順序で状態を担保する）。
+- Chromium のビルドが合わないとき（クラウド VM）は `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium pnpm test:e2e`。CI は `pnpm exec playwright install --with-deps chromium`、ローカルは `pnpm exec playwright install chromium`。

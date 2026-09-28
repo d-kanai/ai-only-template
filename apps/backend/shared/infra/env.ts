@@ -1,5 +1,5 @@
 // 環境変数の唯一の入口（Issue #59）。アプリ・テスト・ツールの設定ファイルは、process.env を直接読まずにここの env / toolEnv を使う。
-// 規則と WHY は rules/code/env.md の「環境変数」。process.env を直接読むと Biome（style/noProcessEnv）と
+// 規則と WHY は .claude/rules/env.md の「環境変数」。process.env を直接読むと Biome（style/noProcessEnv）と
 // architecture.test.ts（規則 env-direct-access）で失敗する。process.env に触ってよいのはこのファイルだけ
 // （例外は apps/frontend/instrumentation.ts が Next.js の規約の NEXT_RUNTIME を読む 1 か所だけ）。
 //
@@ -25,6 +25,11 @@ export type Env = {
   DATABASE_POOL_IDLE_TIMEOUT_MS: number;
   // 接続待ちの上限（ミリ秒、0 以上。0 は無制限）。
   DATABASE_CONNECTION_TIMEOUT_MS: number;
+  // E2E（Playwright）が起動する本番ビルドのポート（1〜65535。playwright.config.ts）。
+  // WHY Env（必須）に置く: worktree ごとに別の値にする外部リソースの 1 つで（Issue #64。scripts/worktree-env.sh が
+  //   worktree の名前から導いて .env に書く）、並列の worktree が同じポートを使うと、reuseExistingServer により
+  //   別の worktree のサーバを検証してしまう。既定値を持つと .env の書き忘れで全 worktree が同じポートに戻る。
+  E2E_PORT: number;
 };
 
 // 開発ツールの切り替え（任意）。アプリの設定ではなく、テストや CI の実行のしかたを変えるだけのフラグ。
@@ -69,11 +74,21 @@ function positiveInteger(raw: string): Check<number> {
   return { value: Number(raw) };
 }
 
+// TCP のポートとして使える 1〜65535 に限る。
+// WHY 0 を拒否する: 0 は「OS が空きポートを選ぶ」意味になり、webServer と baseURL（テスト側）の番号がずれる。
+function portNumber(raw: string): Check<number> {
+  if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 65_535) {
+    return { problem: `1〜65535 の整数で指定してください（値: ${raw}）` };
+  }
+  return { value: Number(raw) };
+}
+
 const PARSERS: { [K in keyof Env]: (raw: string) => Check<Env[K]> } = {
   DATABASE_URL: requiredString,
   DATABASE_POOL_MAX: positiveInteger,
   DATABASE_POOL_IDLE_TIMEOUT_MS: nonNegativeInteger,
   DATABASE_CONNECTION_TIMEOUT_MS: nonNegativeInteger,
+  E2E_PORT: portNumber,
 };
 
 // source（本番は process.env）から Env を読む。純粋関数にして、テストで偽の source を渡せるようにしている。
@@ -102,7 +117,7 @@ export function readEnv(source: EnvSource): Env {
       [
         "環境変数が足りないか、値が正しくありません。",
         ...problems.map((problem) => `  - ${problem}`),
-        "リポジトリ直下で cp .env.example .env を実行して .env を作り、値を確かめてください（rules/code/env.md の「環境変数」）。",
+        "リポジトリ直下で cp .env.example .env を実行して .env を作り、値を確かめてください（.claude/rules/env.md の「環境変数」）。",
       ].join("\n"),
     );
   }
