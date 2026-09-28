@@ -482,6 +482,15 @@ ensure_docker_daemon() {
 #   429（出口 IP の残り回数 0）で失敗し、直後の再試行では通った。イメージは compose.yaml で mirror.gcr.io に
 #   しているが、ミラーでも一時的な失敗はありうるので再試行は残す。
 #   最大 3 回、間隔は 2 秒・4 秒（倍々）。最後の失敗の後は待たない。取得済みのイメージなら pull は数秒で終わる。
+# WHY pull を timeout 45 で囲むか: curl の --max-time と同じく、通信が止まったまま待ち続けてフックの 600 秒打ち切りに
+#   達し「失敗しても warn を出して exit 0 で続ける」設計が崩れるのを防ぐため。docker compose pull 自体には全体の
+#   上限を指定するオプションが無い。45 秒は実測（mirror.gcr.io から 18-alpine の初回 pull が 10.5 秒、2026-09-28）の
+#   4 倍強で、45 秒かかるなら止まっているとみなす。
+#   値はフック全体の最悪ケースを 600 秒に収めるように決めた（rules/code/env.md の見積もり）:
+#     Node / pnpm の取得（curl の --max-time の和）280 + デーモン待ち 30 + pull 45 × 3 + 再試行の間隔 6
+#     + up の --wait-timeout 120 = 571 秒。残り約 30 秒が pnpm install（実測 10 秒）などの分。
+#   pull を 240 秒にすると Docker の段だけで 30 + 720 + 6 + 120 = 876 秒になり、600 秒を超える。
+#   timeout で打ち切られた pull は失敗として扱い、次の再試行に回る。
 # WHY --wait: コンテナの起動だけでなく healthcheck（pg_isready）が通るまで待つ。フックが終わった時点で
 #   psql やアプリから接続できる状態にするため。
 # WHY --wait-timeout 120: healthcheck は約 30 秒（2 秒 × 15 回）で unhealthy になり --wait は失敗で返るが、
@@ -494,14 +503,14 @@ ensure_docker_daemon() {
 start_database() {
   local project_dir="$1"
   if is_dry_run; then
-    echo "[dry-run] (cd ${project_dir} && docker compose pull) up to 3 times, waiting 2s / 4s between attempts"
+    echo "[dry-run] (cd ${project_dir} && timeout 45 docker compose pull) up to 3 times, waiting 2s / 4s between attempts"
     echo "[dry-run] (cd ${project_dir} && docker compose up -d --wait --wait-timeout 120)"
     return 0
   fi
 
   local attempt delay=2
   for attempt in 1 2 3; do
-    if (cd "$project_dir" && docker compose pull >&2); then
+    if (cd "$project_dir" && timeout 45 docker compose pull >&2); then
       break
     fi
     if [ "$attempt" -eq 3 ]; then

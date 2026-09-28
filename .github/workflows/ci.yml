@@ -1,4 +1,5 @@
-# main 宛の PR と main への push で lint / test / build / E2E テストを実行する。
+# main 宛の PR と main への push で、開発用 Postgres の起動（compose.yaml）と psql での接続確認、
+# lint / test / build / E2E テストを実行する。
 # main の Ruleset（protect-main）でこのワークフローの `ci` ジョブを required status check にしており、
 # 通らないと PR をマージできない（rules/general/branch.md の「CI」）。
 name: CI
