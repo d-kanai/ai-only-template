@@ -202,7 +202,7 @@ backend/
 - 実行: `pnpm test:e2e`（`playwright test`）。設定は `playwright.config.ts`。`webServer` が `pnpm build && pnpm start -p 3100` で本番ビルドを起動してからテストする（ローカルで 3100 番にサーバが起動済みなら、それを使う）。`pnpm test`（Vitest）には含めない（`vitest.config.mts` で `e2e/**` を除外）。
 - 1 テストで CRUD を一周する（追加 → 完了 → 詳細で title を変更 → 一覧から削除）。テストを増やすときも、1 テストの中で作ったデータはそのテストの中で消す。
   - 理由: API は InMemory で、`webServer` の 1 プロセスを全テストが共有する（`workers: 1` で順番に実行）。テスト間でデータが残ると結果が実行順に依存するため、テスト間の独立性ではなく 1 本の中の操作の順序で状態を担保する。
-- Chromium のビルド: `@playwright/test` が要求するビルドと、環境に入っているブラウザが一致しないときは、環境変数 `PLAYWRIGHT_CHROMIUM_EXECUTABLE` に Chromium の実行ファイルを渡す（例: クラウド VM では `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium pnpm test:e2e`）。CI とローカルでは `pnpm exec playwright install chromium` で版の合ったブラウザを入れ、この変数は使わない。
+- Chromium のビルド: `@playwright/test` が要求するビルドと、環境に入っているブラウザが一致しないときは、環境変数 `PLAYWRIGHT_CHROMIUM_EXECUTABLE` に Chromium の実行ファイルを渡す（例: クラウド VM では `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium pnpm test:e2e`）。CI では `pnpm exec playwright install --with-deps chromium`（OS の依存ライブラリも入れる）、ローカルでは `pnpm exec playwright install chromium` で版の合ったブラウザを入れ、この変数は使わない。
   - 理由: クラウド VM の `/opt/pw-browsers` にある Chromium はビルド 1194 で、`@playwright/test@1.63.0` の要求（1243）と一致しない。変数なしで実行すると、Playwright が 1243 の実行ファイル（`/opt/pw-browsers/chromium_headless_shell-1243/...`）を探して `Executable doesn't exist` で失敗し、この変数で 1194 の Chromium（141）を渡すと通った（2026-09-28 実測）。
 
 ## 採用しなかった案
