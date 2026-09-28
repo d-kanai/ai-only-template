@@ -5,7 +5,7 @@ import {
   renderHook,
   waitFor,
 } from "@testing-library/react";
-import { Activity, createElement, StrictMode } from "react";
+import { Activity, type ActivityProps, createElement, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   createTodo,
@@ -111,8 +111,10 @@ describe("初回の読み込み", () => {
       return null;
     }
     // テストファイルは .ts（hook のテストの命名）なので JSX を使わず createElement で組み立てる。
+    // children は第 3 引数で渡す（Biome の noChildrenProp）。ActivityProps は children を必須にしているため、
+    // props（{ mode }）だけでは型が合わない。children は第 3 引数で渡しているので ActivityProps として扱う。
     const withActivity = (mode: "visible" | "hidden") =>
-      createElement(Activity, { mode }, createElement(Probe));
+      createElement(Activity, { mode } as ActivityProps, createElement(Probe));
     const view = render(withActivity("visible"));
 
     view.rerender(withActivity("hidden"));
