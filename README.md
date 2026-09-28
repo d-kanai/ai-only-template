@@ -26,15 +26,17 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 ```
 app/                  # ルーティングだけ（page.tsx は screen を返すだけ、api/**/route.ts は backend の api ファイルの GET / POST などを re-export するだけ）
 features/todo/        # 画面側
-  screens/todo-screen/  # todo-screen.tsx（見た目）+ todo-screen.hook.ts（状態・データ取得）+ テスト
+  screens/todo-screen/  # 一覧画面。todo-screen.tsx（見た目）+ todo-screen.hook.ts（状態・データ取得）+ テスト
+  screens/todo-detail-screen/  # 詳細画面（/todo/[id]）。構成は todo-screen/ と同じ
+  components/           # feature 内で画面をまたぐ部品（todo-item.tsx）
   api/                  # /api/... を fetch する薄いラッパー（型は backend の api ファイルから import type）
   index.ts              # 公開 API（外から import してよいのはここだけ）
 backend/todo/         # API 側（DDD 4 層）
-  presentation/         # 1 API = 1 ファイル（list-todos.api.ts など）。GET / POST などの関数と、リクエスト / レスポンスの型を export
+  presentation/         # 1 API = 1 ファイル（list-todos.api.ts など）。コンテナを受け取って handler を返す関数（listTodosApi(container)）、本番用の GET / POST など、リクエスト / レスポンスの型を export
   application/          # 読むだけの query（list-todos.query.ts）と状態を変える command（create-todo.command.ts）
   domain/               # Entity / Value Object / Repository の interface
   infra/                # Repository の実装（当面 InMemory）、container.ts（DI）
-backend/shared/       # API 側で feature をまたぐ共通部品（presentation/http-error.ts に DomainError → HTTP ステータス変換と ErrorResponse 型）
+backend/shared/       # API 側で feature をまたぐ共通部品（domain/domain-error.ts に DomainError、presentation/http-error.ts に HTTP ステータス変換と ErrorResponse 型、presentation/json-body.ts に本文の読み取り）
 shared/               # 画面側で feature をまたぐ共通部品（必要になったら作る）
 ```
 

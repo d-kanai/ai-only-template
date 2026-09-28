@@ -22,6 +22,9 @@ Next.js（App Router）のコードを、機能（feature）単位で置く。�
 app/
   layout.tsx                          # Next の規約ファイル（loading.tsx / error.tsx なども app/ に置く）
   page.tsx                            # return <TodoScreen />
+  todo/
+    [id]/
+      page.tsx                        # await params で id を取り出し、return <TodoDetailScreen todoId={id} />
   api/
     todos/
       route.ts                        # export { GET } from "@/backend/todo/presentation/list-todos.api"
@@ -44,21 +47,31 @@ features/
         todo-screen.hook.ts           # 状態・イベント・データ取得（useTodoScreen）
         todo-screen.test.tsx
         todo-screen.hook.test.ts
+      todo-detail-screen/
+        todo-detail-screen.tsx        # props は todoId（app/todo/[id]/page.tsx から受け取る）
+        todo-detail-screen.hook.ts    # useTodoDetailScreen(todoId)
+        todo-detail-screen.test.tsx
+        todo-detail-screen.hook.test.ts
 backend/
   shared/
+    domain/
+      domain-error.ts                 # DomainError（code: validation_error / not_found）
     presentation/
-      http-error.ts                   # DomainError → HTTP ステータスの変換、ErrorResponse 型
+      http-error.ts                   # DomainError → HTTP ステータスの変換、ErrorResponse 型、InvalidRequestError
+      http-error.test.ts
+      json-body.ts                    # リクエスト本文を JSON のオブジェクトとして読む（readJsonObject）
+      json-body.test.ts
   todo/
     presentation/                     # 1 API = 1 ファイル。リクエスト / レスポンスの型もこの中で定義して export する
-      list-todos.api.ts               # export async function GET(request: Request)
+      list-todos.api.ts               # export function listTodosApi(container) → handler / export const GET = listTodosApi(todoContainer)
       list-todos.api.test.ts
-      get-todo.api.ts                 # export async function GET(request, ctx: { params: Promise<{ id: string }> })
+      get-todo.api.ts                 # getTodoApi(container) の handler は (request, ctx: { params: Promise<{ id: string }> }) / export const GET
       get-todo.api.test.ts
-      create-todo.api.ts              # export async function POST(request: Request)
+      create-todo.api.ts              # createTodoApi(container) / export const POST
       create-todo.api.test.ts
-      update-todo.api.ts              # export async function PUT(request, ctx)
+      update-todo.api.ts              # updateTodoApi(container) / export const PUT
       update-todo.api.test.ts
-      delete-todo.api.ts              # export async function DELETE(request, ctx)
+      delete-todo.api.ts              # deleteTodoApi(container) / export const DELETE
       delete-todo.api.test.ts
     application/
       list-todos.query.ts             # 読むだけ（副作用なし）
@@ -77,7 +90,8 @@ backend/
       todo-repository.ts              # Repository の interface
     infra/
       todo-repository.in-memory.ts    # Repository の実装（InMemory）
-      container.ts                    # 組み立て（DI）
+      todo-repository.in-memory.test.ts
+      container.ts                    # 組み立て（DI）。createTodoContainer(repository) と、アプリ共有の todoContainer
 ```
 
 ## `app/`（ルーティング）
@@ -85,7 +99,7 @@ backend/
 - `page.tsx` は screen を返すだけにする（`return <TodoScreen />`）。状態・データ取得・見た目は screen 側に書く。
 - `app/api/**/route.ts` は `backend/<feature>/presentation` の api ファイルが export する HTTP メソッド名の関数を re-export するだけにする（`export { GET } from "@/backend/todo/presentation/list-todos.api";`）。入力検証やレスポンスの組み立ては書かない。
   - 同じ URL の複数のメソッド（`/api/todos` の GET と POST など）は、それぞれ別の api ファイルから re-export する。
-  - re-export した関数が Route Handler として認識されることは、公式ドキュメントに明記がなく未確認。実装時に `pnpm build` の出力と動作で確認する。
+  - re-export した関数が Route Handler として動くことは確認済み（公式ドキュメントには明記がないため実測。Next.js 16.3.6、2026-09-28）: `pnpm build` の出力で `/api/todos` と `/api/todos/[id]` が動的ルート（ƒ）として出力され、`next start` に curl して一覧・取得・作成・更新・削除（CRUD）が動いた。
   - 動的セグメント（`[id]`）の `params` は Promise で、`await` して取り出す（`15-route-handlers.md` の「Route Context Helper」の例 `await ctx.params`）。取り出しは api ファイル側で行う。
 - `app/` にテストは置かない。
   - 理由: `app/` のファイルは screen / api ファイルを繋ぐだけで、仕様（テスト = 仕様）は screen と api ファイルのテストで固定する。ルーティングのファイルにロジックを置かせない狙いもある。
@@ -112,26 +126,33 @@ backend/
 ## `backend/<feature>/`（API 側、DDD 4 層）
 | 層 | 置くもの | 依存してよい先 |
 | --- | --- | --- |
-| `presentation/` | api ファイル。1 API = 1 ファイル `<verb>-<noun>.api.ts`（例: `list-todos.api.ts`、`create-todo.api.ts`）。HTTP メソッド名の関数（Request → 入力検証 → query / command → Response）と、その API のリクエスト / レスポンスの型を export する | `application`、`infra/container.ts`（query / command の受け取りだけ）、`backend/shared` |
+| `presentation/` | api ファイル。1 API = 1 ファイル `<verb>-<noun>.api.ts`（例: `list-todos.api.ts`、`create-todo.api.ts`）。コンテナを受け取って handler（Request → 入力の形の検証 → query / command → Response）を返す関数（`listTodosApi(container)`）、それを本番用のコンテナで組み立てた HTTP メソッド名の定数（`export const GET = listTodosApi(todoContainer)`）、その API のリクエスト / レスポンスの型を export する | `application`、`infra/container.ts`（コンテナの型と本番用のコンテナの受け取りだけ）、`backend/shared` |
 | `application/` | ユースケース。1 ユースケース = 1 ファイルで、読むだけ（副作用なし）のものは `<verb>-<noun>.query.ts`、状態を変えるものは `<verb>-<noun>.command.ts`（例: `list-todos.query.ts`、`create-todo.command.ts`） | `domain`、`backend/shared` |
-| `domain/` | Entity / Value Object / Repository の interface / DomainError | `backend/shared` だけ（Next・React・DB に依存しない） |
-| `infra/` | Repository の実装、`container.ts`（組み立て = DI） | `domain`（interface を実装する）、`application`（container で組み立てる） |
+| `domain/` | Entity / Value Object / Repository の interface（DomainError は feature をまたいで使うため `backend/shared/domain/` に置く） | `backend/shared` だけ（Next・React・DB に依存しない） |
+| `infra/` | Repository の実装、`container.ts`（組み立て = DI。リポジトリを受け取ってコンテナを作る `createTodoContainer(repository)` と、アプリで共有する `todoContainer`） | `domain`（interface を実装する）、`application`（container で組み立てる） |
 
 - 依存の向き: `app/api → presentation → application → domain`。`infra` は `domain` の interface を実装する（依存性の逆転）。
 - presentation は 1 API = 1 ファイルにし、その API のリクエスト / レスポンスの型（DTO）もそのファイルの中で定義して export する。feature で共通の型ファイルは置かない。
-  - 例: `list-todos.api.ts` は `export async function GET(request: Request)`、動的セグメントがある `get-todo.api.ts` は `export async function GET(request: Request, ctx: { params: Promise<{ id: string }> })` を export する。
+  - 例: `list-todos.api.ts` は `listTodosApi(container)`（handler は `(request: Request) => Promise<Response>`）と `export const GET = listTodosApi(todoContainer)` を export する。動的セグメントがある `get-todo.api.ts` の handler は `(request: Request, ctx: { params: Promise<{ id: string }> }) => Promise<Response>`。
   - 複数の API が同じ形を返す場合（`list-todos` / `get-todo` / `create-todo` / `update-todo` が返す `TodoDto` など）も、各ファイルで定義する（共通化しない）。
   - 理由: api ファイルを 1 つ開けば、その API の契約（リクエスト / レスポンスの型）と処理がすべて見えるようにする（ユーザーの判断）。同じ形を複数回書くことになり、形を変えるときは該当する api ファイルをすべて直す必要があるが、その手間よりも 1 ファイルで契約が完結することを優先する。
 - application は、読むだけで副作用のない query（`.query.ts`）と、状態を変える command（`.command.ts`）に分ける。
   - 理由: 副作用の有無をファイル名で区別し、読むだけの処理が状態を変えていないか、状態を変える処理がどれかを、開かずに見分けられるようにする。
-- `presentation` は query / command を `infra/container.ts` からだけ受け取る。Repository の実装を直接 new しない。
+- api ファイルは「コンテナを受け取って handler を返す関数」（`listTodosApi(container)`）を export し、本番の Route Handler はそれに `infra/container.ts` の共有コンテナ `todoContainer` を渡して作る（`export const GET = listTodosApi(todoContainer)`）。
+  - 理由: テストでは `listTodosApi(createTodoContainer(new InMemoryTodoRepository()))` のように空のリポジトリで組み立てた handler を使い、共有のコンテナ（`todoContainer`）に依存しないようにするため。共有のコンテナをテストで使うと、前のテストが作った Todo が残り、結果がテストの実行順に左右される。handler の中身は本番と同じものをテストする。
+  - 受け取るコンテナの型は `Pick<TodoContainer, "listTodos">` のように、その API が使う query / command だけに絞る（何に依存しているかを型で読めるようにするため）。
+- `presentation` は query / command を `infra/container.ts` で組み立てたコンテナからだけ受け取る。Repository の実装を直接 new しない（テストで `createTodoContainer` に InMemory リポジトリを渡すのは除く）。
   - 理由: 実装の差し替え（InMemory → DB）を `container.ts` の 1 か所で済ませるため。
 - `domain` は Next・React・DB に依存させない。
   - 理由: ビジネスルールをフレームワークや永続化の都合から切り離し、純粋な単体テストで検証できるようにする。
-- `backend/shared/`: feature をまたいで使う型や処理。DomainError → HTTP ステータスの変換と、エラー時のレスポンスの型 `ErrorResponse` は `backend/shared/presentation/http-error.ts` に置く。
+- `backend/shared/`: feature をまたいで使う型や処理。`DomainError` は `backend/shared/domain/domain-error.ts`、DomainError → HTTP ステータスの変換・エラー時のレスポンスの型 `ErrorResponse`・リクエストの形の誤りを表す `InvalidRequestError` は `backend/shared/presentation/http-error.ts`、リクエスト本文を JSON のオブジェクトとして読む `readJsonObject` は `backend/shared/presentation/json-body.ts` に置く。
 - 永続化は当面 InMemory（`todo-repository.in-memory.ts`）。プロセスの再起動でデータは消える。DB を決めたら `infra/` に実装を足し、`container.ts` で切り替える。
 - 入力検証は手書きにする（バリデーションライブラリは入れない）。
   - 理由: 現状の規模では依存を増やすほどの必要がない。入力が複雑になったら Issue で導入を検討する。
+- 入力検証の分担: presentation は入力の「形」だけを検査し、値の中身の規則は domain の不変条件に一本化する。
+  - presentation（api ファイル）: 本文が JSON のオブジェクトか（`readJsonObject`）、項目の型（`title` が string か、`completed` が boolean か）。違反は `InvalidRequestError` → 400（`validation_error`）。
+  - domain: 値の中身の規則（例: `title` は前後の空白を除いて 1〜100 文字。`Todo.create` / `Todo#rename`）。違反は `DomainError("validation_error")` → 400。
+  - 理由: 同じ規則を presentation と domain の 2 か所に書くと、片方だけ直してずれる。どちらの違反もレスポンスは同じ 400 / `validation_error` になるので、クライアントから見た結果は変わらない。
 
 ## 画面側とサーバ側の境界
 - 画面側（`features/<feature>/api/`）からサーバ側へは、`backend/<feature>/presentation/<name>.api.ts` が export するリクエスト / レスポンスの型を `import type` で参照するだけにする。api ファイルの関数や、application・domain・infra の実装は import しない。
@@ -164,13 +185,13 @@ backend/
 | --- | --- | --- |
 | `backend/**/domain` | 純粋な単体テスト | Node |
 | `backend/**/application`（`.query.ts` / `.command.ts`） | InMemory リポジトリを渡して検証 | Node |
-| `backend/**/presentation`（`.api.ts`） | 各 api ファイルの `GET` / `POST` などの関数に `new Request()` を渡し（動的セグメントがあれば `ctx` も）、返る `Response` を検証。Next の起動は不要 | Node |
+| `backend/**/presentation`（`.api.ts`） | 空の InMemory リポジトリで組み立てた handler（`listTodosApi(createTodoContainer(new InMemoryTodoRepository()))`）に `new Request()` を渡し（動的セグメントがあれば `ctx` も）、返る `Response` を検証。共有の `todoContainer` は使わない（上の「`backend/<feature>/`」）。Next の起動は不要 | Node |
 | `features/**/*.hook.ts` | `renderHook` で状態とイベントを検証 | jsdom |
 | `features/**/*-screen.tsx` | render して操作（クリック・入力）し、表示を検証 | jsdom |
 
 - `backend/` のテストはファイル先頭に `// @vitest-environment node` を書き、Node 環境で実行する。画面側のテストは `vitest.config.mts` の既定（jsdom）で実行する。
   - 理由: サーバのコードはブラウザ上では動かないため、DOM のない Node 環境で検証する。ファイル単位のコメントで環境を切り替えられることは、Vitest 5.0.1 で実測済み（既定を jsdom にした状態で、このコメントを付けたテストでは `document` が undefined、付けないテストでは object になった）。
-- Route Handler は Web 標準の `Request` / `Response` で書ける（`15-route-handlers.md` の「Route Handlers」）ため、api ファイルの関数は Next を起動せずに `Request` → `Response` の関数としてテストできる。
+- Route Handler は Web 標準の `Request` / `Response` で書ける（`15-route-handlers.md` の「Route Handlers」）ため、api ファイルの handler は Next を起動せずに `Request` → `Response` の関数としてテストできる。
 
 ## 採用しなかった案
 - `app/` 内に `_components` などの private folder を置き、ルート単位でコードを分ける構成（公式の「Split project files by feature or route」）: URL とコードの置き場所が結びつき、ルートを移動・改名するとコードも動かすことになる。

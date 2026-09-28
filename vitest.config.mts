@@ -8,7 +8,8 @@ export default defineConfig({
   resolve: {
     // tsconfigPaths: tsconfig.json の paths（"@/*"）を Vitest（Vite）側でも解決させるため。
     //   Next.js は tsconfig の paths を自前で解決するが、Vite は既定では解決しない（vite 8.3.1 の型定義で @default false）。
-    //   これがないとテスト対象を "@/..." で import したときに解決に失敗する（app/page.test.tsx で担保）。
+    //   これがないとテスト対象を "@/..." で import したときに解決に失敗する（features/ のテストが "@/features/..."、
+    //   backend/ のテストが "@/backend/..." を import しており、解決できなければそれらのテストが失敗することで担保）。
     //   Next.js 公式ガイドは vite-tsconfig-paths プラグインを案内しているが、Vite 8 には同等の標準オプションがある。
     //   プラグインの依存 tsconfck@3.1.6 は任意 peer として typescript ^5.0.0 を宣言しており、本リポジトリの
     //   TypeScript 7 では `pnpm peers check` が unmet peer と報告した（2026-09-28 に確認）。TS 7 との組み合わせが
