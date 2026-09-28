@@ -2,7 +2,7 @@
 // WHY: vitest.config.mts の既定環境は jsdom（コンポーネントテスト用）。このテストは子プロセスを起動するだけで DOM を使わないため、
 //   jsdom の初期化を省き、ブラウザ相当の globals が Node の API と混ざる余地をなくすため node 環境で動かす。
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -98,6 +98,53 @@ describe("biome check（pnpm lint と同じ引数）", () => {
 
     expect(status, output).not.toBe(0);
     expect(output).toContain(rule);
+  });
+
+  // style/noProcessEnv（Issue #59）: process.env を読んでよいのは backend/shared/infra/env.ts とテストだけ
+  //   （rules/code/env.md の「環境変数」）。既定 severity が info なので、biome.json で error にしている。
+  // WHY 一時ディレクトリに置いたファイルで must-reject を確かめる: overrides の includes はリポジトリ直下からの相対パスで
+  //   照合され、リポジトリの外のファイルは env.ts と同じ名前（.../backend/shared/infra/env.ts）でも一致しない（2026-09-28 実測）。
+  //   そのため「env.ts という名前なら何でも許す」ような緩い overrides になっていないことも、同じ仕組みで確かめられる。
+  it.each([
+    ["env.ts 以外のファイル", "config.ts"],
+    [
+      "リポジトリの外にある env.ts という名前のファイル（overrides はパスで照合する）",
+      "env.ts",
+    ],
+    ["E2E の spec（テストの overrides の対象外）", "todo.spec.ts"],
+  ])(
+    "%s で process.env を読むと非 0 で終わり、noProcessEnv が出力される",
+    (_kind, fileName) => {
+      const { status, output } = checkSource(fileName, [
+        "export const url = process.env.DATABASE_URL;",
+      ]);
+
+      expect(status, output).not.toBe(0);
+      expect(output).toContain("noProcessEnv");
+    },
+  );
+
+  it.each([["x.test.ts"], ["x.test.tsx"]])(
+    "テスト（%s）では process.env を読んでも 0 で終わる（子プロセスに PATH を渡すなどで使う）",
+    (fileName) => {
+      const { status, output } = checkSource(fileName, [
+        "export const path = process.env.PATH;",
+      ]);
+
+      expect(status, output).toBe(0);
+    },
+  );
+
+  it("backend/shared/infra/env.ts は process.env を読んでいても 0 で終わる（環境変数の唯一の入口）", () => {
+    const envModule = "backend/shared/infra/env.ts";
+    // 前提: env.ts が実際に process.env を読んでいること（読んでいなければ、この検査は何も確かめていない）。
+    expect(readFileSync(join(repoRoot, envModule), "utf8")).toContain(
+      "process.env",
+    );
+
+    const result = pnpmExec("biome", ["check", ERROR_ON_WARNINGS, envModule]);
+
+    expect(result.status, result.stdout + result.stderr).toBe(0);
   });
 
   it("違反のないファイルは 0 で終わる", () => {

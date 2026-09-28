@@ -7,7 +7,8 @@
 #   bash scripts/cloud-session-start.sh --install-only  # 環境設定の setup script から呼ぶ。Node / pnpm のインストールだけ行う
 #   bash scripts/cloud-session-start.sh                 # SessionStart フック（.claude/settings.json）から呼ぶ。
 #                                                       #   CLAUDE_CODE_REMOTE=true のときだけ動き、PATH の書き出しと pnpm install、
-#                                                       #   dockerd の起動と docker compose pull / up（Postgres）、pnpm db:migrate を行う
+#                                                       #   dockerd の起動と docker compose pull / up（Postgres）、.env が無ければ
+#                                                       #   .env.example からのコピー、pnpm db:migrate を行う
 #   bash scripts/cloud-session-start.sh --print-plan    # 読み取った版とインストール先を表示するだけ（テスト・確認用）
 #   CLOUD_SESSION_START_DRY_RUN=1 ...                   # ダウンロード・インストールをせず、実行予定のコマンドを表示する
 #
@@ -527,12 +528,40 @@ start_database() {
   fi
 }
 
+# リポジトリ直下の .env が無ければ .env.example からコピーする（Issue #59）。既にあれば触らない。
+# WHY: アプリ・テスト・drizzle-kit は必須の環境変数を .env から読み（backend/shared/infra/env.ts）、既定値を持たない。
+#   VM はセッションごとに新しいクローンで .env が無いので、そのままだと pnpm db:migrate も pnpm test も欠けた変数の名前を
+#   出して止まる。.env.example の値は compose.yaml の開発用 DB に合わせた開発用の値（秘密ではない）で、手元の
+#   `cp .env.example .env` と同じ状態にする。
+# WHY 既にある .env は上書きしない: 利用者がセッションの中で書き換えた値（別の DB を指すなど）を消さないため。
+# WHY .env.example も無いときは warn だけで続ける: 環境変数だけで値が渡されている場合もあり、その場合は pnpm db:migrate が通る。
+#   足りなければ env.ts が欠けた名前を出し、下の migrate の warn になる。
+ensure_dotenv() {
+  local project_dir="$1"
+  if [ -f "$project_dir/.env" ]; then
+    if is_dry_run; then echo "[dry-run] ${project_dir}/.env exists; keep it"; fi
+    return 0
+  fi
+  if [ ! -f "$project_dir/.env.example" ]; then
+    warn "${project_dir}/.env.example not found; not creating .env"
+    return 0
+  fi
+  if is_dry_run; then
+    echo "[dry-run] (cd ${project_dir} && cp .env.example .env)"
+    return 0
+  fi
+  if ! (cd "$project_dir" && cp .env.example .env); then
+    warn "cp .env.example .env failed"
+  fi
+}
+
 # 起動した Postgres に drizzle/ のマイグレーションを当てる（pnpm db:migrate = drizzle-kit migrate。Issue #57）。
 # WHY フックで当てるか: VM はセッションごとに新しく、Postgres もデータの無い状態で起動する。表が無いままだと、
-#   DATABASE_URL を付けた pnpm dev / pnpm test:e2e が「relation "todos" does not exist」で失敗する。
+#   pnpm dev / pnpm test:e2e が「relation "todos" does not exist」で失敗する。
 #   当て済みのものは飛ばす（drizzle.__drizzle_migrations に記録がある）ので、何度実行しても同じ結果になる。
-# WHY DATABASE_URL が無ければ compose.yaml の開発用 DB を渡すか: フックの環境には DATABASE_URL が無い。drizzle.config.ts も
-#   同じ既定値を持つが、どの DB に当てるかをこのスクリプトの表示（DRY_RUN）とテストで確かめられるように明示する。
+# WHY 先に .env を用意する（ensure_dotenv）: 接続先（DATABASE_URL）は drizzle.config.ts が env.ts 経由で .env から読む。
+#   スクリプトは接続先を持たず、DATABASE_URL を差し込まない（既定値を 1 か所 = .env.example にするため。Issue #59）。
+#   フックの環境に DATABASE_URL があれば、そのまま引き継がれて .env より優先される。
 # WHY timeout 15: 実測は約 1 秒（2026-09-28、表 1 つ）。15 秒かかるなら止まっているとみなす。フック全体の最悪ケースを
 #   600 秒に収めるための見積もりは rules/code/env.md（571 + 15 = 586 秒）。
 # WHY Node / pnpm の導入に失敗していても試すか: VM 既定の pnpm でも packageManager の版を取って動く（rules/code/env.md の実測）。
@@ -540,12 +569,12 @@ start_database() {
 # 出力は stderr に回す（stdout は Claude のコンテキストに入るため。start_database と同じ）。
 migrate_database() {
   local project_dir="$1"
-  local url="${DATABASE_URL:-postgresql://app:app@localhost:5432/app}"
+  ensure_dotenv "$project_dir"
   if is_dry_run; then
-    echo "[dry-run] (cd ${project_dir} && DATABASE_URL=${url} timeout 15 pnpm db:migrate)"
+    echo "[dry-run] (cd ${project_dir} && timeout 15 pnpm db:migrate)"
     return 0
   fi
-  if ! (cd "$project_dir" && DATABASE_URL="$url" timeout 15 pnpm db:migrate >&2); then
+  if ! (cd "$project_dir" && timeout 15 pnpm db:migrate >&2); then
     warn "pnpm db:migrate failed; run it manually to see the details"
     return 1
   fi

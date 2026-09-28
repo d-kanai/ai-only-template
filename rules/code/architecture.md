@@ -63,7 +63,9 @@ backend/
       json-body.ts                    # リクエスト本文を JSON のオブジェクトとして読む（readJsonObject）
       json-body.test.ts
     infra/
-      database.ts                     # Postgres のプール（環境変数から設定）と Drizzle の db、Executor 型、getDatabase / closeDatabase
+      env.ts                          # 環境変数の唯一の入口（env: 必須の設定を検証した値、toolEnv: 開発ツールのフラグ）。.env を読む
+      env.test.ts
+      database.ts                     # Postgres のプール（env から設定）と Drizzle の db、Executor 型、getDatabase / closeDatabase
       database.test.ts
       database.test-support.ts        # 実 Postgres を使うテスト用。テストファイルごとの別スキーマにマイグレーションを当てる
       database.test-support.test.ts
@@ -100,7 +102,7 @@ backend/
       schema.ts                       # todos テーブルの定義（Drizzle のスキーマ。マイグレーションの生成元）
       todo-repository.postgres.ts     # Repository の実装（Postgres。Executor を受け取る）
       todo-repository.postgres.test.ts
-      todo-repository.in-memory.ts    # Repository の実装（InMemory。DATABASE_URL が無いときとテスト用）
+      todo-repository.in-memory.ts    # Repository の実装（InMemory。テスト用）
       todo-repository.in-memory.test.ts
       in-memory-transaction-runner.ts # TransactionRunner の InMemory 実装（スナップショットで rollback）
       in-memory-transaction-runner.test.ts
@@ -167,8 +169,8 @@ drizzle.config.ts                     # drizzle-kit の設定
   - 理由: 実装の切り替え（InMemory / Postgres）とトランザクションの張り方を `container.ts` の 1 か所で決めるため。
 - `domain` は Next・React・DB に依存させない。
   - 理由: ビジネスルールをフレームワークや永続化の都合から切り離し、純粋な単体テストで検証できるようにする。
-- `backend/shared/`: feature をまたいで使う型や処理。`DomainError` は `backend/shared/domain/domain-error.ts`、`TransactionRunner` の interface は `backend/shared/domain/transaction-runner.ts`、Postgres の接続（プール）と Drizzle の db は `backend/shared/infra/database.ts`、TransactionRunner の Drizzle 実装は `backend/shared/infra/drizzle-transaction-runner.ts`、DomainError → HTTP ステータスの変換・エラー時のレスポンスの型 `ErrorResponse`・リクエストの形の誤りを表す `InvalidRequestError` は `backend/shared/presentation/http-error.ts`、リクエスト本文を JSON のオブジェクトとして読む `readJsonObject` は `backend/shared/presentation/json-body.ts` に置く。
-- 永続化は Postgres（Drizzle + node-postgres）。`DATABASE_URL` が無いときは InMemory（`todo-repository.in-memory.ts`。プロセスの再起動でデータは消える）。詳細は下の「永続化（Drizzle + Postgres）」。
+- `backend/shared/`: feature をまたいで使う型や処理。`DomainError` は `backend/shared/domain/domain-error.ts`、`TransactionRunner` の interface は `backend/shared/domain/transaction-runner.ts`、環境変数の読み込みと検証は `backend/shared/infra/env.ts`（`rules/code/env.md` の「環境変数」）、Postgres の接続（プール）と Drizzle の db は `backend/shared/infra/database.ts`、TransactionRunner の Drizzle 実装は `backend/shared/infra/drizzle-transaction-runner.ts`、DomainError → HTTP ステータスの変換・エラー時のレスポンスの型 `ErrorResponse`・リクエストの形の誤りを表す `InvalidRequestError` は `backend/shared/presentation/http-error.ts`、リクエスト本文を JSON のオブジェクトとして読む `readJsonObject` は `backend/shared/presentation/json-body.ts` に置く。
+- 永続化は Postgres（Drizzle + node-postgres）。アプリは常に Postgres を使い、InMemory（`todo-repository.in-memory.ts`）はテスト用。詳細は下の「永続化（Drizzle + Postgres）」。
 - 入力検証は手書きにする（バリデーションライブラリは入れない）。
   - 理由: 現状の規模では依存を増やすほどの必要がない。入力が複雑になったら Issue で導入を検討する。
 - 入力検証の分担: presentation は入力の「形」だけを検査し、値の中身の規則は domain の不変条件に一本化する。
@@ -177,7 +179,7 @@ drizzle.config.ts                     # drizzle-kit の設定
   - 理由: 同じ規則を presentation と domain の 2 か所に書くと、片方だけ直してずれる。どちらの違反もレスポンスは同じ 400 / `validation_error` になるので、クライアントから見た結果は変わらない。
 
 ## 永続化（Drizzle + Postgres）
-Issue #57 で導入した。Todo は Postgres（`compose.yaml`）に保存し、`DATABASE_URL` が無いときだけ InMemory で動く。
+Issue #57 で導入した。Todo は Postgres（`compose.yaml`）に保存する。InMemory はテスト用（Issue #59 で、`DATABASE_URL` が無いときに InMemory に切り替える分岐を削除した）。
 
 ### スキーマとマイグレーション
 - テーブルの形は TypeScript で宣言する（codebase-first）。feature ごとに `backend/<feature>/infra/schema.ts` に Drizzle の `pgTable` で書く（例: `backend/todo/infra/schema.ts` の `todos`）。
@@ -188,7 +190,7 @@ Issue #57 で導入した。Todo は Postgres（`compose.yaml`）に保存し、
   2. `pnpm db:generate`（`drizzle-kit generate`）で、前回のスナップショット（`drizzle/meta/`）との差分から SQL（`drizzle/<番号>_<名前>.sql`）を作る。DB には接続しない。名前は `pnpm db:generate --name <内容>` で付ける。
   3. 生成された SQL を読んで意図どおりか確かめ、`drizzle/` をまとめてコミットする。生成済みの SQL は手で直さない（直すと `drizzle/meta/` のスナップショットとずれる）。
   4. `pnpm db:migrate`（`drizzle-kit migrate`）で、DB にまだ当てていない SQL を当てる。当てた記録は DB の `drizzle.__drizzle_migrations` 表に残り、何度実行しても同じ結果になる。
-- 設定は `drizzle.config.ts`（WHAT / WHY はファイル内のコメント）。`dbCredentials.url` は `DATABASE_URL`、未設定なら compose.yaml の開発用 DB（drizzle-kit は `.env*` を読まないため）。
+- 設定は `drizzle.config.ts`（WHAT / WHY はファイル内のコメント）。`dbCredentials.url` は `env.DATABASE_URL`（`backend/shared/infra/env.ts` を相対パスで import する。drizzle-kit 自身は `.env` を読まないが、`env.ts` が読み込み時に `.env` を読む）。既定値は持たない。
 - `drizzle-kit push`（DB をスキーマに直接合わせる）は使わない。
   - 理由: push は差分を DB に直接当て、SQL をファイルに残さない。どの環境にどの変更を当てたかが記録されず、レビューもできない。列の改名を「削除 + 追加」と解釈してデータを消すような変更も、SQL を読まずに当たってしまう。generate + migrate なら、当てる SQL を PR で読み、すべての環境で同じ SQL を同じ順に当てられる。
 - `drizzle/` は Biome の対象外（`biome.json` の `files.includes`。`rules/code/lint.md`）。生成物で、整形すると次の generate で書き戻されるため。
@@ -212,26 +214,28 @@ Issue #57 で導入した。Todo は Postgres（`compose.yaml`）に保存し、
   - 分離レベルは Postgres の既定（READ COMMITTED）: 同じ Todo を同時に更新すると、後から保存した方が勝つ（lost update）。今は許容している。防ぐ必要が出たら、`SELECT ... FOR UPDATE` か分離レベルの変更を Issue で検討する。
   - InMemory の runner は run を 1 つずつ順番に実行する（並行した run の rollback が、他の run の確定した変更を消さないようにするため）。query は待たないので、実行中の command の途中の状態が見えることがある（InMemory の限界。WHY は `in-memory-transaction-runner.ts`）。
 
-### InMemory との切り替え
-- `todoContainer`（アプリ共有）は `createTodoContainerFromEnv(process.env)` で作る。`DATABASE_URL` があれば Postgres、無ければ（空文字も）InMemory。
-  - 理由: DB を起動していなくても `pnpm dev` で画面を触れるようにし、presentation のテストなどがこのモジュールを読み込むだけで DB を要求しないようにするため。
-  - E2E は必ず Postgres で動かす（下の「E2E テスト（Playwright）」）。
+### InMemory はテスト用のみ
+- `todoContainer`（アプリ共有）は常に `createPostgresTodoContainer(getDatabase().db)` で作る。環境変数で InMemory に切り替える分岐は持たない（Issue #59）。
+  - 理由: 以前は `DATABASE_URL` が無いと InMemory に落ちていたため、`.env` の書き忘れや CI での渡し忘れでも黙って動き、データが保存されないことに気づけなかった。環境変数はすべて必須にして起動時に検証する（`rules/code/env.md` の「環境変数」）。
+  - そのため `pnpm dev` の前にも `pnpm db:up` と `pnpm db:migrate` が要る。
+- `createInMemoryTodoContainer`（`InMemoryTodoRepository` と `InMemoryTransactionRunner`）はテスト用に残す。presentation のテストなどで、DB に接続せずに handler の振る舞いを確かめる（下の「テストの置き方」）。
+  - presentation のテストなどが `container.ts` を読み込むと、`todoContainer` のためにプールを作る（接続は最初のクエリまで張らないので、DB は要求しない）。`env.ts` の検証は通る必要がある（`.env` が要る）。
 
 ### 接続とプール（暫定）
-- `backend/shared/infra/database.ts` が `pg.Pool` を自分で作り、`drizzle({ client: pool })` に渡す。設定は環境変数から読む（`.env.example`）。
-  | 環境変数 | 既定値 | 意味 |
+- `backend/shared/infra/database.ts` が `pg.Pool` を自分で作り、`drizzle({ client: pool })` に渡す。設定は `env.ts` の `env`（`.env` / 環境変数を検証した値）から取る。変数はすべて必須で、コードに既定値は無い（`rules/code/env.md` の「環境変数」）。
+  | 環境変数 | `.env.example` の値 | 意味 |
   | --- | --- | --- |
-  | `DATABASE_URL` | なし（必須。無ければ InMemory） | 接続先 |
-  | `DATABASE_POOL_MAX` | 10 | プールの最大接続数（node-postgres の既定と同じ） |
-  | `DATABASE_POOL_IDLE_TIMEOUT_MS` | 10000 | 使われない接続を閉じるまでの時間（node-postgres の既定と同じ） |
-  | `DATABASE_CONNECTION_TIMEOUT_MS` | 5000 | 接続待ちの上限。node-postgres の既定 0（無制限）だと、DB が落ちているときやプールが埋まっているときにリクエストが無期限に待つため、5 秒でエラーにする |
-- 数として使えない値（`abc`、負の数、小数、`DATABASE_POOL_MAX=0`）は起動時にエラーにする（NaN のままプールに渡すと上限が効かないため）。
+  | `DATABASE_URL` | `postgresql://app:app@localhost:5432/app` | 接続先（compose.yaml の開発用 DB） |
+  | `DATABASE_POOL_MAX` | 10 | プールの最大接続数（1 以上。node-postgres の既定と同じ値） |
+  | `DATABASE_POOL_IDLE_TIMEOUT_MS` | 10000 | 使われない接続を閉じるまでの時間（0 以上。node-postgres の既定と同じ値） |
+  | `DATABASE_CONNECTION_TIMEOUT_MS` | 5000 | 接続待ちの上限（0 以上）。node-postgres の既定 0（無制限）だと、DB が落ちているときやプールが埋まっているときにリクエストが無期限に待つため、5 秒でエラーにする |
+- 欠けている値と、数として使えない値（`abc`、負の数、小数、`DATABASE_POOL_MAX=0`）は、`env.ts` の読み込み時にまとめてエラーにする（NaN のままプールに渡すと上限が効かないため。検証は `env.test.ts`）。
 - アイドル中の接続のエラー（DB の再起動など）は `pool.on("error")` でログに出すだけにし、プロセスを落とさない。
 - プールはプロセスで 1 つだけ（`globalThis` に保持）。`next dev` の再読み込み（HMR）でモジュールが読み込み直されても、プールが増えて接続を使い切らないようにするため。終了時は `closeDatabase()`（`pool.end()`）。
 - これらの値は開発・CI・E2E 用の暫定値。本番用の最終的な設定（接続数、タイムアウト、TLS、サーバレス環境での接続の扱いなど）は Issue #58 で決める。
 
 ### テスト
-- `pnpm test` は Postgres が起動している前提（`pnpm db:up` してから実行する）。接続先は `DATABASE_URL`、未設定なら compose.yaml の開発用 DB。
+- `pnpm test` は Postgres が起動している前提（`pnpm db:up` してから実行する）。接続先は `env.DATABASE_URL`（`.env`。アプリと同じ）。
 - 実 Postgres を使うテストは `createTestDatabase()`（`backend/shared/infra/database.test-support.ts`）で、テストファイルごとに別のスキーマ（`test_<UUID>`）を作り、`search_path` をそこに向けて使う。マイグレーションはそのスキーマに当て（`migrate()`）、各テストの前に `TRUNCATE` し、終わったらスキーマごと消す（`close()`）。
   - 理由: Vitest はテストファイルを並列に実行し、Stryker はさらに複数のプロセスで同じテストを並行して実行する。全員が同じ `public.todos` を使うと、あるファイルの `TRUNCATE` が別のファイルの途中のデータを消す。スキーマを分ければ互いに干渉せず、`pnpm dev` や E2E が使う `public` の表も消さない。drizzle の migrator には同時実行の排他が無い（drizzle-orm 0.45.3 の `pg-core/dialect.js` の `migrate`）ので、同じスキーマに並行して当てることも避ける。
   - テストが途中で強制終了して残ったスキーマは、次の Vitest の実行の最初に globalSetup（`vitest.global-setup.ts`）が消す（`rules/code/test.md` の「テスト用スキーマの後始末（globalSetup）」）。Postgres に接続できなければ、globalSetup が `pnpm db:up` を促すエラーで止める。
@@ -271,9 +275,11 @@ Issue #57 で導入した。Todo は Postgres（`compose.yaml`）に保存し、
   - `app/api/` が参照してよいのは `backend/<x>/presentation/*.api` だけ。
   - 規則の判定そのものも、規則ごとに「違反になる例」「ならない例」を架空の参照で 3 件以上ずつ固定している（`architecture.test.ts` の「規則ごとの判定」）。今のコードに違反が無いことだけでは、規則が緩すぎても気づけないため。
   - さらに、一時ディレクトリに架空のツリーを作って実ファイルを置き、本番と同じ列挙 → 抽出 → 正規化 → 判定（`collectViolations(root)`）に通す fixture テストがある（同ファイルの「fixture のツリーを検査したときに検出される違反」）。
-    - must-reject: 13 規則と置き場所の規則それぞれの違反を、alias（`@/`）と相対パス、値の import / `import type` / inline の `type` / `export { X } from` / `export type { X } from` / dynamic `import()` / 副作用だけの import、`.ts` / `.tsx` / `.mts` / `.cts` / `.js` / `.jsx` / `.mjs` / `.cjs` で置き、前方一致の境界（`backend/shared-x`、`app/api-x`、`features/todo-extra`）やパスに `test` を含む本番のファイルも含めて、検出される「規則: ファイル → 参照先」の一覧を丸ごと比較する（見逃しも余分な検出も失敗にする）。
+    - must-reject: 依存の 13 規則と置き場所の規則それぞれの違反を、alias（`@/`）と相対パス、値の import / `import type` / inline の `type` / `export { X } from` / `export type { X } from` / dynamic `import()` / 副作用だけの import、`.ts` / `.tsx` / `.mts` / `.cts` / `.js` / `.jsx` / `.mjs` / `.cjs` で置き、前方一致の境界（`backend/shared-x`、`app/api-x`、`features/todo-extra`）やパスに `test` を含む本番のファイルも含めて、検出される「規則: ファイル → 参照先」の一覧を丸ごと比較する（見逃しも余分な検出も失敗にする）。
     - must-pass: 許可される参照を網羅したツリーで違反 0 件を確かめる。今のリポジトリの本番コードの参照（参照元・参照先・型だけか）はすべて含めている。コメント・文字列の中の import 風の文字列、テストファイル、TS / JS 以外のファイルも置く。
     - 理由: 抽出の取りこぼし（書き方によって import を拾えない）は、規則が正しくても違反の見逃しになる。1 件の参照を規則に渡すだけのテストではそこを検証できない。
+  - 環境変数の直参照（規則 `env-direct-access`。Issue #59）: `process.env` を読んでよいのは `backend/shared/infra/env.ts` だけ。対象は `app/` `features/` `backend/` `shared/` `e2e/` のソースとルート直下の設定・セットアップファイル（テストは除く）。依存の向きとは別に、ソースの中身（`process.env` / `process["env"]` など）で判定し、「ファイル:行」を出して失敗する。判定の例（`ENV_ACCESS_EXAMPLES`）と fixture の must-reject / must-pass も持つ。規則の中身・限界（分割代入は拾わない）・Biome の `noProcessEnv` との二重化の理由は `rules/code/env.md` の「環境変数」。
+  - 規則は全部で 15（依存の 13 規則 `RULES` + 置き場所 `BACKEND_PLACEMENT` + 環境変数の直参照 `ENV_DIRECT_ACCESS`）。
   - テストを対象外にする理由: テストは組み立てのために規則の外側を参照する（presentation のテストが infra の InMemory リポジトリを使うなど。上の「テストの置き方」）。
   - 抽出は正規表現で行う（依存は足さない）。コメントと文字列リテラルの中の import 風の文字列は除く。dynamic import は ``import(`x`)``（`${}` 無し）と第 2 引数つきの `import("x", { with: ... })` も拾う。限界: 正規表現リテラルやテンプレートリテラルの入れ子はコメント・文字列の区切りを誤認しうる、`${}` の中の `import()`、`${}` を含むテンプレートリテラルを渡した ``import(`@/backend/${name}`)``（参照先を静的に決められない）、`}` の直後に同じ行で続けた `export ... from` は拾わない（見逃す方向）、型の位置の `import("x").T` は値の参照として数える（多く検出する方向）（詳細と WHY は `architecture.test.ts` のコメント。抽出の仕様は同ファイルの「参照の抽出」「参照先の正規化」のテストで固定している）。
   - この節や上の「画面側とサーバ側の境界」「`backend/<feature>/`」の依存の規則を足す・変えるときは、`architecture.test.ts` の `RULES` と `RULE_EXAMPLES`（判定の例）、置き場所の規則 `BACKEND_PLACEMENT` と `PLACEMENT_EXAMPLES`、fixture の must-reject / must-pass（`MUST_REJECT_FILES` / `MUST_REJECT_VIOLATIONS` / `MUST_PASS_FILES`）も合わせて直す。本番コードに新しい import の形（新しい層の組み合わせや書き方）を足したときも、must-pass に同じ形を足す。
@@ -321,10 +327,10 @@ Issue #57 で導入した。Todo は Postgres（`compose.yaml`）に保存し、
 - 置き場所: ルート直下の `e2e/` に `<feature>.spec.ts` で置く（例: `e2e/todo.spec.ts`）。対象の隣には置かない。
   - 理由: E2E は画面・API・ルーティングをまたいで 1 つの操作の流れを検証するもので、特定のファイルに対応しない。
 - 実行: `pnpm test:e2e`（`playwright test`）。設定は `playwright.config.ts`。`webServer` が `pnpm build && pnpm start -p 3100` で本番ビルドを起動してからテストする（ローカルで 3100 番にサーバが起動済みなら、それを使う）。`pnpm test`（Vitest）には含めない（`vitest.config.mts` で `e2e/**` を除外）。
-- E2E は必ず Postgres で動かす。`playwright.config.ts` が `webServer.env` に `DATABASE_URL`（未設定なら compose.yaml の開発用 DB `postgresql://app:app@localhost:5432/app`）を渡す。`DATABASE_URL` が空文字なら、サーバを起動する前に失敗させる（`e2e/database.ts` の `e2eDatabaseUrl`）。
-  - 理由: アプリは `DATABASE_URL` が無いと InMemory で動く。E2E は利用者に届く構成（Postgres に保存する）を検証するもので、InMemory で緑になると DB 経由の不具合を見逃す。テストの中でも、画面で追加した Todo が DB に行として入っていることを直接確かめる。
+- E2E は Postgres で動かす（アプリは常に Postgres）。`playwright.config.ts` が `webServer.env` に `env.DATABASE_URL`（`.env` / 環境変数を `env.ts` で検証した値）を渡し、テスト側（`e2e/database.ts`）も同じ `env.DATABASE_URL` に接続する。必須の変数が欠けていれば、`playwright.config.ts` の読み込み（`env.ts`）でサーバを起動する前に失敗する。
+  - 理由: E2E は利用者に届く構成（Postgres に保存する）を検証する。テストの中でも、画面で追加した Todo が DB に行として入っていることを直接確かめる。サーバとテストが同じ値を使うので、コマンドの前に付けた `DATABASE_URL` で接続先を変えても両者がずれない。
   - 前提: Postgres が起動していて（`pnpm db:up`）、マイグレーションを当ててある（`pnpm db:migrate`）こと。`webServer.command` の中では当てない（Issue #57 の方針）。CI とクラウドのフックは E2E の前に `pnpm db:migrate` を実行する。
-  - 注意: ローカルで `reuseExistingServer` により 3100 番の起動済みサーバを使うときは、そのサーバの環境変数のまま動く。`DATABASE_URL` なしで起動したサーバが残っていると、DB の確認で失敗する。
+  - 注意: ローカルで `reuseExistingServer` により 3100 番の起動済みサーバを使うときは、そのサーバの環境変数のまま動く。別の `DATABASE_URL` で起動したサーバが残っていると、DB の確認で失敗する。
 - 各テストの前に `todos` を空にする（`test.beforeEach` で `e2e/database.ts` の `resetTodos()` が `TRUNCATE todos`）。データの冪等性はこれで担保する。title に実行時刻を付けてユニークにしているのは補助（リセットが効かなかったときに、失敗の原因を分かりやすくする）。
   - 理由: Postgres のデータはサーバを起動し直しても残る。前のテストや、途中で失敗した前回の実行のデータが一覧に出ると、結果が実行順や過去の実行に左右される。
 - 1 テストで CRUD を一周する（追加 → 完了 → 詳細で title を変更 → 一覧から削除）。

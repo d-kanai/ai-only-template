@@ -19,7 +19,7 @@ import {
   createInMemoryTodoContainer,
   createPostgresTodoContainer,
   createTodoContainer,
-  createTodoContainerFromEnv,
+  todoContainer,
 } from "@/backend/todo/infra/container";
 import { InMemoryTodoRepository } from "@/backend/todo/infra/todo-repository.in-memory";
 import { PostgresTodoRepository } from "@/backend/todo/infra/todo-repository.postgres";
@@ -175,31 +175,14 @@ describe("createInMemoryTodoContainer", () => {
   });
 });
 
-describe("createTodoContainerFromEnv", () => {
-  test("DATABASE_URL が無ければ InMemory で組み立てる（DB を起動していなくても画面を触れる）", async () => {
-    const container = createTodoContainerFromEnv({});
-
-    const todo = await container.createTodo.execute({ title: "牛乳を買う" });
-
-    await expect(container.listTodos.execute()).resolves.toEqual([todo]);
-  });
-
-  test("DATABASE_URL が空文字でも InMemory で組み立てる", async () => {
-    const container = createTodoContainerFromEnv({ DATABASE_URL: "" });
-
-    await expect(container.listTodos.execute()).resolves.toEqual([]);
-  });
-
-  test("DATABASE_URL があれば Postgres のリポジトリで組み立てる", async () => {
+describe("todoContainer（アプリ共有のコンテナ）", () => {
+  test("常に Postgres のリポジトリで組み立てる（DATABASE_URL が無いときに InMemory へ切り替えない）", async () => {
     const findAll = vi
       .spyOn(PostgresTodoRepository.prototype, "findAll")
       .mockResolvedValue([]);
-    const container = createTodoContainerFromEnv({
-      // 接続はしない（findAll を差し替えている）。プールは作るだけなら接続しない（node-postgres の Pool は最初のクエリで接続する）。
-      DATABASE_URL: "postgresql://app:app@localhost:5432/app",
-    });
 
-    await expect(container.listTodos.execute()).resolves.toEqual([]);
+    // findAll を差し替えているので接続はしない。
+    await expect(todoContainer.listTodos.execute()).resolves.toEqual([]);
     expect(findAll).toHaveBeenCalledTimes(1);
   });
 });

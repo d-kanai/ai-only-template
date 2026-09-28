@@ -15,7 +15,8 @@ import { dirname, join, posix, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
 // ディレクトリ構成ルール（rules/code/architecture.md）の依存の向きを、仕様として機械的に検査するテスト。
-// 対象は「依存の向き（全体）」「画面側とサーバ側の境界」「backend の 4 層の依存してよい先」。
+// 対象は「依存の向き（全体）」「画面側とサーバ側の境界」「backend の 4 層の依存してよい先」と、
+// 環境変数の直参照の禁止（rules/code/env.md の「環境変数」。規則 env-direct-access）。
 //
 // WHY 自前のテストにする（Biome の noRestrictedImports を使わない）:
 //   「features/<f>/api/ から backend へは import type だけ許す」を表現できない。Biome 2.5.13 の noRestrictedImports は
@@ -548,6 +549,80 @@ const BACKEND_PLACEMENT = {
     isUnder(file, "backend") && !BACKEND_LAYER_DIR.test(file),
 };
 
+// --- 環境変数の直参照（規則 env-direct-access。rules/code/env.md の「環境変数」） ---
+// process.env を読んでよいのは backend/shared/infra/env.ts だけ。ほかは env.ts の env / toolEnv を使う。
+// WHY 参照（import）の規則と別に持つ: 参照先ではなくソースの中身（process.env という式）で決まり、対象のファイルも違う
+//   （e2e/ とルート直下の設定ファイルも含める）ため。置き場所の規則（BACKEND_PLACEMENT）と同じく、RULES の外に置く。
+// WHY Biome の style/noProcessEnv と二重に検査する: Biome は biome.json の overrides で対象外を決めるので、overrides の
+//   書き換え（対象外のパスを広げる、ルールを off にする）で黙って効かなくなる。ここでは対象と例外（env.ts だけ）を
+//   テストとして固定し、どちらか片方が壊れても、もう片方で止まるようにする。
+// 限界（仕様として受け入れる。下の「環境変数の直参照の抽出」のテストで固定している）:
+//   - 分割代入（const { env } = process）や process を別名に入れてから読む書き方（const p = process; p.env）は拾わない
+//     （見逃す方向）。式の流れを追うには構文解析が要るため。Biome の noProcessEnv（2.5.13）もこの 2 つは検出しない
+//     （2026-09-28 実測）ので、どちらの検査でも見逃す。レビューで見る。
+//   - テンプレートリテラルの ${} の中の process.env は、文字列の中とみなして拾わない（見逃す方向。extractImports と同じ）。
+//     これと import { env } from "node:process" は Biome の noProcessEnv が検出する（2026-09-28 実測）。
+
+// 検査の対象にするディレクトリ。依存の向きの対象（SOURCE_DIRS）に、E2E（e2e/）を足す。
+// WHY e2e/ を含める: E2E の補助（e2e/database.ts）は接続先を読むので、既定値や直参照が入り込みやすい。
+const ENV_CHECK_DIRS = [...SOURCE_DIRS, "e2e"];
+
+const ENV_DIRECT_ACCESS = {
+  id: "env-direct-access",
+  name: "process.env を直接読んでよいのは backend/shared/infra/env.ts だけ（app/・features/・backend/・shared/・e2e/ とルート直下の設定ファイルが対象。テストは除く）",
+  // 例外の 1 ファイル。
+  allowedFile: "backend/shared/infra/env.ts",
+  // 対象のファイルか。ENV_CHECK_DIRS の下か、ルート直下（"/" を含まない）の、テストでない TS / JS。
+  // WHY ルート直下の設定ファイルを含める: drizzle.config.ts・playwright.config.ts・vitest.global-setup.ts などは、
+  //   接続先やフラグを読むので、既定値や直参照が入り込みやすい。ルート直下のテスト（architecture.test.ts など）は除く。
+  appliesTo: (file: string) =>
+    SOURCE_FILE.test(file) &&
+    !TEST_FILE.test(file) &&
+    (!file.includes("/") ||
+      ENV_CHECK_DIRS.some((dir) => file.startsWith(`${dir}/`))),
+};
+
+// process.env / process?.env / process["env"] / process['env'] / process[`env`]。空白や改行を挟んでもよい。
+// \bprocess なので globalThis.process.env も拾い、processEnv のような別の識別子や myprocess.env は拾わない。
+const PROCESS_ENV =
+  /\bprocess\s*(?:\??\.\s*env\b|(?:\?\.)?\s*\[\s*(["'`])env\1\s*\])/g;
+
+// source の中の process.env の参照を、書かれた行番号（1 始まり）の並びで返す。
+// コメントの中と文字列リテラルの中は拾わない（extractImports と同じ stripComments / stringRanges を使う）。
+// stripComments はコメントを同じ長さの空白に置き換え、改行を残すので、位置から元の行番号を数えられる。
+function findProcessEnvAccesses(source: string): number[] {
+  const code = stripComments(source);
+  const ranges = stringRanges(code);
+  return [...code.matchAll(PROCESS_ENV)]
+    .filter((match) => !isInsideString(ranges, match.index))
+    .map((match) => code.slice(0, match.index).split("\n").length);
+}
+
+// ルート直下のファイル（ディレクトリの中は見ない）。node_modules/ や .next/ の中は対象外。
+function listRootFiles(root: string): string[] {
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name);
+}
+
+function listEnvCheckedFiles(root: string): string[] {
+  return [
+    ...ENV_CHECK_DIRS.flatMap((dir) => listSourceFiles(root, dir)),
+    ...listRootFiles(root),
+  ].filter(ENV_DIRECT_ACCESS.appliesTo);
+}
+
+// 「ファイル:行」の一覧。env.ts は除く。
+function findEnvViolations(root: string): string[] {
+  return listEnvCheckedFiles(root)
+    .filter((file) => file !== ENV_DIRECT_ACCESS.allowedFile)
+    .flatMap((file) =>
+      findProcessEnvAccesses(readFileSync(join(root, file), "utf8")).map(
+        (line) => `${file}:${line}`,
+      ),
+    );
+}
+
 function findViolations(references: Reference[], rule: Rule): string[] {
   return references
     .filter((ref) => rule.appliesTo(ref.from) && rule.isViolation(ref))
@@ -557,6 +632,8 @@ function findViolations(references: Reference[], rule: Rule): string[] {
 // root の下のツリー全体の違反を「<規則の id>: ファイル → 参照先」の一覧（並べ替え済み）で返す。
 //   1 つの参照が複数の規則に違反するときは、規則ごとに 1 行ずつ出す。
 //   置き場所の違反は「backend-placement: ファイル」の 1 行で出す。
+//   環境変数の直参照は「env-direct-access: ファイル:行」を参照ごとに 1 行で出す（同じファイルの複数の書き方を、
+//   1 つずつ拾えているかまで比べるため）。
 function collectViolations(root: string): string[] {
   const files = listAllSourceFiles(root);
   const references = referencesOf(root, files);
@@ -567,6 +644,9 @@ function collectViolations(root: string): string[] {
     ...files
       .filter(BACKEND_PLACEMENT.isMisplaced)
       .map((file) => `${BACKEND_PLACEMENT.id}: ${file}`),
+    ...findEnvViolations(root).map(
+      (line) => `${ENV_DIRECT_ACCESS.id}: ${line}`,
+    ),
   ].sort();
 }
 
@@ -589,6 +669,40 @@ describe("依存の向き（rules/code/architecture.md）", () => {
       expect(findViolations(references, rule)).toEqual([]);
     });
   }
+
+  it(ENV_DIRECT_ACCESS.name, () => {
+    // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
+    expect(findEnvViolations(repoRoot)).toEqual([]);
+  });
+
+  it("環境変数の直参照の検査は、各ディレクトリとルート直下の設定ファイルを対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
+    const files = listEnvCheckedFiles(repoRoot);
+    expect(files).toEqual(
+      expect.arrayContaining([
+        "backend/shared/infra/env.ts",
+        "backend/shared/infra/database.ts",
+        "backend/shared/infra/database.test-support.ts",
+        "backend/todo/infra/container.ts",
+        "e2e/database.ts",
+        "drizzle.config.ts",
+        "playwright.config.ts",
+        "vitest.config.mts",
+        "vitest.global-setup.ts",
+        "stryker.config.mjs",
+        "next.config.ts",
+      ]),
+    );
+    expect(files).not.toContain("architecture.test.ts");
+    expect(files).not.toContain("backend/shared/infra/env.test.ts");
+  });
+
+  it("env.ts の中の process.env は拾えている（抽出が壊れて 0 件になり、規則が素通りするのを防ぐ）", () => {
+    expect(
+      findProcessEnvAccesses(
+        readFileSync(join(repoRoot, ENV_DIRECT_ACCESS.allowedFile), "utf8"),
+      ).length,
+    ).toBeGreaterThan(0);
+  });
 });
 
 // --- 規則ごとの判定の仕様 ---
@@ -1025,6 +1139,97 @@ describe("backend の置き場所の判定", () => {
   });
 });
 
+// 環境変数の直参照の規則（ENV_DIRECT_ACCESS）の判定例。参照ではなく [ファイル, ソース] で決まるので別に持つ。
+const ENV_ACCESS_EXAMPLES: {
+  violating: [file: string, source: string][];
+  allowed: [file: string, source: string][];
+} = {
+  violating: [
+    ["backend/todo/infra/x.ts", "const url = process.env.DATABASE_URL;"],
+    ["e2e/x.ts", 'const url = process["env"].DATABASE_URL;'],
+    ["playwright.config.ts", "const ci = !process . env . CI;"],
+    ["features/todo/api/x.tsx", "const v = globalThis.process.env.X;"],
+    ["drizzle.config.ts", "const v = process\n  .env\n  .X;"],
+    ["app/page.jsx", "const v = process?.env.X;"],
+    ["vitest.config.mts", "const v = process['env'];"],
+    // env.ts と名前の前方一致だけが同じ別ファイル。
+    ["backend/shared/infra/env-helper.ts", "export const v = process.env;"],
+    ["shared/x.cjs", "module.exports = process[`env`];"],
+  ],
+  allowed: [
+    // 例外の env.ts。
+    [
+      "backend/shared/infra/env.ts",
+      'process.loadEnvFile(".env");\nexport const env = readEnv(process.env);',
+    ],
+    // コメント・文字列の中。
+    ["backend/todo/infra/x.ts", "// process.env.DATABASE_URL は読まない"],
+    ["backend/todo/infra/x.ts", "/* process.env */ export const a = 1;"],
+    ["backend/todo/infra/x.ts", 'const s = "process.env.DATABASE_URL";'],
+    // process.env ではない識別子・プロパティ。
+    ["backend/todo/infra/x.ts", "const processEnv = read(); processEnv.X;"],
+    ["backend/todo/infra/x.ts", "const v = myprocess.env; process.envelope;"],
+    // テストと、対象外の場所のファイル。
+    ["backend/todo/infra/x.test.ts", "const path = process.env.PATH;"],
+    ["architecture.test.ts", "const path = process.env.PATH;"],
+    ["scripts/x.ts", "const path = process.env.PATH;"],
+    ["README.md", "process.env.DATABASE_URL"],
+  ],
+};
+
+function judgeEnvAccess([file, source]: [string, string]): boolean {
+  return (
+    ENV_DIRECT_ACCESS.appliesTo(file) &&
+    file !== ENV_DIRECT_ACCESS.allowedFile &&
+    findProcessEnvAccesses(source).length > 0
+  );
+}
+
+describe("環境変数の直参照の判定", () => {
+  it("違反例・許可例はそれぞれ 4 件以上ある", () => {
+    expect(ENV_ACCESS_EXAMPLES.violating.length).toBeGreaterThanOrEqual(4);
+    expect(ENV_ACCESS_EXAMPLES.allowed.length).toBeGreaterThanOrEqual(4);
+  });
+  it.each(ENV_ACCESS_EXAMPLES.violating)("%s の %j は違反", (...example) => {
+    expect(judgeEnvAccess(example)).toBe(true);
+  });
+  it.each(ENV_ACCESS_EXAMPLES.allowed)(
+    "%s の %j は違反ではない",
+    (...example) => {
+      expect(judgeEnvAccess(example)).toBe(false);
+    },
+  );
+});
+
+describe("環境変数の直参照の抽出（findProcessEnvAccesses）", () => {
+  it("参照ごとに、書かれた行番号を返す（コメントを消しても行はずれない）", () => {
+    const source = [
+      "/*",
+      " * process.env は読まない",
+      " */",
+      "const a = process.env.A; const b = process.env.B;",
+      "// process.env",
+      'const c = process["env"].C;',
+    ].join("\n");
+    expect(findProcessEnvAccesses(source)).toEqual([4, 4, 6]);
+  });
+
+  it("分割代入（const { env } = process）と別名経由の参照は拾わない（見逃す方向の限界。Biome の noProcessEnv も検出しない）", () => {
+    const source = [
+      "const { env } = process;",
+      "const p = process; p.env;",
+    ].join("\n");
+    expect(findProcessEnvAccesses(source)).toEqual([]);
+  });
+
+  it("テンプレートリテラルの埋め込み式の中の参照は拾わない（見逃す方向の限界。Biome の noProcessEnv が検出する）", () => {
+    // WHY テンプレートリテラルで書く: 普通の文字列の中に埋め込み式の形を書くと Biome の noTemplateCurlyInString が
+    //   書き間違いとして検出するため、\${ でエスケープして同じ文字列を作る。
+    const source = `const url = \`db: \${process.env.DATABASE_URL}\`;`;
+    expect(findProcessEnvAccesses(source)).toEqual([]);
+  });
+});
+
 describe("規則ごとの判定", () => {
   // WHY 件数をそろえる: 例が 1 件だけだと、規則の書き方を少し崩した（条件を 1 つ落とした）ときに気づけない。
   //   違反・許可の両側に複数の例を置き、境界の両側を固定する。
@@ -1075,10 +1280,12 @@ function violationsOfFixture(files: Record<string, string>): string[] {
   }
 }
 
-// must-reject: 13 規則それぞれについて、alias（@/）と相対パス、値の import / import type / inline の type /
+// must-reject: 依存の向きの 13 規則（RULES）それぞれについて、alias（@/）と相対パス、値の import / import type / inline の type /
 // export { X } from / export type { X } from / dynamic import() / 副作用だけの import のうち規則に関係する形と、
 // .ts / .tsx / .js / .jsx の各拡張子、境界ぎりぎりのケース（他 feature の深いパス、自 feature の禁止層、
 // 名前の前方一致だけが同じ別ディレクトリ、next / react / react-dom のサブパス）を置く。
+// あわせて、置き場所の規則（BACKEND_PLACEMENT）と環境変数の直参照の規則（ENV_DIRECT_ACCESS）の違反も置く。
+// 規則は全部で 15（RULES の 13 + 置き場所 + 環境変数の直参照）。
 const MUST_REJECT_FILES: Record<string, string> = {
   // screen-to-backend: features/<f>/ の api/ 以外から backend への参照は、型でも相対でも違反。
   "features/todo/components/bad-backend.ts": lines(
@@ -1312,9 +1519,35 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import { NextResponse } from "next/server";',
     'import { toErrorResponse } from "../presentation/http-error";',
   ),
+  // env-direct-access: env.ts 以外で process.env を読む。書き方ごとに 1 行ずつ置き、行番号で検出を比べる。
+  //   コメント・文字列の中（7・8 行目）は拾わない。
+  "backend/todo/infra/bad-env.ts": lines(
+    "const a = process.env.DATABASE_URL;",
+    "const b = process",
+    "  .env.DATABASE_POOL_MAX;",
+    'const c = process["env"].X;',
+    "const d = globalThis.process.env.X;",
+    "const e = process?.env.X;",
+    "// process.env.COMMENT",
+    'const f = "process.env.STRING";',
+  ),
+  //   e2e/ とルート直下の設定ファイル（.ts / .mjs / .cjs）、env.ts と名前の前方一致だけが同じ別ファイル。
+  "e2e/bad-env.ts": lines("export const url = process.env.DATABASE_URL;"),
+  "bad.config.ts": lines("export const ci = !process['env'].CI;"),
+  "bad.config.mjs": lines("export default { ci: process.env.CI };"),
+  "bad.config.cjs": lines("module.exports = process . env;"),
+  "backend/shared/infra/env-helper.ts": lines("export const e = process.env;"),
 };
 
 const MUST_REJECT_VIOLATIONS = [
+  ...[1, 2, 4, 5, 6].map(
+    (line) => `env-direct-access: backend/todo/infra/bad-env.ts:${line}`,
+  ),
+  "env-direct-access: e2e/bad-env.ts:1",
+  "env-direct-access: bad.config.ts:1",
+  "env-direct-access: bad.config.mjs:1",
+  "env-direct-access: bad.config.cjs:1",
+  "env-direct-access: backend/shared/infra/env-helper.ts:1",
   ...[
     "backend/todo/presentation/list-todos.api",
     "backend/todo/domain/todo",
@@ -1765,6 +1998,41 @@ const MUST_PASS_FILES: Record<string, string> = {
   "backend/shared/infra/database.ts": lines(
     'import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";',
     'import { Pool, type PoolConfig } from "pg";',
+    // Issue #59: 設定は env.ts から取る（backend/shared/infra → backend/shared/infra の値の参照）。
+    'import { env } from "@/backend/shared/infra/env";',
+    'import { env as e } from "./env";',
+  ),
+  // Issue #59: process.env を読んでよいのは env.ts だけ。
+  "backend/shared/infra/env.ts": lines(
+    'process.loadEnvFile(".env");',
+    "export const env = readEnv(process.env);",
+    "export const toolEnv = readToolEnv(process . env);",
+  ),
+  // env.ts 以外の、process.env に見えるが参照ではないもの（コメント・文字列・別の識別子）。
+  "backend/todo/infra/env-lookalikes.ts": lines(
+    "// process.env.DATABASE_URL は env.ts から読む",
+    "/* process['env'] */",
+    'const s = "process.env.X";',
+    "const t = 'process[\"env\"]';",
+    "const processEnv = read(); processEnv.X;",
+    "const v = myprocess.env; process.envelope;",
+  ),
+  // テスト、対象外の場所（scripts/・ルート直下のディレクトリの中）、TS / JS 以外のファイルは検査しない。
+  "backend/shared/infra/env.test.ts": lines("const p = process.env.PATH;"),
+  "e2e/todo.test.ts": lines("const p = process.env.PATH;"),
+  "architecture.test.ts": lines("const p = process.env.PATH;"),
+  "scripts/tool.ts": lines("const p = process.env.PATH;"),
+  "node_modules/pkg/index.js": lines("module.exports = process.env;"),
+  ".next/server/chunk.js": lines("module.exports = process.env;"),
+  "README.md": "process.env.DATABASE_URL",
+  // ルート直下の設定ファイル・e2e/ は env.ts を相対パスで import する。
+  "drizzle.config.ts": lines(
+    'import { env } from "./backend/shared/infra/env";',
+    "export default { url: env.DATABASE_URL };",
+  ),
+  "e2e/database.ts": lines(
+    'import { env } from "../backend/shared/infra/env";',
+    "export const url = env.DATABASE_URL;",
   ),
   "backend/shared/infra/drizzle-transaction-runner.ts": lines(
     'import type { TransactionRunner } from "@/backend/shared/domain/transaction-runner";',
@@ -1778,6 +2046,7 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { migrate } from "drizzle-orm/node-postgres/migrator";',
     'import { Pool } from "pg";',
     'import type { Database } from "@/backend/shared/infra/database";',
+    'import { env } from "@/backend/shared/infra/env";',
   ),
   "backend/todo/infra/schema.ts": lines(
     'import { boolean, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";',

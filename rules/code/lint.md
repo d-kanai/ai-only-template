@@ -22,7 +22,7 @@ pnpm format   # biome format --write .                  … format だけを適�
 - Biome の recommended には既定 severity が warn / info のルールが多い（2.5.13 では recommended の JS ルール 178 件のうち warn 50 件・info 26 件。`biome explain <rule>` の Default severity で確認）。次の 2 段で error 扱いにしている。
   - warn: `pnpm lint` / `pnpm check` / pre-commit のすべてで `--error-on-warnings` を付け、warn でも失敗させる。ルールを列挙しないため、Biome の更新で warn のルールが増えても自動で対象になる。
   - info: `--error-on-warnings` では失敗しないため、`biome.json` で個別に `"error"` を指定している（下の「recommended のうち info から error に上げたルール」）。Biome を更新したら、recommended に info のルールが増えていないか確認する。
-- 担保: `lint.test.ts` が、warn（noUnusedVariables）・info（useTemplate）・追加ルール（noConsole）の**代表 1 ルールずつ**について、違反単独で `biome check --error-on-warnings` が失敗すること、`pnpm lint` / `pnpm check` / pre-commit が `--error-on-warnings` 付きであることを検査する。個々のルールの有無までは検査しないので、`biome.json` を変えるときは下の一覧と `biome explain` で確認する。
+- 担保: `lint.test.ts` が、warn（noUnusedVariables）・info（useTemplate）・追加ルール（noConsole）の**代表 1 ルールずつ**と、`noProcessEnv`（`env.ts` 以外・`env.ts` という名前のリポジトリ外のファイル・E2E の spec では失敗し、`env.ts` とテストでは通る）について、違反単独で `biome check --error-on-warnings` が失敗すること、`pnpm lint` / `pnpm check` / pre-commit が `--error-on-warnings` 付きであることを検査する。個々のルールの有無までは検査しないので、`biome.json` を変えるときは下の一覧と `biome explain` で確認する。
 
 ## pre-commit（Lefthook）
 - 仕組み: `pnpm install` すると lefthook パッケージの postinstall が `lefthook install -f` を実行し、`.git/hooks/pre-commit` を Lefthook のスクリプトに置き換える（`pnpm-workspace.yaml` の `allowBuilds` で `lefthook: true` にして許可している。postinstall の中身とその判断は同ファイルのコメント）。以後 `git commit` のたびに `lefthook.yml` の pre-commit が実行される。
@@ -45,6 +45,7 @@ JSON にはコメントを書けないため、ここに書く。ベースは cr
 | `linter.rules.preset` | `recommended` | テンプレートは `"recommended": true` だが、Biome 2.5.13 では非推奨（`biome rage --linter` が「deprecated ... Use preset instead」と出す）のため、後継の `preset` を使う |
 | `linter.rules.<group>.<rule>` | 下の一覧 | recommended 外のルールの追加と、info のルールを error に上げるため |
 | `linter.domains` | `next` / `react` / `test` を `recommended` | Next.js・React・Vitest 固有のルールを有効にする。テンプレートは next / react のみ。test（Vitest）は `vitest` が依存にあれば自動で有効になるが、依存の検出に頼らず明示する |
+| `overrides` | `backend/shared/infra/env.ts`・`**/*.test.ts`・`**/*.test.tsx` で `style/noProcessEnv` を `off` | `process.env` を読んでよいのは環境変数の唯一の入口 `env.ts` と、子プロセスに `PATH` を渡すなどで環境変数を扱うテストだけ（Issue #59。`rules/code/env.md` の「環境変数」）。`includes` はリポジトリ直下からの相対パスで照合される（リポジトリの外の同名ファイル `.../backend/shared/infra/env.ts` には効かないことを `lint.test.ts` で確認）。E2E の spec（`e2e/*.spec.ts`）は対象外にしない（`architecture.test.ts` の `env-direct-access` と同じく、E2E も `env.ts` を使う） |
 | `assist.actions.source.organizeImports` | `on`（テンプレートのまま） | import の並び順を統一し、差分のノイズとマージ時の競合を減らす |
 
 ## 有効化したルール一覧
@@ -77,6 +78,7 @@ Biome の recommended 全体を有効にする（個別に列挙しない）。�
 - `correctness/useUniqueElementIds`（react domain・recommended 外）: 固定文字列の `id` はコンポーネントを複数回使うと DOM 上で重複する。`useId` を使わせる。
 - `complexity/noExcessiveCognitiveComplexity`: 認知的複雑度が既定の上限（15）を超える関数を防ぎ、分割を促す。
 - `style/noParameterAssign`: 引数への再代入で、呼び出し元の値と関数内の値の対応が追いにくくなるのを防ぐ。
+- `style/noProcessEnv`（既定 severity は info。Issue #59）: 環境変数を `backend/shared/infra/env.ts` 以外で `process.env` から直接読むのを防ぐ（読む場所が散らばると、既定値や検証が場所ごとにずれるため。`rules/code/env.md` の「環境変数」）。`env.ts` とテストは `overrides` で off。`architecture.test.ts` の規則 `env-direct-access` でも同じことを検査している（2 系統にする理由と、分割代入 `const { env } = process` をどちらも拾わない限界は `rules/code/env.md`）。
 - `style/useThrowOnlyError`: `Error` 以外を throw するとスタックトレースが失われる（ESLint の no-throw-literal 相当）。
 - `suspicious/noConsole`（`console.error` / `console.warn` は許可）: デバッグ用の `console.log` の消し忘れを防ぐ。エラー・警告の出力は正当な用途があるため許可する。
 - `suspicious/noConstantBinaryExpressions`: 常に同じ結果になる比較・論理式（書き間違い）を検出する（ESLint の recommended にある no-constant-binary-expression 相当）。

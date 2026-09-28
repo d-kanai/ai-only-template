@@ -1,4 +1,7 @@
 import { defineConfig } from "drizzle-kit";
+// WHY 相対パスで import する: drizzle-kit は設定ファイルを自前で読み込み、tsconfig の paths（"@/"）を解決する保証がない。
+//   env.ts は import を持たないので、相対パスだけで読める（pnpm db:migrate で読めることを確認済み。Issue #59）。
+import { env } from "./backend/shared/infra/env";
 
 // drizzle-kit（マイグレーションの生成と適用）の設定。使い方は rules/code/architecture.md の「永続化（Drizzle + Postgres）」。
 //   pnpm db:generate … drizzle-kit generate: schema のファイルと前回のスナップショット（drizzle/meta/）の差分から、
@@ -15,11 +18,11 @@ export default defineConfig({
   // out: 生成したマイグレーション（SQL と meta/ のスナップショット）の置き場所。コミットして、すべての環境で同じ SQL を当てる。
   out: "./drizzle",
   dbCredentials: {
-    // url: db:migrate の接続先。DATABASE_URL が無ければ compose.yaml の開発用 DB（.env.example と同じ値）。
-    // WHY 既定値を持つ: drizzle-kit は .env / .env.local を自動では読まない。手元・クラウドのフックで毎回
-    //   DATABASE_URL を渡さなくても開発用 DB に当てられるようにする（単体テストと E2E の既定値と同じ）。
-    //   本番などほかの DB に当てるときは DATABASE_URL を必ず渡す。db:generate は接続しないので、値は使わない。
-    url: process.env.DATABASE_URL || "postgresql://app:app@localhost:5432/app",
+    // url: db:migrate の接続先。env.ts が .env / 環境変数から読んで検証した DATABASE_URL（既定値は持たない。WHY は env.ts）。
+    //   drizzle-kit 自身は .env を読まないが、env.ts が読み込み時に .env を読む。ほかの DB に当てるときは
+    //   DATABASE_URL=... pnpm db:migrate のように環境変数で渡す（.env より優先される）。
+    //   db:generate は接続しないが、この設定ファイルを読むので env.ts の検証は通る必要がある（.env が要る）。
+    url: env.DATABASE_URL,
   },
   // strict: generate / push で、データが消えうる変更（列の削除など）を確認なしで出さない。
   // verbose: 実行する SQL を表示する。

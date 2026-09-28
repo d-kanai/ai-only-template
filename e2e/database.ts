@@ -1,28 +1,16 @@
 import { Client } from "pg";
+import { env } from "../backend/shared/infra/env";
 
 // E2E テストが使う Postgres（compose.yaml）への接続と、データのリセット。
-// playwright.config.ts（webServer に渡す接続先）と e2e/*.spec.ts（テストの前のリセット・DB の確認）の両方が使う。
-
-// compose.yaml の開発用 DB（.env.example と同じ値。開発用で秘密ではない）。
-const LOCAL_DATABASE_URL = "postgresql://app:app@localhost:5432/app";
-
-// E2E で使う接続先。DATABASE_URL が未設定なら compose.yaml の開発用 DB。
-// WHY 空文字ならエラーにする: アプリ（backend/todo/infra/container.ts）は DATABASE_URL が空だと InMemory で動く。
-//   E2E は Postgres を通した動作（永続化・マイグレーション済みの表）を確かめるためのもので、InMemory で動いて
-//   緑になると、DB 経由の不具合を見逃す。`DATABASE_URL=` と空で渡されたときは、サーバを起動する前に止める。
-export function e2eDatabaseUrl(): string {
-  const url = process.env.DATABASE_URL ?? LOCAL_DATABASE_URL;
-  if (url === "") {
-    throw new Error(
-      "DATABASE_URL が空です。E2E は Postgres で動かすため、接続先を指定するか、未設定にして compose.yaml の開発用 DB を使ってください",
-    );
-  }
-  return url;
-}
+// e2e/*.spec.ts（テストの前のリセット・DB の確認）が使う。
+// 接続先は env.DATABASE_URL（.env / 環境変数から env.ts が読んで検証した値）で、webServer（next start）と同じ DB を指す
+// （playwright.config.ts が同じ env.DATABASE_URL を webServer に渡す）。既定値は持たない（WHY は env.ts）。
+// WHY 相対パスで import する: Playwright はテストと設定を自前の変換で読み込む。"@/" の解決（tsconfig の paths）に頼らず、
+//   playwright.config.ts と同じ書き方にそろえる。
 
 // 1 本の接続で fn を実行し、終わったら閉じる。
 async function withClient<T>(fn: (client: Client) => Promise<T>): Promise<T> {
-  const client = new Client({ connectionString: e2eDatabaseUrl() });
+  const client = new Client({ connectionString: env.DATABASE_URL });
   await client.connect();
   try {
     return await fn(client);
