@@ -93,3 +93,4 @@ Biome の recommended 全体を有効にする（個別に列挙しない）。�
 - `style/noDefaultExport`: Next.js の page / layout は default export が必須。
 - `style/useBlockStatements` / `noNestedTernary` / `noMagicNumbers` など: バグ防止より好みの要素が強く、最小構成の段階では入れない。
 - `security/noSecrets`: エントロピーによる推定で誤検知が出やすい。秘密情報は `.env*` を `.gitignore` 済み。
+- `style/noRestrictedImports`: ディレクトリ構成の依存の向きの検査に使えない。`import type` だけを許すことを表現できず（2.5.13 で、制限したパスへの `import type` も違反になることを実測）、参照元ごとの制限には feature・層ごとの `overrides` が要る。依存の向きはルート直下の `architecture.test.ts` で検査する（`rules/code/architecture.md` の「依存の向き（全体）」）。

@@ -43,3 +43,4 @@
 - 依存パッケージ: @rules/code/dependencies.md
 - Lint / Format: @rules/code/lint.md
 - ディレクトリ構成: @rules/code/architecture.md
+- テストコード: @rules/code/test.md
