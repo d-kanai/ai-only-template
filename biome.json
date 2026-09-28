@@ -57,7 +57,8 @@
         "useNodejsImportProtocol": "error",
         "useShorthandFunctionType": "error",
         "useTemplate": "error",
-        "useThrowOnlyError": "error"
+        "useThrowOnlyError": "error",
+        "noProcessEnv": "error"
       },
       "suspicious": {
         "noConsole": {
@@ -81,6 +82,22 @@
       "test": "recommended"
     }
   },
+  "overrides": [
+    {
+      "includes": [
+        "backend/shared/infra/env.ts",
+        "**/*.test.ts",
+        "**/*.test.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noProcessEnv": "off"
+          }
+        }
+      }
+    }
+  ],
   "assist": {
     "actions": {
       "source": {

@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { e2eDatabaseUrl } from "./e2e/database";
+import { env, toolEnv } from "./backend/shared/infra/env";
 
 // Playwright（E2E テスト）の設定。最小構成で、Chromium だけで e2e/ のテストを実行する。
 // 実行: pnpm test:e2e（= playwright test）。Next の本番ビルドを webServer で起動し、ブラウザから画面を操作する。
@@ -9,21 +9,22 @@ import { e2eDatabaseUrl } from "./e2e/database";
 const port = 3100;
 const baseURL = `http://localhost:${port}`;
 
-// Chromium の実行ファイルのパス。未設定なら Playwright がインストールしたブラウザ（playwright install）を使う。
+// Chromium の実行ファイルのパス（toolEnv.PLAYWRIGHT_CHROMIUM_EXECUTABLE。env.ts のツール用の区画で、無いのが正常）。
+// 未設定なら Playwright がインストールしたブラウザ（playwright install）を使う。
 // WHY 環境変数で差し替える: Claude Code のクラウド VM には Playwright 同梱の Chromium（/opt/pw-browsers）が
 //   あらかじめ入っているが、そのビルド（chromium-1194、Chromium 141）は @playwright/test 1.63.0 が要求するビルド
 //   （playwright-core の browsers.json で chromium 1243）と一致せず、そのままでは起動できない。VM ではブラウザの
 //   ダウンロードもしない前提のため、既存の Chromium をこの変数で渡す（例: PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium）。
 //   CI では未設定にし、playwright install で入れた、版の合ったブラウザを使う。
-const chromiumExecutable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
+const chromiumExecutable = toolEnv.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
 
-// サーバ（next start）とテストが使う Postgres の接続先。未設定なら compose.yaml の開発用 DB、空文字ならここで失敗する
-// （e2e/database.ts の e2eDatabaseUrl）。
-// WHY 必ず Postgres で動かす: アプリは DATABASE_URL が無いと InMemory で動く（backend/todo/infra/container.ts）。
-//   E2E は利用者に届く構成（Postgres に保存する）を検証するので、InMemory に落ちないよう、webServer に明示的に渡す。
+// サーバ（next start）とテスト（e2e/database.ts）が使う Postgres の接続先。env.ts が .env / 環境変数から読んで検証した値で、
+// 欠けていれば env.ts の読み込み（この設定ファイルの読み込み）で、サーバを起動する前に失敗する。
+// WHY webServer に明示的に渡す: next start は自分でも .env を読むが、コマンドの前に付けた DATABASE_URL（環境変数）で
+//   E2E の接続先を変えたときに、テスト（e2e/database.ts）とサーバが必ず同じ DB を指すようにする。
 // 前提: Postgres が起動していて（pnpm db:up）、マイグレーションを当ててある（pnpm db:migrate）こと。
 //   webServer の中では当てない（Issue #57 の方針。CI・クラウドのフックは E2E の前に db:migrate を実行する）。
-const databaseUrl = e2eDatabaseUrl();
+const databaseUrl = env.DATABASE_URL;
 
 export default defineConfig({
   // testDir: E2E テストの置き場所。Vitest の単体テスト（対象の隣の *.test.ts(x)）と分けるため、ルート直下の e2e/ に置く。
@@ -69,14 +70,14 @@ export default defineConfig({
     //   その PR のコードを検証したことにならないため。
     //   注意: ローカルで 3100 番に古いサーバが残っていると、今のコードではなくそのサーバを検証してしまう。
     //   コードを変えた後は、起動したままのサーバを止めてから実行する。
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: !toolEnv.CI,
     // timeout: build を含めて起動を待つ上限（ミリ秒）。WHY 180 秒: 既定の 60 秒では next build の時間を含めると足りない
     //   おそれがあるため、余裕を持たせる。
     timeout: 180_000,
     // env: next start に渡す環境変数（Playwright の既定では process.env を引き継いだうえで、ここに書いたものを上書きする）。
     //   DATABASE_URL を渡して Postgres で動かす（上の databaseUrl）。
-    //   注意: reuseExistingServer で起動済みのサーバを使うときは、そのサーバの環境変数のままになる。DATABASE_URL なしで
-    //   起動したサーバが 3100 番に残っていると InMemory のまま検証してしまう（テストの DB の確認で失敗する）。
+    //   注意: reuseExistingServer で起動済みのサーバを使うときは、そのサーバの環境変数のままになる。別の DATABASE_URL で
+    //   起動したサーバが 3100 番に残っていると、テストと違う DB を検証してしまう（テストの DB の確認で失敗する）。
     env: { DATABASE_URL: databaseUrl },
   },
 });

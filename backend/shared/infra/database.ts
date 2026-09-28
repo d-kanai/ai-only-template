@@ -1,9 +1,10 @@
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool, type PoolConfig } from "pg";
+import { env } from "@/backend/shared/infra/env";
 
 // Postgres への接続（node-postgres のプール）と、それを使う Drizzle の db を作る。
-// 設定は環境変数から読む。本番用の最終的な値（接続数・タイムアウト・TLS など）は Issue #58 で決める。
-// ここの既定値は開発・CI・E2E で動かすための暫定値で、環境変数で上書きできるようにしている。
+// 設定は env.ts の env（.env / 環境変数を検証した値）から取る。ここには既定値を置かない（WHY は env.ts）。
+// 開発・CI・E2E 用の値は .env.example にあり、本番用の最終的な値（接続数・タイムアウト・TLS など）は Issue #58 で決める。
 
 // Drizzle の db（プール全体）。query の読み取りや、トランザクションを始めるのに使う。
 export type Database = NodePgDatabase;
@@ -25,66 +26,6 @@ export type DatabaseConfig = {
   idleTimeoutMillis: number;
   connectionTimeoutMillis: number;
 };
-
-// 暫定の既定値（Issue #58 で見直す）。
-// - max 10: node-postgres の既定と同じ。Postgres の既定の max_connections（100）に対し、next start の 1 プロセスが
-//   使う数として十分小さい。
-// - idleTimeoutMillis 10000: node-postgres の既定と同じ。使われない接続を 10 秒で閉じる。
-// - connectionTimeoutMillis 5000: node-postgres の既定は 0（無制限）。DB が落ちている・プールが埋まっているときに
-//   リクエストが無期限に待たされ、画面が固まるのを避けるため、5 秒で諦めてエラー（API は 500）にする。
-const DEFAULT_POOL_MAX = 10;
-const DEFAULT_IDLE_TIMEOUT_MS = 10_000;
-const DEFAULT_CONNECTION_TIMEOUT_MS = 5_000;
-
-type Env = Record<string, string | undefined>;
-
-// 0 以上の整数の環境変数を読む。未設定・空文字なら既定値。
-// WHY 数として使えない値はエラーにする: Number("abc") は NaN になり、プールに渡すと上限やタイムアウトが効かない
-//   （意図しない無制限になりうる）まま動いてしまう。起動時に分かるように止める。
-function readNonNegativeInteger(
-  env: Env,
-  name: string,
-  fallback: number,
-): number {
-  const raw = env[name];
-  if (raw === undefined || raw === "") {
-    return fallback;
-  }
-  if (!/^\d+$/.test(raw)) {
-    throw new Error(`${name} は 0 以上の整数で指定してください（値: ${raw}）`);
-  }
-  return Number(raw);
-}
-
-export function readDatabaseConfig(env: Env): DatabaseConfig {
-  const connectionString = env.DATABASE_URL;
-  if (connectionString === undefined || connectionString === "") {
-    throw new Error("DATABASE_URL が設定されていません");
-  }
-  const max = readNonNegativeInteger(
-    env,
-    "DATABASE_POOL_MAX",
-    DEFAULT_POOL_MAX,
-  );
-  // 接続数 0 のプールはクエリを永久に待たせるだけなので、1 以上に限る。
-  if (max === 0) {
-    throw new Error("DATABASE_POOL_MAX は 1 以上で指定してください（値: 0）");
-  }
-  return {
-    connectionString,
-    max,
-    idleTimeoutMillis: readNonNegativeInteger(
-      env,
-      "DATABASE_POOL_IDLE_TIMEOUT_MS",
-      DEFAULT_IDLE_TIMEOUT_MS,
-    ),
-    connectionTimeoutMillis: readNonNegativeInteger(
-      env,
-      "DATABASE_CONNECTION_TIMEOUT_MS",
-      DEFAULT_CONNECTION_TIMEOUT_MS,
-    ),
-  };
-}
 
 export type DatabaseHandle = { db: Database; pool: Pool };
 
@@ -115,8 +56,13 @@ const holder = globalThis as typeof globalThis & {
   __appDatabase?: DatabaseHandle;
 };
 
-export function getDatabase(env: Env): DatabaseHandle {
-  holder.__appDatabase ??= createDatabase(readDatabaseConfig(env));
+export function getDatabase(): DatabaseHandle {
+  holder.__appDatabase ??= createDatabase({
+    connectionString: env.DATABASE_URL,
+    max: env.DATABASE_POOL_MAX,
+    idleTimeoutMillis: env.DATABASE_POOL_IDLE_TIMEOUT_MS,
+    connectionTimeoutMillis: env.DATABASE_CONNECTION_TIMEOUT_MS,
+  });
   return holder.__appDatabase;
 }
 

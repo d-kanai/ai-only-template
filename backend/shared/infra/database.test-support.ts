@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Client, Pool } from "pg";
 import type { Database } from "@/backend/shared/infra/database";
+import { env } from "@/backend/shared/infra/env";
 
 // 実 Postgres を使う単体テスト（*.postgres.test.ts など）のための、テスト専用の DB を用意する部品。
 // 本番のコードからは使わない（ファイル名の .test-support が目印）。
@@ -20,10 +21,6 @@ import type { Database } from "@/backend/shared/infra/database";
 // createTestDatabase が作るスキーマの名前の接頭辞。cleanupTestSchemas はこれで始まるスキーマを消す。
 export const TEST_SCHEMA_PREFIX = "test_";
 
-// DATABASE_URL が無いときの接続先。compose.yaml の開発用 DB（.env.example と同じ値。開発用で秘密ではない）。
-// WHY 既定値を持つ: `pnpm db:up` しておけば、環境変数を渡さずに pnpm test を実行できるようにする。
-export const LOCAL_DATABASE_URL = "postgresql://app:app@localhost:5432/app";
-
 export type TestDatabase = {
   // テスト用のスキーマを search_path にした接続の db。
   db: Database;
@@ -35,15 +32,9 @@ export type TestDatabase = {
   close(): Promise<void>;
 };
 
-// 未設定・空文字なら LOCAL_DATABASE_URL。
-export function testDatabaseUrl(
-  env: Record<string, string | undefined>,
-): string {
-  return env.DATABASE_URL || LOCAL_DATABASE_URL;
-}
-
+// 接続先は env の DATABASE_URL（アプリと同じ。.env / 環境変数から env.ts が読んで検証した値で、既定値は無い）。
 export async function createTestDatabase(): Promise<TestDatabase> {
-  const url = testDatabaseUrl(process.env);
+  const url = env.DATABASE_URL;
   const schema = `${TEST_SCHEMA_PREFIX}${randomUUID().replaceAll("-", "")}`;
   // max 4: DrizzleTransactionRunner のテストが「トランザクションの中」と「外」の 2 本を同時に使うため、2 以上にする。
   // options: 接続の開始時に Postgres に渡す設定（node-postgres の options）。search_path をテスト用のスキーマだけにする。
@@ -68,6 +59,16 @@ export async function createTestDatabase(): Promise<TestDatabase> {
   };
 }
 
+// cleanupTestSchemas の設定。vitest.global-setup.ts が env / toolEnv（env.ts）から渡す。
+// WHY 引数で受け取る（ここで env / toolEnv を読まない）: 接続できないときと Stryker の worker の中のときの分岐を、
+//   テストで値を変えて確かめるため。
+export type CleanupOptions = {
+  // 接続先（env.DATABASE_URL）。
+  databaseUrl: string;
+  // Stryker の worker の中で動いているか（toolEnv.STRYKER_MUTATOR_WORKER）。
+  insideStrykerWorker: boolean;
+};
+
 // prefix で始まるスキーマを中の表ごとすべて消し、消した名前を返す。Postgres に接続できなければ、起動を促すエラーにする。
 // vitest.global-setup.ts が Vitest の実行の最初（テストファイルを動かす前）に TEST_SCHEMA_PREFIX で呼ぶ。
 // WHY LIKE ではなく starts_with で探す: LIKE の "_" は任意の 1 文字に一致するので、'test_%' は "testX..." のような
@@ -80,10 +81,9 @@ export async function createTestDatabase(): Promise<TestDatabase> {
 // WHY 接続できないときに専用のエラーにする: pnpm test は Postgres が起動している前提（rules/code/test.md）。
 //   各テストファイルの ECONNREFUSED が並ぶより、最初に「起動していない」と分かる方が早く直せる。
 export async function cleanupTestSchemas(
-  env: Record<string, string | undefined>,
+  { databaseUrl: url, insideStrykerWorker }: CleanupOptions,
   prefix: string,
 ): Promise<string[]> {
-  const url = testDatabaseUrl(env);
   const client = new Client({
     connectionString: url,
     connectionTimeoutMillis: 5_000,
@@ -98,7 +98,7 @@ export async function cleanupTestSchemas(
     );
   }
   try {
-    if (env.STRYKER_MUTATOR_WORKER) {
+    if (insideStrykerWorker) {
       return [];
     }
     const result = await client.query<{ name: string }>(

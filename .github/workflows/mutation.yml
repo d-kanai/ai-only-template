@@ -65,13 +65,19 @@ jobs:
       - name: Check Postgres connection
         run: docker compose exec -T db psql -U app -d app -c 'select 1'
 
+      # .env を .env.example から作る（ci.yml と同じ。WHY は ci.yml のコメント。Issue #59）。
+      # Stryker はリポジトリのファイルをサンドボックス（.stryker-tmp/sandbox-*）にコピーして動かす。.env も .gitignore に関係なく
+      #   コピーされる（@stryker-mutator/core 10.0.0 の dist/src/fs/project-reader.js が除外するのは ALWAYS_IGNORE の
+      #   node_modules・.git・*.tsbuildinfo・/stryker.log・.next・.nuxt・.svelte-kit と、作業用ディレクトリ・レポートの出力先・
+      #   ignorePatterns だけ）。
+      - name: Create .env from .env.example
+        run: cp .env.example .env
+
       # drizzle/ のマイグレーションを当てる（ci.yml と同じ）。
       # 単体テストはテストファイルごとに別のスキーマを作ってそこに当てる（backend/shared/infra/database.test-support.ts）ので
       #   この結果には依存しないが、ci.yml と同じ状態の DB でテストを動かすためにそろえる。
       - name: Apply database migrations
         run: pnpm db:migrate
-        env:
-          DATABASE_URL: postgresql://app:app@localhost:5432/app
 
       # stryker run。Playwright のブラウザ（E2E）は使わないので入れない。
       - run: pnpm test:mutation

@@ -5,12 +5,19 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   closeDatabase,
   createDatabase,
+  type DatabaseConfig,
   getDatabase,
-  readDatabaseConfig,
 } from "@/backend/shared/infra/database";
 import { createTestDatabase } from "@/backend/shared/infra/database.test-support";
+import { env } from "@/backend/shared/infra/env";
 
-const URL = "postgresql://app:app@localhost:5432/app";
+// createDatabase に渡す設定の例。接続先は架空（プールは作るだけなら接続しない）。
+const CONFIG: DatabaseConfig = {
+  connectionString: "postgresql://u:p@db.example:5432/x",
+  max: 3,
+  idleTimeoutMillis: 1_000,
+  connectionTimeoutMillis: 1_500,
+};
 
 // pg.Pool の代わり。受け取った設定と、登録されたイベントハンドラ・end の呼び出しを記録する。
 // WHY 差し替える: プールの設定値や error ハンドラの登録は、本物の Pool では外から確かめにくい（接続もしてしまう）。
@@ -35,84 +42,12 @@ afterEach(async () => {
   await closeDatabase();
 });
 
-describe("readDatabaseConfig", () => {
-  test("DATABASE_URL だけなら、プールの設定は既定値（最大 10 接続・アイドル 10 秒・接続待ち 5 秒）", () => {
-    expect(readDatabaseConfig({ DATABASE_URL: URL })).toEqual({
-      connectionString: URL,
-      max: 10,
-      idleTimeoutMillis: 10_000,
-      connectionTimeoutMillis: 5_000,
-    });
-  });
-
-  test("DATABASE_POOL_MAX / DATABASE_POOL_IDLE_TIMEOUT_MS / DATABASE_CONNECTION_TIMEOUT_MS で上書きできる", () => {
-    expect(
-      readDatabaseConfig({
-        DATABASE_URL: URL,
-        DATABASE_POOL_MAX: "3",
-        DATABASE_POOL_IDLE_TIMEOUT_MS: "0",
-        DATABASE_CONNECTION_TIMEOUT_MS: "1500",
-      }),
-    ).toEqual({
-      connectionString: URL,
-      max: 3,
-      idleTimeoutMillis: 0,
-      connectionTimeoutMillis: 1_500,
-    });
-  });
-
-  test("空文字の上書きは未設定と同じに扱い、既定値を使う", () => {
-    expect(
-      readDatabaseConfig({
-        DATABASE_URL: URL,
-        DATABASE_POOL_MAX: "",
-        DATABASE_POOL_IDLE_TIMEOUT_MS: "",
-        DATABASE_CONNECTION_TIMEOUT_MS: "",
-      }),
-    ).toMatchObject({
-      max: 10,
-      idleTimeoutMillis: 10_000,
-      connectionTimeoutMillis: 5_000,
-    });
-  });
-
-  test.each([
-    ["未設定", {}],
-    ["空文字", { DATABASE_URL: "" }],
-  ])("DATABASE_URL が%sならエラーにする", (_label, env) => {
-    expect(() => readDatabaseConfig(env)).toThrow("DATABASE_URL");
-  });
-
-  test.each([
-    ["DATABASE_POOL_MAX", "abc"],
-    ["DATABASE_POOL_MAX", "0"],
-    ["DATABASE_POOL_MAX", "1.5"],
-    ["DATABASE_POOL_IDLE_TIMEOUT_MS", "-1"],
-    ["DATABASE_CONNECTION_TIMEOUT_MS", "10s"],
-  ])("%s=%s のように数として使えない値はエラーにする", (name, value) => {
-    expect(() =>
-      readDatabaseConfig({ DATABASE_URL: URL, [name]: value }),
-    ).toThrow(name);
-  });
-
-  test("DATABASE_CONNECTION_TIMEOUT_MS=0（無制限）は明示すれば受け付ける", () => {
-    expect(
-      readDatabaseConfig({
-        DATABASE_URL: URL,
-        DATABASE_CONNECTION_TIMEOUT_MS: "0",
-      }).connectionTimeoutMillis,
-    ).toBe(0);
-  });
-});
-
 describe("createDatabase", () => {
   test("設定をそのままプールに渡す", () => {
     const pool = fakePool();
-    const config = readDatabaseConfig({ DATABASE_URL: URL });
+    createDatabase(CONFIG, pool.create);
 
-    createDatabase(config, pool.create);
-
-    expect(pool.configs).toEqual([config]);
+    expect(pool.configs).toEqual([CONFIG]);
   });
 
   test("アイドル中の接続のエラーはログに出すだけで、プロセスを落とさない（error ハンドラを登録する）", () => {
@@ -120,7 +55,7 @@ describe("createDatabase", () => {
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
     const pool = fakePool();
-    createDatabase(readDatabaseConfig({ DATABASE_URL: URL }), pool.create);
+    createDatabase(CONFIG, pool.create);
     const error = new Error(
       "terminating connection due to administrator command",
     );
@@ -135,9 +70,9 @@ describe("createDatabase", () => {
   });
 
   test("プールを省略すると node-postgres の Pool を作る（作るだけでは接続しない）", async () => {
-    const { pool } = createDatabase(readDatabaseConfig({ DATABASE_URL: URL }));
+    const { pool } = createDatabase(CONFIG);
 
-    expect(pool.options.max).toBe(10);
+    expect(pool.options.max).toBe(3);
     expect(pool.totalCount).toBe(0);
     await pool.end();
   });
@@ -145,9 +80,10 @@ describe("createDatabase", () => {
   test("作った db で実際にクエリを実行できる", async () => {
     const database = await createTestDatabase();
     try {
-      const { db, pool } = createDatabase(
-        readDatabaseConfig({ DATABASE_URL: database.url }),
-      );
+      const { db, pool } = createDatabase({
+        ...CONFIG,
+        connectionString: database.url,
+      });
       const result = await db.execute(sql`select 1 as one`);
       expect(result.rows).toEqual([{ one: 1 }]);
       await pool.end();
@@ -159,15 +95,15 @@ describe("createDatabase", () => {
 
 describe("getDatabase / closeDatabase", () => {
   test("何度呼んでも同じプールを返す（next dev の再読み込みでプールを増やさない）", () => {
-    const first = getDatabase({ DATABASE_URL: URL });
-    const second = getDatabase({ DATABASE_URL: URL });
+    const first = getDatabase();
+    const second = getDatabase();
 
     expect(second).toBe(first);
     expect(second.pool).toBe(first.pool);
   });
 
   test("プロセス全体（globalThis）で 1 つだけ保持する", () => {
-    const database = getDatabase({ DATABASE_URL: URL });
+    const database = getDatabase();
 
     expect((globalThis as { __appDatabase?: unknown }).__appDatabase).toBe(
       database,
@@ -175,11 +111,11 @@ describe("getDatabase / closeDatabase", () => {
   });
 
   test("closeDatabase でプールを閉じ、次の getDatabase は新しいプールを作る", async () => {
-    const first = getDatabase({ DATABASE_URL: URL });
+    const first = getDatabase();
     const end = vi.spyOn(first.pool, "end");
 
     await closeDatabase();
-    const second = getDatabase({ DATABASE_URL: URL });
+    const second = getDatabase();
 
     expect(end).toHaveBeenCalledTimes(1);
     expect(second).not.toBe(first);
@@ -192,10 +128,14 @@ describe("getDatabase / closeDatabase", () => {
     ).toBeUndefined();
   });
 
-  test("DATABASE_URL が無ければエラーにし、プールを作らない", () => {
-    expect(() => getDatabase({})).toThrow("DATABASE_URL");
-    expect(
-      (globalThis as { __appDatabase?: unknown }).__appDatabase,
-    ).toBeUndefined();
+  test("プールの設定は env（.env / 環境変数を env.ts で検証した値）から取る", () => {
+    const { pool } = getDatabase();
+
+    expect(pool.options).toMatchObject({
+      connectionString: env.DATABASE_URL,
+      max: env.DATABASE_POOL_MAX,
+      idleTimeoutMillis: env.DATABASE_POOL_IDLE_TIMEOUT_MS,
+      connectionTimeoutMillis: env.DATABASE_CONNECTION_TIMEOUT_MS,
+    });
   });
 });

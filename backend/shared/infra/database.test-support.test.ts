@@ -7,28 +7,9 @@ import { describe, expect, test } from "vitest";
 import {
   cleanupTestSchemas,
   createTestDatabase,
-  LOCAL_DATABASE_URL,
   TEST_SCHEMA_PREFIX,
-  testDatabaseUrl,
 } from "@/backend/shared/infra/database.test-support";
-
-describe("testDatabaseUrl", () => {
-  test("DATABASE_URL があればそれを使う", () => {
-    expect(
-      testDatabaseUrl({ DATABASE_URL: "postgresql://u:p@db.example:5432/x" }),
-    ).toBe("postgresql://u:p@db.example:5432/x");
-  });
-
-  test.each([
-    ["未設定", {}],
-    ["空文字", { DATABASE_URL: "" }],
-  ])("DATABASE_URL が%sなら compose.yaml の開発用 DB を使う", (_label, env) => {
-    expect(testDatabaseUrl(env)).toBe(
-      "postgresql://app:app@localhost:5432/app",
-    );
-    expect(testDatabaseUrl(env)).toBe(LOCAL_DATABASE_URL);
-  });
-});
+import { env } from "@/backend/shared/infra/env";
 
 // 実 Postgres（compose.yaml）に対して実行する。
 describe("createTestDatabase", () => {
@@ -43,6 +24,15 @@ describe("createTestDatabase", () => {
       await other.close();
     }
   }
+
+  test("接続先は env の DATABASE_URL（.env / 環境変数。既定値は持たない）", async () => {
+    const database = await createTestDatabase();
+    try {
+      expect(database.url).toBe(env.DATABASE_URL);
+    } finally {
+      await database.close();
+    }
+  });
 
   test("テスト用のスキーマを作って search_path にし、close でスキーマごと消す", async () => {
     const database = await createTestDatabase();
@@ -96,10 +86,11 @@ describe("createTestDatabase", () => {
 // WHY 接頭辞を "test_" にせずテストごとに変える: cleanupTestSchemas("test_") をここで呼ぶと、並列に動いている
 //   他のテストファイルのスキーマまで消してしまう。このテストだけが作るスキーマの接頭辞で確かめる。
 describe("cleanupTestSchemas", () => {
-  const env = { DATABASE_URL: LOCAL_DATABASE_URL };
+  // 後始末する側の設定。接続先は単体テストと同じ DB で、Stryker の worker の外として動かす。
+  const options = { databaseUrl: env.DATABASE_URL, insideStrykerWorker: false };
 
   async function withClient<T>(fn: (client: Client) => Promise<T>): Promise<T> {
-    const client = new Client({ connectionString: testDatabaseUrl(env) });
+    const client = new Client({ connectionString: env.DATABASE_URL });
     await client.connect();
     try {
       return await fn(client);
@@ -136,7 +127,7 @@ describe("cleanupTestSchemas", () => {
       await client.query(`create schema ${prefix}b`);
     });
 
-    const dropped = await cleanupTestSchemas(env, prefix);
+    const dropped = await cleanupTestSchemas(options, prefix);
 
     expect([...dropped].sort()).toEqual([`${prefix}a`, `${prefix}b`]);
     await expect(schemasStartingWith(prefix)).resolves.toEqual([]);
@@ -148,7 +139,7 @@ describe("cleanupTestSchemas", () => {
     const lookalike = `${prefix.slice(0, -1)}x_keep`;
     await withClient((client) => client.query(`create schema ${lookalike}`));
     try {
-      await expect(cleanupTestSchemas(env, prefix)).resolves.toEqual([]);
+      await expect(cleanupTestSchemas(options, prefix)).resolves.toEqual([]);
       await expect(schemasStartingWith(prefix.slice(0, -1))).resolves.toEqual([
         lookalike,
       ]);
@@ -159,25 +150,28 @@ describe("cleanupTestSchemas", () => {
     }
   });
 
-  test("Stryker の worker の中（STRYKER_MUTATOR_WORKER がある）では消さない（並行して動く他の worker のスキーマを消さないため）", async () => {
+  test("Stryker の worker の中（toolEnv.STRYKER_MUTATOR_WORKER が true）では消さない（並行して動く他の worker のスキーマを消さないため）", async () => {
     const prefix = uniquePrefix();
     await withClient((client) => client.query(`create schema ${prefix}a`));
     try {
       await expect(
-        cleanupTestSchemas({ ...env, STRYKER_MUTATOR_WORKER: "1" }, prefix),
+        cleanupTestSchemas({ ...options, insideStrykerWorker: true }, prefix),
       ).resolves.toEqual([]);
       await expect(schemasStartingWith(prefix)).resolves.toEqual([
         `${prefix}a`,
       ]);
     } finally {
-      await cleanupTestSchemas(env, prefix);
+      await cleanupTestSchemas(options, prefix);
     }
   });
 
   test("Postgres に接続できなければ、起動を促すエラーで失敗する", async () => {
     await expect(
       cleanupTestSchemas(
-        { DATABASE_URL: "postgresql://app:app@127.0.0.1:1/app" },
+        {
+          databaseUrl: "postgresql://u:p@127.0.0.1:1/x",
+          insideStrykerWorker: false,
+        },
         uniquePrefix(),
       ),
     ).rejects.toThrow("pnpm db:up");

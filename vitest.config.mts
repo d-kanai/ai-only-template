@@ -54,6 +54,9 @@ export default defineConfig({
       //     仕様は screen と api ファイルのテストで固定し、app/ の結線は E2E（pnpm test:e2e）で確かめる。
       //   - ルート直下の設定ファイル（next.config.ts / playwright.config.ts など）: ツールに渡す値を並べるだけで、
       //     単体テストで検証する振る舞いを持たない。
+      //     ルート直下の Next の規約ファイル instrumentation.ts / instrumentation-node.ts（起動時の環境変数の検証。Issue #59）も
+      //     含めない: next start / next dev の起動でだけ動き、プロセスを終える処理なので、起動時に止まることを実測で確かめている
+      //     （rules/code/env.md の「環境変数」）。検証の中身は env.ts（計測の対象）のテストで固定している。
       //   - e2e/: Playwright の E2E テストそのもの（Vitest では実行しない。上の test.exclude）。
       //   - scripts/ のシェルスクリプト（.sh）: include に入れても、@vitest/coverage-v8 が JS として解析しようとして
       //     失敗し、「Failed to parse ... cloud-session-start.sh. Excluding it from coverage.」とエラーを出して結局外す

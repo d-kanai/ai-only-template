@@ -30,7 +30,7 @@
   - 理由: モックは「こう呼ばれるはず」という前提をテストに書き込むため、実装と前提がずれても緑のままになる。本物の実装を通せば、層をまたいだ振る舞い（command で保存したものが query で読めるなど）まで検証できる。
   - Postgres の実装（`*.postgres.ts`、`drizzle-transaction-runner.ts`、`database.ts`）は、モックせず実 Postgres（compose.yaml）に対してテストする。`createTestDatabase()`（`backend/shared/infra/database.test-support.ts`）でテストファイルごとに別のスキーマを作ってマイグレーションを当て、各テストの前に `TRUNCATE` する（詳細と WHY は `rules/code/architecture.md` の「永続化（Drizzle + Postgres）」の「テスト」）。
     - 理由: SQL の組み立て（upsert・並び順・uuid 型）やトランザクションの commit / rollback は、DB を差し替えると何も検証できない。
-    - そのため `pnpm test` / `pnpm test:unit` / `pnpm test:mutation` は Postgres が起動している前提（`pnpm db:up`）。接続先は `DATABASE_URL`、未設定なら compose.yaml の開発用 DB。
+    - そのため `pnpm test` / `pnpm test:unit` / `pnpm test:mutation` は Postgres が起動している前提（`pnpm db:up`）。接続先は `.env` の `DATABASE_URL`（`backend/shared/infra/env.ts`。既定値は無い）。
   - 例外: InMemory では起こせない失敗の経路は、その経路に必要な分だけ差し替える。例: `backend/todo/presentation/list-todos.api.test.ts` は 500 の経路のために、常に reject する `TodoRepository`（`failingRepository`）で `createTodoContainer` を組み立て、`console.error` を `vi.spyOn` で抑制しつつ呼ばれたことを検証する。
 - 画面側の hook / screen（`features/**/screens/**`）: `vi.mock("@/features/todo/api/todo-api")` で `api/` を差し替え、`vi.mocked(listTodos).mockResolvedValue(...)` で応答を与える。
   - 理由: 画面側と API 側の境界は `api/` の 1 ファイル（`rules/code/architecture.md` の「画面側とサーバ側の境界」）なので、そこで切るとテストが HTTP やサーバの状態に依存しない。
@@ -44,11 +44,11 @@
 
 | テスト | 検査する規則・設定 |
 | --- | --- |
-| `lint.test.ts` | Biome の違反が `--error-on-warnings` で失敗になること、`pnpm lint` / `pnpm check` / pre-commit の引数（`rules/code/lint.md`） |
+| `lint.test.ts` | Biome の違反が `--error-on-warnings` で失敗になること、`pnpm lint` / `pnpm check` / pre-commit の引数、`noProcessEnv` が `env.ts` とテスト以外で効くこと（`rules/code/lint.md`） |
 | `package.test.ts` | `package.json` の版が完全固定であること（`rules/code/dependencies.md`） |
 | `pnpm-workspace.test.ts` | `minimumReleaseAge` などのサプライチェーン保護の値（`rules/code/dependencies.md`） |
 | `scripts/cloud-session-start.test.ts` | クラウドセッションのスクリプトが `.tool-versions` どおりの版を、検証付きで入れること（`rules/code/env.md`） |
-| `architecture.test.ts`（Issue #47 で追加） | 依存の向き（`rules/code/architecture.md` の「依存の向き（全体）」） |
+| `architecture.test.ts`（Issue #47 で追加） | 依存の向き（`rules/code/architecture.md` の「依存の向き（全体）」）と、環境変数の直参照の禁止（規則 `env-direct-access`。Issue #59。`rules/code/env.md` の「環境変数」） |
 
 テスト以外のゲート（カバレッジのしきい値、pre-commit のフック、CI の required status check、型チェック）も、「違反があれば止まる」ことを検査する仕組みなので、下の「fault injection」は同じように行う。
 

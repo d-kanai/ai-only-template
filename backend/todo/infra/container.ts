@@ -86,7 +86,9 @@ export function createTodoContainer<Tx>({
   };
 }
 
-// InMemory のリポジトリで組み立てる。DATABASE_URL が無いときと、テストで使う。
+// InMemory のリポジトリで組み立てる。テスト専用（アプリは常に Postgres。下の todoContainer）。
+// WHY 本番では使わないのに残す: presentation のテストなどで、DB に接続せずに handler の振る舞いを確かめるため
+//   （rules/code/architecture.md の「テストの置き方」）。InMemoryTransactionRunner で rollback もそろえている。
 // WHY リポジトリを引数で受け取れる: テストで空のリポジトリを渡し（省略時も空）、アプリ共有のコンテナとは別に組み立てるため。
 //   共有のコンテナをテストで使うと、前のテストが作った Todo が残って結果が実行順に依存する。
 export function createInMemoryTodoContainer(
@@ -108,30 +110,20 @@ export function createPostgresTodoContainer(db: Database): TodoContainer {
   });
 }
 
-// 環境変数から組み立てる。DATABASE_URL があれば Postgres、無ければ（空文字も）InMemory。
-// WHY DATABASE_URL が無いときに InMemory にする: DB を起動していなくても pnpm dev で画面を触れるようにし、
-//   単体テスト（presentation のテストなど）がこのモジュールを読み込むだけで DB を要求しないようにするため。
-//   E2E は playwright.config.ts で必ず DATABASE_URL を渡し、Postgres で動かす（InMemory に落ちない）。
-// WHY 環境変数を引数で受け取る: 両方の分岐をテストで確かめるため（本番は process.env を渡す）。
-export function createTodoContainerFromEnv(
-  env: Record<string, string | undefined>,
-): TodoContainer {
-  if (env.DATABASE_URL) {
-    return createPostgresTodoContainer(getDatabase(env).db);
-  }
-  return createInMemoryTodoContainer();
-}
-
-// アプリ（Route Handler）が使う、プロセス内で共有するコンテナ。
-// WHY 共有する: InMemory リポジトリはインスタンスごとにデータを持つ。/api/todos と /api/todos/[id] で
-//   別のインスタンスを使うと、作った Todo が 1 件取得で見つからなくなる（Postgres ではプールを 1 つにするため。
-//   プールは getDatabase が globalThis に 1 つだけ持つ）。
-// WHY モジュールの変数で足りる（globalThis に置かない）: 2 つの route.ts がこのモジュールを別々に読み込むと
-//   インスタンスが分かれるおそれがあったが、Next.js 16.3.6 の `next build` + `next start` と `next dev` の両方で、
-//   POST /api/todos で作った Todo を GET /api/todos/[id] で取得できた（2026-09-28 に curl で確認）。
-//   `next dev` でファイルを編集して再読み込みされたときに InMemory のデータが消えるかは未確認（InMemory なので消えても実害は小さい）。
-// WHY 読み込んだ時点で組み立ててよい: Postgres でもプールを作るだけで、接続は最初のクエリまで張らない（node-postgres の Pool）。
-//   `next build` がこのモジュールを読み込んでも DB には接続しない。
-export const todoContainer: TodoContainer = createTodoContainerFromEnv(
-  process.env,
+// アプリ（Route Handler）が使う、プロセス内で共有するコンテナ。常に Postgres で組み立てる。
+// WHY DATABASE_URL が無いときに InMemory へ切り替えない（Issue #59）: 以前は DB を起動していなくても pnpm dev で画面を
+//   触れるよう InMemory に落としていたが、設定漏れ（.env の書き忘れ、CI での渡し忘れ）でも黙って InMemory で動き、
+//   データが保存されないまま気づけなかった。環境変数はすべて必須にし（backend/shared/infra/env.ts）、欠けていれば起動時に止める。
+//   pnpm dev の前に pnpm db:up と pnpm db:migrate が要る（README.md の手順）。
+// WHY 共有する: プールは getDatabase が globalThis に 1 つだけ持つので、/api/todos と /api/todos/[id] で同じプールを使う。
+// WHY モジュールの変数で足りる（globalThis に置かない）: 2 つの route.ts がこのモジュールを別々に読み込んでも、
+//   Next.js 16.3.6 の `next build` + `next start` と `next dev` の両方で、POST /api/todos で作った Todo を
+//   GET /api/todos/[id] で取得できた（2026-09-28 に curl で確認。当時は InMemory で、インスタンスの共有を確かめた）。
+//   Postgres ではデータが DB にあるので、コンテナが分かれても結果は変わらない。
+// WHY 読み込んだ時点で組み立ててよい: プールを作るだけで、接続は最初のクエリまで張らない（node-postgres の Pool）。
+//   `next build` がこのモジュールを読み込んでも DB には接続しない。環境変数の検証（env.ts）は読み込み時に行われるので、
+//   必須の変数が欠けていれば `next build` はここで止まる。`next start` / `next dev` は、このモジュールを読む前に
+//   ルート直下の instrumentation.ts が起動時に env.ts を読み込んで止まる。
+export const todoContainer: TodoContainer = createPostgresTodoContainer(
+  getDatabase().db,
 );
