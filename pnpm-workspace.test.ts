@@ -27,6 +27,11 @@ const repoRoot = import.meta.dirname;
 //     フローの書き方（`allowBuilds: { lefthook: true }`）などは文字列のまま残り、期待値と一致せず違反になる
 //     （見逃す方向ではなく、多く検出する方向に倒れる）。
 //   - トップレベルのキーの重複は YAML の仕様で不正なので、例外にする。
+// 限界: pnpm 自身が読めない YAML（タブのインデント、`minimumReleaseAge: 07200`、allowBuilds の値が空の子の下の孫）は、
+//   ここでは「違反なし」になりうる。いずれも pnpm 12.7.0 の `pnpm config get` が「Failed to parse pnpm-workspace.yaml」で
+//   止まる（2026-09-28 実測）ので、install も止まり実害はない。
+//   逆に `minimumReleaseAge: "7200"`（クォートした文字列）と値の後ろの空白（`7200 `）は、pnpm は 7200 と読む（同じ実測）が、
+//   ここでは安全側に倒して違反にする（must reject で固定）。
 type Scalar = string | number | boolean;
 type Settings = Record<string, Scalar | Record<string, Scalar>>;
 
@@ -44,7 +49,10 @@ function unquote(text: string): string {
 }
 
 function parseScalar(raw: string): Scalar {
-  // クォートの中の ` #` はコメントではないので、クォートした値は先に取り出す。
+  // WHY クォートの後ろのコメント（`'x' # 理由`）をここで除く: 子の値は CHILD_ENTRY から生のまま渡るため。
+  //   トップレベルの値は splitTopLevelBlocks で先に ` #` 以降を除いてから渡る。そのため、トップレベルのクォートの中に
+  //   ` #` があると値が途中で切れるが、検査する値（7200 / true / '' など）にその形は無く、切れた場合は期待値と一致せず
+  //   違反になる（見逃す方向ではない）。
   const quoted = raw.match(/^(['"])(.*?)\1(?:\s+#.*)?$/);
   if (quoted) return quoted[2];
   const plain = raw.replace(TRAILING_COMMENT, "");
@@ -200,6 +208,26 @@ describe("設定の読み取りと判定（must pass）", () => {
     ).toEqual([]);
   });
 
+  it.each([
+    [
+      "子の間の、インデントされた `key: value` 形式のコメント行",
+      "  sharp: false\n",
+      "  sharp: false\n  # note: x\n",
+    ],
+    [
+      "子の間の、行頭の `key: value` 形式のコメント行",
+      "  sharp: false\n",
+      "  sharp: false\n# a: b\n",
+    ],
+    [
+      "子の値の後ろのコメント",
+      "  lefthook: true\n",
+      "  lefthook: true # 理由\n",
+    ],
+  ])("%s は読まない（違反なし）", (_case, from, to) => {
+    expect(violationsOf(replaceOnce(VALID_YAML, from, to))).toEqual([]);
+  });
+
   it("改行が CRLF でも読める", () => {
     expect(violationsOf(VALID_YAML.replaceAll("\n", "\r\n"))).toEqual([]);
   });
@@ -348,6 +376,27 @@ describe("設定の読み取りと判定（must reject）", () => {
           "",
         ),
       ["allowBuilds"],
+    ],
+    // 安全側に倒して違反にするもの（pnpm は 7200 と読むが、書き方を 1 通りにする。上の「限界」）。
+    [
+      "minimumReleaseAge がクォートした文字列",
+      (yaml: string) =>
+        replaceOnce(
+          yaml,
+          "minimumReleaseAge: 7200\n",
+          'minimumReleaseAge: "7200"\n',
+        ),
+      ["minimumReleaseAge"],
+    ],
+    [
+      "minimumReleaseAge の値の後ろに空白がある",
+      (yaml: string) =>
+        replaceOnce(
+          yaml,
+          "minimumReleaseAge: 7200\n",
+          "minimumReleaseAge: 7200 \n",
+        ),
+      ["minimumReleaseAge"],
     ],
     // WHY: 読み取りが空（ファイルの取り違えなど）でも「違反なし」にならず、すべての設定が欠けていると報告すること。
     [

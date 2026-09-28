@@ -21,7 +21,8 @@ const repoRoot = import.meta.dirname;
 //   （semver の互換性の約束）から外れ、ビルドメタは npm の版の比較で無視される（同じ x.y.z の別ビルドを区別できない）。
 //   どちらも通常の依存では使わないので拒否に倒し、使う必要が出たら Issue で決める（rules/code/dependencies.md）。
 //   `=1.2.3` や `v1.2.3` も npm は完全一致として解釈するが、書き方を 1 通りにするため拒否する。
-const EXACT_VERSION = /^\d+\.\d+\.\d+$/;
+//   先頭が 0 の数（`01.2.3`）は semver で不正なので拒否する（0 そのものは許す）。
+const EXACT_VERSION = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
 
 function isPinnedVersion(spec: string): boolean {
   return EXACT_VERSION.test(spec);
@@ -72,6 +73,11 @@ describe("版の判定（isPinnedVersion）", () => {
     ["1.2.3 || 2.0.0", "OR の範囲"],
     ["1.2.x", "x のワイルドカード"],
     ["1.2", "メジャー.マイナーだけ（1.2.x と同じ範囲）"],
+    ["1", "メジャーだけ（1.x.x と同じ範囲）"],
+    ["~1", "チルダとメジャーだけ"],
+    ["01.2.3", "先頭が 0 の数（semver で不正）"],
+    ["1.02.3", "先頭が 0 の数（マイナー）"],
+    ["1.2.03", "先頭が 0 の数（パッチ）"],
     ["*", "任意の版"],
     ["latest", "dist-tag"],
     ["workspace:*", "workspace プロトコル"],

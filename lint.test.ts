@@ -19,24 +19,47 @@ const repoRoot = import.meta.dirname;
 //   （info は biome.json 側で error に上げている）。pnpm lint / pnpm check / pre-commit と同じ引数で検査するため定数にしている。
 const ERROR_ON_WARNINGS = "--error-on-warnings";
 
-// WHY コマンド文字列を「含むか」ではなく、コマンドの区切りごとに `biome check` とその引数として読む:
+// WHY コマンド文字列を「含むか」ではなく、`&&` で区切ったコマンドごとに `biome check` とその引数として読む:
 //   `biome check . && echo --error-on-warnings` のように、別のコマンドの引数に置かれたフラグや、`biome lint` / `biome format` に
 //   付いたフラグを「付いている」と誤判定しないため（Issue #50）。
 // 許す起動の仕方は `biome ...`（package.json の scripts。node_modules/.bin が PATH に入る）と `pnpm exec biome ...`（lefthook）だけ。
 //   npx などは pnpm のみを使う方針（rules/code/env.md）から外れるので、許可しない。
-const COMMAND_SEPARATOR = /&&|\|\||;|\|/;
+// WHY `&&` 以外のつなぎ（`||` / `;` / 改行 / `|` / 単独の `&`）を含むコマンドは丸ごと拒否する:
+//   どれも biome check の失敗をコマンド全体の失敗にしない書き方になりうる。`biome check ... || true` は失敗を打ち消し、
+//   `; exit 0` と改行は後ろのコマンドの終了コードになり、`| cat` はパイプの最後のコマンドの終了コードになり、
+//   末尾の `&` はバックグラウンドにして終了コードを見ない。`true || biome check ...` では biome check が実行されない。
+//   `&&` は前が失敗すればそこで止まって失敗になるので、つなげても失敗は消えない（許可する）。
+//   区切りの文字がクォートの中にある場合も拒否する（多く検出する方向。今の scripts / lefthook.yml には無い）。
+const COMMAND_CHAIN = "&&";
+const UNSAFE_CHAIN = /[|;&\n]/;
+
+// WHY warn を効かなくするフラグを拒否する: `--diagnostic-level=error` は warn 以下の診断を出さず、`--only` / `--skip` は
+//   実行するルールを絞るため、`--error-on-warnings` が付いていても warn の違反で終了コード 0 になる（Issue #50 の reviewer が実測）。
+//   `--flag=value` と `--flag value` の両方の書き方を拒否する。
+const WARNING_SUPPRESSING_FLAGS = ["--diagnostic-level", "--only", "--skip"];
+
+function suppressesWarnings(arg: string): boolean {
+  return WARNING_SUPPRESSING_FLAGS.some(
+    (flag) => arg === flag || arg.startsWith(`${flag}=`),
+  );
+}
+
+function isBiomeCheckWithErrorOnWarnings(segment: string): boolean {
+  const words = segment.trim().split(/\s+/);
+  const args =
+    words[0] === "pnpm" && words[1] === "exec" ? words.slice(2) : words;
+  return (
+    args[0] === "biome" &&
+    args[1] === "check" &&
+    args.includes(ERROR_ON_WARNINGS) &&
+    !args.some(suppressesWarnings)
+  );
+}
 
 function runsBiomeCheckWithErrorOnWarnings(command: string): boolean {
-  return command.split(COMMAND_SEPARATOR).some((segment) => {
-    const words = segment.trim().split(/\s+/);
-    const args =
-      words[0] === "pnpm" && words[1] === "exec" ? words.slice(2) : words;
-    return (
-      args[0] === "biome" &&
-      args[1] === "check" &&
-      args.includes(ERROR_ON_WARNINGS)
-    );
-  });
+  const segments = command.split(COMMAND_CHAIN);
+  if (segments.some((segment) => UNSAFE_CHAIN.test(segment))) return false;
+  return segments.some(isBiomeCheckWithErrorOnWarnings);
 }
 
 function pnpmExec(command: string, args: string[]) {
@@ -244,6 +267,52 @@ describe("--error-on-warnings 付きの biome check かの判定（runsBiomeChec
       "biome check が別のコマンドの引数にある",
     ],
     ["npx biome check --error-on-warnings .", "npx で起動する（pnpm のみ）"],
+    ["biome check --error-on-warnings . || true", "|| で失敗を打ち消す"],
+    ["true || biome check --error-on-warnings .", "|| の後ろで実行されない"],
+    [
+      "biome check --error-on-warnings . ; exit 0",
+      "; の後ろのコマンドの終了コードになる",
+    ],
+    [
+      "biome check --error-on-warnings .; exit 0",
+      "; の後ろのコマンドの終了コードになる（空白なし）",
+    ],
+    [
+      "biome check --error-on-warnings .\nexit 0",
+      "改行の後ろのコマンドの終了コードになる",
+    ],
+    [
+      "biome check --error-on-warnings . | cat",
+      "パイプの最後のコマンドの終了コードになる",
+    ],
+    [
+      "biome check --error-on-warnings . &",
+      "& でバックグラウンドにして終了コードを見ない",
+    ],
+    [
+      "biome check --error-on-warnings --diagnostic-level=error .",
+      "--diagnostic-level=error で warn を出さない",
+    ],
+    [
+      "biome check --error-on-warnings --diagnostic-level error .",
+      "--diagnostic-level（空白区切り）",
+    ],
+    [
+      "biome check --error-on-warnings --only=suspicious/noConsole .",
+      "--only で他のルールを止める",
+    ],
+    [
+      "biome check --error-on-warnings --only suspicious/noConsole .",
+      "--only（空白区切り）",
+    ],
+    [
+      "biome check --error-on-warnings --skip=correctness/noUnusedVariables .",
+      "--skip でルールを止める",
+    ],
+    [
+      "biome check --error-on-warnings --skip correctness .",
+      "--skip（空白区切り）",
+    ],
     ["", "空文字"],
   ])("%s（%s）は拒否する", (command) => {
     expect(runsBiomeCheckWithErrorOnWarnings(command)).toBe(false);
