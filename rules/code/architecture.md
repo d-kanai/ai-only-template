@@ -184,10 +184,14 @@ backend/
   - `backend/shared/` は `backend/<feature>/`（shared 以外）・`features/` / `app/` を参照しない。
   - `app/`（`app/api` 以外）が `features/` / `backend/` / `shared/` を参照するときは `features/<f>`（`features/<f>/index`）か `shared/` だけ（`backend/` と feature の深いパスは不可）。パッケージ（`next` / `react` など）と、`app/` の中の相対参照（`import "./globals.css"` など）は検査しない。
   - `app/api/` が参照してよいのは `backend/<x>/presentation/*.api` だけ。
-  - 規則の判定そのものも、規則ごとに「違反になる例」「ならない例」を架空の参照で固定している（`architecture.test.ts` の「規則ごとの判定」）。今のコードに違反が無いことだけでは、規則が緩すぎても気づけないため。
+  - 規則の判定そのものも、規則ごとに「違反になる例」「ならない例」を架空の参照で 3 件以上ずつ固定している（`architecture.test.ts` の「規則ごとの判定」）。今のコードに違反が無いことだけでは、規則が緩すぎても気づけないため。
+  - さらに、一時ディレクトリに架空のツリーを作って実ファイルを置き、本番と同じ列挙 → 抽出 → 正規化 → 判定（`collectViolations(root)`）に通す fixture テストがある（同ファイルの「fixture のツリーを検査したときに検出される違反」）。
+    - must-reject: 12 規則それぞれの違反を、alias（`@/`）と相対パス、値の import / `import type` / inline の `type` / `export { X } from` / `export type { X } from` / dynamic `import()` / 副作用だけの import、`.ts` / `.tsx` / `.js` / `.jsx` で置き、検出される「規則: ファイル → 参照先」の一覧を丸ごと比較する（見逃しも余分な検出も失敗にする）。
+    - must-pass: 許可される参照を網羅したツリーで違反 0 件を確かめる。今のリポジトリの本番コードの参照（参照元・参照先・型だけか）はすべて含めている。コメント・文字列の中の import 風の文字列、テストファイル、TS / JS 以外のファイルも置く。
+    - 理由: 抽出の取りこぼし（書き方によって import を拾えない）は、規則が正しくても違反の見逃しになる。1 件の参照を規則に渡すだけのテストではそこを検証できない。
   - テストを対象外にする理由: テストは組み立てのために規則の外側を参照する（presentation のテストが infra の InMemory リポジトリを使うなど。上の「テストの置き方」）。
   - 抽出は正規表現で行う（依存は足さない）。コメントは除いてから抽出するが、正規表現リテラルやテンプレートリテラルの入れ子はコメント・文字列の区切りを誤認しうるなど限界がある（詳細と WHY は `architecture.test.ts` のコメント。抽出の仕様は同ファイルの「参照の抽出」「参照先の正規化」のテストで固定している）。
-  - この節や上の「画面側とサーバ側の境界」「`backend/<feature>/`」の依存の規則を足す・変えるときは、`architecture.test.ts` の `RULES` と `RULE_EXAMPLES`（判定の例）も合わせて直す。
+  - この節や上の「画面側とサーバ側の境界」「`backend/<feature>/`」の依存の規則を足す・変えるときは、`architecture.test.ts` の `RULES` と `RULE_EXAMPLES`（判定の例）、fixture の must-reject / must-pass（`MUST_REJECT_FILES` / `MUST_REJECT_VIOLATIONS` / `MUST_PASS_FILES`）も合わせて直す。本番コードに新しい import の形（新しい層の組み合わせや書き方）を足したときも、must-pass に同じ形を足す。
   - Biome の `noRestrictedImports` を使わなかった理由: `import type` だけを許すことを表現できない（Biome 2.5.13 で、制限したパスへの `import type` も違反になることを実測。Issue #47）。また参照元のディレクトリごとに制限を変えるには feature・層ごとに `overrides` を書く必要があり、feature を足すたびに `biome.json` を直すことになる。
 
 ## 命名
@@ -240,6 +244,7 @@ backend/
 - `components/` `hooks/` `lib/` を最上位に並べる層別の構成: 1 つの機能のコードが層をまたいで散り、機能の追加・削除で複数のディレクトリを触ることになる。
 - `src/` の下に置く構成: ユーザーの判断で不要。ルート直下に置く。
 - `features/<feature>/` の中に `client/` と `server/` を並べる構成: 同じ feature ディレクトリに `"use client"` のコードとサーバ専用のコードが混在し、画面からサーバの実装を import する誤りが起きやすい。API 側は `backend/` として最上位で分離する。
+- 依存の向きの検査に dependency-cruiser を使う案: 18.4.0（2026-09-28 時点の latest）は `supportedTranspilers.typescript` が `>=2.0.0 <7.0.0` で、本リポジトリの TypeScript 7.0.2 が範囲外（npm レジストリの 18.4.0 のメタデータで確認）。`import type` の区別や層ごとのルールは書けるので、TS 7 に対応したら再検討する。
 - 旧案（Issue #39 の最初の案）: API 側のディレクトリ名を `server/` にし、presentation に feature 共通の型ファイル `dto.ts` と、複数の API をまとめたコントローラを置き、application のユースケースを `.use-case.ts` の 1 種類にする構成。ユーザーの判断で、ディレクトリ名は `backend/`、presentation は 1 API = 1 ファイル（型もその中で定義）、application は query / command に分ける形に変えた。
 
 ## 一次情報

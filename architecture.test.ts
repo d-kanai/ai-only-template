@@ -1,8 +1,17 @@
 // @vitest-environment node
 // WHY: vitest.config.mts の既定環境は jsdom（コンポーネントテスト用）。このテストはソースを文字列として読むだけで DOM を使わないため、
 //   jsdom の初期化を省き、ブラウザ相当の globals が Node の API と混ざる余地をなくすため node 環境で動かす。
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, posix, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
 // ディレクトリ構成ルール（rules/code/architecture.md）の依存の向きを、仕様として機械的に検査するテスト。
@@ -15,8 +24,9 @@ import { describe, expect, it } from "vitest";
 //   足すたびに biome.json を直すことになる。ここでは参照元のパスから feature 名・層を取り出して、規則を 1 か所で書く。
 //
 // WHY 依存を増やさず正規表現で抽出する: 検査に必要なのは import / export の参照先と「型だけか」の 2 つで、
-//   TypeScript の構文木までは要らない。依存（dependency-cruiser など）を足すほどの必要がない（rules/code/architecture.md の
-//   入力検証と同じ判断）。抽出の限界は stripComments / extractImports の WHY に書き、仕様を下の describe で固定する。
+//   TypeScript の構文木までは要らない。dependency-cruiser は 18.4.0 の supportedTranspilers.typescript が <7.0.0 で、
+//   本リポジトリの TypeScript 7.0.2 に対応していない（rules/code/architecture.md の「採用しなかった案」）。
+//   抽出の限界は stripComments / extractImports の WHY に書き、仕様を下の describe と fixture テストで固定する。
 
 const repoRoot = import.meta.dirname;
 
@@ -118,15 +128,32 @@ function findValueImports(code: string, pattern: RegExp): Located[] {
 }
 
 // ソースから import / re-export / dynamic import の参照を、書かれた順に取り出す。
-// 限界（仕様として受け入れる）: 文字列リテラルの中に import 文の形の文字列があると参照として拾う（本番のコードに書くことはまれで、
-//   拾った場合は多く検出する方向＝見逃さない方向に働く）。`require()` と `import x = require()` は拾わない（本リポジトリは ESM だけ）。
+// 文字列リテラルの範囲（[開始, 終了)）。stripComments の後のコードに使うので、一致するのは文字列だけになる。
+function stringRanges(code: string): [number, number][] {
+  return [...code.matchAll(STRING_OR_COMMENT)]
+    .filter((match) => match[1] !== undefined)
+    .map((match) => [match.index, match.index + match[0].length]);
+}
+
+function isInsideString(ranges: [number, number][], index: number): boolean {
+  return ranges.some(([start, end]) => start <= index && index < end);
+}
+
+// ソースから import / re-export / dynamic import の参照を、書かれた順に取り出す。
+// WHY 一致の始まりが文字列リテラルの中にあるものを捨てる: 'import("@/backend/x")' やテンプレートリテラルの中の行頭の
+//   `import { a } from "..."` のような、コードの例を文字列で持つだけのものを参照と誤認しないため。本物の import の
+//   specifier（"x"）も文字列だが、一致の始まり（import / export、行頭、; の位置）は文字列の外にあるので残る。
+// 限界（仕様として受け入れる）: テンプレートリテラルの ${} の中に書いた import("x") は、文字列の中とみなして拾わない
+//   （見逃す方向）。`require()` と `import x = require()` は拾わない（本リポジトリは ESM だけ）。
 function extractImports(source: string): ImportStatement[] {
   const code = stripComments(source);
+  const ranges = stringRanges(code);
   return [
     ...findFromStatements(code),
     ...findValueImports(code, SIDE_EFFECT_IMPORT),
     ...findValueImports(code, DYNAMIC_IMPORT),
   ]
+    .filter(({ index }) => !isInsideString(ranges, index))
     .sort((a, b) => a.index - b.index)
     .map(({ specifier, typeOnly }) => ({ specifier, typeOnly }));
 }
@@ -156,30 +183,33 @@ function toReference(
     };
   }
   if (specifier.startsWith(".")) {
-    const absolute = resolve(repoRoot, dirname(from), specifier);
-    const to = toPosix(relative(repoRoot, absolute)).replace(
-      CODE_EXTENSION,
-      "",
-    );
+    // WHY posix で文字列として解決する: from がリポジトリ相対の "/" 区切りなので、ルートの場所（本番のリポジトリ直下か、
+    //   fixture の一時ディレクトリか）に関係なく同じ結果になる。
+    const to = posix
+      .join(posix.dirname(from), specifier)
+      .replace(CODE_EXTENSION, "");
     return { from, to, own: true, typeOnly };
   }
   return { from, to: specifier, own: false, typeOnly };
 }
 
-function listSourceFiles(dir: string): string[] {
-  if (!existsSync(join(repoRoot, dir))) {
+// WHY root を引数で受け取る: 本番の検査（リポジトリ直下）と、fixture の一時ディレクトリに置いた架空のツリーの検査で、
+//   列挙 → 抽出 → 正規化 → 判定の同じ経路を通すため。
+function listSourceFiles(root: string, dir: string): string[] {
+  if (!existsSync(join(root, dir))) {
     return [];
   }
-  return readdirSync(join(repoRoot, dir), { recursive: true, encoding: "utf8" })
+  return readdirSync(join(root, dir), { recursive: true, encoding: "utf8" })
     .map((path) => toPosix(join(dir, path)))
     .filter((path) => SOURCE_FILE.test(path) && !TEST_FILE.test(path));
 }
 
-function collectReferences(): Reference[] {
-  return SOURCE_DIRS.flatMap(listSourceFiles).flatMap((file) =>
-    extractImports(readFileSync(join(repoRoot, file), "utf8")).map(
-      (statement) => toReference(file, statement),
-    ),
+function collectReferences(root: string): Reference[] {
+  return SOURCE_DIRS.flatMap((dir) => listSourceFiles(root, dir)).flatMap(
+    (file) =>
+      extractImports(readFileSync(join(root, file), "utf8")).map((statement) =>
+        toReference(file, statement),
+      ),
   );
 }
 
@@ -457,8 +487,23 @@ const RULES: Rule[] = [
   },
 ];
 
+function findViolations(references: Reference[], rule: Rule): string[] {
+  return references
+    .filter((ref) => rule.appliesTo(ref.from) && rule.isViolation(ref))
+    .map((ref) => `${ref.from} → ${ref.to}`);
+}
+
+// root の下のツリー全体の違反を「<規則の id>: ファイル → 参照先」の一覧（並べ替え済み）で返す。
+//   1 つの参照が複数の規則に違反するときは、規則ごとに 1 行ずつ出す。
+function collectViolations(root: string): string[] {
+  const references = collectReferences(root);
+  return RULES.flatMap((rule) =>
+    findViolations(references, rule).map((line) => `${rule.id}: ${line}`),
+  ).sort();
+}
+
 describe("依存の向き（rules/code/architecture.md）", () => {
-  const references = collectReferences();
+  const references = collectReferences(repoRoot);
 
   it("検査の対象から参照を取り出せている（抽出が壊れて 0 件になり、すべての規則が素通りするのを防ぐ）", () => {
     expect(references.length).toBeGreaterThan(0);
@@ -467,10 +512,7 @@ describe("依存の向き（rules/code/architecture.md）", () => {
   for (const rule of RULES) {
     it(rule.name, () => {
       // 失敗時にどのファイルがどこを参照しているかが出力に出るよう、違反を「ファイル → 参照先」の一覧にして空配列と比較する。
-      const violations = references
-        .filter((ref) => rule.appliesTo(ref.from) && rule.isViolation(ref))
-        .map((ref) => `${ref.from} → ${ref.to}`);
-      expect(violations).toEqual([]);
+      expect(findViolations(references, rule)).toEqual([]);
     });
   }
 });
@@ -495,7 +537,7 @@ const RULE_EXAMPLES: Record<
       ],
       [
         "features/todo/screens/s/s.hook.ts",
-        "@/backend/todo/domain/todo",
+        "../../../../backend/todo/domain/todo",
         "value",
       ],
       ["shared/x.ts", "@/backend/shared/presentation/http-error", "type"],
@@ -507,6 +549,7 @@ const RULE_EXAMPLES: Record<
         "@/backend/todo/presentation/list-todos.api",
         "type",
       ],
+      ["shared/x.ts", "react", "value"],
     ],
   },
   "feature-api-to-backend": {
@@ -522,11 +565,21 @@ const RULE_EXAMPLES: Record<
         "@/backend/other/presentation/list-others.api",
         "type",
       ],
+      [
+        "features/todo/api/todo-api.ts",
+        "@/backend/todo/presentation/list-todos",
+        "type",
+      ],
     ],
     allowed: [
       [
         "features/todo/api/todo-api.ts",
         "@/backend/todo/presentation/list-todos.api",
+        "type",
+      ],
+      [
+        "features/todo/api/todo-api.ts",
+        "../../../backend/todo/presentation/get-todo.api",
         "type",
       ],
       [
@@ -541,6 +594,12 @@ const RULE_EXAMPLES: Record<
       [
         "features/other/components/x.ts",
         "@/features/todo/components/todo-item",
+        "value",
+      ],
+      ["features/other/components/x.ts", "../../todo/api/todo-api", "type"],
+      [
+        "features/todo/components/x.ts",
+        "@/features/todo-extra/components/y",
         "value",
       ],
     ],
@@ -558,16 +617,38 @@ const RULE_EXAMPLES: Record<
     violating: [
       ["features/todo/components/x.ts", "@/app/page", "value"],
       ["shared/x.ts", "@/app/layout", "type"],
+      [
+        "features/todo/screens/s/s.tsx",
+        "../../../../app/api/todos/route",
+        "value",
+      ],
     ],
-    allowed: [["features/todo/components/x.ts", "next/link", "value"]],
+    allowed: [
+      ["features/todo/components/x.ts", "next/link", "value"],
+      ["features/todo/components/x.ts", "@/shared/x", "value"],
+      ["shared/x.ts", "./y", "value"],
+    ],
   },
   "shared-to-features": {
-    violating: [["shared/x.ts", "@/features/todo", "value"]],
-    allowed: [["shared/x.ts", "react", "value"]],
+    violating: [
+      ["shared/x.ts", "@/features/todo", "value"],
+      ["shared/ui/x.tsx", "../../features/todo/components/todo-item", "value"],
+      ["shared/x.ts", "@/features/todo/api/todo-api", "type"],
+    ],
+    allowed: [
+      ["shared/x.ts", "react", "value"],
+      ["shared/ui/x.tsx", "../x", "value"],
+      [
+        "features/todo/components/x.ts",
+        "@/features/todo/api/todo-api",
+        "value",
+      ],
+    ],
   },
   domain: {
     violating: [
       ["backend/todo/domain/x.ts", "next/server", "value"],
+      ["backend/todo/domain/x.ts", "react/jsx-runtime", "value"],
       [
         "backend/todo/domain/x.ts",
         "../application/create-todo.command",
@@ -583,6 +664,7 @@ const RULE_EXAMPLES: Record<
     ],
     allowed: [
       ["backend/todo/domain/x.ts", "@/backend/todo/domain/todo", "value"],
+      ["backend/todo/domain/x.ts", "./todo", "type"],
       [
         "backend/todo/domain/x.ts",
         "@/backend/shared/domain/domain-error",
@@ -600,10 +682,11 @@ const RULE_EXAMPLES: Record<
       ],
       [
         "backend/todo/application/x.ts",
-        "@/backend/todo/presentation/list-todos.api",
+        "../presentation/list-todos.api",
         "type",
       ],
       ["backend/todo/application/x.ts", "react", "value"],
+      ["backend/todo/application/x.ts", "@/features/todo", "value"],
     ],
     allowed: [
       [
@@ -611,6 +694,7 @@ const RULE_EXAMPLES: Record<
         "@/backend/todo/domain/todo-repository",
         "type",
       ],
+      ["backend/todo/application/x.ts", "../domain/todo", "value"],
       [
         "backend/todo/application/x.ts",
         "@/backend/shared/domain/domain-error",
@@ -623,6 +707,11 @@ const RULE_EXAMPLES: Record<
       [
         "backend/todo/presentation/x.api.ts",
         "@/backend/todo/infra/todo-repository.in-memory",
+        "value",
+      ],
+      [
+        "backend/todo/presentation/x.api.ts",
+        "../infra/container-helper",
         "value",
       ],
       ["backend/todo/presentation/x.api.ts", "next/server", "value"],
@@ -638,6 +727,7 @@ const RULE_EXAMPLES: Record<
         "@/backend/todo/infra/container",
         "value",
       ],
+      ["backend/todo/presentation/x.api.ts", "../infra/container", "value"],
       [
         "backend/todo/presentation/x.api.ts",
         "@/backend/todo/domain/todo",
@@ -690,7 +780,13 @@ const RULE_EXAMPLES: Record<
         "@/backend/todo/domain/todo",
         "type",
       ],
+      [
+        "backend/shared/presentation/x.ts",
+        "../../todo/infra/container",
+        "value",
+      ],
       ["backend/shared/presentation/x.ts", "@/features/todo", "value"],
+      ["backend/shared/x.ts", "@/app/page", "value"],
     ],
     allowed: [
       [
@@ -698,15 +794,19 @@ const RULE_EXAMPLES: Record<
         "@/backend/shared/domain/domain-error",
         "value",
       ],
+      ["backend/shared/presentation/json-body.ts", "./http-error", "value"],
+      ["backend/shared/domain/x.ts", "node:crypto", "value"],
     ],
   },
   app: {
     violating: [
       ["app/page.tsx", "@/backend/todo/presentation/list-todos.api", "value"],
       ["app/page.tsx", "@/features/todo/components/todo-item", "value"],
+      ["app/todo/[id]/page.tsx", "../../../features/todo/api/todo-api", "type"],
     ],
     allowed: [
       ["app/page.tsx", "@/features/todo", "value"],
+      ["app/todo/[id]/page.tsx", "../../../features/todo/index", "value"],
       ["app/page.tsx", "@/shared/x", "value"],
       ["app/layout.tsx", "./globals.css", "value"],
       ["app/page.tsx", "react", "value"],
@@ -716,12 +816,27 @@ const RULE_EXAMPLES: Record<
     violating: [
       ["app/api/todos/route.ts", "@/backend/todo/infra/container", "value"],
       ["app/api/todos/route.ts", "next/server", "value"],
+      [
+        "app/api/todos/route.ts",
+        "@/backend/todo/presentation/list-todos",
+        "value",
+      ],
     ],
     allowed: [
       [
         "app/api/todos/route.ts",
         "@/backend/todo/presentation/list-todos.api",
         "value",
+      ],
+      [
+        "app/api/todos/[id]/route.ts",
+        "../../../../backend/todo/presentation/get-todo.api",
+        "value",
+      ],
+      [
+        "app/api/todos/route.ts",
+        "@/backend/todo/presentation/create-todo.api",
+        "type",
       ],
     ],
   },
@@ -737,6 +852,17 @@ function judge(id: RuleId, [from, specifier, kind]: Example): boolean {
 }
 
 describe("規則ごとの判定", () => {
+  // WHY 件数をそろえる: 例が 1 件だけだと、規則の書き方を少し崩した（条件を 1 つ落とした）ときに気づけない。
+  //   違反・許可の両側に複数の例を置き、境界の両側を固定する。
+  it.each(Object.keys(RULE_EXAMPLES))(
+    "%s の違反例・許可例はそれぞれ 3 件以上ある",
+    (id) => {
+      const { violating, allowed } = RULE_EXAMPLES[id as RuleId];
+      expect(violating.length).toBeGreaterThanOrEqual(3);
+      expect(allowed.length).toBeGreaterThanOrEqual(3);
+    },
+  );
+
   for (const [id, { violating, allowed }] of Object.entries(RULE_EXAMPLES) as [
     RuleId,
     { violating: Example[]; allowed: Example[] },
@@ -750,6 +876,565 @@ describe("規則ごとの判定", () => {
       });
     });
   }
+});
+
+// --- 抽出 → 正規化 → 判定を通した fixture テスト ---
+// 上の「規則ごとの判定」は、正規化済みの参照 1 件を規則に渡すだけで、ファイルの列挙・import の抽出・相対パスの解決を
+// 通らない。抽出の取りこぼし（書き方によって import を拾えない）は、規則が正しくても違反の見逃しになる。
+// 一時ディレクトリに架空のツリーを作って実ファイルを置き、本番と同じ collectViolations に通して、検出される違反の
+// 集合を丸ごと比較する（余分な検出も見逃しも失敗にする）。規則を足す・変えるときは、ここの must-reject / must-pass も直す。
+
+const lines = (...source: string[]) => source.join("\n");
+
+function violationsOfFixture(files: Record<string, string>): string[] {
+  // WHY OS の一時ディレクトリに置く: リポジトリ内に置くと、本番の検査（リポジトリ直下）や Biome・git の差分に混ざる。
+  //   テストが途中で落ちても finally で消す。
+  const root = mkdtempSync(join(tmpdir(), "architecture-test-"));
+  try {
+    for (const [path, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), content);
+    }
+    return collectViolations(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+// must-reject: 12 規則それぞれについて、alias（@/）と相対パス、値の import / import type / inline の type /
+// export { X } from / export type { X } from / dynamic import() / 副作用だけの import のうち規則に関係する形と、
+// .ts / .tsx / .js / .jsx の各拡張子、境界ぎりぎりのケース（他 feature の深いパス、自 feature の禁止層、
+// 名前の前方一致だけが同じ別ディレクトリ、next / react / react-dom のサブパス）を置く。
+const MUST_REJECT_FILES: Record<string, string> = {
+  // screen-to-backend: features/<f>/ の api/ 以外から backend への参照は、型でも相対でも違反。
+  "features/todo/components/bad-backend.ts": lines(
+    'import { GET } from "@/backend/todo/presentation/list-todos.api";',
+    'import type { Todo } from "../../../backend/todo/domain/todo";',
+    'import { type GetTodoResponse } from "@/backend/todo/presentation/get-todo.api";',
+    'import * as updateApi from "@/backend/todo/presentation/update-todo.api";',
+    'import deleteApi from "../../../backend/todo/presentation/delete-todo.api";',
+    'export { POST } from "@/backend/todo/presentation/create-todo.api";',
+    'export type { ErrorResponse } from "@/backend/shared/presentation/http-error";',
+    // セミコロンの無い文の直後の複数行の import type も拾う。
+    "export enum Kind { A }",
+    "import type {",
+    "  TodoContainer,",
+    '} from "@/backend/todo/infra/container";',
+    'const lazy = import("../../../backend/shared/presentation/json-body");',
+  ),
+  // screen-to-backend / shared-to-features / screen-to-app: 画面側の shared/ から。
+  "shared/bad-shared.tsx": lines(
+    'import { GET } from "../backend/todo/presentation/list-todos.api";',
+    'import type { DomainError } from "@/backend/shared/domain/domain-error";',
+    'import { TodoScreen } from "@/features/todo";',
+    'import type { TodoDto } from "../features/todo/api/todo-api";',
+    'export { TodoItem } from "@/features/todo/components/todo-item";',
+    'export { default } from "@/app/page";',
+    'const layout = import("../app/layout");',
+  ),
+  // feature-api-to-backend: 値の参照、presentation 以外、他 feature、.api でないファイル、inline type の混在。
+  "features/todo/api/bad-api.ts": lines(
+    'import { listTodosApi } from "@/backend/todo/presentation/list-todos.api";',
+    'import type { Todo } from "../../../backend/todo/domain/todo";',
+    'import type { ListOthersResponse } from "@/backend/other/presentation/list-others.api";',
+    'import { type TodoDto, GET } from "@/backend/todo/presentation/get-todo.api";',
+    'export { toErrorResponse } from "../../../backend/shared/presentation/http-error";',
+    'import type { X } from "@/backend/todo/presentation/list-todos";',
+    'import type { DomainError } from "@/backend/shared/domain/domain-error";',
+    'const m = import("@/backend/todo/presentation/update-todo.api");',
+  ),
+  // feature-to-feature: 別 feature の深いパスは、型でも re-export でも dynamic でも違反。
+  "features/other/components/bad-feature.js": lines(
+    'import { TodoItem } from "@/features/todo/components/todo-item";',
+    'import { useTodoScreen } from "../../todo/screens/todo-screen/todo-screen.hook";',
+    'export { fetchTodos } from "@/features/todo/api/todo-api";',
+    'import type { TodoDto } from "../../todo/api/todo-api";',
+    'const c = import("@/features/todo/components");',
+  ),
+  // feature-to-feature: 名前の前方一致だけが同じ別 feature（todo と todo-extra）を同じ feature と誤認しない。
+  "features/todo/components/bad-prefix.jsx": lines(
+    'import { X } from "@/features/todo-extra/components/x";',
+  ),
+  // screen-to-app
+  "features/todo/screens/s/bad-app.tsx": lines(
+    'import Page from "@/app/page";',
+    'import { GET } from "../../../../app/api/todos/route";',
+    'export type { Metadata } from "@/app/layout";',
+  ),
+  // domain: フレームワークのサブパス、自 feature の外側の層、他 feature の domain、shared の presentation、画面側。
+  "backend/todo/domain/bad-domain.ts": lines(
+    'import { NextResponse } from "next/server";',
+    'import { jsx } from "react/jsx-runtime";',
+    'import { createRoot } from "react-dom/client";',
+    'import { CreateTodoCommand } from "../application/create-todo.command";',
+    'import type { TodoContainer } from "@/backend/todo/infra/container";',
+    'import type { TodoDto } from "../presentation/list-todos.api";',
+    'import type { Other } from "@/backend/other/domain/other";',
+    'import { toErrorResponse } from "../../shared/presentation/http-error";',
+    'export type { TodoDto as Dto } from "@/features/todo";',
+    'const s = import("@/shared/x");',
+    'import "@/app/globals.css";',
+  ),
+  // domain: backend/shared/domain から backend/shared/presentation（shared の中でも向きが逆）。
+  "backend/shared/domain/bad-shared-domain.ts": lines(
+    'import { InvalidRequestError } from "../presentation/http-error";',
+  ),
+  // application
+  "backend/todo/application/bad-application.ts": lines(
+    'import { todoContainer } from "@/backend/todo/infra/container";',
+    'import type { TodoDto } from "../presentation/list-todos.api";',
+    'import { InvalidRequestError } from "@/backend/shared/presentation/http-error";',
+    'import { useState } from "react";',
+    'import { notFound } from "next/navigation";',
+    'import { flushSync } from "react-dom";',
+    'export { TodoItem } from "@/features/todo/components/todo-item";',
+    'const r = import("../../../app/page");',
+  ),
+  // presentation: container 以外の infra（名前が container で始まる別ファイルも）、domain の値の参照（inline type の混在、
+  //   re-export）、フレームワーク、画面側、他 feature の infra。
+  "backend/todo/presentation/bad-presentation.api.ts": lines(
+    'import { InMemoryTodoRepository } from "@/backend/todo/infra/todo-repository.in-memory";',
+    'import { helper } from "../infra/container-helper";',
+    'import { Todo } from "@/backend/todo/domain/todo";',
+    'import { TodoFactory, type TodoId } from "../domain/todo-factory";',
+    'export { Todo as Entity } from "@/backend/todo/domain/todo-entity";',
+    'import { NextResponse } from "next/server";',
+    'import { cache } from "react";',
+    'export type { TodoDto } from "@/features/todo/api/todo-api";',
+    'const c = import("@/backend/other/infra/other-repository.in-memory");',
+    'import "../../../app/globals.css";',
+  ),
+  // infra
+  "backend/todo/infra/bad-infra.ts": lines(
+    'import { listTodosApi } from "@/backend/todo/presentation/list-todos.api";',
+    'import type { GetTodoResponse } from "../presentation/get-todo.api";',
+    'import type { Other } from "@/backend/other/domain/other";',
+    'import { OtherQuery } from "../../other/application/other.query";',
+    'import { TodoScreen } from "@/features/todo";',
+    'import { x } from "@/shared/x";',
+    'export { default } from "../../../app/page";',
+    'import { headers } from "next/headers";',
+    'import { renderToString } from "react-dom/server";',
+    'const c = import("@/backend/other/infra/container");',
+  ),
+  // backend-shared（presentation 層のファイルなので presentation の規則にも同時にかかるものがある）
+  "backend/shared/presentation/bad-backend-shared.ts": lines(
+    'import type { Todo } from "@/backend/todo/domain/todo";',
+    'import { todoContainer } from "../../todo/infra/container";',
+    'import { TodoFactory } from "@/backend/todo/domain/todo-factory";',
+    'export { TodoScreen } from "@/features/todo";',
+    'const p = import("@/app/page");',
+    'import "@/backend/todo/infra/todo-repository.in-memory";',
+  ),
+  // backend-shared: 層に属さない backend/shared 直下のファイルから。
+  "backend/shared/bad-root.ts": lines(
+    'import { CreateTodoCommand } from "@/backend/todo/application/create-todo.command";',
+  ),
+  // app
+  "app/bad-page.tsx": lines(
+    'import { TodoItem } from "@/features/todo/components/todo-item";',
+    'import { useTodoScreen } from "../features/todo/screens/todo-screen/todo-screen.hook";',
+    'import type { TodoDto } from "@/backend/todo/presentation/list-todos.api";',
+    'export { GET } from "../backend/todo/presentation/get-todo.api";',
+    'const x = import("@/features/todo/api/todo-api");',
+    'import { Y } from "@/features/todo-extra/components/y";',
+  ),
+  "app/todo/[id]/bad.jsx": lines(
+    'import { TodoItem } from "../../../features/todo/components/todo-item";',
+  ),
+  // app-api: api ファイル以外（.api の付かない presentation、shared の presentation を含む）、パッケージ、画面側。
+  "app/api/todos/bad-route.ts": lines(
+    'export { GET } from "@/backend/todo/infra/container";',
+    'export { POST } from "../../../backend/todo/application/create-todo.command";',
+    'import { NextResponse } from "next/server";',
+    'import { TodoScreen } from "@/features/todo";',
+    'export { PUT } from "@/backend/todo/presentation/update-todo";',
+    'export { DELETE } from "@/backend/shared/presentation/http-error";',
+    'const x = import("@/shared/x");',
+  ),
+};
+
+const MUST_REJECT_VIOLATIONS = [
+  ...[
+    "backend/todo/presentation/list-todos.api",
+    "backend/todo/domain/todo",
+    "backend/todo/presentation/get-todo.api",
+    "backend/todo/presentation/update-todo.api",
+    "backend/todo/presentation/delete-todo.api",
+    "backend/todo/presentation/create-todo.api",
+    "backend/shared/presentation/http-error",
+    "backend/todo/infra/container",
+    "backend/shared/presentation/json-body",
+  ].map(
+    (to) =>
+      `screen-to-backend: features/todo/components/bad-backend.ts → ${to}`,
+  ),
+  "screen-to-backend: shared/bad-shared.tsx → backend/todo/presentation/list-todos.api",
+  "screen-to-backend: shared/bad-shared.tsx → backend/shared/domain/domain-error",
+  "shared-to-features: shared/bad-shared.tsx → features/todo",
+  "shared-to-features: shared/bad-shared.tsx → features/todo/api/todo-api",
+  "shared-to-features: shared/bad-shared.tsx → features/todo/components/todo-item",
+  "screen-to-app: shared/bad-shared.tsx → app/page",
+  "screen-to-app: shared/bad-shared.tsx → app/layout",
+  ...[
+    "backend/todo/presentation/list-todos.api",
+    "backend/todo/domain/todo",
+    "backend/other/presentation/list-others.api",
+    "backend/todo/presentation/get-todo.api",
+    "backend/shared/presentation/http-error",
+    "backend/todo/presentation/list-todos",
+    "backend/shared/domain/domain-error",
+    "backend/todo/presentation/update-todo.api",
+  ].map((to) => `feature-api-to-backend: features/todo/api/bad-api.ts → ${to}`),
+  ...[
+    "features/todo/components/todo-item",
+    "features/todo/screens/todo-screen/todo-screen.hook",
+    "features/todo/api/todo-api",
+    "features/todo/api/todo-api",
+    "features/todo/components",
+  ].map(
+    (to) =>
+      `feature-to-feature: features/other/components/bad-feature.js → ${to}`,
+  ),
+  "feature-to-feature: features/todo/components/bad-prefix.jsx → features/todo-extra/components/x",
+  "screen-to-app: features/todo/screens/s/bad-app.tsx → app/page",
+  "screen-to-app: features/todo/screens/s/bad-app.tsx → app/api/todos/route",
+  "screen-to-app: features/todo/screens/s/bad-app.tsx → app/layout",
+  ...[
+    "next/server",
+    "react/jsx-runtime",
+    "react-dom/client",
+    "backend/todo/application/create-todo.command",
+    "backend/todo/infra/container",
+    "backend/todo/presentation/list-todos.api",
+    "backend/other/domain/other",
+    "backend/shared/presentation/http-error",
+    "features/todo",
+    "shared/x",
+    "app/globals.css",
+  ].map((to) => `domain: backend/todo/domain/bad-domain.ts → ${to}`),
+  "domain: backend/shared/domain/bad-shared-domain.ts → backend/shared/presentation/http-error",
+  ...[
+    "backend/todo/infra/container",
+    "backend/todo/presentation/list-todos.api",
+    "backend/shared/presentation/http-error",
+    "react",
+    "next/navigation",
+    "react-dom",
+    "features/todo/components/todo-item",
+    "app/page",
+  ].map(
+    (to) => `application: backend/todo/application/bad-application.ts → ${to}`,
+  ),
+  ...[
+    "backend/todo/infra/todo-repository.in-memory",
+    "backend/todo/infra/container-helper",
+    "backend/todo/domain/todo",
+    "backend/todo/domain/todo-factory",
+    "backend/todo/domain/todo-entity",
+    "next/server",
+    "react",
+    "features/todo/api/todo-api",
+    "backend/other/infra/other-repository.in-memory",
+    "app/globals.css",
+  ].map(
+    (to) =>
+      `presentation: backend/todo/presentation/bad-presentation.api.ts → ${to}`,
+  ),
+  ...[
+    "backend/todo/presentation/list-todos.api",
+    "backend/todo/presentation/get-todo.api",
+    "backend/other/domain/other",
+    "backend/other/application/other.query",
+    "features/todo",
+    "shared/x",
+    "app/page",
+    "next/headers",
+    "react-dom/server",
+    "backend/other/infra/container",
+  ].map((to) => `infra: backend/todo/infra/bad-infra.ts → ${to}`),
+  ...[
+    "backend/todo/domain/todo",
+    "backend/todo/infra/container",
+    "backend/todo/domain/todo-factory",
+    "features/todo",
+    "app/page",
+    "backend/todo/infra/todo-repository.in-memory",
+  ].map(
+    (to) =>
+      `backend-shared: backend/shared/presentation/bad-backend-shared.ts → ${to}`,
+  ),
+  ...[
+    "backend/todo/domain/todo-factory",
+    "features/todo",
+    "app/page",
+    "backend/todo/infra/todo-repository.in-memory",
+  ].map(
+    (to) =>
+      `presentation: backend/shared/presentation/bad-backend-shared.ts → ${to}`,
+  ),
+  "backend-shared: backend/shared/bad-root.ts → backend/todo/application/create-todo.command",
+  ...[
+    "features/todo/components/todo-item",
+    "features/todo/screens/todo-screen/todo-screen.hook",
+    "backend/todo/presentation/list-todos.api",
+    "backend/todo/presentation/get-todo.api",
+    "features/todo/api/todo-api",
+    "features/todo-extra/components/y",
+  ].map((to) => `app: app/bad-page.tsx → ${to}`),
+  "app: app/todo/[id]/bad.jsx → features/todo/components/todo-item",
+  ...[
+    "backend/todo/infra/container",
+    "backend/todo/application/create-todo.command",
+    "next/server",
+    "features/todo",
+    "backend/todo/presentation/update-todo",
+    "backend/shared/presentation/http-error",
+    "shared/x",
+  ].map((to) => `app-api: app/api/todos/bad-route.ts → ${to}`),
+];
+
+// must-pass: 許可される参照を網羅する。今のリポジトリの本番コードにある import の形
+// （`git grep -h "from \"" -- '*.ts' '*.tsx'` で列挙したもの）をすべて含め、alias と相対の両方を置く。
+// コメント・文字列の中の import 風の文字列、from の無い `export type {...};`、テストファイル・TS 以外のファイルも置く。
+const MUST_PASS_FILES: Record<string, string> = {
+  "app/layout.tsx": lines(
+    'import type { Metadata } from "next";',
+    'import { Inter } from "next/font/google";',
+    'import "./globals.css";',
+  ),
+  "app/globals.css": "body { margin: 0; }",
+  "app/page.tsx": lines(
+    'import { TodoScreen } from "@/features/todo";',
+    'import { x } from "@/shared/x";',
+    'import { useState } from "react";',
+    'import Link from "next/link";',
+  ),
+  "app/todo/[id]/page.tsx": lines(
+    'import { TodoDetailScreen } from "@/features/todo";',
+    'import { TodoScreen } from "../../../features/todo/index";',
+  ),
+  "app/api/todos/route.ts": lines(
+    'export { POST } from "@/backend/todo/presentation/create-todo.api";',
+    'export { GET } from "@/backend/todo/presentation/list-todos.api";',
+  ),
+  "app/api/todos/[id]/route.ts": lines(
+    'export { DELETE } from "@/backend/todo/presentation/delete-todo.api";',
+    'export { GET } from "@/backend/todo/presentation/get-todo.api";',
+    'export { PUT } from "@/backend/todo/presentation/update-todo.api";',
+    'export { PUT as PUT2 } from "../../../../backend/todo/presentation/update-todo.api";',
+  ),
+  "features/todo/index.ts": lines(
+    'export { TodoDetailScreen } from "./screens/todo-detail-screen/todo-detail-screen";',
+    'export { TodoScreen } from "./screens/todo-screen/todo-screen";',
+  ),
+  "features/todo/api/todo-api.ts": lines(
+    'import type { ErrorResponse } from "@/backend/shared/presentation/http-error";',
+    "import type {",
+    "  CreateTodoRequest,",
+    "  CreateTodoResponse,",
+    '} from "@/backend/todo/presentation/create-todo.api";',
+    'import type { GetTodoResponse } from "@/backend/todo/presentation/get-todo.api";',
+    "import type {",
+    "  ListTodosResponse,",
+    "  TodoDto,",
+    '} from "@/backend/todo/presentation/list-todos.api";',
+    "import type {",
+    "  UpdateTodoRequest,",
+    "  UpdateTodoResponse,",
+    '} from "@/backend/todo/presentation/update-todo.api";',
+    'import { type UpdateTodoRequest as Req, type UpdateTodoResponse as Res } from "../../../backend/todo/presentation/update-todo.api";',
+    'export type { DeleteTodoResponse } from "@/backend/todo/presentation/delete-todo.api";',
+    "export type {",
+    "  CreateTodoRequest,",
+    "  CreateTodoResponse,",
+    "  ErrorResponse,",
+    "};",
+    'const BASE_PATH = "/api/todos";',
+  ),
+  "features/todo/components/todo-item.tsx": lines(
+    'import Link from "next/link";',
+    'import type { TodoDto } from "@/features/todo/api/todo-api";',
+  ),
+  "features/todo/screens/todo-screen/todo-screen.tsx": lines(
+    '"use client";',
+    'import { TodoItem } from "../../components/todo-item";',
+    'import { useTodoScreen } from "./todo-screen.hook";',
+  ),
+  "features/todo/screens/todo-screen/todo-screen.hook.ts": lines(
+    'import { useCallback, useEffect, useRef, useState } from "react";',
+    "import {",
+    "  listTodos,",
+    "  type TodoDto,",
+    "  updateTodo,",
+    '} from "@/features/todo/api/todo-api";',
+  ),
+  "features/todo/screens/todo-detail-screen/todo-detail-screen.tsx": lines(
+    '"use client";',
+    'import Link from "next/link";',
+    'import { useTodoDetailScreen } from "./todo-detail-screen.hook";',
+  ),
+  "features/todo/screens/todo-detail-screen/todo-detail-screen.hook.ts": lines(
+    'import { useCallback, useEffect, useRef, useState } from "react";',
+    "import {",
+    "  getTodo,",
+    "  type TodoDto,",
+    "  updateTodo,",
+    '} from "@/features/todo/api/todo-api";',
+  ),
+  // 別 feature からは index だけ（alias と相対、index の明示あり・なし）。画面側の shared/ は参照してよい。
+  "features/other/components/uses-todo.jsx": lines(
+    'import { TodoScreen } from "@/features/todo";',
+    'import { TodoDetailScreen } from "../../todo/index";',
+    'import { x } from "@/shared/x";',
+  ),
+  "shared/x.js": lines('import { useState } from "react";'),
+  "shared/ui/button.tsx": lines('import { x } from "../x";'),
+  // コメント・文字列の中の import 風の文字列は参照ではない。
+  "features/todo/components/notes.ts": lines(
+    '// import { GET } from "@/backend/todo/presentation/list-todos.api";',
+    '/* export { x } from "@/app/page"; */',
+    "/**",
+    ' * 例: import("@/backend/todo/infra/container")',
+    ' * import "@/backend/todo/domain/todo";',
+    " */",
+    "export const single = 'import { GET } from \"@/backend/x\";';",
+    "export const double = \"import('@/backend/y')\";",
+    "export const side = 'import \"@/backend/z\"';",
+    "export const template = `",
+    'import { a } from "@/app/page";',
+    "`;",
+    'export const url = "https://example.com/import/from"; import { useState } from "react";',
+  ),
+  "backend/shared/domain/domain-error.ts": lines(
+    "export class DomainError extends Error {}",
+  ),
+  "backend/shared/presentation/http-error.ts": lines(
+    "import {",
+    "  DomainError,",
+    "  type DomainErrorCode,",
+    '} from "@/backend/shared/domain/domain-error";',
+  ),
+  "backend/shared/presentation/json-body.ts": lines(
+    'import { InvalidRequestError } from "@/backend/shared/presentation/http-error";',
+    'import { toErrorResponse } from "./http-error";',
+  ),
+  "backend/todo/domain/todo.ts": lines(
+    'import { randomUUID } from "node:crypto";',
+    'import { DomainError } from "@/backend/shared/domain/domain-error";',
+    'import { DomainError as E } from "../../shared/domain/domain-error";',
+  ),
+  "backend/todo/domain/todo-repository.ts": lines(
+    'import type { Todo } from "@/backend/todo/domain/todo";',
+    'import { Todo as T } from "./todo";',
+  ),
+  "backend/todo/application/create-todo.command.ts": lines(
+    'import { Todo } from "@/backend/todo/domain/todo";',
+    'import type { TodoRepository } from "@/backend/todo/domain/todo-repository";',
+  ),
+  "backend/todo/application/get-todo.query.ts": lines(
+    'import { DomainError } from "@/backend/shared/domain/domain-error";',
+    'import type { Todo } from "../domain/todo";',
+    'import { InvalidRequestError } from "../../shared/other-helper";',
+    'import type { TodoRepository } from "@/backend/todo/domain/todo-repository";',
+  ),
+  "backend/todo/application/list-todos.query.ts": lines(
+    'import type { Todo } from "@/backend/todo/domain/todo";',
+    'import type { TodoRepository } from "@/backend/todo/domain/todo-repository";',
+  ),
+  "backend/todo/application/update-todo.command.ts": lines(
+    'import { DomainError } from "@/backend/shared/domain/domain-error";',
+    'import type { Todo } from "@/backend/todo/domain/todo";',
+    'import type { TodoRepository } from "@/backend/todo/domain/todo-repository";',
+  ),
+  "backend/todo/application/delete-todo.command.ts": lines(
+    'import { DomainError } from "@/backend/shared/domain/domain-error";',
+    'import type { TodoRepository } from "@/backend/todo/domain/todo-repository";',
+  ),
+  "backend/todo/presentation/list-todos.api.ts": lines(
+    'import { toErrorResponse } from "@/backend/shared/presentation/http-error";',
+    'import type { Todo } from "@/backend/todo/domain/todo";',
+    "import {",
+    "  type TodoContainer,",
+    "  todoContainer,",
+    '} from "@/backend/todo/infra/container";',
+  ),
+  "backend/todo/presentation/create-todo.api.ts": lines(
+    "import {",
+    "  InvalidRequestError,",
+    "  toErrorResponse,",
+    '} from "@/backend/shared/presentation/http-error";',
+    'import { readJsonObject } from "@/backend/shared/presentation/json-body";',
+    'import { todoContainer } from "../infra/container";',
+    'import { DomainError } from "../../shared/domain/domain-error";',
+    'export type { Todo } from "../domain/todo";',
+    'import { type Todo as T } from "@/backend/todo/domain/todo";',
+  ),
+  "backend/todo/presentation/get-todo.api.ts": lines(
+    'import { toErrorResponse } from "@/backend/shared/presentation/http-error";',
+    'import type { Todo } from "@/backend/todo/domain/todo";',
+    "import {",
+    "  type TodoContainer,",
+    "  todoContainer,",
+    '} from "@/backend/todo/infra/container";',
+  ),
+  "backend/todo/presentation/update-todo.api.ts": lines(
+    "import {",
+    "  InvalidRequestError,",
+    "  toErrorResponse,",
+    '} from "@/backend/shared/presentation/http-error";',
+    'import { readJsonObject } from "@/backend/shared/presentation/json-body";',
+    'import type { Todo } from "@/backend/todo/domain/todo";',
+    "import {",
+    "  type TodoContainer,",
+    "  todoContainer,",
+    '} from "@/backend/todo/infra/container";',
+  ),
+  "backend/todo/presentation/delete-todo.api.ts": lines(
+    'import { toErrorResponse } from "@/backend/shared/presentation/http-error";',
+    "import {",
+    "  type TodoContainer,",
+    "  todoContainer,",
+    '} from "@/backend/todo/infra/container";',
+  ),
+  "backend/todo/infra/container.ts": lines(
+    'import { CreateTodoCommand } from "@/backend/todo/application/create-todo.command";',
+    'import { DeleteTodoCommand } from "@/backend/todo/application/delete-todo.command";',
+    'import { GetTodoQuery } from "../application/get-todo.query";',
+    'import { ListTodosQuery } from "@/backend/todo/application/list-todos.query";',
+    'import { UpdateTodoCommand } from "@/backend/todo/application/update-todo.command";',
+    'import type { TodoRepository } from "@/backend/todo/domain/todo-repository";',
+    'import { Todo } from "../domain/todo";',
+    'import { InMemoryTodoRepository } from "@/backend/todo/infra/todo-repository.in-memory";',
+    'import { InMemoryTodoRepository as R } from "./todo-repository.in-memory";',
+    'import { DomainError } from "@/backend/shared/domain/domain-error";',
+    'import { randomUUID } from "node:crypto";',
+  ),
+  "backend/todo/infra/todo-repository.in-memory.ts": lines(
+    'import type { Todo } from "@/backend/todo/domain/todo";',
+    'import type { TodoRepository } from "@/backend/todo/domain/todo-repository";',
+  ),
+  // テストファイルと TS / JS 以外のファイルは検査しない。
+  "backend/todo/presentation/list-todos.api.test.ts": lines(
+    'import { InMemoryTodoRepository } from "@/backend/todo/infra/todo-repository.in-memory";',
+  ),
+  "features/todo/components/todo-item.test.tsx": lines(
+    'import { listTodosApi } from "@/backend/todo/presentation/list-todos.api";',
+  ),
+  "features/todo/README.md":
+    'import { GET } from "@/backend/todo/infra/container";',
+};
+
+describe("fixture のツリーを検査したときに検出される違反", () => {
+  it("must-reject: 置いた違反がすべて、置いたとおりの規則で検出され、それ以外は検出されない", () => {
+    expect(violationsOfFixture(MUST_REJECT_FILES)).toEqual(
+      [...MUST_REJECT_VIOLATIONS].sort(),
+    );
+  });
+
+  it("must-pass: 許可される参照だけのツリーでは違反が 0 件", () => {
+    expect(violationsOfFixture(MUST_PASS_FILES)).toEqual([]);
+  });
 });
 
 describe("参照の抽出（extractImports）", () => {
@@ -828,6 +1513,20 @@ describe("参照の抽出（extractImports）", () => {
     ].join("\n");
     expect(extractImports(source)).toEqual([
       { specifier: "after-enum", typeOnly: true },
+    ]);
+  });
+
+  it("文字列リテラル（テンプレートリテラルを含む）の中の import 風の文字列は拾わない", () => {
+    const source = [
+      "const a = 'import(\"@/backend/x\")';",
+      "const b = 'import \"@/backend/y\"';",
+      "const t = `",
+      'import { c } from "@/backend/z";',
+      "`;",
+      'import { real } from "real";',
+    ].join("\n");
+    expect(extractImports(source)).toEqual([
+      { specifier: "real", typeOnly: false },
     ]);
   });
 
