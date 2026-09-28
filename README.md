@@ -19,7 +19,9 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 | Lint / Format | [Biome](https://biomejs.dev/) | typescript-eslint が TypeScript 7 未対応のため ESLint ではなく Biome を使う（`rules/code/lint.md`） |
 | Git フック | [Lefthook](https://github.com/evilmartians/lefthook) | pre-commit でステージ済みファイルを Biome で検査する |
 | コンテナ | [Docker Compose](https://docs.docker.com/compose/) | `compose.yaml` を手元・GitHub Actions・クラウドセッションの 3 環境で共通に使う。Podman（`podman compose`）でも同じファイルを使う想定 |
-| データベース | [PostgreSQL](https://www.postgresql.org/) | 18（`mirror.gcr.io/library/postgres:18-alpine`。Docker Hub の匿名 pull のレート制限を避けるためミラーから取る）。開発用で、アプリからの接続は未実装 |
+| データベース | [PostgreSQL](https://www.postgresql.org/) | 18（`mirror.gcr.io/library/postgres:18-alpine`。Docker Hub の匿名 pull のレート制限を避けるためミラーから取る）。Todo の保存先（`DATABASE_URL` が無ければ InMemory） |
+| ORM / マイグレーション | [Drizzle ORM](https://orm.drizzle.team/) + [drizzle-kit](https://orm.drizzle.team/docs/kit-overview) | スキーマを TypeScript で宣言し、`pnpm db:generate` で SQL を生成、`pnpm db:migrate` で当てる（`push` は使わない。`rules/code/architecture.md` の「永続化」） |
+| DB ドライバ | [node-postgres（pg）](https://node-postgres.com/) | プールの設定は環境変数から読む（`.env.example`。本番用の値は Issue #58 で決める） |
 
 ツールのバージョンは `.tool-versions` が正（決め方と更新手順は `rules/code/env.md`）。npm パッケージのバージョンは `package.json` / `pnpm-lock.yaml` が正。pnpm のサプライチェーン保護設定は `pnpm-workspace.yaml` を参照。
 
@@ -39,8 +41,9 @@ backend/todo/         # API 側（DDD 4 層）
   presentation/         # 1 API = 1 ファイル（list-todos.api.ts など）。コンテナを受け取って handler を返す関数（listTodosApi(container)）、本番用の GET / POST など、リクエスト / レスポンスの型を export
   application/          # 読むだけの query（list-todos.query.ts）と状態を変える command（create-todo.command.ts）
   domain/               # Entity / Value Object / Repository の interface
-  infra/                # Repository の実装（当面 InMemory）、container.ts（DI）
-backend/shared/       # API 側で feature をまたぐ共通部品（domain/domain-error.ts に DomainError、presentation/http-error.ts に HTTP ステータス変換と ErrorResponse 型、presentation/json-body.ts に本文の読み取り）
+  infra/                # Repository の実装（Postgres / InMemory）、schema.ts（Drizzle のスキーマ）、container.ts（DI。command をトランザクションで包む）
+backend/shared/       # API 側で feature をまたぐ共通部品（domain/ に DomainError と TransactionRunner、presentation/ に HTTP ステータス変換と本文の読み取り、infra/ に Postgres のプールと Drizzle のトランザクション）
+drizzle/              # 生成したマイグレーション（pnpm db:generate が作る。コミットする）
 shared/               # 画面側で feature をまたぐ共通部品（必要になったら作る）
 ```
 
@@ -63,15 +66,18 @@ asdf install
 開発用の PostgreSQL は Docker Compose（`compose.yaml`）で起動する。
 
 ```sh
-pnpm db:up     # Postgres を起動し、healthcheck が通るまで待つ（docker compose up -d --wait）
-pnpm db:psql   # psql で接続する（docker compose exec db psql -U app -d app）
-pnpm db:down   # 止める（データは名前付きボリューム pgdata に残る。消すときは docker compose down -v）
+pnpm db:up       # Postgres を起動し、healthcheck が通るまで待つ（docker compose up -d --wait）
+pnpm db:migrate  # drizzle/ のマイグレーションを当てる（drizzle-kit migrate。当て済みのものは飛ばす）
+pnpm db:psql     # psql で接続する（docker compose exec db psql -U app -d app）
+pnpm db:down     # 止める（データは名前付きボリューム pgdata に残る。消すときは docker compose down -v）
+pnpm db:generate # backend/**/infra/schema.ts を変えたら、差分の SQL を drizzle/ に生成する（drizzle-kit generate。DB には接続しない）
 ```
 
-- 接続先は `postgresql://app:app@localhost:5432/app`（`.env.example`。開発用の固定値で秘密ではない）。アプリから読む実装はまだ無い。
+- 接続先は `postgresql://app:app@localhost:5432/app`（`.env.example`。開発用の固定値で秘密ではない）。アプリは `DATABASE_URL` があれば Postgres、無ければ InMemory で動く。`pnpm dev` で Postgres を使うときは `.env.example` を `.env.local` にコピーする（Next.js が読む）。`pnpm db:migrate` は `.env*` を読まないが、`DATABASE_URL` が無ければ同じ開発用 DB に当てる。
+- 接続・プールの環境変数（`DATABASE_POOL_MAX` など）とスキーマの変え方は `rules/code/architecture.md` の「永続化（Drizzle + Postgres）」を参照。
 - Docker Desktop は、従業員 250 人以上または年間売上 1,000 万ドル以上の企業での業務利用などに有料サブスクリプションが必要になる（[Docker Desktop license agreement](https://docs.docker.com/subscription-billing/desktop-license/)）。該当する場合は [Podman](https://podman.io/) の `podman compose up -d --wait` でも同じ `compose.yaml` を使える想定（Podman での実動作は未確認）。
 
-Claude Code のクラウドセッション（asdf が無い環境）では、`scripts/cloud-session-start.sh` で `.tool-versions` どおりの Node.js / pnpm を用意する（環境設定の setup script に `bash scripts/cloud-session-start.sh --install-only` を書くと初回だけで済む）。`.tool-versions` の版を上げたら setup script も更新してキャッシュを作り直す。あわせて SessionStart フックが毎セッション `dockerd` を起動し、`docker compose pull`（最大 3 回再試行）と `docker compose up -d --wait --wait-timeout 120` で Postgres を立ち上げる。詳細は `rules/code/env.md` の「クラウドセッション」を参照。
+Claude Code のクラウドセッション（asdf が無い環境）では、`scripts/cloud-session-start.sh` で `.tool-versions` どおりの Node.js / pnpm を用意する（環境設定の setup script に `bash scripts/cloud-session-start.sh --install-only` を書くと初回だけで済む）。`.tool-versions` の版を上げたら setup script も更新してキャッシュを作り直す。あわせて SessionStart フックが毎セッション `dockerd` を起動し、`docker compose pull`（最大 3 回再試行）と `docker compose up -d --wait --wait-timeout 120` で Postgres を立ち上げ、`pnpm db:migrate` でマイグレーションを当てる。詳細は `rules/code/env.md` の「クラウドセッション」を参照。
 
 ## 開発
 
@@ -80,12 +86,15 @@ pnpm install   # 依存をインストール
 pnpm dev       # 開発サーバを起動（http://localhost:3000）
 pnpm test      # 単体テストを実行し、カバレッジ 100% 未満なら失敗（Vitest。詳細は rules/code/architecture.md）
 pnpm test:unit # 単体テストだけを実行（カバレッジを計測しない。速く回したいとき）
-pnpm test:e2e  # E2E テストを実行（Playwright。本番ビルドを起動してブラウザで操作する。詳細は rules/code/architecture.md）
+pnpm test:e2e  # E2E テストを実行（Playwright。本番ビルドを Postgres に接続して起動し、ブラウザで操作する。詳細は rules/code/architecture.md）
 pnpm test:mutation # mutation testing を実行し、reports/mutation/ にレポートを出す（Stryker。数分かかる。詳細は rules/code/test.md）
 pnpm lint      # lint + format の違反を検査（Biome。変更しない）
 pnpm check     # 安全な自動修正を適用して再検査（Biome）
 pnpm format    # format だけを適用（Biome）
 pnpm build     # 本番ビルド
 ```
+
+- `pnpm test` / `pnpm test:unit` / `pnpm test:mutation` は Postgres が起動している前提（先に `pnpm db:up`）。Postgres を使うテストは、テストファイルごとに別のスキーマを作ってマイグレーションを当てるので、`pnpm db:migrate` は不要で、`pnpm dev` のデータも消さない。前の実行が残したテスト用のスキーマは、実行の最初に消す（Postgres に接続できなければそこで止まる）。
+- `pnpm test:e2e` は Postgres の起動とマイグレーションが前提（先に `pnpm db:up && pnpm db:migrate`）。各テストの前に `todos` を空にする（`pnpm dev` と同じ DB を使うので、開発中のデータも消える）。
 
 `pnpm install` で pre-commit フック（Lefthook）も入り、コミット時にステージ済みファイルが Biome で検査される。詳細は `rules/code/lint.md` を参照。

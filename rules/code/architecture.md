@@ -10,7 +10,7 @@ Next.js（App Router）のコードを、機能（feature）単位で置く。�
 | `app/` | ルーティングだけ。`page.tsx` は screen を返すだけ、`app/api/**/route.ts` は `backend/` の api ファイルの関数を re-export するだけ |
 | `features/<feature>/` | 画面側。screen（見た目 + hook）、feature 内の部品、`/api/...` を呼ぶラッパー |
 | `backend/<feature>/` | API 側。DDD の 4 層（presentation / application / domain / infra） |
-| `backend/shared/` | API 側で feature をまたぐ共通部品（DomainError、DomainError → HTTP ステータスの変換と `ErrorResponse` 型など） |
+| `backend/shared/` | API 側で feature をまたぐ共通部品（DomainError・TransactionRunner の interface、DomainError → HTTP ステータスの変換と `ErrorResponse` 型、Postgres の接続とトランザクションの実装など） |
 | `shared/` | 画面側で feature をまたぐ共通部品。**まだ無いので作らない**。必要になったら作る |
 
 - 理由: Next.js はプロジェクトの構成について方針を持たない（unopinionated）。`app/` の外にコードを置き、`app/` をルーティング専用にする構成は公式の例の 1 つ（下の「一次情報」）。ルーティング（URL）と機能のコードを分けることで、URL を変えてもコードを動かさずに済む。
@@ -56,11 +56,19 @@ backend/
   shared/
     domain/
       domain-error.ts                 # DomainError（code: validation_error / not_found）
+      transaction-runner.ts           # TransactionRunner<Tx> の interface（command をトランザクションで実行する窓口）
     presentation/
       http-error.ts                   # DomainError → HTTP ステータスの変換、ErrorResponse 型、InvalidRequestError
       http-error.test.ts
       json-body.ts                    # リクエスト本文を JSON のオブジェクトとして読む（readJsonObject）
       json-body.test.ts
+    infra/
+      database.ts                     # Postgres のプール（環境変数から設定）と Drizzle の db、Executor 型、getDatabase / closeDatabase
+      database.test.ts
+      database.test-support.ts        # 実 Postgres を使うテスト用。テストファイルごとの別スキーマにマイグレーションを当てる
+      database.test-support.test.ts
+      drizzle-transaction-runner.ts   # TransactionRunner の Drizzle 実装（db.transaction）
+      drizzle-transaction-runner.test.ts
   todo/
     presentation/                     # 1 API = 1 ファイル。リクエスト / レスポンスの型もこの中で定義して export する
       list-todos.api.ts               # export function listTodosApi(container) → handler / export const GET = listTodosApi(todoContainer)
@@ -89,9 +97,18 @@ backend/
       todo.test.ts
       todo-repository.ts              # Repository の interface
     infra/
-      todo-repository.in-memory.ts    # Repository の実装（InMemory）
+      schema.ts                       # todos テーブルの定義（Drizzle のスキーマ。マイグレーションの生成元）
+      todo-repository.postgres.ts     # Repository の実装（Postgres。Executor を受け取る）
+      todo-repository.postgres.test.ts
+      todo-repository.in-memory.ts    # Repository の実装（InMemory。DATABASE_URL が無いときとテスト用）
       todo-repository.in-memory.test.ts
-      container.ts                    # 組み立て（DI）。createTodoContainer(repository) と、アプリ共有の todoContainer
+      in-memory-transaction-runner.ts # TransactionRunner の InMemory 実装（スナップショットで rollback）
+      in-memory-transaction-runner.test.ts
+      container.ts                    # 組み立て（DI）。createTodoContainer({ runner, repositoryFor, readExecutor })、
+                                      #   createInMemoryTodoContainer / createPostgresTodoContainer、アプリ共有の todoContainer
+      container.test.ts
+drizzle/                              # 生成したマイグレーション（SQL と meta/）。pnpm db:generate が作り、コミットする
+drizzle.config.ts                     # drizzle-kit の設定
 ```
 
 ## `app/`（ルーティング）
@@ -129,7 +146,7 @@ backend/
 | `presentation/` | api ファイル。1 API = 1 ファイル `<verb>-<noun>.api.ts`（例: `list-todos.api.ts`、`create-todo.api.ts`）。コンテナを受け取って handler（Request → 入力の形の検証 → query / command → Response）を返す関数（`listTodosApi(container)`）、それを本番用のコンテナで組み立てた HTTP メソッド名の定数（`export const GET = listTodosApi(todoContainer)`）、その API のリクエスト / レスポンスの型を export する | 許可の一覧（ここに無い自前コードは不可）: 自 feature と `backend/shared` の `application`、`domain`（feature の domain は Entity の型の参照のみ。query / command が返す Entity を DTO に変換するため `import type { Todo }` する。`backend/shared/domain` は値でも可）、同じ `presentation`（re-export など）、自 feature の `infra/container.ts`（コンテナの型と本番用のコンテナの受け取りだけ）。パッケージは `next` / `react` / `react-dom` 以外 |
 | `application/` | ユースケース。1 ユースケース = 1 ファイルで、読むだけ（副作用なし）のものは `<verb>-<noun>.query.ts`、状態を変えるものは `<verb>-<noun>.command.ts`（例: `list-todos.query.ts`、`create-todo.command.ts`） | 許可の一覧: 自 feature と `backend/shared` の `domain`・`application`。パッケージは `next` / `react` / `react-dom` 以外 |
 | `domain/` | Entity / Value Object / Repository の interface（DomainError は feature をまたいで使うため `backend/shared/domain/` に置く） | 許可の一覧: 自 feature と `backend/shared` の `domain` だけ（Next・React・DB に依存しない）。パッケージは `next` / `react` / `react-dom` 以外（`node:crypto` など） |
-| `infra/` | Repository の実装、`container.ts`（組み立て = DI。リポジトリを受け取ってコンテナを作る `createTodoContainer(repository)` と、アプリで共有する `todoContainer`） | 許可の一覧: 自 feature と `backend/shared` の `domain`（interface を実装する）・`application`（container で組み立てる）・`infra`（container が Repository の実装を組み立てる）。パッケージは `next` / `react` / `react-dom` 以外 |
+| `infra/` | Repository の実装、Drizzle のスキーマ（`schema.ts`）、TransactionRunner の実装、`container.ts`（組み立て = DI。runner と Repository の作り方を受け取ってコンテナを作る `createTodoContainer`、InMemory / Postgres 用の `createInMemoryTodoContainer` / `createPostgresTodoContainer`、アプリで共有する `todoContainer`） | 許可の一覧: 自 feature と `backend/shared` の `domain`（interface を実装する）・`application`（container で組み立てる）・`infra`（container が Repository の実装を組み立てる）。パッケージは `next` / `react` / `react-dom` 以外 |
 
 - 依存の向き: `app/api → presentation → application → domain`。`infra` は `domain` の interface を実装する（依存性の逆転）。
 - 依存してよい先は許可の一覧で決める。一覧に無い自前コード（他 feature のどの層、画面側の `features/` `app/` `shared/`、層に属さない場所）は参照しない。
@@ -144,20 +161,80 @@ backend/
 - application は、読むだけで副作用のない query（`.query.ts`）と、状態を変える command（`.command.ts`）に分ける。
   - 理由: 副作用の有無をファイル名で区別し、読むだけの処理が状態を変えていないか、状態を変える処理がどれかを、開かずに見分けられるようにする。
 - api ファイルは「コンテナを受け取って handler を返す関数」（`listTodosApi(container)`）を export し、本番の Route Handler はそれに `infra/container.ts` の共有コンテナ `todoContainer` を渡して作る（`export const GET = listTodosApi(todoContainer)`）。
-  - 理由: テストでは `listTodosApi(createTodoContainer(new InMemoryTodoRepository()))` のように空のリポジトリで組み立てた handler を使い、共有のコンテナ（`todoContainer`）に依存しないようにするため。共有のコンテナをテストで使うと、前のテストが作った Todo が残り、結果がテストの実行順に左右される。handler の中身は本番と同じものをテストする。
+  - 理由: テストでは `listTodosApi(createInMemoryTodoContainer())` のように空の InMemory リポジトリで組み立てた handler を使い、共有のコンテナ（`todoContainer`）に依存しないようにするため。共有のコンテナをテストで使うと、前のテストが作った Todo が残り、結果がテストの実行順に左右される。handler の中身は本番と同じものをテストする。
   - 受け取るコンテナの型は `Pick<TodoContainer, "listTodos">` のように、その API が使う query / command だけに絞る（何に依存しているかを型で読めるようにするため）。
-- `presentation` は query / command を `infra/container.ts` で組み立てたコンテナからだけ受け取る。Repository の実装を直接 new しない（テストで `createTodoContainer` に InMemory リポジトリを渡すのは除く）。
-  - 理由: 実装の差し替え（InMemory → DB）を `container.ts` の 1 か所で済ませるため。
+- `presentation` は query / command を `infra/container.ts` で組み立てたコンテナからだけ受け取る。Repository の実装を直接 new しない（テストで `createInMemoryTodoContainer` を使うのは除く）。
+  - 理由: 実装の切り替え（InMemory / Postgres）とトランザクションの張り方を `container.ts` の 1 か所で決めるため。
 - `domain` は Next・React・DB に依存させない。
   - 理由: ビジネスルールをフレームワークや永続化の都合から切り離し、純粋な単体テストで検証できるようにする。
-- `backend/shared/`: feature をまたいで使う型や処理。`DomainError` は `backend/shared/domain/domain-error.ts`、DomainError → HTTP ステータスの変換・エラー時のレスポンスの型 `ErrorResponse`・リクエストの形の誤りを表す `InvalidRequestError` は `backend/shared/presentation/http-error.ts`、リクエスト本文を JSON のオブジェクトとして読む `readJsonObject` は `backend/shared/presentation/json-body.ts` に置く。
-- 永続化は当面 InMemory（`todo-repository.in-memory.ts`）。プロセスの再起動でデータは消える。DB を決めたら `infra/` に実装を足し、`container.ts` で切り替える。
+- `backend/shared/`: feature をまたいで使う型や処理。`DomainError` は `backend/shared/domain/domain-error.ts`、`TransactionRunner` の interface は `backend/shared/domain/transaction-runner.ts`、Postgres の接続（プール）と Drizzle の db は `backend/shared/infra/database.ts`、TransactionRunner の Drizzle 実装は `backend/shared/infra/drizzle-transaction-runner.ts`、DomainError → HTTP ステータスの変換・エラー時のレスポンスの型 `ErrorResponse`・リクエストの形の誤りを表す `InvalidRequestError` は `backend/shared/presentation/http-error.ts`、リクエスト本文を JSON のオブジェクトとして読む `readJsonObject` は `backend/shared/presentation/json-body.ts` に置く。
+- 永続化は Postgres（Drizzle + node-postgres）。`DATABASE_URL` が無いときは InMemory（`todo-repository.in-memory.ts`。プロセスの再起動でデータは消える）。詳細は下の「永続化（Drizzle + Postgres）」。
 - 入力検証は手書きにする（バリデーションライブラリは入れない）。
   - 理由: 現状の規模では依存を増やすほどの必要がない。入力が複雑になったら Issue で導入を検討する。
 - 入力検証の分担: presentation は入力の「形」だけを検査し、値の中身の規則は domain の不変条件に一本化する。
   - presentation（api ファイル）: 本文が JSON のオブジェクトか（`readJsonObject`）、項目の型（`title` が string か、`completed` が boolean か）。違反は `InvalidRequestError` → 400（`validation_error`）。
   - domain: 値の中身の規則（例: `title` は前後の空白を除いて 1〜100 文字。`Todo.create` / `Todo#rename`）。違反は `DomainError("validation_error")` → 400。
   - 理由: 同じ規則を presentation と domain の 2 か所に書くと、片方だけ直してずれる。どちらの違反もレスポンスは同じ 400 / `validation_error` になるので、クライアントから見た結果は変わらない。
+
+## 永続化（Drizzle + Postgres）
+Issue #57 で導入した。Todo は Postgres（`compose.yaml`）に保存し、`DATABASE_URL` が無いときだけ InMemory で動く。
+
+### スキーマとマイグレーション
+- テーブルの形は TypeScript で宣言する（codebase-first）。feature ごとに `backend/<feature>/infra/schema.ts` に Drizzle の `pgTable` で書く（例: `backend/todo/infra/schema.ts` の `todos`）。
+  - 理由: テーブルの形の正を 1 か所にし、SQL はそこから生成する。手で SQL を書くと、スキーマのファイルと DB の形がずれても気づけない。
+  - schema は infra に置く（テーブルの形は永続化の都合で、domain は知らない）。domain の Entity との変換は Repository の実装（`todo-repository.postgres.ts`）が行う。
+- 変えるときの手順:
+  1. `schema.ts` を変える。
+  2. `pnpm db:generate`（`drizzle-kit generate`）で、前回のスナップショット（`drizzle/meta/`）との差分から SQL（`drizzle/<番号>_<名前>.sql`）を作る。DB には接続しない。名前は `pnpm db:generate --name <内容>` で付ける。
+  3. 生成された SQL を読んで意図どおりか確かめ、`drizzle/` をまとめてコミットする。生成済みの SQL は手で直さない（直すと `drizzle/meta/` のスナップショットとずれる）。
+  4. `pnpm db:migrate`（`drizzle-kit migrate`）で、DB にまだ当てていない SQL を当てる。当てた記録は DB の `drizzle.__drizzle_migrations` 表に残り、何度実行しても同じ結果になる。
+- 設定は `drizzle.config.ts`（WHAT / WHY はファイル内のコメント）。`dbCredentials.url` は `DATABASE_URL`、未設定なら compose.yaml の開発用 DB（drizzle-kit は `.env*` を読まないため）。
+- `drizzle-kit push`（DB をスキーマに直接合わせる）は使わない。
+  - 理由: push は差分を DB に直接当て、SQL をファイルに残さない。どの環境にどの変更を当てたかが記録されず、レビューもできない。列の改名を「削除 + 追加」と解釈してデータを消すような変更も、SQL を読まずに当たってしまう。generate + migrate なら、当てる SQL を PR で読み、すべての環境で同じ SQL を同じ順に当てられる。
+- `drizzle/` は Biome の対象外（`biome.json` の `files.includes`。`rules/code/lint.md`）。生成物で、整形すると次の generate で書き戻されるため。
+
+### Repository と Executor
+- Postgres の Repository（`PostgresTodoRepository`）は `Executor`（`backend/shared/infra/database.ts`。Drizzle の db かトランザクションのどちらか）を受け取る。自分ではトランザクションを始めない。
+  - 理由: 同じ実装を、query ではトランザクションの外（db）で、command ではトランザクションの中（tx）で使うため。どちらを渡すかは `container.ts` が決める。
+- DB の行から Entity に戻すときは `Todo.restore` を使う（不変条件で検査しない。WHY は `todo.ts` のコメント）。利用者の入力から作るときは `Todo.create` / `rename` を使う。
+- id 列は uuid 型。uuid の形でない id（`/api/todos/abc`）は DB に渡さず「無い」として扱う（Postgres が形の違いでエラーを返し、404 ではなく 500 になるのを防ぐ）。
+
+### command は一律トランザクション
+- `container.ts` の `createTodoContainer` が、すべての command（create / update / delete）を `TransactionRunner#run` で包む。query（list / get）は包まない。
+  - 仕組み: `TransactionRunner<Tx>`（`backend/shared/domain/transaction-runner.ts`）の `run(fn)` が fn に Tx を渡し、正常終了で commit、例外で rollback して例外を投げ直す。container は `repositoryFor(tx)` でその Tx を使う Repository を作り、command に渡す。query には `repositoryFor(readExecutor)` で作った Repository を渡す。
+  - Postgres は `DrizzleTransactionRunner`（`db.transaction`）、InMemory は `InMemoryTransactionRunner`（実行前のスナップショットに戻す）。InMemory でも「失敗した command の変更は残らない」をそろえる。
+  - command / query の本体（application 層）は Repository を受け取るだけで、トランザクションを知らない。
+  - 理由: command は「全部成功するか、何も変えないか」にする。今は 1 つの command が書き込むのは 1 回だが、書き込みが増えたときに途中までの変更が残らない形を先に決めておく。包む場所を container の 1 か所にし、command ごとの付け忘れを無くす。
+- 危険な点と対策:
+  - トランザクションの外の Repository で書き込むと rollback されない: command には `repositoryFor(tx)` で作った Repository しか渡さない（組み立ては `container.ts` だけ。presentation は Repository を new しない）。
+  - トランザクションの間は接続を 1 本占有する: command の中で外部 API の呼び出しなど遅い処理をしない（プールの接続を使い切ると、他のリクエストが接続待ちになる）。接続待ちは `DATABASE_CONNECTION_TIMEOUT_MS`（既定 5 秒）でエラーにし、無期限に固まらないようにしている。
+  - 入れ子にしない: command の中から別の command（`runner.run`）を呼ばない。`DrizzleTransactionRunner` は外側の tx ではなく db から新しいトランザクションを始めるので、内側は別の接続・別のトランザクションになり、外側が rollback しても戻らない（接続も 2 本占有する）。InMemory の runner は、前の run の終わりを待つので止まったままになる。
+  - 分離レベルは Postgres の既定（READ COMMITTED）: 同じ Todo を同時に更新すると、後から保存した方が勝つ（lost update）。今は許容している。防ぐ必要が出たら、`SELECT ... FOR UPDATE` か分離レベルの変更を Issue で検討する。
+  - InMemory の runner は run を 1 つずつ順番に実行する（並行した run の rollback が、他の run の確定した変更を消さないようにするため）。query は待たないので、実行中の command の途中の状態が見えることがある（InMemory の限界。WHY は `in-memory-transaction-runner.ts`）。
+
+### InMemory との切り替え
+- `todoContainer`（アプリ共有）は `createTodoContainerFromEnv(process.env)` で作る。`DATABASE_URL` があれば Postgres、無ければ（空文字も）InMemory。
+  - 理由: DB を起動していなくても `pnpm dev` で画面を触れるようにし、presentation のテストなどがこのモジュールを読み込むだけで DB を要求しないようにするため。
+  - E2E は必ず Postgres で動かす（下の「E2E テスト（Playwright）」）。
+
+### 接続とプール（暫定）
+- `backend/shared/infra/database.ts` が `pg.Pool` を自分で作り、`drizzle({ client: pool })` に渡す。設定は環境変数から読む（`.env.example`）。
+  | 環境変数 | 既定値 | 意味 |
+  | --- | --- | --- |
+  | `DATABASE_URL` | なし（必須。無ければ InMemory） | 接続先 |
+  | `DATABASE_POOL_MAX` | 10 | プールの最大接続数（node-postgres の既定と同じ） |
+  | `DATABASE_POOL_IDLE_TIMEOUT_MS` | 10000 | 使われない接続を閉じるまでの時間（node-postgres の既定と同じ） |
+  | `DATABASE_CONNECTION_TIMEOUT_MS` | 5000 | 接続待ちの上限。node-postgres の既定 0（無制限）だと、DB が落ちているときやプールが埋まっているときにリクエストが無期限に待つため、5 秒でエラーにする |
+- 数として使えない値（`abc`、負の数、小数、`DATABASE_POOL_MAX=0`）は起動時にエラーにする（NaN のままプールに渡すと上限が効かないため）。
+- アイドル中の接続のエラー（DB の再起動など）は `pool.on("error")` でログに出すだけにし、プロセスを落とさない。
+- プールはプロセスで 1 つだけ（`globalThis` に保持）。`next dev` の再読み込み（HMR）でモジュールが読み込み直されても、プールが増えて接続を使い切らないようにするため。終了時は `closeDatabase()`（`pool.end()`）。
+- これらの値は開発・CI・E2E 用の暫定値。本番用の最終的な設定（接続数、タイムアウト、TLS、サーバレス環境での接続の扱いなど）は Issue #58 で決める。
+
+### テスト
+- `pnpm test` は Postgres が起動している前提（`pnpm db:up` してから実行する）。接続先は `DATABASE_URL`、未設定なら compose.yaml の開発用 DB。
+- 実 Postgres を使うテストは `createTestDatabase()`（`backend/shared/infra/database.test-support.ts`）で、テストファイルごとに別のスキーマ（`test_<UUID>`）を作り、`search_path` をそこに向けて使う。マイグレーションはそのスキーマに当て（`migrate()`）、各テストの前に `TRUNCATE` し、終わったらスキーマごと消す（`close()`）。
+  - 理由: Vitest はテストファイルを並列に実行し、Stryker はさらに複数のプロセスで同じテストを並行して実行する。全員が同じ `public.todos` を使うと、あるファイルの `TRUNCATE` が別のファイルの途中のデータを消す。スキーマを分ければ互いに干渉せず、`pnpm dev` や E2E が使う `public` の表も消さない。drizzle の migrator には同時実行の排他が無い（drizzle-orm 0.45.3 の `pg-core/dialect.js` の `migrate`）ので、同じスキーマに並行して当てることも避ける。
+  - テストが途中で強制終了して残ったスキーマは、次の Vitest の実行の最初に globalSetup（`vitest.global-setup.ts`）が消す（`rules/code/test.md` の「テスト用スキーマの後始末（globalSetup）」）。Postgres に接続できなければ、globalSetup が `pnpm db:up` を促すエラーで止める。
 
 ## 画面側とサーバ側の境界
 - 画面側で backend を参照してよいのは `features/<feature>/api/` だけ。参照先は `backend/<feature>/presentation/<name>.api.ts`（リクエスト / レスポンスの型）と `backend/shared/presentation/`（エラー時の `ErrorResponse`）で、いずれも `import type` のみ。api ファイルの関数や、application・domain・infra の実装は import しない。
@@ -216,7 +293,8 @@ backend/
 | --- | --- | --- |
 | `backend/**/domain` | 純粋な単体テスト | Node |
 | `backend/**/application`（`.query.ts` / `.command.ts`） | InMemory リポジトリを渡して検証 | Node |
-| `backend/**/presentation`（`.api.ts`） | 空の InMemory リポジトリで組み立てた handler（`listTodosApi(createTodoContainer(new InMemoryTodoRepository()))`）に `new Request()` を渡し（動的セグメントがあれば `ctx` も）、返る `Response` を検証。共有の `todoContainer` は使わない（上の「`backend/<feature>/`」）。Next の起動は不要 | Node |
+| `backend/**/infra` の Postgres の実装（`*.postgres.ts`、`drizzle-transaction-runner.ts`、`database.ts`） | 実 Postgres（compose.yaml）に対して実行する。`createTestDatabase()`（`backend/shared/infra/database.test-support.ts`）でテストファイルごとの別スキーマを作り、マイグレーションを当て、各テストの前に `TRUNCATE` する | Node |
+| `backend/**/presentation`（`.api.ts`） | 空の InMemory リポジトリで組み立てた handler（`listTodosApi(createInMemoryTodoContainer())`）に `new Request()` を渡し（動的セグメントがあれば `ctx` も）、返る `Response` を検証。共有の `todoContainer` は使わない（上の「`backend/<feature>/`」）。Next の起動は不要 | Node |
 | `features/**/*.hook.ts` | `renderHook` で状態とイベントを検証 | jsdom |
 | `features/**/*-screen.tsx` | render して操作（クリック・入力）し、表示を検証 | jsdom |
 | 画面から API まで通した動作（`e2e/*.spec.ts`） | Playwright で本番ビルドを起動し、ブラウザ（Chromium）で画面を操作して表示を検証 | Chromium |
@@ -242,8 +320,14 @@ backend/
 - 置き場所: ルート直下の `e2e/` に `<feature>.spec.ts` で置く（例: `e2e/todo.spec.ts`）。対象の隣には置かない。
   - 理由: E2E は画面・API・ルーティングをまたいで 1 つの操作の流れを検証するもので、特定のファイルに対応しない。
 - 実行: `pnpm test:e2e`（`playwright test`）。設定は `playwright.config.ts`。`webServer` が `pnpm build && pnpm start -p 3100` で本番ビルドを起動してからテストする（ローカルで 3100 番にサーバが起動済みなら、それを使う）。`pnpm test`（Vitest）には含めない（`vitest.config.mts` で `e2e/**` を除外）。
-- 1 テストで CRUD を一周する（追加 → 完了 → 詳細で title を変更 → 一覧から削除）。テストを増やすときも、1 テストの中で作ったデータはそのテストの中で消す。
-  - 理由: API は InMemory で、`webServer` の 1 プロセスを全テストが共有する（`workers: 1` で順番に実行）。テスト間でデータが残ると結果が実行順に依存するため、テスト間の独立性ではなく 1 本の中の操作の順序で状態を担保する。
+- E2E は必ず Postgres で動かす。`playwright.config.ts` が `webServer.env` に `DATABASE_URL`（未設定なら compose.yaml の開発用 DB `postgresql://app:app@localhost:5432/app`）を渡す。`DATABASE_URL` が空文字なら、サーバを起動する前に失敗させる（`e2e/database.ts` の `e2eDatabaseUrl`）。
+  - 理由: アプリは `DATABASE_URL` が無いと InMemory で動く。E2E は利用者に届く構成（Postgres に保存する）を検証するもので、InMemory で緑になると DB 経由の不具合を見逃す。テストの中でも、画面で追加した Todo が DB に行として入っていることを直接確かめる。
+  - 前提: Postgres が起動していて（`pnpm db:up`）、マイグレーションを当ててある（`pnpm db:migrate`）こと。`webServer.command` の中では当てない（Issue #57 の方針）。CI とクラウドのフックは E2E の前に `pnpm db:migrate` を実行する。
+  - 注意: ローカルで `reuseExistingServer` により 3100 番の起動済みサーバを使うときは、そのサーバの環境変数のまま動く。`DATABASE_URL` なしで起動したサーバが残っていると、DB の確認で失敗する。
+- 各テストの前に `todos` を空にする（`test.beforeEach` で `e2e/database.ts` の `resetTodos()` が `TRUNCATE todos`）。データの冪等性はこれで担保する。title に実行時刻を付けてユニークにしているのは補助（リセットが効かなかったときに、失敗の原因を分かりやすくする）。
+  - 理由: Postgres のデータはサーバを起動し直しても残る。前のテストや、途中で失敗した前回の実行のデータが一覧に出ると、結果が実行順や過去の実行に左右される。
+- 1 テストで CRUD を一周する（追加 → 完了 → 詳細で title を変更 → 一覧から削除）。
+  - 理由: `webServer` の 1 プロセスと 1 つの Postgres を全テストが共有する（`workers: 1` で順番に実行）。1 本の中の操作の順序で状態を担保する。
 - Chromium のビルド: `@playwright/test` が要求するビルドと、環境に入っているブラウザが一致しないときは、環境変数 `PLAYWRIGHT_CHROMIUM_EXECUTABLE` に Chromium の実行ファイルを渡す（例: クラウド VM では `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium pnpm test:e2e`）。CI では `pnpm exec playwright install --with-deps chromium`（OS の依存ライブラリも入れる）、ローカルでは `pnpm exec playwright install chromium` で版の合ったブラウザを入れ、この変数は使わない。
   - 理由: クラウド VM の `/opt/pw-browsers` にある Chromium はビルド 1194 で、`@playwright/test@1.63.0` の要求（1243）と一致しない。変数なしで実行すると、Playwright が 1243 の実行ファイル（`/opt/pw-browsers/chromium_headless_shell-1243/...`）を探して `Executable doesn't exist` で失敗し、この変数で 1194 の Chromium（141）を渡すと通った（2026-09-28 実測）。
 

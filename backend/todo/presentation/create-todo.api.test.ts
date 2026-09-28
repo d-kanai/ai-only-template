@@ -1,15 +1,14 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
 import type { ErrorResponse } from "@/backend/shared/presentation/http-error";
-import { createTodoContainer } from "@/backend/todo/infra/container";
-import { InMemoryTodoRepository } from "@/backend/todo/infra/todo-repository.in-memory";
+import { createInMemoryTodoContainer } from "@/backend/todo/infra/container";
 import {
   type CreateTodoResponse,
   createTodoApi,
 } from "@/backend/todo/presentation/create-todo.api";
 
 function setup() {
-  const container = createTodoContainer(new InMemoryTodoRepository());
+  const container = createInMemoryTodoContainer();
   return { container, POST: createTodoApi(container) };
 }
 

@@ -1223,6 +1223,29 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'export { DELETE } from "@/backend/shared/presentation/http-error";',
     'const x = import("@/shared/x");',
   ),
+  // Issue #57: backend/shared/infra（プール・Drizzle）と feature の infra（スキーマ・Postgres の実装）への参照。
+  //   infra は domain / application / presentation（自 feature の container 以外）から参照できない。
+  "backend/todo/domain/bad-domain-infra.ts": lines(
+    'import type { Executor } from "@/backend/shared/infra/database";',
+    'import type { DrizzleTransactionRunner } from "../../shared/infra/drizzle-transaction-runner";',
+  ),
+  "backend/shared/domain/bad-shared-domain-infra.ts": lines(
+    'import type { Executor } from "../infra/database";',
+  ),
+  "backend/todo/application/bad-application-infra.ts": lines(
+    'import { getDatabase } from "@/backend/shared/infra/database";',
+  ),
+  "backend/todo/presentation/bad-presentation-infra.api.ts": lines(
+    'import { getDatabase } from "@/backend/shared/infra/database";',
+    'import { todos } from "../infra/schema";',
+    'import { PostgresTodoRepository } from "@/backend/todo/infra/todo-repository.postgres";',
+  ),
+  //   backend/shared/infra は feature の infra を参照できず、next も参照できない。backend/shared/presentation も参照できない（infra の規則）。
+  "backend/shared/infra/bad-shared-infra.ts": lines(
+    'import { todos } from "@/backend/todo/infra/schema";',
+    'import { NextResponse } from "next/server";',
+    'import { toErrorResponse } from "../presentation/http-error";',
+  ),
 };
 
 const MUST_REJECT_VIOLATIONS = [
@@ -1396,6 +1419,23 @@ const MUST_REJECT_VIOLATIONS = [
     "backend/shared/presentation/http-error",
     "shared/x",
   ].map((to) => `app-api: app/api/todos/bad-route.ts → ${to}`),
+  "domain: backend/todo/domain/bad-domain-infra.ts → backend/shared/infra/database",
+  "domain: backend/todo/domain/bad-domain-infra.ts → backend/shared/infra/drizzle-transaction-runner",
+  "domain: backend/shared/domain/bad-shared-domain-infra.ts → backend/shared/infra/database",
+  "application: backend/todo/application/bad-application-infra.ts → backend/shared/infra/database",
+  ...[
+    "backend/shared/infra/database",
+    "backend/todo/infra/schema",
+    "backend/todo/infra/todo-repository.postgres",
+  ].map(
+    (to) =>
+      `presentation: backend/todo/presentation/bad-presentation-infra.api.ts → ${to}`,
+  ),
+  "infra: backend/shared/infra/bad-shared-infra.ts → backend/todo/infra/schema",
+  "backend-shared: backend/shared/infra/bad-shared-infra.ts → backend/todo/infra/schema",
+  "infra: backend/shared/infra/bad-shared-infra.ts → next/server",
+  "backend-shared: backend/shared/infra/bad-shared-infra.ts → next/server",
+  "infra: backend/shared/infra/bad-shared-infra.ts → backend/shared/presentation/http-error",
 ];
 
 // must-pass: 許可される参照を網羅する。今のリポジトリの本番コードにある import の形
@@ -1625,6 +1665,60 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { InMemoryTodoRepository as R } from "./todo-repository.in-memory";',
     'import { DomainError } from "@/backend/shared/domain/domain-error";',
     'import { randomUUID } from "node:crypto";',
+    // Issue #57: container.ts が backend/shared/infra（プール・Drizzle の runner）と自 feature の Postgres / InMemory の実装、
+    //   backend/shared/domain の TransactionRunner の型、application の入力の型（inline の type）を参照する。
+    'import type { TransactionRunner } from "@/backend/shared/domain/transaction-runner";',
+    "import {",
+    "  type Database,",
+    "  type Executor,",
+    "  getDatabase,",
+    '} from "@/backend/shared/infra/database";',
+    'import { DrizzleTransactionRunner } from "@/backend/shared/infra/drizzle-transaction-runner";',
+    'import { getDatabase as g } from "../../shared/infra/database";',
+    "import {",
+    "  CreateTodoCommand,",
+    "  type CreateTodoInput,",
+    '} from "@/backend/todo/application/create-todo.command";',
+    'import type { Todo } from "@/backend/todo/domain/todo";',
+    'import { InMemoryTransactionRunner } from "@/backend/todo/infra/in-memory-transaction-runner";',
+    'import { PostgresTodoRepository } from "@/backend/todo/infra/todo-repository.postgres";',
+  ),
+  // Issue #57: 永続化（Drizzle + Postgres）とトランザクション。backend の infra からパッケージ（drizzle-orm / pg）への参照、
+  //   backend/shared/infra → backend/shared/domain、自 feature の infra → backend/shared/infra。
+  "backend/shared/domain/transaction-runner.ts": lines(
+    "export interface TransactionRunner<Tx> {}",
+  ),
+  "backend/shared/infra/database.ts": lines(
+    'import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";',
+    'import { Pool, type PoolConfig } from "pg";',
+  ),
+  "backend/shared/infra/drizzle-transaction-runner.ts": lines(
+    'import type { TransactionRunner } from "@/backend/shared/domain/transaction-runner";',
+    'import type { Database, Executor } from "@/backend/shared/infra/database";',
+    'import type { TransactionRunner as T } from "../domain/transaction-runner";',
+    'import type { Executor as E } from "./database";',
+  ),
+  "backend/shared/infra/database.test-support.ts": lines(
+    'import { randomUUID } from "node:crypto";',
+    'import { drizzle } from "drizzle-orm/node-postgres";',
+    'import { migrate } from "drizzle-orm/node-postgres/migrator";',
+    'import { Pool } from "pg";',
+    'import type { Database } from "@/backend/shared/infra/database";',
+  ),
+  "backend/todo/infra/schema.ts": lines(
+    'import { boolean, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";',
+  ),
+  "backend/todo/infra/todo-repository.postgres.ts": lines(
+    'import { asc, eq } from "drizzle-orm";',
+    'import type { Executor } from "@/backend/shared/infra/database";',
+    'import { Todo } from "@/backend/todo/domain/todo";',
+    'import type { TodoRepository } from "@/backend/todo/domain/todo-repository";',
+    'import { todos } from "@/backend/todo/infra/schema";',
+    'import { todos as t } from "./schema";',
+  ),
+  "backend/todo/infra/in-memory-transaction-runner.ts": lines(
+    'import type { TransactionRunner } from "@/backend/shared/domain/transaction-runner";',
+    'import type { InMemoryTodoRepository } from "@/backend/todo/infra/todo-repository.in-memory";',
   ),
   "backend/todo/infra/todo-repository.in-memory.ts": lines(
     'import type { Todo } from "@/backend/todo/domain/todo";',

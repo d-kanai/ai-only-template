@@ -53,7 +53,27 @@ jobs:
       # --frozen-lockfile: lockfile と package.json がずれていたら更新せず失敗させる（rules/code/dependencies.md）。
       - run: pnpm install --frozen-lockfile
 
-      # stryker run。単体テスト（Vitest）だけを使うので、ci.yml と違って Postgres や Playwright のブラウザは用意しない。
+      # 開発用の PostgreSQL を compose.yaml で起動する（ci.yml と同じ手順。WHY の詳細は ci.yml のコメント）。
+      # WHY 用意するか: 単体テスト（pnpm test）に実 Postgres を使うテスト（*.postgres.test.ts など。Issue #57）があり、
+      #   Stryker はそれを実行する。Postgres が無いと、Vitest の globalSetup（vitest.global-setup.ts）が接続できないエラーで止めるので、
+#   最初のテスト実行（dry run）から失敗する（pnpm test で確認。Stryker 経由では未確認）。
+      # -d: バックグラウンドで起動する。--wait: healthcheck（pg_isready）が healthy になるまで待つ。--wait-timeout 120: 待つ上限（秒）。
+      - name: Start Postgres
+        run: docker compose up -d --wait --wait-timeout 120
+
+      # 起動した Postgres に psql で接続できることを確かめる（-T: TTY を割り当てない。psql はコンテナ内のもの）。
+      - name: Check Postgres connection
+        run: docker compose exec -T db psql -U app -d app -c 'select 1'
+
+      # drizzle/ のマイグレーションを当てる（ci.yml と同じ）。
+      # 単体テストはテストファイルごとに別のスキーマを作ってそこに当てる（backend/shared/infra/database.test-support.ts）ので
+      #   この結果には依存しないが、ci.yml と同じ状態の DB でテストを動かすためにそろえる。
+      - name: Apply database migrations
+        run: pnpm db:migrate
+        env:
+          DATABASE_URL: postgresql://app:app@localhost:5432/app
+
+      # stryker run。Playwright のブラウザ（E2E）は使わないので入れない。
       - run: pnpm test:mutation
 
       # レポート（stryker.config.mjs の htmlReporter / jsonReporter の出力先 reports/mutation/）を保存する。

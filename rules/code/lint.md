@@ -40,7 +40,7 @@ JSON にはコメントを書けないため、ここに書く。ベースは cr
 | `$schema` | `./node_modules/@biomejs/biome/configuration_schema.json` | テンプレートはバージョン付き URL（2.4.2）だが、インストール済みの Biome と版がずれるとエディタの補完・検証が実際の挙動と食い違う。Biome を上げるたびに URL を直す手間もなくす |
 | `vcs.enabled` / `clientKind: git` / `useIgnoreFile: true` | テンプレートのまま | `.gitignore` に書いたもの（`.next/` `node_modules` `next-env.d.ts` など生成物）を検査対象から外す。無視設定を `.gitignore` と二重管理しない |
 | `files.ignoreUnknown` | `true`（テンプレートのまま） | Biome が扱えない拡張子（`.md` `.yml` など）を `biome check .` の対象にしてもエラーにしない |
-| `files.includes` | `["**", "!node_modules", "!.next", "!dist", "!build"]`（テンプレートのまま） | 生成物を明示的に除外する。`.gitignore` と重複するが、`.gitignore` の書き換えで生成物が検査対象に入るのを防ぐ保険 |
+| `files.includes` | `["**", "!node_modules", "!.next", "!dist", "!build", "!drizzle"]`（`!drizzle` 以外はテンプレートのまま） | 生成物を明示的に除外する。`.gitignore` と重複するが、`.gitignore` の書き換えで生成物が検査対象に入るのを防ぐ保険。`drizzle/` は drizzle-kit が生成するマイグレーション（SQL と `meta/*.json`）で、コミットするので `.gitignore` には入れない。drizzle-kit が書く JSON は末尾の改行が無く Biome の format に違反し、整形しても次の `pnpm db:generate` で書き戻されるため、検査の対象から外す（Issue #57） |
 | `formatter.indentStyle` / `indentWidth` | `space` / `2`（テンプレートのまま） | create-next-app が生成した既存コードと同じ。その他（行幅 80、ダブルクォート、セミコロンあり、末尾カンマ all）も Biome の既定のままで既存コードと一致するため変えていない |
 | `linter.rules.preset` | `recommended` | テンプレートは `"recommended": true` だが、Biome 2.5.13 では非推奨（`biome rage --linter` が「deprecated ... Use preset instead」と出す）のため、後継の `preset` を使う |
 | `linter.rules.<group>.<rule>` | 下の一覧 | recommended 外のルールの追加と、info のルールを error に上げるため |

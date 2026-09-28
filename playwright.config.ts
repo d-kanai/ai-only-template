@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { e2eDatabaseUrl } from "./e2e/database";
 
 // Playwright（E2E テスト）の設定。最小構成で、Chromium だけで e2e/ のテストを実行する。
 // 実行: pnpm test:e2e（= playwright test）。Next の本番ビルドを webServer で起動し、ブラウザから画面を操作する。
@@ -16,12 +17,20 @@ const baseURL = `http://localhost:${port}`;
 //   CI では未設定にし、playwright install で入れた、版の合ったブラウザを使う。
 const chromiumExecutable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
 
+// サーバ（next start）とテストが使う Postgres の接続先。未設定なら compose.yaml の開発用 DB、空文字ならここで失敗する
+// （e2e/database.ts の e2eDatabaseUrl）。
+// WHY 必ず Postgres で動かす: アプリは DATABASE_URL が無いと InMemory で動く（backend/todo/infra/container.ts）。
+//   E2E は利用者に届く構成（Postgres に保存する）を検証するので、InMemory に落ちないよう、webServer に明示的に渡す。
+// 前提: Postgres が起動していて（pnpm db:up）、マイグレーションを当ててある（pnpm db:migrate）こと。
+//   webServer の中では当てない（Issue #57 の方針。CI・クラウドのフックは E2E の前に db:migrate を実行する）。
+const databaseUrl = e2eDatabaseUrl();
+
 export default defineConfig({
   // testDir: E2E テストの置き場所。Vitest の単体テスト（対象の隣の *.test.ts(x)）と分けるため、ルート直下の e2e/ に置く。
   testDir: "e2e",
   // fullyParallel / workers: テストを 1 つずつ順番に実行する。
-  //   WHY: API は InMemory で、webServer の 1 プロセスを全テストが共有する。並列に動かすと、別のテストが作った Todo が
-  //   一覧に混ざり、結果が実行のタイミングで変わるため。
+  //   WHY: webServer の 1 プロセスと 1 つの Postgres を全テストが共有し、各テストの前に todos を空にする（e2e/todo.spec.ts）。
+  //   並列に動かすと、別のテストのリセットや作った Todo が混ざり、結果が実行のタイミングで変わるため。
   fullyParallel: false,
   workers: 1,
   // retries: 失敗したテストを再実行しない。WHY: 再実行で通ると不安定なテストが隠れるため、失敗はそのまま失敗にする。
@@ -64,5 +73,10 @@ export default defineConfig({
     // timeout: build を含めて起動を待つ上限（ミリ秒）。WHY 180 秒: 既定の 60 秒では next build の時間を含めると足りない
     //   おそれがあるため、余裕を持たせる。
     timeout: 180_000,
+    // env: next start に渡す環境変数（Playwright の既定では process.env を引き継いだうえで、ここに書いたものを上書きする）。
+    //   DATABASE_URL を渡して Postgres で動かす（上の databaseUrl）。
+    //   注意: reuseExistingServer で起動済みのサーバを使うときは、そのサーバの環境変数のままになる。DATABASE_URL なしで
+    //   起動したサーバが 3100 番に残っていると InMemory のまま検証してしまう（テストの DB の確認で失敗する）。
+    env: { DATABASE_URL: databaseUrl },
   },
 });

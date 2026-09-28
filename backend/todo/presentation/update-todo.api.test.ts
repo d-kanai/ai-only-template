@@ -1,15 +1,14 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
 import type { ErrorResponse } from "@/backend/shared/presentation/http-error";
-import { createTodoContainer } from "@/backend/todo/infra/container";
-import { InMemoryTodoRepository } from "@/backend/todo/infra/todo-repository.in-memory";
+import { createInMemoryTodoContainer } from "@/backend/todo/infra/container";
 import {
   type UpdateTodoResponse,
   updateTodoApi,
 } from "@/backend/todo/presentation/update-todo.api";
 
 async function setup() {
-  const container = createTodoContainer(new InMemoryTodoRepository());
+  const container = createInMemoryTodoContainer();
   const todo = await container.createTodo.execute({ title: "牛乳を買う" });
   return { container, todo, PUT: updateTodoApi(container) };
 }

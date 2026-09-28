@@ -42,10 +42,17 @@ const pnpmExeMetaUrl = (platform: Platform) =>
   `${REGISTRY}/@pnpm/exe.${platform}/${pnpmVersion}`;
 
 // @pnpm/exe.<platform> に入っているネイティブバイナリの代わり。--version には .tool-versions の版を返し、
-// それ以外（pnpm install）は引数を stderr に出すだけにする。スクリプトが入れた pnpm で
+// それ以外（pnpm install / pnpm db:migrate）は引数を stderr に出すだけにする。スクリプトが入れた pnpm で
 // pnpm install まで進んだことを stderr で確かめられるようにするため。
+// PNPM_LOG があれば、呼ばれたときのカレントディレクトリ・DATABASE_URL・引数を 1 行ずつ追記する（マイグレーションの
+// 実行場所と接続先を確かめるため。DOCKER_LOG と同じファイルを渡すと、docker compose との順序も確かめられる）。
+// db:migrate は FAKE_PNPM_MIGRATE_EXIT（既定 0）で終わる（失敗の経路を確かめるため）。
 const FAKE_NATIVE_PNPM = `#!/bin/sh
-if [ "$1" = "--version" ]; then echo "${pnpmVersion}"; else echo "fake native pnpm $*" >&2; fi
+if [ "$1" = "--version" ]; then echo "${pnpmVersion}"; exit 0; fi
+echo "fake native pnpm $*" >&2
+if [ -n "\${PNPM_LOG:-}" ]; then echo "$PWD DATABASE_URL=\${DATABASE_URL:-} pnpm $*" >> "$PNPM_LOG"; fi
+if [ "$1" = "db:migrate" ]; then exit "\${FAKE_PNPM_MIGRATE_EXIT:-0}"; fi
+exit 0
 `;
 
 // 実インストール経路のテストで PATH の先頭に置く偽コマンド。
@@ -161,6 +168,8 @@ describe("scripts/cloud-session-start.sh", () => {
     delete env.CLAUDE_ENV_FILE;
     delete env.CLOUD_SESSION_START_DRY_RUN;
     delete env.CLOUD_SESSION_START_DOCKER_WAIT_SECONDS;
+    // 実行元（CI など）の DATABASE_URL が漏れると、マイグレーションの接続先の検査が実行環境に左右される。
+    delete env.DATABASE_URL;
     Object.assign(env, {
       CLAUDE_PROJECT_DIR: repoRoot,
       HOME: home,
@@ -740,6 +749,11 @@ describe("scripts/cloud-session-start.sh", () => {
     const pullTimeout = 45;
     const timeoutCalls = () => logLines(join(tmp, "timeout.log"));
     const composeUp = `${repoRoot} compose up -d --wait --wait-timeout 120`;
+    // pnpm db:migrate 1 回の上限（秒）。値の根拠は scripts/cloud-session-start.sh と rules/code/env.md の見積もり。
+    const migrateTimeout = 15;
+    const localDatabaseUrl = "postgresql://app:app@localhost:5432/app";
+    const migrate = (url: string) =>
+      `${repoRoot} DATABASE_URL=${url} pnpm db:migrate`;
     // Node / pnpm の導入を速い経路（インストール済み）にして、Postgres の起動だけを見る。
     const placeInstalledNodeAndPnpm = () => {
       placeFakeNode(nodeDirIn());
@@ -807,7 +821,7 @@ describe("scripts/cloud-session-start.sh", () => {
       expect(logLines(dockerLog)).toEqual([`${process.cwd()} info`]);
     });
 
-    it("DRY_RUN でデーモンが動いていれば、dockerd の起動予定は出さず docker compose pull / up の予定だけを表示する", () => {
+    it("DRY_RUN でデーモンが動いていれば、dockerd の起動予定は出さず docker compose pull / up と pnpm db:migrate の予定だけを表示する", () => {
       const result = runScript([], {
         ...remoteEnv(),
         CLOUD_SESSION_START_DRY_RUN: "1",
@@ -820,10 +834,17 @@ describe("scripts/cloud-session-start.sh", () => {
       expect(result.stdout).toContain(
         `(cd ${repoRoot} && docker compose up -d --wait --wait-timeout 120)`,
       );
+      // up の後にマイグレーションを当てる予定も出す（DATABASE_URL が無ければ compose.yaml の開発用 DB）。
+      expect(result.stdout).toContain(
+        `(cd ${repoRoot} && DATABASE_URL=${localDatabaseUrl} timeout ${migrateTimeout} pnpm db:migrate)`,
+      );
+      expect(result.stdout.indexOf("pnpm db:migrate")).toBeGreaterThan(
+        result.stdout.indexOf("docker compose up"),
+      );
       expect(logLines(dockerLog)).not.toContain(composeUp);
     });
 
-    it("デーモンが動いていれば dockerd は起動せず、リポジトリ直下で docker compose pull → up -d --wait --wait-timeout 120 の順に実行する", () => {
+    it("デーモンが動いていれば dockerd は起動せず、リポジトリ直下で docker compose pull → up -d --wait --wait-timeout 120 の順に実行し、その後マイグレーションを当てる", () => {
       placeInstalledNodeAndPnpm();
       const result = runScript([], remoteEnv());
       expect(result.status).toBe(0);
@@ -834,7 +855,10 @@ describe("scripts/cloud-session-start.sh", () => {
         calls.indexOf(composePull),
       );
       // pull は timeout で上限を付けて実行する（up は --wait-timeout で上限がある）
-      expect(timeoutCalls()).toEqual([`${pullTimeout} docker compose pull`]);
+      expect(timeoutCalls()).toEqual([
+        `${pullTimeout} docker compose pull`,
+        `${migrateTimeout} pnpm db:migrate`,
+      ]);
       expect(result.stderr).not.toContain("cloud-session-start:");
     });
 
@@ -979,6 +1003,68 @@ describe("scripts/cloud-session-start.sh", () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toContain("dockerd not found");
       expect(logLines(dockerLog)).not.toContain(composeUp);
+    });
+
+    it("docker compose up の後に、リポジトリ直下で pnpm db:migrate を compose.yaml の開発用 DB に対して実行する（上限 15 秒）", () => {
+      placeInstalledNodeAndPnpm();
+      const result = runScript([], { ...remoteEnv(), PNPM_LOG: dockerLog });
+      expect(result.status).toBe(0);
+      const calls = logLines(dockerLog);
+      expect(calls.filter((c) => c.endsWith("pnpm db:migrate"))).toEqual([
+        migrate(localDatabaseUrl),
+      ]);
+      expect(calls.indexOf(migrate(localDatabaseUrl))).toBeGreaterThan(
+        calls.indexOf(composeUp),
+      );
+      expect(timeoutCalls()).toContain(`${migrateTimeout} pnpm db:migrate`);
+      expect(result.stderr).not.toContain("cloud-session-start:");
+    });
+
+    it("DATABASE_URL が設定されていれば、その DB に pnpm db:migrate を実行する", () => {
+      placeInstalledNodeAndPnpm();
+      const url = "postgresql://u:p@db.example:5432/other";
+      const result = runScript([], {
+        ...remoteEnv(),
+        PNPM_LOG: dockerLog,
+        DATABASE_URL: url,
+      });
+      expect(result.status).toBe(0);
+      expect(
+        logLines(dockerLog).filter((c) => c.endsWith("pnpm db:migrate")),
+      ).toEqual([migrate(url)]);
+    });
+
+    it("pnpm db:migrate が失敗しても warn を出して exit 0", () => {
+      placeInstalledNodeAndPnpm();
+      const result = runScript([], {
+        ...remoteEnv(),
+        PNPM_LOG: dockerLog,
+        FAKE_PNPM_MIGRATE_EXIT: "1",
+      });
+      expect(result.status).toBe(0);
+      expect(logLines(dockerLog)).toContain(migrate(localDatabaseUrl));
+      expect(result.stderr).toContain("pnpm db:migrate failed");
+    });
+
+    it("docker compose up が失敗したら pnpm db:migrate は実行しない", () => {
+      placeInstalledNodeAndPnpm();
+      const result = runScript([], {
+        ...remoteEnv(),
+        PNPM_LOG: dockerLog,
+        FAKE_COMPOSE_EXIT: "1",
+      });
+      expect(result.status).toBe(0);
+      expect(
+        logLines(dockerLog).filter((c) => c.endsWith("pnpm db:migrate")),
+      ).toEqual([]);
+      expect(timeoutCalls()).not.toContain(`${migrateTimeout} pnpm db:migrate`);
+    });
+
+    it("--install-only（setup script）では pnpm db:migrate を実行しない", () => {
+      placeInstalledNodeAndPnpm();
+      const result = runScript(["--install-only"], { PNPM_LOG: dockerLog });
+      expect(result.status).toBe(0);
+      expect(logLines(dockerLog)).toEqual([]);
     });
   });
 });
