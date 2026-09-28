@@ -11,6 +11,7 @@
     "test:e2e": "playwright test",
     "test:mutation": "stryker run",
     "lint": "biome check --error-on-warnings .",
+    "typecheck": "tsc -p . --noEmit && tsc -p apps/backend --noEmit",
     "format": "biome format --write .",
     "check": "biome check --write --error-on-warnings .",
     "db:up": "docker compose up -d --wait",

@@ -48,6 +48,7 @@
 | `package.test.ts` | `package.json` の `dependencies` / `devDependencies` の版が完全固定であること（判定 `isPinnedVersion`、列挙 `listDependencies`。`rules/code/dependencies.md`） |
 | `pnpm-workspace.test.ts` | `minimumReleaseAge` / `minimumReleaseAgeStrict` / `savePrefix` / `allowBuilds` の値（読み取り `readTopLevelSettings`、判定 `findWorkspaceSettingViolations`。`rules/code/dependencies.md`） |
 | `scripts/cloud-session-start.test.ts` | クラウドセッションのスクリプトが `.tool-versions` どおりの版を、検証付きで入れること（`rules/code/env.md`） |
+| `typecheck.test.ts`（Issue #68 で追加） | `pnpm typecheck` がリポジトリ直下と `apps/backend` の tsconfig を `tsc --noEmit` で検査すること（判定 `typechecksAllProjects`。失敗を打ち消すつなぎや `--noCheck` / `false` を渡す書き方も拒否）、CI の `ci.yml` が `pnpm typecheck` を `pnpm build` より前に無条件で実行すること（判定 `runsTypecheckBeforeBuild`）（`rules/code/architecture.md` の tsconfig の節） |
 | `architecture.test.ts`（Issue #47 で追加） | 依存の向き（`rules/code/architecture.md` の「依存の向き（全体）」。Issue #68 で apps/frontend と apps/backend の境界の規則を追加）と、環境変数の直参照の禁止（規則 `env-direct-access`。Issue #59。`rules/code/env.md` の「環境変数」） |
 
 テスト以外のゲート（カバレッジのしきい値、pre-commit のフック、CI の required status check、型チェック）も、「違反があれば止まる」ことを検査する仕組みなので、下の「fault injection」は同じように行う。

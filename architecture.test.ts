@@ -33,17 +33,11 @@ import { describe, expect, it } from "vitest";
 const repoRoot = import.meta.dirname;
 
 // 検査の対象（rules/code/architecture.md の「全体像」。Issue #68 で apps/frontend と apps/backend に分けた）。
-//   - apps/frontend: app/・features/・shared/ の下（再帰）と、apps/frontend 直下のファイル（next.config.ts・instrumentation*.ts）。
-//     shared/ はまだ無いが、作ったときに自動で対象になるよう入れる。
-//   - apps/backend: 全体（再帰）。4 層の下のファイルと、直下の drizzle.config.ts。
-// WHY apps/frontend は直下を再帰しない: next build が apps/frontend/.next/ に生成物（大量の JS）を置くため。直下のファイルだけを見る。
-// WHY apps/frontend 直下のファイルも対象にする: instrumentation-node.ts は backend の env.ts を読み込む（frontend → backend の
-//   参照）。対象から外すと、そこから backend の何を参照しても検査を素通りする（規則 frontend-root-to-backend）。
-const FRONTEND_SOURCE_DIRS = [
-  "apps/frontend/app",
-  "apps/frontend/features",
-  "apps/frontend/shared",
-];
+//   apps/frontend と apps/backend の全体（再帰）。除くのは依存と生成物のディレクトリ（EXCLUDED_DIRS）だけ。
+// WHY 全体を再帰する（app/・features/・shared/ だけにしない）: 以前は app/・features/・shared/ と直下のファイルだけを見ていたため、
+//   apps/frontend/lib/db.ts のような場所のファイルは、backend の container を値で import しても検査に出なかった（Issue #68 の
+//   reviewer が実測）。全体を列挙したうえで、置き場所の規則（FRONTEND_PLACEMENT / BACKEND_PLACEMENT）で、どの規則もかからない
+//   場所にファイルを置くこと自体を違反にする。
 const FRONTEND_ROOT = "apps/frontend";
 const BACKEND_ROOT = "apps/backend";
 
@@ -252,13 +246,19 @@ function isSourceNonTest(path: string): boolean {
   return SOURCE_FILE.test(path) && !TEST_FILE.test(path);
 }
 
-// WHY node_modules と "." で始まるディレクトリの中を除く: workspace パッケージ化（Issue #68 の段階 2）で apps/backend/node_modules/
-//   ができたときや、ツールの生成物（.next/ など）を、自前のコードとして検査しないため。
+// 列挙から除くディレクトリ（どの階層にあっても、その中を見ない）。
+//   node_modules: 依存（workspace パッケージ化した段階 2 では apps/*/node_modules/ ができる）。
+//   .next: next build / next dev の生成物（apps/frontend/.next/。数千件の JS）。
+// WHY 名前を列挙する（"." で始まるディレクトリをまとめて除かない）: まとめて除くと apps/backend/.lib/x.ts のような自前のコードが
+//   検査を素通りする（Issue #68 の reviewer 指摘）。既知の生成物・依存だけを除き、それ以外の "." のディレクトリは通常どおり
+//   検査して、置き場所の規則で違反にする。生成物のディレクトリが増えたらここに足す。
+const EXCLUDED_DIRS = new Set(["node_modules", ".next"]);
+
 function isGeneratedOrDependency(path: string): boolean {
   return path
     .split("/")
     .slice(0, -1)
-    .some((segment) => segment === "node_modules" || segment.startsWith("."));
+    .some((segment) => EXCLUDED_DIRS.has(segment));
 }
 
 // WHY root を引数で受け取る: 本番の検査（リポジトリ直下）と、fixture の一時ディレクトリに置いた架空のツリーの検査で、
@@ -284,8 +284,7 @@ function listDirectFiles(root: string, dir: string): string[] {
 
 function listAllSourceFiles(root: string): string[] {
   return [
-    ...FRONTEND_SOURCE_DIRS.flatMap((dir) => listSourceFiles(root, dir)),
-    ...listDirectFiles(root, FRONTEND_ROOT).filter(isSourceNonTest),
+    ...listSourceFiles(root, FRONTEND_ROOT),
     ...listSourceFiles(root, BACKEND_ROOT),
   ];
 }
@@ -673,10 +672,38 @@ const BACKEND_PLACEMENT = {
     !BACKEND_ROOT_CONFIG.test(file),
 };
 
+// frontend のソースファイルは、apps/frontend の app/・features/・shared/ の下か、直下の決まった名前のファイルだけに置く
+// （Issue #68 の reviewer 指摘）。
+// WHY 置き場所を規則にする: 依存の規則は app/・features/・shared/ と直下のファイル（frontend-root-to-backend）にしかかからない。
+//   apps/frontend/lib/ のような場所のファイルは、backend の container を値で import してもどの規則にもかからず素通りする。
+// WHY 直下は名前で許す: Next の設定（next.config.ts）と規約ファイル（instrumentation.ts）、その Node.js 用の処理
+//   （instrumentation-node.ts）、Next が生成する型の宣言（next-env.d.ts。.gitignore 済みだが手元にはある）だけが直下に要る。
+//   名前を決めずに直下を許すと、層に属さないコードの置き場所になる。直下のファイルが backend を参照するときは
+//   frontend-root-to-backend が見る。
+const FRONTEND_SOURCE_DIR = /^apps\/frontend\/(?:app|features|shared)\//;
+const FRONTEND_ROOT_FILES = new Set([
+  "apps/frontend/next.config.ts",
+  "apps/frontend/instrumentation.ts",
+  "apps/frontend/instrumentation-node.ts",
+  "apps/frontend/next-env.d.ts",
+]);
+
+const FRONTEND_PLACEMENT = {
+  id: "frontend-placement",
+  name: "apps/frontend/ のソースファイルは app/・features/・shared/ の下か、直下の next.config.ts・instrumentation.ts・instrumentation-node.ts・next-env.d.ts だけに置く",
+  isMisplaced: (file: string) =>
+    isUnder(file, FRONTEND_ROOT) &&
+    !FRONTEND_SOURCE_DIR.test(file) &&
+    !FRONTEND_ROOT_FILES.has(file),
+};
+
+// 置き場所の規則（参照ではなくファイルの場所で決まる）。collectViolations で使う。
+const PLACEMENT_RULES = [BACKEND_PLACEMENT, FRONTEND_PLACEMENT];
+
 // --- 環境変数の直参照（規則 env-direct-access。rules/code/env.md の「環境変数」） ---
 // process.env を読んでよいのは apps/backend/shared/infra/env.ts だけ。ほかは env.ts の env / toolEnv を使う。
 // WHY 参照（import）の規則と別に持つ: 参照先ではなくソースの中身（process.env という式）で決まり、対象のファイルも違う
-//   （e2e/ とルート直下の設定ファイルも含める）ため。置き場所の規則（BACKEND_PLACEMENT）と同じく、RULES の外に置く。
+//   （e2e/ とルート直下の設定ファイルも含める）ため。置き場所の規則（BACKEND_PLACEMENT / FRONTEND_PLACEMENT）と同じく、RULES の外に置く。
 // WHY Biome の style/noProcessEnv と二重に検査する: Biome は biome.json の overrides で対象外を決めるので、overrides の
 //   書き換え（対象外のパスを広げる、ルールを off にする）で黙って効かなくなる。ここでは対象と例外（env.ts だけ）を
 //   テストとして固定し、どちらか片方が壊れても、もう片方で止まるようにする。
@@ -775,7 +802,7 @@ function findViolations(references: Reference[], rule: Rule): string[] {
 
 // root の下のツリー全体の違反を「<規則の id>: ファイル → 参照先」の一覧（並べ替え済み）で返す。
 //   1 つの参照が複数の規則に違反するときは、規則ごとに 1 行ずつ出す。
-//   置き場所の違反は「backend-placement: ファイル」の 1 行で出す。
+//   置き場所の違反は「backend-placement: ファイル」「frontend-placement: ファイル」の 1 行で出す。
 //   環境変数の直参照は「env-direct-access: ファイル:行」を参照ごとに 1 行で出す（同じファイルの複数の書き方を、
 //   1 つずつ拾えているかまで比べるため）。
 function collectViolations(root: string): string[] {
@@ -785,9 +812,11 @@ function collectViolations(root: string): string[] {
     ...RULES.flatMap((rule) =>
       findViolations(references, rule).map((line) => `${rule.id}: ${line}`),
     ),
-    ...files
-      .filter(BACKEND_PLACEMENT.isMisplaced)
-      .map((file) => `${BACKEND_PLACEMENT.id}: ${file}`),
+    ...PLACEMENT_RULES.flatMap((placement) =>
+      files
+        .filter(placement.isMisplaced)
+        .map((file) => `${placement.id}: ${file}`),
+    ),
     ...findEnvViolations(root).map(
       (line) => `${ENV_DIRECT_ACCESS.id}: ${line}`,
     ),
@@ -804,6 +833,12 @@ describe("依存の向き（rules/code/architecture.md）", () => {
   it(BACKEND_PLACEMENT.name, () => {
     expect(
       listAllSourceFiles(repoRoot).filter(BACKEND_PLACEMENT.isMisplaced),
+    ).toEqual([]);
+  });
+
+  it(FRONTEND_PLACEMENT.name, () => {
+    expect(
+      listAllSourceFiles(repoRoot).filter(FRONTEND_PLACEMENT.isMisplaced),
     ).toEqual([]);
   });
 
@@ -1419,9 +1454,10 @@ function judge(id: RuleId, [from, specifier, kind]: Example): boolean {
   return rule.appliesTo(ref.from) && rule.isViolation(ref);
 }
 
-// backend の置き場所の規則（BACKEND_PLACEMENT）の判定例。参照ではなくファイルの置き場所で決まるので別に持つ。
+// 置き場所の規則（BACKEND_PLACEMENT / FRONTEND_PLACEMENT）の判定例。参照ではなくファイルの置き場所で決まるので別に持つ。
 const PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
   misplaced: [
+    "apps/backend/.lib/x.ts",
     "apps/backend/todo/p-root.ts",
     "apps/backend/todo/lib/x.ts",
     "apps/backend/shared/bad-root.ts",
@@ -1433,7 +1469,35 @@ const PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/backend/shared/presentation/http-error.ts",
     "apps/backend/todo/infra/container.ts",
     "apps/backend/todo/presentation/nested/x.api.ts",
+    "apps/backend/drizzle.config.ts",
     "apps/frontend/features/todo/lib/x.ts",
+  ],
+};
+
+const FRONTEND_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
+  misplaced: [
+    "apps/frontend/lib/db.ts",
+    "apps/frontend/.lib/x.ts",
+    "apps/frontend/x.ts",
+    "apps/frontend/next.config.mjs",
+    // 前方一致だけが同じ別ディレクトリ・別ファイル。
+    "apps/frontend/app-x/page.tsx",
+    "apps/frontend/featuresx/todo/x.ts",
+    "apps/frontend/instrumentation-node.helper.ts",
+    // 許可された名前でも、直下でなければ例外にしない。
+    "apps/frontend/lib/next.config.ts",
+  ],
+  placed: [
+    "apps/frontend/app/page.tsx",
+    "apps/frontend/app/api/todos/route.ts",
+    "apps/frontend/features/todo/lib/x.ts",
+    "apps/frontend/shared/ui/button.tsx",
+    "apps/frontend/next.config.ts",
+    "apps/frontend/instrumentation.ts",
+    "apps/frontend/instrumentation-node.ts",
+    "apps/frontend/next-env.d.ts",
+    // frontend の規則の対象外（apps/backend は BACKEND_PLACEMENT が見る）。
+    "apps/backend/lib/x.ts",
   ],
 };
 
@@ -1444,6 +1508,21 @@ describe("backend の置き場所の判定", () => {
   it.each(PLACEMENT_EXAMPLES.placed)("%s は置き場所の違反ではない", (file) => {
     expect(BACKEND_PLACEMENT.isMisplaced(file)).toBe(false);
   });
+});
+
+describe("frontend の置き場所の判定", () => {
+  it.each(FRONTEND_PLACEMENT_EXAMPLES.misplaced)(
+    "%s は置き場所の違反",
+    (file) => {
+      expect(FRONTEND_PLACEMENT.isMisplaced(file)).toBe(true);
+    },
+  );
+  it.each(FRONTEND_PLACEMENT_EXAMPLES.placed)(
+    "%s は置き場所の違反ではない",
+    (file) => {
+      expect(FRONTEND_PLACEMENT.isMisplaced(file)).toBe(false);
+    },
+  );
 });
 
 // 環境変数の直参照の規則（ENV_DIRECT_ACCESS）の判定例。参照ではなく [ファイル, ソース] で決まるので別に持つ。
@@ -1664,8 +1743,8 @@ function violationsOfFixture(files: Record<string, string>): string[] {
 // export { X } from / export type { X } from / dynamic import() / 副作用だけの import のうち規則に関係する形と、
 // .ts / .tsx / .js / .jsx の各拡張子、境界ぎりぎりのケース（他 feature の深いパス、自 feature の禁止層、
 // 名前の前方一致だけが同じ別ディレクトリ、next / react / react-dom のサブパス）を置く。
-// あわせて、置き場所の規則（BACKEND_PLACEMENT）と環境変数の直参照の規則（ENV_DIRECT_ACCESS）の違反も置く。
-// 規則は全部で 18（RULES の 16 + 置き場所 + 環境変数の直参照）。Issue #68 で RULES に 3 規則（backend-to-frontend・
+// あわせて、置き場所の規則（BACKEND_PLACEMENT / FRONTEND_PLACEMENT）と環境変数の直参照の規則（ENV_DIRECT_ACCESS）の違反も置く。
+// 規則は全部で 19（RULES の 16 + 置き場所 2 + 環境変数の直参照）。Issue #68 で RULES に 3 規則（backend-to-frontend・
 // backend-relative-only・frontend-root-to-backend）を足した。
 const MUST_REJECT_FILES: Record<string, string> = {
   // screen-to-backend: apps/frontend/features/<f>/ の api/ 以外から backend への参照は、型でも相対でも違反。
@@ -1950,15 +2029,36 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/backend/todo/drizzle.config.ts": lines("export default {};"),
   // frontend-root-to-backend: apps/frontend 直下のファイルから、env 以外の backend（alias と相対、型、re-export、dynamic、
   //   名前の前方一致だけが同じ env-helper）。
-  "apps/frontend/bad-root.ts": lines(
+  // 置き場所の規則（frontend-placement）で許される名前（next.config.ts）に置き、frontend-root-to-backend だけを確かめる。
+  "apps/frontend/next.config.ts": lines(
     'import { todoContainer } from "@repo/backend/todo/infra/container";',
     'import type { Executor } from "../backend/shared/infra/database";',
     'export { GET } from "@repo/backend/todo/presentation/list-todos.api";',
     'const e = import("@repo/backend/shared/infra/env-helper");',
   ),
+  // frontend-placement（reviewer 指摘。Issue #68）: apps/frontend の app/・features/・shared/ の外と、直下の許可された名前
+  //   以外のファイル。lib/ のファイルはどの依存の規則もかからないので、backend の container を値で import しても置き場所の
+  //   違反だけが出る（置き場所の規則が無いと 0 件で素通りしていた）。"." で始まるディレクトリも検査する。
+  "apps/frontend/lib/db.ts": lines(
+    'import { todoContainer } from "@repo/backend/todo/infra/container";',
+    "export const db = todoContainer;",
+  ),
+  "apps/frontend/.lib/x.ts": lines("export const x = 1;"),
+  "apps/frontend/next.config.mjs": lines("export default {};"),
+  // backend-placement: "." で始まるディレクトリ（apps/backend/.lib/）も検査し、4 層の外として違反にする（除外するのは
+  //   node_modules と .next だけ）。"@/" で frontend を参照しているので、backend-to-frontend と backend-relative-only にもかかる。
+  "apps/backend/.lib/x.ts": lines(
+    'import { TodoScreen } from "@/features/todo";',
+  ),
 };
 
 const MUST_REJECT_VIOLATIONS = [
+  "frontend-placement: apps/frontend/lib/db.ts",
+  "frontend-placement: apps/frontend/.lib/x.ts",
+  "frontend-placement: apps/frontend/next.config.mjs",
+  "backend-placement: apps/backend/.lib/x.ts",
+  "backend-to-frontend: apps/backend/.lib/x.ts → apps/frontend/features/todo",
+  "backend-relative-only: apps/backend/.lib/x.ts → apps/frontend/features/todo",
   // Issue #68: 新しい 3 規則のための fixture（上の最後の 4 ファイル）。
   ...[
     "apps/backend/todo/domain/todo",
@@ -1983,7 +2083,9 @@ const MUST_REJECT_VIOLATIONS = [
     "apps/backend/shared/infra/database",
     "apps/backend/todo/presentation/list-todos.api",
     "apps/backend/shared/infra/env-helper",
-  ].map((to) => `frontend-root-to-backend: apps/frontend/bad-root.ts → ${to}`),
+  ].map(
+    (to) => `frontend-root-to-backend: apps/frontend/next.config.ts → ${to}`,
+  ),
   // Issue #68: 既存の fixture のうち、backend から画面側（features / shared / app）を参照している行は、層の規則に加えて
   //   backend-to-frontend にかかる。"@/" で書いたものは backend-relative-only にもかかる（相対パスで書いたものはかからない）。
   ...[
@@ -2507,6 +2609,15 @@ const MUST_PASS_FILES: Record<string, string> = {
   "apps/frontend/.next/server/chunk.js": lines(
     "module.exports = process.env;",
     'import "@repo/backend/todo/infra/container";',
+  ),
+  "apps/frontend/node_modules/pkg/index.js": lines(
+    "module.exports = process.env;",
+    'import "@repo/backend/todo/infra/container";',
+  ),
+  // next build / next dev が生成する型の宣言（.gitignore 済み）。直下の許可された名前で、.next の中を import する。
+  "apps/frontend/next-env.d.ts": lines(
+    '/// <reference types="next" />',
+    'import "./.next/types/routes.d.ts";',
   ),
   "apps/backend/node_modules/pkg/index.js": lines(
     "module.exports = process.env;",

@@ -102,6 +102,7 @@ Claude Code のクラウドセッション（asdf が無い環境）では、`sc
 ```sh
 pnpm install   # 依存をインストール
 pnpm dev       # 開発サーバを起動（http://localhost:3000）
+pnpm typecheck # 型チェック（リポジトリ全体と apps/backend の tsconfig。next build は frontend から import したファイルしか見ないため）
 pnpm test      # 単体テストを実行し、カバレッジ 100% 未満なら失敗（Vitest。詳細は rules/code/architecture.md）
 pnpm test:unit # 単体テストだけを実行（カバレッジを計測しない。速く回したいとき）
 pnpm test:e2e  # E2E テストを実行（Playwright。本番ビルドを Postgres に接続して起動し、ブラウザで操作する。詳細は rules/code/architecture.md）
