@@ -75,13 +75,15 @@ const PARSERS: { [K in keyof Env]: (raw: string) => Check<Env[K]> } = {
 
 // source（本番は process.env）から Env を読む。純粋関数にして、テストで偽の source を渡せるようにしている。
 // WHY 全件を検査してからまとめて投げる: 1 件ずつ止めると、直して起動し直すたびに次の 1 件が見つかり、何度も往復する。
-// WHY 空文字も未設定と同じに扱う: `DATABASE_URL=` のように値を書き忘れた行は、値が無いのと同じ意味のため。
+// WHY 空文字と空白だけの値も未設定と同じに扱う: `DATABASE_URL=` や `DATABASE_URL=  ` のように値を書き忘れた行は、
+//   値が無いのと同じ意味のため（空白だけの接続先を渡しても、接続時に分かりにくいエラーになるだけ）。
+//   値そのものは trim せずに渡す（前後の空白を黙って直すと、.env と実際の値がずれるため。数の検証は空白を含むとエラー）。
 export function readEnv(source: EnvSource): Env {
   const values: Partial<Record<keyof Env, unknown>> = {};
   const problems: string[] = [];
   for (const name of Object.keys(PARSERS) as (keyof Env)[]) {
     const raw = source[name];
-    if (raw === undefined || raw === "") {
+    if (raw === undefined || raw.trim() === "") {
       problems.push(`${name}: 設定されていません`);
       continue;
     }

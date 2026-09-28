@@ -54,6 +54,7 @@ node --version && pnpm --version   # .tool-versions と一致することを確�
   - 単体テストは無い（ルート直下の規約ファイルはカバレッジの対象外。`vitest.config.mts`）。起動時に止まることは上の実測で確認した。
 - `.env`:
   - 作り方: リポジトリ直下で `cp .env.example .env`。`.env` はコミットしない（`.gitignore` の `.env*`。`.env.example` だけ `!.env.example` でコミットする）。
+  - `.env.local`（や `.env.development` など）は使わない。残っていれば消す。理由: Next.js は `.env.local` を `.env` より優先して読む（Next.js 16.3.6 同梱ドキュメント `01-app/02-guides/environment-variables.md` の「Environment Variable Load Order」）が、`env.ts` は `.env` だけを読むので、`pnpm dev` と `pnpm test` / `pnpm db:migrate` で値がずれる。
   - 読み込み: `next dev` / `next build` / `next start` は Next.js が `.env` を自動で読む。それ以外（Vitest・Playwright・drizzle-kit）は、`env.ts` が読み込み時に Node 標準の `process.loadEnvFile(".env")` でカレントディレクトリ（pnpm のスクリプトはリポジトリ直下で動く）の `.env` を読む。依存（dotenv など）は足さない。
   - `.env` が無いとき（`ENOENT`）だけ何もしない（環境変数だけで渡す動かし方を許すため。足りなければ `readEnv` が名前を挙げて止める）。それ以外の読み込みエラーは投げる。
   - 環境変数が優先: `process.loadEnvFile` は、すでに環境にある変数をファイルの値で上書きしない（Node 24.21.0 で実測）。`DATABASE_URL=... pnpm db:migrate` のように前に付けた値が `.env` より優先される。
@@ -61,11 +62,20 @@ node --version && pnpm --version   # .tool-versions と一致することを確�
   - クラウドセッションはフック（`scripts/cloud-session-start.sh`）が、`.env` が無ければ `.env.example` からコピーする（下の「クラウドセッション」）。
 - 直参照の検査（2 系統。どちらも `pnpm lint` / `pnpm test` に含まれ、CI で止まる。例外は `env.ts` と、上の `instrumentation.ts` の `NEXT_RUNTIME` だけ）:
   - Biome の `style/noProcessEnv`（`biome.json`。既定 severity が info なので `"error"` を明示）。`overrides` で `backend/shared/infra/env.ts` とテスト（`**/*.test.ts` / `**/*.test.tsx`。子プロセスに `PATH` を渡すなどで使う）だけ off（`rules/code/lint.md`）。overrides の `includes` はリポジトリ直下からの相対パスで照合される。
-  - `architecture.test.ts` の規則 `env-direct-access`: `app/` `features/` `backend/` `shared/` `e2e/` のソースと、ルート直下の設定・セットアップファイル（`drizzle.config.ts`、`playwright.config.ts`、`vitest.config.mts`、`vitest.global-setup.ts`、`stryker.config.mjs`、`next.config.ts` など）で、`process.env`（空白・改行を挟むもの、`process?.env`、`globalThis.process.env` を含む）と `process["env"]` / `process['env']` を拾い、`env.ts` 以外にあれば「ファイル:行」を出して失敗する。テスト（`*.test.*`）は対象外。コメント・文字列の中は拾わない。
+  - `architecture.test.ts` の規則 `env-direct-access`: `app/` `features/` `backend/` `shared/` `e2e/` のソースと、ルート直下の設定・セットアップファイル（`drizzle.config.ts`、`playwright.config.ts`、`vitest.config.mts`、`vitest.global-setup.ts`、`stryker.config.mjs`、`next.config.ts` など）で、`process.env`（空白・改行を挟むもの、`process?.env`、`globalThis.process.env` / `global.process.env`、括弧で囲んだ `(process).env` を含む）と `process["env"]` / `process['env']` を拾い、`env.ts` 以外にあれば「ファイル:行」を出して失敗する。テスト（`*.test.*`）は対象外。コメント・文字列の中は拾わない。
   - 2 系統にする理由: Biome は `biome.json` の overrides の書き換えで黙って効かなくなる。テスト側で対象と例外（`env.ts` だけ）を固定し、片方が壊れてももう片方で止まるようにする。
   - 限界（2026-09-28、Biome 2.5.13 で実測）:
-    - 分割代入（`const { env } = process`）と別名経由（`const p = process; p.env`）は、**どちらの検査でも拾わない**。`architecture.test.ts` の抽出は正規表現で式の流れを追わず、Biome の `noProcessEnv` もこの 2 つを違反にしなかった。レビューで見る。
-    - テンプレートリテラルの `${}` の中の `process.env` と、`import { env } from "node:process"` は、`architecture.test.ts` では拾わないが、Biome の `noProcessEnv` が違反にする。
+    - **両方とも見逃す**（`architecture.test.ts` の抽出は正規表現で式の流れを追わず、Biome の `noProcessEnv` も違反にしなかった。レビューで見る）:
+      - 分割代入: `const { env } = process`
+      - 別名経由: `const p = process; p.env`
+      - `Reflect.get(process, "env")`
+      - `node:process` の default import: `import proc from "node:process"; proc.env`
+    - **Biome だけが拾う**（`architecture.test.ts` は拾わない）:
+      - テンプレートリテラルの `${}` の中: `` `${process.env.X}` ``
+      - `node:process` の名前付き import: `import { env } from "node:process"`
+    - **`architecture.test.ts` だけが拾う**（Biome の `noProcessEnv` は違反にしない）:
+      - `global.process.env`
+      - 括弧で囲んだ `(process).env`
     - `architecture.test.ts` 側の限界は、同ファイルの「環境変数の直参照の抽出」のテストで固定している。
 - 変数を足すとき: `env.ts` の `Env` と `PARSERS` に足し（必須、既定値なし）、`.env.example` に開発用の値と WHAT / WHY のコメントを書き、`env.test.ts` に検証のテストを足す。CI・クラウドは `.env.example` をコピーするので、ワークフローやスクリプトは直さなくてよい。
 - テスト用の接続先: 単体テスト（`backend/shared/infra/database.test-support.ts`）・E2E（`e2e/database.ts`）・`drizzle.config.ts` も `env.DATABASE_URL` を使う（アプリと同じ）。
@@ -87,7 +97,7 @@ Claude Code on the web（クラウドセッション）では asdf が使えな�
 - セッション中にインストールしたものは次のセッションに残らない（VM が毎回新しいため）。残るのは setup script が書いたファイルだけ（環境キャッシュ = ファイルシステムのスナップショット）。
 - 役割分担（公式 cloud-environments / hooks ドキュメント）:
   - **setup script（推奨）**: 環境設定ダイアログに書く。root で実行され、約 5 分以内に終わればファイルシステムがキャッシュされ、以後のセッションは setup script を飛ばしてキャッシュから始まる。重い作業（Node のダウンロード・展開、pnpm の導入）はここで行う。
-  - **SessionStart フック**: `.claude/settings.json` の `hooks.SessionStart`（matcher `startup|resume`）が毎セッション（resume を含む）`scripts/cloud-session-start.sh` を実行する。軽い作業だけにする。既存のインストールを見つけて PATH を書き出し、`pnpm install --frozen-lockfile` を行う。setup script を設定していない場合は、フックが自分で Node / pnpm を入れる（フォールバック）。続けて `dockerd` を起動し、`docker compose pull`（再試行つき）と `docker compose up -d --wait --wait-timeout 120` で Postgres を立ち上げ、`.env` が無ければ `.env.example` からコピーして（上の「環境変数」）、`pnpm db:migrate` でマイグレーションを当てる（下の「Docker / Postgres」）。
+  - **SessionStart フック**: `.claude/settings.json` の `hooks.SessionStart`（matcher `startup|resume`）が毎セッション（resume を含む）`scripts/cloud-session-start.sh` を実行する。軽い作業だけにする。既存のインストールを見つけて PATH を書き出し、`pnpm install --frozen-lockfile` を行う。setup script を設定していない場合は、フックが自分で Node / pnpm を入れる（フォールバック）。続けて `.env` が無ければ `.env.example` からコピーし（上の「環境変数」。Node / pnpm の導入や Docker の結果に関係なく行う）、`dockerd` を起動し、`docker compose pull`（再試行つき）と `docker compose up -d --wait --wait-timeout 120` で Postgres を立ち上げ、`pnpm db:migrate` でマイグレーションを当てる（下の「Docker / Postgres」）。
   - JSON にはコメントを書けないため、フックの説明はこの節に書く。
 - 環境設定ダイアログの setup script に貼る内容:
   ```
@@ -107,7 +117,8 @@ Claude Code on the web（クラウドセッション）では asdf が使えな�
   - アーキテクチャは x86_64 / aarch64 のみ対応。それ以外は何も入れない。
 - Docker / Postgres（Issue #51。フックのときだけ）:
   - 前提（2026-09-28 実測）: クラウド VM には `docker` CLI 29.3.1、`/usr/bin/dockerd`、`containerd`、Compose プラグイン v5.1.1（`/usr/libexec/docker/cli-plugins/docker-compose`）、`psql` が入っているが、デーモンは起動していない（`docker info` が失敗する）。Podman は無い。
-  - スクリプトの動き: `docker info` が通れば何もしない。通らなければ `setsid nohup dockerd </dev/null >${TMPDIR:-/tmp}/dockerd.log 2>&1 &` でバックグラウンドに起動し（`setsid` が無ければ `nohup` だけ）、`docker info` が通るまで最大 30 秒待つ。その後リポジトリ直下で `timeout 45 docker compose pull` を最大 3 回（失敗したら 2 秒・4 秒待って再試行）実行し、続けて `docker compose up -d --wait --wait-timeout 120` で `compose.yaml` の healthcheck（`pg_isready`）が healthy になるまで待つ（上限 120 秒。pull は含まない）。up が成功したら、リポジトリ直下に `.env` が無ければ `.env.example` からコピーし（既にあれば触らない。`.env.example` も無ければ warn だけ。Issue #59）、`timeout 15 pnpm db:migrate` で `drizzle/` のマイグレーションを当てる（Issue #57。VM ごとに Postgres のデータが空なので、表を作らないと `pnpm dev` / `pnpm test:e2e` が動かない。当て済みのものは飛ばす）。接続先はスクリプトが持たず、`drizzle.config.ts` が `env.ts` 経由で `.env` の `DATABASE_URL` を読む（フックの環境に `DATABASE_URL` があればそちらが優先）。どの段で失敗しても warn を出して exit 0（Node と同じ設計）。Node / pnpm の導入に失敗しても Postgres の起動は行う（Postgres は Node に依存しない）。マイグレーションは VM 既定の pnpm でも試す（失敗しても warn だけ）。`docker` / `dockerd` が無ければ warn を出して飛ばす。
+  - スクリプトの動き: `docker info` が通れば何もしない。通らなければ `setsid nohup dockerd </dev/null >${TMPDIR:-/tmp}/dockerd.log 2>&1 &` でバックグラウンドに起動し（`setsid` が無ければ `nohup` だけ）、`docker info` が通るまで最大 30 秒待つ。その後リポジトリ直下で `timeout 45 docker compose pull` を最大 3 回（失敗したら 2 秒・4 秒待って再試行）実行し、続けて `docker compose up -d --wait --wait-timeout 120` で `compose.yaml` の healthcheck（`pg_isready`）が healthy になるまで待つ（上限 120 秒。pull は含まない）。up が成功したら、`timeout 15 pnpm db:migrate` で `drizzle/` のマイグレーションを当てる（Issue #57。VM ごとに Postgres のデータが空なので、表を作らないと `pnpm dev` / `pnpm test:e2e` が動かない。当て済みのものは飛ばす）。接続先はスクリプトが持たず、`drizzle.config.ts` が `env.ts` 経由で `.env` の `DATABASE_URL` を読む（フックの環境に `DATABASE_URL` があればそちらが優先）。
+  - `.env` の用意（Issue #59）: Node / pnpm の導入の後、Docker の段（デーモンの起動・pull・up）より前に、リポジトリ直下に `.env` が無ければ `.env.example` からコピーする（既にあれば触らない。`.env.example` も無ければ warn だけ）。Docker の段より前にする理由: docker が無い・pull や up が失敗したときも、`pnpm test` / `pnpm dev` などは `.env` が無いと必須の変数が欠けて止まるため（reviewer の指摘。以前は migrate の直前にだけ作っていた）。DRY_RUN では、`[dry-run] (cd <dir> && cp .env.example .env)`（既にあれば `[dry-run] <dir>/.env exists; keep it`）を docker compose の予定より前に表示する。どの段で失敗しても warn を出して exit 0（Node と同じ設計）。Node / pnpm の導入に失敗しても Postgres の起動は行う（Postgres は Node に依存しない）。マイグレーションは VM 既定の pnpm でも試す（失敗しても warn だけ）。`docker` / `dockerd` が無ければ warn を出して飛ばす。
   - 既定のソケット（`/var/run/docker.sock`）とデータ置き場（`/var/lib/docker`）のまま使える: root で `dockerd` を引数なしで起動すると約 1.1 秒で `API listen on /var/run/docker.sock` になった（storage driver は overlayfs）。そのため `DOCKER_HOST` を `CLAUDE_ENV_FILE` に書き出す必要はなく、以降の Bash の `docker` / `pnpm db:psql` もそのまま動く。
   - 実測（Issue #57、2026-09-28）: Node / pnpm・デーモン・コンテナが用意済みの VM で、`CI=true CLAUDE_CODE_REMOTE=true` でスクリプトを直接実行すると、`pnpm install` → pull（取得済みの確認）→ up → `pnpm db:migrate`（`migrations applied successfully`）まで 3.4 秒で exit 0。フックとして起動したときの確認は未確認。
   - 実測（この VM、2026-09-28、イメージは `mirror.gcr.io/library/postgres:18-alpine`）: `docker pull` 単体は約 10.5 秒。デーモン停止・イメージ未取得の状態から、スクリプト全体（Node / pnpm はインストール済み → `pnpm install` → `dockerd` 起動 → pull → up で healthy）は 14.7 秒。2 回目（デーモン・コンテナ起動済み。pull は取得済みの確認だけ）は 2.5 秒。`docker compose exec -T db psql -U app -d app -c 'select version()'` は `PostgreSQL 18.6 on x86_64-pc-linux-musl`、ホストの `psql postgresql://app:app@localhost:5432/app` でも接続できた。

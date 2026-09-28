@@ -787,7 +787,8 @@ describe("scripts/cloud-session-start.sh", () => {
     const limitedPath = (withDocker: boolean) => {
       const dir = join(tmp, "limited-bin");
       mkdirSync(dir);
-      for (const tool of ["bash", "awk", "dirname"]) {
+      // cp: .env を .env.example から作るのに使う（docker が無くても .env は作る）。
+      for (const tool of ["bash", "awk", "dirname", "cp"]) {
         const found = spawnSync("bash", ["-c", `command -v ${tool}`], {
           encoding: "utf8",
         }).stdout.trim();
@@ -1022,6 +1023,66 @@ describe("scripts/cloud-session-start.sh", () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toContain("docker not found");
       expect(result.stdout).not.toContain("docker compose");
+    });
+
+    // .env は Docker の段より前に用意する（Issue #59 の reviewer 指摘）。Docker が使えなくても、pnpm test / pnpm dev などは
+    //   .env が無いと必須の変数が欠けて止まるため。
+    it("docker が無くても .env は .env.example から作る（Docker の段より前に用意する）", () => {
+      placeInstalledNodeAndPnpm();
+      const result = runScript([], {
+        ...remoteEnv(),
+        PATH: limitedPath(false),
+      });
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain("docker not found");
+      expect(readFileSync(projectEnvFile, "utf8")).toBe(
+        readFileSync(join(projectDir, ".env.example"), "utf8"),
+      );
+    });
+
+    it("DRY_RUN で docker が無くても、.env のコピーの予定を表示する", () => {
+      placeInstalledNodeAndPnpm();
+      const result = runScript([], {
+        ...remoteEnv(),
+        CLOUD_SESSION_START_DRY_RUN: "1",
+        PATH: limitedPath(false),
+      });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(
+        `(cd ${projectDir} && cp .env.example .env)`,
+      );
+      expect(existsSync(projectEnvFile)).toBe(false);
+    });
+
+    it("DRY_RUN では .env のコピーの予定が docker compose の予定より前に出る", () => {
+      const result = runScript([], {
+        ...remoteEnv(),
+        CLOUD_SESSION_START_DRY_RUN: "1",
+      });
+      expect(result.status).toBe(0);
+      expect(result.stdout.indexOf("cp .env.example .env")).toBeGreaterThan(-1);
+      expect(result.stdout.indexOf("cp .env.example .env")).toBeLessThan(
+        result.stdout.indexOf("docker compose pull"),
+      );
+    });
+
+    it.each([
+      ["docker compose up が失敗", { FAKE_COMPOSE_EXIT: "1" }],
+      ["docker compose pull が 3 回とも失敗", { FAKE_COMPOSE_PULL_FAILS: "3" }],
+    ])("%sしても .env は作る", (_label, failure) => {
+      placeInstalledNodeAndPnpm();
+      writeFileSync(join(fakeBin, "sleep"), FAKE_SLEEP, { mode: 0o755 });
+      const result = runScript([], { ...remoteEnv(), ...failure });
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain("cloud-session-start:");
+      expect(existsSync(projectEnvFile)).toBe(true);
+    });
+
+    it("Node の取得に失敗しても .env は作る", () => {
+      const result = runScript([], { ...remoteEnv(), FAKE_COMPOSE_EXIT: "1" });
+      expect(result.status).toBe(0);
+      expect(existsSync(nodeDirIn())).toBe(false);
+      expect(existsSync(projectEnvFile)).toBe(true);
     });
 
     it("デーモンが動いておらず dockerd も無ければ、待たずに warn を出して compose は実行せず exit 0", () => {

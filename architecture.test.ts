@@ -557,11 +557,13 @@ const BACKEND_PLACEMENT = {
 //   書き換え（対象外のパスを広げる、ルールを off にする）で黙って効かなくなる。ここでは対象と例外（env.ts だけ）を
 //   テストとして固定し、どちらか片方が壊れても、もう片方で止まるようにする。
 // 限界（仕様として受け入れる。下の「環境変数の直参照の抽出」のテストで固定している）:
-//   - 分割代入（const { env } = process）や process を別名に入れてから読む書き方（const p = process; p.env）は拾わない
-//     （見逃す方向）。式の流れを追うには構文解析が要るため。Biome の noProcessEnv（2.5.13）もこの 2 つは検出しない
-//     （2026-09-28 実測）ので、どちらの検査でも見逃す。レビューで見る。
+//   - 分割代入（const { env } = process）、別名（const p = process; p.env）、Reflect.get(process, "env")、
+//     node:process の default import（import proc from "node:process"; proc.env）は拾わない（見逃す方向）。
+//     式の流れを追うには構文解析が要るため。Biome の noProcessEnv（2.5.13）もこの 4 つは検出しない（2026-09-28 実測）ので、
+//     どちらの検査でも見逃す。レビューで見る。
 //   - テンプレートリテラルの ${} の中の process.env は、文字列の中とみなして拾わない（見逃す方向。extractImports と同じ）。
-//     これと import { env } from "node:process" は Biome の noProcessEnv が検出する（2026-09-28 実測）。
+//     これと import { env } from "node:process" は Biome の noProcessEnv だけが検出する（2026-09-28 実測）。
+//   - 逆に、global.process.env と (process).env はこちらだけが検出する（Biome の noProcessEnv は検出しない。2026-09-28 実測）。
 
 // 検査の対象にするディレクトリ。依存の向きの対象（SOURCE_DIRS）に、E2E（e2e/）を足す。
 // WHY e2e/ を含める: E2E の補助（e2e/database.ts）は接続先を読むので、既定値や直参照が入り込みやすい。
@@ -592,11 +594,12 @@ const ENV_DIRECT_ACCESS = {
 };
 
 // process.env / process?.env / process["env"] / process['env'] / process[`env`]。空白や改行を挟んでもよい。
-// \bprocess なので globalThis.process.env も拾い、processEnv のような別の識別子や myprocess.env は拾わない。
+// \bprocess なので globalThis.process.env / global.process.env も拾い、processEnv のような別の識別子や myprocess.env は拾わない。
+// 括弧で囲んだ (process).env / ( process )["env"] も拾う（括弧の中は空白だけを許す）。
 // 続けて .NAME / ?.NAME と書いた変数の名前をグループ 2 で取る（例外の変数を絞るため）。["NAME"] の形や、
 // process.env をそのまま渡す書き方では名前を取らない（例外に当たらず、違反になる）。
 const PROCESS_ENV =
-  /\bprocess\s*(?:\??\.\s*env\b|(?:\?\.)?\s*\[\s*(["'`])env\1\s*\])(?:\s*\??\.\s*([A-Za-z_$][\w$]*))?/g;
+  /(?:\bprocess|\(\s*process\s*\))\s*(?:\??\.\s*env\b|(?:\?\.)?\s*\[\s*(["'`])env\1\s*\])(?:\s*\??\.\s*([A-Za-z_$][\w$]*))?/g;
 
 type EnvAccess = { line: number; variable: string | undefined };
 
@@ -1180,6 +1183,10 @@ const ENV_ACCESS_EXAMPLES: {
     // env.ts と名前の前方一致だけが同じ別ファイル。
     ["backend/shared/infra/env-helper.ts", "export const v = process.env;"],
     ["shared/x.cjs", "module.exports = process[`env`];"],
+    // 括弧で囲んだ process と、global 経由。
+    ["backend/todo/infra/x.ts", "const v = (process).env.X;"],
+    ["e2e/x.ts", 'const v = ( process )["env"];'],
+    ["backend/todo/infra/x.ts", "const v = global.process.env.X;"],
     // instrumentation.ts の例外は NEXT_RUNTIME だけで、ほかの変数・名前を取れない書き方・ほかのファイルは違反。
     ["instrumentation.ts", "const url = process.env.DATABASE_URL;"],
     ["instrumentation.ts", "const r = process.env.NEXT_RUNTIME_X;"],
@@ -1267,10 +1274,20 @@ describe("環境変数の直参照の抽出（findProcessEnvAccesses）", () => 
     ]);
   });
 
-  it("分割代入（const { env } = process）と別名経由の参照は拾わない（見逃す方向の限界。Biome の noProcessEnv も検出しない）", () => {
+  it("分割代入・別名・Reflect.get・node:process の default import 経由の参照は拾わない（見逃す方向の限界。Biome の noProcessEnv も検出しない）", () => {
     const source = [
       "const { env } = process;",
       "const p = process; p.env;",
+      'const e = Reflect.get(process, "env");',
+      'import proc from "node:process"; proc.env.X;',
+    ].join("\n");
+    expect(findProcessEnvAccesses(source)).toEqual([]);
+  });
+
+  it('node:process の名前付き import（import { env } from "node:process"）は拾わない（見逃す方向の限界。Biome の noProcessEnv が検出する）', () => {
+    const source = [
+      'import { env } from "node:process";',
+      "export const u = env.X;",
     ].join("\n");
     expect(findProcessEnvAccesses(source)).toEqual([]);
   });
@@ -1585,6 +1602,8 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'const f = "process.env.STRING";',
     //   instrumentation.ts 以外の NEXT_RUNTIME も違反（9 行目）。
     "const g = process.env.NEXT_RUNTIME;",
+    //   括弧で囲んだ process（10 行目）。
+    "const h = ( process ).env.X;",
   ),
   //   instrumentation.ts でも NEXT_RUNTIME 以外は違反（2 行目。1 行目の NEXT_RUNTIME は許す）。
   "instrumentation.ts": lines(
@@ -1601,7 +1620,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
 
 const MUST_REJECT_VIOLATIONS = [
   "env-direct-access: instrumentation.ts:2",
-  ...[1, 2, 4, 5, 6, 9].map(
+  ...[1, 2, 4, 5, 6, 9, 10].map(
     (line) => `env-direct-access: backend/todo/infra/bad-env.ts:${line}`,
   ),
   "env-direct-access: e2e/bad-env.ts:1",

@@ -7,8 +7,8 @@
 #   bash scripts/cloud-session-start.sh --install-only  # 環境設定の setup script から呼ぶ。Node / pnpm のインストールだけ行う
 #   bash scripts/cloud-session-start.sh                 # SessionStart フック（.claude/settings.json）から呼ぶ。
 #                                                       #   CLAUDE_CODE_REMOTE=true のときだけ動き、PATH の書き出しと pnpm install、
-#                                                       #   dockerd の起動と docker compose pull / up（Postgres）、.env が無ければ
-#                                                       #   .env.example からのコピー、pnpm db:migrate を行う
+#                                                       #   .env が無ければ .env.example からのコピー、dockerd の起動と
+#                                                       #   docker compose pull / up（Postgres）、pnpm db:migrate を行う
 #   bash scripts/cloud-session-start.sh --print-plan    # 読み取った版とインストール先を表示するだけ（テスト・確認用）
 #   CLOUD_SESSION_START_DRY_RUN=1 ...                   # ダウンロード・インストールをせず、実行予定のコマンドを表示する
 #
@@ -536,6 +536,8 @@ start_database() {
 # WHY 既にある .env は上書きしない: 利用者がセッションの中で書き換えた値（別の DB を指すなど）を消さないため。
 # WHY .env.example も無いときは warn だけで続ける: 環境変数だけで値が渡されている場合もあり、その場合は pnpm db:migrate が通る。
 #   足りなければ env.ts が欠けた名前を出し、下の migrate の warn になる。
+# WHY Docker の段より前に呼ぶ（main）: docker が無い・pull や up が失敗したときも、pnpm test / pnpm dev などは .env が無いと
+#   必須の変数が欠けて止まる。.env の用意は Docker に依存しないので、Docker の結果に関係なく行う（Issue #59 の reviewer 指摘）。
 ensure_dotenv() {
   local project_dir="$1"
   if [ -f "$project_dir/.env" ]; then
@@ -559,9 +561,9 @@ ensure_dotenv() {
 # WHY フックで当てるか: VM はセッションごとに新しく、Postgres もデータの無い状態で起動する。表が無いままだと、
 #   pnpm dev / pnpm test:e2e が「relation "todos" does not exist」で失敗する。
 #   当て済みのものは飛ばす（drizzle.__drizzle_migrations に記録がある）ので、何度実行しても同じ結果になる。
-# WHY 先に .env を用意する（ensure_dotenv）: 接続先（DATABASE_URL）は drizzle.config.ts が env.ts 経由で .env から読む。
-#   スクリプトは接続先を持たず、DATABASE_URL を差し込まない（既定値を 1 か所 = .env.example にするため。Issue #59）。
-#   フックの環境に DATABASE_URL があれば、そのまま引き継がれて .env より優先される。
+# 接続先（DATABASE_URL）は drizzle.config.ts が env.ts 経由で .env から読む（.env は main で Docker の段より前に
+#   ensure_dotenv が用意済み）。スクリプトは接続先を持たず、DATABASE_URL を差し込まない（既定値を 1 か所 = .env.example に
+#   するため。Issue #59）。フックの環境に DATABASE_URL があれば、そのまま引き継がれて .env より優先される。
 # WHY timeout 15: 実測は約 1 秒（2026-09-28、表 1 つ）。15 秒かかるなら止まっているとみなす。フック全体の最悪ケースを
 #   600 秒に収めるための見積もりは rules/code/env.md（571 + 15 = 586 秒）。
 # WHY Node / pnpm の導入に失敗していても試すか: VM 既定の pnpm でも packageManager の版を取って動く（rules/code/env.md の実測）。
@@ -569,7 +571,6 @@ ensure_dotenv() {
 # 出力は stderr に回す（stdout は Claude のコンテキストに入るため。start_database と同じ）。
 migrate_database() {
   local project_dir="$1"
-  ensure_dotenv "$project_dir"
   if is_dry_run; then
     echo "[dry-run] (cd ${project_dir} && timeout 15 pnpm db:migrate)"
     return 0
@@ -670,6 +671,7 @@ main() {
   # WHY Node / pnpm の失敗で Postgres の起動を止めないか: Postgres はコンテナで動き、Node に依存しない。
   #   Node の取得に失敗しても（VM 既定の Node 22 で作業は続けられる）、DB は使えるようにしておく。
   setup_node_and_dependencies "$node_version" "$pnpm_version" "$project_dir"
+  ensure_dotenv "$project_dir"
   ensure_docker_daemon || return 0
   start_database "$project_dir" || return 0
   migrate_database "$project_dir" || return 0

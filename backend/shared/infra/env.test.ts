@@ -87,6 +87,15 @@ describe("readEnv", () => {
     },
   );
 
+  test.each(REQUIRED_NAMES)(
+    "%s が空白だけ（前後の空白を除くと空）でも、未設定と同じくエラーにする",
+    (name) => {
+      expect(errorMessageOf({ ...VALID, [name]: "  \t" })).toContain(
+        `${name}: 設定されていません`,
+      );
+    },
+  );
+
   test.each([
     ["DATABASE_POOL_MAX", "abc"],
     ["DATABASE_POOL_MAX", "0"],
@@ -235,6 +244,23 @@ describe("env / toolEnv（モジュールを読み込んだ時点の値）", () 
     const reloaded = await import("@/backend/shared/infra/env");
 
     expect(reloaded.env.DATABASE_POOL_MAX).toBeGreaterThanOrEqual(1);
+  });
+
+  test("toolEnv は読み込み時の環境変数のツールのフラグを読む（CI が設定されていれば CI は true）", async () => {
+    // WHY 読み込み直して確かめる: 手元では CI も STRYKER_MUTATOR_WORKER も無いので、上の比較だけでは toolEnv が
+    //   常に「フラグ無し」を返しても通ってしまう。
+    vi.stubEnv("CI", "1");
+    vi.stubEnv("STRYKER_MUTATOR_WORKER", "1");
+    vi.stubEnv("PLAYWRIGHT_CHROMIUM_EXECUTABLE", "/opt/pw-browsers/chromium");
+    vi.resetModules();
+
+    const reloaded = await import("@/backend/shared/infra/env");
+
+    expect(reloaded.toolEnv).toEqual({
+      CI: true,
+      PLAYWRIGHT_CHROMIUM_EXECUTABLE: "/opt/pw-browsers/chromium",
+      STRYKER_MUTATOR_WORKER: true,
+    });
   });
 
   test("読み込み時に必須の変数が不正なら、読み込みそのものがエラーになる（起動エラー）", async () => {
