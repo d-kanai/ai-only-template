@@ -168,22 +168,6 @@ patchedDependencies:
 importers:
 
   .:
-    dependencies:
-      drizzle-orm:
-        specifier: 0.45.3
-        version: 0.45.3(@types/pg@8.23.1)(pg@8.23.0)
-      next:
-        specifier: 16.3.6
-        version: 16.3.6(@babel/core@8.0.6)(@playwright/test@1.63.0)(@types/node@24.13.6)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      pg:
-        specifier: 8.23.0
-        version: 8.23.0
-      react:
-        specifier: 19.2.8
-        version: 19.2.8
-      react-dom:
-        specifier: 19.2.8
-        version: 19.2.8(react@19.2.8)
     devDependencies:
       '@biomejs/biome':
         specifier: 2.5.13
@@ -191,6 +175,9 @@ importers:
       '@playwright/test':
         specifier: 1.63.0
         version: 1.63.0
+      '@repo/backend':
+        specifier: workspace:*
+        version: link:apps/backend
       '@stryker-mutator/core':
         specifier: 10.0.0
         version: 10.0.0(@types/node@24.13.6)
@@ -209,33 +196,65 @@ importers:
       '@types/pg':
         specifier: 8.23.1
         version: 8.23.1
-      '@types/react':
-        specifier: 19.3.0
-        version: 19.3.0
-      '@types/react-dom':
-        specifier: 19.3.0
-        version: 19.3.0(@types/react@19.3.0)
       '@vitejs/plugin-react':
         specifier: 6.1.1
         version: 6.1.1(vite@8.3.0(@types/node@24.13.6)(esbuild@0.28.2)(tsx@4.23.15))
       '@vitest/coverage-v8':
         specifier: 5.0.1
         version: 5.0.1(vitest@5.0.1)
-      drizzle-kit:
-        specifier: 0.31.11
-        version: 0.31.11
       jsdom:
         specifier: 30.1.1
         version: 30.1.1
       lefthook:
         specifier: 2.1.12
         version: 2.1.12
+      pg:
+        specifier: 8.23.0
+        version: 8.23.0
       typescript:
         specifier: 7.0.2
         version: 7.0.2
       vitest:
         specifier: 5.0.1
         version: 5.0.1(@types/node@24.13.6)(@vitest/coverage-v8@5.0.1)(jsdom@30.1.1)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.28.2)(tsx@4.23.15))
+
+  apps/backend:
+    dependencies:
+      drizzle-orm:
+        specifier: 0.45.3
+        version: 0.45.3(@types/pg@8.23.1)(pg@8.23.0)
+      pg:
+        specifier: 8.23.0
+        version: 8.23.0
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
+      drizzle-kit:
+        specifier: 0.31.11
+        version: 0.31.11
+
+  apps/frontend:
+    dependencies:
+      '@repo/backend':
+        specifier: workspace:*
+        version: link:../backend
+      next:
+        specifier: 16.3.6
+        version: 16.3.6(@babel/core@8.0.6)(@playwright/test@1.63.0)(@types/node@24.13.6)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      react:
+        specifier: 19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: 19.2.8
+        version: 19.2.8(react@19.2.8)
+    devDependencies:
+      '@types/react':
+        specifier: 19.3.0
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: 19.3.0
+        version: 19.3.0(@types/react@19.3.0)
 
 packages:
 

@@ -8,7 +8,7 @@ import pkg from "./package.json";
 
 // 型チェックのゲート（pnpm typecheck と CI の ci ジョブ）が効いていることを、仕様として固定するテスト（Issue #68 の reviewer 指摘）。
 // WHY このゲートが要る: monorepo 化（Issue #68）の前は、next build がリポジトリ直下の tsconfig（include が **/*.ts）で、
-//   テスト・ルール検査テスト・e2e・設定ファイルまで型チェックしていた。next build apps/frontend は apps/frontend と、そこから
+//   テスト・ルール検査テスト・e2e・設定ファイルまで型チェックしていた。apps/frontend の next build は apps/frontend と、そこから
 //   import された backend のファイルしか型チェックしない。backend のテストや architecture.test.ts に型エラーを置いても
 //   pnpm build が exit 0 になった（reviewer の実測）。Vitest は型を検査しないので、pnpm test でも止まらない。
 //   そのため、リポジトリ直下の tsconfig（全体）と apps/backend の tsconfig（DOM の型なし）の両方を tsc で検査する。

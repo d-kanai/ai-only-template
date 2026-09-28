@@ -1,0 +1,22 @@
+{
+  "name": "@repo/backend",
+  "private": true,
+  "exports": {
+    "./todo/presentation/*.api": "./todo/presentation/*.api.ts",
+    "./shared/presentation/http-error": "./shared/presentation/http-error.ts",
+    "./shared/infra/env": "./shared/infra/env.ts",
+    "./shared/infra/database.test-support": "./shared/infra/database.test-support.ts"
+  },
+  "scripts": {
+    "db:generate": "drizzle-kit generate --config drizzle.config.ts",
+    "db:migrate": "drizzle-kit migrate --config drizzle.config.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.45.3",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1",
+    "drizzle-kit": "0.31.11"
+  }
+}

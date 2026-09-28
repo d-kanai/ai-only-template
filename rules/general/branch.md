@@ -52,6 +52,7 @@ main は常にマージ可能な状態を保つ。作業はすべて Issue → �
 
 ## CI（GitHub Actions）
 - `.github/workflows/ci.yml` が、main 宛の PR と main への push で `pnpm install --frozen-lockfile` → Postgres の起動（`docker compose up -d --wait --wait-timeout 120`）→ psql での接続確認（`docker compose exec -T db psql -U app -d app -c 'select 1'`）→ マイグレーション（`pnpm db:migrate`。`DATABASE_URL` は compose.yaml の開発用 DB）→ `pnpm lint` → `pnpm typecheck`（`tsc -p . --noEmit && tsc -p apps/backend --noEmit`）→ `pnpm test` → `pnpm build` → Chromium の導入（`pnpm exec playwright install --with-deps chromium`）→ `pnpm test:e2e` を実行する（ジョブ名 `ci`）。
+- ステップはすべてリポジトリ直下で実行する。`pnpm install --frozen-lockfile` は pnpm workspace の全パッケージ（リポジトリ直下・`apps/frontend`・`apps/backend`）に入り、`pnpm db:migrate` / `pnpm build`（と E2E の webServer の `pnpm build && pnpm start`）はリポジトリ直下の script が `pnpm --filter` で `apps/backend` / `apps/frontend` の script を呼ぶ（Issue #68 の段階 2。`rules/code/architecture.md` の「workspace パッケージと exports」）。
 - Node の版は `.tool-versions` の `nodejs` 行、pnpm の版は `package.json` の `packageManager` から取る（ワークフローに版を直書きしない。`rules/code/env.md`）。
 - GitHub Actions は `CI=true` を既定で設定するため、lefthook の postinstall はフックを入れない（`rules/code/lint.md`）。
 - マージ条件への組み込み: main の Ruleset `protect-main`（https://github.com/d-kanai/ai-only-template/rules/24101231 ）の `required_status_checks` に `ci` を入れている。

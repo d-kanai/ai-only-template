@@ -45,11 +45,11 @@
 | テスト | 検査する規則・設定 |
 | --- | --- |
 | `lint.test.ts` | Biome の違反が `--error-on-warnings` で失敗になること（代表ルールごとに違反の例と許可される書き方の例）、`pnpm lint` / `pnpm check` / pre-commit の引数（判定 `runsBiomeCheckWithErrorOnWarnings`。失敗を無効化するつなぎやフラグも拒否）、`noProcessEnv` が `env.ts` とテスト以外で効くこと（`rules/code/lint.md`） |
-| `package.test.ts` | `package.json` の `dependencies` / `devDependencies` の版が完全固定であること（判定 `isPinnedVersion`、列挙 `listDependencies`。`rules/code/dependencies.md`） |
+| `package.test.ts` | workspace のすべての `package.json`（リポジトリ直下と `apps/*`）の `dependencies` / `devDependencies` の版が完全固定であること（`workspace:*` だけ例外。判定 `isPinnedVersion` / `isAllowedVersion`、列挙 `listDependencies` / `listWorkspaceManifests`。`rules/code/dependencies.md`） |
 | `pnpm-workspace.test.ts` | `minimumReleaseAge` / `minimumReleaseAgeStrict` / `savePrefix` / `allowBuilds` の値（読み取り `readTopLevelSettings`、判定 `findWorkspaceSettingViolations`。`rules/code/dependencies.md`） |
 | `scripts/cloud-session-start.test.ts` | クラウドセッションのスクリプトが `.tool-versions` どおりの版を、検証付きで入れること（`rules/code/env.md`） |
 | `typecheck.test.ts`（Issue #68 で追加） | `pnpm typecheck` がリポジトリ直下と `apps/backend` の tsconfig を `tsc --noEmit` で検査すること（判定 `typechecksAllProjects`。失敗を打ち消すつなぎや `--noCheck` / `false` を渡す書き方も拒否）、CI の `ci.yml` が `pnpm typecheck` を `pnpm build` より前に無条件で実行すること（判定 `runsTypecheckBeforeBuild`）（`rules/code/architecture.md` の tsconfig の節） |
-| `architecture.test.ts`（Issue #47 で追加） | 依存の向き（`rules/code/architecture.md` の「依存の向き（全体）」。Issue #68 で apps/frontend と apps/backend の境界の規則を追加）と、環境変数の直参照の禁止（規則 `env-direct-access`。Issue #59。`rules/code/env.md` の「環境変数」） |
+| `architecture.test.ts`（Issue #47 で追加） | 依存の向き（`rules/code/architecture.md` の「依存の向き（全体）」。Issue #68 で apps/frontend と apps/backend の境界の規則を追加。段階 2 で frontend などから backend への書き方 `frontend-to-backend-specifier` と `apps/backend/package.json` の exports の過不足 `backend-exports` を追加）と、環境変数の直参照の禁止（規則 `env-direct-access`。Issue #59。`rules/code/env.md` の「環境変数」） |
 
 テスト以外のゲート（カバレッジのしきい値、pre-commit のフック、CI の required status check、型チェック）も、「違反があれば止まる」ことを検査する仕組みなので、下の「fault injection」は同じように行う。
 
@@ -61,7 +61,7 @@
   - `package.test.ts` / `pnpm-workspace.test.ts` / `lint.test.ts` も must pass と must reject の両方を持つ（Issue #50 で揃えた）。判定を関数に切り出し、架空の入力（版の文字列、YAML の文字列、コマンドの文字列）で許可・拒否を固定したうえで、同じ関数で実ファイル（リポジトリの設定と、一時ディレクトリに置いた違反入りの fixture）を検査する。
 - must reject は、その検査が取り違えやすい境界のケースを網羅する。検査の種類ごとに列挙し、許可か違反かを決めてテストで固定する。
   - import の検査: alias（`@/...`）と相対パス（`../...`）、値の import と `import type` / inline の `type`、`index` と深いパス、自 feature と他 feature、`export ... from`（re-export）と dynamic `import()`、複数行にまたがる import、拡張子の違い（`.ts` / `.tsx` / `.js` / `.jsx`）、パッケージとそのサブパス（`next` と `next/link`）。コメントや文字列の中の import の例示は must pass（誤検知しない）側に入れる。
-  - 版の検査: `^` / `~` / `>=` / `*` / `x` / `latest` / `workspace:` / `npm:` の別名、プレリリース（`1.2.3-beta.1`）など（`package.test.ts`。プレリリースとビルドメタは拒否に決めている。`rules/code/dependencies.md`）。
+  - 版の検査: `^` / `~` / `>=` / `*` / `x` / `latest` / `workspace:` / `npm:` の別名、プレリリース（`1.2.3-beta.1`）など（`package.test.ts`。プレリリースとビルドメタは拒否に決めている。`workspace:*` だけを許し、`workspace:^` / `workspace:1.2.3` などは拒否する。`rules/code/dependencies.md`）。
   - 設定値の検査: 値の違い、キーが無い、コメントアウトされた行、同名のキーがネストの中にある場合（`pnpm-workspace.test.ts`）。
   - lint / フックの検査: 違反を単独で含むファイル（他の違反に巻き込まれて落ちているのではないことを示す）、違反のないファイル、対象外のファイル（`.md` のみのコミットなど）。
 - 検査の対象を列挙する処理（glob、ディレクトリの走査など）が空を返したら失敗させる。
@@ -134,6 +134,7 @@ Stryker でコードに変異（条件の反転、戻り値の差し替え、文
   - Issue #55 の後: 100.00%（killed 560 / survived 0 / ignored 16。ignored は `schema.ts` の static 10 件と disable コメント 6 件）。
 - 入れていないもの: `@stryker-mutator/typescript-checker`（型エラーになる変異を実行前に除く checker）。TypeScript の JS API（`ts.createSolutionBuilderWithWatch` / `ts.parseConfigFileTextToJson`。typescript-checker 10.0.0 の `dist` で確認）を使うが、TypeScript 7.0.2 の `typescript` パッケージは `version` / `versionMajorMinor` しか export しない（2026-09-28 に `import("typescript")` で確認）ため、動かないと判断した（入れて実行はしていない）。同じ理由で、Stryker 本体の tsconfig の書き換えも `stryker.config.mjs` の `tsconfigFile` で止めている。型エラーになる変異は checker なしでも、実行時に失敗するか生き残るかで数えられる（Vitest は型を検査しない）。
 - vitest-runner の patch: `@stryker-mutator/vitest-runner` 10.0.0 は、そのままでは Vitest 5.0.1 と組み合わせると `describe` の中のテストで変異を検出できず、survived と数えられる（テスト名の連結の区切りが、vitest-runner はスペース、Vitest 5.0.1 の testNamePattern の照合は ` > ` で合わず、変異を通るテストが skip されるため）。`pnpm patch` で連結を ` > ` に直して対応している（`patches/`。2026-09-28 実測で score は patch なし 26.82% → patch あり 85.68%）。上流が直ったら patch を外す（`rules/code/dependencies.md` の「pnpm patch」）。詳細は `stryker.config.mjs` のコメント。
+- workspace パッケージ（Issue #68 の段階 2）: サンドボックスの中でも、`@repo/backend/...` で import したファイルは変異していない元の `apps/backend` を読む（サンドボックスの `node_modules` は元のリポジトリへの symlink で、その中の `@repo/backend` も元の `apps/backend` を指す。2026-09-28 に実行中のサンドボックスで確認）。backend のテストは backend の中を相対パスで import するので影響はなく、score は 100% のまま（killed 570 / timeout 3 / survived 0 / ignored 16）。テストで `@repo/backend/...` から backend の値を import すると、その変異はテストに届かない（survived になる）ので、backend の振る舞いは backend の中のテストで確かめる。詳細は `stryker.config.mjs` のコメント。
 
 ## E2E テスト
 - `rules/code/architecture.md` の「E2E テスト（Playwright）」に従う。ここには重複して書かない。

@@ -12,13 +12,13 @@ export default defineConfig({
   resolve: {
     // tsconfigPaths: tsconfig の paths を Vitest（Vite）側でも解決させるため。
     //   Next.js は tsconfig の paths を自前で解決するが、Vite は既定では解決しない（vite 8.3.1 の型定義で @default false）。
-    //   解決するのは frontend の "@/*"（apps/frontend/*）と、frontend から backend を指す "@repo/backend/*"
-    //   （apps/backend/*。Issue #68 の段階 1 では workspace パッケージではなく paths で解決する）。paths はリポジトリ直下の
-    //   tsconfig.json と apps/frontend/tsconfig.json の両方に同じ行き先で書いている（どちらが使われても同じファイルになる）。
+    //   解決するのは frontend の "@/*"（apps/frontend/*）。paths はリポジトリ直下の tsconfig.json と
+    //   apps/frontend/tsconfig.json の両方に同じ行き先で書いている（どちらが使われても同じファイルになる）。
+    //   frontend から backend を指す "@repo/backend/..." は paths ではなく、workspace パッケージとして Vite の通常の解決
+    //   （node_modules/@repo/backend → apps/backend と、apps/backend/package.json の exports）で解決する（Issue #68 の段階 2）。
     //   backend の中は相対パスだけなので paths を使わない（architecture.test.ts の backend-relative-only）。
     //   これがないとテスト対象を "@/..." で import したときに解決に失敗する（apps/frontend/features/ のテストが
-    //   "@/features/..." を、apps/frontend/features/todo/api/ が "@repo/backend/..." を import しており、解決できなければ
-    //   それらのテストが失敗することで担保）。
+    //   "@/features/..." を import しており、解決できなければそれらのテストが失敗することで担保）。
     //   Next.js 公式ガイドは vite-tsconfig-paths プラグインを案内しているが、Vite 8 には同等の標準オプションがある。
     //   プラグインの依存 tsconfck@3.1.6 は任意 peer として typescript ^5.0.0 を宣言しており、本リポジトリの
     //   TypeScript 7 では `pnpm peers check` が unmet peer と報告した（2026-09-28 に確認）。TS 7 との組み合わせが

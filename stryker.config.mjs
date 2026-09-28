@@ -51,8 +51,7 @@ export default {
   //   サンドボックスにコピーするファイルの中に無ければ何もしない（同ファイルの rewriteTSConfigFile）。
   //   書き換えを止めても問題ない理由: tsconfig（リポジトリ直下・apps/frontend・apps/backend）に extends / references が無く、
   //   include / exclude / paths にもサンドボックスの外を指すパスが無いため、書き換える対象がそもそも無い
-  //   （apps/frontend/tsconfig.json の paths の "../backend/*" はリポジトリの中の apps/backend を指し、サンドボックスにも
-  //   コピーされる。Issue #68）。extends / references を足すときはこの設定を見直す。
+  //   （paths は "@/*" だけで、apps/frontend の中を指す。Issue #68）。extends / references を足すときはこの設定を見直す。
   //   typescript-checker（型エラーになる変異を除く checker）も同じ JS API を使うため、TS 7 では動かないと判断して
   //   入れていない（rules/code/test.md の「mutation testing（Stryker）」）。
   tsconfigFile: "stryker-skips-tsconfig-rewrite.json",
@@ -72,6 +71,17 @@ export default {
   //   - 設定ファイル（リポジトリ直下のもの、apps/frontend/next.config.ts・instrumentation*.ts、apps/backend/drizzle.config.ts）、
   //     ルール検査テスト（architecture.test.ts など）、e2e/: 実装ではない（vitest.config.mts の coverage.include と同じ）。
   //   apps/frontend/shared/ はまだ無い（rules/code/architecture.md）が、作ったときに自動で対象になるよう入れておく。
+  // 注意（Issue #68 の段階 2。workspace パッケージ @repo/backend）: "@repo/backend/..." で import したファイルは、サンドボックスの
+  //   中でも変異していない元の apps/backend を読む。Stryker はリポジトリの中の node_modules（リポジトリ直下・apps/frontend・
+  //   apps/backend）をサンドボックスへの symlink にし（@stryker-mutator/core 10.0.0 の sandbox.js の symlinkNodeModulesIfNeeded と
+  //   file-utils.js の findNodeModulesList）、その中の @repo/backend は pnpm が作った相対の symlink（../../../backend など）で、
+  //   元のリポジトリの apps/backend に解決されるため（2026-09-28、実行中のサンドボックスで readlink -f して確認）。
+  //   今は影響しない: backend のテストは backend の中を相対パスで import する（サンドボックスの変異したファイルを読む）。
+  //   "@repo/backend/..." を使うのは、frontend の型だけの import（実行時に消える）、テストの無い app/api と instrumentation-node.ts、
+  //   globalSetup（vitest.global-setup.ts。Stryker の worker の中では何もしない）だけで、mutation score は 100% のまま
+  //   （killed 570 / timeout 3 / survived 0 / ignored 16。2026-09-28 実測）。
+  //   将来、テストが "@repo/backend/..." から backend の値を import すると、その変異はテストに届かず survived になる。
+  //   backend の振る舞いは backend の中のテスト（相対パスの import）で確かめる。
   mutate: [
     "apps/frontend/features/**/*.{ts,tsx}",
     "apps/frontend/shared/**/*.{ts,tsx}",

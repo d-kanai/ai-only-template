@@ -1,4 +1,15 @@
-# pnpm の設定ファイル。ワークスペース（モノレポ）用ではなく、単一パッケージのまま pnpm の設定を書く場所として使っている。
+# pnpm の設定ファイル。pnpm workspace（モノレポ）の範囲（packages）と、workspace 全体に効く pnpm の設定を書く。
+#
+# packages: workspace に含めるパッケージのディレクトリ（Issue #68 の段階 2）。
+#   apps/frontend（@repo/frontend、Next.js）と apps/backend（@repo/backend、pure な TypeScript）を workspace パッケージにし、
+#   frontend は "@repo/backend": "workspace:*" で backend に依存する（node_modules/@repo/backend が apps/backend への symlink になる）。
+#   リポジトリ直下（package.json）も workspace のルートとして 1 つのパッケージになり、ツール（Biome・Vitest・Playwright など）を持つ。
+#   WHY パッケージに分ける: 依存（drizzle-orm / pg は backend、next / react は frontend）と公開する入口（apps/backend/package.json の
+#   exports）をパッケージの単位で分け、後で backend を別プロセスに分けやすくする（rules/code/architecture.md）。
+#   下の設定（サプライチェーン保護・allowBuilds・patchedDependencies）は workspace 全体に効くので、ここ（ルート）にだけ書く。
+#   package.test.ts はこの packages を読んで、すべての package.json の依存の版を検査する（"<ディレクトリ>/*" の形だけを扱う）。
+packages:
+  - apps/*
 #
 # allowBuilds: 依存パッケージのインストール時ビルドスクリプト（postinstall 等）の実行可否をパッケージごとに指定する。
 #   false は「実行しない」。ビルドスクリプトは任意コードを実行できるため、許可するパッケージを明示的に絞る。

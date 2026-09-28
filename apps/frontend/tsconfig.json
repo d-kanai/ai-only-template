@@ -21,16 +21,14 @@
       }
     ],
     // paths:
-    //   "@/*": frontend の中の参照（apps/frontend/*）。
-    //   "@repo/backend/*": frontend から backend への参照（apps/backend/*）。Issue #68 の段階 1 では workspace パッケージに
-    //     せず paths で解決する（Next 16.3.6 の next build が通ることを確認）。段階 2 で workspace パッケージにしても import の
-    //     書き方を変えずに済むよう、パッケージ名の形にしている。
+    //   "@/*": frontend の中の参照（apps/frontend/*）。リポジトリ直下の tsconfig.json の paths と同じ行き先にする。
+    //   "@repo/backend/..." は paths に書かない（Issue #68 の段階 2）。package.json の "@repo/backend": "workspace:*" で入る
+    //   node_modules/@repo/backend（apps/backend への symlink）と、apps/backend/package.json の exports で解決する。
+    //   exports に無いファイルを import すると、型チェック（next build・pnpm typecheck）で解決できずに失敗する。
     //   注意: Next（Turbopack）は backend のファイルの "@/" にもこの paths を当てるので、backend の中では "@/" を使わない
     //   （architecture.test.ts の backend-relative-only）。
-    //   リポジトリ直下の tsconfig.json の paths と同じ行き先にする。
     "paths": {
-      "@/*": ["./*"],
-      "@repo/backend/*": ["../backend/*"]
+      "@/*": ["./*"]
     }
   },
   "include": [

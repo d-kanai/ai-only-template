@@ -163,15 +163,15 @@ export function findRepoRoot(start: string): string {
 
 // cwd から探したリポジトリ直下の .env を読む。読み込んだら true、ファイルが無ければ false（loadDotEnvFile と同じ）。
 // WHY リポジトリ直下の .env を 1 つだけ読む（Issue #68 のユーザー判断）: .env は app ごとに置かず、リポジトリ直下に 1 つにする。
-//   pnpm のスクリプト（next / vitest / playwright / drizzle-kit）は今はリポジトリ直下で動くが、workspace パッケージ化
-//   （Issue #68 の段階 2）の pnpm --filter はパッケージのディレクトリ（apps/backend など）で動くため、カレントディレクトリの
-//   .env を読むだけでは見つからない。
+//   vitest / playwright はリポジトリ直下で動くが、workspace パッケージの script（pnpm --filter @repo/frontend build /
+//   pnpm --filter @repo/backend db:migrate など。Issue #68 の段階 2）はパッケージのディレクトリ（apps/frontend・apps/backend）で
+//   動くため、カレントディレクトリの .env を読むだけでは見つからない。
 // WHY このファイルの場所から探さない（import.meta.dirname を使わない）: Next のビルドでバンドルされると元の場所を指さないため。
 export function loadRepoDotEnv(cwd: string): boolean {
   return loadDotEnvFile(join(findRepoRoot(cwd), ".env"));
 }
 
-// next dev / build / start apps/frontend では、Next.js は apps/frontend の .env を探すが、そこには置かない（リポジトリ直下に
+// apps/frontend の next dev / build / start では、Next.js は apps/frontend の .env を探すが、そこには置かない（リポジトリ直下に
 //   1 つだけ）。Next.js が読まなくても、ここでリポジトリ直下の .env を読む。
 loadRepoDotEnv(process.cwd());
 

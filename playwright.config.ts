@@ -1,8 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
-import { env, toolEnv } from "./apps/backend/shared/infra/env";
+import { env, toolEnv } from "@repo/backend/shared/infra/env";
 
 // Playwright（E2E テスト）の設定。最小構成で、Chromium だけで e2e/ のテストを実行する。
 // 実行: pnpm test:e2e（= playwright test）。Next の本番ビルドを webServer で起動し、ブラウザから画面を操作する。
+// WHY env.ts を "@repo/backend/..." で import する（Issue #68 の段階 2）: frontend と同じく、backend は workspace パッケージの
+//   公開の入口（apps/backend/package.json の exports）からだけ使う（architecture.test.ts の frontend-to-backend-specifier）。
+//   リポジトリ直下の package.json の devDependencies に "@repo/backend": "workspace:*" があるので、Node の解決
+//   （node_modules/@repo/backend → apps/backend）で見つかる。tsconfig の paths には頼らない。
 
 // E2E 用のサーバのポート。
 // WHY 3100: pnpm dev の既定（3000）と重ならないようにし、開発サーバを起動したままでも E2E を実行できるようにする。
