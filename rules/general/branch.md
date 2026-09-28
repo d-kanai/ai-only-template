@@ -5,23 +5,23 @@ main は常にマージ可能な状態を保つ。作業はすべて Issue → �
 ## Issue
 - 作業は Issue を起点にする。なければ AI が作成する（目的・完了条件を書く）。
 - 1 Issue = 1 PR を基本とする。大きければ Issue を分ける。
-- 作成した Issue は GitHub Projects（下記）に追加する。
+- 作成した Issue は GitHub Projects（下記）に自動で追加される。
 - Issue には type ラベルを 1 つ付ける（`gh issue create --label <type>`）。type はブランチ命名の type と同じ 5 つ: `feat` / `fix` / `docs` / `chore` / `refactor`。ブランチ名の type、PR のラベル（`gh pr create --label <type>`）も Issue と同じにする。Projects ではラベル列でグループ化・絞り込みができる。
 
 ## GitHub Projects（ステータス管理）
 - プロジェクト: https://github.com/users/d-kanai/projects/4（ユーザー単位のプロジェクトで、このリポジトリに紐付け済み）。Status は `Todo` / `In Progress` / `Done` の 3 つ。
-- Issue を作ったら AI がプロジェクトに追加する（新規 Issue の自動追加ワークフローは GitHub の API から有効化できず UI 操作が必要なため、AI が明示的に追加する）。追加直後の Status は `Todo`。
+- Status の遷移はすべて GitHub 側の組み込みワークフロー（プロジェクトの Workflows 画面 https://github.com/users/d-kanai/projects/4/workflows ）で自動化しており、AI は Projects の API を呼ばない。
+  - 追加（`Todo`）: 「Auto-add to project」（リポジトリ `ai-only-template`、フィルタ `is:issue is:open`）。Issue の作成・更新で自動追加される。フィルタが空だと追加されなかったため、フィルタは必ず設定する（2026-09-28 実測）。
+  - `In Progress`: 「Pull request linked to issue」。PR 本文の `Closes #<Issue番号>` で Issue に紐付いたときに変わる。
+  - `Done`: 「Item closed」「Pull request merged」。PR のマージで Issue が自動クローズされて変わる。
+- API を使わない理由: クラウドセッション（Claude Code on the web）では GitHub プロキシが PR 用の固定された GraphQL しか通さず、Projects v2 の API は 403 になる（公式 https://code.claude.com/docs/en/cloud-environments 「GitHub proxy」）。ワークフローは GitHub 側で動くのでローカルでもクラウドでも同じに回る。
+- ワークフローの設定変更は UI でしかできない（API に作成・更新の手段がない）。変えたときはこの節を更新する。
+- ローカルで手動操作が必要になったとき（例: ワークフローが動かない）だけ、次を使う。gh のトークンに `project` スコープが必要（`gh auth refresh -s project` はユーザーが実行する）。
   ```
   gh project item-add 4 --owner d-kanai --url <IssueのURL>
-  ```
-- ブランチを切って着手したら Status を `In Progress` にする。
-  ```
   gh project item-edit 4 --owner d-kanai --url <IssueのURL> --field Status --value "In Progress"
   ```
-  （Issue の URL とフィールド名で指定できる。`--id` / `--field-id` / `--single-select-option-id` の node ID 指定は不要）
-- PR のマージで Issue がクローズされると、プロジェクトの既定ワークフローで Status が `Done` になる（PR #19 のマージで確認済み）。手で Done にはしない。
-- `--owner` は `@me` ではなく `d-kanai` を明示する（`@me` だと `gh project link` がオーナー不一致で失敗し、`item-add` の JSON 出力も欠ける）。
-- gh のトークンに `project` スコープが必要。無ければ `gh auth refresh -s project` をユーザーが実行する（認証操作なので AI は実行しない）。
+  `--owner` は `@me` ではなく `d-kanai` を明示する（`@me` だと `gh project link` がオーナー不一致で失敗し、`item-add` の JSON 出力も欠ける）。
 
 ## ブランチ
 - main から切る。
