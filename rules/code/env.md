@@ -35,7 +35,17 @@ node --version && pnpm --version   # .tool-versions と一致することを確�
 ## クラウドセッション
 Claude Code on the web（クラウドセッション）では asdf が使えないため、`scripts/cloud-session-start.sh` で `.tool-versions` と同じ Node.js / pnpm を用意する。
 
-- クラウド VM の前提（公式 https://code.claude.com/docs/en/cloud-environments.md）: セッションごとに新しい VM（Ubuntu 24.04、x86_64）。Node.js は 20 / 21 / 22 が入っていて 22 が PATH にある。asdf は無い。pnpm は入っているが版は未確認。セッションでは `CLAUDE_CODE_REMOTE=true` が設定される。
+- クラウド VM の前提（公式 https://code.claude.com/docs/en/cloud-environments.md）: セッションごとに新しい VM（Ubuntu 24.04、x86_64）。Node.js は 20 / 21 / 22 が入っていて 22 が PATH にある。asdf は無い。セッションでは `CLAUDE_CODE_REMOTE=true` が設定される。
+- 実測（2026-09-28、Claude Code on the web、環境タイプ cloud_default）:
+  - VM は Ubuntu x86_64、実行ユーザーは root（`HOME=/root`）、`/opt` は書き込み可。`/opt/node20` `/opt/node21` `/opt/node22` があり、PATH の `node` は `/opt/node22/bin/node`（22.22.2）。
+  - PATH の `pnpm` は `/opt/node22/bin/pnpm` で、単体では 10.33.0（`/tmp` で `pnpm --version`）。リポジトリ内では `package.json` の `packageManager`（`pnpm@12.7.0`）に従って 12.7.0 を `~/.local/share/pnpm/.tools/pnpm/12.7.0` に取得して動いていた。`.tool-versions` と一致したのは `packageManager` のおかげで、VM の pnpm そのものの版ではない。
+  - フックには `CLAUDE_CODE_REMOTE=true` と `CLAUDE_PROJECT_DIR` が渡されていた。`CLAUDE_ENV_FILE` は Claude の通常の Bash には見えない（フックにだけ渡される想定どおり）。フックが書いた PATH が以降の Bash に効くかは、フックが成功する次のセッションで確認する（未確認）。
+  - SessionStart フックは起動時に実行された（Claude Code の診断ログ `hook_spawn_completed` が exit 0、306 ms）が、Node の取得で失敗していた。nodejs.org への CONNECT がプロキシに 403 で拒否された（環境のネットワークポリシーで未許可。`curl -f` はハングせず即 exit 22）。code.claude.com も 403。registry.npmjs.org は `no_proxy` に含まれ、プロキシを通らず直接届く。
+  - 対策は 2 つ。(a) 環境設定（セッションのタイトルバーの環境メニュー → Edit → Network access）で nodejs.org を許可ドメインに追加する。(b) スクリプトが nodejs.org で取れなければ npm レジストリから取る（既定の許可範囲で動く。下の「スクリプトの動き」）。(b) を実装済みなので (a) は必須ではない。
+  - setup script は実行されていなかった（`/opt/node-24.21.0` が無かった）。環境に設定されているかは未確認。
+  - setup script なしでフックが毎セッション入れる場合のコスト（実測）: レジストリの Node（52 MB）の取得・検証・展開が 3.1 秒、pnpm は tarball 1 MB とネイティブバイナリ 25 MB、スクリプト全体（nodejs.org の 403 → レジストリの Node・pnpm の取得 → `pnpm install --frozen-lockfile`）で 3.6 秒（pnpm のストアが温まった状態）。VM 既定の Node 22 で `pnpm install --frozen-lockfile` を実行したときは 10 秒だった。
+  - VM 既定の Node 22.22.2 のままでも `pnpm install --frozen-lockfile` / `pnpm lint` / `pnpm test` / `pnpm build` は通った。
+  - クラウドでは `CI` が未設定なので、`pnpm install`（フックの中も含む）で lefthook の postinstall が pre-commit フックを `.git/hooks` に入れる。
 - セッション中にインストールしたものは次のセッションに残らない（VM が毎回新しいため）。残るのは setup script が書いたファイルだけ（環境キャッシュ = ファイルシステムのスナップショット）。
 - 役割分担（公式 cloud-environments / hooks ドキュメント）:
   - **setup script（推奨）**: 環境設定ダイアログに書く。root で実行され、約 5 分以内に終わればファイルシステムがキャッシュされ、以後のセッションは setup script を飛ばしてキャッシュから始まる。重い作業（Node のダウンロード・展開、pnpm の導入）はここで行う。
@@ -50,13 +60,15 @@ Claude Code on the web（クラウドセッション）では asdf が使えな�
 - スクリプトの動き:
   - 版は `.tool-versions` の `nodejs` / `pnpm` の行から読む。スクリプトに直書きしない（`.tool-versions` が正）。
   - インストール先: `/opt` に書き込めれば `/opt/node-<版>`（setup script は root）、書けなければ `$HOME/.local/node-<版>`（フックの実行ユーザーは未確認）。検出は `/opt/node-<版>` → `$HOME/.local/node-<版>` の順で両方を見る。
-  - Node は nodejs.org から取得し、SHASUMS256.txt で検証してから展開する。pnpm はその Node の npm で入れる。
+  - Node はまず nodejs.org から取得し、SHASUMS256.txt で検証してから展開する。
+  - nodejs.org で取れない（ネットワークポリシーで 403、SHASUMS 不一致など）ときは、npm レジストリの `node-linux-x64`（aarch64 は `node-linux-arm64`）にフォールバックする。Node 公式バイナリをそのまま同梱したパッケージ（https://github.com/aredridel/node-bin-gen 、provenance 付き）。版のメタデータ `https://registry.npmjs.org/node-linux-x64/<版>` の `dist.integrity`（tarball の sha512）で検証してから `dist.tarball` を展開する。jq はクラウド VM にあるか未確認なので使わず、sed で取り出す。
+  - pnpm は Node の入手経路によらず、常にレジストリの tarball から入れる。レジストリの Node には npm が同梱されていないため `npm install -g` は使えず、経路を 1 本にそろえる。pnpm 12 の本体はネイティブバイナリで、`pnpm` パッケージの `pnpm` は置き換えられる前提の placeholder、バイナリは `@pnpm/exe.linux-x64`（aarch64 は `@pnpm/exe.linux-arm64`）にある（pnpm@12.7.0 の `install.js` / `native-binary.mjs`）。両方を integrity で検証して取得し、placeholder をバイナリで置き換えて `<node_dir>/lib/node_modules/pnpm` に置き、`<node_dir>/bin/pnpm` から symlink する（`npm install -g pnpm` と同じ最終形）。`pnpm` パッケージだけを置くと初回実行時にバイナリを自分でダウンロードしに行き、スクリプトのタイムアウト・検証の外になるため、バイナリも自分で取る。同じ版の `pnpm` が既にあれば何もしない。
   - フックはサブプロセスなので、PATH は `CLAUDE_ENV_FILE` に `export PATH=...` を追記して以降の Bash に引き継ぐ。
   - 何が失敗しても exit 0 で終わる（stderr に理由を出す）。setup script は exit 0 以外だとセッションが開始できない（公式）。フックも、失敗しても VM 既定の Node 22 でセッションは続けられる。
-  - curl には `--connect-timeout 15` と `--max-time`（tarball は 240 秒、SHASUMS256.txt は 60 秒）を付けている。通信が止まったままフックの 600 秒打ち切りに達しないようにするため（最悪ケースの合計 15 + 240 + 15 + 60 = 330 秒）。setup script の約 5 分はキャッシュされるかどうかの目安で、超えても失敗はしない。
+  - curl には `--connect-timeout 15` と `--max-time`（数十 MB の tarball は 60 秒、SHASUMS256.txt・レジストリのメタデータ・1 MB の pnpm tarball は 20 秒）を付けている。通信が止まったままフックの 600 秒打ち切りに達しないようにするため。最悪ケース（nodejs.org の 2 回が上限まで粘って失敗し、レジストリで Node 2 回・pnpm 4 回を取得）の合計は、接続タイムアウトも足す保守的な見積もりで (15 + 60) + (15 + 20) + (15 + 20) + (15 + 60) + (15 + 20) + (15 + 20) + (15 + 20) + (15 + 60) = 400 秒（`--max-time` は接続を含む全体の上限なので、実際は max-time の和の 280 秒が上限）。実測はいずれも数秒なので、60 秒かかるなら止まっているとみなせる。setup script の約 5 分はキャッシュされるかどうかの目安で、超えても失敗はしない。
   - アーキテクチャは x86_64 / aarch64 のみ対応。それ以外は何も入れない。
 - ローカルでもフックは毎回実行されるが、`CLAUDE_CODE_REMOTE` が `true` でなければ何もしない（ローカルは asdf を使う）。
-- setup script を使わない場合は、**毎セッション**フックが Node をダウンロードする（VM が毎回新しく、セッション中のインストールは残らないため）。そのぶん毎回の開始が遅くなる。
+- setup script を使わない場合は、**毎セッション**フックが Node / pnpm をダウンロードする（VM が毎回新しく、セッション中のインストールは残らないため）。そのぶん毎回の開始が遅くなる（上の実測で数秒）。
 - `.tool-versions` の Node / pnpm を上げたとき:
   - キャッシュには旧版しか入っていない。キャッシュが作り直されるのは、環境の setup script か許可ネットワークを変更したとき、または約 7 日で失効したときだけ（公式 cloud-environments ドキュメント）。`.tool-versions` の変更では作り直されない。
   - そのままでもフックが新しい版を見つけられず毎セッションダウンロードするので動くが、遅い。環境設定ダイアログで setup script の内容を変更して保存し、キャッシュを再構築させる（公式の条件は「setup script を変更したとき」。内容を変えずに保存し直すだけで再構築されるかは未確認なので、例えば setup script に `# nodejs <版> / pnpm <版>` のようなコメント行を置き、版を上げるたびに書き換える）。
@@ -66,4 +78,6 @@ Claude Code on the web（クラウドセッション）では asdf が使えな�
   CLOUD_SESSION_START_DRY_RUN=1 bash scripts/cloud-session-start.sh --install-only                  # setup script の実行予定を表示するだけ
   CLAUDE_CODE_REMOTE=true CLOUD_SESSION_START_DRY_RUN=1 bash scripts/cloud-session-start.sh      # フックの実行予定を表示するだけ（CLAUDE_ENV_FILE があれば PATH は書く）
   ```
-- 未検証（2026-09-28 時点）: クラウドセッションで実際に setup script / フックが動き、Node / pnpm が `.tool-versions` どおりになるかは未確認。ローカル（macOS）で確認済みなのは、テスト（`scripts/cloud-session-start.test.ts`）、Linux 用 tarball の取得・SHASUMS 検証・展開、ローカルではフックが何もしないこと。最初のクラウドセッションで `node --version` / `pnpm --version` を確認し、結果をここに反映する。
+- 検証状況（2026-09-28 時点）:
+  - クラウド VM 上で確認済み: スクリプトを `CLAUDE_CODE_REMOTE=true` で直接実行すると、nodejs.org が 403 → レジストリへのフォールバックで `/opt/node-24.21.0/bin/node --version` が v24.21.0、`/opt/node-24.21.0/bin/pnpm --version` が 12.7.0 になり、`CLAUDE_ENV_FILE` に PATH の行が追記され、`pnpm install --frozen-lockfile` まで通った（3.6 秒）。2 回目はインストール済みとして取得をせず 0.06 秒で終わった。テスト（`scripts/cloud-session-start.test.ts`）も通る。
+  - 未確認: SessionStart フックとして起動したときにこの経路で成功し、書き出した PATH で以降の Bash の `node --version` / `pnpm --version` が `.tool-versions` どおりになるか。setup script に設定したときの動き。次のクラウドセッションで確認し、結果をここに反映する。

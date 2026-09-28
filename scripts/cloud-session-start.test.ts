@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -13,7 +14,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const repoRoot = resolve(__dirname, "..");
@@ -31,9 +32,26 @@ function readToolVersion(tool: string): string {
 const nodeVersion = readToolVersion("nodejs");
 const pnpmVersion = readToolVersion("pnpm");
 const nodeTarballUrl = `https://nodejs.org/dist/v${nodeVersion}/node-v${nodeVersion}-linux-`;
+const REGISTRY = "https://registry.npmjs.org";
+type Platform = "linux-x64" | "linux-arm64";
+type Integrity = "ok" | "mismatch" | "missing";
+const nodeRegistryMetaUrl = (platform: Platform) =>
+  `${REGISTRY}/node-${platform}/${nodeVersion}`;
+const pnpmMetaUrl = `${REGISTRY}/pnpm/${pnpmVersion}`;
+const pnpmExeMetaUrl = (platform: Platform) =>
+  `${REGISTRY}/@pnpm/exe.${platform}/${pnpmVersion}`;
+
+// @pnpm/exe.<platform> に入っているネイティブバイナリの代わり。--version には .tool-versions の版を返し、
+// それ以外（pnpm install）は引数を stderr に出すだけにする。スクリプトが入れた pnpm で
+// pnpm install まで進んだことを stderr で確かめられるようにするため。
+const FAKE_NATIVE_PNPM = `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "${pnpmVersion}"; else echo "fake native pnpm $*" >&2; fi
+`;
 
 // 実インストール経路のテストで PATH の先頭に置く偽コマンド。
-// - curl: 本物の nodejs.org に行かず、URL のファイル名に対応するフィクスチャを -o の先にコピーする。
+// - curl: 本物の nodejs.org / npm レジストリに行かず、URL から https:// を除いたパス
+//   （例: fixtures/registry.npmjs.org/pnpm/<版>）にあるフィクスチャを -o の先にコピーする。ファイル名だけで引くと
+//   pnpm/<版> と @pnpm/exe.<platform>/<版> のメタデータのように、別の URL が同じ名前になって区別できないため。
 //   受け取った引数を 1 行ずつ CURL_LOG に記録し、要求 URL やタイムアウト指定を検証できるようにする。
 //   フィクスチャが無ければ curl -f と同じく 22 で失敗する。
 // - uname: `uname -m` だけ FAKE_UNAME_M（既定 x86_64）を返す。実行マシン（Apple Silicon の arm64 など）に
@@ -49,7 +67,7 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-src="$FIXTURE_DIR/$(basename "$url")"
+src="$FIXTURE_DIR/\${url#https://}"
 [ -f "$src" ] || exit 22
 cp "$src" "$out"
 `;
@@ -114,7 +132,7 @@ describe("scripts/cloud-session-start.sh", () => {
   }
 
   // nodejs.org の配布物と同じ構成（node-v<版>-<platform>/bin/node）の tar.xz と SHASUMS256.txt を作る。
-  // node はダミー（実行すると失敗する）なので、その後の npm install -g pnpm は失敗する前提。
+  // node はダミー（実行すると失敗する）。pnpm はレジストリのフィクスチャ（buildPnpmFixtures）が無ければ取得に失敗する。
   function buildNodeFixture(
     platform: "linux-x64" | "linux-arm64",
     shasums: "ok" | "mismatch" | "missing",
@@ -125,7 +143,9 @@ describe("scripts/cloud-session-start.sh", () => {
     writeFileSync(join(stage, name, "bin", "node"), "#!/bin/sh\nexit 1\n", {
       mode: 0o755,
     });
-    const tarball = join(fixtureDir, `${name}.tar.xz`);
+    const distDir = join(fixtureDir, "nodejs.org", "dist", `v${nodeVersion}`);
+    mkdirSync(distDir, { recursive: true });
+    const tarball = join(distDir, `${name}.tar.xz`);
     const tar = spawnSync("tar", ["-cJf", tarball, "-C", stage, name], {
       encoding: "utf8",
     });
@@ -141,7 +161,73 @@ describe("scripts/cloud-session-start.sh", () => {
       mismatch: `${"0".repeat(64)}  ${name}.tar.xz\n`,
       missing: `${sha}  node-v${nodeVersion}-darwin-x64.tar.xz\n`,
     };
-    writeFileSync(join(fixtureDir, "SHASUMS256.txt"), lines[shasums]);
+    writeFileSync(join(distDir, "SHASUMS256.txt"), lines[shasums]);
+  }
+
+  // npm レジストリと同じ構成のフィクスチャを作る: 版のメタデータ（<name>/<版>。dist.integrity と dist.tarball を持つ JSON）と、
+  // package/ 以下に files を入れた tarball（<name>/-/<スコープを除いた name>-<版>.tgz）。
+  // integrity は ok = tarball の sha512（base64）、mismatch = 別の内容の sha512、missing = メタデータに書かない。
+  function buildRegistryFixture(
+    name: string,
+    version: string,
+    files: Record<string, string>,
+    integrity: Integrity = "ok",
+  ) {
+    const stage = mkdtempSync(join(tmp, "stage-"));
+    for (const [rel, content] of Object.entries(files)) {
+      const file = join(stage, "package", rel);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, content, { mode: 0o755 });
+    }
+    const unscoped = name.split("/").pop();
+    const tgzPath = `${name}/-/${unscoped}-${version}.tgz`;
+    const tgz = join(fixtureDir, "registry.npmjs.org", tgzPath);
+    mkdirSync(dirname(tgz), { recursive: true });
+    const tar = spawnSync("tar", ["-czf", tgz, "-C", stage, "package"], {
+      encoding: "utf8",
+    });
+    if (tar.status !== 0) throw new Error(`tar -czf に失敗: ${tar.stderr}`);
+
+    const sha512 = (data: Buffer | string) =>
+      `sha512-${createHash("sha512").update(data).digest("base64")}`;
+    const dist: Record<string, string> = {
+      tarball: `${REGISTRY}/${tgzPath}`,
+    };
+    if (integrity === "ok") dist.integrity = sha512(readFileSync(tgz));
+    if (integrity === "mismatch") dist.integrity = sha512("other content");
+    writeFileSync(
+      join(fixtureDir, "registry.npmjs.org", name, version),
+      JSON.stringify({ name, version, dist }),
+    );
+  }
+
+  // node-bin-gen の node-linux-<arch> と同じく、package/bin/node だけを持つ（npm は同梱されない）。
+  function buildRegistryNodeFixture(platform: Platform, integrity: Integrity) {
+    buildRegistryFixture(
+      `node-${platform}`,
+      nodeVersion,
+      { "bin/node": "#!/bin/sh\nexit 1\n", "package.json": "{}\n" },
+      integrity,
+    );
+  }
+
+  // pnpm 12 の配布物と同じ構成: pnpm パッケージの package/pnpm は placeholder（ネイティブバイナリで置き換えられる前提の
+  // スクリプト）で、ネイティブバイナリは @pnpm/exe.<platform> の package/pnpm にある。
+  function buildPnpmFixtures(
+    platform: Platform = "linux-x64",
+    exeIntegrity: Integrity = "ok",
+  ) {
+    buildRegistryFixture("pnpm", pnpmVersion, {
+      pnpm: "#!/bin/sh\necho placeholder >&2\nexit 1\n",
+      "bin/pnpm.mjs": "// dummy\n",
+      "package.json": "{}\n",
+    });
+    buildRegistryFixture(
+      `@pnpm/exe.${platform}`,
+      pnpmVersion,
+      { pnpm: FAKE_NATIVE_PNPM },
+      exeIntegrity,
+    );
   }
 
   const remoteEnv = () => ({
@@ -226,6 +312,14 @@ describe("scripts/cloud-session-start.sh", () => {
       );
     });
 
+    it("nodejs.org に届かないときに使う npm レジストリの URL（Node と pnpm）も表示する", () => {
+      const result = runScript(["--print-plan"], {});
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(nodeRegistryMetaUrl("linux-x64"));
+      expect(result.stdout).toContain(pnpmMetaUrl);
+      expect(result.stdout).toContain(pnpmExeMetaUrl("linux-x64"));
+    });
+
     it("/opt に書き込めるなら /opt/node-<版> に入れる", () => {
       optDir = join(tmp, "opt-writable");
       mkdirSync(optDir);
@@ -262,7 +356,10 @@ describe("scripts/cloud-session-start.sh", () => {
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(nodeTarballUrl);
       expect(result.stdout).toContain(`SHASUMS256.txt`);
-      expect(result.stdout).toContain(`npm install -g pnpm@${pnpmVersion}`);
+      expect(result.stdout).toContain(nodeRegistryMetaUrl("linux-x64"));
+      expect(result.stdout).toContain(pnpmMetaUrl);
+      expect(result.stdout).toContain(pnpmExeMetaUrl("linux-x64"));
+      expect(result.stdout).not.toContain("npm install -g");
       expect(result.stdout).toContain("pnpm install --frozen-lockfile");
 
       const nodeBin = join(home, ".local", `node-${nodeVersion}`, "bin");
@@ -279,7 +376,10 @@ describe("scripts/cloud-session-start.sh", () => {
 
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(nodeTarballUrl);
-      expect(result.stdout).toContain(`npm install -g pnpm@${pnpmVersion}`);
+      expect(result.stdout).toContain(nodeRegistryMetaUrl("linux-x64"));
+      expect(result.stdout).toContain(pnpmMetaUrl);
+      expect(result.stdout).toContain(pnpmExeMetaUrl("linux-x64"));
+      expect(result.stdout).not.toContain("npm install -g");
       expect(result.stdout).not.toContain("pnpm install --frozen-lockfile");
       expect(readFileSync(envFile, "utf8")).toBe("export EXISTING=1\n");
     });
@@ -301,6 +401,7 @@ describe("scripts/cloud-session-start.sh", () => {
         expect(result.status).toBe(0);
         expect(result.stdout).not.toContain(nodeTarballUrl);
         expect(result.stdout).not.toContain("SHASUMS256.txt");
+        expect(result.stdout).not.toContain(nodeRegistryMetaUrl("linux-x64"));
         expect(result.stdout).toContain("pnpm install --frozen-lockfile");
         expect(readFileSync(envFile, "utf8")).toBe(
           `export EXISTING=1\nexport PATH="${join(nodeDir, "bin")}:$PATH"\n`,
@@ -309,11 +410,13 @@ describe("scripts/cloud-session-start.sh", () => {
     );
   });
 
-  // 偽の curl でダウンロードを差し替え、取得 → SHASUMS 検証 → 展開 → 配置 の実処理を通す。
+  // 偽の curl でダウンロードを差し替え、取得 → 検証 → 展開 → 配置 の実処理を通す。
   describe("実インストール経路（偽の curl）", () => {
     const nodeDirIn = () => join(home, ".local", `node-${nodeVersion}`);
+    const envWithPath = () =>
+      `export EXISTING=1\nexport PATH="${join(nodeDirIn(), "bin")}:$PATH"\n`;
 
-    it("正常: 展開して bin/node を配置し PATH を追記する。ダミー node で pnpm 導入が失敗しても warn だけで exit 0", () => {
+    it("正常: 展開して bin/node を配置し PATH を追記する。nodejs.org で取れればレジストリには行かない。pnpm が取れなくても warn だけで exit 0", () => {
       buildNodeFixture("linux-x64", "ok");
 
       const result = runScript([], remoteEnv());
@@ -324,31 +427,65 @@ describe("scripts/cloud-session-start.sh", () => {
       expect(readdirSync(join(home, ".local"))).toEqual([
         `node-${nodeVersion}`,
       ]);
-      expect(readFileSync(envFile, "utf8")).toBe(
-        `export EXISTING=1\nexport PATH="${join(nodeDirIn(), "bin")}:$PATH"\n`,
-      );
+      expect(readFileSync(envFile, "utf8")).toBe(envWithPath());
+      expect(curlCalls().join("\n")).not.toContain("node-linux-x64");
       expect(result.stderr).toContain(`failed to install pnpm@${pnpmVersion}`);
     });
 
-    it("curl に接続タイムアウト 15 秒と、tarball は 240 秒・SHASUMS256.txt は 60 秒の全体タイムアウトを付ける（最悪でもフックの 600 秒打ち切りより十分前に終える）", () => {
-      buildNodeFixture("linux-x64", "ok");
+    it("curl に接続タイムアウト 15 秒と、取得物ごとの全体タイムアウトを付け、最悪ケースの合計をフックの 600 秒打ち切りより十分小さく（400 秒以下に）する", () => {
+      // nodejs.org の SHASUMS 不一致でレジストリにフォールバックさせ、Node・pnpm の取得 8 回をすべて通す。
+      buildNodeFixture("linux-x64", "mismatch");
+      buildRegistryNodeFixture("linux-x64", "ok");
+      buildPnpmFixtures();
 
       runScript([], remoteEnv());
 
       const calls = curlCalls();
-      const tarballCall = calls.find((c) => c.includes(".tar.xz"));
-      const shasumsCall = calls.find((c) => c.includes("SHASUMS256.txt"));
-      expect(tarballCall).toContain("--connect-timeout 15");
-      expect(tarballCall).toContain("--max-time 240");
-      expect(shasumsCall).toContain("--connect-timeout 15");
-      expect(shasumsCall).toContain("--max-time 60");
+      const expected: [string, (c: string) => boolean, number][] = [
+        ["nodejs.org tarball", (c) => c.endsWith(".tar.xz"), 60],
+        ["SHASUMS256.txt", (c) => c.endsWith("SHASUMS256.txt"), 20],
+        [
+          "node メタデータ",
+          (c) => c.endsWith(nodeRegistryMetaUrl("linux-x64")),
+          20,
+        ],
+        [
+          "node tarball",
+          (c) => c.endsWith(`node-linux-x64-${nodeVersion}.tgz`),
+          60,
+        ],
+        ["pnpm メタデータ", (c) => c.endsWith(pnpmMetaUrl), 20],
+        ["pnpm tarball", (c) => c.endsWith(`pnpm-${pnpmVersion}.tgz`), 20],
+        [
+          "@pnpm/exe メタデータ",
+          (c) => c.endsWith(pnpmExeMetaUrl("linux-x64")),
+          20,
+        ],
+        [
+          "@pnpm/exe tarball",
+          (c) => c.endsWith(`exe.linux-x64-${pnpmVersion}.tgz`),
+          60,
+        ],
+      ];
+      expect(calls).toHaveLength(expected.length);
+      let worstCase = 0;
+      for (const [label, match, maxTime] of expected) {
+        const call = calls.find(match);
+        expect(call, label).toBeDefined();
+        expect(call, label).toContain("--connect-timeout 15");
+        expect(call, label).toContain(`--max-time ${maxTime}`);
+        // --max-time は接続を含む全体の上限なので実際の最悪値は max-time の和だが、
+        // 既存の考え方に合わせて接続タイムアウトも足した保守的な値で上限を確かめる。
+        worstCase += 15 + maxTime;
+      }
+      expect(worstCase).toBeLessThanOrEqual(400);
     });
 
     it.each([
       ["SHASUMS のハッシュが一致しない", "mismatch"],
       ["SHASUMS に対象の行が無い", "missing"],
     ] as const)(
-      "%s: 展開せず、一時ディレクトリも残さず、PATH も書かずに exit 0",
+      "%s（レジストリにも無い）: 展開せず、一時ディレクトリも残さず、PATH も書かずに exit 0",
       (_label, shasums) => {
         buildNodeFixture("linux-x64", shasums);
 
@@ -361,16 +498,19 @@ describe("scripts/cloud-session-start.sh", () => {
       },
     );
 
-    it("uname -m が aarch64 なら linux-arm64 の配布物を取得する", () => {
+    it("uname -m が aarch64 なら linux-arm64 の配布物（Node と @pnpm/exe）を取得する", () => {
       buildNodeFixture("linux-arm64", "ok");
+      buildPnpmFixtures("linux-arm64");
 
       const result = runScript([], { ...remoteEnv(), FAKE_UNAME_M: "aarch64" });
 
       expect(result.status).toBe(0);
       const urls = curlCalls().join("\n");
       expect(urls).toContain(`node-v${nodeVersion}-linux-arm64.tar.xz`);
+      expect(urls).toContain(pnpmExeMetaUrl("linux-arm64"));
       expect(urls).not.toContain("linux-x64");
       expect(existsSync(join(nodeDirIn(), "bin", "node"))).toBe(true);
+      expect(existsSync(join(nodeDirIn(), "bin", "pnpm"))).toBe(true);
     });
 
     it("uname -m が x86_64 / aarch64 以外なら warn を出してダウンロードせず、PATH も書かずに exit 0", () => {
@@ -397,6 +537,118 @@ describe("scripts/cloud-session-start.sh", () => {
         existsSync(join(nodeDirIn(), `node-v${nodeVersion}-linux-x64`)),
       ).toBe(false);
       expect(existsSync(join(nodeDirIn(), "leftover"))).toBe(false);
+    });
+  });
+
+  // クラウドのネットワークポリシーで nodejs.org が 403 になる（2026-09-28 実測）ときの経路。
+  // nodejs.org のフィクスチャを置かないことで、偽の curl が 22 で失敗する = 403 と同じ扱いになる。
+  describe("npm レジストリへのフォールバック（nodejs.org に届かない）", () => {
+    const nodeDirIn = () => join(home, ".local", `node-${nodeVersion}`);
+
+    it("レジストリの node-linux-x64 を integrity 検証して展開し、bin/node を配置して PATH を追記する", () => {
+      buildRegistryNodeFixture("linux-x64", "ok");
+
+      const result = runScript([], remoteEnv());
+
+      expect(result.status).toBe(0);
+      const urls = curlCalls().join("\n");
+      expect(urls).toContain(nodeTarballUrl);
+      expect(urls).toContain(nodeRegistryMetaUrl("linux-x64"));
+      expect(urls).toContain(`node-linux-x64-${nodeVersion}.tgz`);
+      expect(existsSync(join(nodeDirIn(), "bin", "node"))).toBe(true);
+      expect(readdirSync(join(home, ".local"))).toEqual([
+        `node-${nodeVersion}`,
+      ]);
+      expect(readFileSync(envFile, "utf8")).toBe(
+        `export EXISTING=1\nexport PATH="${join(nodeDirIn(), "bin")}:$PATH"\n`,
+      );
+      expect(result.stderr).toContain("npm registry");
+    });
+
+    it.each([
+      ["integrity が一致しない", "mismatch"],
+      ["メタデータに integrity が無い", "missing"],
+    ] as const)(
+      "%s: 展開せず、一時ディレクトリも残さず、PATH も書かずに exit 0",
+      (_label, integrity) => {
+        buildRegistryNodeFixture("linux-x64", integrity);
+
+        const result = runScript([], remoteEnv());
+
+        expect(result.status).toBe(0);
+        expect(result.stderr).toContain("integrity");
+        expect(readdirSync(join(home, ".local"))).toEqual([]);
+        expect(readFileSync(envFile, "utf8")).toBe("export EXISTING=1\n");
+      },
+    );
+
+    it("uname -m が aarch64 なら node-linux-arm64 を取得する", () => {
+      buildRegistryNodeFixture("linux-arm64", "ok");
+
+      const result = runScript([], { ...remoteEnv(), FAKE_UNAME_M: "aarch64" });
+
+      expect(result.status).toBe(0);
+      const urls = curlCalls().join("\n");
+      expect(urls).toContain(nodeRegistryMetaUrl("linux-arm64"));
+      expect(urls).not.toContain("node-linux-x64");
+      expect(existsSync(join(nodeDirIn(), "bin", "node"))).toBe(true);
+    });
+  });
+
+  // pnpm は Node の入手経路によらず、常にレジストリの tarball から入れる（レジストリの Node には npm が無いため）。
+  describe("pnpm の導入（npm レジストリの tarball）", () => {
+    const nodeDirIn = () => join(home, ".local", `node-${nodeVersion}`);
+
+    it("pnpm と @pnpm/exe.linux-x64 を integrity 検証して lib/node_modules/pnpm に置き、ネイティブバイナリを bin/pnpm から実行できるようにして pnpm install する（npm は使わない）", () => {
+      buildNodeFixture("linux-x64", "ok");
+      buildPnpmFixtures();
+
+      const result = runScript([], remoteEnv());
+
+      expect(result.status).toBe(0);
+      const pnpmBin = join(nodeDirIn(), "bin", "pnpm");
+      expect(lstatSync(pnpmBin).isSymbolicLink()).toBe(true);
+      const version = spawnSync(pnpmBin, ["--version"], { encoding: "utf8" });
+      expect(version.stdout.trim()).toBe(pnpmVersion);
+      // 一時ディレクトリが残っていない
+      expect(readdirSync(join(nodeDirIn(), "lib", "node_modules"))).toEqual([
+        "pnpm",
+      ]);
+      expect(result.stderr).not.toContain("fake npm");
+      expect(result.stderr).toContain(
+        "fake native pnpm install --frozen-lockfile",
+      );
+    });
+
+    it("@pnpm/exe の integrity が一致しなければ bin/pnpm を作らず一時ディレクトリも残さない（Node の PATH は書く）", () => {
+      buildNodeFixture("linux-x64", "ok");
+      buildPnpmFixtures("linux-x64", "mismatch");
+
+      const result = runScript([], remoteEnv());
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain("integrity mismatch");
+      expect(result.stderr).toContain(`failed to install pnpm@${pnpmVersion}`);
+      expect(existsSync(join(nodeDirIn(), "bin", "pnpm"))).toBe(false);
+      expect(readdirSync(join(nodeDirIn(), "lib", "node_modules"))).toEqual([]);
+      expect(readFileSync(envFile, "utf8")).toBe(
+        `export EXISTING=1\nexport PATH="${join(nodeDirIn(), "bin")}:$PATH"\n`,
+      );
+    });
+
+    it("同じ版の pnpm が既にあれば何も取得しない（冪等）", () => {
+      placeFakeNode(nodeDirIn());
+      writeFileSync(join(nodeDirIn(), "bin", "pnpm"), FAKE_NATIVE_PNPM, {
+        mode: 0o755,
+      });
+
+      const result = runScript([], remoteEnv());
+
+      expect(result.status).toBe(0);
+      expect(curlCalls()).toEqual([]);
+      expect(result.stderr).toContain(
+        "fake native pnpm install --frozen-lockfile",
+      );
     });
   });
 });

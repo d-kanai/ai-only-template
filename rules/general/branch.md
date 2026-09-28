@@ -23,6 +23,13 @@ main は常にマージ可能な状態を保つ。作業はすべて Issue → �
   ```
   `--owner` は `@me` ではなく `d-kanai` を明示する（`@me` だと `gh project link` がオーナー不一致で失敗し、`item-add` の JSON 出力も欠ける）。
 
+## クラウドセッション（Claude Code on the web）での GitHub 操作
+- `gh` CLI は入っていない。Issue / PR の作成・ラベル付与・マージは GitHub MCP ツール（`mcp__github__issue_write` / `create_pull_request` / `merge_pull_request` など）で行う。このファイルの `gh` のコマンド例は、クラウドでは対応する MCP ツールに読み替える（PR のラベルは `issue_write` の update で付ける）。
+- 前提: Claude GitHub App がこのリポジトリにインストールされていること。未インストールだと読み取りだけ通り、Issue 作成が 403「Resource not accessible by integration」、`git push` が 403「Claude doesn't have GitHub access to ...」になる（2026-09-28 実測。ユーザーが https://github.com/apps/claude/installations/select_target からインストールして解消）。
+- インストール後は、Issue 作成（#34）、`<type>/<Issue番号>-<内容>` ブランチの push、PR 作成（#35）、merge commit でのマージまで、ローカルと同じ流れで動くことを確認済み。Projects の Status はローカルと同じく GitHub 側のワークフローで変わる（API は呼ばない）。
+- セッション開始時に `claude/<ランダム名>` ブランチが作られるが、作業はルールどおり main から `<type>/<Issue番号>-<内容>` を切って行う。`claude/...` ブランチは使わない（origin に残っていれば削除する）。
+- 環境の設定（setup script・許可ドメイン・GitHub App）はセッションの中からは変更できない。必要なときはユーザーに依頼する。
+
 ## ブランチ
 - main から切る。
 - 命名: `<type>/<Issue番号>-<内容>`（例: `feat/12-branch-rules`）

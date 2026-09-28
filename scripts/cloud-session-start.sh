@@ -14,6 +14,14 @@
 #   setup script（--install-only）に寄せ、フックは「既存のインストールを見つけて PATH を通し pnpm install する」
 #   だけの速い経路にする。setup script を設定していない環境でも動くよう、フックは未インストールなら自分で入れる。
 #
+# WHY Node を npm レジストリからも取れるようにするか: 2026-09-28 のクラウドセッションで、nodejs.org への CONNECT が
+#   プロキシに 403 で拒否された（環境のネットワークポリシーで未許可）。一方 registry.npmjs.org はプロキシを通らず
+#   直接届く（no_proxy に含まれる）。npm レジストリには Node 公式バイナリをそのまま同梱した node-linux-<arch>
+#   （node-bin-gen、provenance 付き）があるので、nodejs.org で取れなければそちらに切り替える。環境設定で nodejs.org を
+#   許可すれば第一候補の nodejs.org で取れる。どちらの経路でも、検証に通らなければ展開しない。
+# WHY pnpm を npm で入れないか: レジストリの node-linux-<arch> には npm が同梱されていない。Node の入手経路で
+#   pnpm の入れ方が変わると確認すべき経路が倍になるので、pnpm は常にレジストリの tarball から入れる 1 本にする。
+#
 # WHY set -e を使わない: このスクリプトは「どんな失敗でも exit 0 で終える」設計にしている。
 #   フックが失敗するとセッション開始時にエラーが出るが、Node の取得に失敗しても
 #   クラウド VM 既定の Node 22 で最低限の作業（コードを読む・編集する）はできる。フックの失敗で
@@ -103,15 +111,29 @@ node_platform() {
 # WHY curl にタイムアウトを付ける: 通信が止まったまま待ち続けると、フックは 600 秒で打ち切られ（公式 cloud-environments
 #   ドキュメント）、「失敗しても warn を出して exit 0 で続ける」設計が守れなくなるので、自分で先に諦める。
 #   --connect-timeout 15: 接続確立に 15 秒かかるならネットワーク不通・遮断とみなす（通常は 1 秒未満で終わる）。
-#   --max-time（呼び出し側で指定）: 1 回の取得の上限。tarball は 240 秒、SHASUMS256.txt（数十 KB）は 60 秒。
-#     最悪ケースの合計は 15 + 240 + 15 + 60 = 330 秒で、フックの 600 秒に余裕を持って収まる。
-#     linux-x64 の .tar.xz は 2026-09-28 にローカルで取得・展開まで約 5 秒だったので、240 秒かかるなら止まっているとみなせる。
+#     クラウドで nodejs.org がプロキシに 403 で拒否されるときは、curl -f が待たずにすぐ失敗する（2026-09-28 実測）。
+#   --max-time（呼び出し側で指定）: 1 回の取得の上限。数十 MB の tarball は 60 秒、それ以外（SHASUMS256.txt、
+#     レジストリのメタデータ、1 MB の pnpm tarball）は 20 秒。
+#     2026-09-28 のクラウド VM での実測: レジストリの node-linux-x64（52 MB）は取得・検証・展開まで 3.1 秒、
+#     @pnpm/exe.linux-x64（25 MB）の取得は 0.2 秒。nodejs.org の .tar.xz はローカルで取得・展開まで約 5 秒。
+#     60 秒かかるなら止まっているとみなせる。
+#   最悪ケース（nodejs.org の 2 回がどちらも上限まで粘った末に失敗し、レジストリにフォールバックして Node 2 回・
+#     pnpm 4 回を取得）の合計は、接続タイムアウトも足した保守的な見積もりで
+#     (15 + 60) + (15 + 20)             … nodejs.org の tarball + SHASUMS256.txt
+#     + (15 + 20) + (15 + 60)           … レジストリの node-linux-<arch> のメタデータ + tarball
+#     + (15 + 20) + (15 + 20)           … pnpm のメタデータ + tarball
+#     + (15 + 20) + (15 + 60) = 400 秒  … @pnpm/exe.<platform> のメタデータ + tarball
+#     で、フックの 600 秒から pnpm install（クラウドで実測 10 秒）の時間を引いても余裕がある。
+#     実際には --max-time が接続を含む 1 回の取得全体の上限なので、最悪でも max-time の和の 280 秒で終わる。
 #   setup script の約 5 分はキャッシュされるかどうかの目安で、超えても失敗はしない（キャッシュされないだけ）ため、
 #   上限はフックの 600 秒に合わせている。
 download() {
   local url="$1" out="$2" max_time="$3"
   curl -fsSL --connect-timeout 15 --max-time "$max_time" -o "$out" "$url"
 }
+
+# WHY 1 か所にまとめる: レジストリの URL は --print-plan・DRY_RUN・実際の取得で同じものを使うため。
+NPM_REGISTRY="https://registry.npmjs.org"
 
 sha256_of() {
   # Ubuntu（クラウド VM）には coreutils の sha256sum がある。macOS で手元確認するときのために shasum にも倒す。
@@ -122,36 +144,88 @@ sha256_of() {
   fi
 }
 
-install_node() {
-  local version="$1" node_dir="$2"
-  local platform dist_base tarball base
-  platform="$(node_platform)" || return 1
-  dist_base="https://nodejs.org/dist/v${version}"
-  tarball="node-v${version}-${platform}.tar.xz"
-  base="$(dirname "$node_dir")"
+# npm の integrity と同じ形式（sha512 の生バイトを base64 にしたもの）を返す。
+# openssl を使う: Ubuntu（クラウド VM）にも macOS にもある。sha512sum は 16 進で出すので base64 に直す手間がかかる。
+# macOS の base64 には改行を抑える -w0 が無いので、tr で改行を消して両方で同じ 1 行にする。
+# openssl が無いときは空文字になり、呼び出し側の照合が一致しないので展開されない（検証できないものは入れない）。
+sha512_integrity_of() {
+  openssl dgst -sha512 -binary "$1" | base64 | tr -d '\n'
+}
 
-  if is_dry_run; then
-    echo "[dry-run] curl -fsSL ${dist_base}/${tarball}"
-    echo "[dry-run] curl -fsSL ${dist_base}/SHASUMS256.txt"
-    echo "[dry-run] verify sha256 of ${tarball} against SHASUMS256.txt"
-    echo "[dry-run] tar -xJf ${tarball} -> ${node_dir}"
-    return 0
-  fi
+# レジストリの版メタデータ（JSON）から "<key>":"<文字列>" の値を取り出す。
+# WHY jq を使わない: クラウド VM に jq があるかは未確認で、無ければフォールバックそのものが動かなくなるため。
+#   レジストリのメタデータは空白なしの 1 行 JSON で、dist.integrity / dist.tarball のキーはそれぞれ 1 回だけ出る
+#   （2026-09-28 に node-linux-x64 / pnpm / @pnpm/exe.linux-x64 の版メタデータで確認）。念のため空白も許し、最初の一致を使う。
+json_string_field() {
+  local key="$1" file="$2"
+  grep -o "\"${key}\" *: *\"[^\"]*\"" "$file" | head -n 1 | sed 's/^.*: *"\(.*\)"$/\1/'
+}
 
-  mkdir -p "$base" || { warn "failed to create ${base}"; return 1; }
-  # 一時ディレクトリは展開先と同じ場所に作る。最後の mv を同一ファイルシステム内の rename にして、
-  # 一瞬で完了させる（別ファイルシステムだとコピーになり、途中で止まると中途半端なディレクトリが残る）。
-  local work
-  work="$(mktemp -d "$base/.node-download.XXXXXX")" || { warn "mktemp failed in ${base}"; return 1; }
+# npm レジストリからパッケージ <name>@<version> を取得・検証し、<dest>/package に展開する。
+# 失敗したら warn を出して失敗を返す（<dest> の後始末は呼び出し側の一時ディレクトリごと消す）。
+# WHY dist.integrity で検証する: nodejs.org の SHASUMS256.txt と同じく、途中で切れた・壊れた・差し替えられた
+#   tarball を展開して以後ずっと使い続ける事故を防ぐため。integrity は npm が公開時に記録した tarball の sha512 で、
+#   npm / pnpm 自身もインストール時にこれで照合している。sha512 以外（古い sha1 など）は弱いので受け付けない。
+# 引数 max_time は tarball の取得の上限（秒）。メタデータは数 KB なので 20 秒で固定する。
+fetch_registry_package() {
+  local name="$1" version="$2" dest="$3" max_time="$4"
+  local meta_url="${NPM_REGISTRY}/${name}/${version}"
 
-  if ! download "${dist_base}/${tarball}" "$work/$tarball" 240; then
-    warn "failed to download ${dist_base}/${tarball}"
-    rm -rf "$work"
+  mkdir -p "$dest" || { warn "failed to create ${dest}"; return 1; }
+  if ! download "$meta_url" "$dest/meta.json" 20; then
+    warn "failed to download ${meta_url}"
     return 1
   fi
-  if ! download "${dist_base}/SHASUMS256.txt" "$work/SHASUMS256.txt" 60; then
+
+  local integrity tarball_url
+  integrity="$(json_string_field integrity "$dest/meta.json")"
+  tarball_url="$(json_string_field tarball "$dest/meta.json")"
+  case "$integrity" in
+    sha512-?*) ;;
+    *)
+      warn "no sha512 integrity in ${meta_url}"
+      return 1
+      ;;
+  esac
+  # https 以外（メタデータの破損など）の URL は取りに行かない。
+  case "$tarball_url" in
+    https://?*) ;;
+    *)
+      warn "no https tarball URL in ${meta_url}"
+      return 1
+      ;;
+  esac
+
+  if ! download "$tarball_url" "$dest/package.tgz" "$max_time"; then
+    warn "failed to download ${tarball_url}"
+    return 1
+  fi
+  local actual
+  actual="sha512-$(sha512_integrity_of "$dest/package.tgz")"
+  if [ "$actual" != "$integrity" ]; then
+    warn "integrity mismatch for ${name}@${version} (expected: ${integrity}, actual: ${actual})"
+    return 1
+  fi
+
+  # npm の tarball は package/ 以下に中身が入っている（node-linux-<arch>・pnpm・@pnpm/exe で確認）。
+  if ! tar -xzf "$dest/package.tgz" -C "$dest" || [ ! -d "$dest/package" ]; then
+    warn "failed to extract ${tarball_url}"
+    return 1
+  fi
+}
+
+# 第一候補: nodejs.org の公式配布物を取得し、SHASUMS256.txt で検証して <work>/node-v<版>-<platform> に展開する。
+fetch_node_from_nodejs_org() {
+  local version="$1" platform="$2" work="$3"
+  local dist_base="https://nodejs.org/dist/v${version}"
+  local tarball="node-v${version}-${platform}.tar.xz"
+
+  if ! download "${dist_base}/${tarball}" "$work/$tarball" 60; then
+    warn "failed to download ${dist_base}/${tarball}"
+    return 1
+  fi
+  if ! download "${dist_base}/SHASUMS256.txt" "$work/SHASUMS256.txt" 20; then
     warn "failed to download ${dist_base}/SHASUMS256.txt"
-    rm -rf "$work"
     return 1
   fi
 
@@ -163,12 +237,52 @@ install_node() {
   actual="$(sha256_of "$work/$tarball")"
   if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
     warn "sha256 mismatch for ${tarball} (expected: ${expected:-<not found>}, actual: ${actual})"
-    rm -rf "$work"
     return 1
   fi
 
   if ! tar -xJf "$work/$tarball" -C "$work"; then
     warn "failed to extract ${tarball}"
+    return 1
+  fi
+}
+
+install_node() {
+  local version="$1" node_dir="$2"
+  local platform base
+  platform="$(node_platform)" || return 1
+  base="$(dirname "$node_dir")"
+
+  if is_dry_run; then
+    local dist_base="https://nodejs.org/dist/v${version}" tarball="node-v${version}-${platform}.tar.xz"
+    echo "[dry-run] curl -fsSL ${dist_base}/${tarball}"
+    echo "[dry-run] curl -fsSL ${dist_base}/SHASUMS256.txt"
+    echo "[dry-run] verify sha256 of ${tarball} against SHASUMS256.txt"
+    echo "[dry-run] tar -xJf ${tarball} -> ${node_dir}"
+    echo "[dry-run] if nodejs.org fails: curl -fsSL ${NPM_REGISTRY}/node-${platform}/${version} (dist.integrity / dist.tarball)"
+    echo "[dry-run]   curl -fsSL <dist.tarball>, verify sha512 against dist.integrity, tar -xzf -> ${node_dir}"
+    return 0
+  fi
+
+  mkdir -p "$base" || { warn "failed to create ${base}"; return 1; }
+  # 一時ディレクトリは展開先と同じ場所に作る。最後の mv を同一ファイルシステム内の rename にして、
+  # 一瞬で完了させる（別ファイルシステムだとコピーになり、途中で止まると中途半端なディレクトリが残る）。
+  local work
+  work="$(mktemp -d "$base/.node-download.XXXXXX")" || { warn "mktemp failed in ${base}"; return 1; }
+
+  local extracted
+  if fetch_node_from_nodejs_org "$version" "$platform" "$work"; then
+    extracted="$work/node-v${version}-${platform}"
+  else
+    warn "falling back to the npm registry (node-${platform}@${version})"
+    if ! fetch_registry_package "node-${platform}" "$version" "$work/registry" 60; then
+      rm -rf "$work"
+      return 1
+    fi
+    # node-linux-<arch> の package/ は bin/node・include・share などの公式配布物と同じ構成（npm は無い）。
+    extracted="$work/registry/package"
+  fi
+  if [ ! -x "$extracted/bin/node" ]; then
+    warn "bin/node not found in the downloaded Node.js"
     rm -rf "$work"
     return 1
   fi
@@ -177,13 +291,13 @@ install_node() {
   #   $node_dir が残ると、次回「インストール済み」と誤判定して壊れた Node を使い続けてしまうため。
   # ここに来るのは $node_dir/bin/node が無いとき（find_installed_node_dir で見つからなかった）なので、
   #   $node_dir が残っていれば壊れたインストールとみなして消す。消さずに mv すると $node_dir の中に
-  #   node-v<版>-<platform> が入れ子になり、bin/node が見つからないままになる。
+  #   展開したディレクトリが入れ子になり、bin/node が見つからないままになる。
   if [ -e "$node_dir" ] && ! rm -rf "$node_dir"; then
     warn "failed to remove broken ${node_dir}"
     rm -rf "$work"
     return 1
   fi
-  if ! mv "$work/node-v${version}-${platform}" "$node_dir"; then
+  if ! mv "$extracted" "$node_dir"; then
     warn "failed to move Node.js into ${node_dir}"
     rm -rf "$work"
     return 1
@@ -191,6 +305,16 @@ install_node() {
   rm -rf "$work"
 }
 
+# pnpm をレジストリの tarball から $node_dir/lib/node_modules/pnpm に入れ、$node_dir/bin/pnpm から実行できるようにする。
+# WHY 2 つのパッケージを取るか: pnpm 12 の本体は Rust のネイティブバイナリで、pnpm パッケージの package/pnpm は
+#   それに置き換えられる前提の placeholder にすぎない。バイナリは os/cpu 別の @pnpm/exe.<platform> パッケージにあり、
+#   `npm install -g pnpm` では optionalDependencies として一緒に入り、preinstall（install.js）が placeholder を
+#   バイナリで置き換える（pnpm@12.7.0 の install.js / native-binary.mjs で確認）。ここでも同じ最終形を作る。
+#   pnpm パッケージだけを置くと、初回実行時に bin/pnpm.mjs がバイナリを自分でダウンロードしに行く。その通信は
+#   このスクリプトのタイムアウトや検証の外になるので、2 つとも自分で取得・検証する。
+# WHY pnpm パッケージも置くか（バイナリだけにしない）: ネイティブバイナリは同梱の dist/（node-gyp）を自分の隣から
+#   探す（bin/pnpm.mjs のコメント）。pn / pnpx / pnx の sh スクリプトも隣の pnpm を実行する。
+# libc は glibc 前提（クラウド VM は Ubuntu）。musl 用の @pnpm/exe.<platform>-musl は扱わない。
 install_pnpm() {
   local version="$1" node_dir="$2"
 
@@ -199,17 +323,58 @@ install_pnpm() {
     return 0
   fi
 
-  # WHY --prefix を明示する: npm のグローバル先は既定ではその Node の配下だが、環境変数や .npmrc の prefix で
-  #   変えられる。クラウド VM に何が設定されているかは未確認なので、確実に $node_dir/bin/pnpm に入るよう固定する。
+  local platform
+  platform="$(node_platform)" || return 1
+  local exe_name="@pnpm/exe.${platform}"
+  local modules="$node_dir/lib/node_modules"
+
   if is_dry_run; then
-    echo "[dry-run] npm install -g pnpm@${version} --prefix ${node_dir}"
+    echo "[dry-run] curl -fsSL ${NPM_REGISTRY}/pnpm/${version} (dist.integrity / dist.tarball)"
+    echo "[dry-run] curl -fsSL ${NPM_REGISTRY}/${exe_name}/${version} (dist.integrity / dist.tarball)"
+    echo "[dry-run]   curl -fsSL <dist.tarball> for each, verify sha512 against dist.integrity, tar -xzf"
+    echo "[dry-run] place pnpm -> ${modules}/pnpm (native binary from ${exe_name} replaces the placeholder)"
+    echo "[dry-run] ln -s ../lib/node_modules/pnpm/pnpm ${node_dir}/bin/pnpm"
     return 0
   fi
 
-  if ! npm install -g "pnpm@${version}" --prefix "$node_dir" >&2; then
+  mkdir -p "$modules" "$node_dir/bin" || { warn "failed to create ${modules}"; return 1; }
+  # Node と同じく、置き場所と同じディレクトリに一時ディレクトリを作り、最後に rename で差し替える。
+  local work
+  work="$(mktemp -d "$modules/.pnpm-download.XXXXXX")" || { warn "mktemp failed in ${modules}"; return 1; }
+
+  if ! fetch_registry_package pnpm "$version" "$work/pnpm" 20 \
+    || ! fetch_registry_package "$exe_name" "$version" "$work/exe" 60; then
     warn "failed to install pnpm@${version}"
+    rm -rf "$work"
     return 1
   fi
+  if ! mv -f "$work/exe/package/pnpm" "$work/pnpm/package/pnpm"; then
+    warn "failed to install pnpm@${version} (could not place the native binary)"
+    rm -rf "$work"
+    return 1
+  fi
+  # 別の版や壊れた pnpm が残っていれば消してから置く（残したまま mv すると中に入れ子になるため）。
+  if [ -e "$modules/pnpm" ] && ! rm -rf "$modules/pnpm"; then
+    warn "failed to install pnpm@${version} (could not remove ${modules}/pnpm)"
+    rm -rf "$work"
+    return 1
+  fi
+  if ! mv "$work/pnpm/package" "$modules/pnpm"; then
+    warn "failed to install pnpm@${version} (could not move it into ${modules})"
+    rm -rf "$work"
+    return 1
+  fi
+  rm -rf "$work"
+
+  # npm の global install と同じく、bin には相対 symlink を置く（node_dir ごと移しても壊れない）。
+  local bin_name
+  for bin_name in pnpm pnpx pn pnx; do
+    [ -e "$modules/pnpm/$bin_name" ] || continue
+    if ! ln -sfn "../lib/node_modules/pnpm/${bin_name}" "$node_dir/bin/${bin_name}"; then
+      warn "failed to install pnpm@${version} (could not link bin/${bin_name})"
+      return 1
+    fi
+  done
 }
 
 # Node が無ければ入れる。使える Node が用意できなければ失敗する（DRY_RUN では入れたものとして成功する）。
@@ -223,8 +388,9 @@ ensure_node() {
     install_node "$node_version" "$NODE_DIR" || return 1
   fi
 
-  # この後の npm / pnpm を、入れた Node で動かす。npm・pnpm のシバンは `#!/usr/bin/env node` なので、
-  # PATH の先頭に置かないと VM 既定の Node 22 で動いてしまう。
+  # この後の pnpm install を、入れた Node と pnpm で動かす。pnpm 自体はネイティブバイナリだが、
+  # 依存のライフサイクルスクリプト（postinstall など）は PATH の node で動くので、PATH の先頭に置かないと
+  # VM 既定の Node 22 で動き、さらに VM 既定の pnpm が先に見つかってしまう。
   export PATH="$NODE_DIR/bin:$PATH"
 }
 
@@ -308,7 +474,12 @@ main() {
     echo "pnpm ${pnpm_version}"
     echo "node_dir ${installed:-$target}"
     if [ -n "$installed" ]; then echo "installed yes"; else echo "installed no"; fi
-    echo "node_url https://nodejs.org/dist/v${node_version}/node-v${node_version}-$(node_platform 2>/dev/null || echo unsupported).tar.xz"
+    local platform
+    platform="$(node_platform 2>/dev/null || echo unsupported)"
+    echo "node_url https://nodejs.org/dist/v${node_version}/node-v${node_version}-${platform}.tar.xz"
+    echo "node_registry_url ${NPM_REGISTRY}/node-${platform}/${node_version}"
+    echo "pnpm_registry_url ${NPM_REGISTRY}/pnpm/${pnpm_version}"
+    echo "pnpm_exe_registry_url ${NPM_REGISTRY}/@pnpm/exe.${platform}/${pnpm_version}"
     echo "pnpm_bin ${installed:-$target}/bin/pnpm"
     return 0
   fi
