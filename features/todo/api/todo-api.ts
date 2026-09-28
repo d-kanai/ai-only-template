@@ -30,11 +30,16 @@ export type {
   UpdateTodoResponse,
 };
 
-const BASE_PATH = "/api/todos";
+// 一覧・作成の URL。
+// WHY 関数の中に置く（モジュールの最上位の定数にしない）: 最上位の式は読み込み時にだけ評価される static な変異になり、
+//   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に評価すれば、変異をテストで検出できる（Issue #55）。
+function todosPath(): string {
+  return "/api/todos";
+}
 
 // id はユーザー入力由来の URL（/todo/[id]）から来るため、"/" や "?" を含んでも別のパスやクエリにならないようエンコードする。
 function todoPath(id: string): string {
-  return `${BASE_PATH}/${encodeURIComponent(id)}`;
+  return `${todosPath()}/${encodeURIComponent(id)}`;
 }
 
 // 本文を送るときだけ Content-Type を付ける。GET / DELETE には本文がないため不要。
@@ -84,7 +89,7 @@ async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
 }
 
 export function listTodos(): Promise<ListTodosResponse> {
-  return requestJson(BASE_PATH, { method: "GET" });
+  return requestJson(todosPath(), { method: "GET" });
 }
 
 export function getTodo(id: string): Promise<GetTodoResponse> {
@@ -94,7 +99,7 @@ export function getTodo(id: string): Promise<GetTodoResponse> {
 export function createTodo(
   request: CreateTodoRequest,
 ): Promise<CreateTodoResponse> {
-  return requestJson(BASE_PATH, jsonInit("POST", request));
+  return requestJson(todosPath(), jsonInit("POST", request));
 }
 
 export function updateTodo(

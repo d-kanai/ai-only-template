@@ -19,7 +19,11 @@ import { env } from "@/backend/shared/infra/env";
 //   Vitest の実行の最初に globalSetup（vitest.global-setup.ts）が cleanupTestSchemas で消す。
 
 // createTestDatabase が作るスキーマの名前の接頭辞。cleanupTestSchemas はこれで始まるスキーマを消す。
-export const TEST_SCHEMA_PREFIX = "test_";
+// WHY 関数の中に置く（モジュールの最上位の定数にしない）: 最上位の式は読み込み時にだけ評価される static な変異になり、
+//   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に評価すれば、変異をテストで検出できる（Issue #55）。
+export function testSchemaPrefix(): string {
+  return "test_";
+}
 
 export type TestDatabase = {
   // テスト用のスキーマを search_path にした接続の db。
@@ -35,7 +39,7 @@ export type TestDatabase = {
 // 接続先は env の DATABASE_URL（アプリと同じ。.env / 環境変数から env.ts が読んで検証した値で、既定値は無い）。
 export async function createTestDatabase(): Promise<TestDatabase> {
   const url = env.DATABASE_URL;
-  const schema = `${TEST_SCHEMA_PREFIX}${randomUUID().replaceAll("-", "")}`;
+  const schema = `${testSchemaPrefix()}${randomUUID().replaceAll("-", "")}`;
   // max 4: DrizzleTransactionRunner のテストが「トランザクションの中」と「外」の 2 本を同時に使うため、2 以上にする。
   // options: 接続の開始時に Postgres に渡す設定（node-postgres の options）。search_path をテスト用のスキーマだけにする。
   const pool = new Pool({
@@ -70,7 +74,7 @@ export type CleanupOptions = {
 };
 
 // prefix で始まるスキーマを中の表ごとすべて消し、消した名前を返す。Postgres に接続できなければ、起動を促すエラーにする。
-// vitest.global-setup.ts が Vitest の実行の最初（テストファイルを動かす前）に TEST_SCHEMA_PREFIX で呼ぶ。
+// vitest.global-setup.ts が Vitest の実行の最初（テストファイルを動かす前）に testSchemaPrefix() で呼ぶ。
 // WHY LIKE ではなく starts_with で探す: LIKE の "_" は任意の 1 文字に一致するので、'test_%' は "testX..." のような
 //   テスト用でないスキーマにも一致してしまう。
 // WHY Stryker の worker の中（STRYKER_MUTATOR_WORKER。Stryker が子プロセスに渡す環境変数。@stryker-mutator/core 10.0.0 の

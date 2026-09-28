@@ -172,7 +172,7 @@ describe("PostgresTodoRepository", () => {
         await new PostgresTodoRepository(tx).save(todo);
         throw new Error("rollback させる");
       }),
-    ).rejects.toThrow("rollback させる");
+    ).rejects.toEqual(new Error("rollback させる"));
 
     await expect(repository().findAll()).resolves.toEqual([]);
   });

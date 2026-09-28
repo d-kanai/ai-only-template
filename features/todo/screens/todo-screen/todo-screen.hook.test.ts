@@ -1,5 +1,11 @@
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { StrictMode } from "react";
+import {
+  act,
+  cleanup,
+  render,
+  renderHook,
+  waitFor,
+} from "@testing-library/react";
+import { Activity, createElement, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   createTodo,
@@ -87,6 +93,35 @@ describe("初回の読み込み", () => {
 
     expect(result.current.todos).toEqual([milk]);
     expect(result.current.isLoading).toBe(false);
+  });
+
+  // Next 16 は cacheComponents を有効にすると、画面遷移で前のページを unmount せずに React の <Activity> で隠す
+  // （Next.js 16.3.6 同梱ドキュメント node_modules/next/dist/docs/01-app/02-guides/preserving-ui-state.md）。
+  // 隠すときは effect の片付けが走り、隠れている間に届いた応答の state 更新も反映される（unmount と違って捨てられない）。
+  // 片付けで送信中の GET を古い扱いにしないと、隠れている間に届いた古い一覧が、再表示後に一瞬表示されてしまう。
+  test("Activity で隠れている間に届いた GET の応答は反映せず、再表示したときに取り直す", async () => {
+    const firstResponse = deferred<ListResponse>();
+    vi.mocked(listTodos)
+      .mockReturnValueOnce(firstResponse.promise)
+      // 再表示で送り直す GET は返さずにおき、読み込み中のままであることを見る。
+      .mockReturnValueOnce(deferred<ListResponse>().promise);
+    let latest: ReturnType<typeof useTodoScreen> | undefined;
+    function Probe() {
+      latest = useTodoScreen();
+      return null;
+    }
+    // テストファイルは .ts（hook のテストの命名）なので JSX を使わず createElement で組み立てる。
+    const withActivity = (mode: "visible" | "hidden") =>
+      createElement(Activity, { mode }, createElement(Probe));
+    const view = render(withActivity("visible"));
+
+    view.rerender(withActivity("hidden"));
+    await act(async () => firstResponse.resolve({ todos: [milk] }));
+    view.rerender(withActivity("visible"));
+
+    await waitFor(() => expect(listTodos).toHaveBeenCalledTimes(2));
+    expect(latest?.todos).toEqual([]);
+    expect(latest?.isLoading).toBe(true);
   });
 
   test("StrictMode で先に送った GET が先に返っても、後に送った GET が返るまで読み込み中のまま", async () => {

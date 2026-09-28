@@ -7,7 +7,7 @@ import { describe, expect, test, vi } from "vitest";
 import {
   cleanupTestSchemas,
   createTestDatabase,
-  TEST_SCHEMA_PREFIX,
+  testSchemaPrefix,
 } from "@/backend/shared/infra/database.test-support";
 import { env } from "@/backend/shared/infra/env";
 
@@ -112,11 +112,11 @@ describe("cleanupTestSchemas", () => {
   // test_ で始めておく: テストが途中で失敗して残っても、次の実行の globalSetup が消す。
   //   "test_cleanup_" の "l" は 16 進に無い文字なので、createTestDatabase のスキーマ（test_<16 進 32 桁>）とは重ならない。
   function uniquePrefix(): string {
-    return `${TEST_SCHEMA_PREFIX}cleanup_${randomUUID().replaceAll("-", "")}_`;
+    return `${testSchemaPrefix()}cleanup_${randomUUID().replaceAll("-", "")}_`;
   }
 
   test("createTestDatabase が作るスキーマの接頭辞は test_", () => {
-    expect(TEST_SCHEMA_PREFIX).toBe("test_");
+    expect(testSchemaPrefix()).toBe("test_");
   });
 
   test("接頭辞で始まるスキーマを、中の表ごとすべて消し、消した名前を返す", async () => {
