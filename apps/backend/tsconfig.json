@@ -1,0 +1,27 @@
+// apps/backend の tsconfig（Issue #68）。backend 単体の型チェック（pnpm exec tsc -p apps/backend --noEmit）に使う。
+// WHY frontend と分ける: backend は Next / React に依存しない pure な TypeScript にする（後で別プロセスに分けやすくする）。
+//   Next の plugin・jsx・DOM の型（lib の dom）を入れず、ブラウザや React の API を使うと型エラーになるようにする。
+//   DOM の型が無いので、Request / Response などは @types/node の型になる（Response#json() は unknown を返す）。
+// WHY paths を持たない: backend の中の import は相対パスだけにする（architecture.test.ts の backend-relative-only）。
+//   "@/" は Next（Turbopack）が frontend の tsconfig の paths で解決してしまい、backend のファイルでは使えない。
+// frontend から import された backend のファイルは、Next のビルドでは apps/frontend/tsconfig.json の設定で型チェックされる。
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    // types: @types/node だけを読む（@types/react など、リポジトリ直下の node_modules/@types にある他の型を入れない）。
+    "types": ["node"]
+  },
+  "include": ["**/*.ts", "**/*.mts"],
+  // exclude: drizzle/ は drizzle-kit が生成するマイグレーション（SQL と JSON）で TS を含まないが、念のため外す。
+  "exclude": ["node_modules", "drizzle"]
+}

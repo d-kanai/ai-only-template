@@ -21,34 +21,41 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 | コンテナ | [Docker Compose](https://docs.docker.com/compose/) | `compose.yaml` を手元・GitHub Actions・クラウドセッションの 3 環境で共通に使う。Podman（`podman compose`）でも同じファイルを使う想定 |
 | データベース | [PostgreSQL](https://www.postgresql.org/) | 18（`mirror.gcr.io/library/postgres:18-alpine`。Docker Hub の匿名 pull のレート制限を避けるためミラーから取る）。Todo の保存先（アプリは常に Postgres。InMemory のリポジトリはテスト用） |
 | ORM / マイグレーション | [Drizzle ORM](https://orm.drizzle.team/) + [drizzle-kit](https://orm.drizzle.team/docs/kit-overview) | スキーマを TypeScript で宣言し、`pnpm db:generate` で SQL を生成、`pnpm db:migrate` で当てる（`push` は使わない。`rules/code/architecture.md` の「永続化」） |
-| DB ドライバ | [node-postgres（pg）](https://node-postgres.com/) | 接続先とプールの設定は `.env` から読む（`backend/shared/infra/env.ts`。値は `.env.example`。本番用の値は Issue #58 で決める） |
+| DB ドライバ | [node-postgres（pg）](https://node-postgres.com/) | 接続先とプールの設定は `.env` から読む（`apps/backend/shared/infra/env.ts`。値は `.env.example`。本番用の値は Issue #58 で決める） |
 
 ツールのバージョンは `.tool-versions` が正（決め方と更新手順は `rules/code/env.md`）。npm パッケージのバージョンは `package.json` / `pnpm-lock.yaml` が正。pnpm のサプライチェーン保護設定は `pnpm-workspace.yaml` を参照。
 
 ## ディレクトリ構成
 
-機能（feature）単位で置く。`src/` は使わず、ルート直下に置く（例は Todo）。
+機能（feature）単位で置く。画面側（Next.js）を `apps/frontend/`、API 側（Next・React に依存しない TypeScript）を `apps/backend/` に分ける（Issue #68。プロセスは Next 1 つのまま）。`src/` は使わない（例は Todo）。
 
 ```
-app/                  # ルーティングだけ（page.tsx は screen を返すだけ、api/**/route.ts は backend の api ファイルの GET / POST などを re-export するだけ）
-features/todo/        # 画面側
-  screens/todo-screen/  # 一覧画面。todo-screen.tsx（見た目）+ todo-screen.hook.ts（状態・データ取得）+ テスト
-  screens/todo-detail-screen/  # 詳細画面（/todo/[id]）。構成は todo-screen/ と同じ
-  components/           # feature 内で画面をまたぐ部品（todo-item.tsx）
-  api/                  # /api/... を fetch する薄いラッパー（型は backend の api ファイルから import type）
-  index.ts              # 公開 API（外から import してよいのはここだけ）
-backend/todo/         # API 側（DDD 4 層）
-  presentation/         # 1 API = 1 ファイル（list-todos.api.ts など）。コンテナを受け取って handler を返す関数（listTodosApi(container)）、本番用の GET / POST など、リクエスト / レスポンスの型を export
-  application/          # 読むだけの query（list-todos.query.ts）と状態を変える command（create-todo.command.ts）
-  domain/               # Entity / Value Object / Repository の interface
-  infra/                # Repository の実装（Postgres / InMemory）、schema.ts（Drizzle のスキーマ）、container.ts（DI。command をトランザクションで包む）
-backend/shared/       # API 側で feature をまたぐ共通部品（domain/ に DomainError と TransactionRunner、presentation/ に HTTP ステータス変換と本文の読み取り、infra/ に環境変数の入口 env.ts と Postgres のプール、Drizzle のトランザクション）
-drizzle/              # 生成したマイグレーション（pnpm db:generate が作る。コミットする）
-shared/               # 画面側で feature をまたぐ共通部品（必要になったら作る）
+apps/
+  frontend/             # Next.js（next dev/build/start apps/frontend）
+    app/                # ルーティングだけ（page.tsx は screen を返すだけ、api/**/route.ts は backend の api ファイルの GET / POST などを re-export するだけ）
+    features/todo/      # 画面側
+      screens/todo-screen/  # 一覧画面。todo-screen.tsx（見た目）+ todo-screen.hook.ts（状態・データ取得）+ テスト
+      screens/todo-detail-screen/  # 詳細画面（/todo/[id]）。構成は todo-screen/ と同じ
+      components/         # feature 内で画面をまたぐ部品（todo-item.tsx）
+      api/                # /api/... を fetch する薄いラッパー（型は backend の api ファイルから import type）
+      index.ts            # 公開 API（外から import してよいのはここだけ）
+    shared/             # 画面側で feature をまたぐ共通部品（必要になったら作る）
+    instrumentation.ts  # 起動時の環境変数の検証（Next の規約ファイル）
+  backend/
+    todo/               # API 側（DDD 4 層）
+      presentation/       # 1 API = 1 ファイル（list-todos.api.ts など）。コンテナを受け取って handler を返す関数（listTodosApi(container)）、本番用の GET / POST など、リクエスト / レスポンスの型を export
+      application/        # 読むだけの query（list-todos.query.ts）と状態を変える command（create-todo.command.ts）
+      domain/             # Entity / Value Object / Repository の interface
+      infra/              # Repository の実装（Postgres / InMemory）、schema.ts（Drizzle のスキーマ）、container.ts（DI。command をトランザクションで包む）
+    shared/             # API 側で feature をまたぐ共通部品（domain/ に DomainError と TransactionRunner、presentation/ に HTTP ステータス変換と本文の読み取り、infra/ に環境変数の入口 env.ts と Postgres のプール、Drizzle のトランザクション）
+    drizzle/            # 生成したマイグレーション（pnpm db:generate が作る。コミットする）
+    drizzle.config.ts   # drizzle-kit の設定
+e2e/                    # Playwright の E2E
 ```
 
-- 画面は SSR を前提にせず、データは hook から `/api/...` を呼んで取る。サーバの処理はすべて `backend/` に置く。
-- 画面側からサーバ側へは、各 api ファイル（`backend/<feature>/presentation/<name>.api.ts`）の型を `import type` で参照するだけ。型で担保されるのはリクエスト / レスポンスの形で、URL・メソッド・実行時の JSON の形は担保されない。
+- 画面は SSR を前提にせず、データは hook から `/api/...` を呼んで取る。サーバの処理はすべて `apps/backend/` に置く。
+- frontend から backend へは `@repo/backend/<path>` で参照する（段階 1 の今は tsconfig の paths で `apps/backend/*` に解決）。参照してよいのは `app/api/**`（api ファイルの値）、`features/*/api/`（型だけ）、`instrumentation-node.ts`（`env.ts`）だけ。backend は frontend を参照せず、backend の中の import は相対パスだけにする（`architecture.test.ts` で検査）。
+- 画面側からサーバ側へは、各 api ファイル（`apps/backend/<feature>/presentation/<name>.api.ts`）の型を `import type` で参照するだけ。型で担保されるのはリクエスト / レスポンスの形で、URL・メソッド・実行時の JSON の形は担保されない。
 - テストは対象の隣に置く（`app/` には置かない）。
 
 詳細（依存の向き、命名、テストの置き方、採用しなかった案）は `rules/code/architecture.md` を参照。
@@ -69,18 +76,19 @@ asdf install
 cp .env.example .env
 ```
 
-- `.env` はコミットしない（`.gitignore` 済み）。変数はすべて必須で、コードに既定値は無い。`.env` が無い・変数が欠けていると、`pnpm dev` / `pnpm start` / `pnpm build` / `pnpm test` / `pnpm test:e2e` / `pnpm db:migrate` は欠けた変数の名前を出して起動時に止まる（非 0 で終わる。`pnpm dev` / `pnpm start` はルート直下の `instrumentation.ts` で検証する）。
+- `.env` はコミットしない（`.gitignore` 済み）。変数はすべて必須で、コードに既定値は無い。`.env` が無い・変数が欠けていると、`pnpm dev` / `pnpm start` / `pnpm build` / `pnpm test` / `pnpm test:e2e` / `pnpm db:migrate` は欠けた変数の名前を出して起動時に止まる（非 0 で終わる。`pnpm dev` / `pnpm start` は `apps/frontend/instrumentation.ts` で検証する）。
 - コマンドの前に付けた環境変数（`DATABASE_URL=... pnpm db:migrate`）は `.env` より優先される。
-- 仕組み（`backend/shared/infra/env.ts` への一元化、`process.env` の直参照の禁止）は `rules/code/env.md` の「環境変数」を参照。
+- `.env` はリポジトリ直下に 1 つだけ置く（`apps/frontend/` などには置かない）。
+- 仕組み（`apps/backend/shared/infra/env.ts` への一元化、`process.env` の直参照の禁止）は `rules/code/env.md` の「環境変数」を参照。
 
 開発用の PostgreSQL は Docker Compose（`compose.yaml`）で起動する。
 
 ```sh
 pnpm db:up       # Postgres を起動し、healthcheck が通るまで待つ（docker compose up -d --wait）
-pnpm db:migrate  # drizzle/ のマイグレーションを当てる（drizzle-kit migrate。当て済みのものは飛ばす）
+pnpm db:migrate  # apps/backend/drizzle/ のマイグレーションを当てる（drizzle-kit migrate。当て済みのものは飛ばす）
 pnpm db:psql     # psql で接続する（docker compose exec db psql -U app -d app）
 pnpm db:down     # 止める（データは名前付きボリューム pgdata に残る。消すときは docker compose down -v）
-pnpm db:generate # backend/**/infra/schema.ts を変えたら、差分の SQL を drizzle/ に生成する（drizzle-kit generate。DB には接続しない）
+pnpm db:generate # apps/backend/*/infra/schema.ts を変えたら、差分の SQL を apps/backend/drizzle/ に生成する（drizzle-kit generate。DB には接続しない）
 ```
 
 - 接続先は `.env` の `DATABASE_URL`（`.env.example` の値は `postgresql://app:app@localhost:5432/app`。開発用の固定値で秘密ではない）。アプリは常に Postgres を使うので、`pnpm dev` の前にも `pnpm db:up` と `pnpm db:migrate` が要る。
@@ -94,6 +102,7 @@ Claude Code のクラウドセッション（asdf が無い環境）では、`sc
 ```sh
 pnpm install   # 依存をインストール
 pnpm dev       # 開発サーバを起動（http://localhost:3000）
+pnpm typecheck # 型チェック（リポジトリ全体と apps/backend の tsconfig。next build は frontend から import したファイルしか見ないため）
 pnpm test      # 単体テストを実行し、カバレッジ 100% 未満なら失敗（Vitest。詳細は rules/code/architecture.md）
 pnpm test:unit # 単体テストだけを実行（カバレッジを計測しない。速く回したいとき）
 pnpm test:e2e  # E2E テストを実行（Playwright。本番ビルドを Postgres に接続して起動し、ブラウザで操作する。詳細は rules/code/architecture.md）

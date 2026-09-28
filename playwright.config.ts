@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { env, toolEnv } from "./backend/shared/infra/env";
+import { env, toolEnv } from "./apps/backend/shared/infra/env";
 
 // Playwright（E2E テスト）の設定。最小構成で、Chromium だけで e2e/ のテストを実行する。
 // 実行: pnpm test:e2e（= playwright test）。Next の本番ビルドを webServer で起動し、ブラウザから画面を操作する。

@@ -3,21 +3,22 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "dev": "next dev apps/frontend",
+    "build": "next build apps/frontend",
+    "start": "next start apps/frontend",
     "test": "vitest run --coverage",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
     "test:mutation": "stryker run",
     "lint": "biome check --error-on-warnings .",
+    "typecheck": "tsc -p . --noEmit && tsc -p apps/backend --noEmit",
     "format": "biome format --write .",
     "check": "biome check --write --error-on-warnings .",
     "db:up": "docker compose up -d --wait",
     "db:down": "docker compose down",
     "db:psql": "docker compose exec db psql -U app -d app",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:generate": "drizzle-kit generate --config apps/backend/drizzle.config.ts",
+    "db:migrate": "drizzle-kit migrate --config apps/backend/drizzle.config.ts"
   },
   "dependencies": {
     "drizzle-orm": "0.45.3",
