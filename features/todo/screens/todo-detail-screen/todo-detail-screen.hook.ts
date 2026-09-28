@@ -53,6 +53,8 @@ export function useTodoDetailScreen(todoId: string) {
     // 遷移や unmount の後に、前の todoId の遅れたレスポンスで state を書き換えないようにする。
     return () => {
       ignore = true;
+      // 世代は「呼び出し時と違うか」だけを見るので、進める向き（+= / -=）は問わない。
+      // Stryker disable next-line AssignmentOperator: -= にしても毎回別の値になり、判定が変わらない（等価な変異。Issue #55）
       todoGenerationRef.current += 1;
     };
   }, [todoId]);

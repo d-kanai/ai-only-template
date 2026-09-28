@@ -1,6 +1,6 @@
 import {
   cleanupTestSchemas,
-  TEST_SCHEMA_PREFIX,
+  testSchemaPrefix,
 } from "./backend/shared/infra/database.test-support";
 import { env, toolEnv } from "./backend/shared/infra/env";
 
@@ -18,6 +18,6 @@ export default async function setup(): Promise<void> {
       databaseUrl: env.DATABASE_URL,
       insideStrykerWorker: toolEnv.STRYKER_MUTATOR_WORKER,
     },
-    TEST_SCHEMA_PREFIX,
+    testSchemaPrefix(),
   );
 }

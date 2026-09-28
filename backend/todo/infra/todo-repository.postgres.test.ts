@@ -142,6 +142,18 @@ describe("PostgresTodoRepository", () => {
     await expect(repository().findById(`${todo.id}x`)).resolves.toBeUndefined();
   });
 
+  // Postgres の uuid 型は大文字の 16 進も同じ値として受け付けるので、形の検査でも大文字を弾かない（/i）。
+  test("大文字で書いた uuid でも、同じ Todo を取り出せて削除できる", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await repository().save(todo);
+
+    await expect(repository().findById(todo.id.toUpperCase())).resolves.toEqual(
+      todo,
+    );
+    await repository().delete(todo.id.toUpperCase());
+    await expect(repository().findById(todo.id)).resolves.toBeUndefined();
+  });
+
   test("delete すると取り出せなくなり、他の Todo は残る", async () => {
     const removed = Todo.create("牛乳を買う");
     const kept = Todo.create("卵を買う");
@@ -172,7 +184,7 @@ describe("PostgresTodoRepository", () => {
         await new PostgresTodoRepository(tx).save(todo);
         throw new Error("rollback させる");
       }),
-    ).rejects.toThrow("rollback させる");
+    ).rejects.toEqual(new Error("rollback させる"));
 
     await expect(repository().findAll()).resolves.toEqual([]);
   });

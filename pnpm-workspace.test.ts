@@ -414,9 +414,14 @@ describe("設定の読み取りと判定（must reject）", () => {
   });
 
   it("トップレベルのキーが重複していると例外にする", () => {
+    // WHY toThrow(Error) と message の両方: toThrow("文字列") は throw undefined でも通る（rules/code/test.md）。
     expect(() =>
       readTopLevelSettings(`${VALID_YAML}minimumReleaseAge: 1440\n`),
-    ).toThrow("minimumReleaseAge");
+    ).toThrow(
+      expect.objectContaining({
+        message: expect.stringContaining("minimumReleaseAge"),
+      }),
+    );
   });
 });
 

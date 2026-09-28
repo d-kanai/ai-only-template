@@ -43,25 +43,41 @@ describe("POST /api/todos", () => {
     });
   });
 
+  // message は画面に出る（クライアントとの契約）ので、どの誤りかが分かる文言まで検証する。
   test.each([
-    ["JSON でない", "{title:"],
-    ["オブジェクトでない", '["牛乳を買う"]'],
-    ["title が無い", "{}"],
-    ["title が文字列でない", JSON.stringify({ title: 1 })],
-    ["title が空", JSON.stringify({ title: "" })],
-    ["title が空白だけ", JSON.stringify({ title: "  " })],
-    ["title が 101 文字", JSON.stringify({ title: "a".repeat(101) })],
+    ["JSON でない", "{title:", "リクエスト本文が JSON ではありません"],
+    [
+      "オブジェクトでない",
+      '["牛乳を買う"]',
+      "リクエスト本文は JSON のオブジェクトで指定してください",
+    ],
+    ["title が無い", "{}", "title は文字列で指定してください"],
+    [
+      "title が文字列でない",
+      JSON.stringify({ title: 1 }),
+      "title は文字列で指定してください",
+    ],
+    ["title が空", JSON.stringify({ title: "" }), "タイトルを入力してください"],
+    [
+      "title が空白だけ",
+      JSON.stringify({ title: "  " }),
+      "タイトルを入力してください",
+    ],
+    [
+      "title が 101 文字",
+      JSON.stringify({ title: "a".repeat(101) }),
+      "タイトルは 100 文字以内で入力してください",
+    ],
   ])(
-    "%s なら 400 と validation_error を返し、何も保存しない",
-    async (_label, body) => {
+    "%s なら 400 と validation_error を、理由の message 付きで返し、何も保存しない",
+    async (_label, body, message) => {
       const { container, POST } = setup();
 
       const response = await POST(postRequest(body));
 
       expect(response.status).toBe(400);
       const error: ErrorResponse = await response.json();
-      expect(error.error.code).toBe("validation_error");
-      expect(error.error.message).toEqual(expect.any(String));
+      expect(error.error).toEqual({ code: "validation_error", message });
       await expect(container.listTodos.execute()).resolves.toEqual([]);
     },
   );

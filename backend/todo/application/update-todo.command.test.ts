@@ -46,12 +46,15 @@ describe("UpdateTodoCommand", () => {
     expect(updated).toMatchObject({ title: "卵を買う", completed: true });
   });
 
-  test("無い id なら DomainError(not_found) を投げる", async () => {
+  test("無い id なら、その id を示す message 付きの DomainError(not_found) を投げる", async () => {
     const { command } = await setup();
 
     await expect(
       command.execute({ id: "missing", completed: true }),
-    ).rejects.toMatchObject({ code: "not_found" });
+    ).rejects.toMatchObject({
+      code: "not_found",
+      message: "Todo（id: missing）が見つかりません",
+    });
   });
 
   test("title が不変条件を満たさなければ validation_error を投げ、保存済みの Todo は変わらない", async () => {

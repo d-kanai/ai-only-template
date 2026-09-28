@@ -32,34 +32,51 @@ export function useTodoScreen() {
   // 後から別の GET を送っていた（この応答が古い）場合は、成功も失敗も反映せず true を返す。
   // 表示は新しい GET の結果に任せ、この取得の失敗を「操作の失敗」として扱わない（追加の入力を残す判断などに使うため）。
   // 成功したら前の操作のエラー表示は古い情報なので消す。
-  const reloadTodos = useCallback(async (): Promise<boolean> => {
-    latestListRequestRef.current += 1;
-    const requestId = latestListRequestRef.current;
-    const isStale = () => requestId !== latestListRequestRef.current;
-    try {
-      const response = await listTodos();
-      if (isStale()) return true;
-      setTodos(response.todos);
-      setError(null);
-      return true;
-    } catch (reason) {
-      if (isStale()) return true;
-      setError(toMessage(reason));
-      return false;
-    } finally {
-      // 初回が遅れている間に再取得が先に終わった場合も、一覧は表示できているので読み込み中を解く。
-      if (!isStale()) setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void reloadTodos();
-    // unmount 後（StrictMode の二重実行や画面遷移）に遅れて返った結果で state を書き換えないよう、
-    // 連番を進めて送信中の GET をすべて古い扱いにする。
-    return () => {
+  //
+  // mutation testing（Stryker）で、reloadTodos・effect・mutateAndReload・toggleTodo・removeTodo の依存配列の変異
+  // （ArrayDeclaration）は、それぞれの依存配列の行だけ数えない（disable next-line）。
+  // WHY: reloadTodos は依存が無い useCallback なので作り直されず、それを依存に持つ effect・mutateAndReload（と、
+  //   mutateAndReload を依存に持つ toggleTodo・removeTodo）も作り直されない。依存配列を [] や別の定数に変えても
+  //   挙動が変わらない（等価な変異。Issue #55）。依存配列の直前にコメントを置くため、配列を別の行に書いている。
+  const reloadTodos = useCallback(
+    async (): Promise<boolean> => {
       latestListRequestRef.current += 1;
-    };
-  }, [reloadTodos]);
+      const requestId = latestListRequestRef.current;
+      const isStale = () => requestId !== latestListRequestRef.current;
+      try {
+        const response = await listTodos();
+        if (isStale()) return true;
+        setTodos(response.todos);
+        setError(null);
+        return true;
+      } catch (reason) {
+        if (isStale()) return true;
+        setError(toMessage(reason));
+        return false;
+      } finally {
+        // 初回が遅れている間に再取得が先に終わった場合も、一覧は表示できているので読み込み中を解く。
+        if (!isStale()) setIsLoading(false);
+      }
+    },
+    // Stryker disable next-line ArrayDeclaration: 依存の無い useCallback は、依存配列を別の定数にしても同じ（等価な変異）
+    [],
+  );
+
+  useEffect(
+    () => {
+      void reloadTodos();
+      // unmount 後（StrictMode の二重実行や画面遷移）に遅れて返った結果で state を書き換えないよう、
+      // 連番を進めて送信中の GET をすべて古い扱いにする。
+      // Next 16 の cacheComponents を有効にすると、画面遷移で前のページが unmount されず <Activity> で隠される
+      // （Next.js 16.3.6 同梱ドキュメント 02-guides/preserving-ui-state.md）。隠すときもこの片付けが走り、隠れている間の
+      // state 更新は反映されるので、ここで古い扱いにしないと、隠れている間に届いた古い一覧が再表示後に出てしまう。
+      return () => {
+        latestListRequestRef.current += 1;
+      };
+    },
+    // Stryker disable next-line ArrayDeclaration: reloadTodos は作り直されないので [] でも同じ（等価な変異）
+    [reloadTodos],
+  );
 
   // 変更系の操作の共通処理。操作の後は一覧を取り直す。
   // 変更のレスポンスで手元の一覧を書き換えることもできるが、並び順や他の変更の反映まで画面側で再現することになる。
@@ -74,6 +91,7 @@ export function useTodoScreen() {
       }
       return reloadTodos();
     },
+    // Stryker disable next-line ArrayDeclaration: reloadTodos は作り直されないので [] でも同じ（等価な変異）
     [reloadTodos],
   );
 
@@ -90,6 +108,7 @@ export function useTodoScreen() {
     async (id: string, completed: boolean) => {
       await mutateAndReload(() => updateTodo(id, { completed }));
     },
+    // Stryker disable next-line ArrayDeclaration: mutateAndReload は作り直されないので [] でも同じ（等価な変異。Issue #55）
     [mutateAndReload],
   );
 
@@ -97,6 +116,7 @@ export function useTodoScreen() {
     async (id: string) => {
       await mutateAndReload(() => deleteTodo(id));
     },
+    // Stryker disable next-line ArrayDeclaration: mutateAndReload は作り直されないので [] でも同じ（等価な変異。Issue #55）
     [mutateAndReload],
   );
 

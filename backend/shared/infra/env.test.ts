@@ -268,8 +268,11 @@ describe("env / toolEnv（モジュールを読み込んだ時点の値）", () 
     vi.stubEnv("DATABASE_POOL_MAX", "abc");
     vi.resetModules();
 
-    await expect(import("@/backend/shared/infra/env")).rejects.toThrow(
-      "DATABASE_POOL_MAX",
-    );
+    // rejects.toThrow("文字列") は reject された値が undefined でも通るので、Error であることと message を別に確かめる（rules/code/test.md）。
+    const loading = import("@/backend/shared/infra/env");
+    await expect(loading).rejects.toBeInstanceOf(Error);
+    await expect(loading).rejects.toMatchObject({
+      message: expect.stringContaining("DATABASE_POOL_MAX"),
+    });
   });
 });

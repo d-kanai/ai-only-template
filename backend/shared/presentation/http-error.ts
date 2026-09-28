@@ -26,10 +26,15 @@ export class InvalidRequestError extends Error {
 
 // WHY Record<DomainErrorCode, number> にする: DomainErrorCode に種類を足したとき、
 //   ここに対応するステータスを書き忘れると型エラーになり、変換漏れ（= 500 になる）を防げる。
-const statusByDomainErrorCode: Record<DomainErrorCode, number> = {
-  validation_error: 400,
-  not_found: 404,
-};
+// WHY 関数の中に置く（モジュールの最上位の定数にしない）: 最上位の式は読み込み時にだけ評価される static な変異になり、
+//   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に評価すれば、変異をテストで検出できる（Issue #55）。
+function statusOf(code: DomainErrorCode): number {
+  const statusByDomainErrorCode: Record<DomainErrorCode, number> = {
+    validation_error: 400,
+    not_found: 404,
+  };
+  return statusByDomainErrorCode[code];
+}
 
 function errorResponse(
   status: number,
@@ -43,11 +48,7 @@ function errorResponse(
 // presentation 層の各 API が catch した例外を Response に変換する。変換の規則をここ 1 か所に集める。
 export function toErrorResponse(error: unknown): Response {
   if (error instanceof DomainError) {
-    return errorResponse(
-      statusByDomainErrorCode[error.code],
-      error.code,
-      error.message,
-    );
+    return errorResponse(statusOf(error.code), error.code, error.message);
   }
   if (error instanceof InvalidRequestError) {
     return errorResponse(400, "validation_error", error.message);

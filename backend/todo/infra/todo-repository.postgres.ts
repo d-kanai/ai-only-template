@@ -5,7 +5,13 @@ import type { TodoRepository } from "@/backend/todo/domain/todo-repository";
 import { todos } from "@/backend/todo/infra/schema";
 
 // id が uuid の形か（8-4-4-4-12 の 16 進。大文字も Postgres は受け付ける）。
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// WHY 関数の中に置く（モジュールの最上位の定数にしない）: 最上位の式は読み込み時にだけ評価される static な変異になり、
+//   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に評価すれば、変異をテストで検出できる（Issue #55）。
+function isUuid(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    id,
+  );
+}
 
 type TodoRow = typeof todos.$inferSelect;
 
@@ -41,7 +47,7 @@ export class PostgresTodoRepository implements TodoRepository {
     // WHY uuid の形でない id は問い合わせずに「無い」とする: id 列は uuid 型で、形の違う値（URL の /api/todos/abc など）を
     //   渡すと Postgres が invalid input syntax のエラーを返し、API が 404 ではなく 500 になる。
     //   InMemory と同じく「その id の Todo は無い」として扱う。
-    if (!UUID.test(id)) {
+    if (!isUuid(id)) {
       return undefined;
     }
     const rows = await this.executor
@@ -72,7 +78,7 @@ export class PostgresTodoRepository implements TodoRepository {
 
   async delete(id: string): Promise<void> {
     // findById と同じ理由で、uuid の形でない id は DB に渡さない（その id の Todo は無いので、何もしない）。
-    if (!UUID.test(id)) {
+    if (!isUuid(id)) {
       return;
     }
     await this.executor.delete(todos).where(eq(todos.id, id));

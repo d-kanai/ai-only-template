@@ -18,9 +18,11 @@ describe("readJsonObject", () => {
     ).resolves.toEqual({ title: "牛乳を買う" });
   });
 
-  test("JSON として読めなければ InvalidRequestError を投げる", async () => {
-    await expect(readJsonObject(postRequest("{title:"))).rejects.toBeInstanceOf(
-      InvalidRequestError,
+  // message は API の ErrorResponse の message として画面に出る（クライアントとの契約）ので、文言まで検証する。
+  // toEqual は例外のクラスと message を比べる（別のクラスや別の文言なら失敗する）。
+  test("JSON として読めなければ、JSON でないことを伝える InvalidRequestError を投げる", async () => {
+    await expect(readJsonObject(postRequest("{title:"))).rejects.toEqual(
+      new InvalidRequestError("リクエスト本文が JSON ではありません"),
     );
   });
 
@@ -30,10 +32,12 @@ describe("readJsonObject", () => {
     ["文字列", '"title"'],
     ["数値", "1"],
   ])(
-    "JSON でもオブジェクトでない（%s）なら InvalidRequestError を投げる",
+    "JSON でもオブジェクトでない（%s）なら、オブジェクトで指定するよう伝える InvalidRequestError を投げる",
     async (_label, body) => {
-      await expect(readJsonObject(postRequest(body))).rejects.toBeInstanceOf(
-        InvalidRequestError,
+      await expect(readJsonObject(postRequest(body))).rejects.toEqual(
+        new InvalidRequestError(
+          "リクエスト本文は JSON のオブジェクトで指定してください",
+        ),
       );
     },
   );

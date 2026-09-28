@@ -141,7 +141,7 @@ describe("createInMemoryTodoContainer", () => {
 
     await expect(
       container.createTodo.execute({ title: "牛乳を買う" }),
-    ).rejects.toThrow("書き込みの後で失敗");
+    ).rejects.toEqual(new Error("書き込みの後で失敗"));
 
     await expect(repository.findAll()).resolves.toEqual([]);
   });
@@ -155,7 +155,7 @@ describe("createInMemoryTodoContainer", () => {
 
     await expect(
       container.updateTodo.execute({ id: todo.id, title: "卵を買う" }),
-    ).rejects.toThrow("書き込みの後で失敗");
+    ).rejects.toEqual(new Error("書き込みの後で失敗"));
 
     await expect(repository.findById(todo.id)).resolves.toEqual(todo);
   });
@@ -167,8 +167,8 @@ describe("createInMemoryTodoContainer", () => {
     failAfterWrite(repository);
     const container = createInMemoryTodoContainer(repository);
 
-    await expect(container.deleteTodo.execute(todo.id)).rejects.toThrow(
-      "書き込みの後で失敗",
+    await expect(container.deleteTodo.execute(todo.id)).rejects.toEqual(
+      new Error("書き込みの後で失敗"),
     );
 
     await expect(repository.findById(todo.id)).resolves.toEqual(todo);
@@ -233,7 +233,7 @@ describe("createPostgresTodoContainer", () => {
 
     await expect(
       container.createTodo.execute({ title: "rollback される作成" }),
-    ).rejects.toThrow("書き込みの後で失敗");
+    ).rejects.toEqual(new Error("書き込みの後で失敗"));
 
     vi.restoreAllMocks();
     await expect(container.listTodos.execute()).resolves.toEqual(before);
@@ -246,7 +246,7 @@ describe("createPostgresTodoContainer", () => {
 
     await expect(
       container.updateTodo.execute({ id: todo.id, title: "卵を買う" }),
-    ).rejects.toThrow("書き込みの後で失敗");
+    ).rejects.toEqual(new Error("書き込みの後で失敗"));
 
     vi.restoreAllMocks();
     await expect(container.getTodo.execute(todo.id)).resolves.toEqual(todo);
@@ -257,8 +257,8 @@ describe("createPostgresTodoContainer", () => {
     const todo = await container.createTodo.execute({ title: "牛乳を買う" });
     failAfterWrite();
 
-    await expect(container.deleteTodo.execute(todo.id)).rejects.toThrow(
-      "書き込みの後で失敗",
+    await expect(container.deleteTodo.execute(todo.id)).rejects.toEqual(
+      new Error("書き込みの後で失敗"),
     );
 
     vi.restoreAllMocks();

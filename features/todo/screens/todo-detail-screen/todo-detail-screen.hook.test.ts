@@ -49,6 +49,24 @@ async function renderLoaded(todoId = "todo-1") {
 }
 
 describe("初回の読み込み", () => {
+  // 最初の描画（effect が動く前）の値も見るため、描画のたびに戻り値を記録する。
+  // WHY: 最初の描画で isLoading が false だと、取得前の一瞬だけ「読み込み中」ではない画面（Todo の無い画面）が出る。
+  test("最初の描画から読み込み中で、編集中の title は空", async () => {
+    const todoResponse = deferred<typeof milk>();
+    vi.mocked(getTodo).mockReturnValue(todoResponse.promise);
+    const renders: { isLoading: boolean; title: string }[] = [];
+
+    renderHook(() => {
+      const state = useTodoDetailScreen("todo-1");
+      renders.push({ isLoading: state.isLoading, title: state.title });
+      return state;
+    });
+
+    expect(renders[0]).toEqual({ isLoading: true, title: "" });
+    expect(renders.at(-1)).toEqual({ isLoading: true, title: "" });
+    await act(async () => todoResponse.resolve(milk));
+  });
+
   test("id の Todo を取得し、todo と編集中の title に入れる", async () => {
     vi.mocked(getTodo).mockResolvedValue(milk);
 
@@ -91,6 +109,57 @@ describe("初回の読み込み", () => {
 
     await waitFor(() => expect(result.current.todo).toEqual(bread));
     expect(result.current.title).toBe("パンを買う");
+  });
+
+  test("todoId が変わると、新しい Todo の取得を待つ間は前の Todo とエラーを消して読み込み中にする", async () => {
+    const breadResponse = deferred<typeof bread>();
+    vi.mocked(getTodo)
+      .mockRejectedValueOnce(new Error("Todo が見つかりません"))
+      .mockReturnValueOnce(breadResponse.promise);
+    const { result, rerender } = renderWithTodoId("todo-1");
+    await waitFor(() =>
+      expect(result.current.error).toBe("Todo が見つかりません"),
+    );
+
+    rerender({ todoId: "todo-2" });
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.isLoading).toBe(true);
+    await act(async () => breadResponse.resolve(bread));
+    expect(result.current.todo).toEqual(bread);
+  });
+
+  test("todoId が変わると、新しい Todo が届くまで前の Todo を表示しない", async () => {
+    const breadResponse = deferred<typeof bread>();
+    vi.mocked(getTodo)
+      .mockResolvedValueOnce(milk)
+      .mockReturnValueOnce(breadResponse.promise);
+    const { result, rerender } = renderWithTodoId("todo-1");
+    await waitFor(() => expect(result.current.todo).toEqual(milk));
+
+    rerender({ todoId: "todo-2" });
+
+    expect(result.current.todo).toBeNull();
+    expect(result.current.isLoading).toBe(true);
+    await act(async () => breadResponse.resolve(bread));
+    expect(result.current.todo).toEqual(bread);
+  });
+
+  test("todoId が変わった後に前の todoId の取得が終わっても、新しい Todo の取得が終わるまで読み込み中のまま", async () => {
+    const milkResponse = deferred<typeof milk>();
+    const breadResponse = deferred<typeof bread>();
+    vi.mocked(getTodo)
+      .mockReturnValueOnce(milkResponse.promise)
+      .mockReturnValueOnce(breadResponse.promise);
+    const { result, rerender } = renderWithTodoId("todo-1");
+
+    rerender({ todoId: "todo-2" });
+    await act(async () => milkResponse.resolve(milk));
+
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.todo).toBeNull();
+    await act(async () => breadResponse.resolve(bread));
+    expect(result.current.isLoading).toBe(false);
   });
 
   test("todoId が変わった後に前の todoId の取得結果が届いても、新しい Todo の表示を上書きしない", async () => {
@@ -203,6 +272,24 @@ describe("todoId が変わった後に届いた前の Todo の更新結果", () 
     });
 
     expect(result.current.error).toBeNull();
+  });
+});
+
+describe("todoId が変わった後の更新", () => {
+  test("完了の切り替えは、新しい todoId の Todo に送る", async () => {
+    vi.mocked(getTodo).mockImplementation(async (id) =>
+      id === "todo-1" ? milk : bread,
+    );
+    vi.mocked(updateTodo).mockResolvedValue({ ...bread, completed: true });
+    const { result, rerender } = renderWithTodoId("todo-1");
+    await waitFor(() => expect(result.current.todo).toEqual(milk));
+    rerender({ todoId: "todo-2" });
+    await waitFor(() => expect(result.current.todo).toEqual(bread));
+
+    await act(() => result.current.toggleCompleted());
+
+    expect(updateTodo).toHaveBeenCalledWith("todo-2", { completed: true });
+    expect(result.current.todo).toEqual({ ...bread, completed: true });
   });
 });
 

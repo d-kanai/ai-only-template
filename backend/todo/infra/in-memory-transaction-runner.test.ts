@@ -76,7 +76,7 @@ describe("InMemoryTransactionRunner", () => {
     expect(secondStarted).toBe(false);
 
     gate.resolve();
-    await expect(first).rejects.toThrow("途中で失敗");
+    await expect(first).rejects.toEqual(new Error("途中で失敗"));
     await second;
 
     expect(secondStarted).toBe(true);
@@ -91,7 +91,7 @@ describe("InMemoryTransactionRunner", () => {
       runner.run(async () => {
         throw new Error("失敗");
       }),
-    ).rejects.toThrow("失敗");
+    ).rejects.toEqual(new Error("失敗"));
 
     await expect(runner.run(async () => "next")).resolves.toBe("next");
   });

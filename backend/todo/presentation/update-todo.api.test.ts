@@ -62,6 +62,21 @@ describe("PUT /api/todos/:id", () => {
     });
   });
 
+  test("title だけ送ると completed はそのまま（部分更新）", async () => {
+    const { container, todo, PUT } = await setup();
+
+    const response = await PUT(
+      putRequest(todo.id, JSON.stringify({ title: "卵を買う" })),
+      context(todo.id),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(container.getTodo.execute(todo.id)).resolves.toMatchObject({
+      title: "卵を買う",
+      completed: false,
+    });
+  });
+
   test("無い id なら 404 と not_found を返す", async () => {
     const { PUT } = await setup();
 
@@ -72,26 +87,46 @@ describe("PUT /api/todos/:id", () => {
 
     expect(response.status).toBe(404);
     const body: ErrorResponse = await response.json();
-    expect(body.error.code).toBe("not_found");
+    expect(body.error).toEqual({
+      code: "not_found",
+      message: "Todo（id: missing）が見つかりません",
+    });
   });
 
+  // message は画面に出る（クライアントとの契約）ので、どの誤りかが分かる文言まで検証する。
   test.each([
-    ["JSON でない", "{completed:"],
-    ["オブジェクトでない", "null"],
-    ["title が文字列でない", JSON.stringify({ title: null })],
-    ["title が空", JSON.stringify({ title: "" })],
-    ["title が 101 文字", JSON.stringify({ title: "a".repeat(101) })],
-    ["completed が boolean でない", JSON.stringify({ completed: "true" })],
+    ["JSON でない", "{completed:", "リクエスト本文が JSON ではありません"],
+    [
+      "オブジェクトでない",
+      "null",
+      "リクエスト本文は JSON のオブジェクトで指定してください",
+    ],
+    [
+      "title が文字列でない",
+      JSON.stringify({ title: null }),
+      "title は文字列で指定してください",
+    ],
+    ["title が空", JSON.stringify({ title: "" }), "タイトルを入力してください"],
+    [
+      "title が 101 文字",
+      JSON.stringify({ title: "a".repeat(101) }),
+      "タイトルは 100 文字以内で入力してください",
+    ],
+    [
+      "completed が boolean でない",
+      JSON.stringify({ completed: "true" }),
+      "completed は true か false で指定してください",
+    ],
   ])(
-    "%s なら 400 と validation_error を返し、Todo は変わらない",
-    async (_label, body) => {
+    "%s なら 400 と validation_error を、理由の message 付きで返し、Todo は変わらない",
+    async (_label, body, message) => {
       const { container, todo, PUT } = await setup();
 
       const response = await PUT(putRequest(todo.id, body), context(todo.id));
 
       expect(response.status).toBe(400);
       const error: ErrorResponse = await response.json();
-      expect(error.error.code).toBe("validation_error");
+      expect(error.error).toEqual({ code: "validation_error", message });
       await expect(container.getTodo.execute(todo.id)).resolves.toEqual(todo);
     },
   );
