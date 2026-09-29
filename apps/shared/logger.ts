@@ -27,7 +27,7 @@ const WRITERS: Record<LogLevel, (line: string) => void> = {
 
 // JSON.stringify で JSON にできなかったとき（循環参照・BigInt・toJSON が例外を投げるなど）に出す文言。
 const UNSERIALIZABLE_MESSAGE =
-  "logger: event を JSON にできなかった（循環参照・BigInt など）";
+  "logger: event could not be serialized to JSON (circular reference, BigInt, etc.)";
 
 // JSON.stringify の replacer。Error は { name, message } にする。
 // WHY 変換する: Error の name / message / stack は列挙できないプロパティなので、そのまま JSON.stringify すると {} になり、

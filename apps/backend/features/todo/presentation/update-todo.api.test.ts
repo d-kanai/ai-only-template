@@ -112,7 +112,7 @@ describe("PUT /api/todos/:id", () => {
     });
   });
 
-  test("uuid の形だが存在しない id なら 404 と not_found を、その id を示す message 付きで返す", async () => {
+  test("uuid の形だが存在しない id なら 404 と not_found を、todo.notFound と id の params 付きで返す", async () => {
     const { PUT } = await setup();
     const id = randomUUID();
 
@@ -122,10 +122,8 @@ describe("PUT /api/todos/:id", () => {
     );
 
     expect(response.status).toBe(404);
-    const body = (await response.json()) as ErrorResponse;
-    expect(body.error).toEqual({
-      code: "not_found",
-      message: `Todo（id: ${id}）が見つかりません`,
+    await expect(response.json()).resolves.toStrictEqual({
+      error: { code: "not_found", key: "todo.notFound", params: { id } },
     });
   });
 
@@ -145,7 +143,7 @@ describe("PUT /api/todos/:id", () => {
       ]),
     ),
   )(
-    "id が %s なら、%sときも、Repository に問い合わせずに 404 と not_found を返す",
+    "id が %s なら、%sときも、Repository に問い合わせずに 404 と not_found（todo.notFound と id の params）を返す",
     async (_idLabel, _bodyLabel, id, requestBody) => {
       const { repository, ...spies } = spiedRepository();
       const PUT = updateTodoApi(createInMemoryTodoContainer(repository));
@@ -153,10 +151,8 @@ describe("PUT /api/todos/:id", () => {
       const response = await PUT(putRequest(id, requestBody), context(id));
 
       expect(response.status).toBe(404);
-      const body = (await response.json()) as ErrorResponse;
-      expect(body.error).toEqual({
-        code: "not_found",
-        message: `Todo（id: ${id}）が見つかりません`,
+      await expect(response.json()).resolves.toStrictEqual({
+        error: { code: "not_found", key: "todo.notFound", params: { id } },
       });
       expect(spies.findById).not.toHaveBeenCalled();
       expect(spies.save).not.toHaveBeenCalled();
@@ -164,96 +160,119 @@ describe("PUT /api/todos/:id", () => {
     },
   );
 
-  // message と issues は画面に出る（クライアントとの契約）ので、どの誤りかが分かる文言まで検証する。
-  // issues はリクエストの形（presentation の zod スキーマ）の誤りだけに付く（create-todo.api.test.ts と同じ）。
-  test.each([
+  // key・params・issues は画面が翻訳する（クライアントとの契約。Issue #116）ので、本文全体を toStrictEqual で検証する
+  //   （WHY は create-todo.api.test.ts と同じ）。issues はリクエストの形（presentation の zod スキーマ）の誤りだけに付く。
+  test.each<[string, string, ErrorResponse["error"]]>([
     [
       "JSON でない",
       "{completed:",
-      "リクエスト本文が JSON ではありません",
-      undefined,
+      { code: "validation_error", key: "request.body.notJson" },
     ],
     [
       "オブジェクトでない",
       "null",
-      "リクエスト本文は JSON のオブジェクトで指定してください",
-      [
-        {
-          path: "",
-          message: "リクエスト本文は JSON のオブジェクトで指定してください",
-        },
-      ],
+      {
+        code: "validation_error",
+        key: "request.body.notObject",
+        issues: [{ path: "", key: "request.body.notObject" }],
+      },
     ],
     [
       "title が文字列でない",
       JSON.stringify({ title: null }),
-      "title は文字列で指定してください",
-      [{ path: "title", message: "title は文字列で指定してください" }],
+      {
+        code: "validation_error",
+        key: "request.field.notString",
+        params: { path: "title" },
+        issues: [
+          {
+            path: "title",
+            key: "request.field.notString",
+            params: { path: "title" },
+          },
+        ],
+      },
     ],
     [
       "completed が boolean でない",
       JSON.stringify({ completed: "true" }),
-      "completed は true か false で指定してください",
-      [
-        {
-          path: "completed",
-          message: "completed は true か false で指定してください",
-        },
-      ],
+      {
+        code: "validation_error",
+        key: "request.field.notBoolean",
+        params: { path: "completed" },
+        issues: [
+          {
+            path: "completed",
+            key: "request.field.notBoolean",
+            params: { path: "completed" },
+          },
+        ],
+      },
     ],
     [
       "title と completed の両方の型が違う",
       JSON.stringify({ title: 1, completed: 1 }),
-      "title は文字列で指定してください",
-      [
-        { path: "title", message: "title は文字列で指定してください" },
-        {
-          path: "completed",
-          message: "completed は true か false で指定してください",
-        },
-      ],
+      {
+        code: "validation_error",
+        key: "request.field.notString",
+        params: { path: "title" },
+        issues: [
+          {
+            path: "title",
+            key: "request.field.notString",
+            params: { path: "title" },
+          },
+          {
+            path: "completed",
+            key: "request.field.notBoolean",
+            params: { path: "completed" },
+          },
+        ],
+      },
     ],
     [
       // WHY 未知のキーを拒否する: 部分更新なので、項目名を打ち間違えた本文（{ complete: true }）を黙って捨てると
       //   「何も変えない」200 になり、誤りに気づけない。
       "定義されていない項目がある（項目名の打ち間違い）",
       JSON.stringify({ complete: true }),
-      "定義されていない項目は指定できません（complete）",
-      [
-        {
-          path: "",
-          message: "定義されていない項目は指定できません（complete）",
-        },
-      ],
+      {
+        code: "validation_error",
+        key: "request.body.unknownKeys",
+        params: { keys: "complete" },
+        issues: [
+          {
+            path: "",
+            key: "request.body.unknownKeys",
+            params: { keys: "complete" },
+          },
+        ],
+      },
     ],
     [
       "title が空",
       JSON.stringify({ title: "" }),
-      "タイトルを入力してください",
-      undefined,
+      { code: "validation_error", key: "todo.title.empty" },
     ],
     [
       "title が 101 文字",
       JSON.stringify({ title: "a".repeat(101) }),
-      "タイトルは 100 文字以内で入力してください",
-      undefined,
+      {
+        code: "validation_error",
+        key: "todo.title.tooLong",
+        params: { max: 100 },
+      },
     ],
   ])(
-    "%s なら 400 と validation_error を、理由の message（と issues）付きで返し、Todo は変わらない",
-    async (_label, body, message, issues) => {
+    "%s なら 400 と validation_error を、理由の key（と params・issues）付きで返し、Todo は変わらない",
+    async (_label, body, expected) => {
       const { container, todo, PUT } = await setup();
 
       const response = await PUT(putRequest(todo.id, body), context(todo.id));
 
       expect(response.status).toBe(400);
-      const error = (await response.json()) as ErrorResponse;
-      // toEqual は undefined のプロパティと無いプロパティを同じとみなす。issues が無いことは下で別に確かめる。
-      expect(error.error).toEqual({
-        code: "validation_error",
-        message,
-        issues,
+      await expect(response.json()).resolves.toStrictEqual({
+        error: expected,
       });
-      expect("issues" in error.error).toBe(issues !== undefined);
       await expect(container.getTodo.execute(todo.id)).resolves.toEqual(todo);
     },
   );

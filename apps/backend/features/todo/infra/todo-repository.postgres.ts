@@ -25,7 +25,7 @@ type TodoRow = typeof todos.$inferSelect;
 //   クライアントには直せないサーバ側の誤りで、直すのは運用（データの移行。スキル db-migration）。500 なら
 //   toErrorResponse が logger.error で 1 行残すので、どの行が何に違反したかをログで追える。
 // WHY message に id と違反の理由を入れる: logger は Error を { name, message } にし、cause は出さない。
-//   クライアントへの本文は固定の文言（toErrorResponse）なので、ここに書いた内容は外に出ない。
+//   クライアントへの本文は固定のキー（server.internalError。toErrorResponse）なので、ここに書いた内容は外に出ない。
 // WHY 行を読み飛ばさない（一覧から黙って外さない）: データが消えたように見え、不整合に気づけない。
 // WHY cause に元の DomainError を持たせる: 例外を調べるとき（テスト・デバッガ）に元の例外をたどれるようにする。
 function toTodo(row: TodoRow): Todo {
@@ -37,9 +37,12 @@ function toTodo(row: TodoRow): Todo {
       createdAt: row.createdAt,
     });
   } catch (error) {
-    // reconstruct が投げるのは不変条件の違反（DomainError）だけ（todo.ts の validate）。
+    // reconstruct が投げるのは不変条件の違反（DomainError）だけ（todo.ts の validate）。その message はキーと params
+    //   （例: todo.title.tooLong {"max":100}）で、どの規則に違反したかがログで分かる。
+    // WHY 英語の文言: ログ（toErrorResponse の logger.error）に出る開発者向けの文字列で、クライアントには返さない。
+    //   apps/backend の非テストコードには自然言語の日本語を置かない（Issue #116。画面の文言は画面の辞書だけが持つ）。
     throw new Error(
-      `保存済みの Todo（id: ${row.id}）が不変条件を満たしません: ${(error as Error).message}`,
+      `stored Todo (id: ${row.id}) violates the invariants: ${(error as Error).message}`,
       { cause: error },
     );
   }

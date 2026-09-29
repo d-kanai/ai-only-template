@@ -12,6 +12,8 @@ import type {
   UpdateTodoResponse,
 } from "@repo/backend/features/todo/presentation/update-todo.api";
 import type { ErrorResponse } from "@repo/backend/shared/presentation/http-error";
+import { isMessageKey } from "@/shared/i18n/messages";
+import { ApiError } from "./api-error";
 
 // /api/todos を呼ぶ薄いラッパー。画面側のデータ取得は必ず「hook → ここ → Route Handler」を通す（SSR を前提にしない構成）。
 // リクエスト / レスポンスの型は backend の presentation 層の型を import type で参照するだけにする。
@@ -58,26 +60,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 // WHY `"error" in value` で絞り込まない: 無いプロパティは undefined として読めるので、in の検査は判定の結果を変えない。
 //   結果を変えない検査は mutation testing で消しても落ちない（等価な変異）ため、Record として読んで型だけで判定する（Issue #55）。
+// WHY key が辞書のキーかまで確かめる: 版の違う backend が画面の辞書に無いキーを返すと、翻訳できない（formatMessage が辞書を引けない）。
+//   その応答は ErrorResponse とみなさず、HTTP ステータスだけを伝える（toError）。
+//   実行時に確かめられるのは「辞書のキー」までで、ErrorKey（サーバのエラーのキー）かどうかは確かめない。辞書の画面の文言のキーが
+//   返っても、その文言が出るだけで壊れない。
+// WHY params は省略か、オブジェクト: 値の型（string / number）までは確かめない。置換は String() で文字列にするので壊れない。
 function isErrorResponse(value: unknown): value is ErrorResponse {
   return (
     isRecord(value) &&
     isRecord(value.error) &&
-    typeof value.error.message === "string"
+    typeof value.error.key === "string" &&
+    isMessageKey(value.error.key) &&
+    (value.error.params === undefined || isRecord(value.error.params))
   );
 }
 
-// backend は失敗時に ErrorResponse を返す契約なので、その message を画面に出せるよう Error に載せる。
+// backend は失敗時に ErrorResponse（key と params）を返す契約なので、それを ApiError に載せる。文言は画面が辞書で決める（api-error.ts）。
 // ただしプロキシや Next 自体のエラーページなど、backend を通らないエラーは JSON でないことがある。
-// その場合も「失敗した」ことは伝わるよう、HTTP ステータスを message にする。
-async function toError(response: Response): Promise<Error> {
+// その場合も「失敗した」ことは伝わるよう、HTTP ステータスを error.unknown（画面側だけのキー）の params にする。
+async function toError(response: Response): Promise<ApiError> {
   // 本文が JSON として読めない場合は ErrorResponse ではないので、undefined（形の判定で必ず外れる値）として扱う。
   // WHY 例外を握りつぶすのを response.json() だけにする: 以前は isErrorResponse の判定まで try の中に入れていたため、
   //   判定の書き間違い（null のプロパティを読むなど）で投げた TypeError も「JSON でない」扱いになり、
   //   ステータスの表示に化けて気づけなかった（Issue #55 の mutation testing で、判定の変異が生き残って判明）。
   const body: unknown = await response.json().catch(() => undefined);
   return isErrorResponse(body)
-    ? new Error(body.error.message)
-    : new Error(`HTTP ${response.status}`);
+    ? new ApiError(body.error.key, body.error.params)
+    : new ApiError("error.unknown", { status: response.status });
 }
 
 async function requestJson<T>(path: string, init: RequestInit): Promise<T> {

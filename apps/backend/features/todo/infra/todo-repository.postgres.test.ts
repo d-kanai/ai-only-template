@@ -183,17 +183,22 @@ describe("PostgresTodoRepository", () => {
   //   「リクエストを直せば通る」とクライアントに伝える。DB のデータの不整合はクライアントには直せないサーバ側の誤り。
   //   toEqual は Error の name・message・cause を比べるので、DomainError のまま投げる実装はこのテストで落ちる。
   // 行は Todo を通さずに insert する（Todo は不変条件を満たさない値を作れない）。
+  // 3 番目は元の DomainError（cause）。Error の message はその message（キーと params）を含む。
   const INVALID_ROWS = [
-    ["タイトルが空", { title: "" }, "タイトルを入力してください"],
+    [
+      "タイトルが空",
+      { title: "" },
+      new DomainError("validation_error", "todo.title.empty"),
+    ],
     [
       "タイトルが 101 文字",
       { title: "a".repeat(101) },
-      "タイトルは 100 文字以内で入力してください",
+      new DomainError("validation_error", "todo.title.tooLong", { max: 100 }),
     ],
     [
       "id の版の桁が 0（Postgres の uuid 型は受け付ける）",
       { id: "8d0f4f39-6f0b-0a39-9d53-0a3f8b1c2d4e" },
-      "id が不正です",
+      new DomainError("validation_error", "todo.id.invalid"),
     ],
   ] as const;
 
@@ -207,34 +212,36 @@ describe("PostgresTodoRepository", () => {
     };
   }
 
-  function corruptedRowError(id: string, message: string): Error {
+  // WHY message は英語: ログ（toErrorResponse の logger.error）に出る開発者向けの文字列で、apps/backend の非テストコードには
+  //   自然言語の日本語を置かない（Issue #116）。cause の DomainError の message はキーと params（describeErrorKey）。
+  function corruptedRowError(id: string, cause: DomainError): Error {
     return new Error(
-      `保存済みの Todo（id: ${id}）が不変条件を満たしません: ${message}`,
-      { cause: new DomainError("validation_error", message) },
+      `stored Todo (id: ${id}) violates the invariants: ${cause.message}`,
+      { cause },
     );
   }
 
   test.each(INVALID_ROWS)(
     "不変条件を満たさない行（%s）の findById は、DomainError ではない Error を投げる（API で 500 になるように）",
-    async (_label, override, message) => {
+    async (_label, override, cause) => {
       const row = invalidRow(override);
       await database.db.insert(todos).values(row);
 
       await expect(repository().findById(row.id)).rejects.toEqual(
-        corruptedRowError(row.id, message),
+        corruptedRowError(row.id, cause),
       );
     },
   );
 
   test.each(INVALID_ROWS)(
     "不変条件を満たさない行（%s）が 1 行でもあれば、findAll は DomainError ではない Error を投げる",
-    async (_label, override, message) => {
+    async (_label, override, cause) => {
       const row = invalidRow(override);
       await repository().save(Todo.create("卵を買う"));
       await database.db.insert(todos).values(row);
 
       await expect(repository().findAll()).rejects.toEqual(
-        corruptedRowError(row.id, message),
+        corruptedRowError(row.id, cause),
       );
     },
   );

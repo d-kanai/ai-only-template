@@ -59,7 +59,7 @@ test("Todo を追加し、完了にし、詳細で title を変えて、一覧�
 
   // title を変えて保存（Update）→ 見出しが保存後の title に変わる
   // WHY exact: 完了チェックの label「完了」など、他の名前に部分一致しないよう title の input だけを指す。
-  const titleInput = page.getByLabel("title", { exact: true });
+  const titleInput = page.getByLabel("タイトル", { exact: true });
   await titleInput.fill(updatedTitle);
   await page.getByRole("button", { name: "保存" }).click();
   await expect(

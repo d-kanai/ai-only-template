@@ -11,6 +11,7 @@ paths:
 ## 置いてよいもの
 - `env.ts`（環境変数の唯一の入口。`.claude/rules/env.md`）と `logger.ts`（サーバ側のログの唯一の出口。`.claude/rules/backend.md` の「ログ」）、そのテスト（`env.test.ts`・`logger.test.ts`）、`package.json`・`tsconfig.json` だけ（規則 `shared-placement`。ソース以外のファイルも名前で決める）。
   - WHY: 「frontend と backend の両方で使う」ものは多く、共通の置き場所を自由にすると feature のコードや DB・React に依存するコードが集まり、層の規則（backend の 4 層・画面側の境界）の外で依存が育つ。置いてよいのは、どの層・どのパッケージからも同じものを使うべき基盤（外の世界との入口・出口）だけにする。
+- 文言（`env.ts` のエラー、`logger.ts` のメッセージ）は英語で書き、日本語のリテラルを置かない（規則 `server-hardcoded-text`）。WHY: 利用者に見せる文言は frontend の辞書（`apps/frontend/shared/i18n/messages/`）だけで、運用者向けの文言は英語に統一する。
 - 置かないもの: feature のコード（型・DTO を含む。画面とサーバの契約は backend の api ファイルに置く）、DB（`drizzle-orm` / `pg`。永続化は backend の infra）、React・Next・ブラウザの API。
 - 足すときは、Issue で「frontend と backend の両方が使う基盤か」を決めてから、`shared-placement` の一覧（`SHARED_FILES`）・`exports`・このファイルを同じ変更で直す（足すことを規則の変更としてレビューに出す）。
 

@@ -72,6 +72,14 @@ describe("readEnv", () => {
     });
   });
 
+  test("アイドル・接続待ちに整数でない値を書くと、0 以上の整数が必要だと英語で伝える", () => {
+    expect(
+      errorMessageOf({ ...VALID, DATABASE_POOL_IDLE_TIMEOUT_MS: "-1" }),
+    ).toContain(
+      "DATABASE_POOL_IDLE_TIMEOUT_MS: must be an integer >= 0 (got: -1)",
+    );
+  });
+
   test.each(REQUIRED_NAMES)(
     "%s が無ければ、その名前を含むエラーにする（既定値で補わない）",
     (name) => {
@@ -95,7 +103,7 @@ describe("readEnv", () => {
     "%s が空白だけ（前後の空白を除くと空）でも、未設定と同じくエラーにする",
     (name) => {
       expect(errorMessageOf({ ...VALID, [name]: "  \t" })).toContain(
-        `${name}: 設定されていません`,
+        `${name}: is not set`,
       );
     },
   );
@@ -114,7 +122,7 @@ describe("readEnv", () => {
     (name, value) => {
       const message = errorMessageOf({ ...VALID, [name]: value });
       expect(message).toContain(name);
-      expect(message).toContain(`値: ${value}`);
+      expect(message).toContain(`(got: ${value})`);
     },
   );
 
@@ -136,9 +144,9 @@ describe("readEnv", () => {
     }).split("\n");
 
     expect(lines).toEqual([
-      "環境変数が足りないか、値が正しくありません。",
-      "  - DATABASE_URL: 設定されていません",
-      "  - DATABASE_POOL_MAX: 1 以上の整数で指定してください（値: 0）",
+      "Environment variables are missing or invalid.",
+      "  - DATABASE_URL: is not set",
+      "  - DATABASE_POOL_MAX: must be an integer >= 1 (got: 0)",
       expect.stringContaining("cp .env.example .env"),
     ]);
   });
@@ -190,8 +198,8 @@ describe("readToolEnv", () => {
       expect(thrown).toEqual(
         new Error(
           [
-            "環境変数の値が正しくありません。",
-            `  - E2E_PORT: 1〜65535 の整数で指定してください（値: ${value}）`,
+            "Environment variable values are invalid.",
+            `  - E2E_PORT: must be an integer from 1 to 65535 (got: ${value})`,
           ].join("\n"),
         ),
       );
@@ -390,7 +398,7 @@ describe("env / toolEnv（モジュールを読み込んだ時点の値）", () 
     await expect(loading).rejects.toBeInstanceOf(Error);
     await expect(loading).rejects.toMatchObject({
       message: expect.stringContaining(
-        "E2E_PORT: 1〜65535 の整数で指定してください（値: 70000）",
+        "E2E_PORT: must be an integer from 1 to 65535 (got: 70000)",
       ),
     });
   });

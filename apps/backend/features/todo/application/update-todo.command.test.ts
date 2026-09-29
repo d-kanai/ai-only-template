@@ -46,14 +46,15 @@ describe("UpdateTodoCommand", () => {
     expect(updated).toMatchObject({ title: "卵を買う", completed: true });
   });
 
-  test("無い id なら、その id を示す message 付きの DomainError(not_found) を投げる", async () => {
+  test("無い id なら、その id を params に持つ DomainError(not_found, todo.notFound) を投げる", async () => {
     const { command } = await setup();
 
     await expect(
       command.execute({ id: "missing", completed: true }),
     ).rejects.toMatchObject({
       code: "not_found",
-      message: "Todo（id: missing）が見つかりません",
+      key: "todo.notFound",
+      params: { id: "missing" },
     });
   });
 
@@ -64,7 +65,8 @@ describe("UpdateTodoCommand", () => {
       command.execute({ id: todo.id, title: " ", completed: true }),
     ).rejects.toMatchObject({
       code: "validation_error",
-      message: "タイトルを入力してください",
+      key: "todo.title.empty",
+      params: undefined,
     });
     await expect(repository.findById(todo.id)).resolves.toEqual(todo);
   });

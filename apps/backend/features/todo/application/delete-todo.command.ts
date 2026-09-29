@@ -10,7 +10,7 @@ export class DeleteTodoCommand {
     //   API は「無い id の削除は 404」を仕様にしているので、その判定をこのユースケースで行う。
     const todo = await this.repository.findById(id);
     if (todo === undefined) {
-      throw new DomainError("not_found", `Todo（id: ${id}）が見つかりません`);
+      throw new DomainError("not_found", "todo.notFound", { id });
     }
     await this.repository.delete(id);
   }

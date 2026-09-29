@@ -23,7 +23,8 @@ describe("CreateTodoCommand", () => {
       new CreateTodoCommand(repository).execute({ title: "" }),
     ).rejects.toMatchObject({
       code: "validation_error",
-      message: "タイトルを入力してください",
+      key: "todo.title.empty",
+      params: undefined,
     });
     await expect(repository.findAll()).resolves.toEqual([]);
   });

@@ -62,6 +62,15 @@ export default defineConfig({
   use: {
     // baseURL: page.goto("/") などの相対パスの基準。webServer と同じ URL にする。
     baseURL,
+    // locale: ブラウザの言語（navigator.language と、リクエストの Accept-Language）。
+    //   WHY ja-JP に固定する: 画面の言語は Accept-Language で決まる（apps/frontend/proxy.ts・shared/i18n/locale.ts。Issue #116）。
+    //   固定しないと、実行する環境（CI の Chromium の既定は en-US）で画面の言語が変わり、日本語の文言を探すテストが落ちる。
+    //   英語の表示は、テストの中で test.use({ locale: "en-US" }) にして確かめる（apps/e2e/i18n.spec.ts）。
+    locale: "ja-JP",
+    // timezoneId: ブラウザのタイムゾーン。
+    //   WHY サーバ（UTC）と違う Asia/Tokyo にする: 日時はブラウザのタイムゾーンで表示する（todo-item.tsx）。サーバと同じ UTC だと、
+    //   サーバのタイムゾーンで表示してしまう誤りを見逃す。
+    timezoneId: "Asia/Tokyo",
   },
   projects: [
     {
@@ -101,6 +110,8 @@ export default defineConfig({
     //   DATABASE_URL を渡して Postgres で動かす（上の databaseUrl）。
     //   注意: reuseExistingServer で起動済みのサーバを使うときは、そのサーバの環境変数のままになる。別の DATABASE_URL で
     //   起動したサーバが E2E_PORT 番に残っていると、テストと違う DB を検証してしまう（テストの DB の確認で失敗する）。
-    env: { DATABASE_URL: databaseUrl },
+    //   TZ: サーバは UTC で動かす（apps/frontend/instrumentation-node.ts が UTC でなければ起動を止める。Issue #116）。
+    //   command の pnpm -w start も TZ=UTC を付けるが（リポジトリ直下の package.json）、build を含む command 全体を UTC にそろえる。
+    env: { DATABASE_URL: databaseUrl, TZ: "UTC" },
   },
 });

@@ -70,7 +70,7 @@ describe("createDatabase", () => {
     expect(JSON.parse(line)).toEqual({
       level: "error",
       timestamp: expect.any(String),
-      message: "Postgres のアイドル中の接続でエラーが発生しました",
+      message: "idle Postgres connection error",
       error: {
         name: "Error",
         message: "terminating connection due to administrator command",

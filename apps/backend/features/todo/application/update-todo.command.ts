@@ -16,10 +16,7 @@ export class UpdateTodoCommand {
   async execute(input: UpdateTodoInput): Promise<Todo> {
     const current = await this.repository.findById(input.id);
     if (current === undefined) {
-      throw new DomainError(
-        "not_found",
-        `Todo（id: ${input.id}）が見つかりません`,
-      );
+      throw new DomainError("not_found", "todo.notFound", { id: input.id });
     }
     // WHY 変更をすべて適用してから 1 回だけ save する: title が不変条件違反で例外になったとき、
     //   completed だけが保存される中途半端な状態を作らないため（Todo は不変なので、save するまで保存済みの値は変わらない）。

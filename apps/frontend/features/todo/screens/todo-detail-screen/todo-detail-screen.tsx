@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useT } from "@/shared/i18n/use-t";
 import { useTodoDetailScreen } from "./todo-detail-screen.hook";
 
 type TodoDetailScreenProps = {
@@ -14,7 +15,9 @@ type TodoDetailScreenProps = {
 
 // 詳細画面の見た目。状態・データ取得は useTodoDetailScreen に置き、ここは戻り値を描くだけにする。
 // "use client": データは hook から /api/todos/:id を fetch して取る（SSR を前提にしない構成）ため。
+// 文言はすべて辞書のキーで t から出す（.claude/rules/frontend.md の「i18n」）。
 export function TodoDetailScreen({ todoId }: TodoDetailScreenProps) {
+  const t = useT();
   const {
     todo,
     title,
@@ -27,15 +30,29 @@ export function TodoDetailScreen({ todoId }: TodoDetailScreenProps) {
 
   return (
     <main>
-      {/* 取得に失敗した（not_found など）ときも一覧に戻れるよう、リンクは状態によらず常に出す。 */}
-      <Link href="/">一覧へ戻る</Link>
-      {/* role="alert": 操作の結果として後から出るエラーを、スクリーンリーダーにも即座に読み上げさせる。 */}
-      {error === null ? null : <p role="alert">{error}</p>}
-      {isLoading ? <p>読み込み中…</p> : null}
+      <Link
+        // 取得に失敗した（not_found など）ときも一覧に戻れるよう、リンクは状態によらず常に出す。
+        href="/"
+      >
+        {t("todo.detail.back")}
+      </Link>
+      {error === null ? null : (
+        <p
+          // role="alert": 操作の結果として後から出るエラーを、スクリーンリーダーにも即座に読み上げさせる。
+          role="alert"
+        >
+          {error}
+        </p>
+      )}
+      {isLoading ? <p>{t("todo.loading")}</p> : null}
       {todo === null ? null : (
         <>
-          {/* 見出しは保存済みの title を出す。入力中の値を出すと、未保存なのに保存されたように見えるため。 */}
-          <h1>{todo.title}</h1>
+          <h1>
+            {
+              // 見出しは保存済みの title を出す。入力中の値を出すと、未保存なのに保存されたように見えるため。
+              todo.title
+            }
+          </h1>
           <form
             onSubmit={(event) => {
               // フォーム送信によるページ遷移（再読み込み）を止め、hook の保存処理だけを行う。
@@ -43,15 +60,15 @@ export function TodoDetailScreen({ todoId }: TodoDetailScreenProps) {
               void saveTitle();
             }}
           >
-            {/* htmlFor + id で結び付けると固定 id が必要になるため、label で input を包んで名前を付ける。 */}
             <label>
-              title
+              {t("todo.detail.titleLabel")}
               <input
+                // htmlFor + id で結び付けると固定 id が必要になるため、label で input を包んで名前を付ける。
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
               />
             </label>
-            <button type="submit">保存</button>
+            <button type="submit">{t("todo.detail.save")}</button>
           </form>
           <label>
             <input
@@ -59,7 +76,7 @@ export function TodoDetailScreen({ todoId }: TodoDetailScreenProps) {
               checked={todo.completed}
               onChange={() => void toggleCompleted()}
             />
-            完了
+            {t("todo.detail.completed")}
           </label>
         </>
       )}

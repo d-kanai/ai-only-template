@@ -1,18 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toErrorMessage } from "@/features/todo/api/api-error";
 import {
   getTodo,
   type TodoDto,
   type UpdateTodoRequest,
   updateTodo,
 } from "@/features/todo/api/todo-api";
+import { useLocale } from "@/shared/i18n/use-t";
 
-// todo-api は失敗時に Error を投げるが、fetch 自体の失敗なども含め catch に何が来るかは型で保証されない。
-// 画面には文字列だけを渡したいので、Error 以外は固定の文言にする。
-function toMessage(error: unknown): string {
-  return error instanceof Error
-    ? error.message
-    : "予期しないエラーが発生しました";
-}
+// 失敗の理由（catch で受けた値）を包んで state に持つ。null（失敗なし）と、reject された値そのものが null / undefined の場合を区別するため。
+// WHY 文言ではなく理由を持ち、描画のときに翻訳する（toErrorMessage）: ロケールが変わっても表示中のエラーがそのロケールで出る。
+//   翻訳に使う locale を useCallback の依存に入れずに済み、コールバックが作り直されない（下の依存配列の Stryker のコメントの前提）。
+type Failure = { reason: unknown };
 
 // 詳細画面の状態とイベント。見た目（todo-detail-screen.tsx）はこの戻り値を描くだけにする。
 export function useTodoDetailScreen(todoId: string) {
@@ -21,7 +20,10 @@ export function useTodoDetailScreen(todoId: string) {
   // 保存前の編集中の値。todo.title（保存済みの値）とは別に持ち、見出しは保存済みの値を出す。
   const [title, setTitle] = useState("");
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const locale = useLocale();
+  // todo-api は失敗時に ApiError を投げるが、fetch 自体の失敗なども含め catch に何が来るかは型で保証されない。
+  // 画面には翻訳した文字列だけを渡す（ApiError 以外は固定の文言。api-error.ts の toErrorMessage）。
+  const [failure, setFailure] = useState<Failure | null>(null);
   // 表示中の todoId の「世代」。todoId が変わる（または unmount する）たびに進める。
   // WHY: PUT は todoId が変わった後に返ることがある。useCallback の todoId は呼び出し時点の値で固定されるので、
   //   応答が返った時点でまだ同じ画面かどうかは、呼び出し時に控えた世代と今の世代を比べて判断する。
@@ -35,7 +37,7 @@ export function useTodoDetailScreen(todoId: string) {
     let ignore = false;
     setTodo(null);
     setIsLoading(true);
-    setError(null);
+    setFailure(null);
     getTodo(todoId)
       .then(
         (fetched) => {
@@ -44,7 +46,7 @@ export function useTodoDetailScreen(todoId: string) {
           setTitle(fetched.title);
         },
         (reason: unknown) => {
-          if (!ignore) setError(toMessage(reason));
+          if (!ignore) setFailure({ reason });
         },
       )
       .finally(() => {
@@ -72,10 +74,10 @@ export function useTodoDetailScreen(todoId: string) {
         const updated = await updateTodo(todoId, request);
         if (isStale()) return null;
         setTodo(updated);
-        setError(null);
+        setFailure(null);
         return updated;
       } catch (reason) {
-        if (!isStale()) setError(toMessage(reason));
+        if (!isStale()) setFailure({ reason });
         return null;
       }
     },
@@ -102,7 +104,7 @@ export function useTodoDetailScreen(todoId: string) {
     title,
     setTitle,
     isLoading,
-    error,
+    error: failure === null ? null : toErrorMessage(failure.reason, locale),
     saveTitle,
     toggleCompleted,
   };
