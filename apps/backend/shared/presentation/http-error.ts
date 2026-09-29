@@ -1,4 +1,5 @@
 import { DomainError, type DomainErrorCode } from "../domain/domain-error";
+import { logger } from "../infra/logger";
 
 // エラー時のレスポンス本文。全 API で同じ形にする（画面側はこの形だけを見て分岐できる）。
 export type ErrorResponse = {
@@ -51,8 +52,9 @@ export function toErrorResponse(error: unknown): Response {
     return errorResponse(400, "validation_error", error.message);
   }
   // WHY ログに残す: 想定外の例外は原因を調べる必要がある。レスポンスでは詳細を隠すので、
-  //   サーバのログにだけ残す（noConsole でも console.error は許可している。.claude/rules/lint.md）。
-  console.error(error);
+  //   サーバのログ（stderr の 1 行の JSON）にだけ残す。ログはすべて logger を通す（.claude/rules/backend.md の「ログ」）。
+  //   Error は logger が { name, message } にする（stack は出さない）。
+  logger.error({ message: "想定外の例外", error });
   // WHY 固定の文言にする: 例外の message には内部の情報（接続先、SQL など）が含まれうるため、クライアントに返さない。
   return errorResponse(500, "internal_error", "サーバでエラーが発生しました");
 }

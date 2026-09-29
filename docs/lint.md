@@ -11,6 +11,7 @@
 - テンプレートの `"recommended": true` は非推奨（`biome rage --linter` が「deprecated ... Use preset instead」と出す）。
 - 制限したパスへの `import type` も `noRestrictedImports` の違反になる（Issue #47）。
 - `noProcessEnv` の検出範囲（分割代入などを拾わない）は `docs/env.md`。
+- `noConsole` の検出範囲（`global.console`・`(console)`・別名・分割代入を拾わない）は `docs/logger.md`。
 
 ## lefthook
 - 環境変数 `CI` が有効（`"0"` / `"false"` 以外）なときは postinstall がフックを入れない（lefthook@2.1.12 の `postinstall.js` で確認）。

@@ -1,6 +1,7 @@
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool, type PoolConfig } from "pg";
 import { env } from "./env";
+import { logger } from "./logger";
 
 // Postgres への接続（node-postgres のプール）と、それを使う Drizzle の db を作る。
 // 設定は env.ts の env（.env / 環境変数を検証した値）から取る。ここには既定値を置かない（WHY は env.ts）。
@@ -43,7 +44,10 @@ export function createDatabase(
   //   （node-postgres の Pool のドキュメント）。切れた接続はプールから捨てられ、次のクエリは新しい接続を作るので、
   //   ログに残して続ける。
   pool.on("error", (error) => {
-    console.error("Postgres のアイドル中の接続でエラーが発生しました", error);
+    logger.error({
+      message: "Postgres のアイドル中の接続でエラーが発生しました",
+      error,
+    });
   });
   return { db: drizzle({ client: pool }), pool };
 }

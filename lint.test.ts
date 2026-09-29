@@ -190,8 +190,79 @@ describe("biome check（pnpm lint と同じ引数）", () => {
     expect(result.status, result.stdout + result.stderr).toBe(0);
   });
 
+  // suspicious/noConsole（Issue #85）: console を書いてよいのは apps/backend/shared/infra/logger.ts（ログの唯一の出口）と
+  //   テストだけ（.claude/rules/backend.md の「ログ」）。allow は空にし、console.error / console.warn も違反にする。
+  // WHY noProcessEnv と同じく一時ディレクトリのファイルで must-reject を確かめる: overrides の includes はリポジトリ直下からの
+  //   相対パスで照合されるので、リポジトリの外の logger.ts という名前のファイルが通らないことで、「logger.ts という名前なら
+  //   何でも許す」緩い overrides になっていないことも確かめられる。
+  it.each([
+    ["console.log", "logger.ts 以外のファイル", "config.ts"],
+    [
+      "console.error",
+      "logger.ts 以外のファイル（allow で許していない）",
+      "report.ts",
+    ],
+    [
+      "console.warn",
+      "logger.ts 以外のファイル（allow で許していない）",
+      "retry.ts",
+    ],
+    [
+      "console.error",
+      "リポジトリの外にある logger.ts という名前のファイル（overrides はパスで照合する）",
+      "logger.ts",
+    ],
+    [
+      "console.log",
+      "E2E の spec（テストの overrides の対象外）",
+      "todo.spec.ts",
+    ],
+  ])(
+    "%s を %s に書くと非 0 で終わり、noConsole が出力される",
+    (call, _kind, fileName) => {
+      const { status, output } = checkSource(fileName, [
+        "export function report(value: unknown): void {",
+        `  ${call}(value);`,
+        "}",
+      ]);
+
+      expect(status, output).not.toBe(0);
+      expect(output).toContain("noConsole");
+    },
+  );
+
+  it.each([["x.test.ts"], ["x.test.tsx"]])(
+    "テスト（%s）では console を書いても 0 で終わる（vi.spyOn(console, ...) で出力を抑える・確かめる）",
+    (fileName) => {
+      const { status, output } = checkSource(fileName, [
+        "export function report(value: unknown): void {",
+        "  console.log(value);",
+        "  console.error(value);",
+        "}",
+      ]);
+
+      expect(status, output).toBe(0);
+    },
+  );
+
+  it("apps/backend/shared/infra/logger.ts は console を書いていても 0 で終わる（ログの唯一の出口）", () => {
+    const loggerModule = "apps/backend/shared/infra/logger.ts";
+    // 前提: logger.ts が実際に console を使っていること（使っていなければ、この検査は何も確かめていない）。
+    const source = readFileSync(join(repoRoot, loggerModule), "utf8");
+    expect(source).toContain("console.log(");
+    expect(source).toContain("console.error(");
+
+    const result = pnpmExec("biome", [
+      "check",
+      ERROR_ON_WARNINGS,
+      loggerModule,
+    ]);
+
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+  });
+
   // must pass: 上の代表ルールごとに、許可される書き方が通ることを確かめる。ルールが何でも違反にする設定
-  //   （例: noConsole の allow が消えて console.error まで違反になる）になっていないことを検出するため。
+  //   になっていないことを検出するため。noConsole の must pass は上の logger.ts とテストの検査。
   it.each([
     [
       "noUnusedVariables",
@@ -210,16 +281,6 @@ describe("biome check（pnpm lint と同じ引数）", () => {
         "export function greet(name: string): string {",
         // WHY テンプレートリテラルで書く: 文字列リテラルに `${` を書くと noTemplateCurlyInString に掛かるため、エスケープして書く。
         `  return \`Hello, \${name}\`;`,
-        "}",
-      ],
-    ],
-    [
-      "noConsole",
-      "console.error と console.warn を使う（biome.json の allow で許可）",
-      [
-        "export function report(error: Error): void {",
-        "  console.error(error);",
-        '  console.warn("retrying");',
         "}",
       ],
     ],

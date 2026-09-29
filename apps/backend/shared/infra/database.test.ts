@@ -63,10 +63,18 @@ describe("createDatabase", () => {
     const handler = pool.handlers.get("error");
     expect(handler).toBeDefined();
     expect(() => handler?.(error)).not.toThrow();
-    expect(consoleError).toHaveBeenCalledWith(
-      expect.stringContaining("アイドル中の接続"),
-      error,
-    );
+    // logger.error（中で console.error）が、文言と例外の name・message を 1 行の JSON で出す。
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    const [line] = consoleError.mock.calls[0] as [string];
+    expect(JSON.parse(line)).toEqual({
+      level: "error",
+      timestamp: expect.any(String),
+      message: "Postgres のアイドル中の接続でエラーが発生しました",
+      error: {
+        name: "Error",
+        message: "terminating connection due to administrator command",
+      },
+    });
   });
 
   test("プールを省略すると node-postgres の Pool を作る（作るだけでは接続しない）", async () => {

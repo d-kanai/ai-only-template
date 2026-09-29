@@ -59,6 +59,7 @@ paths:
   - Biome だけが拾う: テンプレートリテラルの `${process.env.X}`、`import { env } from "node:process"`。
   - `architecture.test.ts` だけが拾う: `global.process.env`、`(process).env`。
   - `architecture.test.ts` 側の限界は、同ファイルの「環境変数の直参照の抽出」のテストで固定している。
+- 同じ設計（Biome のルール + `architecture.test.ts` の規則で、唯一の入口・出口のファイルだけを許す）を、ログの `console` にも使っている（`noConsole` と `console-direct-access`。`.claude/rules/backend.md` の「ログ」、`docs/logger.md`）。
 
 ## 変数を足すとき
 - `env.ts` の `Env` と `PARSERS` に足し（必須、既定値なし）、`.env.example` に開発用の値と WHAT / WHY のコメントを書き、`env.test.ts` に検証のテストを足す。CI・クラウドは `.env.example` をコピーするので、ワークフローやスクリプトは直さなくてよい。

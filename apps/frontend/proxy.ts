@@ -1,3 +1,4 @@
+import { logger } from "@repo/backend/shared/infra/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { buildRequestLog } from "@/shared/request-log/request-log";
 
@@ -5,11 +6,12 @@ import { buildRequestLog } from "@/shared/request-log/request-log";
 // ルーティングの前に Node.js runtime で 1 回呼ばれる（Next.js 16.3.6 同梱
 // node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md）。
 // ここでは画面アクセスとブラウザからの API route 呼び出しを、1 リクエスト = JSON 1 行（stdout）で出す（Issue #80）。
+// 出力はサーバ側のログの唯一の出口 logger（apps/backend/shared/infra/logger.ts。Issue #85）を通す。
 // WHY 薄く保つ: 1 行の中身の決め方は shared/request-log/request-log.ts（純粋関数。テストで固定）に置き、ここは NextRequest の
 //   値を渡して出力し、応答に x-request-id を付けるだけにする。このファイルは next start / next dev の中でだけ動くので
 //   カバレッジの対象外にし（vitest.config.mts）、結線は E2E（apps/e2e/request-log.spec.ts）で確かめる。
 // 限界（docs/request-log.md）: 応答の前に動くので status と所要時間は取れない。
-// WHY 第 2 引数（NextFetchEvent）を受け取らない: event.waitUntil を使わないため（下の console.log の WHY）。
+// WHY 第 2 引数（NextFetchEvent）を受け取らない: event.waitUntil を使わないため（下の logger.info の WHY）。
 export function proxy(request: NextRequest): NextResponse {
   const log = buildRequestLog({
     method: request.method,
@@ -18,10 +20,10 @@ export function proxy(request: NextRequest): NextResponse {
     receivedAt: new Date(),
     generateRequestId: () => crypto.randomUUID(),
   });
-  // WHY console.log（stdout）に同期で 1 行: 出力先は stdout の NDJSON だけにし（ログの収集は実行環境に任せる）、ライブラリを
-  //   入れない（Issue #80）。stdout への書き込みは同期で終わるので event.waitUntil は使わない。
-  // biome-ignore lint/suspicious/noConsole: リクエストログの出力そのもの（デバッグ用の console.log ではない）
-  console.log(JSON.stringify(log));
+  // WHY logger.info（info は stdout）に同期で 1 行: 出力先は stdout の NDJSON だけにし（ログの収集は実行環境に任せる）、
+  //   ライブラリを入れない（Issue #80）。stdout への書き込みは同期で終わるので event.waitUntil は使わない。
+  //   logger が先頭に level（"info"）を付ける。timestamp は log の受信時刻がそのまま使われる（docs/request-log.md の「1 行の形」）。
+  logger.info(log);
   // WHY 応答ヘッダに x-request-id: ブラウザの開発者ツールや呼び出し側から、応答と stdout の行を突き合わせられるようにする。
   //   NextResponse.next({ headers }) ではなく、応答を作ってから set する（next-response.md の next()）。
   const response = NextResponse.next();
