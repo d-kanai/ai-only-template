@@ -1,9 +1,10 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { TodoItem } from "@/features/todo/components/todo-item";
+import { LocaleProvider } from "@/shared/i18n/i18n";
 import { JaLocale, tJa } from "@/shared/i18n/i18n.test-support";
 import type { Locale } from "@/shared/i18n/locale";
-import { LocaleProvider } from "@/shared/i18n/locale-provider";
+import { todoItemMessages } from "./todo-item.messages";
 
 // Vitest は globals を無効にしているため、Testing Library の自動 cleanup（グローバルの afterEach に登録する仕組み）が働かない。
 // 前のテストの DOM が残ると getByRole が複数一致で失敗するため、明示的に後片付けする。
@@ -56,7 +57,7 @@ test("完了チェックボックスは Todo の completed を反映する", () 
   expect(
     (
       screen.getByRole("checkbox", {
-        name: tJa("todo.item.toggle", { title: "牛乳を買う" }),
+        name: tJa(todoItemMessages, "toggle", { title: "牛乳を買う" }),
       }) as HTMLInputElement
     ).checked,
   ).toBe(true);
@@ -67,7 +68,7 @@ test("完了チェックボックスを押すと、id と切り替え後の comp
 
   fireEvent.click(
     screen.getByRole("checkbox", {
-      name: tJa("todo.item.toggle", { title: "牛乳を買う" }),
+      name: tJa(todoItemMessages, "toggle", { title: "牛乳を買う" }),
     }),
   );
 
@@ -79,7 +80,7 @@ test("削除ボタンを押すと、id で onDelete が呼ばれる", () => {
 
   fireEvent.click(
     screen.getByRole("button", {
-      name: tJa("todo.item.deleteAria", { title: "牛乳を買う" }),
+      name: tJa(todoItemMessages, "deleteAria", { title: "牛乳を買う" }),
     }),
   );
 
@@ -92,9 +93,9 @@ test("削除ボタンには、辞書の削除の文言が見える文字とし�
 
   expect(
     screen.getByRole("button", {
-      name: tJa("todo.item.deleteAria", { title: "牛乳を買う" }),
+      name: tJa(todoItemMessages, "deleteAria", { title: "牛乳を買う" }),
     }).textContent,
-  ).toBe(tJa("todo.item.delete"));
+  ).toBe(tJa(todoItemMessages, "delete"));
 });
 
 // テストの実行環境のタイムゾーンは UTC（vitest.config.mts の test.env.TZ）。画面はブラウザのタイムゾーンで出す。

@@ -62,6 +62,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-29 | E2E は apps/e2e の workspace パッケージ @repo/e2e にする | 採用 | [20260929-e2e-as-workspace-package.md](architecture/20260929-e2e-as-workspace-package.md) |
 | 2026-09-29 | 画面の i18n はライブラリを使わずに自前の型付き辞書で行い、URL は変えずに Proxy と root layout でロケールを決め、API のエラーは key と params で返す | 採用 | [20260929-i18n-without-library.md](architecture/20260929-i18n-without-library.md) |
 | 2026-09-29 | サーバ側のログは logger.ts を唯一の出口にし、console の直接の呼び出しを Biome とテストの 2 系統で止める | 採用 | [20260929-logger-single-exit.md](architecture/20260929-logger-single-exit.md) |
+| 2026-09-29 | 画面の文言の辞書は画面・部品ごとに隣の *.messages.ts に置き、共通の辞書は API のエラーだけにし、自前の i18n を 3 ファイルにまとめる | 採用 | [20260929-messages-colocated-per-screen.md](architecture/20260929-messages-colocated-per-screen.md) |
 | 2026-09-29 | リクエストログは Next の Proxy（edge 層）で、1 リクエスト = JSON 1 行（5W1H）で出す | 採用 | [20260929-request-log-in-proxy.md](architecture/20260929-request-log-in-proxy.md) |
 | 2026-09-29 | リポジトリ全体を検査するルール検査テストは、apps/ ではなくリポジトリ直下の rule-tests/ にまとめる | 採用 | [20260929-rule-tests-directory.md](architecture/20260929-rule-tests-directory.md) |
 | 2026-09-29 | Todo の不変条件は、どの口を通ってもコンストラクタで常に全フィールドを検証する（restore は reconstruct に改名） | 採用 | [20260929-todo-invariants-always-validated.md](architecture/20260929-todo-invariants-always-validated.md) |

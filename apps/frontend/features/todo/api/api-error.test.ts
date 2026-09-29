@@ -4,7 +4,10 @@ import type {
 } from "@repo/backend/shared/presentation/http-error";
 import { describe, expect, expectTypeOf, test } from "vitest";
 import { ApiError, toErrorMessage } from "@/features/todo/api/api-error";
-import type { MessageKey, MessageParams } from "@/shared/i18n/messages";
+import type { commonMessages } from "@/shared/i18n/common.messages";
+import type { MessageKey, MessageParams } from "@/shared/i18n/i18n";
+
+type CommonMessages = typeof commonMessages;
 
 describe("ApiError", () => {
   test("サーバのエラーのキーと params を持つ Error", () => {
@@ -51,11 +54,20 @@ describe("toErrorMessage（失敗の理由を画面の文言にする）", () =>
   });
 });
 
-// 型の検査（pnpm typecheck で確かめる）。backend の ErrorKey と画面の辞書の対応。
-describe("backend の ErrorKey と辞書の対応（型）", () => {
-  // ErrorKey がすべて辞書のキーであることは、api-error.ts の ApiErrorKey の制約（TranslatedKey<K extends MessageKey>）で止める。
-  test("ErrorKey はすべて辞書のキー", () => {
-    expectTypeOf<ErrorKey>().toExtend<MessageKey>();
+// 型の検査（pnpm typecheck で確かめる）。backend の ErrorKey と共通の辞書（shared/i18n/common.messages.ts）の対応。
+describe("backend の ErrorKey と共通の辞書の対応（型）", () => {
+  // ErrorKey がすべて共通の辞書のキーであることは、api-error.ts の ApiErrorKey の制約（TranslatedKey<K extends MessageKey<...>>）で止める。
+  test("ErrorKey はすべて共通の辞書のキー", () => {
+    expectTypeOf<ErrorKey>().toExtend<MessageKey<CommonMessages>>();
+  });
+
+  // WHY 過不足なく一致させる: 共通の辞書に置くのは、どの画面でも出る API のエラー（ErrorKey）と画面側だけのエラー（error.*）だけ。
+  //   画面・部品に固有の文言（「削除」など）は、その隣の *.messages.ts に置く（Issue #125）。ここに混ざると、どの画面の文言かが
+  //   ファイルの場所から分からなくなる。backend から消えた ErrorKey が残ることも止める。
+  test("共通の辞書のキーは、ErrorKey と error.unknown・error.unexpected だけ（画面固有の文言を置かない）", () => {
+    expectTypeOf<MessageKey<CommonMessages>>().toEqualTypeOf<
+      ErrorKey | "error.unknown" | "error.unexpected"
+    >();
   });
 
   // backend の params の名前（ErrorKeyParams）と、ja の文言の placeholder の名前が一致しないキーの一覧。空（never）であること。
@@ -65,9 +77,11 @@ describe("backend の ErrorKey と辞書の対応（型）", () => {
     type ParamNames<P> = string extends keyof P ? never : keyof P;
     type Mismatched = {
       [K in ErrorKey]: [ParamNames<ErrorKeyParams[K]>] extends [
-        keyof MessageParams<K>,
+        keyof MessageParams<CommonMessages, K>,
       ]
-        ? [keyof MessageParams<K>] extends [ParamNames<ErrorKeyParams[K]>]
+        ? [keyof MessageParams<CommonMessages, K>] extends [
+            ParamNames<ErrorKeyParams[K]>,
+          ]
           ? never
           : K
         : K;

@@ -34,7 +34,8 @@ import { describe, expect, it } from "vitest";
 // 書き方だけ、apps/backend/package.json の exports の過不足）、frontend と backend で共通の apps/shared（Issue #90。置き場所、
 // "@repo/shared/..." の書き方、画面側から参照しない、apps/shared/package.json の exports の過不足）と、環境変数の直参照の禁止
 // （.claude/rules/env.md の「環境変数」。規則 env-direct-access）、画面と backend のハードコードの文言の禁止（Issue #116 の i18n。
-// 規則 frontend-hardcoded-text・server-hardcoded-text。これだけは正規表現ではなく構文木で見る。WHY は該当の節）。
+// 規則 frontend-hardcoded-text・server-hardcoded-text。これだけは正規表現ではなく構文木で見る。WHY は該当の節）、画面・部品の辞書
+// （*.messages.ts）を同じディレクトリのファイルだけが参照すること（Issue #125。規則 messages-colocation）。
 //
 // WHY 自前のテストにする（Biome の noRestrictedImports を使わない）:
 //   「features/<f>/api/ から backend へは import type だけ許す」を表現できない。Biome 2.5.13 の noRestrictedImports は
@@ -454,6 +455,13 @@ function isFrontendRootFile(path: string): boolean {
   return /^apps\/frontend\/[^/]+$/.test(path);
 }
 
+// 画面・部品の辞書（*.messages.ts。Issue #125）。参照先（拡張子を除いたパス）の名前が ".messages" で終わるもの。
+// WHY 拡張子を問わない: toReference が参照先の拡張子を除くので、"./x.messages" と "./x.messages.ts" は同じ参照先になる。
+//   辞書の本体が .ts でなくても（規則 frontend-hardcoded-text の例外は .ts だけ）、参照の向きは同じ規則で見る。
+const MESSAGES_MODULE = /\.messages$/;
+// 共通の辞書（API のエラー ErrorKey と error.*）。apps/frontend のどこから参照してもよい唯一の辞書。
+const COMMON_MESSAGES_MODULE = "apps/frontend/shared/i18n/common.messages";
+
 // 環境変数の唯一の入口（Issue #59）とサーバ側のログの唯一の出口（Issue #85）。Issue #90 で apps/backend/shared/infra/ から
 //   apps/shared/ に移した（frontend 直下の instrumentation-node.ts・proxy.ts、backend、apps/e2e/、リポジトリ直下が共通で使うため。
 //   以前は frontend 直下から backend を参照する frontend-root-to-backend の例外だった）。
@@ -610,7 +618,8 @@ type RuleId =
   | "backend-shared"
   | "app"
   | "app-api"
-  | "shared-self-contained";
+  | "shared-self-contained"
+  | "messages-colocation";
 
 type Rule = {
   id: RuleId;
@@ -890,6 +899,26 @@ const RULES: Rule[] = [
           usesPersistence(ref) ||
           !ref.specifier.startsWith("node:"),
   },
+  {
+    // 「画面・部品の辞書（<name>.messages.ts）は、その画面・部品の隣に置き、同じディレクトリのファイルだけが使う」（Issue #125。
+    //   .claude/rules/frontend.md の「i18n」）。共通の辞書 apps/frontend/shared/i18n/common.messages だけは apps/frontend のどこからでも使える。
+    // WHY 同じディレクトリに限る: 別の画面の辞書を借りると、その画面を消す・言い回しを変えるときに、関係の無い画面の表示まで
+    //   変わる。辞書を画面のディレクトリに閉じ込め、画面をディレクトリごと消せるようにする（screens/<name>-screen/ の方針と同じ）。
+    //   複数の画面で使う文言は、共通の辞書に置くか、それぞれの辞書に書く。
+    // WHY 場所（参照先のディレクトリ）で判定する（書き方 "./" に限らない）: "@/features/.../todo-screen.messages" と
+    //   "./todo-screen.messages" は同じファイルを指し、書き方の規則は別の関心（今は無い）。子・親のディレクトリも「別の場所」とする。
+    // WHY 参照元を apps/frontend に限らない: apps/e2e/ やリポジトリ直下から辞書を import すると、E2E が文言ではなく辞書の値で
+    //   探すことになり、画面に出る文言を確かめなくなる。共通の辞書も apps/frontend の外からは不可。
+    //   テストは対象外（列挙がテストを除く）。画面のテストが部品の辞書で期待値を作る（tJa(todoItemMessages, ...)）のは許す。
+    id: "messages-colocation",
+    name: "*.messages（画面・部品の辞書）を参照してよいのは同じディレクトリのファイルだけ（apps/frontend/shared/i18n/common.messages は apps/frontend/ のどこからでも可）",
+    appliesTo: () => true,
+    isViolation: (ref) =>
+      ref.own &&
+      MESSAGES_MODULE.test(ref.to) &&
+      posix.dirname(ref.to) !== posix.dirname(ref.from) &&
+      !(ref.to === COMMON_MESSAGES_MODULE && isUnder(ref.from, FRONTEND_ROOT)),
+  },
 ];
 
 // backend のソースファイルは、apps/backend/features/<f>/ か apps/backend/shared/ の 4 層（domain / application / presentation /
@@ -1168,10 +1197,10 @@ function findConsoleViolations(root: string): string[] {
 }
 
 // --- ハードコードの文言（規則 frontend-hardcoded-text・server-hardcoded-text。Issue #116 の i18n） ---
-// 画面の文言は apps/frontend/shared/i18n/messages/ の辞書（ja.ts / en.ts）だけに置き、画面は t("key", params) で描く。
+// 画面の文言は辞書（apps/frontend の *.messages.ts。画面・部品の隣と shared/i18n/common.messages.ts）だけに置き、画面は t("key", params) で描く。
 //   backend のエラーは ErrorKey（apps/backend/shared/domain/error-key.ts）と params で表し、自然言語を持たない。
 //   この 2 つを、文言が辞書の外に書かれた時点で止める（CLAUDE.md の原則 7。レビューの目視に頼らない）。
-// 違反にするもの（frontend-hardcoded-text。apps/frontend のテスト以外のソース。辞書 shared/i18n/messages/*.ts は除く）:
+// 違反にするもの（frontend-hardcoded-text。apps/frontend のテスト以外のソース。辞書 *.messages.ts は除く）:
 //   1. JSX のテキスト（<button>削除</button>、<h1>Todo</h1>）に空白以外の文字がある。ASCII の英語も違反にする。
 //      WHY 英語も止める: 言語を切り替えても英語のまま残り、日本語だけを見る 3 では拾えないため。
 //   2. 利用者に見える JSX 属性（VISIBLE_TEXT_ATTRIBUTES）の値が、文字列リテラル・テンプレートリテラルで、空白以外の文字を持つ
@@ -1217,10 +1246,14 @@ const VISIBLE_TEXT_ATTRIBUTES: ReadonlySet<string> = new Set([
   "label",
 ]);
 
-// 画面の文言の辞書（shared/i18n/messages/ の直下の .ts。ja.ts / en.ts）。ここだけは日本語を書いてよい。
-// WHY 直下の .ts だけ: messages/ の下の別の階層（messages/x/ja.ts）や messages/ の外（shared/i18n/ja.ts）に置いた文言は、
-//   辞書として読まれない（キーの型の元にならない）ので、例外を広げない。
-const I18N_MESSAGES = /^apps\/frontend\/shared\/i18n\/messages\/[^/]+\.ts$/;
+// 画面の文言の辞書（apps/frontend の *.messages.ts。画面・部品の隣の todo-screen.messages.ts と、共通の
+//   shared/i18n/common.messages.ts。Issue #125）。ここだけは日本語を書いてよい。
+// WHY 名前（.messages.ts）で決める（ディレクトリで決めない）: 辞書は画面・部品の隣に置く（colocation）ので、場所は画面ごとに違う。
+//   どこから参照してよいかは規則 messages-colocation が見る。
+// WHY .ts だけ（.tsx を除かない）: 辞書は defineMessages({ ja, en }) のオブジェクトだけで JSX を持たない。.tsx にすると
+//   JSX の文言まで例外になる。
+// 限界: 名前が *.messages.ts なら、中身が defineMessages でなくても例外になる（中身までは見ない）。
+const I18N_MESSAGES = /^apps\/frontend\/.+\.messages\.ts$/;
 
 // 日本語の文字。Unicode の Script（書記体系）で、ひらがな・カタカナ・漢字を見る（u フラグで \p{...} を使う）。
 // WHY Script で見る（文字コードの範囲を書かない）: 範囲の書き間違い・漏れ（半角カナ・CJK 互換漢字など）を避けるため。
@@ -1236,7 +1269,7 @@ type HardcodedTextChecks = {
 
 const FRONTEND_HARDCODED_TEXT = {
   id: "frontend-hardcoded-text",
-  name: "画面（apps/frontend）に文言をハードコードしない: JSX のテキスト、利用者に見える属性（aria-label・placeholder・title・alt・label・aria-description）の文字列、日本語の文字列は違反（辞書 apps/frontend/shared/i18n/messages/*.ts とテストは除く）",
+  name: "画面（apps/frontend）に文言をハードコードしない: JSX のテキスト、利用者に見える属性（aria-label・placeholder・title・alt・label・aria-description）の文字列、日本語の文字列は違反（辞書 apps/frontend/**/*.messages.ts とテストは除く）",
   roots: [FRONTEND_ROOT],
   appliesTo: (file: string) =>
     isSourceNonTest(file) &&
@@ -1824,6 +1857,20 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
       ]),
     );
     expect(frontend.filter((file) => I18N_MESSAGES.test(file))).toEqual([]);
+    // WHY 辞書そのものも列挙できていることを見る: 辞書の例外（I18N_MESSAGES）が実在のファイルに当たらないまま（名前の付け方が
+    //   変わるなど）でも、上の「対象にしない」は空のまま通ってしまう。
+    expect(
+      listSourceFiles(repoRoot, FRONTEND_ROOT).filter((file) =>
+        I18N_MESSAGES.test(file),
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        "apps/frontend/shared/i18n/common.messages.ts",
+        "apps/frontend/features/todo/components/todo-item.messages.ts",
+        "apps/frontend/features/todo/screens/todo-screen/todo-screen.messages.ts",
+        "apps/frontend/features/todo/screens/todo-detail-screen/todo-detail-screen.messages.ts",
+      ]),
+    );
     const backend = listHardcodedTextCheckedFiles(
       repoRoot,
       SERVER_HARDCODED_TEXT,
@@ -2919,6 +2966,99 @@ const RULE_EXAMPLES: Record<
       ["apps/shared-x/y.ts", "react", "value"],
     ],
   },
+  "messages-colocation": {
+    violating: [
+      // 別のディレクトリ（隣の画面・components/・親・子）の *.messages を、相対パス・"@/"・拡張子つきで参照する。
+      [
+        "apps/frontend/features/todo/screens/todo-detail-screen/todo-detail-screen.tsx",
+        "../todo-screen/todo-screen.messages",
+        "value",
+      ],
+      [
+        "apps/frontend/features/todo/screens/todo-screen/todo-screen.tsx",
+        "@/features/todo/components/todo-item.messages",
+        "value",
+      ],
+      [
+        "apps/frontend/features/todo/components/todo-item.tsx",
+        "../screens/todo-screen/todo-screen.messages",
+        "type",
+      ],
+      [
+        "apps/frontend/features/todo/index.ts",
+        "./screens/todo-screen/todo-screen.messages",
+        "value",
+      ],
+      [
+        "apps/frontend/features/todo/screens/todo-screen/parts/header.tsx",
+        "../todo-screen.messages",
+        "value",
+      ],
+      [
+        "apps/frontend/features/todo/screens/todo-screen/todo-screen.tsx",
+        "./parts/header.messages",
+        "value",
+      ],
+      [
+        "apps/frontend/features/other/screens/x-screen/x-screen.tsx",
+        "@/features/todo/screens/todo-screen/todo-screen.messages.ts",
+        "value",
+      ],
+      // 共通の辞書と同じ名前でも、shared/i18n/ の外のものは例外にならない。
+      [
+        "apps/frontend/features/todo/screens/todo-screen/todo-screen.tsx",
+        "@/features/todo/common.messages",
+        "value",
+      ],
+      // 共通の辞書でも、apps/frontend の外（E2E）からは参照しない。
+      [
+        "apps/e2e/i18n.spec.ts",
+        "../frontend/shared/i18n/common.messages",
+        "value",
+      ],
+    ],
+    allowed: [
+      // 同じディレクトリ（"./"・"@/"・拡張子つき・型だけ）。
+      [
+        "apps/frontend/features/todo/screens/todo-screen/todo-screen.tsx",
+        "./todo-screen.messages",
+        "value",
+      ],
+      [
+        "apps/frontend/features/todo/screens/todo-screen/todo-screen.hook.ts",
+        "@/features/todo/screens/todo-screen/todo-screen.messages",
+        "type",
+      ],
+      [
+        "apps/frontend/features/todo/components/todo-item.tsx",
+        "./todo-item.messages.ts",
+        "value",
+      ],
+      // 共通の辞書は apps/frontend のどこからでも（"@/"・相対パス）。
+      [
+        "apps/frontend/features/todo/api/api-error.ts",
+        "@/shared/i18n/common.messages",
+        "value",
+      ],
+      ["apps/frontend/app/page.tsx", "../shared/i18n/common.messages", "value"],
+      // *.messages ではないもの（前方一致・名前の一部だけが同じ、パッケージ）。
+      [
+        "apps/frontend/features/todo/components/todo-item.tsx",
+        "../screens/todo-screen/todo-screen.messages-helper",
+        "value",
+      ],
+      [
+        "apps/frontend/features/todo/components/todo-item.tsx",
+        "@/shared/i18n/messages",
+        "value",
+      ],
+      [
+        "apps/frontend/features/todo/components/todo-item.tsx",
+        "some-lib/app.messages",
+        "value",
+      ],
+    ],
+  },
   "app-api": {
     violating: [
       [
@@ -3528,9 +3668,9 @@ const HARDCODED_TEXT_EXAMPLES: Record<
         "export const C = () => <p>Hello</p>;",
       ],
       ["apps/frontend/shared/x.js", "export const C = () => <p>Hello</p>;"],
-      // 辞書の例外は messages/ の直下の .ts だけ（下の階層・外・.tsx・別の feature の messages/ は違反）。
+      // 辞書の例外は *.messages.ts だけ（Issue #125 より前の messages/ja.ts、.tsx、名前の一部だけが同じもの、.messages の無いものは違反）。
       [
-        "apps/frontend/shared/i18n/messages/nested/ja.ts",
+        "apps/frontend/shared/i18n/messages/ja.ts",
         'export const ja = { "todo.item.delete": "削除" };',
       ],
       [
@@ -3538,12 +3678,16 @@ const HARDCODED_TEXT_EXAMPLES: Record<
         'export const ja = { "todo.item.delete": "削除" };',
       ],
       [
-        "apps/frontend/shared/i18n/messages/ja.tsx",
-        'export const ja = { "todo.item.delete": "削除" };',
+        "apps/frontend/features/todo/components/todo-item.messages.tsx",
+        'export const m = { ja: { delete: "削除" } };',
       ],
       [
-        "apps/frontend/features/todo/i18n/messages/ja.ts",
-        'export const ja = { "todo.item.delete": "削除" };',
+        "apps/frontend/features/todo/components/todo-item-messages.ts",
+        'export const m = { ja: { delete: "削除" } };',
+      ],
+      [
+        "apps/frontend/features/todo/components/todo-item.messages.helper.ts",
+        'export const m = { ja: { delete: "削除" } };',
       ],
     ],
     allowed: [
@@ -3585,14 +3729,18 @@ const HARDCODED_TEXT_EXAMPLES: Record<
         "apps/frontend/features/todo/api/x.ts",
         'export const url = "/api/todos"; export const f = (a, b, c, d) => a < b && c > d;',
       ],
-      // 辞書（messages/ の直下の .ts）。
+      // 辞書（*.messages.ts。画面・部品の隣と、共通の shared/i18n/common.messages.ts）。
       [
-        "apps/frontend/shared/i18n/messages/ja.ts",
-        'export const ja = { "todo.item.delete": "削除", "todo.item.deleteLabel": "「{title}」を削除" } as const;',
+        "apps/frontend/features/todo/components/todo-item.messages.ts",
+        'export const m = defineMessages({ ja: { delete: "削除", deleteAria: "「{title}」を削除" }, en: { delete: "Delete", deleteAria: "Delete {title}" } });',
       ],
       [
-        "apps/frontend/shared/i18n/messages/en.ts",
-        'export const en = { "todo.item.delete": "Delete" } as const;',
+        "apps/frontend/features/todo/screens/todo-screen/todo-screen.messages.ts",
+        'export const m = defineMessages({ ja: { loading: "読み込み中…" }, en: { loading: "Loading…" } });',
+      ],
+      [
+        "apps/frontend/shared/i18n/common.messages.ts",
+        'export const m = defineMessages({ ja: { "todo.notFound": "Todo（id: {id}）が見つかりません" }, en: { "todo.notFound": "Todo (id: {id}) was not found" } });',
       ],
       // テストと、対象外の場所・種類のファイル。
       [
@@ -3658,7 +3806,10 @@ const HARDCODED_TEXT_EXAMPLES: Record<
         "apps/backend/features/todo/domain/todo.test.ts",
         'expect(e.message).toBe("見つかりません");',
       ],
-      ["apps/frontend/shared/i18n/messages/ja.ts", 'export const s = "削除";'],
+      [
+        "apps/frontend/shared/i18n/common.messages.ts",
+        'export const s = "削除";',
+      ],
       ["apps/shared/logger.ts", 'export const s = "Delete";'],
       [
         "apps/shared/env.ts",
@@ -4072,8 +4223,9 @@ function violationsOfFixture(files: Record<string, string>): string[] {
 // console の直接の呼び出しの規則（CONSOLE_DIRECT_ACCESS。Issue #85）の違反も置く。
 // apps/shared の規則（Issue #90。frontend-to-shared-specifier・screen-to-shared・SHARED_PLACEMENT・SHARED_EXPORTS と、層の規則の
 // apps/shared の許可 SHARED_MODULES_BY_LAYER）の違反も置く。
-// ハードコードの文言の規則（FRONTEND_HARDCODED_TEXT・SERVER_HARDCODED_TEXT。Issue #116）の違反も置く。
-// 規則は全部で 29（RULES の 20 + 置き場所 3 + 環境変数の直参照 + console + exports 2 + ハードコードの文言 2）。Issue #68 で RULES に 3 規則（backend-to-frontend・
+// ハードコードの文言の規則（FRONTEND_HARDCODED_TEXT・SERVER_HARDCODED_TEXT。Issue #116）と、辞書の置き場所の規則
+// （messages-colocation。Issue #125）の違反も置く。
+// 規則は全部で 30（RULES の 21 + 置き場所 3 + 環境変数の直参照 + console + exports 2 + ハードコードの文言 2）。Issue #68 で RULES に 3 規則（backend-to-frontend・
 // backend-relative-only・frontend-root-to-backend）を足し、段階 2 で frontend-to-backend-specifier と BACKEND_EXPORTS を足した。
 // Issue #90 で frontend-to-shared-specifier・screen-to-shared・shared-self-contained・SHARED_PLACEMENT・SHARED_EXPORTS を足した。
 const MUST_REJECT_FILES: Record<string, string> = {
@@ -4406,6 +4558,28 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/frontend/shared/i18n/ja.ts": lines(
     'export const ja = { "todo.item.delete": "削除" };',
   ),
+  //   辞書の例外は *.messages.ts だけ（.tsx と、Issue #125 より前の置き場所 messages/ja.ts は違反）。
+  "apps/frontend/features/todo/components/bad-text.messages.tsx": lines(
+    'export const m = { ja: { delete: "削除" } };',
+  ),
+  "apps/frontend/shared/i18n/messages/ja.ts": lines(
+    'export const ja = { "todo.item.delete": "削除" };',
+  ),
+  // messages-colocation（Issue #125）: *.messages を別のディレクトリから参照する（相対パス・"@/"・import type・export from・
+  //   dynamic import・拡張子つき）。共通の辞書と同じ名前でも shared/i18n/ の外のもの、E2E からの共通の辞書も違反。
+  "apps/frontend/features/todo/screens/todo-detail-screen/bad-import-messages.tsx":
+    lines(
+      'import { todoScreenMessages } from "../todo-screen/todo-screen.messages";',
+      'import type { todoItemMessages } from "@/features/todo/components/todo-item.messages";',
+      'export { commonMessages } from "@/features/todo/common.messages";',
+      'const lazy = import("../todo-screen/parts/header.messages.ts");',
+    ),
+  "apps/frontend/features/todo/bad-reexport-messages.ts": lines(
+    'export { todoScreenMessages } from "./screens/todo-screen/todo-screen.messages";',
+  ),
+  "apps/e2e/bad-messages.spec.ts": lines(
+    'import { commonMessages } from "../frontend/shared/i18n/common.messages";',
+  ),
   // server-hardcoded-text（Issue #116）: 日本語の文字列（テンプレートリテラル・zod の error）。コメント（3 行目）と ErrorKey（5 行目）は拾わない。
   "apps/backend/features/todo/domain/bad-text.ts": lines(
     "export const notFound = (id) =>",
@@ -4717,6 +4891,19 @@ const MUST_REJECT_VIOLATIONS = [
   "frontend-hardcoded-text: apps/frontend/features/todo/api/bad-text.ts:1",
   "frontend-hardcoded-text: apps/frontend/shared/i18n/messages/nested/ja.ts:1",
   "frontend-hardcoded-text: apps/frontend/shared/i18n/ja.ts:1",
+  "frontend-hardcoded-text: apps/frontend/features/todo/components/bad-text.messages.tsx:1",
+  "frontend-hardcoded-text: apps/frontend/shared/i18n/messages/ja.ts:1",
+  ...[
+    "apps/frontend/features/todo/screens/todo-screen/todo-screen.messages",
+    "apps/frontend/features/todo/components/todo-item.messages",
+    "apps/frontend/features/todo/common.messages",
+    "apps/frontend/features/todo/screens/todo-screen/parts/header.messages",
+  ].map(
+    (to) =>
+      `messages-colocation: apps/frontend/features/todo/screens/todo-detail-screen/bad-import-messages.tsx → ${to}`,
+  ),
+  "messages-colocation: apps/frontend/features/todo/bad-reexport-messages.ts → apps/frontend/features/todo/screens/todo-screen/todo-screen.messages",
+  "messages-colocation: apps/e2e/bad-messages.spec.ts → apps/frontend/shared/i18n/common.messages",
   "server-hardcoded-text: apps/backend/features/todo/domain/bad-text.ts:2",
   "server-hardcoded-text: apps/backend/features/todo/domain/bad-text.ts:4",
   "server-hardcoded-text: apps/shared/lib/logger.ts:2",
@@ -4986,6 +5173,7 @@ const MUST_PASS_FILES: Record<string, string> = {
   "apps/frontend/app/globals.css": "body { margin: 0; }",
   "apps/frontend/app/page.tsx": lines(
     'import { TodoScreen } from "@/features/todo";',
+    'import { commonMessages } from "../shared/i18n/common.messages";',
     "const lazy = import(`@/features/todo`);",
     'import { x } from "@/shared/x";',
     'import { useState } from "react";',
@@ -5035,14 +5223,25 @@ const MUST_PASS_FILES: Record<string, string> = {
   "apps/frontend/features/todo/components/todo-item.tsx": lines(
     'import Link from "next/link";',
     'import type { TodoDto } from "@/features/todo/api/todo-api";',
+    // messages-colocation（Issue #125）: 同じディレクトリの辞書と、*.messages ではない名前（前方一致だけが同じ、パッケージ）。
+    'import { todoItemMessages } from "./todo-item.messages";',
+    'import { helper } from "../screens/todo-screen/todo-screen.messages-helper";',
+    'import { m } from "some-lib/app.messages";',
   ),
   "apps/frontend/features/todo/screens/todo-screen/todo-screen.tsx": lines(
     '"use client";',
+    'import { commonMessages } from "@/shared/i18n/common.messages";',
+    'import { useT } from "@/shared/i18n/i18n";',
     'import { TodoItem } from "../../components/todo-item";',
     'import { useTodoScreen } from "./todo-screen.hook";',
+    'import { todoScreenMessages } from "./todo-screen.messages";',
+  ),
+  "apps/frontend/features/todo/screens/todo-screen/todo-screen.test.tsx": lines(
+    'import { todoItemMessages } from "@/features/todo/components/todo-item.messages";',
   ),
   "apps/frontend/features/todo/screens/todo-screen/todo-screen.hook.ts": lines(
     'import { useCallback, useEffect, useRef, useState } from "react";',
+    'import type { todoScreenMessages } from "@/features/todo/screens/todo-screen/todo-screen.messages";',
     "import {",
     "  listTodos,",
     "  type TodoDto,",
@@ -5396,11 +5595,19 @@ const MUST_PASS_FILES: Record<string, string> = {
   ),
   // frontend-hardcoded-text・server-hardcoded-text（Issue #116）: 辞書の日本語、t(...) で描く画面、一覧に無い属性、
   //   空白だけの alt、埋め込み式だけのテンプレート、コメントの日本語、ErrorKey で表すエラー、テストの日本語は通す。
-  "apps/frontend/shared/i18n/messages/ja.ts": lines(
-    'export const ja = { "todo.item.delete": "削除", "todo.item.deleteLabel": "「{title}」を削除" } as const;',
+  "apps/frontend/shared/i18n/common.messages.ts": lines(
+    'import { defineMessages } from "./i18n";',
+    'export const commonMessages = defineMessages({ ja: { "todo.notFound": "Todo（id: {id}）が見つかりません" }, en: { "todo.notFound": "Todo (id: {id}) was not found" } });',
   ),
-  "apps/frontend/shared/i18n/messages/en.ts": lines(
-    'export const en = { "todo.item.delete": "Delete", "todo.item.deleteLabel": "Delete {title}" } as const;',
+  "apps/frontend/shared/i18n/i18n.test-support.tsx": lines(
+    'import { commonMessages } from "./common.messages";',
+  ),
+  "apps/frontend/features/todo/components/todo-item.messages.ts": lines(
+    'import { defineMessages } from "@/shared/i18n/i18n";',
+    'export const todoItemMessages = defineMessages({ ja: { delete: "削除", deleteLabel: "「{title}」を削除" }, en: { delete: "Delete", deleteLabel: "Delete {title}" } });',
+  ),
+  "apps/frontend/features/todo/api/api-error.ts": lines(
+    'import { commonMessages } from "../../../shared/i18n/common.messages";',
   ),
   "apps/frontend/features/todo/components/good-text.tsx": lines(
     "// 削除のボタン（コメントの日本語は拾わない）",

@@ -9,8 +9,10 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { TodoDetailScreen } from "@/features/todo";
 import { ApiError } from "@/features/todo/api/api-error";
 import { getTodo, updateTodo } from "@/features/todo/api/todo-api";
+import { commonMessages } from "@/shared/i18n/common.messages";
+import { LocaleProvider } from "@/shared/i18n/i18n";
 import { JaLocale, tJa } from "@/shared/i18n/i18n.test-support";
-import { LocaleProvider } from "@/shared/i18n/locale-provider";
+import { todoDetailScreenMessages } from "./todo-detail-screen.messages";
 
 // 画面は「hook の状態を描き、操作を hook に渡す」ことを検証する。API は差し替え、操作の結果として呼ばれたかで見る。
 // 状態遷移の細かい仕様は todo-detail-screen.hook.test.ts で固定している。
@@ -35,11 +37,15 @@ test("取得中は読み込み中と表示され、取得後は level 1 の見�
 
   render(<TodoDetailScreen todoId={milk.id} />, { wrapper: JaLocale });
 
-  expect(screen.getByText(tJa("todo.loading"))).toBeDefined();
+  expect(
+    screen.getByText(tJa(todoDetailScreenMessages, "loading")),
+  ).toBeDefined();
   expect(
     await screen.findByRole("heading", { level: 1, name: "牛乳を買う" }),
   ).toBeDefined();
-  expect(screen.queryByText(tJa("todo.loading"))).toBeNull();
+  expect(
+    screen.queryByText(tJa(todoDetailScreenMessages, "loading")),
+  ).toBeNull();
   expect(getTodo).toHaveBeenCalledWith("todo-1");
 });
 
@@ -61,7 +67,9 @@ test("title のフォームを送信しても、ブラウザの既定の送信�
   render(<TodoDetailScreen todoId={milk.id} />, { wrapper: JaLocale });
 
   const form = (
-    await screen.findByRole("button", { name: tJa("todo.detail.save") })
+    await screen.findByRole("button", {
+      name: tJa(todoDetailScreenMessages, "save"),
+    })
   ).closest("form");
   if (form === null) throw new Error("保存ボタンが form の中にない");
 
@@ -79,7 +87,9 @@ test("一覧へ戻るリンクは / を指す", async () => {
 
   expect(
     (
-      await screen.findByRole("link", { name: tJa("todo.detail.back") })
+      await screen.findByRole("link", {
+        name: tJa(todoDetailScreenMessages, "back"),
+      })
     ).getAttribute("href"),
   ).toBe("/");
 });
@@ -92,10 +102,10 @@ test("取得に失敗すると（not_found など）、エラーのキーを翻�
   render(<TodoDetailScreen todoId="missing" />, { wrapper: JaLocale });
 
   expect((await screen.findByRole("alert")).textContent).toBe(
-    tJa("todo.notFound", { id: "missing" }),
+    tJa(commonMessages, "todo.notFound", { id: "missing" }),
   );
   expect(
-    screen.getByRole("link", { name: tJa("todo.detail.back") }),
+    screen.getByRole("link", { name: tJa(todoDetailScreenMessages, "back") }),
   ).toBeDefined();
   expect(screen.queryByRole("textbox")).toBeNull();
 });
@@ -106,12 +116,12 @@ test("title を編集して保存ボタンを押すと、その title で更新�
   render(<TodoDetailScreen todoId={milk.id} />, { wrapper: JaLocale });
 
   const input = (await screen.findByRole("textbox", {
-    name: tJa("todo.detail.titleLabel"),
+    name: tJa(todoDetailScreenMessages, "titleLabel"),
   })) as HTMLInputElement;
   expect(input.value).toBe("牛乳を買う");
   fireEvent.change(input, { target: { value: "豆乳を買う" } });
   fireEvent.click(
-    screen.getByRole("button", { name: tJa("todo.detail.save") }),
+    screen.getByRole("button", { name: tJa(todoDetailScreenMessages, "save") }),
   );
 
   expect(
@@ -126,14 +136,16 @@ test("完了チェックボックスを押すと、完了に更新されチェ�
   render(<TodoDetailScreen todoId={milk.id} />, { wrapper: JaLocale });
 
   fireEvent.click(
-    await screen.findByRole("checkbox", { name: tJa("todo.detail.completed") }),
+    await screen.findByRole("checkbox", {
+      name: tJa(todoDetailScreenMessages, "completed"),
+    }),
   );
 
   await waitFor(() =>
     expect(
       (
         screen.getByRole("checkbox", {
-          name: tJa("todo.detail.completed"),
+          name: tJa(todoDetailScreenMessages, "completed"),
         }) as HTMLInputElement
       ).checked,
     ).toBe(true),

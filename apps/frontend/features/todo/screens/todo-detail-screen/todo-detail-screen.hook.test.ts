@@ -4,9 +4,9 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ApiError } from "@/features/todo/api/api-error";
 import { getTodo, updateTodo } from "@/features/todo/api/todo-api";
 import { useTodoDetailScreen } from "@/features/todo/screens/todo-detail-screen/todo-detail-screen.hook";
+import { commonMessages } from "@/shared/i18n/common.messages";
+import { formatMessage, LocaleProvider } from "@/shared/i18n/i18n";
 import { JaLocale, tJa } from "@/shared/i18n/i18n.test-support";
-import { LocaleProvider } from "@/shared/i18n/locale-provider";
-import { formatMessage } from "@/shared/i18n/messages";
 
 // HTTP の詳細は todo-api.test.ts で検証済みなので差し替え、hook が API をいつ何で呼び、結果をどう状態に反映するかを見る。
 vi.mock("@/features/todo/api/todo-api");
@@ -98,7 +98,9 @@ describe("初回の読み込み", () => {
     const { result } = await renderLoaded("missing");
 
     expect(result.current.todo).toBeNull();
-    expect(result.current.error).toBe(tJa("todo.notFound", { id: "missing" }));
+    expect(result.current.error).toBe(
+      tJa(commonMessages, "todo.notFound", { id: "missing" }),
+    );
   });
 
   // WHY 翻訳は描画のときに LocaleProvider のロケールで行う（hook はキーと params を持つ失敗を保持する）。
@@ -114,7 +116,7 @@ describe("初回の読み込み", () => {
 
     await waitFor(() =>
       expect(result.current.error).toBe(
-        formatMessage("en", "todo.notFound", { id: "missing" }),
+        formatMessage(commonMessages, "en", "todo.notFound", { id: "missing" }),
       ),
     );
   });
@@ -131,7 +133,9 @@ describe("初回の読み込み", () => {
       const { result } = await renderLoaded();
 
       expect(result.current.todo).toBeNull();
-      expect(result.current.error).toBe(tJa("error.unexpected"));
+      expect(result.current.error).toBe(
+        tJa(commonMessages, "error.unexpected"),
+      );
     },
   );
 
@@ -155,7 +159,9 @@ describe("初回の読み込み", () => {
       .mockReturnValueOnce(breadResponse.promise);
     const { result, rerender } = renderWithTodoId("todo-1");
     await waitFor(() =>
-      expect(result.current.error).toBe(tJa("todo.notFound", { id: "todo-1" })),
+      expect(result.current.error).toBe(
+        tJa(commonMessages, "todo.notFound", { id: "todo-1" }),
+      ),
     );
 
     rerender({ todoId: "todo-2" });
@@ -365,7 +371,9 @@ describe("title の保存", () => {
     act(() => result.current.setTitle("豆乳を買う"));
     await act(() => result.current.saveTitle());
 
-    expect(result.current.error).toBe(tJa("todo.title.tooLong", { max: 100 }));
+    expect(result.current.error).toBe(
+      tJa(commonMessages, "todo.title.tooLong", { max: 100 }),
+    );
     expect(result.current.title).toBe("豆乳を買う");
     expect(result.current.todo).toEqual(milk);
   });
@@ -403,7 +411,9 @@ describe("完了の切り替え", () => {
     const { result } = await renderLoaded();
 
     await act(() => result.current.toggleCompleted());
-    expect(result.current.error).toBe(tJa("server.internalError"));
+    expect(result.current.error).toBe(
+      tJa(commonMessages, "server.internalError"),
+    );
 
     await act(() => result.current.toggleCompleted());
     expect(result.current.error).toBeNull();

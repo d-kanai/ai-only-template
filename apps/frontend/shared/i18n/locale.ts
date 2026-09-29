@@ -1,12 +1,12 @@
 // 画面の表示言語（ロケール）の一覧と、リクエストからロケールを決める純粋関数（Issue #116）。
 // 流れ: proxy.ts が negotiateLocale でロケールを決めてリクエストヘッダ x-locale に載せ → app/layout.tsx が
-//   localeFromHeader で読み → LocaleProvider（locale-provider.tsx）で画面に配る。URL のパスは変えない（ADR
+//   localeFromHeader で読み → LocaleProvider（i18n.tsx）で画面に配る。URL のパスは変えない（ADR
 //   docs/adr/architecture/20260929-i18n-without-library.md）。
 // WHY ライブラリ（@formatjs/intl-localematcher など）を使わない: 対応言語は 2 つで、照合は「言語の部分が一致するか」だけで足りる。
 //   依存を増やさず、決め方をこのファイルのテストで固定する。
 
 // 対応するロケール。先頭が既定ではない（既定は DEFAULT_LOCALE で明示する）。
-// 足すときは messages/<locale>.ts の辞書と、messages.ts の辞書の一覧にも足す（足さないと型エラーになる）。
+// 足すときは i18n.tsx の Messages・defineMessages と、各 *.messages.ts の辞書にも足す（Messages に足せば、辞書を足すまで型エラーになる）。
 export const SUPPORTED_LOCALES = ["ja", "en"] as const;
 
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
