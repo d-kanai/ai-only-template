@@ -1,8 +1,7 @@
 // @vitest-environment node
 import { randomUUID } from "node:crypto";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import type { ErrorResponse } from "../../shared/presentation/http-error";
-import { Todo } from "../domain/todo";
 import { createInMemoryTodoContainer } from "../infra/container";
 import { InMemoryTodoRepository } from "../infra/todo-repository.in-memory";
 import { deleteTodoApi } from "./delete-todo.api";
@@ -20,20 +19,19 @@ function deleteRequest(id: string): Request {
   return new Request(`http://localhost/api/todos/${id}`, { method: "DELETE" });
 }
 
-// uuid の形でない id の Todo を置いたリポジトリ。Todo.create の id は常に uuid なので、restore で置く
-//   （DB に外から入れた行を想定）。リポジトリにあっても 404 になることで、presentation が id の形で弾き、
-//   query / command に渡していないことを確かめる（InMemory は形を見ないので、渡せば見つかってしまう）。
-async function repositoryWith(id: string): Promise<InMemoryTodoRepository> {
+// 問い合わせを記録するリポジトリ。uuid の形でない id で、presentation が query / command に渡す前に
+//   404 にしていること（parseUuidParam）を、Repository が呼ばれないことで確かめる。
+// WHY spy で確かめる（その id の Todo を置いて「あっても 404」を見ない）: Issue #94 から Todo は常に不変条件
+//   （id は uuid の形）を満たすので、uuid の形でない id の Todo は作れない。空のリポジトリで 404 を見るだけだと、
+//   id をそのまま渡しても「無い」の 404 になり、presentation の検査を外しても通ってしまう。
+function spiedRepository() {
   const repository = new InMemoryTodoRepository();
-  await repository.save(
-    Todo.restore({
-      id,
-      title: "牛乳を買う",
-      completed: false,
-      createdAt: new Date("2026-09-28T00:00:00.000Z"),
-    }),
-  );
-  return repository;
+  return {
+    repository,
+    findById: vi.spyOn(repository, "findById"),
+    save: vi.spyOn(repository, "save"),
+    delete: vi.spyOn(repository, "delete"),
+  };
 }
 
 // id の形の検査は z.uuid()（RFC 9562 の形。版の桁は 1〜8、variant の桁は 8 / 9 / a / b）。
@@ -70,9 +68,9 @@ describe("DELETE /api/todos/:id", () => {
   });
 
   test.each(NOT_UUID_IDS)(
-    "id が %s なら、その id の Todo がリポジトリにあっても、問い合わせずに 404 と not_found を返す",
+    "id が %s なら、Repository に問い合わせずに 404 と not_found を返す",
     async (_label, id) => {
-      const repository = await repositoryWith(id);
+      const { repository, ...spies } = spiedRepository();
       const DELETE = deleteTodoApi(createInMemoryTodoContainer(repository));
 
       const response = await DELETE(deleteRequest(id), context(id));
@@ -83,7 +81,9 @@ describe("DELETE /api/todos/:id", () => {
         code: "not_found",
         message: `Todo（id: ${id}）が見つかりません`,
       });
-      await expect(repository.findById(id)).resolves.toBeInstanceOf(Todo);
+      expect(spies.findById).not.toHaveBeenCalled();
+      expect(spies.save).not.toHaveBeenCalled();
+      expect(spies.delete).not.toHaveBeenCalled();
     },
   );
 });

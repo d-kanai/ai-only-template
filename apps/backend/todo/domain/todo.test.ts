@@ -116,17 +116,6 @@ describe("Todo#rename", () => {
       expectValidationError(() => todo.rename(title), message);
     },
   );
-
-  test("今の規則に合わない保存済みの Todo（restore したもの）も、規則を満たすタイトルに変えられる", () => {
-    const legacy = Todo.restore({
-      id: "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e",
-      title: "a".repeat(101),
-      completed: false,
-      createdAt: new Date("2026-09-28T00:00:00.000Z"),
-    });
-
-    expect(legacy.rename("卵を買う").title).toBe("卵を買う");
-  });
 });
 
 describe("Todo#changeCompletion", () => {
@@ -143,50 +132,81 @@ describe("Todo#changeCompletion", () => {
     expect(original.completed).toBe(false);
   });
 
-  test("タイトルを検証し直さない（今の規則に合わない保存済みの Todo も完了にできる）", () => {
-    // restore は規則で弾かないので、規則を厳しくした後の既存データがある。完了の切り替えでタイトルを検証し直すと、
-    //   タイトルに触れていない操作が 400 になる。
-    const legacy = Todo.restore({
-      id: "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e",
-      title: "a".repeat(101),
-      completed: false,
-      createdAt: new Date("2026-09-28T00:00:00.000Z"),
-    });
+  // WHY 型に反する値を as で渡す: 型の上では boolean しか渡せないが、完全コンストラクタは口によらず全体を検証する
+  //   （todo.ts のコメント）。completed の規則（boolean であること）も、changeCompletion を通って守られることを確かめる。
+  test("completed が boolean でなければ validation_error を投げる（全体を検証する）", () => {
+    const todo = Todo.create("牛乳を買う");
 
-    const completed = legacy.changeCompletion(true);
-
-    expect(completed.completed).toBe(true);
-    expect(completed.title).toBe("a".repeat(101));
+    expectValidationError(
+      () => todo.changeCompletion("true" as unknown as boolean),
+      "完了状態が不正です",
+    );
   });
 });
 
-describe("Todo.restore", () => {
-  test("保存済みの値（id・title・completed・作成日時）をそのまま持つ Todo を作る", () => {
-    const createdAt = new Date("2026-09-28T00:00:00.000Z");
+describe("Todo.reconstruct", () => {
+  const VALID_ID = "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e";
+  const CREATED_AT = new Date("2026-09-28T00:00:00.000Z");
 
-    const todo = Todo.restore({
-      id: "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e",
+  test("保存済みの値（id・title・completed・作成日時）をそのまま持つ Todo を作る", () => {
+    const todo = Todo.reconstruct({
+      id: VALID_ID,
       title: "牛乳を買う",
       completed: true,
-      createdAt,
+      createdAt: CREATED_AT,
     });
 
     expect(todo).toBeInstanceOf(Todo);
-    expect(todo.id).toBe("8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e");
+    expect(todo.id).toBe(VALID_ID);
     expect(todo.title).toBe("牛乳を買う");
     expect(todo.completed).toBe(true);
-    expect(todo.createdAt).toEqual(createdAt);
+    expect(todo.createdAt).toEqual(CREATED_AT);
   });
 
-  test("タイトルの不変条件で弾かない（今の規則に合わない保存済みの Todo も読める）", () => {
-    // 保存した後で規則（上限の文字数など）を厳しくしても、既存のデータを読んだ時点で例外にしないため。
-    const todo = Todo.restore({
-      id: "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e",
-      title: `   ${"a".repeat(101)}`,
+  // create と同じスキーマを通るので、前後の空白は取り除かれる（規則を満たす形にそろう）。
+  test("タイトルの前後の空白は取り除いて保持する", () => {
+    const todo = Todo.reconstruct({
+      id: VALID_ID,
+      title: "  牛乳を買う \n",
       completed: false,
-      createdAt: new Date("2026-09-28T00:00:00.000Z"),
+      createdAt: CREATED_AT,
     });
 
-    expect(todo.title).toBe(`   ${"a".repeat(101)}`);
+    expect(todo.title).toBe("牛乳を買う");
   });
+
+  // Issue #94: 保存済みの値も今の不変条件で検査する（Todo 型 = 不変条件を満たす値）。規則を厳しくしたときは、
+  //   既存のデータを移行（スキル db-migration）してから規則を変える。
+  test.each([
+    ["タイトルが空文字", { title: "" }, EMPTY_TITLE_MESSAGE],
+    ["タイトルが空白だけ", { title: "   \t\n" }, EMPTY_TITLE_MESSAGE],
+    ["タイトルが 101 文字", { title: "a".repeat(101) }, TOO_LONG_TITLE_MESSAGE],
+    ["id が uuid の形でない", { id: "missing" }, "id が不正です"],
+    // Postgres の uuid 型は受け付けるが、RFC 9562 の形ではない（版の桁が 0）。
+    [
+      "id の版の桁が 0",
+      { id: "8d0f4f39-6f0b-0a39-9d53-0a3f8b1c2d4e" },
+      "id が不正です",
+    ],
+    [
+      "作成日時が Invalid Date",
+      { createdAt: new Date("not a date") },
+      "作成日時が不正です",
+    ],
+  ])(
+    "%sなら validation_error を、理由の message 付きで投げる",
+    (_label, override, message) => {
+      expectValidationError(
+        () =>
+          Todo.reconstruct({
+            id: VALID_ID,
+            title: "牛乳を買う",
+            completed: false,
+            createdAt: CREATED_AT,
+            ...override,
+          }),
+        message,
+      );
+    },
+  );
 });
