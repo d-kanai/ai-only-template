@@ -1,7 +1,7 @@
 # ai-only-template
 
 AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで開発を進めるためのテンプレートリポジトリ。
-運用ルールは `CLAUDE.md` と `rules/` にまとめている。
+運用ルールは `CLAUDE.md` から辿れるように置いている（下の「指示ファイルの構成」）。
 
 ## Tech Stack
 
@@ -14,16 +14,16 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 | UI ライブラリ | [React](https://react.dev/) | Next.js（create-next-app）が指定するバージョンに合わせる |
 | 言語 | [TypeScript](https://www.typescriptlang.org/) | 最新版を使う |
 | テスト | [Vitest](https://vitest.dev/) | React Testing Library + jsdom でコンポーネントをテストする |
-| mutation testing | [Stryker](https://stryker-mutator.io/) | 単体テストが変異（コードの一部を壊したもの）を検出できるかを測る。GitHub Actions で main を毎日実行し、レポートを artifact に残す（`pnpm test:mutation`。`rules/code/test.md`） |
+| mutation testing | [Stryker](https://stryker-mutator.io/) | 単体テストが変異（コードの一部を壊したもの）を検出できるかを測る。GitHub Actions で main を毎日実行し、レポートを artifact に残す（`pnpm test:mutation`。`.claude/rules/testing.md`・スキル `mutation-testing`） |
 | E2E テスト | [Playwright](https://playwright.dev/) | Chromium のみ。本番ビルドを起動し、ブラウザで画面を操作して検証する（`pnpm test:e2e`） |
-| Lint / Format | [Biome](https://biomejs.dev/) | typescript-eslint が TypeScript 7 未対応のため ESLint ではなく Biome を使う（`rules/code/lint.md`） |
+| Lint / Format | [Biome](https://biomejs.dev/) | typescript-eslint が TypeScript 7 未対応のため ESLint ではなく Biome を使う（`.claude/rules/lint.md`） |
 | Git フック | [Lefthook](https://github.com/evilmartians/lefthook) | pre-commit でステージ済みファイルを Biome で検査する |
 | コンテナ | [Docker Compose](https://docs.docker.com/compose/) | `compose.yaml` を手元・GitHub Actions・クラウドセッションの 3 環境で共通に使う。Podman（`podman compose`）でも同じファイルを使う想定 |
 | データベース | [PostgreSQL](https://www.postgresql.org/) | 18（`mirror.gcr.io/library/postgres:18-alpine`。Docker Hub の匿名 pull のレート制限を避けるためミラーから取る）。Todo の保存先（アプリは常に Postgres。InMemory のリポジトリはテスト用） |
-| ORM / マイグレーション | [Drizzle ORM](https://orm.drizzle.team/) + [drizzle-kit](https://orm.drizzle.team/docs/kit-overview) | スキーマを TypeScript で宣言し、`pnpm db:generate` で SQL を生成、`pnpm db:migrate` で当てる（`push` は使わない。`rules/code/architecture.md` の「永続化」） |
+| ORM / マイグレーション | [Drizzle ORM](https://orm.drizzle.team/) + [drizzle-kit](https://orm.drizzle.team/docs/kit-overview) | スキーマを TypeScript で宣言し、`pnpm db:generate` で SQL を生成、`pnpm db:migrate` で当てる（`push` は使わない。`.claude/rules/backend.md` の「永続化（Drizzle + Postgres）」・スキル `db-migration`） |
 | DB ドライバ | [node-postgres（pg）](https://node-postgres.com/) | 接続先とプールの設定は `.env` から読む（`apps/backend/shared/infra/env.ts`。値は `.env.example`。本番用の値は Issue #58 で決める） |
 
-ツールのバージョンは `.tool-versions` が正（決め方と更新手順は `rules/code/env.md`）。npm パッケージのバージョンは各 `package.json`（リポジトリ直下・`apps/frontend`・`apps/backend`）と `pnpm-lock.yaml` が正（`rules/code/dependencies.md`）。pnpm のサプライチェーン保護設定は `pnpm-workspace.yaml` を参照。
+ツールのバージョンは `.tool-versions` が正（決め方と更新手順は `.claude/rules/env.md`）。npm パッケージのバージョンは各 `package.json`（リポジトリ直下・`apps/frontend`・`apps/backend`）と `pnpm-lock.yaml` が正（`.claude/rules/dependencies.md`）。pnpm のサプライチェーン保護設定は `pnpm-workspace.yaml` を参照。
 
 ## ディレクトリ構成
 
@@ -58,11 +58,11 @@ e2e/                    # Playwright の E2E
 ```
 
 - 画面は SSR を前提にせず、データは hook から `/api/...` を呼んで取る。サーバの処理はすべて `apps/backend/` に置く。
-- frontend（と `e2e/`・リポジトリ直下の設定ファイル）から backend へは `@repo/backend/<path>` でだけ参照する（相対パスは使わない。例外はテスト基盤の `vitest.global-setup.ts` → `database.test-support` だけ）。使えるのは `apps/backend/package.json` の `exports` に書いたファイルだけ。frontend で参照してよいのは `app/api/**`（api ファイルの値）、`features/*/api/`（型だけ）、`instrumentation-node.ts`（`env.ts`）だけ。backend は frontend を参照せず、backend の中の import は相対パスだけにする（`architecture.test.ts` で検査。`rules/code/architecture.md` の「workspace パッケージと exports」）。
+- frontend（と `e2e/`・リポジトリ直下の設定ファイル）から backend へは `@repo/backend/<path>` でだけ参照する（相対パスは使わない。例外はテスト基盤の `vitest.global-setup.ts` → `database.test-support` だけ）。使えるのは `apps/backend/package.json` の `exports` に書いたファイルだけ。frontend で参照してよいのは `app/api/**`（api ファイルの値）、`features/*/api/`（型だけ）、`instrumentation-node.ts`（`env.ts`）だけ。backend は frontend を参照せず、backend の中の import は相対パスだけにする（`architecture.test.ts` で検査。`.claude/rules/backend.md` の「import の書き方と公開の範囲（exports）」）。
 - 画面側からサーバ側へは、各 api ファイル（`apps/backend/<feature>/presentation/<name>.api.ts`）の型を `import type` で参照するだけ。型で担保されるのはリクエスト / レスポンスの形で、URL・メソッド・実行時の JSON の形は担保されない。
 - テストは対象の隣に置く（`app/` には置かない）。
 
-詳細（依存の向き、命名、テストの置き方、採用しなかった案）は `rules/code/architecture.md` を参照。
+詳細は `.claude/rules/backend.md`（API 側）・`.claude/rules/frontend.md`（画面側）・`.claude/rules/architecture-check.md`（依存の向きの検査）・`.claude/rules/testing.md`（テストの置き方）、経緯と採用しなかった案は `docs/architecture-decisions.md` を参照。
 
 ## セットアップ
 
@@ -72,7 +72,7 @@ asdf plugin add pnpm
 asdf install
 ```
 
-バージョンの確認方法や更新手順の詳細は `rules/code/env.md` を参照。
+バージョンの確認方法や更新手順の詳細は `.claude/rules/env.md` を参照。
 
 環境変数は `.env` に置く。最初に `.env.example` をコピーする（開発用の値がそのまま入っている）。
 
@@ -83,7 +83,7 @@ cp .env.example .env
 - `.env` はコミットしない（`.gitignore` 済み）。変数はすべて必須で、コードに既定値は無い。`.env` が無い・変数が欠けていると、`pnpm dev` / `pnpm start` / `pnpm build` / `pnpm test` / `pnpm test:e2e` / `pnpm db:migrate` は欠けた変数の名前を出して起動時に止まる（非 0 で終わる。`pnpm dev` / `pnpm start` は `apps/frontend/instrumentation.ts` で検証する）。
 - コマンドの前に付けた環境変数（`DATABASE_URL=... pnpm db:migrate`）は `.env` より優先される。
 - `.env` はリポジトリ直下に 1 つだけ置く（`apps/frontend/` などには置かない）。
-- 仕組み（`apps/backend/shared/infra/env.ts` への一元化、`process.env` の直参照の禁止）は `rules/code/env.md` の「環境変数」を参照。
+- 仕組み（`apps/backend/shared/infra/env.ts` への一元化、`process.env` の直参照の禁止）は `.claude/rules/env.md` の「環境変数」を参照。
 
 開発用の PostgreSQL は Docker Compose（`compose.yaml`）で起動する。
 
@@ -96,10 +96,10 @@ pnpm db:generate # apps/backend/*/infra/schema.ts を変えたら、差分の SQ
 ```
 
 - 接続先は `.env` の `DATABASE_URL`（`.env.example` の値は `postgresql://app:app@localhost:5432/app`。開発用の固定値で秘密ではない）。アプリは常に Postgres を使うので、`pnpm dev` の前にも `pnpm db:up` と `pnpm db:migrate` が要る。
-- 接続・プールの環境変数（`DATABASE_POOL_MAX` など）とスキーマの変え方は `rules/code/architecture.md` の「永続化（Drizzle + Postgres）」を参照。
+- 接続・プールの環境変数（`DATABASE_POOL_MAX` など）は `.claude/rules/backend.md` の「永続化（Drizzle + Postgres）」、スキーマの変え方はスキル `db-migration` を参照。
 - Docker Desktop は、従業員 250 人以上または年間売上 1,000 万ドル以上の企業での業務利用などに有料サブスクリプションが必要になる（[Docker Desktop license agreement](https://docs.docker.com/subscription-billing/desktop-license/)）。該当する場合は [Podman](https://podman.io/) の `podman compose up -d --wait` でも同じ `compose.yaml` を使える想定（Podman での実動作は未確認）。
 
-Claude Code のクラウドセッション（asdf が無い環境）では、`scripts/cloud-session-start.sh` で `.tool-versions` どおりの Node.js / pnpm を用意する（環境設定の setup script に `bash scripts/cloud-session-start.sh --install-only` を書くと初回だけで済む）。`.tool-versions` の版を上げたら setup script も更新してキャッシュを作り直す。あわせて SessionStart フックが毎セッション `dockerd` を起動し、`docker compose pull`（最大 3 回再試行）と `docker compose up -d --wait --wait-timeout 120` で Postgres を立ち上げ、`.env` が無ければ `.env.example` からコピーして、`pnpm db:migrate` でマイグレーションを当てる。詳細は `rules/code/env.md` の「クラウドセッション」を参照。
+Claude Code のクラウドセッション（asdf が無い環境）では、`scripts/cloud-session-start.sh` で `.tool-versions` どおりの Node.js / pnpm を用意する（環境設定の setup script に `bash scripts/cloud-session-start.sh --install-only` を書くと初回だけで済む）。`.tool-versions` の版を上げたら setup script も更新してキャッシュを作り直す。あわせて SessionStart フックが毎セッション `dockerd` を起動し、`docker compose pull`（最大 3 回再試行）と `docker compose up -d --wait --wait-timeout 120` で Postgres を立ち上げ、`.env` が無ければ `.env.example` からコピーして、`pnpm db:migrate` でマイグレーションを当てる。詳細は `.claude/rules/cloud-session.md`（規則）・スキル `cloud-session`（確認と復旧）・`docs/cloud-session.md`（実測）を参照。
 
 ## 開発
 
@@ -107,10 +107,10 @@ Claude Code のクラウドセッション（asdf が無い環境）では、`sc
 pnpm install   # 依存をインストール（リポジトリ直下で実行する。workspace のすべてのパッケージに入る）
 pnpm dev       # 開発サーバを起動（http://localhost:3000。pnpm --filter @repo/frontend dev。引数は pnpm dev -p 3001 のように渡せる）
 pnpm typecheck # 型チェック（リポジトリ全体と apps/backend の tsconfig。next build は frontend から import したファイルしか見ないため）
-pnpm test      # 単体テストを実行し、カバレッジ 100% 未満なら失敗（Vitest。詳細は rules/code/architecture.md）
+pnpm test      # 単体テストを実行し、カバレッジ 100% 未満なら失敗（Vitest。詳細は .claude/rules/testing.md）
 pnpm test:unit # 単体テストだけを実行（カバレッジを計測しない。速く回したいとき）
-pnpm test:e2e  # E2E テストを実行（Playwright。本番ビルドを Postgres に接続して起動し、ブラウザで操作する。詳細は rules/code/architecture.md）
-pnpm test:mutation # mutation testing を実行し、reports/mutation/ にレポートを出す（Stryker。数分かかる。詳細は rules/code/test.md）
+pnpm test:e2e  # E2E テストを実行（Playwright。本番ビルドを Postgres に接続して起動し、ブラウザで操作する。詳細は .claude/rules/testing.md）
+pnpm test:mutation # mutation testing を実行し、reports/mutation/ にレポートを出す（Stryker。数分かかる。詳細はスキル mutation-testing）
 pnpm lint      # lint + format の違反を検査（Biome。変更しない）
 pnpm check     # 安全な自動修正を適用して再検査（Biome）
 pnpm format    # format だけを適用（Biome）
@@ -118,11 +118,28 @@ pnpm build     # 本番ビルド（pnpm --filter @repo/frontend build。apps/fro
 pnpm start     # 本番ビルドを起動（pnpm --filter @repo/frontend start）
 ```
 
-- コマンドはリポジトリ直下で実行する。`dev` / `build` / `start` は `apps/frontend`、`db:generate` / `db:migrate` は `apps/backend` の script を `pnpm --filter` で呼ぶ（そのパッケージのディレクトリで動くが、`.env` はリポジトリ直下の 1 つを読む）。依存の追加は `pnpm --filter @repo/backend add <pkg>@<x.y.z>` のように置き場所のパッケージを指定する（`rules/code/dependencies.md`）。
+- コマンドはリポジトリ直下で実行する。`dev` / `build` / `start` は `apps/frontend`、`db:generate` / `db:migrate` は `apps/backend` の script を `pnpm --filter` で呼ぶ（そのパッケージのディレクトリで動くが、`.env` はリポジトリ直下の 1 つを読む）。依存の追加は `pnpm --filter @repo/backend add <pkg>@<x.y.z>` のように置き場所のパッケージを指定する（`.claude/rules/dependencies.md`）。
 
 - どのコマンドも `.env` がある前提（上の「セットアップ」）。
 - `pnpm dev` は Postgres の起動とマイグレーションが前提（先に `pnpm db:up && pnpm db:migrate`）。
 - `pnpm test` / `pnpm test:unit` / `pnpm test:mutation` は Postgres が起動している前提（先に `pnpm db:up`）。Postgres を使うテストは、テストファイルごとに別のスキーマを作ってマイグレーションを当てるので、`pnpm db:migrate` は不要で、`pnpm dev` のデータも消さない。前の実行が残したテスト用のスキーマは、実行の最初に消す（Postgres に接続できなければそこで止まる）。
 - `pnpm test:e2e` は Postgres の起動とマイグレーションが前提（先に `pnpm db:up && pnpm db:migrate`）。各テストの前に `todos` を空にする（`pnpm dev` と同じ DB を使うので、開発中のデータも消える）。
 
-`pnpm install` で pre-commit フック（Lefthook）も入り、コミット時にステージ済みファイルが Biome で検査される。詳細は `rules/code/lint.md` を参照。
+`pnpm install` で pre-commit フック（Lefthook）も入り、コミット時にステージ済みファイルが Biome で検査される。詳細は `.claude/rules/lint.md` を参照。
+
+## 指示ファイルの構成
+
+AI（Claude Code）への指示は、常に読み込むもの・必要なときだけ読み込むもの・読み込まない記録に分けている（Issue #64。仕組みと実測は `docs/claude-code-mechanics.md`）。構成は `instructions.test.ts` が検査する（CLAUDE.md の行数と `@` import、`.claude/rules` の `paths`、docs の参照、スキルのフロントマター）。
+
+| 置き場所 | 読み込まれるとき | 置くもの |
+| --- | --- | --- |
+| `CLAUDE.md` | 常時 | 原則（FACT ベース・Test Driven など）と、ほかの置き場所の一覧。`@` で `LEARNINGS.md` と `.claude/general/` を読む |
+| `LEARNINGS.md` | 常時（`CLAUDE.md` から） | 改善ループで得た再発防止ルール |
+| `.claude/general/` | 常時（`CLAUDE.md` から） | オーケストレーション・Issue → PR → マージ・コミットメッセージ・作業ログの要点 |
+| `.claude/rules/` | フロントマターの `paths` に一致するファイルを触ったとき | 規則と WHY（backend・frontend・依存の向きの検査・テスト・lint・環境変数・クラウドセッション・依存・git ガード・作業ログ・worktree） |
+| `.claude/skills/` | 説明は常時、本文は呼び出したとき | 手順（`pr-flow`・`rule-check-test`・`mutation-testing`・`db-migration`・`dependency-update`・`cloud-session`） |
+| `.claude/agents/` | サブエージェントの起動時 | worker / researcher / reviewer の定義 |
+| `docs/` | 読み込まれない | 実測・経緯・一次情報・採用しなかった案（一覧は `docs/README.md`） |
+| `logs/` | 読み込まれない | 日ごとの作業ログ |
+
+- 文章のルールより、lint・テスト・フック・CI での機械的な強制を優先する（CLAUDE.md の 7）。フックは `.claude/settings.json` と `scripts/hooks/`。

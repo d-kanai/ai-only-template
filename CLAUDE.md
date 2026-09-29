@@ -39,13 +39,47 @@
 
 @LEARNINGS.md
 
-## ルール詳細
-- ブランチ・PR: @rules/general/branch.md
-- コミットメッセージ: @rules/general/commit.md
-- 作業ログ: @rules/general/log.md
-- オーケストレーション: @rules/general/orchestration.md
-- 実行環境: @rules/code/env.md
-- 依存パッケージ: @rules/code/dependencies.md
-- Lint / Format: @rules/code/lint.md
-- ディレクトリ構成: @rules/code/architecture.md
-- テストコード: @rules/code/test.md
+## 常時のルール（要点）
+- オーケストレーション: @.claude/general/orchestration.md
+- Issue → ブランチ → PR → マージ: @.claude/general/workflow.md
+- コミットメッセージ: @.claude/general/commit.md
+- 作業ログ: @.claude/general/log.md
+
+## 指示ファイルの置き場所
+常時読み込むのはこのファイル・LEARNINGS.md・`.claude/general/` だけにし、ほかは必要なときだけ読まれる形に分けている（WHY と公式の仕様・実測は `docs/claude-code-mechanics.md`。構成は `instructions.test.ts` が検査する）。
+
+| 置き場所 | 読み込まれるとき | 置くもの |
+| --- | --- | --- |
+| `.claude/rules/*.md` | フロントマターの `paths` に一致するファイルを触ったとき | 規則と WHY |
+| `.claude/skills/<name>/SKILL.md` | 説明は常時、本文は呼び出したとき | 手順 |
+| `docs/` | 読み込まれない（必要なら自分で読む） | 実測・経緯・一次情報・採用しなかった案。一覧は `docs/README.md` |
+| `logs/` | 読み込まれない | 日ごとの作業ログ |
+
+### .claude/rules（パス依存）
+| ファイル | 触ったときに読まれる主なファイル | 内容 |
+| --- | --- | --- |
+| `backend.md` | `apps/backend/**` | DDD 4 層と許可の一覧、exports、永続化（Drizzle / Postgres / トランザクション）、命名 |
+| `frontend.md` | `apps/frontend/**` | app はルーティングだけ、features の構成、画面側とサーバ側の境界、SSR を前提にしない |
+| `architecture-check.md` | `architecture.test.ts` | 依存の向きの 21 規則、足すときの手順、限界 |
+| `testing.md` | `**/*.test.ts(x)`・`e2e/**`・テストの設定 | テスト = 仕様、置き方、テストダブル、ルール検査テスト、Stryker、E2E |
+| `lint.md` | `biome.json`・`lint.test.ts`・`lefthook.yml`・`package.json` | Biome の方針と設定の WHY、pre-commit |
+| `env.md` | `.env.example`・`env.ts`・`instrumentation*`・`compose.yaml`・`.tool-versions` | Node / pnpm の版、環境変数の一元化と検査 |
+| `cloud-session.md` | `scripts/cloud-session-start*`・`.claude/settings.json` | クラウドセッションの setup script とフック |
+| `dependencies.md` | `package.json`・`pnpm-workspace.yaml`・lockfile・`patches/**` | 完全固定、置き場所、版の決め方、pnpm patch |
+| `git-guard.md` | `.claude/settings.json`・`lefthook.yml`・`scripts/hooks/guard-git*` など | git 操作の権限・フック・commit-msg |
+| `work-log.md` | `logs/**`・`scripts/hooks/require-log*` など | 作業ログの強制（Stop フック・CI） |
+| `worktree.md` | worktree のフックと生成規則 | worktree ごとの `.env`・DB・ポート |
+
+### スキル（手順。`/<name>` でも呼べる）
+- `pr-flow`: Issue → ブランチ → PR → CI → マージ → 後始末（PR の作成・マージの前に読む）。
+- `rule-check-test`: ルール検査テストとゲートの must pass / must reject と fault injection。
+- `mutation-testing`: Stryker の実行と生き残りの扱い。
+- `db-migration`: スキーマの変更とマイグレーション。
+- `dependency-update`: 依存の追加・更新・lockfile の作り直し・pnpm patch。
+- `cloud-session`: クラウドセッションの確認と復旧。
+
+### 機械的な強制（原則 7）
+- git: PreToolUse フック `scripts/hooks/guard-git.sh`（サブエージェントの commit / push / PR、main への commit / push、force push、`--no-verify` を拒否）、lefthook の pre-commit（Biome）と commit-msg（形式）。
+- 作業ログ: Stop フック `scripts/hooks/require-log.sh` と CI の `scripts/hooks/check-logs-diff.sh`。
+- worktree: WorktreeCreate フック `scripts/hooks/worktree-create.sh`、SubagentStop フック `scripts/hooks/subagent-stop.sh`（共有フックの修復）。
+- コード: `pnpm lint` / `pnpm typecheck` / `pnpm test`（カバレッジ 100%・ルール検査テスト）/ CI の `ci` ジョブ（required status check）。

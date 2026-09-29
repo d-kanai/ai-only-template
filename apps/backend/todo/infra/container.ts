@@ -50,7 +50,7 @@ export type TodoContainerDeps<Tx> = {
 // WHY command は一律に runner.run で包む: command は「全部成功するか、何も変えないか」にする（Issue #57 の方針）。
 //   今の command は save / delete を 1 回しか呼ばないが、将来 command が複数の書き込みをするようになっても、
 //   途中までの変更を残さない形を先に決めておく。なお分離レベルは既定の READ COMMITTED なので、読んでから書くまでの間に
-//   別のリクエストが同じ Todo を変える（lost update）ことは防がない（rules/code/architecture.md の「永続化」）。
+//   別のリクエストが同じ Todo を変える（lost update）ことは防がない（.claude/rules/backend.md の「永続化（Drizzle + Postgres）」）。
 //   包むのはこの 1 か所だけで、command の本体（application 層）は Repository を受け取るだけのまま、トランザクションを知らない。
 // WHY command を呼び出しのたびに作る: トランザクションごとに executor（tx）が違うので、その tx で作ったリポジトリを
 //   持つ command が要る。command は Repository を持つだけの軽いオブジェクトなので、毎回作っても負担は小さい。
@@ -88,7 +88,7 @@ export function createTodoContainer<Tx>({
 
 // InMemory のリポジトリで組み立てる。テスト専用（アプリは常に Postgres。下の todoContainer）。
 // WHY 本番では使わないのに残す: presentation のテストなどで、DB に接続せずに handler の振る舞いを確かめるため
-//   （rules/code/architecture.md の「テストの置き方」）。InMemoryTransactionRunner で rollback もそろえている。
+//   （.claude/rules/testing.md の「置き方と環境」）。InMemoryTransactionRunner で rollback もそろえている。
 // WHY リポジトリを引数で受け取れる: テストで空のリポジトリを渡し（省略時も空）、アプリ共有のコンテナとは別に組み立てるため。
 //   共有のコンテナをテストで使うと、前のテストが作った Todo が残って結果が実行順に依存する。
 export function createInMemoryTodoContainer(

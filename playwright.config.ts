@@ -8,9 +8,14 @@ import { env, toolEnv } from "@repo/backend/shared/infra/env";
 //   リポジトリ直下の package.json の devDependencies に "@repo/backend": "workspace:*" があるので、Node の解決
 //   （node_modules/@repo/backend → apps/backend）で見つかる。tsconfig の paths には頼らない。
 
-// E2E 用のサーバのポート。
-// WHY 3100: pnpm dev の既定（3000）と重ならないようにし、開発サーバを起動したままでも E2E を実行できるようにする。
-const port = 3100;
+// E2E 用のサーバのポート（toolEnv.E2E_PORT。.env / 環境変数の E2E_PORT を env.ts が 1〜65535 の整数として検証した値。任意）。
+// WHY 既定が 3100: pnpm dev の既定（3000）と重ならないようにし、開発サーバを起動したままでも E2E を実行できるようにする。
+//   メインの作業ツリーは E2E_PORT が無くても（既存の .env のままでも）この値で動く。
+// WHY .env から変えられるようにする（Issue #64）: worktree では WorktreeCreate フックが worktree の名前から 3101〜3900 の
+//   値を導いて .env に書く（scripts/worktree-env.sh）。並列の worktree が同じポートを使うと、reuseExistingServer で
+//   別の worktree のサーバを検証してしまうため（.claude/rules/worktree.md）。
+// WHY Env（必須）ではなく toolEnv（任意）: E2E 専用の値で、アプリ（next start）は使わないため（.claude/rules/env.md）。
+const port = toolEnv.E2E_PORT ?? 3100;
 const baseURL = `http://localhost:${port}`;
 
 // Chromium の実行ファイルのパス（toolEnv.PLAYWRIGHT_CHROMIUM_EXECUTABLE。env.ts のツール用の区画で、無いのが正常）。
@@ -72,7 +77,7 @@ export default defineConfig({
     // reuseExistingServer: ローカルでは既に起動しているサーバがあればそれを使い、CI では必ず新しく起動する。
     //   WHY: ローカルでは build を毎回待たずに繰り返し実行できるようにする。CI では古いサーバを使うと、
     //   その PR のコードを検証したことにならないため。
-    //   注意: ローカルで 3100 番に古いサーバが残っていると、今のコードではなくそのサーバを検証してしまう。
+    //   注意: ローカルで E2E_PORT 番（未設定なら 3100）に古いサーバが残っていると、今のコードではなくそのサーバを検証してしまう。
     //   コードを変えた後は、起動したままのサーバを止めてから実行する。
     reuseExistingServer: !toolEnv.CI,
     // timeout: build を含めて起動を待つ上限（ミリ秒）。WHY 180 秒: 既定の 60 秒では next build の時間を含めると足りない
@@ -81,7 +86,7 @@ export default defineConfig({
     // env: next start に渡す環境変数（Playwright の既定では process.env を引き継いだうえで、ここに書いたものを上書きする）。
     //   DATABASE_URL を渡して Postgres で動かす（上の databaseUrl）。
     //   注意: reuseExistingServer で起動済みのサーバを使うときは、そのサーバの環境変数のままになる。別の DATABASE_URL で
-    //   起動したサーバが 3100 番に残っていると、テストと違う DB を検証してしまう（テストの DB の確認で失敗する）。
+    //   起動したサーバが E2E_PORT 番に残っていると、テストと違う DB を検証してしまう（テストの DB の確認で失敗する）。
     env: { DATABASE_URL: databaseUrl },
   },
 });

@@ -1,10 +1,18 @@
+---
+paths:
+  - "biome.json"
+  - "lint.test.ts"
+  - "lefthook.yml"
+  - "package.json"
+---
+
 # Lint / Format ルール
 
 コードの lint と format は **Biome**（`biome.json`）で行い、**Lefthook**（`lefthook.yml`）の pre-commit でコミット前に違反を検知する。
 
 ## ツールの選定
 - Biome を使う。ESLint（+ typescript-eslint）は使わない。
-- 理由: typescript-eslint が TypeScript 7 に未対応で、読み込み時点で失敗する。2026-09-28 に `@typescript-eslint/parser@8.70.0` + `typescript@7.0.2` で `require('@typescript-eslint/parser')` を実行すると、`typescript-eslint does not support TS 7.0.` を出して例外になった（peerDependencies も `typescript: >=4.8.4 <6.1.0`）。本リポジトリは TypeScript 7 を使うため（`rules/code/dependencies.md`）、TS の型情報を使う ESLint ルールは動かせない。
+- 理由: typescript-eslint が TypeScript 7 に未対応で、読み込み時点で失敗する（実測は `docs/lint.md`）。本リポジトリは TypeScript 7 を使うため（`.claude/rules/dependencies.md`）、TS の型情報を使う ESLint ルールは動かせない。
 - トレードオフ: プロジェクト固有のカスタムルールは ESLint の方が書きやすい（Biome は GritQL プラグインのみ）が、上記の理由で使えない。
 - 再検討の条件: typescript-eslint が TS 7.1 以降に対応したら（追跡 Issue: https://github.com/typescript-eslint/typescript-eslint/issues/10940 ）、ESLint への移行・併用を Issue で検討する。
 
@@ -31,8 +39,8 @@ pnpm format   # biome format --write .                  … format だけを適�
 - 検査内容: ステージ済みファイルだけを `pnpm exec biome check --error-on-warnings ...` で検査し、違反があればコミットを中止する。自動修正はしない（`pnpm check` で直してステージし直す）。
 - 環境変数 `CI` が有効（`"0"` / `"false"` 以外）なときは postinstall がフックを入れない（lefthook@2.1.12 の `postinstall.js` で確認）。CI ではフックは不要で、`pnpm lint` を直接実行する。
 - フックが入っているかの確認: `git rev-parse --git-path hooks` の場所にある `pre-commit` が Lefthook のスクリプト（`call_lefthook run "pre-commit"` を含む）になっていること。入っていなければ `pnpm exec lefthook install` を実行する。
-- git worktree の注意: フックのディレクトリ（`.git/hooks`）はメインの作業ツリーと全 worktree で共有される。worktree で `pnpm install` や `lefthook run`（設定が変わっていると自動で `lefthook install` する）を実行すると、共有のフックが書き換わる。
-- フックを一時的に飛ばす: `LEFTHOOK=0 git commit ...`。**緊急時のみ**使い、使ったら理由を PR に書き、直後に `pnpm lint` を通す。`git commit --no-verify` も同様に緊急時のみ。
+- git worktree の注意: フックのディレクトリ（`.git/hooks`）はメインの作業ツリーと全 worktree で共有される。worktree で `pnpm install` や `lefthook run`（設定が変わっていると自動で `lefthook install` する）を実行すると、共有のフックが書き換わる。WorktreeCreate フック（`scripts/hooks/worktree-create.sh`）と SubagentStop フック（`scripts/hooks/subagent-stop.sh`）が共有のフックを修復する（LEARNINGS.md）。
+- フックを一時的に飛ばす: `LEFTHOOK=0 git commit ...` は**人間だけが使える**（緊急時のみ。使ったら理由を PR に書き、直後に `pnpm lint` を通す）。AI は `permissions.deny` と PreToolUse フック `scripts/hooks/guard-git.sh` で止まる（`git commit --no-verify` も同じ。`.claude/rules/git-guard.md`）。
 
 ## biome.json の設定の WHY
 JSON にはコメントを書けないため、ここに書く。ベースは create-next-app@16.3.6 の `--biome` テンプレート（`biome.json`、Biome 2.4.2 向け）。
@@ -47,7 +55,7 @@ JSON にはコメントを書けないため、ここに書く。ベースは cr
 | `linter.rules.preset` | `recommended` | テンプレートは `"recommended": true` だが、Biome 2.5.13 では非推奨（`biome rage --linter` が「deprecated ... Use preset instead」と出す）のため、後継の `preset` を使う |
 | `linter.rules.<group>.<rule>` | 下の一覧 | recommended 外のルールの追加と、info のルールを error に上げるため |
 | `linter.domains` | `next` / `react` / `test` を `recommended` | Next.js・React・Vitest 固有のルールを有効にする。テンプレートは next / react のみ。test（Vitest）は `vitest` が依存にあれば自動で有効になるが、依存の検出に頼らず明示する |
-| `overrides` | `apps/backend/shared/infra/env.ts`・`**/*.test.ts`・`**/*.test.tsx` で `style/noProcessEnv` を `off` | `process.env` を読んでよいのは環境変数の唯一の入口 `env.ts` と、子プロセスに `PATH` を渡すなどで環境変数を扱うテストだけ（Issue #59。`rules/code/env.md` の「環境変数」）。`includes` はリポジトリ直下からの相対パスで照合される（リポジトリの外の同名ファイル `.../apps/backend/shared/infra/env.ts` には効かないことを `lint.test.ts` で確認）。E2E の spec（`e2e/*.spec.ts`）は対象外にしない（`architecture.test.ts` の `env-direct-access` と同じく、E2E も `env.ts` を使う） |
+| `overrides` | `apps/backend/shared/infra/env.ts`・`**/*.test.ts`・`**/*.test.tsx` で `style/noProcessEnv` を `off` | `process.env` を読んでよいのは環境変数の唯一の入口 `env.ts` と、子プロセスに `PATH` を渡すなどで環境変数を扱うテストだけ（Issue #59。`.claude/rules/env.md` の「環境変数」）。`includes` はリポジトリ直下からの相対パスで照合される（リポジトリの外の同名ファイル `.../apps/backend/shared/infra/env.ts` には効かないことを `lint.test.ts` で確認）。E2E の spec（`e2e/*.spec.ts`）は対象外にしない（`architecture.test.ts` の `env-direct-access` と同じく、E2E も `env.ts` を使う） |
 | `assist.actions.source.organizeImports` | `on`（テンプレートのまま） | import の並び順を統一し、差分のノイズとマージ時の競合を減らす |
 
 ## 有効化したルール一覧
@@ -80,7 +88,7 @@ Biome の recommended 全体を有効にする（個別に列挙しない）。�
 - `correctness/useUniqueElementIds`（react domain・recommended 外）: 固定文字列の `id` はコンポーネントを複数回使うと DOM 上で重複する。`useId` を使わせる。
 - `complexity/noExcessiveCognitiveComplexity`: 認知的複雑度が既定の上限（15）を超える関数を防ぎ、分割を促す。
 - `style/noParameterAssign`: 引数への再代入で、呼び出し元の値と関数内の値の対応が追いにくくなるのを防ぐ。
-- `style/noProcessEnv`（既定 severity は info。Issue #59）: 環境変数を `apps/backend/shared/infra/env.ts` 以外で `process.env` から直接読むのを防ぐ（読む場所が散らばると、既定値や検証が場所ごとにずれるため。`rules/code/env.md` の「環境変数」）。`env.ts` とテストは `overrides` で off。`apps/frontend/instrumentation.ts` の `process.env.NEXT_RUNTIME`（Next.js の規約の変数）だけは、その行の `biome-ignore` で理由を書いて許している（ファイルごと off にすると、同じファイルの別の直参照も通るため）。`architecture.test.ts` の規則 `env-direct-access` でも同じことを検査している（2 系統にする理由と、分割代入 `const { env } = process` をどちらも拾わない限界は `rules/code/env.md`）。
+- `style/noProcessEnv`（既定 severity は info。Issue #59）: 環境変数を `apps/backend/shared/infra/env.ts` 以外で `process.env` から直接読むのを防ぐ（読む場所が散らばると、既定値や検証が場所ごとにずれるため。`.claude/rules/env.md` の「環境変数」）。`env.ts` とテストは `overrides` で off。`apps/frontend/instrumentation.ts` の `process.env.NEXT_RUNTIME`（Next.js の規約の変数）だけは、その行の `biome-ignore` で理由を書いて許している（ファイルごと off にすると、同じファイルの別の直参照も通るため）。`architecture.test.ts` の規則 `env-direct-access` でも同じことを検査している（2 系統にする理由と、分割代入 `const { env } = process` をどちらも拾わない限界は `.claude/rules/env.md`）。
 - `style/useThrowOnlyError`: `Error` 以外を throw するとスタックトレースが失われる（ESLint の no-throw-literal 相当）。
 - `suspicious/noConsole`（`console.error` / `console.warn` は許可）: デバッグ用の `console.log` の消し忘れを防ぐ。エラー・警告の出力は正当な用途があるため許可する。
 - `suspicious/noConstantBinaryExpressions`: 常に同じ結果になる比較・論理式（書き間違い）を検出する（ESLint の recommended にある no-constant-binary-expression 相当）。
@@ -97,4 +105,4 @@ Biome の recommended 全体を有効にする（個別に列挙しない）。�
 - `style/noDefaultExport`: Next.js の page / layout は default export が必須。
 - `style/useBlockStatements` / `noNestedTernary` / `noMagicNumbers` など: バグ防止より好みの要素が強く、最小構成の段階では入れない。
 - `security/noSecrets`: エントロピーによる推定で誤検知が出やすい。秘密情報は `.env*` を `.gitignore` 済み。
-- `style/noRestrictedImports`: ディレクトリ構成の依存の向きの検査に使えない。`import type` だけを許すことを表現できず（2.5.13 で、制限したパスへの `import type` も違反になることを実測）、参照元ごとの制限には feature・層ごとの `overrides` が要る。依存の向きはルート直下の `architecture.test.ts` で検査する（`rules/code/architecture.md` の「依存の向き（全体）」）。
+- `style/noRestrictedImports`: ディレクトリ構成の依存の向きの検査に使えない。`import type` だけを許すことを表現できず（2.5.13 で、制限したパスへの `import type` も違反になることを実測）、参照元ごとの制限には feature・層ごとの `overrides` が要る。依存の向きはルート直下の `architecture.test.ts` で検査する（`.claude/rules/architecture-check.md`）。

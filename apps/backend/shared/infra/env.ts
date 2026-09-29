@@ -1,5 +1,5 @@
 // 環境変数の唯一の入口（Issue #59）。アプリ・テスト・ツールの設定ファイルは、process.env を直接読まずにここの env / toolEnv を使う。
-// 規則と WHY は rules/code/env.md の「環境変数」。process.env を直接読むと Biome（style/noProcessEnv）と
+// 規則と WHY は .claude/rules/env.md の「環境変数」。process.env を直接読むと Biome（style/noProcessEnv）と
 // architecture.test.ts（規則 env-direct-access）で失敗する。process.env に触ってよいのはこのファイルだけ
 // （例外は apps/frontend/instrumentation.ts が Next.js の規約の NEXT_RUNTIME を読む 1 か所だけ）。
 //
@@ -42,6 +42,13 @@ export type ToolEnv = {
   // Stryker（mutation testing）の worker の中で動いているか。Stryker が子プロセスに渡す（@stryker-mutator/core 10.0.0 の
   //   child-process-proxy.js）。テスト用スキーマの後始末を止めるのに使う（apps/backend/shared/infra/database.test-support.ts）。
   STRYKER_MUTATOR_WORKER: boolean;
+  // E2E（Playwright）が本番ビルドを起動するポート（1〜65535。playwright.config.ts）。未設定なら undefined で、
+  //   playwright.config.ts が既定の 3100 を使う。ツールの動かし方（E2E のポート）の切り替え。
+  // WHY Env（必須）でなくここ: E2E 専用で、アプリ（next start）は使わない。必須にすると本番や既存の .env にテスト用の
+  //   変数を要求し、足すまで全コマンドが止まる（Issue #64 の reviewer 指摘）。
+  // WHY 任意でも不正な値はエラーにする: 0 や範囲外を黙って既定値にすると、worktree ごとに分けたつもりのポートが
+  //   3100 に戻り、reuseExistingServer で別の worktree のサーバを検証してしまう（.claude/rules/worktree.md）。
+  E2E_PORT: number | undefined;
 };
 
 // 必須の変数の検証。欠けていれば "未設定"、値が不正なら理由を返し、正しければ値を返す。
@@ -65,6 +72,15 @@ function nonNegativeInteger(raw: string): Check<number> {
 function positiveInteger(raw: string): Check<number> {
   if (!/^\d+$/.test(raw) || Number(raw) === 0) {
     return { problem: `1 以上の整数で指定してください（値: ${raw}）` };
+  }
+  return { value: Number(raw) };
+}
+
+// TCP のポートとして使える 1〜65535 に限る。
+// WHY 0 を拒否する: 0 は「OS が空きポートを選ぶ」意味になり、webServer と baseURL（テスト側）の番号がずれる。
+function portNumber(raw: string): Check<number> {
+  if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 65_535) {
+    return { problem: `1〜65535 の整数で指定してください（値: ${raw}）` };
   }
   return { value: Number(raw) };
 }
@@ -102,7 +118,7 @@ export function readEnv(source: EnvSource): Env {
       [
         "環境変数が足りないか、値が正しくありません。",
         ...problems.map((problem) => `  - ${problem}`),
-        "リポジトリ直下で cp .env.example .env を実行して .env を作り、値を確かめてください（rules/code/env.md の「環境変数」）。",
+        "リポジトリ直下で cp .env.example .env を実行して .env を作り、値を確かめてください（.claude/rules/env.md の「環境変数」）。",
       ].join("\n"),
     );
   }
@@ -114,7 +130,43 @@ function nonEmpty(raw: string | undefined): string | undefined {
   return raw === "" ? undefined : raw;
 }
 
+// 任意の数の変数: 未設定・空文字なら undefined、値があれば parse で検証し、不正なら problems に積む。
+function optionalNumber(
+  name: string,
+  raw: string | undefined,
+  parse: (raw: string) => Check<number>,
+  problems: string[],
+): number | undefined {
+  const value = nonEmpty(raw);
+  if (value === undefined) {
+    return undefined;
+  }
+  const checked = parse(value);
+  if ("problem" in checked) {
+    problems.push(`${name}: ${checked.problem}`);
+    return undefined;
+  }
+  return checked.value;
+}
+
+// WHY 不正な値は投げる（readEnv と同じく、読み込み時の起動エラーにする）: 任意の変数でも、書いた値が黙って無視されると
+//   意図と違う動き（E2E_PORT なら既定の 3100 に戻る）に気づけないため。
 export function readToolEnv(source: EnvSource): ToolEnv {
+  const problems: string[] = [];
+  const e2ePort = optionalNumber(
+    "E2E_PORT",
+    source.E2E_PORT,
+    portNumber,
+    problems,
+  );
+  if (problems.length > 0) {
+    throw new Error(
+      [
+        "環境変数の値が正しくありません。",
+        ...problems.map((problem) => `  - ${problem}`),
+      ].join("\n"),
+    );
+  }
   return {
     CI: nonEmpty(source.CI) !== undefined,
     PLAYWRIGHT_CHROMIUM_EXECUTABLE: nonEmpty(
@@ -122,6 +174,7 @@ export function readToolEnv(source: EnvSource): ToolEnv {
     ),
     STRYKER_MUTATOR_WORKER:
       nonEmpty(source.STRYKER_MUTATOR_WORKER) !== undefined,
+    E2E_PORT: e2ePort,
   };
 }
 

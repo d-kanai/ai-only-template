@@ -4,7 +4,7 @@ import { Todo } from "../domain/todo";
 import { InMemoryTransactionRunner } from "./in-memory-transaction-runner";
 import { InMemoryTodoRepository } from "./todo-repository.in-memory";
 
-// テストから任意のタイミングで resolve できる Promise（rules/code/test.md の「テストダブル」）。
+// テストから任意のタイミングで resolve できる Promise（.claude/rules/testing.md の「テストダブル」）。
 function deferred<T>() {
   let resolve: (value: T) => void = () => undefined;
   const promise = new Promise<T>((r) => {

@@ -52,9 +52,11 @@ describe("readEnv", () => {
   });
 
   test("必須の変数以外は返さない（関係のない環境変数を env に混ぜない）", () => {
-    expect(Object.keys(readEnv({ ...VALID, PATH: "/usr/bin" })).sort()).toEqual(
-      [...REQUIRED_NAMES].sort(),
-    );
+    expect(
+      Object.keys(
+        readEnv({ ...VALID, PATH: "/usr/bin", E2E_PORT: "3100" }),
+      ).sort(),
+    ).toEqual([...REQUIRED_NAMES].sort());
   });
 
   test("アイドル・接続待ちの 0 は受け付ける（0 以上の整数）", () => {
@@ -148,8 +150,53 @@ describe("readToolEnv", () => {
       CI: false,
       PLAYWRIGHT_CHROMIUM_EXECUTABLE: undefined,
       STRYKER_MUTATOR_WORKER: false,
+      E2E_PORT: undefined,
     });
   });
+
+  test.each([
+    ["1", 1],
+    ["3616", 3616],
+    ["65535", 65_535],
+  ])("E2E_PORT=%s は %s（ポートの範囲 1〜65535 の中の整数）", (value, port) => {
+    expect(readToolEnv({ E2E_PORT: value }).E2E_PORT).toBe(port);
+  });
+
+  test("E2E_PORT が空文字なら未設定と同じ undefined（playwright.config.ts が既定の 3100 を使う）", () => {
+    expect(readToolEnv({ E2E_PORT: "" }).E2E_PORT).toBeUndefined();
+  });
+
+  test.each([
+    [
+      "0",
+      "0 はポートとして使えない（OS が空きポートを選ぶ意味になり、テストとサーバでずれる）",
+    ],
+    ["65536", "範囲外"],
+    ["-1", "負"],
+    ["3100.5", "小数"],
+    ["abc", "数でない"],
+    [" 3100", "空白を含む"],
+    ["３１００", "全角数字"],
+  ])(
+    "E2E_PORT=%s は不正（%s）なので、任意でも名前と値を含むエラーにする",
+    (value) => {
+      // toThrow ではなく投げた値そのものを比べる（toThrow は投げた値が undefined でも通りうる。.claude/rules/testing.md）。
+      let thrown: unknown;
+      try {
+        readToolEnv({ E2E_PORT: value });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toEqual(
+        new Error(
+          [
+            "環境変数の値が正しくありません。",
+            `  - E2E_PORT: 1〜65535 の整数で指定してください（値: ${value}）`,
+          ].join("\n"),
+        ),
+      );
+    },
+  );
 
   test.each([
     ["true", true],
@@ -322,6 +369,7 @@ describe("env / toolEnv（モジュールを読み込んだ時点の値）", () 
     vi.stubEnv("CI", "1");
     vi.stubEnv("STRYKER_MUTATOR_WORKER", "1");
     vi.stubEnv("PLAYWRIGHT_CHROMIUM_EXECUTABLE", "/opt/pw-browsers/chromium");
+    vi.stubEnv("E2E_PORT", "3456");
     vi.resetModules();
 
     const reloaded = await import("./env");
@@ -330,6 +378,20 @@ describe("env / toolEnv（モジュールを読み込んだ時点の値）", () 
       CI: true,
       PLAYWRIGHT_CHROMIUM_EXECUTABLE: "/opt/pw-browsers/chromium",
       STRYKER_MUTATOR_WORKER: true,
+      E2E_PORT: 3456,
+    });
+  });
+
+  test("読み込み時に E2E_PORT が不正なら、任意の変数でも読み込みそのものがエラーになる", async () => {
+    vi.stubEnv("E2E_PORT", "70000");
+    vi.resetModules();
+
+    const loading = import("./env");
+    await expect(loading).rejects.toBeInstanceOf(Error);
+    await expect(loading).rejects.toMatchObject({
+      message: expect.stringContaining(
+        "E2E_PORT: 1〜65535 の整数で指定してください（値: 70000）",
+      ),
     });
   });
 
@@ -338,7 +400,7 @@ describe("env / toolEnv（モジュールを読み込んだ時点の値）", () 
     vi.stubEnv("DATABASE_POOL_MAX", "abc");
     vi.resetModules();
 
-    // rejects.toThrow("文字列") は reject された値が undefined でも通るので、Error であることと message を別に確かめる（rules/code/test.md）。
+    // rejects.toThrow("文字列") は reject された値が undefined でも通るので、Error であることと message を別に確かめる（.claude/rules/testing.md）。
     const loading = import("./env");
     await expect(loading).rejects.toBeInstanceOf(Error);
     await expect(loading).rejects.toMatchObject({

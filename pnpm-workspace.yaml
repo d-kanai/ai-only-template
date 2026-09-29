@@ -5,7 +5,7 @@
 #   frontend は "@repo/backend": "workspace:*" で backend に依存する（node_modules/@repo/backend が apps/backend への symlink になる）。
 #   リポジトリ直下（package.json）も workspace のルートとして 1 つのパッケージになり、ツール（Biome・Vitest・Playwright など）を持つ。
 #   WHY パッケージに分ける: 依存（drizzle-orm / pg は backend、next / react は frontend）と公開する入口（apps/backend/package.json の
-#   exports）をパッケージの単位で分け、後で backend を別プロセスに分けやすくする（rules/code/architecture.md）。
+#   exports）をパッケージの単位で分け、後で backend を別プロセスに分けやすくする（docs/architecture-decisions.md）。
 #   下の設定（サプライチェーン保護・allowBuilds・patchedDependencies）は workspace 全体に効くので、ここ（ルート）にだけ書く。
 #   package.test.ts はこの packages を読んで、すべての package.json の依存の版を検査する（"<ディレクトリ>/*" の形だけを扱う）。
 packages:
@@ -28,7 +28,7 @@ packages:
 #   パッケージは pnpm が入れるので、実行しなくても JS のラッパー経由でバイナリが使える。任意コードの実行を増やさないため false。
 #   `pnpm db:generate`（drizzle-kit generate）が動くことで確認した（2026-09-28）。
 #
-# lefthook: true … Git フック管理ツール（rules/code/lint.md）。postinstall で `lefthook install -f` を実行し、
+# lefthook: true … Git フック管理ツール（.claude/rules/lint.md）。postinstall で `lefthook install -f` を実行し、
 #   .git/hooks/pre-commit を Lefthook のスクリプトに置き換える（-f: 既存フックの退避ファイル .old を上書きし、
 #   core.hooksPath が設定されていても続行する。`lefthook install --help` で確認）。これにより `pnpm install` するだけで
 #   pre-commit の Biome 検査が有効になり、人間・AI どちらもフックの入れ忘れがなくなる。
@@ -60,7 +60,7 @@ allowBuilds:
 #   下の minimumReleaseAgeStrict と合わせて明示している。値は pnpm-workspace.test.ts で検査している。
 #   対象外: package.json の packageManager（pnpm 本体）の解決。lockfile 先頭の pnpm@12.7.0 / @pnpm/exe.* は
 #   2026-09-25 公開（5 日未満）でも拒否されなかった（2026-09-28 実測。公式仕様は未確認）。pnpm 本体の版は
-#   rules/code/env.md のとおり .tool-versions と packageManager で明示的に固定しているので、勝手に新しい版が入ることはない。
+#   .claude/rules/env.md のとおり .tool-versions と packageManager で明示的に固定しているので、勝手に新しい版が入ることはない。
 minimumReleaseAge: 7200
 
 # minimumReleaseAgeStrict: minimumReleaseAge を満たす版がなければ、フォールバックせず install を失敗させる。
@@ -91,7 +91,7 @@ strictDepBuilds: true
 
 # savePrefix: `pnpm add` が package.json に書く版の接頭辞（https://pnpm.io/settings/other#saveprefix ）。
 #   既定は '^'（例: 1.2.3 → ^1.2.3。マイナー更新を許す範囲指定になる）。'' にすると接頭辞なしの 1.2.3（完全固定）で書かれる。
-#   依存はすべて完全固定する方針のため（rules/code/dependencies.md）、`pnpm add <pkg>` で版を書き忘れても範囲指定にならないようにしている。
+#   依存はすべて完全固定する方針のため（.claude/rules/dependencies.md）、`pnpm add <pkg>` で版を書き忘れても範囲指定にならないようにしている。
 #   注意: 公式ドキュメントのとおり、`pnpm add foo@2` のように範囲を指定して追加した場合はこの設定は無視され、
 #   package.json には "2" と範囲のまま書かれる。そのため版は `pnpm add <pkg>@<x.y.z>` で明示し、package.test.ts でも検査している。
 savePrefix: ''
@@ -99,7 +99,7 @@ savePrefix: ''
 # patchedDependencies: 依存パッケージに当てるパッチ（pnpm patch / pnpm patch-commit で作る）。キーは「パッケージ@版」、
 #   値はパッチファイルのパス。pnpm install のたびに node_modules の中身へ当てられ、lockfile にもパッチのハッシュが入る
 #   （パッチを変えると --frozen-lockfile が lockfile とのずれで失敗するので、パッチと lockfile は同じコミットで直す）。
-#   使ってよい条件・外す条件・確認方法は rules/code/dependencies.md の「pnpm patch」。
+#   使ってよい条件・外す条件・確認方法は .claude/rules/dependencies.md の「pnpm patch」。
 #   - @stryker-mutator/vitest-runner@10.0.0（Issue #52）: テスト名の連結をスペースから " > " に直す（dist の 2 ファイル各 1 行）。
 #     Vitest 5.0.1 の testNamePattern はフルネームを " > " 区切りで照合するため、直さないと describe の中のテストが
 #     変異ごとの実行で skip され、mutation score が実際より低く出る（2026-09-28 実測で 26.82% → 85.68%。詳細は

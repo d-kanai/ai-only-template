@@ -51,7 +51,7 @@ export function toErrorResponse(error: unknown): Response {
     return errorResponse(400, "validation_error", error.message);
   }
   // WHY ログに残す: 想定外の例外は原因を調べる必要がある。レスポンスでは詳細を隠すので、
-  //   サーバのログにだけ残す（noConsole でも console.error は許可している。rules/code/lint.md）。
+  //   サーバのログにだけ残す（noConsole でも console.error は許可している。.claude/rules/lint.md）。
   console.error(error);
   // WHY 固定の文言にする: 例外の message には内部の情報（接続先、SQL など）が含まれうるため、クライアントに返さない。
   return errorResponse(500, "internal_error", "サーバでエラーが発生しました");
