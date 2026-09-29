@@ -90,12 +90,12 @@ jobs:
       - name: Create .env from .env.example
         run: cp .env.example .env
 
-      # apps/backend/drizzle/ のマイグレーションを Postgres に当てる（drizzle-kit migrate。Issue #57）。
+      # apps/backend/shared/drizzle/ のマイグレーションを Postgres に当てる（drizzle-kit migrate。Issue #57）。
       # WHY ここで当てるか: E2E（pnpm test:e2e）の next start は Postgres の todos 表を使うが、webServer の中では
       #   マイグレーションを当てない方針（apps/e2e/playwright.config.ts）。E2E より前に 1 回だけ当てておく。
       #   単体テスト（pnpm test）は、テストごとに別のスキーマを作ってそこに当てる（apps/backend/shared/infra/database.test-support.ts）ので、
       #   この結果には依存しない。
-      # 接続先は上で作った .env の DATABASE_URL（apps/backend/drizzle.config.ts が env.ts 経由で読む）。
+      # 接続先は上で作った .env の DATABASE_URL（apps/backend/shared/drizzle/drizzle.config.ts が env.ts 経由で読む）。
       - name: Apply database migrations
         run: pnpm db:migrate
       - run: pnpm lint

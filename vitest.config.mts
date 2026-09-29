@@ -71,7 +71,7 @@ export default defineConfig({
       //   - apps/frontend/app/: ルーティングだけで、テストを置かない方針（.claude/rules/frontend.md の「app/（ルーティングだけ）」）。
       //     仕様は screen と api ファイルのテストで固定し、app/ の結線は E2E（pnpm test:e2e）で確かめる。
       //   - 設定ファイル（リポジトリ直下の vitest.config.mts など、apps/frontend/next.config.ts、
-      //     apps/backend/drizzle.config.ts）: ツールに渡す値を並べるだけで、単体テストで検証する振る舞いを持たない。
+      //     apps/backend/shared/drizzle/drizzle.config.ts）: ツールに渡す値を並べるだけで、単体テストで検証する振る舞いを持たない。
       //     apps/frontend 直下の Next の規約ファイル instrumentation.ts / instrumentation-node.ts（起動時の環境変数の検証。Issue #59）も
       //     含めない: next start / next dev の起動でだけ動き、プロセスを終える処理なので、起動時に止まることを実測で確かめている
       //     （.claude/rules/env.md の「環境変数」）。検証の中身は env.ts（計測の対象）のテストで固定している。
@@ -85,8 +85,9 @@ export default defineConfig({
       //     （2026-09-28 に実測）。テスト（scripts/*.test.ts）が子プロセスで実行する bash の中身は計測されない。
       //   apps/frontend/shared/（feature をまたぐ部品。最初は request-log/。Issue #80）も対象にする。
       //   apps/shared/（frontend と backend で共通の env.ts・logger.ts。Issue #90 で apps/backend/shared/infra/ から移した）も対象にする。
-      //   apps/backend/ は全体を対象にし、直下の drizzle.config.ts だけを下の exclude で外す（apps/backend/ の中は
-      //   drizzle.config.ts 以外すべて 4 層の下にある。rule-tests/architecture.test.ts の backend-placement）。
+      //   apps/backend/ は全体を対象にし、shared/drizzle/ の drizzle.config.ts だけを下の exclude で外す（apps/backend/ の
+      //   ソースは drizzle.config.ts 以外すべて features/<f>/ か shared/ の 4 層の下にある。rule-tests/architecture.test.ts の
+      //   backend-placement。Issue #98 で apps/backend 直下から shared/drizzle/ に移した）。
       include: [
         "apps/frontend/features/**/*.{ts,tsx}",
         "apps/frontend/shared/**/*.{ts,tsx}",
@@ -97,7 +98,7 @@ export default defineConfig({
       // exclude: include のうち計測から外すもの。
       //   - **/*.test.{ts,tsx}: テストそのもの。Vitest もテストの include パターンを常に除外に足すが、意図を明示する。
       //   - **/*.d.ts: 型宣言だけで実行されるコードを持たない。
-      //   - apps/backend/*.config.ts: drizzle-kit の設定（上の「設定ファイル」）。
+      //   - apps/backend/shared/drizzle/*.config.ts: drizzle-kit の設定（上の「設定ファイル」）。
       //   coverageConfigDefaults.exclude（Vitest の既定の除外。5.0.1 では空配列）と結合し、将来の版で既定が増えても
       //   消さないようにする。なお Vitest は設定ファイル（vitest.config.*）・setupFiles・node_modules を、
       //   この設定とは別に常に除外する（5.0.1 の dist/chunks/index.*.js の resolveConfig で確認）。
@@ -105,7 +106,7 @@ export default defineConfig({
         ...coverageConfigDefaults.exclude,
         "**/*.test.{ts,tsx}",
         "**/*.d.ts",
-        "apps/backend/*.config.ts",
+        "apps/backend/shared/drizzle/*.config.ts",
       ],
       // thresholds: 4 指標すべて 100%。1 つでも下回ると vitest（pnpm test、CI の ci ジョブ）が失敗する。
       //   WHY 100: ユーザー判断（Issue #45）。テスト = 仕様なので、テストが通らないコードは仕様のないコードになる。

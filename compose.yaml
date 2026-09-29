@@ -5,7 +5,7 @@
 #   - Claude Code のクラウドセッション: SessionStart フック（scripts/cloud-session-start.sh）が dockerd を起動してから up する
 # WHY ファイル名が compose.yaml か: Compose Specification の推奨名で、docker compose / podman compose のどちらも
 #   カレントディレクトリのこの名前を自動で読む（-f の指定が要らない）。
-# アプリは DATABASE_URL（.env.example）でこの DB に接続する。表はマイグレーション（pnpm db:migrate。apps/backend/drizzle/）で作る（Issue #57）。
+# アプリは DATABASE_URL（.env.example）でこの DB に接続する。表はマイグレーション（pnpm db:migrate。apps/backend/shared/drizzle/）で作る（Issue #57）。
 
 services:
   # サービス名 db: `docker compose exec db psql ...`（package.json の db:psql）で使う名前。

@@ -53,7 +53,7 @@ export async function createTestDatabase(): Promise<TestDatabase> {
   return {
     db,
     url,
-    // migrationsFolder: apps/backend/drizzle/（このファイルから ../../drizzle）。
+    // migrationsFolder: apps/backend/shared/drizzle/（このファイルから ../drizzle。Issue #98 で apps/backend 直下の drizzle/ から移した）。
     //   WHY このファイルの場所から決める: カレントディレクトリからのパス（"drizzle"）だと、ディレクトリを apps/backend に
     //   移したとき（Issue #68）や、テストをリポジトリ直下以外から動かしたときに見つからない。このファイルは Vitest だけが
     //   読み込み（Next のバンドルには入らない）、import.meta.dirname は元のファイルの場所を指す。
@@ -61,7 +61,7 @@ export async function createTestDatabase(): Promise<TestDatabase> {
     //   pnpm db:migrate の記録と混ざり、「当て済み」と判断されてテスト用のスキーマに表が作られない。
     migrate: () =>
       migrate(db, {
-        migrationsFolder: join(import.meta.dirname, "..", "..", "drizzle"),
+        migrationsFolder: join(import.meta.dirname, "..", "drizzle"),
         migrationsSchema: schema,
       }),
     close: async () => {

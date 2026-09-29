@@ -1,4 +1,4 @@
-import { DomainError } from "../../shared/domain/domain-error";
+import { DomainError } from "../../../shared/domain/domain-error";
 import type { Todo } from "../domain/todo";
 import type { TodoRepository } from "../domain/todo-repository";
 

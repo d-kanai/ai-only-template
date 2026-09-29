@@ -8,12 +8,12 @@ import {
   test,
   vi,
 } from "vitest";
-import type { TransactionRunner } from "../../shared/domain/transaction-runner";
-import { closeDatabase } from "../../shared/infra/database";
+import type { TransactionRunner } from "../../../shared/domain/transaction-runner";
+import { closeDatabase } from "../../../shared/infra/database";
 import {
   createTestDatabase,
   type TestDatabase,
-} from "../../shared/infra/database.test-support";
+} from "../../../shared/infra/database.test-support";
 import { Todo } from "../domain/todo";
 import {
   createInMemoryTodoContainer,

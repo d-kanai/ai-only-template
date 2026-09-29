@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { DomainError } from "../../shared/domain/domain-error";
+import { DomainError } from "../../../shared/domain/domain-error";
 
 // タイトルの不変条件: 前後の空白を除いて 1〜100 文字。規則はこのスキーマ 1 か所に宣言する（Issue #88）。
 // WHY trim してから数え、trim した値を保持する: 空白だけのタイトルを「空」とみなし、

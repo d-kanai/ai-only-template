@@ -66,6 +66,7 @@
 | 2026-09-28 | 作業ログの記録漏れを、Stop フックと CI の差分検査で止める | 採用 | [20260928-work-log-enforced-by-stop-hook-and-ci.md](20260928-work-log-enforced-by-stop-hook-and-ci.md) |
 | 2026-09-28 | worktree ごとの外部リソースは、worktree 名から値を導いて WorktreeCreate フックが .env に書き、作成まで行う | 採用 | [20260928-worktree-isolated-external-resources.md](20260928-worktree-isolated-external-resources.md) |
 | 2026-09-29 | frontend と backend で共通の基盤（env と logger）は、workspace パッケージ apps/shared（@repo/shared）に置く | 採用 | [20260929-apps-shared-package.md](20260929-apps-shared-package.md) |
+| 2026-09-29 | backend も最初の階層を features/ と shared/ にし、Drizzle の設定とマイグレーションは shared/drizzle/ に置く | 採用 | [20260929-backend-features-and-shared-directories.md](20260929-backend-features-and-shared-directories.md) |
 | 2026-09-29 | E2E は apps/e2e の workspace パッケージ @repo/e2e にする | 採用 | [20260929-e2e-as-workspace-package.md](20260929-e2e-as-workspace-package.md) |
 | 2026-09-29 | サーバ側のログは logger.ts を唯一の出口にし、console の直接の呼び出しを Biome とテストの 2 系統で止める | 採用 | [20260929-logger-single-exit.md](20260929-logger-single-exit.md) |
 | 2026-09-29 | CI の完了をポーリングで待たず、PR に auto-merge（merge commit）を付けて終える | 採用 | [20260929-merge-with-auto-merge.md](20260929-merge-with-auto-merge.md) |

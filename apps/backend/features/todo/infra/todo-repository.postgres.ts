@@ -1,5 +1,5 @@
 import { asc, eq } from "drizzle-orm";
-import type { Executor } from "../../shared/infra/database";
+import type { Executor } from "../../../shared/infra/database";
 import { Todo } from "../domain/todo";
 import type { TodoRepository } from "../domain/todo-repository";
 import { todos } from "./schema";

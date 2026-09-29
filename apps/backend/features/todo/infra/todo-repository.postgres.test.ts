@@ -8,11 +8,11 @@ import {
   expect,
   test,
 } from "vitest";
-import { DomainError } from "../../shared/domain/domain-error";
+import { DomainError } from "../../../shared/domain/domain-error";
 import {
   createTestDatabase,
   type TestDatabase,
-} from "../../shared/infra/database.test-support";
+} from "../../../shared/infra/database.test-support";
 import { Todo } from "../domain/todo";
 import { todos } from "./schema";
 import { PostgresTodoRepository } from "./todo-repository.postgres";
