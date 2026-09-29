@@ -33,7 +33,7 @@ paths:
 - `app/`（`app/api` 以外）が features / backend / shared を参照するなら `apps/frontend/features/<f>`（`/index`）か `apps/frontend/shared/` だけ。パッケージと `app/` の中の相対参照（`./globals.css`）は検査しない。`app/api/` が参照してよいのは `apps/backend/<x>/presentation/*.api` だけ。
 - 置き場所: `shared-placement`（Issue #90。`apps/shared/` に置いてよいのは `env.ts`・`logger.ts`・`env.test.ts`・`logger.test.ts`・`package.json`・`tsconfig.json` だけ。ソース以外も含め全ファイルを見る。`SHARED_FILES` と `SHARED_PLACEMENT_EXAMPLES`）、`backend-placement`（4 層の下か直下の `<name>.config.<拡張子>`）、`frontend-placement`（`app/`・`features/`・`shared/` か直下の 5 ファイル: `next.config.ts`・`instrumentation.ts`・`instrumentation-node.ts`・`proxy.ts`・`next-env.d.ts`。`middleware.ts` と `proxy.js` は違反）。参照の有無に関係なく違反。`apps/e2e/` とリポジトリ直下のファイルも判定に通すが、どちらの規則の対象でもない（`PLACEMENT_EXAMPLES` / `FRONTEND_PLACEMENT_EXAMPLES` と fixture で固定。Issue #84）。
 - `env-direct-access`: `process.env`（空白・改行を挟むもの、`process?.env`、`globalThis.process.env` / `global.process.env`、`(process).env`）と `process["env"]` / `process['env']` を、`apps/shared/env.ts` 以外で違反にする。例外は `apps/frontend/instrumentation.ts` の `NEXT_RUNTIME` だけ（`allowedVariables`）。対象は依存の検査と同じファイルに `apps/e2e/` とリポジトリ直下の設定・セットアップファイルを足したもの。判定の例は `ENV_ACCESS_EXAMPLES`。
-- `console-direct-access`（Issue #85）: `console` という識別子（`console.log` / `console?.log` / `console["log"]`、`globalThis.console` / `global.console`、`(console)`、別名・分割代入・引数に渡すものも含む。`consoleLog`・`myconsole`・`console_` は別の識別子）を、`apps/shared/logger.ts` 以外で違反にする。対象は `env-direct-access` と同じファイルに `scripts/` のソース（テスト以外。今は無い）を足したもの。判定の例は `CONSOLE_ACCESS_EXAMPLES`。Biome の `noConsole` と 2 系統にする理由と、どちらか片方だけが拾う書き方は `docs/logger.md`。
+- `console-direct-access`（Issue #85）: `console` という識別子（`console.log` / `console?.log` / `console["log"]`、`globalThis.console` / `global.console`、`(console)`、別名・分割代入・引数に渡すものも含む。`consoleLog`・`myconsole`・`console_` は別の識別子）を、`apps/shared/logger.ts` 以外で違反にする。対象は `env-direct-access` と同じファイルに `scripts/` のソース（テスト以外。今は無い）を足したもの。判定の例は `CONSOLE_ACCESS_EXAMPLES`。Biome の `noConsole` と 2 系統にする理由は ADR `docs/adr/20260929-logger-single-exit.md`、どちらか片方だけが拾う書き方は `rule-tests/architecture.test.ts` のコメントと「console の参照の抽出」のテスト。
 
 ## テストの持ち方
 - 規則ごとに判定の例（`RULE_EXAMPLES`。違反になる例・ならない例を架空の参照で 3 件以上ずつ）。今のコードに違反が無いことだけでは、規則が緩すぎても気づけない。`RULES` のすべての規則に例があることもテストで確かめる。exports は `resolveExportKey`・`findExportsViolations` に当たる例・当たらない例・違反の例を持つ。
@@ -50,7 +50,7 @@ paths:
 - 見逃す: 正規表現リテラルやテンプレートリテラルの入れ子でコメント・文字列の区切りを誤認しうる、`${}` の中の `import()`、``import(`@repo/backend/${name}`)``（静的に決められない）、`}` の直後に同じ行で続けた `export ... from`。
 - 多く検出する: 型の位置の `import("x").T` は値の参照として数える。
 - `frontend-to-backend-specifier`・`frontend-to-shared-specifier` と `backend-exports`・`shared-exports` は `apps/frontend/`・`apps/backend/`・`apps/shared/`・`apps/e2e/`・リポジトリ直下のファイルしか見ない（`scripts/*.ts` のテスト以外などは見ない。今は該当なし）。足すときは `listReferencingFiles` と fixture も直す。
-- 環境変数の抽出の限界（分割代入など）は `.claude/rules/env.md`、console の抽出の限界（`node:console` の import、`${}` の中）は `docs/logger.md`（「console の参照の抽出」のテストで固定）。詳細と WHY は `rule-tests/architecture.test.ts` のコメントと、「参照の抽出」「参照先の正規化」「環境変数の直参照の抽出」のテスト。
+- 環境変数の抽出の限界（分割代入など）は `.claude/rules/env.md`、console の抽出の限界（`node:console` の import、`${}` の中）は「console の参照の抽出」のテストで固定。詳細と WHY は `rule-tests/architecture.test.ts` のコメントと、「参照の抽出」「参照先の正規化」「環境変数の直参照の抽出」のテスト。
 
 ## 採用しなかった検査の手段
-- Biome の `noRestrictedImports`（`import type` だけを許せない。feature・層ごとの `overrides` が要る）、dependency-cruiser（TypeScript 7 に未対応）。詳細は `docs/architecture-decisions.md`。
+- Biome の `noRestrictedImports`（`import type` だけを許せない。feature・層ごとの `overrides` が要る）、dependency-cruiser（TypeScript 7 に未対応）。詳細は ADR `docs/adr/20260928-dependency-direction-checked-by-own-test.md`。

@@ -7,7 +7,7 @@ skills:
   - rule-check-test
 ---
 
-あなたはオーケストレータから機械的な作業を任された軽量ワーカーです。WHY この定義がある: 機械的な作業に Opus を使うと、同じ結果に対して消費が大きい（Issue #78。`docs/usage.md`）。
+あなたはオーケストレータから機械的な作業を任された軽量ワーカーです。WHY この定義がある: 機械的な作業に Opus を使うと、同じ結果に対して消費が大きい（Issue #78。ADR `docs/adr/20260929-save-usage-limit.md`）。
 
 ## 進め方
 - CLAUDE.md のルール（FACTベース、Test Driven）に従う。

@@ -9,7 +9,7 @@ paths:
 
 # 実行環境と環境変数
 
-実測（どこで止まるか、Next の `.env` の読み方、検査の限界の確かめ方など）は `docs/env.md`。クラウドセッションは `.claude/rules/cloud-session.md`。
+決定は ADR `docs/adr/20260928-env-single-entry-all-required.md`、実測（どこで止まるか、Next の `.env` の読み方、検査の限界の確かめ方など）は 2026-09-28 の work-logs。クラウドセッションは `.claude/rules/cloud-session.md`。
 
 ## ツールの版（asdf）
 ツールの版は asdf で管理し、`.tool-versions` をコミットして全員（人間・AI）が同じ環境で動かす。
@@ -34,12 +34,12 @@ paths:
 - WHY 必須・既定値なし: 既定値があると `.env` の書き忘れや CI での渡し忘れが黙って既定値で動き、意図しない DB に接続しても気づけない（以前は `DATABASE_URL` が無いと InMemory に落ちていた）。開発用の値は `.env.example` の 1 か所だけ。
 - WHY ツールのフラグを分ける: 手元では `CI` も `PLAYWRIGHT_CHROMIUM_EXECUTABLE` も無いのが正常。必須にすると `.env.example` に嘘の値を置くことになり、コピーした `.env` で CI として動く。
 - 起動時に全件検証する: `env.ts` の読み込み時に `readEnv(process.env)` が、欠けている・空（空白だけを含む）・不正な値（数でない、負、小数、`DATABASE_POOL_MAX=0`）の名前を**すべて**集めて 1 つのエラーにし、`cp .env.example .env` の手順を出して止まる。WHY すべて集める: 直すたびに次の 1 件が見つかる往復を無くす。
-  - `pnpm build` / `pnpm test` / `pnpm test:e2e` / `pnpm db:migrate` / `pnpm start` / `pnpm dev` はすべて exit 1 で止まる（実測は `docs/env.md`）。
-- `next start` / `next dev` の起動時の検証: `apps/frontend/instrumentation.ts` の `register`（起動時に 1 回、リクエストを受け付ける前に完了する Next の規約）が、`process.env.NEXT_RUNTIME === "nodejs"` のときだけ `instrumentation-node.ts` の `verifyEnvAtStartup` を呼び、`env.ts` を読み込む。
+  - `pnpm build` / `pnpm test` / `pnpm test:e2e` / `pnpm db:migrate` / `pnpm start` / `pnpm dev` はすべて exit 1 で止まる（2026-09-28 に実測）。
+- `next start` / `next dev` の起動時の検証: `apps/frontend/instrumentation.ts` の `register`（起動時に 1 回、リクエストを受け付ける前に完了する Next の規約。同梱ドキュメント `02-guides/instrumentation.md` の「Convention」で、`instrumentation.ts` はプロジェクトのルートに置く）が、`process.env.NEXT_RUNTIME === "nodejs"` のときだけ `instrumentation-node.ts` の `verifyEnvAtStartup` を呼び、`env.ts` を読み込む。
   - WHY: API の route は最初のリクエストまで読み込まれず、`env.ts` だけではサーバが起動したまま最初の `/api/todos` が 500 になるまで気づけない。
   - `register` が失敗しても `next start` は動き続けるので、エラーを出してから `process.exit(1)` する。
   - WHY `NEXT_RUNTIME` で分ける: `register` は Edge 向けにもビルドされ、分岐が無いと Node の API が Edge に入って `next build` が警告を出す。Next がビルド時に埋め込む変数なので `process.env.NEXT_RUNTIME` と書く必要があり、ここだけを直参照の例外にしている（Biome は行単位の `biome-ignore`、`rule-tests/architecture.test.ts` は変数名まで絞った `allowedVariables`）。
-  - 単体テストは無い（カバレッジの対象外）。起動時に止まることは実測で確かめた（`docs/env.md`）。
+  - 単体テストは無い（カバレッジの対象外）。起動時に止まることは実測で確かめた（2026-09-28 の work-logs）。
 
 ## .env
 - 作り方: リポジトリ直下で `cp .env.example .env`。`.env` はコミットしない（`.gitignore` の `.env*`、`!.env.example`）。置くのはリポジトリ直下の 1 つだけ（`apps/*/.env` は置かない。Issue #68 のユーザー判断）。worktree では WorktreeCreate フックが worktree ごとの値で `.env` を書く（`.claude/rules/worktree.md`）。
@@ -60,7 +60,7 @@ paths:
   - Biome だけが拾う: テンプレートリテラルの `${process.env.X}`、`import { env } from "node:process"`。
   - `rule-tests/architecture.test.ts` だけが拾う: `global.process.env`、`(process).env`。
   - `rule-tests/architecture.test.ts` 側の限界は、同ファイルの「環境変数の直参照の抽出」のテストで固定している。
-- 同じ設計（Biome のルール + `rule-tests/architecture.test.ts` の規則で、唯一の入口・出口のファイルだけを許す）を、ログの `console` にも使っている（`noConsole` と `console-direct-access`。`.claude/rules/backend.md` の「ログ」、`docs/logger.md`）。
+- 同じ設計（Biome のルール + `rule-tests/architecture.test.ts` の規則で、唯一の入口・出口のファイルだけを許す）を、ログの `console` にも使っている（`noConsole` と `console-direct-access`。`.claude/rules/backend.md` の「ログ」、ADR `docs/adr/20260929-logger-single-exit.md`）。
 
 ## 変数を足すとき
 - `env.ts` の `Env` と `PARSERS` に足し（必須、既定値なし）、`.env.example` に開発用の値と WHAT / WHY のコメントを書き、`env.test.ts` に検証のテストを足す。CI・クラウドは `.env.example` をコピーするので、ワークフローやスクリプトは直さなくてよい。
@@ -68,4 +68,4 @@ paths:
 - テスト用の接続先（`database.test-support.ts`・`apps/e2e/database.ts`・`drizzle.config.ts`）もアプリと同じ `env.DATABASE_URL` を使う。
 
 ## compose.yaml（開発用 Postgres）
-- 手元・CI・クラウドで同じ `compose.yaml` を使う。イメージは `mirror.gcr.io/library/postgres:18-alpine`（Docker Hub の匿名 pull のレート制限を避ける。経緯は `docs/cloud-session.md`）。healthcheck は `pg_isready`。
+- 手元・CI・クラウドで同じ `compose.yaml` を使う。イメージは `mirror.gcr.io/library/postgres:18-alpine`（Docker Hub の匿名 pull のレート制限を避ける。経緯は ADR `docs/adr/20260928-postgres-via-docker-compose-everywhere.md` と 2026-09-28 の work-logs）。healthcheck は `pg_isready`。

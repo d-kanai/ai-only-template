@@ -2,7 +2,7 @@
 # PreToolUse フック（.claude/settings.json の hooks.PreToolUse。matcher は Bash と GitHub MCP の書き込みツール）。
 # 文章で禁止していた git 操作（サブエージェントの commit / push / PR 作成・マージ、main への直接 commit / push、
 # force push、フックの飛ばし、squash / rebase マージ）を、Claude Code がツールを実行する前に拒否する。
-# WHAT / WHY と誤検知の扱いは .claude/rules/git-guard.md、実測は docs/git-guard.md。
+# WHAT / WHY と誤検知の扱いは .claude/rules/git-guard.md、決定は ADR docs/adr/20260928-git-operations-enforced-by-hooks.md。
 #
 # 入力: stdin の JSON（公式 hooks の「PreToolUse input」。tool_name・tool_input・cwd、サブエージェントの中では agent_id・agent_type）。
 # 出力: 拒否するときだけ stdout に
@@ -51,7 +51,7 @@ const SUBAGENT_DENIED_GIT = new Set([
 ]);
 
 // 危険な長いオプションと、git が一意な接頭辞として受け付ける最短の書き方（git は長いオプションの省略形を受け付ける）。
-// 最短の接頭辞の根拠は git 2.43.0 の builtin/commit.c・push.c・merge.c のオプション定義（docs/git-guard.md）:
+// 最短の接頭辞の根拠は git 2.43.0 の builtin/commit.c・push.c・merge.c のオプション定義（.claude/rules/git-guard.md）:
 // - --no-v: --no-verify（commit / push / merge）。--no-v〜--no-ver は --no-verbose とも一致して git では曖昧（エラー）だが、
 //   止めても害はないので止める側に倒す。
 // - --for: push の --force 系（--fo は --follow-tags と曖昧）。--m: push の --mirror（m で始まるのはこれだけ）。
