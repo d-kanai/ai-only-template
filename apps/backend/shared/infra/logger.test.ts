@@ -92,6 +92,36 @@ describe("logger", () => {
     });
   });
 
+  test("event の timestamp が undefined なら現在時刻を使う（どの行も先頭に level と timestamp が残る）", () => {
+    const spies = spyConsole();
+
+    logger.info({ timestamp: undefined, a: 1 });
+
+    const parsed = JSON.parse(onlyLine(spies, "log")) as Record<
+      string,
+      unknown
+    >;
+    expect(parsed).toEqual({ level: "info", timestamp: NOW, a: 1 });
+    expect(Object.keys(parsed)).toEqual(["level", "timestamp", "a"]);
+  });
+
+  test("event のプロパティ（getter）が例外を投げても呼び出し側に伝えず、失敗した旨の 1 行を出す", () => {
+    const spies = spyConsole();
+    const event = {
+      get boom(): string {
+        throw new Error("getter");
+      },
+    };
+
+    expect(() => logger.error(event)).not.toThrow();
+
+    expect(JSON.parse(onlyLine(spies, "error"))).toEqual({
+      level: "error",
+      timestamp: NOW,
+      message: "logger: event を JSON にできなかった（循環参照・BigInt など）",
+    });
+  });
+
   test("event に level があっても、呼んだメソッドの level で上書きする（出力先と level を食い違わせない）", () => {
     const spies = spyConsole();
 

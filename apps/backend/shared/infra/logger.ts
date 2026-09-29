@@ -40,13 +40,16 @@ function replaceError(_key: string, value: unknown): unknown {
 
 function toLine(level: LogLevel, event: LogEvent): string {
   const timestamp = new Date().toISOString();
-  // WHY { level, timestamp, ...event } の順: 先頭に level と timestamp を置き、どの行も同じ並びで読めるようにする。
-  //   timestamp は event にあればそれを使う（リクエストの受信時刻など、出来事の時刻を優先する）。
-  // WHY 後から level を代入し直す: level は event にあっても呼んだメソッドのものにする（出力先と level を食い違わせない）。
-  //   既にあるキーへの代入なので、並びは先頭のまま。
-  const line: LogEvent = { level, timestamp, ...event };
-  line.level = level;
   try {
+    // WHY { level, timestamp, ...event } の順: 先頭に level と timestamp を置き、どの行も同じ並びで読めるようにする。
+    //   timestamp は event にあればそれを使う（リクエストの受信時刻など、出来事の時刻を優先する）。event の timestamp が
+    //   undefined なら現在時刻に戻す（spread で undefined に上書きされ、行から timestamp が消えるのを防ぐ）。
+    // WHY 後から level を代入し直す: level は event にあっても呼んだメソッドのものにする（出力先と level を食い違わせない）。
+    //   既にあるキーへの代入なので、並びは先頭のまま。
+    // WHY spread も try の中: event の getter が例外を投げても、下の catch で「失敗した旨の 1 行」にして呼び出し側に伝えない。
+    const line: LogEvent = { level, timestamp, ...event };
+    line.level = level;
+    line.timestamp ??= timestamp;
     return JSON.stringify(line, replaceError);
   } catch {
     // WHY 例外で落とさない: ログの失敗で本来の処理（応答を返すなど）を止めない。event の中身は出せないので、失敗した旨だけを
