@@ -1,4 +1,4 @@
-import type { ErrorKey } from "@repo/backend/shared/presentation/http-error";
+import type { ErrorKey } from "@repo/backend/shared/presentation/problem";
 import { commonMessages } from "@/shared/i18n/common.messages";
 import {
   formatMessage,
@@ -17,23 +17,43 @@ import type { Locale } from "@/shared/i18n/locale";
 //   ErrorKey と辞書を突き合わせるのは backend の型を参照してよい features/<f>/api/ のここで行う。
 type TranslatedKey<K extends MessageKey<typeof commonMessages>> = K;
 
-// ApiError が持つキー: サーバが返す ErrorKey と、画面側だけのキー error.unknown（本文が ErrorResponse でないとき）。
+// ApiError が持つキー: サーバが返す ErrorKey と、画面側だけのキー error.unknown（本文が Problem Details でないとき）。
 // WHY 共通の辞書のキー全体にしない: API の失敗ではないキー（error.unexpected。fetch そのものの失敗）を ApiError として作れないよう、
 //   サーバが返しうるキーと error.unknown に絞る。
 export type ApiErrorKey = TranslatedKey<ErrorKey | "error.unknown">;
 
+// ApiError を作るときの値。
+export type ApiErrorInit = {
+  // HTTP の応答のステータス（本文の status ではない。todo-api.ts の toError）。
+  status: number;
+  // Problem Details（RFC 9457）の type（"/problems/not-found" など。apps/backend/shared/presentation/problem.ts）。
+  //   本文が Problem Details でない失敗（error.unknown）では分からないので省く。
+  type?: string;
+  key: ApiErrorKey;
+  params?: RuntimeParams;
+};
+
 // API が失敗したときに todo-api.ts が投げる例外。画面は key と params を辞書で翻訳して表示する（toErrorMessage）。
+// WHY status と type を持つ（Issue #126）: 画面が文言以外で失敗の種類を見分けられるようにする（404 なら一覧へ戻す、など）。
+//   type は文字列のまま持つ（backend の ProblemType の和にしない）: サーバの JSON から来る値で、実行時に和のどれかとは
+//   確かめない（todo-api.ts の isProblem）。
+// WHY Problem Details の detail を持たない: detail は開発者向けの英語で、画面には出さない（契約外。画面の文言は key の翻訳）。
 // WHY message に文言を入れない: 文言はロケールで決まり、例外を作る時点（api/）ではロケールを知らない。message には key を入れ、
 //   ログや開発者ツールで何のエラーかだけが分かるようにする。
 // WHY params は実行時の値の型（RuntimeParams）: サーバの JSON から来るので、キーごとの params の型を実行時には保証できない。
 //   キーと params の名前の対応は、backend の ErrorKeyParams と辞書の placeholder の型の突き合わせ（api-error.test.ts）で止める。
+// WHY 引数をオブジェクト 1 つにする: status・type・key・params の 4 つを位置で渡すと、type を省くときに順序を取り違えやすい。
 export class ApiError extends Error {
+  readonly status: number;
+  readonly type: string | undefined;
   readonly key: ApiErrorKey;
   readonly params: RuntimeParams;
 
-  constructor(key: ApiErrorKey, params: RuntimeParams = {}) {
+  constructor({ status, type, key, params = {} }: ApiErrorInit) {
     super(key);
     this.name = "ApiError";
+    this.status = status;
+    this.type = type;
     this.key = key;
     this.params = params;
   }

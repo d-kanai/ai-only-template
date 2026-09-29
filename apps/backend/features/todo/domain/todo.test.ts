@@ -5,7 +5,7 @@ import { DomainError } from "../../../shared/domain/domain-error";
 import type { ErrorKey } from "../../../shared/domain/error-key";
 import { keyedIssue, keyedRefine, Todo, validate } from "./todo";
 
-// key と params は API の ErrorResponse として画面に渡る（画面が翻訳するクライアントとの契約。Issue #116）ので、両方を検証する。
+// key と params は API の Problem Details（problem.ts）の拡張メンバーとして画面に渡る（画面が翻訳するクライアントとの契約。Issue #116）ので、両方を検証する。
 // WHY toEqual に params: undefined を含める: params の無いキーで params が {} などになっていないことも確かめる
 //   （toEqual は undefined のプロパティと無いプロパティを同じに扱うが、{} とは区別する）。
 function expectValidationError(

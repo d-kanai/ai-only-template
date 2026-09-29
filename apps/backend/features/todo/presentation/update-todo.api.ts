@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { getDatabase } from "../../../shared/infra/database";
-import { toErrorResponse } from "../../../shared/presentation/http-error";
 import {
   parseJsonBody,
   requestBodySchema,
 } from "../../../shared/presentation/json-body";
+import { toProblemResponse } from "../../../shared/presentation/problem";
 import { parseUuidParam } from "../../../shared/presentation/resource-id";
 import { UpdateTodoCommand } from "../application/update-todo.command";
 import type { Todo } from "../domain/todo";
@@ -20,7 +20,7 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 // WHY 未知の項目を拒否する: 項目名の打ち間違い（{ complete: true }）が「何も変えない」200 に化けるのを防ぐ（json-body.ts の requestBodySchema）。
 function updateTodoRequestSchema() {
   return requestBodySchema({
-    // 型が違うときのキー（request.field.notString / notBoolean）は json-body.ts の toErrorIssue が決める（ここに error は書かない）。
+    // 型が違うときのキー（request.field.notString / notBoolean）は json-body.ts の toProblemError が決める（ここに error は書かない）。
     title: z.string().optional(),
     completed: z.boolean().optional(),
   });
@@ -76,7 +76,7 @@ export class UpdateTodoApi {
       const body: UpdateTodoResponse = toTodoDto(todo);
       return Response.json(body);
     } catch (error) {
-      return toErrorResponse(error);
+      return toProblemResponse(error, request);
     }
   };
 }

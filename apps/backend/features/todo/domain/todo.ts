@@ -42,7 +42,7 @@ export function keyedRefine<K extends Exclude<ErrorKey, ParamlessErrorKey>>(
 //   trim 後の値）。
 // WHY 文字数を Array.from で数える（zod の .min / .max を使わない）: .min / .max は String#length（UTF-16 のコード単位の数）で
 //   数え、絵文字（サロゲートペア）を 2 と数える。利用者の感覚の「文字数」に近いコードポイント数で数える。
-// WHY refine を 2 つに分ける: 空と長すぎでキーを変える（どちらも API の ErrorResponse の key として画面が翻訳する契約）。
+// WHY refine を 2 つに分ける: 空と長すぎでキーを変える（どちらも API の Problem Details の key として画面が翻訳する契約）。
 //   zod は同じスキーマの refine をすべて実行するが、同じ値で両方が失敗することは無い（0 文字と 101 文字以上は両立しない）。
 // WHY 100 文字: 一覧で 1 行に収まる程度の上限。上限を設けないと巨大な文字列でメモリと画面が埋まる。
 // WHY 関数にする（スキーマを最上位の定数にしない）: 最上位の式は読み込み時にだけ評価される static な変異になり、
@@ -95,7 +95,7 @@ function todoPropsSchema() {
 type TodoProps = z.input<ReturnType<typeof todoPropsSchema>>;
 
 // 規則で検証し、違反なら DomainError(validation_error) を投げる。
-// WHY ZodError をそのまま投げない: domain の外（presentation の toErrorResponse）は DomainError だけを見て 400 に変換する。
+// WHY ZodError をそのまま投げない: domain の外（presentation の toProblemResponse）は DomainError だけを見て 400 に変換する。
 //   zod を使っていることを domain の外に漏らさない。
 // WHY key と params は最初の issue: 失敗した safeParse の issues は必ず 1 件以上ある。タイトルの規則は同じ値で 1 つしか
 //   失敗しないので、最初の 1 件がそのまま理由になる。複数の項目が同時に違反するとき（id とタイトルなど）は
@@ -115,7 +115,7 @@ export function validate<Schema extends z.ZodType>(
       params?: ErrorKeyParams[ErrorKey];
     };
     // WHY キーでない message を DomainError にしない: keyedIssue / keyedRefine を渡し忘れた検査では、message が zod の既定の
-    //   英語の文言になる。それを key として返すと、画面の辞書に無いキーで API の契約（ErrorResponse の key）を破る。
+    //   英語の文言になる。それを key として返すと、画面の辞書に無いキーで API の契約（Problem Details の key）を破る。
     //   利用者の入力の誤り（400）ではなく実装の誤りなので、DomainError ではない Error にして presentation に 500 を返させ、
     //   ログ（message と cause の ZodError）で開発中に足し忘れに気づけるようにする。
     if (!isErrorKey(message)) {

@@ -1,5 +1,5 @@
 import { getDatabase } from "../../../shared/infra/database";
-import { toErrorResponse } from "../../../shared/presentation/http-error";
+import { toProblemResponse } from "../../../shared/presentation/problem";
 import { parseUuidParam } from "../../../shared/presentation/resource-id";
 import { DeleteTodoCommand } from "../application/delete-todo.command";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
@@ -18,7 +18,7 @@ export class DeleteTodoApi {
   ) {}
 
   readonly handle = async (
-    _request: Request,
+    request: Request,
     ctx: Context,
   ): Promise<Response> => {
     try {
@@ -30,7 +30,7 @@ export class DeleteTodoApi {
       // WHY 204 で本文なし: 削除後に返す内容が無いため。Response.json は本文を持つので使わない。
       return new Response(null, { status: 204 });
     } catch (error) {
-      return toErrorResponse(error);
+      return toProblemResponse(error, request);
     }
   };
 }

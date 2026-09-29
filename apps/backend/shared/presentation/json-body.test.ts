@@ -2,8 +2,8 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import type { ErrorKey } from "../domain/error-key";
-import { type ErrorIssue, InvalidRequestError } from "./http-error";
 import { parseJsonBody, requestBodySchema } from "./json-body";
+import { InvalidRequestError, type ProblemErrorInput } from "./problem";
 
 function postRequest(body: string): Request {
   return new Request("http://localhost/api/test", {
@@ -22,15 +22,16 @@ function testBodySchema() {
   });
 }
 
-// key・params・issues は API の ErrorResponse として画面に渡る（画面が翻訳するクライアントとの契約）ので、すべて検証する。
+// key・params・errors は API の Problem Details（problem.ts）の拡張メンバーとして画面に渡る（画面が翻訳するクライアントとの契約）ので、
+//   すべて検証する。
 // WHY rejects.toEqual(new InvalidRequestError(...)) だけにしない: toEqual は Error の name / message は比べるが、
-//   独自のプロパティ（key・params・issues）まで比べるとは限らない（未確認）。クラスと各プロパティを別々に確かめる。
+//   独自のプロパティ（key・params・errors）まで比べるとは限らない（未確認）。クラスと各プロパティを別々に確かめる。
 async function expectInvalidRequest(
   promise: Promise<unknown>,
   expected: {
     key: ErrorKey;
     params: Record<string, string | number> | undefined;
-    issues: ErrorIssue[] | undefined;
+    errors: ProblemErrorInput[] | undefined;
   },
 ): Promise<void> {
   const error = await promise.then(
@@ -38,8 +39,8 @@ async function expectInvalidRequest(
     (reason: unknown) => reason,
   );
   expect(error).toBeInstanceOf(InvalidRequestError);
-  const { key, params, issues } = error as InvalidRequestError;
-  expect({ key, params, issues }).toEqual(expected);
+  const { key, params, errors } = error as InvalidRequestError;
+  expect({ key, params, errors }).toEqual(expected);
 }
 
 describe("parseJsonBody", () => {
@@ -52,10 +53,10 @@ describe("parseJsonBody", () => {
     ).resolves.toEqual({ name: "牛乳", tags: ["買い物"] });
   });
 
-  test("JSON として読めなければ、request.body.notJson の InvalidRequestError を投げる（params と issues は無い）", async () => {
+  test("JSON として読めなければ、request.body.notJson の InvalidRequestError を投げる（params と errors は無い）", async () => {
     await expectInvalidRequest(
       parseJsonBody(postRequest("{name:"), testBodySchema()),
-      { key: "request.body.notJson", params: undefined, issues: undefined },
+      { key: "request.body.notJson", params: undefined, errors: undefined },
     );
   });
 
@@ -65,14 +66,14 @@ describe("parseJsonBody", () => {
     ["文字列", '"name"'],
     ["数値", "1"],
   ])(
-    "JSON でもオブジェクトでない（%s）なら request.body.notObject にし、issues の path は本文全体（空文字）",
+    "JSON でもオブジェクトでない（%s）なら request.body.notObject にし、errors の pointer は本文全体（#）",
     async (_label, body) => {
       await expectInvalidRequest(
         parseJsonBody(postRequest(body), testBodySchema()),
         {
           key: "request.body.notObject",
           params: undefined,
-          issues: [{ path: "", key: "request.body.notObject" }],
+          errors: [{ pointer: "#", key: "request.body.notObject" }],
         },
       );
     },
@@ -87,9 +88,9 @@ describe("parseJsonBody", () => {
       {
         key: "request.body.unknownKeys",
         params: { keys: "extra, other" },
-        issues: [
+        errors: [
           {
-            path: "",
+            pointer: "#",
             key: "request.body.unknownKeys",
             params: { keys: "extra, other" },
           },
@@ -110,9 +111,9 @@ describe("parseJsonBody", () => {
         {
           key: "request.field.notString",
           params: { path: "name" },
-          issues: [
+          errors: [
             {
-              path: "name",
+              pointer: "#/name",
               key: "request.field.notString",
               params: { path: "name" },
             },
@@ -131,9 +132,9 @@ describe("parseJsonBody", () => {
       {
         key: "request.field.notBoolean",
         params: { path: "done" },
-        issues: [
+        errors: [
           {
-            path: "done",
+            pointer: "#/done",
             key: "request.field.notBoolean",
             params: { path: "done" },
           },
@@ -142,7 +143,7 @@ describe("parseJsonBody", () => {
     );
   });
 
-  test("入れ子の項目の誤りは、path と params.path を . 区切りの文字列にする", async () => {
+  test("入れ子の項目の誤りは、pointer を JSON Pointer（#/ に続けて / 区切り）に、params.path を . 区切りの文字列にする", async () => {
     await expectInvalidRequest(
       parseJsonBody(
         postRequest(JSON.stringify({ name: "牛乳", tags: ["a", 1] })),
@@ -151,9 +152,9 @@ describe("parseJsonBody", () => {
       {
         key: "request.field.notString",
         params: { path: "tags.1" },
-        issues: [
+        errors: [
           {
-            path: "tags.1",
+            pointer: "#/tags/1",
             key: "request.field.notString",
             params: { path: "tags.1" },
           },
@@ -162,7 +163,32 @@ describe("parseJsonBody", () => {
     );
   });
 
-  test("誤りが複数あれば、key と params は最初の 1 つ、issues はすべてを順に持つ", async () => {
+  // JSON Pointer（RFC 6901 の 3 節）は、項目名の中の ~ を ~0 に、/ を ~1 に置き換える（/ は区切りなので、そのままだと
+  //   "a/b" という 1 つの項目と a の中の b を区別できない）。今の API の項目名（title・completed）には現れないが、
+  //   項目を足したときに誤った pointer を返さないよう、規格どおりに組み立てることを固定する。
+  // WHY "a/b~c" で確かめる: ~ と / の両方を含むので、置き換えの順序を誤る（/ を先に ~1 にすると、その ~ が次の置き換えで
+  //   ~01 になる）変異も落とせる。RFC 6901 の 4 節は復号の順序（~1 を先に / へ）を注意しており、符号化はその逆になる。
+  test("項目名の ~ と / は、pointer では ~0 と ~1 にする（params.path はそのまま）", async () => {
+    await expectInvalidRequest(
+      parseJsonBody(
+        postRequest(JSON.stringify({ "a/b~c": 1 })),
+        requestBodySchema({ "a/b~c": z.string() }),
+      ),
+      {
+        key: "request.field.notString",
+        params: { path: "a/b~c" },
+        errors: [
+          {
+            pointer: "#/a~1b~0c",
+            key: "request.field.notString",
+            params: { path: "a/b~c" },
+          },
+        ],
+      },
+    );
+  });
+
+  test("誤りが複数あれば、key と params は最初の 1 つ、errors はすべてを順に持つ", async () => {
     await expectInvalidRequest(
       parseJsonBody(
         postRequest(JSON.stringify({ name: 1, extra: 1 })),
@@ -171,14 +197,14 @@ describe("parseJsonBody", () => {
       {
         key: "request.field.notString",
         params: { path: "name" },
-        issues: [
+        errors: [
           {
-            path: "name",
+            pointer: "#/name",
             key: "request.field.notString",
             params: { path: "name" },
           },
           {
-            path: "",
+            pointer: "#",
             key: "request.body.unknownKeys",
             params: { keys: "extra" },
           },
@@ -189,7 +215,7 @@ describe("parseJsonBody", () => {
 
   // キーの集合（error-key.ts）は画面の辞書と共有する閉じた集合。対応の無い zod の issue（今のスキーマでは起きない。
   //   数値の項目を足したときなど）を黙って別のキーにすると、画面が誤った文言を出す。開発者の誤りとして 500 にし、
-  //   キーを足すよう気づかせる（json-body.ts の toErrorIssue のコメント）。
+  //   キーを足すよう気づかせる（json-body.ts の toProblemError のコメント）。
   test.each([
     [
       "数値の項目の invalid_type",

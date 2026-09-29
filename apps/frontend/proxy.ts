@@ -33,7 +33,7 @@ export function proxy(request: NextRequest): NextResponse {
   logger.info(log);
   // WHY 応答ヘッダに x-request-id: ブラウザの開発者ツールや呼び出し側から、応答と stdout の行を突き合わせられるようにする。
   //   NextResponse.next({ headers }) ではなく、応答を作ってから set する（next-response.md の next()）。
-  // WHY /api/** にはロケールを載せない: API は文言を返さず（ErrorResponse は key と params）、ロケールを使わない（Issue #116）。
+  // WHY /api/** にはロケールを載せない: API は画面の文言を返さず（Problem Details の key と params を画面が翻訳する。detail は翻訳しない英語）、ロケールを使わない（Issue #116・#126）。
   const response =
     log.kind === "api"
       ? NextResponse.next()
