@@ -26,7 +26,7 @@
     //   node_modules/@repo/backend（apps/backend への symlink）と、apps/backend/package.json の exports で解決する。
     //   exports に無いファイルを import すると、型チェック（next build・pnpm typecheck）で解決できずに失敗する。
     //   注意: Next（Turbopack）は backend のファイルの "@/" にもこの paths を当てるので、backend の中では "@/" を使わない
-    //   （architecture.test.ts の backend-relative-only）。
+    //   （rule-tests/architecture.test.ts の backend-relative-only）。
     "paths": {
       "@/*": ["./*"]
     }

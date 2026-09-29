@@ -60,7 +60,7 @@ paths:
 - 非同期の順序（古い応答が後から届く、画面を離れた後に失敗が届く）は、任意のタイミングで resolve できる `deferred()` で作る（各テストファイルの中に定義）。WHY: `mockResolvedValue` は即時に resolve し、タイマーは実行環境の速さに左右される。
 
 ## ルール検査テスト（規則・設定が効いていることを検査するテスト）
-今あるもの: `architecture.test.ts`（`.claude/rules/architecture-check.md`）、`lint.test.ts`（`.claude/rules/lint.md`）、`package.test.ts`・`pnpm-workspace.test.ts`（`.claude/rules/dependencies.md`）、`typecheck.test.ts`（`pnpm typecheck` と CI の順序）、`scripts/cloud-session-start.test.ts`（`.claude/rules/cloud-session.md`）、`instructions.test.ts`（CLAUDE.md の行数と @ import、`.claude/rules` の paths、docs の参照、スキルのフロントマター、旧 rules/ の参照）と、git ガード・作業ログ・worktree のフックのテスト（`scripts/hooks/*.test.ts` など）。テスト以外のゲート（カバレッジ・フック・CI の required check・型チェック）も同じ扱い。
+今あるもの: `rule-tests/architecture.test.ts`（`.claude/rules/architecture-check.md`）、`rule-tests/lint.test.ts`（`.claude/rules/lint.md`）、`rule-tests/package.test.ts`・`rule-tests/pnpm-workspace.test.ts`（`.claude/rules/dependencies.md`）、`rule-tests/typecheck.test.ts`（`pnpm typecheck` と CI の順序）、`scripts/cloud-session-start.test.ts`（`.claude/rules/cloud-session.md`）、`rule-tests/instructions.test.ts`（CLAUDE.md の行数と @ import、`.claude/rules` の paths、docs の参照、スキルのフロントマター、旧 rules/ の参照）と、git ガード・作業ログ・worktree のフックのテスト（`scripts/hooks/*.test.ts` など）。テスト以外のゲート（カバレッジ・フック・CI の required check・型チェック）も同じ扱い。
 - **must pass と must reject の両方**を持つ。WHY: must reject だけだと「何でも違反にする」壊れ方を、must pass だけだと「何も違反にしない」（常に緑）壊れ方を検出できない。「今のリポジトリで違反 0 件」は must pass の 1 例にすぎない。
 - 判定は関数に切り出し、架空の入力で許可・拒否を固定したうえで、同じ関数で実ファイルを検査する。must reject は取り違えやすい境界を網羅する（import の書き方、版の書き方、設定のキーの有無・コメントアウト・ネスト、違反を単独で含むファイル、対象外のファイル）。
 - 実ファイルで end-to-end に通す fixture を持つ（一時ディレクトリは `mkdtempSync(join(tmpdir(), "<name>-"))` で作り `afterAll` で消す）。違反の集合は `toEqual` で丸ごと比較する。WHY: 判定が正しくても、抽出・列挙が漏れれば見逃す。

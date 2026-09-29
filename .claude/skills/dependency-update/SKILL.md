@@ -11,7 +11,7 @@ Node / pnpm 本体の版（`.tool-versions`・`packageManager`）は `.claude/ru
 ## 1. 版を決める
 1. 原則 **latest**。npm レジストリの dist-tags を 1 次情報にする: `curl -s https://registry.npmjs.org/<pkg> | jq -r '.["dist-tags"].latest'`
 2. 公開日時を見る: `curl -s https://registry.npmjs.org/<pkg> | jq '.time'`。**公開から 5 日以上経った版のうち最新**を選ぶ。
-   - WHY: `pnpm-workspace.yaml` の `minimumReleaseAge: 7200`（分 = 5 日）で、それより新しい版は推移的依存も含めて入らない（`pnpm-workspace.test.ts` が値を検査）。
+   - WHY: `pnpm-workspace.yaml` の `minimumReleaseAge: 7200`（分 = 5 日）で、それより新しい版は推移的依存も含めて入らない（`rule-tests/pnpm-workspace.test.ts` が値を検査）。
    - 開発機の safe-chain は 14 日（`~/.aikido/config.json`）。pnpm 側を 14 日に揃えないのは、Next.js などへの追随が 2 週間遅れになるため（Issue #32 のユーザー判断）。
    - latest を入れられなかったときは、入れた版とその理由を PR に書く。
    - `packageManager`（pnpm 本体）の解決は対象外で、5 日未満の pnpm でも拒否されない（2026-09-28 実測。公式仕様は未確認）。pnpm の版は `.tool-versions` と `packageManager` で明示する。
@@ -30,8 +30,8 @@ Node / pnpm 本体の版（`.tool-versions`・`packageManager`）は `.claude/ru
    - `savePrefix: ''` で完全固定で書かれるが、版は必ず明示する。WHY: `pnpm add <pkg>@2` のように範囲を渡すと範囲のまま書かれる。
    - workspace の中のパッケージへの依存は `"<name>": "workspace:*"` と書いて `pnpm install`。
 3. 同じパッケージを複数の `package.json` に置くなら、すべて同じ版にする。
-4. DB のパッケージを足したら `architecture.test.ts` の `PERSISTENCE_PACKAGES` にも足す（domain / application から使えないようにする）。
-5. `pnpm test` で `package.test.ts`（完全固定・`workspace:*` だけ許す・同名は同じ版）と `pnpm-workspace.test.ts` が通ることを確かめ、`pnpm lint` / `pnpm typecheck` / `pnpm build` も通す。
+4. DB のパッケージを足したら `rule-tests/architecture.test.ts` の `PERSISTENCE_PACKAGES` にも足す（domain / application から使えないようにする）。
+5. `pnpm test` で `rule-tests/package.test.ts`（完全固定・`workspace:*` だけ許す・同名は同じ版）と `rule-tests/pnpm-workspace.test.ts` が通ることを確かめ、`pnpm lint` / `pnpm typecheck` / `pnpm build` も通す。
 
 ## 3. 依存を別の package.json に移す
 1. 版を変えずに `package.json` を書き換え、`pnpm install`（`--frozen-lockfile` なし）で lockfile を更新する。

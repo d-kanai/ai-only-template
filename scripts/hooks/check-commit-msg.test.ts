@@ -222,7 +222,7 @@ describe("拒否するメッセージ（must reject）", () => {
 
 describe("lefthook.yml の commit-msg", () => {
   it("commit-msg で check-commit-msg.sh にメッセージのファイル（{1}）を渡す", () => {
-    // WHY lefthook dump: YAML を自前で読まず、Lefthook 自身が解釈した結果を見る（lint.test.ts と同じ）。
+    // WHY lefthook dump: YAML を自前で読まず、Lefthook 自身が解釈した結果を見る（rule-tests/lint.test.ts と同じ）。
     const result = spawnSync(lefthookBin, ["dump", "--format", "json"], {
       cwd: repoRoot,
       encoding: "utf8",

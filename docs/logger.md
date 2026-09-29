@@ -16,7 +16,7 @@
   - 起動時の検証の失敗は、以前の `console.error(error)`（stack 付きの複数行）から 1 行の JSON になり、欠けた変数の一覧（`env.ts` のメッセージの改行）は `\n` にエスケープされて `message` に入る。
 
 ## 検査の 2 系統と、片方だけが拾う書き方（Biome 2.5.13、2026-09-29 実測）
-`env.ts` の `process.env` と同じ設計（`docs/env.md`）。Biome の `suspicious/noConsole`（`biome.json` の overrides で `logger.ts` とテストだけ off）と、`architecture.test.ts` の規則 `console-direct-access`。Biome は overrides・allow の書き換えで黙って効かなくなるので、テスト側で対象と例外を固定する。
+`env.ts` の `process.env` と同じ設計（`docs/env.md`）。Biome の `suspicious/noConsole`（`biome.json` の overrides で `logger.ts` とテストだけ off）と、`rule-tests/architecture.test.ts` の規則 `console-direct-access`。Biome は overrides・allow の書き換えで黙って効かなくなるので、テスト側で対象と例外を固定する。
 
 `./node_modules/.bin/biome lint --only=suspicious/noConsole <ファイル>` で、1 行ずつのファイルを検査した結果:
 
@@ -28,6 +28,6 @@
 | `` `x: ${console.log(1)}` ``（テンプレートリテラルの `${}` の中） | 検出 | 検出しない（文字列の中とみなす） |
 | `import { log } from "node:console"` / `import c from "node:console"` | 検出しない | 検出しない（レビューで見る） |
 
-- `console-direct-access` の限界は `architecture.test.ts` の「console の参照の抽出（findConsoleAccesses）」のテストで固定している。
+- `console-direct-access` の限界は `rule-tests/architecture.test.ts` の「console の参照の抽出（findConsoleAccesses）」のテストで固定している。
 - `console-direct-access` は `obj.console` や `{ console: 1 }` のようなプロパティ名も拾う（多く検出する方向。今のリポジトリには無い）。
 - どちらもテスト（`*.test.ts` / `*.test.tsx`）は対象外。E2E の spec（`apps/e2e/*.spec.ts`）は対象（テストの overrides に当たらない）。

@@ -28,7 +28,7 @@
 - Stryker は `.env` もサンドボックスにコピーする（`.gitignore` を見ない。Issue #59 で `stryker run --mutate backend/shared/infra/env.ts` で確認）。サンドボックスにも `pnpm-workspace.yaml` があるので、`env.ts` はサンドボックスの `.env` を読む。
 
 ## 直参照の検査の限界（Biome 2.5.13 で実測）
-- `architecture.test.ts` の抽出は正規表現で式の流れを追わず、Biome の `noProcessEnv` も違反にしなかったもの: 分割代入 `const { env } = process`、別名経由 `const p = process; p.env`、`Reflect.get(process, "env")`、`import proc from "node:process"; proc.env`。
+- `rule-tests/architecture.test.ts` の抽出は正規表現で式の流れを追わず、Biome の `noProcessEnv` も違反にしなかったもの: 分割代入 `const { env } = process`、別名経由 `const p = process; p.env`、`Reflect.get(process, "env")`、`import proc from "node:process"; proc.env`。
 - Biome だけが拾ったもの: テンプレートリテラルの `${}` の中、`import { env } from "node:process"`。
-- `architecture.test.ts` だけが拾ったもの: `global.process.env`、`(process).env`（Biome の `noProcessEnv` は違反にしない）。
-- `biome.json` の `overrides` の `includes` はリポジトリ直下からの相対パスで照合される（リポジトリの外の同名ファイル `.../apps/backend/shared/infra/env.ts` には効かないことを `lint.test.ts` で確認）。
+- `rule-tests/architecture.test.ts` だけが拾ったもの: `global.process.env`、`(process).env`（Biome の `noProcessEnv` は違反にしない）。
+- `biome.json` の `overrides` の `includes` はリポジトリ直下からの相対パスで照合される（リポジトリの外の同名ファイル `.../apps/backend/shared/infra/env.ts` には効かないことを `rule-tests/lint.test.ts` で確認）。

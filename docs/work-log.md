@@ -2,7 +2,7 @@
 
 ルール（WHAT / WHY / 限界）は `.claude/rules/work-log.md`。ここは、決めた経緯と、確かめた事実の記録。
 
-名前: 2026-09-29（Issue #76、ユーザー指示）に呼び名を work-logs に統一した（ディレクトリ `work-logs/`、`.claude/general/work-log.md`、`scripts/hooks/require-work-log.sh`、`scripts/hooks/check-work-logs-diff.sh`、`work-logs-check.test.ts`、CI のステップ「Check work-logs in PR diff」）。それより前の記録も、この文書では新しい名前で書いている（実測した当時の旧名の一覧は Issue #76 の本文）。
+名前: 2026-09-29（Issue #76、ユーザー指示）に呼び名を work-logs に統一した（ディレクトリ `work-logs/`、`.claude/general/work-log.md`、`scripts/hooks/require-work-log.sh`、`scripts/hooks/check-work-logs-diff.sh`、`rule-tests/work-logs-check.test.ts`、CI のステップ「Check work-logs in PR diff」）。それより前の記録も、この文書では新しい名前で書いている（実測した当時の旧名の一覧は Issue #76 の本文）。
 
 ## 経緯
 - 2026-09-28、調査・質問だけの依頼で作業ログ（`work-logs/`）の追記が 2 件漏れた（LEARNINGS.md）。文章のルール（作業ログのルールの「調査や質問への回答だけで終わった場合も書く」。今は `.claude/general/work-log.md`）はあったが効かなかった。

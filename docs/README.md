@@ -1,7 +1,7 @@
 # docs（読み込まれない記録）
 
 実測値・経緯・一次情報の引用・採用しなかった案を置く。Claude Code は自動では読み込まない（常時読むのは CLAUDE.md と `.claude/general/`、パス依存で `.claude/rules/`、手順はスキル `.claude/skills/`）。規則を変える前に、該当する文書で経緯を確かめる（CLAUDE.md の 6）。
-`instructions.test.ts` が、ここの文書がどこかから参照されていることを検査する。
+`rule-tests/instructions.test.ts` が、ここの文書がどこかから参照されていることを検査する。
 
 | 文書 | 内容 | 規則の置き場所 |
 | --- | --- | --- |

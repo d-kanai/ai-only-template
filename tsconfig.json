@@ -1,5 +1,5 @@
 // リポジトリ直下の tsconfig（Issue #68）。Vitest（vitest.config.mts の resolve.tsconfigPaths）の paths の解決と、
-// リポジトリ全体の型チェック（pnpm exec tsc -p . --noEmit。ルート直下のルール検査テスト・apps/e2e/・scripts/ も含む）に使う。
+// リポジトリ全体の型チェック（pnpm exec tsc -p . --noEmit。rule-tests/ のルール検査テスト・apps/e2e/・scripts/ も含む）に使う。
 // Next のビルドは apps/frontend/tsconfig.json、backend 単体の型チェックは apps/backend/tsconfig.json を使う。
 // compilerOptions は apps/frontend/tsconfig.json（create-next-app@16.3.6 の生成物がベース）に合わせている。
 // Next の plugin と incremental は、Next のビルド・エディタ用なので入れない。

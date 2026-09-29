@@ -30,7 +30,7 @@ jobs:
       # fetch-depth: 0: 全ブランチと全履歴を取る（既定の 1 は PR のマージコミット 1 つだけ）。
       # WHY: 下の作業ログの検査（check-work-logs-diff.sh）が `origin/<base>...HEAD` の三点 diff で PR の変更だけを見るため、
       #   base ブランチ（origin/main）と、HEAD との分岐点（merge-base）までの履歴が要る。浅い履歴では分岐点が求まらず失敗する。
-      #   work-logs-check.test.ts がこの値を検査する。
+      #   rule-tests/work-logs-check.test.ts がこの値を検査する。
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -39,7 +39,7 @@ jobs:
       # WHY: 調査だけの依頼などで作業ログの追記が漏れた。文書だけの PR も例外にしない（ユーザー判断）。
       # WHY pull_request のときだけ: main への push では github.base_ref が空で、比べる base が無い。
       # WHY 最初に置く: Node も Postgres も要らない検査なので、準備（install・Postgres の起動）より先に、原因の分かる
-      #   メッセージで止める。work-logs-check.test.ts が「pnpm lint より前」「if・continue-on-error・失敗を打ち消す書き方が無い」を検査する。
+      #   メッセージで止める。rule-tests/work-logs-check.test.ts が「pnpm lint より前」「if・continue-on-error・失敗を打ち消す書き方が無い」を検査する。
       - name: Check work-logs in PR diff
         if: github.event_name == 'pull_request'
         run: bash scripts/hooks/check-work-logs-diff.sh origin/${{ github.base_ref }}
@@ -104,7 +104,7 @@ jobs:
       #   （Issue #68 で monorepo にする前は、next build がリポジトリ直下の tsconfig で全体を型チェックしていた）。
       #   テスト・ルール検査テスト・e2e・設定ファイルの型エラーと、backend が DOM の型に依存すること（apps/backend の tsconfig は
       #   DOM の型を持たない）は、ここで止める。Vitest は型を検査しないので pnpm test でも止まらない。
-      #   build より前に置き、型エラーを build より先に分かるメッセージで止める（typecheck.test.ts が順序と書き方を検査する）。
+      #   build より前に置き、型エラーを build より先に分かるメッセージで止める（rule-tests/typecheck.test.ts が順序と書き方を検査する）。
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build

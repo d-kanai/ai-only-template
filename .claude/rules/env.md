@@ -37,7 +37,7 @@ paths:
 - `next start` / `next dev` の起動時の検証: `apps/frontend/instrumentation.ts` の `register`（起動時に 1 回、リクエストを受け付ける前に完了する Next の規約）が、`process.env.NEXT_RUNTIME === "nodejs"` のときだけ `instrumentation-node.ts` の `verifyEnvAtStartup` を呼び、`env.ts` を読み込む。
   - WHY: API の route は最初のリクエストまで読み込まれず、`env.ts` だけではサーバが起動したまま最初の `/api/todos` が 500 になるまで気づけない。
   - `register` が失敗しても `next start` は動き続けるので、エラーを出してから `process.exit(1)` する。
-  - WHY `NEXT_RUNTIME` で分ける: `register` は Edge 向けにもビルドされ、分岐が無いと Node の API が Edge に入って `next build` が警告を出す。Next がビルド時に埋め込む変数なので `process.env.NEXT_RUNTIME` と書く必要があり、ここだけを直参照の例外にしている（Biome は行単位の `biome-ignore`、`architecture.test.ts` は変数名まで絞った `allowedVariables`）。
+  - WHY `NEXT_RUNTIME` で分ける: `register` は Edge 向けにもビルドされ、分岐が無いと Node の API が Edge に入って `next build` が警告を出す。Next がビルド時に埋め込む変数なので `process.env.NEXT_RUNTIME` と書く必要があり、ここだけを直参照の例外にしている（Biome は行単位の `biome-ignore`、`rule-tests/architecture.test.ts` は変数名まで絞った `allowedVariables`）。
   - 単体テストは無い（カバレッジの対象外）。起動時に止まることは実測で確かめた（`docs/env.md`）。
 
 ## .env
@@ -52,14 +52,14 @@ paths:
 
 ## 直参照の検査（2 系統。どちらも CI で止まる）
 - Biome の `style/noProcessEnv`（`biome.json` で `"error"`。`overrides` で `env.ts` とテストだけ off。`.claude/rules/lint.md`）。
-- `architecture.test.ts` の規則 `env-direct-access`（`.claude/rules/architecture-check.md`）。
+- `rule-tests/architecture.test.ts` の規則 `env-direct-access`（`.claude/rules/architecture-check.md`）。
 - WHY 2 系統: Biome は `biome.json` の overrides の書き換えで黙って効かなくなる。テスト側で対象と例外を固定し、片方が壊れてももう片方で止める。
 - 限界（Biome 2.5.13 で実測）:
   - 両方とも見逃す（レビューで見る）: 分割代入 `const { env } = process`、別名 `const p = process; p.env`、`Reflect.get(process, "env")`、`import proc from "node:process"; proc.env`。
   - Biome だけが拾う: テンプレートリテラルの `${process.env.X}`、`import { env } from "node:process"`。
-  - `architecture.test.ts` だけが拾う: `global.process.env`、`(process).env`。
-  - `architecture.test.ts` 側の限界は、同ファイルの「環境変数の直参照の抽出」のテストで固定している。
-- 同じ設計（Biome のルール + `architecture.test.ts` の規則で、唯一の入口・出口のファイルだけを許す）を、ログの `console` にも使っている（`noConsole` と `console-direct-access`。`.claude/rules/backend.md` の「ログ」、`docs/logger.md`）。
+  - `rule-tests/architecture.test.ts` だけが拾う: `global.process.env`、`(process).env`。
+  - `rule-tests/architecture.test.ts` 側の限界は、同ファイルの「環境変数の直参照の抽出」のテストで固定している。
+- 同じ設計（Biome のルール + `rule-tests/architecture.test.ts` の規則で、唯一の入口・出口のファイルだけを許す）を、ログの `console` にも使っている（`noConsole` と `console-direct-access`。`.claude/rules/backend.md` の「ログ」、`docs/logger.md`）。
 
 ## 変数を足すとき
 - `env.ts` の `Env` と `PARSERS` に足し（必須、既定値なし）、`.env.example` に開発用の値と WHAT / WHY のコメントを書き、`env.test.ts` に検証のテストを足す。CI・クラウドは `.env.example` をコピーするので、ワークフローやスクリプトは直さなくてよい。

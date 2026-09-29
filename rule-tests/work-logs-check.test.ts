@@ -19,14 +19,14 @@ import { describe, expect, it } from "vitest";
 //   - actions/checkout のステップに fetch-depth: 0 がある（三点 diff の分岐点を求めるのに base ブランチと履歴が要る）。
 // スクリプトそのものの判定は scripts/hooks/check-work-logs-diff.test.ts。
 
-const repoRoot = import.meta.dirname;
+const repoRoot = join(import.meta.dirname, "..");
 
 const CHECK_COMMAND = `bash scripts/hooks/check-work-logs-diff.sh origin/\${{ github.base_ref }}`;
 const PULL_REQUEST_CONDITION = "github.event_name == 'pull_request'";
 
 type WorkflowStep = Record<string, string>;
 
-// GitHub Actions のワークフローから steps を順に取り出す（YAML のパーサを足さず、行で読む。typecheck.test.ts と同じ考え方）。
+// GitHub Actions のワークフローから steps を順に取り出す（YAML のパーサを足さず、行で読む。rule-tests/typecheck.test.ts と同じ考え方）。
 // 1 ステップは `- ` で始まる行から次の `- ` の行まで。その中の `キー: 値` をすべて平たく集める（`with:` の下の
 // `fetch-depth: 0` も同じステップのキーとして入る）。コメント行（`#` で始まる）は読まない。
 // 限界: 複数行の値（`run: |`）の中身は読まない（値は "|" になる）。ci.yml のステップはすべて 1 行の run。

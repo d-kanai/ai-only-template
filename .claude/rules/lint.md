@@ -1,7 +1,7 @@
 ---
 paths:
   - "biome.json"
-  - "lint.test.ts"
+  - "rule-tests/lint.test.ts"
   - "lefthook.yml"
   - "package.json"
 ---
@@ -30,7 +30,7 @@ pnpm format   # biome format --write .                  … format だけを適�
 - Biome の recommended には既定 severity が warn / info のルールが多い（2.5.13 では recommended の JS ルール 178 件のうち warn 50 件・info 26 件。`biome explain <rule>` の Default severity で確認）。次の 2 段で error 扱いにしている。
   - warn: `pnpm lint` / `pnpm check` / pre-commit のすべてで `--error-on-warnings` を付け、warn でも失敗させる。ルールを列挙しないため、Biome の更新で warn のルールが増えても自動で対象になる。
   - info: `--error-on-warnings` では失敗しないため、`biome.json` で個別に `"error"` を指定している（下の「recommended のうち info から error に上げたルール」）。Biome を更新したら、recommended に info のルールが増えていないか確認する。
-- 担保: `lint.test.ts` が、warn（noUnusedVariables）・info（useTemplate）・追加ルール（noConsole）の**代表 1 ルールずつ**と、`noProcessEnv`（`env.ts` 以外・`env.ts` という名前のリポジトリ外のファイル・E2E の spec では失敗し、`env.ts` とテストでは通る）、`noConsole`（`console.log` / `console.error` / `console.warn` を `logger.ts` 以外・`logger.ts` という名前のリポジトリ外のファイル・E2E の spec に書くと失敗し、`logger.ts` とテストでは通る）について、違反単独で `biome check --error-on-warnings` が失敗すること、`pnpm lint` / `pnpm check` / pre-commit が `--error-on-warnings` 付きであることを検査する。個々のルールの有無までは検査しないので、`biome.json` を変えるときは下の一覧と `biome explain` で確認する。
+- 担保: `rule-tests/lint.test.ts` が、warn（noUnusedVariables）・info（useTemplate）・追加ルール（noConsole）の**代表 1 ルールずつ**と、`noProcessEnv`（`env.ts` 以外・`env.ts` という名前のリポジトリ外のファイル・E2E の spec では失敗し、`env.ts` とテストでは通る）、`noConsole`（`console.log` / `console.error` / `console.warn` を `logger.ts` 以外・`logger.ts` という名前のリポジトリ外のファイル・E2E の spec に書くと失敗し、`logger.ts` とテストでは通る）について、違反単独で `biome check --error-on-warnings` が失敗すること、`pnpm lint` / `pnpm check` / pre-commit が `--error-on-warnings` 付きであることを検査する。個々のルールの有無までは検査しないので、`biome.json` を変えるときは下の一覧と `biome explain` で確認する。
   - 代表 3 ルールには、許可される書き方が 0 で終わる must pass もある（Issue #50。使った変数・テンプレートリテラル、`noConsole` は `logger.ts` とテスト。Issue #85）。
   - 引数の検査は判定 `runsBiomeCheckWithErrorOnWarnings` で行う。`biome check`（または `pnpm exec biome check`）に `--error-on-warnings` が付いているかに加え、失敗を無効化する書き方を拒否する: `&&` 以外のつなぎ（`|| true`・`; exit 0`・改行・`| cat`・末尾の `&`）と、warn を効かなくするフラグ `--diagnostic-level` / `--only` / `--skip`（`=` 付きも）。
 
@@ -55,8 +55,8 @@ JSON にはコメントを書けないため、ここに書く。ベースは cr
 | `linter.rules.preset` | `recommended` | テンプレートは `"recommended": true` だが、Biome 2.5.13 では非推奨（`biome rage --linter` が「deprecated ... Use preset instead」と出す）のため、後継の `preset` を使う |
 | `linter.rules.<group>.<rule>` | 下の一覧 | recommended 外のルールの追加と、info のルールを error に上げるため |
 | `linter.domains` | `next` / `react` / `test` を `recommended` | Next.js・React・Vitest 固有のルールを有効にする。テンプレートは next / react のみ。test（Vitest）は `vitest` が依存にあれば自動で有効になるが、依存の検出に頼らず明示する |
-| `overrides` | `apps/backend/shared/infra/env.ts`・`**/*.test.ts`・`**/*.test.tsx` で `style/noProcessEnv` を `off` | `process.env` を読んでよいのは環境変数の唯一の入口 `env.ts` と、子プロセスに `PATH` を渡すなどで環境変数を扱うテストだけ（Issue #59。`.claude/rules/env.md` の「環境変数」）。`includes` はリポジトリ直下からの相対パスで照合される（リポジトリの外の同名ファイル `.../apps/backend/shared/infra/env.ts` には効かないことを `lint.test.ts` で確認）。E2E の spec（`apps/e2e/*.spec.ts`）は対象外にしない（`architecture.test.ts` の `env-direct-access` と同じく、E2E も `env.ts` を使う） |
-| `overrides` | `apps/backend/shared/infra/logger.ts`・`**/*.test.ts`・`**/*.test.tsx` で `suspicious/noConsole` を `off` | `console` を書いてよいのはログの唯一の出口 `logger.ts` と、`vi.spyOn(console, ...)` で出力を抑える・確かめるテストだけ（Issue #85。`.claude/rules/backend.md` の「ログ」）。`noProcessEnv` の override と同じく、リポジトリの外の `logger.ts` という名前のファイルには効かないこと、E2E の spec は対象外にしないことを `lint.test.ts` で確認 |
+| `overrides` | `apps/backend/shared/infra/env.ts`・`**/*.test.ts`・`**/*.test.tsx` で `style/noProcessEnv` を `off` | `process.env` を読んでよいのは環境変数の唯一の入口 `env.ts` と、子プロセスに `PATH` を渡すなどで環境変数を扱うテストだけ（Issue #59。`.claude/rules/env.md` の「環境変数」）。`includes` はリポジトリ直下からの相対パスで照合される（リポジトリの外の同名ファイル `.../apps/backend/shared/infra/env.ts` には効かないことを `rule-tests/lint.test.ts` で確認）。E2E の spec（`apps/e2e/*.spec.ts`）は対象外にしない（`rule-tests/architecture.test.ts` の `env-direct-access` と同じく、E2E も `env.ts` を使う） |
+| `overrides` | `apps/backend/shared/infra/logger.ts`・`**/*.test.ts`・`**/*.test.tsx` で `suspicious/noConsole` を `off` | `console` を書いてよいのはログの唯一の出口 `logger.ts` と、`vi.spyOn(console, ...)` で出力を抑える・確かめるテストだけ（Issue #85。`.claude/rules/backend.md` の「ログ」）。`noProcessEnv` の override と同じく、リポジトリの外の `logger.ts` という名前のファイルには効かないこと、E2E の spec は対象外にしないことを `rule-tests/lint.test.ts` で確認 |
 | `assist.actions.source.organizeImports` | `on`（テンプレートのまま） | import の並び順を統一し、差分のノイズとマージ時の競合を減らす |
 
 ## 有効化したルール一覧
@@ -89,9 +89,9 @@ Biome の recommended 全体を有効にする（個別に列挙しない）。�
 - `correctness/useUniqueElementIds`（react domain・recommended 外）: 固定文字列の `id` はコンポーネントを複数回使うと DOM 上で重複する。`useId` を使わせる。
 - `complexity/noExcessiveCognitiveComplexity`: 認知的複雑度が既定の上限（15）を超える関数を防ぎ、分割を促す。
 - `style/noParameterAssign`: 引数への再代入で、呼び出し元の値と関数内の値の対応が追いにくくなるのを防ぐ。
-- `style/noProcessEnv`（既定 severity は info。Issue #59）: 環境変数を `apps/backend/shared/infra/env.ts` 以外で `process.env` から直接読むのを防ぐ（読む場所が散らばると、既定値や検証が場所ごとにずれるため。`.claude/rules/env.md` の「環境変数」）。`env.ts` とテストは `overrides` で off。`apps/frontend/instrumentation.ts` の `process.env.NEXT_RUNTIME`（Next.js の規約の変数）だけは、その行の `biome-ignore` で理由を書いて許している（ファイルごと off にすると、同じファイルの別の直参照も通るため）。`architecture.test.ts` の規則 `env-direct-access` でも同じことを検査している（2 系統にする理由と、分割代入 `const { env } = process` をどちらも拾わない限界は `.claude/rules/env.md`）。
+- `style/noProcessEnv`（既定 severity は info。Issue #59）: 環境変数を `apps/backend/shared/infra/env.ts` 以外で `process.env` から直接読むのを防ぐ（読む場所が散らばると、既定値や検証が場所ごとにずれるため。`.claude/rules/env.md` の「環境変数」）。`env.ts` とテストは `overrides` で off。`apps/frontend/instrumentation.ts` の `process.env.NEXT_RUNTIME`（Next.js の規約の変数）だけは、その行の `biome-ignore` で理由を書いて許している（ファイルごと off にすると、同じファイルの別の直参照も通るため）。`rule-tests/architecture.test.ts` の規則 `env-direct-access` でも同じことを検査している（2 系統にする理由と、分割代入 `const { env } = process` をどちらも拾わない限界は `.claude/rules/env.md`）。
 - `style/useThrowOnlyError`: `Error` 以外を throw するとスタックトレースが失われる（ESLint の no-throw-literal 相当）。
-- `suspicious/noConsole`（`"error"` のみ。`allow` なし。Issue #85）: ログは `apps/backend/shared/infra/logger.ts` を必ず通す（`.claude/rules/backend.md` の「ログ」）。`logger.ts` とテストは `overrides` で off。WHY `allow` を空にする: 以前は `console.error` / `console.warn` を許可していたが、許可した呼び出しが logger を通らない書き方の抜け道になり、行の形（JSON 1 行・level・timestamp）がそろわない。`biome-ignore` のコメントで Biome を黙らせても、`console-direct-access` が拾う（以前の `proxy.ts` は `biome-ignore` を付けて `console.log` を書いていた）。`architecture.test.ts` の規則 `console-direct-access` でも同じことを検査している（2 系統にする理由と、片方だけが拾う書き方は `docs/logger.md`）。
+- `suspicious/noConsole`（`"error"` のみ。`allow` なし。Issue #85）: ログは `apps/backend/shared/infra/logger.ts` を必ず通す（`.claude/rules/backend.md` の「ログ」）。`logger.ts` とテストは `overrides` で off。WHY `allow` を空にする: 以前は `console.error` / `console.warn` を許可していたが、許可した呼び出しが logger を通らない書き方の抜け道になり、行の形（JSON 1 行・level・timestamp）がそろわない。`biome-ignore` のコメントで Biome を黙らせても、`console-direct-access` が拾う（以前の `proxy.ts` は `biome-ignore` を付けて `console.log` を書いていた）。`rule-tests/architecture.test.ts` の規則 `console-direct-access` でも同じことを検査している（2 系統にする理由と、片方だけが拾う書き方は `docs/logger.md`）。
 - `suspicious/noConstantBinaryExpressions`: 常に同じ結果になる比較・論理式（書き間違い）を検出する（ESLint の recommended にある no-constant-binary-expression 相当）。
 - `suspicious/noEmptyBlockStatements`: 空のブロック（握りつぶした catch、書きかけの関数など）を防ぐ。意図的に空にする場合はブロック内にコメントで理由を書く（ESLint の recommended にある no-empty 相当）。
 - `suspicious/noLeakedRender`（react domain・recommended 外）: `{count && <X />}` のように `0` などが意図せず描画されるのを防ぐ。
@@ -106,4 +106,4 @@ Biome の recommended 全体を有効にする（個別に列挙しない）。�
 - `style/noDefaultExport`: Next.js の page / layout は default export が必須。
 - `style/useBlockStatements` / `noNestedTernary` / `noMagicNumbers` など: バグ防止より好みの要素が強く、最小構成の段階では入れない。
 - `security/noSecrets`: エントロピーによる推定で誤検知が出やすい。秘密情報は `.env*` を `.gitignore` 済み。
-- `style/noRestrictedImports`: ディレクトリ構成の依存の向きの検査に使えない。`import type` だけを許すことを表現できず（2.5.13 で、制限したパスへの `import type` も違反になることを実測）、参照元ごとの制限には feature・層ごとの `overrides` が要る。依存の向きはルート直下の `architecture.test.ts` で検査する（`.claude/rules/architecture-check.md`）。
+- `style/noRestrictedImports`: ディレクトリ構成の依存の向きの検査に使えない。`import type` だけを許すことを表現できず（2.5.13 で、制限したパスへの `import type` も違反になることを実測）、参照元ごとの制限には feature・層ごとの `overrides` が要る。依存の向きはルート直下の `rule-tests/architecture.test.ts` で検査する（`.claude/rules/architecture-check.md`）。

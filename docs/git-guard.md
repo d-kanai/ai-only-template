@@ -36,7 +36,7 @@ claude 2.1.283 の `claude -p ... --setting-sources project`。公式は `https:
 - permission-modes（https://code.claude.com/docs/en/permission-modes.md）
   - deny のルールは `bypassPermissions` を含むすべてのモードで効く。allow のルールは `bypassPermissions` では意味を持たない。
   - 「Protected paths」: `.git`・`.claude` などへの書き込みは、`default` / `acceptEdits` で確認、`auto` で分類器、`bypassPermissions` で確認なし。
-  - `permissions.defaultMode: "bypassPermissions"` を読むのは user / `--settings` / managed の設定とある（プロジェクトの `.claude/settings.json` で効くかは未確認。`settings.test.ts` はどこにあっても拒否する）。
+  - `permissions.defaultMode: "bypassPermissions"` を読むのは user / `--settings` / managed の設定とある（プロジェクトの `.claude/settings.json` で効くかは未確認。`rule-tests/settings.test.ts` はどこにあっても拒否する）。
 - git 2.43.0 のオプション定義（https://raw.githubusercontent.com/git/git/v2.43.0/builtin/commit.c ・ `push.c` ・ `merge.c`）。git は長いオプションを一意な接頭辞で受け付ける（parse-options）ので、`guard-git.sh` は最短の接頭辞から拾う。
   - commit: `OPT_BOOL('n', "no-verify", ...)` と `OPT__VERBOSE`（`--no-verbose` がある）。`--no-v`〜`--no-ver` は両方に当たり、`--no-veri` から `--no-verify` に決まる。
   - push: 長いオプションの名前は repo / all / branches / mirror / delete / tags / dry-run / porcelain / force / recurse-submodules / thin / receive-pack / exec / set-upstream / progress / prune / no-verify / follow-tags / signed / atomic / push-option（ほかに force-with-lease / force-if-includes）。`m` で始まるのは mirror だけ、`--fo` は follow-tags と曖昧、`--a` は atomic と曖昧、`b` で始まるのは branches だけ。

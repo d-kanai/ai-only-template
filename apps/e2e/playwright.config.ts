@@ -7,7 +7,7 @@ import { env, toolEnv } from "@repo/backend/shared/infra/env";
 // WHY apps/e2e を workspace パッケージ @repo/e2e にする（Issue #84）: apps/frontend・apps/backend と同じ形にし、E2E だけが使う
 //   依存（@playwright/test・pg・@types/pg）を apps/e2e/package.json に置いて、リポジトリ直下から外す（.claude/rules/testing.md の「E2E」）。
 // WHY env.ts を "@repo/backend/..." で import する（Issue #68 の段階 2）: frontend と同じく、backend は workspace パッケージの
-//   公開の入口（apps/backend/package.json の exports）からだけ使う（architecture.test.ts の frontend-to-backend-specifier）。
+//   公開の入口（apps/backend/package.json の exports）からだけ使う（rule-tests/architecture.test.ts の frontend-to-backend-specifier）。
 //   apps/e2e/package.json の devDependencies に "@repo/backend": "workspace:*" があるので、Node の解決
 //   （apps/e2e/node_modules/@repo/backend → apps/backend）で見つかる。tsconfig の paths には頼らない。
 // .env: カレントディレクトリは apps/e2e だが、env.ts はカレントディレクトリから上にたどってリポジトリ直下の .env を 1 つだけ読む

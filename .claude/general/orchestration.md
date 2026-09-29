@@ -1,6 +1,6 @@
 # オーケストレーション（常時）
 
-メイン（Fable 5.1）がオーケストレータ、サブエージェント（`.claude/agents/`。model はフル ID で固定し、`instructions.test.ts` が許可した ID だけを通す）が実作業を担当する。消費（Usage limit）の方針と根拠は `docs/usage.md`（Issue #78）。
+メイン（Fable 5.1）がオーケストレータ、サブエージェント（`.claude/agents/`。model はフル ID で固定し、`rule-tests/instructions.test.ts` が許可した ID だけを通す）が実作業を担当する。消費（Usage limit）の方針と根拠は `docs/usage.md`（Issue #78）。
 
 - 役割: オーケストレータ = 計画・タスク分解・依頼文・結果の確認と統合・コミット・ユーザーへの報告。`worker`（Opus）= 実装・テスト。`worker-light`（Sonnet）= 機械的な作業（改名・参照の更新・文書の書き換え・既存の形に倣った単純なテスト）。`researcher`（Opus、読み取り専用）= 調査・原因分析・公式ドキュメント。`reviewer`（Opus、読み取り専用）= worker の成果の検証。単発の検索は組み込みの Explore。
 - 依頼: 1 タスクごとに目的・変更してよいファイル・完了条件（通すべきテスト）・検証方法を明示する。

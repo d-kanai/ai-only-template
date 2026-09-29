@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-const repoRoot = resolve(__dirname);
+const repoRoot = resolve(__dirname, "..");
 
 // 必ず入っている deny のルール。フック（scripts/hooks/guard-git.sh）と二重にする（WHY は .claude/rules/git-guard.md）。
 // 書式は公式 permissions の「Wildcard patterns」: 末尾の `*` の前に空白を置かない形（`--force*`）は `--force-with-lease` も含む。

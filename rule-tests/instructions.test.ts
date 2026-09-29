@@ -37,8 +37,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 //                     （Issue #78。別名 `opus` / `sonnet` や古い ID は意図しないモデルに解決され、消費と品質が変わる。
 //                     `.claude/general/orchestration.md`、`docs/usage.md`）。
 
-const repoRoot = import.meta.dirname;
-const SELF = "instructions.test.ts";
+const repoRoot = join(import.meta.dirname, "..");
+const SELF = "rule-tests/instructions.test.ts";
 
 const CLAUDE_MD = "CLAUDE.md";
 const CLAUDE_MD_MAX_LINES = 200;

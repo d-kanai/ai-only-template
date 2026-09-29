@@ -11,7 +11,7 @@ import {
 // WHY ここ（テストの前）で消すか: テストファイルはまだ 1 つも動いていないので、消してよいのは前の実行の残りだけになる。
 //   同じ理由で、Stryker の worker の中では消さない（他の worker が並行して動いているため。WHY は cleanupTestSchemas）。
 // WHY env は "@repo/backend/..." で import する（Issue #68 の段階 2）: リポジトリ直下のファイルも、backend は公開の入口
-//   （apps/backend/package.json の exports）からだけ使う（architecture.test.ts の frontend-to-backend-specifier）。
+//   （apps/backend/package.json の exports）からだけ使う（rule-tests/architecture.test.ts の frontend-to-backend-specifier）。
 // WHY database.test-support だけは相対パスで import する: テストのための処理で、パッケージの公開面（exports）に含めない
 //   （exports はアプリの入口だけ）。exports に無いので @repo/backend では解決できない。このファイルからのこの参照だけを、
 //   frontend-to-backend-specifier の例外（TEST_INFRA_RELATIVE_EXCEPTION）として許している。

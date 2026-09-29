@@ -10,7 +10,7 @@ export async function register(): Promise<void> {
   //   （2026-09-28 実測）。このアプリは Edge で動くコードを持たないので、Edge では何もしない。
   // WHY ここだけ process.env を直接読む: NEXT_RUNTIME は Next.js がビルド時に値を埋め込む規約の変数で、この形で書くと
   //   Edge 向けのビルドから import が消える（同ドキュメントの例と同じ書き方）。env.ts 経由にすると、判定の前に env.ts を
-  //   読み込むことになり分岐の意味がない。例外はこの NEXT_RUNTIME だけ（architecture.test.ts の env-direct-access も同じ）。
+  //   読み込むことになり分岐の意味がない。例外はこの NEXT_RUNTIME だけ（rule-tests/architecture.test.ts の env-direct-access も同じ）。
   // biome-ignore lint/style/noProcessEnv: Next.js の規約の NEXT_RUNTIME（ビルド時に埋め込まれる）。env.ts 経由では分岐できない
   if (process.env.NEXT_RUNTIME === "nodejs") {
     const { verifyEnvAtStartup } = await import("./instrumentation-node");

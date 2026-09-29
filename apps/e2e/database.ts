@@ -10,7 +10,7 @@ import { Client } from "pg";
 //   apps/backend/package.json の exports）で読む。playwright.config.ts と同じ書き方にそろえる。
 // WHY pg を apps/e2e/package.json の devDependencies にも置く: pg は apps/backend の依存だが、このファイル（apps/e2e/）からは
 //   apps/backend/node_modules が見えない（pnpm は宣言した依存だけを apps/e2e/node_modules に置く）。E2E が DB を直接確かめる
-//   ための依存として、apps/backend と同じ版を置く（package.test.ts が同じ名前の依存の版がそろっていることを検査する）。
+//   ための依存として、apps/backend と同じ版を置く（rule-tests/package.test.ts が同じ名前の依存の版がそろっていることを検査する）。
 
 // 1 本の接続で fn を実行し、終わったら閉じる。
 async function withClient<T>(fn: (client: Client) => Promise<T>): Promise<T> {
