@@ -52,7 +52,7 @@ paths:
 
 ## 限界
 - 名前の sanitize で違う名前が同じ DB 名になりうる（`a-b` と `a_b`、63 文字を超えて前半が同じ名前）。Claude Code が付ける名前（英小文字・数字・`-`）では実用上重ならない想定。
-- E2E_PORT は 800 通りのハッシュなので、並列の worktree で重なりうる。重なると `reuseExistingServer`（`playwright.config.ts`）で別の worktree のサーバを使ってしまう。重なったら片方の `.env` の `E2E_PORT` を手で変える（次の WorktreeCreate で上書きされる）。
+- E2E_PORT は 800 通りのハッシュなので、並列の worktree で重なりうる。重なると `reuseExistingServer`（`apps/e2e/playwright.config.ts`）で別の worktree のサーバを使ってしまう。重なったら片方の `.env` の `E2E_PORT` を手で変える（次の WorktreeCreate で上書きされる）。
 - `reuseExistingServer` は同じポートのサーバしか使わないので、worktree ごとに `next build` を待つ（メインで起動したサーバは使えない）。
 - `.env` は WorktreeCreate のたびに作り直す（手で直した値は、同じ名前で作り直すと消える）。
 - Postgres 以外の外部リソース（Docker のコンテナ名・ボリュームなど）は分けていない。compose の db コンテナはメインと全 worktree で 1 つを共有する。

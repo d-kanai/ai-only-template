@@ -7,7 +7,7 @@ import { buildRequestLog } from "@/shared/request-log/request-log";
 // ここでは画面アクセスとブラウザからの API route 呼び出しを、1 リクエスト = JSON 1 行（stdout）で出す（Issue #80）。
 // WHY 薄く保つ: 1 行の中身の決め方は shared/request-log/request-log.ts（純粋関数。テストで固定）に置き、ここは NextRequest の
 //   値を渡して出力し、応答に x-request-id を付けるだけにする。このファイルは next start / next dev の中でだけ動くので
-//   カバレッジの対象外にし（vitest.config.mts）、結線は E2E（e2e/request-log.spec.ts）で確かめる。
+//   カバレッジの対象外にし（vitest.config.mts）、結線は E2E（apps/e2e/request-log.spec.ts）で確かめる。
 // 限界（docs/request-log.md）: 応答の前に動くので status と所要時間は取れない。
 // WHY 第 2 引数（NextFetchEvent）を受け取らない: event.waitUntil を使わないため（下の console.log の WHY）。
 export function proxy(request: NextRequest): NextResponse {

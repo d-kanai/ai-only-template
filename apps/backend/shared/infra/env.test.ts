@@ -162,7 +162,7 @@ describe("readToolEnv", () => {
     expect(readToolEnv({ E2E_PORT: value }).E2E_PORT).toBe(port);
   });
 
-  test("E2E_PORT が空文字なら未設定と同じ undefined（playwright.config.ts が既定の 3100 を使う）", () => {
+  test("E2E_PORT が空文字なら未設定と同じ undefined（apps/e2e/playwright.config.ts が既定の 3100 を使う）", () => {
     expect(readToolEnv({ E2E_PORT: "" }).E2E_PORT).toBeUndefined();
   });
 

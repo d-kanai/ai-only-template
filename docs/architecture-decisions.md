@@ -7,7 +7,8 @@
 | --- | --- |
 | `apps/frontend/` | `@repo/frontend`（Next.js）。`app/`（ルーティングだけ）・`features/`・`next.config.ts`・`instrumentation*.ts` |
 | `apps/backend/` | `@repo/backend`（API 側。Next・React に依存しない TS）。`<feature>/` の DDD 4 層、`shared/`、`drizzle/`・`drizzle.config.ts` |
-| リポジトリ直下 | ツールの設定・ルール検査テスト・`e2e/`・`scripts/`・`docs/`・`work-logs/` |
+| `apps/e2e/` | `@repo/e2e`（Playwright の E2E。Issue #84）。`*.spec.ts`・`database.ts`・`playwright.config.ts` |
+| リポジトリ直下 | ツールの設定・ルール検査テスト・`scripts/`・`docs/`・`work-logs/` |
 
 - frontend と backend を `apps/` で分ける理由（Issue #68。ユーザー指示）: パッケージの単位で画面側と API 側を分け、後で API を別プロセスに分離しやすくする。プロセスは増やさず Next 1 つのまま（Hono などの別サーバは入れない）。
 - 段階: 段階 1 でディレクトリを `apps/` に移し、import・設定・検査を書き換えた（`package.json` は 1 つ、`@repo/backend/*` は tsconfig の paths で解決）。段階 2（今の形）で pnpm workspace にし、`apps/backend` を `exports` を明示した `@repo/backend`、`apps/frontend` を `@repo/frontend` にした。段階 1 の限界（frontend から backend を相対パスで参照しても、参照先が許される場所なら違反にしない）は段階 2 の `frontend-to-backend-specifier` で解消した。
@@ -119,7 +120,7 @@ apps/
         container.ts                    # 組み立て（DI）。createTodoContainer({ runner, repositoryFor, readExecutor })、
                                         #   createInMemoryTodoContainer / createPostgresTodoContainer、アプリ共有の todoContainer
         container.test.ts
-e2e/                                    # Playwright の E2E（リポジトリ直下）
+apps/e2e/                               # @repo/e2e。Playwright の E2E（*.spec.ts・database.ts・playwright.config.ts。Issue #84）
 architecture.test.ts lint.test.ts …     # ルール検査テスト（リポジトリ直下）
 tsconfig.json                           # Vitest とリポジトリ全体の型チェック用
 ```

@@ -24,7 +24,7 @@ pr-flow の手順から参照する。設定を変えたらこのファイルを
 - クラウドセッションからは、`GH_TOKEN` を付けた `curl` で GET は 200 で読めるが、PUT はプロキシが 403「Write access to this GitHub API path is not permitted through this proxy」で拒否する（2026-09-28 実測。GitHub MCP ツールにも Ruleset の操作は無い）。
 
 ## CI（`.github/workflows/ci.yml`）
-- main 宛の PR と main への push で、ジョブ `ci` が `pnpm install --frozen-lockfile` → Postgres の起動（`docker compose up -d --wait --wait-timeout 120`）→ psql での接続確認 → `cp .env.example .env` → `pnpm db:migrate` → `pnpm lint` → `pnpm typecheck` → `pnpm test` → `pnpm build` → Chromium の導入（`pnpm exec playwright install --with-deps chromium`）→ `pnpm test:e2e` を実行する。ステップはすべてリポジトリ直下で実行する。
+- main 宛の PR と main への push で、ジョブ `ci` が `pnpm install --frozen-lockfile` → Postgres の起動（`docker compose up -d --wait --wait-timeout 120`）→ psql での接続確認 → `cp .env.example .env` → `pnpm db:migrate` → `pnpm lint` → `pnpm typecheck` → `pnpm test` → `pnpm build` → Chromium の導入（`pnpm --filter @repo/e2e exec playwright install --with-deps chromium`）→ `pnpm test:e2e` を実行する。ステップはすべてリポジトリ直下で実行する。
 - Node の版は `.tool-versions`、pnpm の版は `package.json` の `packageManager` から取る（ワークフローに版を直書きしない）。
 - GitHub Actions は `CI=true` を既定で設定するので、lefthook の postinstall はフックを入れない。
 

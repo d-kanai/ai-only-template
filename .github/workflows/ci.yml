@@ -92,7 +92,7 @@ jobs:
 
       # apps/backend/drizzle/ のマイグレーションを Postgres に当てる（drizzle-kit migrate。Issue #57）。
       # WHY ここで当てるか: E2E（pnpm test:e2e）の next start は Postgres の todos 表を使うが、webServer の中では
-      #   マイグレーションを当てない方針（playwright.config.ts）。E2E より前に 1 回だけ当てておく。
+      #   マイグレーションを当てない方針（apps/e2e/playwright.config.ts）。E2E より前に 1 回だけ当てておく。
       #   単体テスト（pnpm test）は、テストごとに別のスキーマを作ってそこに当てる（apps/backend/shared/infra/database.test-support.ts）ので、
       #   この結果には依存しない。
       # 接続先は上で作った .env の DATABASE_URL（apps/backend/drizzle.config.ts が env.ts 経由で読む）。
@@ -110,16 +110,19 @@ jobs:
       - run: pnpm build
 
       # E2E テスト（Playwright）に使う Chromium を入れる。
-      # chromium: playwright.config.ts のプロジェクトは Chromium だけなので、他のブラウザは入れない
+      # pnpm --filter @repo/e2e exec: Playwright は E2E の workspace パッケージ @repo/e2e（apps/e2e/package.json）の依存で、
+      #   リポジトリ直下には無い（Issue #84）。apps/e2e をカレントディレクトリにして、その node_modules/.bin/playwright
+      #   （@playwright/test と同じ版）を動かす。
+      # chromium: apps/e2e/playwright.config.ts のプロジェクトは Chromium だけなので、他のブラウザは入れない
       #   （版は @playwright/test が要求するビルド。本体と headless shell の両方が入る。--dry-run で確認）。
       # --with-deps: Chromium が必要とする OS の依存ライブラリ（apt パッケージ）も一緒に入れる。
       #   ランナーのイメージにどのライブラリが入っているかに依存せず、ブラウザが起動できるようにする。
-      # PLAYWRIGHT_CHROMIUM_EXECUTABLE は設定しない（クラウド VM 用。playwright.config.ts のコメント）。
-      - run: pnpm exec playwright install --with-deps chromium
+      # PLAYWRIGHT_CHROMIUM_EXECUTABLE は設定しない（クラウド VM 用。apps/e2e/playwright.config.ts のコメント）。
+      - run: pnpm --filter @repo/e2e exec playwright install --with-deps chromium
 
-      # E2E テストを実行する（playwright test）。
-      # webServer（playwright.config.ts）が pnpm build && pnpm start -p 3100 でサーバを起動する。
-      #   playwright.config.ts が .env の DATABASE_URL（env.ts）を webServer に渡し、Postgres で動かす。
+      # E2E テストを実行する（pnpm --filter @repo/e2e test = apps/e2e の playwright test）。
+      # webServer（apps/e2e/playwright.config.ts）が pnpm -w build && pnpm -w start -p 3100 でサーバを起動する。
+      #   apps/e2e/playwright.config.ts が .env の DATABASE_URL（env.ts）を webServer に渡し、Postgres で動かす。
       #   上の pnpm build の成果物を使い回さず build し直すが、ローカルと同じコマンドで動かすことを優先する（単純さのため）。
       # CI=true（GitHub Actions の既定）なので reuseExistingServer は無効になり、必ずこのコードでサーバを新しく起動する。
       - run: pnpm test:e2e

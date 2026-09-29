@@ -21,7 +21,7 @@ Stryker が実装に変異（条件の反転・戻り値の差し替え・文字
 4. 後片付け: Stryker の後はテスト用スキーマ（`test_<UUID>`）が残る。次の `pnpm test` の最初に globalSetup が消す（Stryker の worker の中では消さない）。
 
 ## 対象と効かないもの
-- 対象: `apps/frontend/features/` `apps/frontend/shared/` `apps/backend/` の `.ts` / `.tsx`（テストと `*.d.ts` を除く）。`apps/frontend/app/`・`scripts/`・設定ファイル・ルール検査テスト・`e2e/` は対象外。
+- 対象: `apps/frontend/features/` `apps/frontend/shared/` `apps/backend/` の `.ts` / `.tsx`（テストと `*.d.ts` を除く）。`apps/frontend/app/`・`scripts/`・設定ファイル・ルール検査テスト・`apps/e2e/` は対象外。
 - Vitest のカバレッジのしきい値は Stryker の実行では効かない（vitest-runner が coverage を切り、変異を通るテストだけを動かす）。
 - テストで `@repo/backend/...` から backend の値を import すると、その変異はテストに届かない（サンドボックスの `node_modules` が元の `apps/backend` を指す）。backend の振る舞いは backend の中のテスト（相対 import）で確かめる。
 

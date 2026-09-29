@@ -55,7 +55,7 @@ JSON にはコメントを書けないため、ここに書く。ベースは cr
 | `linter.rules.preset` | `recommended` | テンプレートは `"recommended": true` だが、Biome 2.5.13 では非推奨（`biome rage --linter` が「deprecated ... Use preset instead」と出す）のため、後継の `preset` を使う |
 | `linter.rules.<group>.<rule>` | 下の一覧 | recommended 外のルールの追加と、info のルールを error に上げるため |
 | `linter.domains` | `next` / `react` / `test` を `recommended` | Next.js・React・Vitest 固有のルールを有効にする。テンプレートは next / react のみ。test（Vitest）は `vitest` が依存にあれば自動で有効になるが、依存の検出に頼らず明示する |
-| `overrides` | `apps/backend/shared/infra/env.ts`・`**/*.test.ts`・`**/*.test.tsx` で `style/noProcessEnv` を `off` | `process.env` を読んでよいのは環境変数の唯一の入口 `env.ts` と、子プロセスに `PATH` を渡すなどで環境変数を扱うテストだけ（Issue #59。`.claude/rules/env.md` の「環境変数」）。`includes` はリポジトリ直下からの相対パスで照合される（リポジトリの外の同名ファイル `.../apps/backend/shared/infra/env.ts` には効かないことを `lint.test.ts` で確認）。E2E の spec（`e2e/*.spec.ts`）は対象外にしない（`architecture.test.ts` の `env-direct-access` と同じく、E2E も `env.ts` を使う） |
+| `overrides` | `apps/backend/shared/infra/env.ts`・`**/*.test.ts`・`**/*.test.tsx` で `style/noProcessEnv` を `off` | `process.env` を読んでよいのは環境変数の唯一の入口 `env.ts` と、子プロセスに `PATH` を渡すなどで環境変数を扱うテストだけ（Issue #59。`.claude/rules/env.md` の「環境変数」）。`includes` はリポジトリ直下からの相対パスで照合される（リポジトリの外の同名ファイル `.../apps/backend/shared/infra/env.ts` には効かないことを `lint.test.ts` で確認）。E2E の spec（`apps/e2e/*.spec.ts`）は対象外にしない（`architecture.test.ts` の `env-direct-access` と同じく、E2E も `env.ts` を使う） |
 | `assist.actions.source.organizeImports` | `on`（テンプレートのまま） | import の並び順を統一し、差分のノイズとマージ時の競合を減らす |
 
 ## 有効化したルール一覧

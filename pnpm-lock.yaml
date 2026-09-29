@@ -172,9 +172,6 @@ importers:
       '@biomejs/biome':
         specifier: 2.5.13
         version: 2.5.13
-      '@playwright/test':
-        specifier: 1.63.0
-        version: 1.63.0
       '@repo/backend':
         specifier: workspace:*
         version: link:apps/backend
@@ -193,9 +190,6 @@ importers:
       '@types/node':
         specifier: 24.13.6
         version: 24.13.6
-      '@types/pg':
-        specifier: 8.23.1
-        version: 8.23.1
       '@vitejs/plugin-react':
         specifier: 6.1.1
         version: 6.1.1(vite@8.3.0(@types/node@24.13.6)(esbuild@0.28.2)(tsx@4.23.15))
@@ -208,9 +202,6 @@ importers:
       lefthook:
         specifier: 2.1.12
         version: 2.1.12
-      pg:
-        specifier: 8.23.0
-        version: 8.23.0
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -233,6 +224,21 @@ importers:
       drizzle-kit:
         specifier: 0.31.11
         version: 0.31.11
+
+  apps/e2e:
+    devDependencies:
+      '@playwright/test':
+        specifier: 1.63.0
+        version: 1.63.0
+      '@repo/backend':
+        specifier: workspace:*
+        version: link:../backend
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
+      pg:
+        specifier: 8.23.0
+        version: 8.23.0
 
   apps/frontend:
     dependencies:

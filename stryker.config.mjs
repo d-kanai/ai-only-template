@@ -33,7 +33,7 @@ export default {
   //   スペース区切りのまま（devDependencies の vitest は 4.1.11）。
 
   vitest: {
-    // configFile: pnpm test と同じ vitest.config.mts（jsdom、tsconfigPaths、e2e/** の除外）でテストを動かす。
+    // configFile: pnpm test と同じ vitest.config.mts（jsdom、tsconfigPaths、apps/e2e/** の除外）でテストを動かす。
     //   既定でも vitest.config.* を探すが、どの設定で動くかを明示する。
     //   Vitest の coverage（100% のしきい値）は Stryker の実行では効かない。vitest-runner が coverage.enabled: false を
     //   強制し、Stryker 自身の perTest カバレッジ分析を使うため（公式 https://stryker-mutator.io/docs/stryker-js/vitest-runner/
@@ -69,7 +69,7 @@ export default {
   //   - apps/frontend/app/: ルーティングだけで単体テストを置かない方針（.claude/rules/frontend.md）。変異させても単体テストで
   //     落とせないため、生き残りとして数えるだけになる。
   //   - 設定ファイル（リポジトリ直下のもの、apps/frontend/next.config.ts・instrumentation*.ts、apps/backend/drizzle.config.ts）、
-  //     ルール検査テスト（architecture.test.ts など）、e2e/: 実装ではない（vitest.config.mts の coverage.include と同じ）。
+  //     ルール検査テスト（architecture.test.ts など）、apps/e2e/: 実装ではない（vitest.config.mts の coverage.include と同じ）。
   //   apps/frontend/shared/ は request-log（Issue #80）から使い始めた（.claude/rules/frontend.md）。
   // 注意（Issue #68 の段階 2。workspace パッケージ @repo/backend）: "@repo/backend/..." で import したファイルは、サンドボックスの
   //   中でも変異していない元の apps/backend を読む。Stryker はサンドボックスの中に、元のリポジトリの node_modules（リポジトリ直下・

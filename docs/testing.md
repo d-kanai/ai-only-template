@@ -16,4 +16,4 @@
 - Vitest 5.0.1 の `rejects.toThrow("文字列")` / `rejects.toThrowError("文字列")` は、reject された値が `undefined` だと文字列を照合せずに通る。同期の `expect(fn).toThrow("文字列")` も `throw undefined` で通る（2026-09-28。Issue #55）。
 - `mockResolvedValue` は即時に resolve するため、「新しい応答の後に古い応答が届く」順序を再現できない（`deferred()` を使う理由）。
 - Playwright: クラウド VM の `/opt/pw-browsers` の Chromium はビルド 1194 で、`@playwright/test@1.63.0` の要求（1243）と一致しない。変数なしでは `/opt/pw-browsers/chromium_headless_shell-1243/...` を探して `Executable doesn't exist` で失敗し、`PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium`（Chromium 141）で通った（2026-09-28）。
-- Vitest の既定 include は `*.spec.ts` も拾うため、`e2e/**` を除外しないと Playwright の `test()` を Vitest 上で読み込んで失敗する（`vitest.config.mts` のコメント）。
+- Vitest の既定 include は `*.spec.ts` も拾うため、`apps/e2e/**`（Issue #84 までは `e2e/**`）を除外しないと Playwright の `test()` を Vitest 上で読み込んで失敗する（`vitest.config.mts` のコメント）。

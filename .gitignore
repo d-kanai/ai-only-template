@@ -43,10 +43,12 @@ yarn-error.log*
 next-env.d.ts
 
 # playwright（E2E テストの実行結果・レポート。実行のたびに生成される）
-/test-results/
-/playwright-report/
-/blob-report/
-/playwright/.cache/
+# WHY apps/e2e/ の下: Playwright の出力先（outputDir など）の既定は、設定ファイルに近い package.json のディレクトリ（Issue #84 で
+#   E2E を workspace パッケージ apps/e2e にしたので apps/e2e）からの相対パスになる。
+/apps/e2e/test-results/
+/apps/e2e/playwright-report/
+/apps/e2e/blob-report/
+/apps/e2e/playwright/.cache/
 
 # stryker（mutation testing の実行結果。reports/mutation/ にレポート、.stryker-tmp/ に実行中のサンドボックスが作られる）
 /reports/

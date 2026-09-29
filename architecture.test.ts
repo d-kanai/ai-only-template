@@ -41,6 +41,10 @@ const repoRoot = import.meta.dirname;
 //   場所にファイルを置くこと自体を違反にする。
 const FRONTEND_ROOT = "apps/frontend";
 const BACKEND_ROOT = "apps/backend";
+// E2E の workspace パッケージ @repo/e2e（Issue #84 で e2e/ から移した）。依存の向きの規則（frontend / backend の中の規則）と
+//   置き場所の規則の対象ではなく、backend を使う側（frontend-to-backend-specifier・backend-exports）と環境変数の直参照
+//   （env-direct-access）の対象。
+const E2E_ROOT = "apps/e2e";
 
 // WHY テストを対象外にする: テストは組み立てのために規則の外側を参照する（例: presentation のテストが
 //   infra の InMemory リポジトリを new して createTodoContainer に渡す。.claude/rules/testing.md の「置き方と環境」）。
@@ -304,16 +308,16 @@ function referencesOf(root: string, files: string[]): Reference[] {
   );
 }
 
-// 参照を取り出すファイル。依存の向きの対象（listAllSourceFiles）に、e2e/ のソースとリポジトリ直下のファイル
-//   （playwright.config.ts・vitest.global-setup.ts など。テストは除く）を足す。
-// WHY e2e/ とリポジトリ直下を足す: backend を @repo/backend として使う側（frontend-to-backend-specifier・BACKEND_EXPORTS）の
+// 参照を取り出すファイル。依存の向きの対象（listAllSourceFiles）に、apps/e2e/ のソース（apps/e2e/playwright.config.ts を含む）と
+//   リポジトリ直下のファイル（vitest.global-setup.ts など。テストは除く）を足す。
+// WHY apps/e2e/ とリポジトリ直下を足す: backend を @repo/backend として使う側（frontend-to-backend-specifier・BACKEND_EXPORTS）の
 //   検査の対象にするため（Issue #68 の段階 2）。ほかの規則は参照元を apps/ の下に絞っているので、足しても影響しない。
 // 限界: リポジトリ直下のほかのディレクトリ（scripts/ の .ts のテスト以外など）は見ない。今は該当するソースが無い
 //   （scripts/ はシェルスクリプトとテストだけ）。そこに backend を参照するソースを置くなら、ここと fixture に足す。
 function listReferencingFiles(root: string): string[] {
   return [
     ...listAllSourceFiles(root),
-    ...listSourceFiles(root, "e2e"),
+    ...listSourceFiles(root, E2E_ROOT),
     ...listDirectFiles(root, "").filter(isSourceNonTest),
   ];
 }
@@ -513,19 +517,19 @@ type Rule = {
 // 1 規則 = 1 テスト。規則を足す・変えるときは .claude/rules/architecture-check.md と合わせてここと RULE_EXAMPLES（判定の例）を直す。
 const RULES: Rule[] = [
   {
-    // 「frontend（と e2e/・リポジトリ直下の設定ファイル）から backend への参照は "@repo/backend/..." だけ」（Issue #68 の段階 2）。
+    // 「frontend（と apps/e2e/・リポジトリ直下の設定ファイル）から backend への参照は "@repo/backend/..." だけ」（Issue #68 の段階 2）。
     // WHY 相対パス（"../backend/..."）と "@/../backend/..." を禁止する: apps/backend/package.json の exports（公開する入口）を
     //   通らずに backend の中のファイルを指せてしまい、exports を明示した意味がなくなる。後で backend を別パッケージ・別プロセスに
     //   分けたときも、相対パスの参照は壊れる。書き方を 1 つにそろえ、公開の過不足は BACKEND_EXPORTS で検査する。
     //   段階 1 の限界（参照先で判定するので、相対パスでも許される場所なら違反にしない）を、この規則で解消する。
     // WHY 参照先が backend のものだけを見る: apps/frontend の中の参照（"@/..." や "./x"）はこの規則の対象外。
-    // WHY e2e/ とリポジトリ直下も対象にする: playwright.config.ts・vitest.global-setup.ts・e2e/database.ts も env.ts などを
+    // WHY apps/e2e/ とリポジトリ直下も対象にする: apps/e2e/playwright.config.ts・apps/e2e/database.ts・vitest.global-setup.ts も env.ts などを
     //   使う。相対パスを許すと、exports に無いファイルを使っていても気づけない。
     id: "frontend-to-backend-specifier",
-    name: 'apps/frontend/・e2e/・リポジトリ直下のファイルから apps/backend/ への参照は "@repo/backend/..." の書き方だけ（相対パスや "@/../backend/" を使わない。例外は vitest.global-setup.ts → database.test-support の相対パスだけ）',
+    name: 'apps/frontend/・apps/e2e/・リポジトリ直下のファイルから apps/backend/ への参照は "@repo/backend/..." の書き方だけ（相対パスや "@/../backend/" を使わない。例外は vitest.global-setup.ts → database.test-support の相対パスだけ）',
     appliesTo: (from) =>
       isUnder(from, FRONTEND_ROOT) ||
-      isUnder(from, "e2e") ||
+      isUnder(from, E2E_ROOT) ||
       !from.includes("/"),
     isViolation: (ref) =>
       ownUnder(ref, BACKEND_ROOT) &&
@@ -767,7 +771,7 @@ const PLACEMENT_RULES = [BACKEND_PLACEMENT, FRONTEND_PLACEMENT];
 // --- 環境変数の直参照（規則 env-direct-access。.claude/rules/env.md の「環境変数」） ---
 // process.env を読んでよいのは apps/backend/shared/infra/env.ts だけ。ほかは env.ts の env / toolEnv を使う。
 // WHY 参照（import）の規則と別に持つ: 参照先ではなくソースの中身（process.env という式）で決まり、対象のファイルも違う
-//   （e2e/ とルート直下の設定ファイルも含める）ため。置き場所の規則（BACKEND_PLACEMENT / FRONTEND_PLACEMENT）と同じく、RULES の外に置く。
+//   （apps/e2e/ とルート直下の設定ファイルも含める）ため。置き場所の規則（BACKEND_PLACEMENT / FRONTEND_PLACEMENT）と同じく、RULES の外に置く。
 // WHY Biome の style/noProcessEnv と二重に検査する: Biome は biome.json の overrides で対象外を決めるので、overrides の
 //   書き換え（対象外のパスを広げる、ルールを off にする）で黙って効かなくなる。ここでは対象と例外（env.ts だけ）を
 //   テストとして固定し、どちらか片方が壊れても、もう片方で止まるようにする。
@@ -780,13 +784,14 @@ const PLACEMENT_RULES = [BACKEND_PLACEMENT, FRONTEND_PLACEMENT];
 //     これと import { env } from "node:process" は Biome の noProcessEnv だけが検出する（2026-09-28 実測）。
 //   - 逆に、global.process.env と (process).env はこちらだけが検出する（Biome の noProcessEnv は検出しない。2026-09-28 実測）。
 
-// 検査の対象にするディレクトリ。依存の向きの対象（apps/frontend と apps/backend）に、E2E（e2e/）を足す。
-// WHY e2e/ を含める: E2E の補助（e2e/database.ts）は接続先を読むので、既定値や直参照が入り込みやすい。
-const ENV_CHECK_DIRS = [FRONTEND_ROOT, BACKEND_ROOT, "e2e"];
+// 検査の対象にするディレクトリ。依存の向きの対象（apps/frontend と apps/backend）に、E2E（apps/e2e/）を足す。
+// WHY apps/e2e/ を含める: E2E の補助（apps/e2e/database.ts）と設定（apps/e2e/playwright.config.ts）は接続先やフラグを読むので、
+//   既定値や直参照が入り込みやすい。
+const ENV_CHECK_DIRS = [FRONTEND_ROOT, BACKEND_ROOT, E2E_ROOT];
 
 const ENV_DIRECT_ACCESS = {
   id: "env-direct-access",
-  name: "process.env を直接読んでよいのは apps/backend/shared/infra/env.ts だけ（例外は apps/frontend/instrumentation.ts の NEXT_RUNTIME だけ。apps/frontend・apps/backend・e2e/ とルート直下の設定ファイルが対象。テストは除く）",
+  name: "process.env を直接読んでよいのは apps/backend/shared/infra/env.ts だけ（例外は apps/frontend/instrumentation.ts の NEXT_RUNTIME だけ。apps/frontend・apps/backend・apps/e2e/ とルート直下の設定ファイルが対象。テストは除く）",
   // 何を読んでもよいファイル（環境変数の唯一の入口）。
   allowedFile: "apps/backend/shared/infra/env.ts",
   // ファイルごとに、読んでよい変数だけを許す例外。
@@ -798,7 +803,7 @@ const ENV_DIRECT_ACCESS = {
     "apps/frontend/instrumentation.ts": ["NEXT_RUNTIME"],
   } as Record<string, string[]>,
   // 対象のファイルか。ENV_CHECK_DIRS の下か、ルート直下（"/" を含まない）の、テストでない TS / JS。
-  // WHY ルート直下の設定ファイルを含める: playwright.config.ts・vitest.global-setup.ts などは、接続先やフラグを読むので、
+  // WHY ルート直下の設定ファイルを含める: vitest.global-setup.ts・vitest.config.mts などは、接続先やフラグを読むので、
   //   既定値や直参照が入り込みやすい。ルート直下のテスト（architecture.test.ts など）は除く。apps の設定ファイル
   //   （apps/frontend/next.config.ts、apps/backend/drizzle.config.ts）は ENV_CHECK_DIRS の下として対象になる。
   // どのファイルを列挙するか（apps/frontend の .next/ を除くなど）は listEnvCheckedFiles が決める。
@@ -840,11 +845,11 @@ function isAllowedEnvAccess(file: string, { variable }: EnvAccess): boolean {
   );
 }
 
-// 依存の向きの対象（listAllSourceFiles）に、e2e/ とルート直下のファイル（ディレクトリの中は見ない。node_modules/ などは対象外）を足す。
+// 依存の向きの対象（listAllSourceFiles）に、apps/e2e/ とルート直下のファイル（ディレクトリの中は見ない。node_modules/ などは対象外）を足す。
 function listEnvCheckedFiles(root: string): string[] {
   return [
     ...listAllSourceFiles(root),
-    ...listSourceFiles(root, "e2e"),
+    ...listSourceFiles(root, E2E_ROOT),
     ...listDirectFiles(root, ""),
   ].filter(ENV_DIRECT_ACCESS.appliesTo);
 }
@@ -859,7 +864,7 @@ function findEnvViolations(root: string): string[] {
 }
 
 // --- apps/backend/package.json の exports（規則 backend-exports。Issue #68 の段階 2） ---
-// exports は、@repo/backend として外（apps/frontend・e2e/・リポジトリ直下の設定ファイル）に公開するファイルの一覧。
+// exports は、@repo/backend として外（apps/frontend・apps/e2e/・リポジトリ直下の設定ファイル）に公開するファイルの一覧。
 //   ユーザー判断で、全ファイル（"./*"）ではなく、外が使う入口だけを明示する（.claude/rules/backend.md の「import の書き方と公開の範囲（exports）」）。
 // 検査すること（1 つでも破ると「backend-exports: ...」の行を出す）:
 //   (1) 外から "@repo/backend/<path>" で参照するものは、すべて exports のどれかのキーに当たる。
@@ -879,7 +884,7 @@ const BACKEND_MANIFEST = `${BACKEND_ROOT}/package.json`;
 
 const BACKEND_EXPORTS = {
   id: "backend-exports",
-  name: 'apps/backend/package.json の exports は、外（apps/frontend・e2e/・リポジトリ直下）が "@repo/backend/..." で参照するものをすべて含み、参照されないキーを持たず、各キーはそのパスの .ts を指す',
+  name: 'apps/backend/package.json の exports は、外（apps/frontend・apps/e2e/・リポジトリ直下）が "@repo/backend/..." で参照するものをすべて含み、参照されないキーを持たず、各キーはそのパスの .ts を指す',
 };
 
 type BackendExports = Record<string, unknown>;
@@ -995,9 +1000,13 @@ function findViolations(references: Reference[], rule: Rule): string[] {
 //   環境変数の直参照は「env-direct-access: ファイル:行」を参照ごとに 1 行で出す（同じファイルの複数の書き方を、
 //   1 つずつ拾えているかまで比べるため）。
 //   exports の違反は「backend-exports: ...」の 1 行で出す（findExportsViolations）。
+// WHY 置き場所の規則も参照を取り出すファイル（listReferencingFiles。apps/e2e/ とリポジトリ直下を含む）全体にかける:
+//   置き場所の規則は isMisplaced の中で apps/backend・apps/frontend の下かを見るので、それ以外のファイルは違反にならない。
+//   apps/e2e/ など対象外の場所のファイルも判定に通し、判定が対象を広げる壊れ方（apps/ の下をすべて frontend と見なすなど）を
+//   fixture と実ファイルの検査で止める（Issue #84）。
 function collectViolations(root: string): string[] {
-  const files = listAllSourceFiles(root);
-  const references = referencesOf(root, listReferencingFiles(root));
+  const files = listReferencingFiles(root);
+  const references = referencesOf(root, files);
   return [
     ...RULES.flatMap((rule) =>
       findViolations(references, rule).map((line) => `${rule.id}: ${line}`),
@@ -1027,13 +1036,13 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
 
   it(BACKEND_PLACEMENT.name, () => {
     expect(
-      listAllSourceFiles(repoRoot).filter(BACKEND_PLACEMENT.isMisplaced),
+      listReferencingFiles(repoRoot).filter(BACKEND_PLACEMENT.isMisplaced),
     ).toEqual([]);
   });
 
   it(FRONTEND_PLACEMENT.name, () => {
     expect(
-      listAllSourceFiles(repoRoot).filter(FRONTEND_PLACEMENT.isMisplaced),
+      listReferencingFiles(repoRoot).filter(FRONTEND_PLACEMENT.isMisplaced),
     ).toEqual([]);
   });
 
@@ -1059,7 +1068,7 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
     ).toEqual([]);
   });
 
-  it("exports を 1 件以上読め、apps/frontend・e2e/・リポジトリ直下の @repo/backend の参照を取り出せている（読み込みや列挙が壊れて素通りするのを防ぐ）", () => {
+  it("exports を 1 件以上読め、apps/frontend・apps/e2e/・リポジトリ直下の @repo/backend の参照を取り出せている（読み込みや列挙が壊れて素通りするのを防ぐ）", () => {
     expect(Object.keys(readBackendExports(repoRoot)).length).toBeGreaterThan(0);
     const consumers = new Set(
       references
@@ -1071,8 +1080,8 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "apps/frontend/app/api/todos/route.ts",
         "apps/frontend/features/todo/api/todo-api.ts",
         "apps/frontend/instrumentation-node.ts",
-        "e2e/database.ts",
-        "playwright.config.ts",
+        "apps/e2e/database.ts",
+        "apps/e2e/playwright.config.ts",
         "vitest.global-setup.ts",
       ]),
     );
@@ -1092,8 +1101,8 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "apps/frontend/instrumentation-node.ts",
         "apps/frontend/features/todo/api/todo-api.ts",
         "apps/frontend/app/page.tsx",
-        "e2e/database.ts",
-        "playwright.config.ts",
+        "apps/e2e/database.ts",
+        "apps/e2e/playwright.config.ts",
         "vitest.config.mts",
         "vitest.global-setup.ts",
         "stryker.config.mjs",
@@ -1148,8 +1157,8 @@ const RULE_EXAMPLES: Record<
         "@/../backend/todo/presentation/list-todos.api",
         "type",
       ],
-      ["e2e/database.ts", "../apps/backend/shared/infra/env", "value"],
-      ["playwright.config.ts", "./apps/backend/shared/infra/env", "value"],
+      ["apps/e2e/database.ts", "../backend/shared/infra/env", "value"],
+      ["apps/e2e/playwright.config.ts", "../backend/shared/infra/env", "value"],
       // 例外（vitest.global-setup.ts → database.test-support）は、そのファイルとその参照先の組だけ。
       //   global-setup からでも env を相対パスで参照するのは違反。別のルート直下のファイルから test-support も違反。
       ["vitest.global-setup.ts", "./apps/backend/shared/infra/env", "value"],
@@ -1159,8 +1168,8 @@ const RULE_EXAMPLES: Record<
         "value",
       ],
       [
-        "e2e/database.ts",
-        "../apps/backend/shared/infra/database.test-support",
+        "apps/e2e/database.ts",
+        "../backend/shared/infra/database.test-support",
         "value",
       ],
     ],
@@ -1170,7 +1179,7 @@ const RULE_EXAMPLES: Record<
         "@repo/backend/todo/presentation/list-todos.api",
         "value",
       ],
-      ["e2e/database.ts", "@repo/backend/shared/infra/env", "value"],
+      ["apps/e2e/database.ts", "@repo/backend/shared/infra/env", "value"],
       ["vitest.global-setup.ts", "@repo/backend/shared/infra/env", "value"],
       // 例外: テスト基盤の vitest.global-setup.ts だけは、database.test-support を相対パスで参照してよい。
       [
@@ -1766,6 +1775,10 @@ const PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/backend/todo/presentation/nested/x.api.ts",
     "apps/backend/drizzle.config.ts",
     "apps/frontend/features/todo/lib/x.ts",
+    // backend の規則の対象外（apps/e2e は E2E の workspace パッケージ @repo/e2e。Issue #84）。
+    "apps/e2e/database.ts",
+    "apps/e2e/playwright.config.ts",
+    "apps/e2e/todo.spec.ts",
   ],
 };
 
@@ -1799,6 +1812,10 @@ const FRONTEND_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/frontend/next-env.d.ts",
     // frontend の規則の対象外（apps/backend は BACKEND_PLACEMENT が見る）。
     "apps/backend/lib/x.ts",
+    // apps/e2e（E2E の workspace パッケージ @repo/e2e。Issue #84）も frontend の規則の対象外。
+    "apps/e2e/database.ts",
+    "apps/e2e/playwright.config.ts",
+    "apps/e2e/todo.spec.ts",
   ],
 };
 
@@ -1833,8 +1850,8 @@ const ENV_ACCESS_EXAMPLES: {
 } = {
   violating: [
     ["apps/backend/todo/infra/x.ts", "const url = process.env.DATABASE_URL;"],
-    ["e2e/x.ts", 'const url = process["env"].DATABASE_URL;'],
-    ["playwright.config.ts", "const ci = !process . env . CI;"],
+    ["apps/e2e/x.ts", 'const url = process["env"].DATABASE_URL;'],
+    ["apps/e2e/playwright.config.ts", "const ci = !process . env . CI;"],
     [
       "apps/frontend/features/todo/api/x.tsx",
       "const v = globalThis.process.env.X;",
@@ -1850,7 +1867,7 @@ const ENV_ACCESS_EXAMPLES: {
     ["apps/frontend/shared/x.cjs", "module.exports = process[`env`];"],
     // 括弧で囲んだ process と、global 経由。
     ["apps/backend/todo/infra/x.ts", "const v = (process).env.X;"],
-    ["e2e/x.ts", 'const v = ( process )["env"];'],
+    ["apps/e2e/x.ts", 'const v = ( process )["env"];'],
     ["apps/backend/todo/infra/x.ts", "const v = global.process.env.X;"],
     // instrumentation.ts の例外は NEXT_RUNTIME だけで、ほかの変数・名前を取れない書き方・ほかのファイルは違反。
     [
@@ -2106,7 +2123,7 @@ describe("exports の違反の検出（findExportsViolations）", () => {
             "apps/frontend/app/api/todos/route.ts",
             "@repo/backend/todo/presentation/list-todos.api",
           ),
-          ref("e2e/database.ts", "@repo/backend/shared/infra/env"),
+          ref("apps/e2e/database.ts", "@repo/backend/shared/infra/env"),
           // backend の中の参照（backend-relative-only が見る）と、前方一致だけが同じ別パッケージは数えない。
           ref(
             "apps/backend/todo/infra/x.ts",
@@ -2139,17 +2156,17 @@ describe("exports の違反の検出（findExportsViolations）", () => {
             "apps/frontend/features/todo/api/x.ts",
             "@repo/backend/todo/infra/container",
           ),
-          ref("playwright.config.ts", "@repo/backend"),
-          ref("e2e/a.ts", "@repo/backend/mismatch"),
-          ref("e2e/a.ts", "@repo/backend/object"),
-          ref("e2e/a.ts", "@repo/backend/missing"),
-          ref("e2e/a.ts", "@repo/backend/todo/domain/todo"),
+          ref("apps/e2e/playwright.config.ts", "@repo/backend"),
+          ref("apps/e2e/a.ts", "@repo/backend/mismatch"),
+          ref("apps/e2e/a.ts", "@repo/backend/object"),
+          ref("apps/e2e/a.ts", "@repo/backend/missing"),
+          ref("apps/e2e/a.ts", "@repo/backend/todo/domain/todo"),
         ],
         backendFiles,
       ),
     ).toEqual([
       "apps/frontend/features/todo/api/x.ts → @repo/backend/todo/infra/container",
-      "playwright.config.ts → @repo/backend",
+      "apps/e2e/playwright.config.ts → @repo/backend",
       'apps/backend/package.json の exports "./unused" はどこからも参照されていない',
       'apps/backend/package.json の exports "./mismatch" の値 "./todo/presentation/list-todos.api.ts" は、キーのパスに .ts を付けたものではない',
       'apps/backend/package.json の exports "./object" の値 {"import":"./object.ts"} は、キーのパスに .ts を付けたものではない',
@@ -2162,7 +2179,7 @@ describe("exports の違反の検出（findExportsViolations）", () => {
     expect(
       findExportsViolations(
         { "./x": "./x.ts", x: "x.ts" },
-        [ref("e2e/a.ts", "@repo/backend/x")],
+        [ref("apps/e2e/a.ts", "@repo/backend/x")],
         ["apps/backend/x.ts"],
       ),
     ).toEqual([
@@ -2458,8 +2475,8 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'if (process.env.NEXT_RUNTIME === "nodejs") {}',
     "export const url = process.env.DATABASE_URL;",
   ),
-  //   e2e/ とルート直下の設定ファイル（.ts / .mjs / .cjs）、env.ts と名前の前方一致だけが同じ別ファイル。
-  "e2e/bad-env.ts": lines("export const url = process.env.DATABASE_URL;"),
+  //   apps/e2e/ とルート直下の設定ファイル（.ts / .mjs / .cjs）、env.ts と名前の前方一致だけが同じ別ファイル。
+  "apps/e2e/bad-env.ts": lines("export const url = process.env.DATABASE_URL;"),
   "bad.config.ts": lines("export const ci = !process['env'].CI;"),
   "bad.config.mjs": lines("export default { ci: process.env.CI };"),
   "bad.config.cjs": lines("module.exports = process . env;"),
@@ -2510,7 +2527,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   ),
   // frontend-to-backend-specifier（Issue #68 の段階 2）: 参照先はほかの規則で許される（自 feature の api ファイルの型、
   //   app/api からの api ファイル、直下からの env）が、相対パスや "@/../backend/" で書いたもの。この規則だけにかかる。
-  //   e2e/ とリポジトリ直下のファイル（.ts / .mts）からの相対パスも同じ。
+  //   apps/e2e/ とリポジトリ直下のファイル（.ts / .mts）からの相対パスも同じ。
   "apps/frontend/features/todo/api/bad-specifier.ts": lines(
     'import type { TodoDto } from "../../../../backend/todo/presentation/list-todos.api";',
     'export type { GetTodoResponse } from "@/../backend/todo/presentation/get-todo.api";',
@@ -2521,8 +2538,8 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/frontend/instrumentation-node.ts": lines(
     'const env = import("../backend/shared/infra/env");',
   ),
-  "e2e/bad-relative.ts": lines(
-    'import { env } from "../apps/backend/shared/infra/env";',
+  "apps/e2e/bad-relative.ts": lines(
+    'import { env } from "../backend/shared/infra/env";',
   ),
   // 例外（vitest.global-setup.ts → database.test-support の相対パス）は名前まで一致したときだけ。.mts の別ファイルは違反。
   "vitest.global-setup.mts": lines(
@@ -2547,7 +2564,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
       "./mismatch": "./todo/domain/bad-domain.ts",
     },
   }),
-  "e2e/bad-exports.ts": lines(
+  "apps/e2e/bad-exports.ts": lines(
     'import { x } from "@repo/backend/mismatch";',
     'import { todoContainer } from "@repo/backend/todo/infra/container";',
     'import { env } from "@repo/backend";',
@@ -2618,7 +2635,7 @@ const MUST_REJECT_VIOLATIONS = [
   ...[1, 2, 4, 5, 6, 9, 10].map(
     (line) => `env-direct-access: apps/backend/todo/infra/bad-env.ts:${line}`,
   ),
-  "env-direct-access: e2e/bad-env.ts:1",
+  "env-direct-access: apps/e2e/bad-env.ts:1",
   "env-direct-access: bad.config.ts:1",
   "env-direct-access: bad.config.mjs:1",
   "env-direct-access: bad.config.cjs:1",
@@ -2823,7 +2840,7 @@ const MUST_REJECT_VIOLATIONS = [
       `core-to-persistence: apps/backend/todo/application/bad-application-db.command.ts → ${to}`,
   ),
   "core-to-persistence: apps/backend/shared/domain/bad-shared-domain-db.ts → drizzle-orm/node-postgres",
-  // Issue #68 の段階 2: frontend-to-backend-specifier。上の fixture のうち、frontend・e2e/・リポジトリ直下から相対パス
+  // Issue #68 の段階 2: frontend-to-backend-specifier。上の fixture のうち、frontend・apps/e2e/・リポジトリ直下から相対パス
   //   （と "@/../backend/"）で backend を指すものは、ほかの規則の結果に関係なくすべてかかる。
   ...[
     "apps/frontend/app/api/todos/[id]/bad-relative.ts → apps/backend/todo/presentation/update-todo.api",
@@ -2840,7 +2857,7 @@ const MUST_REJECT_VIOLATIONS = [
     "apps/frontend/instrumentation-node.ts → apps/backend/shared/infra/env",
     "apps/frontend/next.config.ts → apps/backend/shared/infra/database",
     "apps/frontend/shared/bad-shared.tsx → apps/backend/todo/presentation/list-todos.api",
-    "e2e/bad-relative.ts → apps/backend/shared/infra/env",
+    "apps/e2e/bad-relative.ts → apps/backend/shared/infra/env",
     "vitest.global-setup.mts → apps/backend/shared/infra/database.test-support",
     "vitest.global-setup.ts → apps/backend/shared/infra/env",
   ].map((line) => `frontend-to-backend-specifier: ${line}`),
@@ -2861,8 +2878,8 @@ const MUST_REJECT_VIOLATIONS = [
     "apps/frontend/next.config.ts → @repo/backend/shared/infra/env-helper",
     "apps/frontend/next.config.ts → @repo/backend/todo/infra/container",
     "apps/frontend/shared/bad-shared.tsx → @repo/backend/shared/domain/domain-error",
-    "e2e/bad-exports.ts → @repo/backend",
-    "e2e/bad-exports.ts → @repo/backend/todo/infra/container",
+    "apps/e2e/bad-exports.ts → @repo/backend",
+    "apps/e2e/bad-exports.ts → @repo/backend/todo/infra/container",
     'apps/backend/package.json の exports "./mismatch" が指すファイルが無い',
     'apps/backend/package.json の exports "./mismatch" の値 "./todo/domain/bad-domain.ts" は、キーのパスに .ts を付けたものではない',
     'apps/backend/package.json の exports "./shared/presentation/http-error" が指すファイルが無い',
@@ -3145,7 +3162,7 @@ const MUST_PASS_FILES: Record<string, string> = {
   ),
   // テスト、対象外の場所（scripts/・ルート直下のディレクトリの中）、TS / JS 以外のファイルは検査しない。
   "apps/backend/shared/infra/env.test.ts": lines("const p = process.env.PATH;"),
-  "e2e/todo.test.ts": lines("const p = process.env.PATH;"),
+  "apps/e2e/todo.test.ts": lines("const p = process.env.PATH;"),
   "architecture.test.ts": lines("const p = process.env.PATH;"),
   "scripts/tool.ts": lines("const p = process.env.PATH;"),
   "node_modules/pkg/index.js": lines("module.exports = process.env;"),
@@ -3202,19 +3219,25 @@ const MUST_PASS_FILES: Record<string, string> = {
     "export function buildRequestLog() {}",
   ),
   // apps/backend の設定ファイル（apps/backend/drizzle.config.ts）は env.ts を相対パスで import する（backend の中）。
-  //   e2e/ とリポジトリ直下の設定ファイルは、frontend と同じく "@repo/backend/..." で import する（Issue #68 の段階 2）。
+  //   apps/e2e/ とリポジトリ直下の設定ファイルは、frontend と同じく "@repo/backend/..." で import する（Issue #68 の段階 2）。
   "apps/backend/drizzle.config.ts": lines(
     'import { env } from "./shared/infra/env";',
     "export default { url: env.DATABASE_URL };",
   ),
-  "e2e/database.ts": lines(
+  "apps/e2e/database.ts": lines(
     'import { Client } from "pg";',
     'import { env } from "@repo/backend/shared/infra/env";',
     "export const url = env.DATABASE_URL;",
   ),
-  "playwright.config.ts": lines(
+  "apps/e2e/playwright.config.ts": lines(
     'import { defineConfig } from "@playwright/test";',
     'import { env, toolEnv } from "@repo/backend/shared/infra/env";',
+  ),
+  // E2E のテスト（*.spec.ts。Vitest のテスト *.test.ts ではないので検査の対象）。apps/e2e は置き場所の規則
+  //   （BACKEND_PLACEMENT / FRONTEND_PLACEMENT）の対象外で、直下に置いても違反にならない（Issue #84）。
+  "apps/e2e/todo.spec.ts": lines(
+    'import { expect, test } from "@playwright/test";',
+    'import { resetTodos } from "./database";',
   ),
   // テスト基盤の vitest.global-setup.ts だけは、database.test-support を相対パスで参照する（exports に含めない例外）。
   "vitest.global-setup.ts": lines(
