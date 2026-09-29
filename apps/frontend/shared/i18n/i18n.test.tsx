@@ -44,6 +44,9 @@ const otherMessages = defineMessages({
   en: { back: "Back to list" },
 });
 
+// 型の検査で使う、文字列リテラルの型ではない（string 型の）値。
+const stringValue: string = String("x");
+
 describe("defineMessages（ja を正とする辞書を定義する）", () => {
   test("渡した辞書をそのまま返す（実行時の処理は無く、型の検査だけを行う）", () => {
     const messages = { ja: { a: "あ" }, en: { a: "A" } } as const;
@@ -104,8 +107,73 @@ describe("defineMessages（ja を正とする辞書を定義する）", () => {
           // @ts-expect-error en の文言が空白だけ
           en: { a: " \n" },
         }),
+      // 全角の空白と \r も空白として扱う（Issue #125 の reviewer 指摘。日本語の入力で全角の空白だけの文言を書きうる）。
+      () =>
+        defineMessages({
+          // @ts-expect-error ja の文言が全角の空白だけ
+          ja: { a: "\u3000 " },
+          en: { a: "A" },
+        }),
+      () =>
+        defineMessages({
+          ja: { a: "あ" },
+          // @ts-expect-error en の文言が \r と \n だけ
+          en: { a: "\r\n" },
+        }),
+      // 文字列リテラルの型でない値（string 型の変数）は、空かどうかも placeholder も型で分からないので受け付けない。
+      () =>
+        defineMessages({
+          // @ts-expect-error ja の文言が string 型（文字列リテラルの型ではない）
+          ja: { a: stringValue },
+          en: { a: "A" },
+        }),
+      () =>
+        defineMessages({
+          ja: { a: "あ" },
+          // @ts-expect-error en の文言が string 型（文字列リテラルの型ではない）
+          en: { a: stringValue },
+        }),
+      // placeholder の名前は英数字と _ だけ（formatMessage の置換 /\{(\w+)\}/ と同じ）。それ以外の {...} は、型では
+      //   placeholder に見えても実行時に置き換わらないので、文言に書けない。
+      () =>
+        defineMessages({
+          // @ts-expect-error placeholder の名前に - がある
+          ja: { a: "{a-b} 件" },
+          // @ts-expect-error en も同じ（ja と placeholder の集合が同じでも、名前が \w+ でない {...} は書けない）
+          en: { a: "{a-b} items" },
+        }),
+      () =>
+        defineMessages({
+          // @ts-expect-error placeholder の名前が空
+          ja: { a: "値は {}" },
+          // @ts-expect-error en も同じ（ja と placeholder の集合が同じでも、名前が \w+ でない {...} は書けない）
+          en: { a: "value is {}" },
+        }),
+      () =>
+        defineMessages({
+          // @ts-expect-error placeholder の名前に空白がある
+          ja: { a: "{ max } 文字以内" },
+          // @ts-expect-error en も同じ（ja と placeholder の集合が同じでも、名前が \w+ でない {...} は書けない）
+          en: { a: "{ max } characters or fewer" },
+        }),
     ];
-    expect(typeErrors).toHaveLength(7);
+    expect(typeErrors).toHaveLength(14);
+  });
+
+  // WHY } の後に { を書く: { の後に } があると、その間は placeholder の名前として検査される（上の「名前に空白がある」）。
+  test("placeholder の名前は英数字と _ で、対にならない { や } は文言に書ける（型と実行時で同じ名前を置き換える）", () => {
+    const messages = defineMessages({
+      ja: { a: "{max_1} と {Id2}（} だけ、{ だけ）" },
+      en: { a: "{Id2} and {max_1} (} only, { only)" },
+    });
+
+    expectTypeOf<MessageParams<typeof messages, "a">>().toEqualTypeOf<{
+      readonly max_1: string | number;
+      readonly Id2: string | number;
+    }>();
+    expect(formatMessage(messages, "en", "a", { max_1: 3, Id2: "x" })).toBe(
+      "x and 3 (} only, { only)",
+    );
   });
 });
 

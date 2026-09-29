@@ -72,11 +72,64 @@ export type RuntimeParams = Readonly<Record<string, string | number>>;
 
 // 空白だけ（空文字を含む）の文言か。空白を 1 文字ずつ取り除いて "" になれば true。
 // WHY: 文言を書き忘れた辞書（"" や " "）は、画面に何も出ないのに型もテストも通ってしまうため、型で止める。
+// WHY 全角の空白（U+3000）と \r も空白に数える（Issue #125 の reviewer 指摘）: 日本語の入力では全角の空白だけの文言を書きうる。
+//   \r は Windows の改行（\r\n）を貼り付けたときに混ざる。どちらも画面には何も出ない。
 type IsBlank<S extends string> = S extends ""
   ? true
-  : S extends ` ${infer Rest}` | `\n${infer Rest}` | `\t${infer Rest}`
+  : S extends
+        | ` ${infer Rest}`
+        | `\u3000${infer Rest}`
+        | `\n${infer Rest}`
+        | `\r${infer Rest}`
+        | `\t${infer Rest}`
     ? IsBlank<Rest>
     : false;
+
+// 文字列 S の 1 文字ずつの union（"ab" → "a" | "b"）。
+// WHY 集めた文字を Acc で渡す（Head | CharsOf<Rest> にしない）: 末尾再帰の形にしないと、63 文字で TypeScript の
+//   再帰の深さの上限（TS2589「Type instantiation is excessively deep」）に当たる（実測）。
+type CharsOf<
+  S extends string,
+  Acc = never,
+> = S extends `${infer Head}${infer Rest}` ? CharsOf<Rest, Acc | Head> : Acc;
+
+// placeholder の名前に使える 1 文字（英数字と _）。formatMessage の置換 /\{(\w+)\}/ の \w と同じ集合（u フラグが無いので ASCII だけ）。
+// WHY 文字列から作る（63 個の union を並べない）: 並べると Biome の format で 1 行 1 文字になり、集合が読み取りにくい。
+type PlaceholderNameChar =
+  CharsOf<"_0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ">;
+
+// 1 文字以上で、すべてが PlaceholderNameChar の文字列か（\w+ に当たるか）。空文字は false（{} は置き換わらない）。
+type IsPlaceholderName<S extends string> =
+  S extends `${infer Head}${infer Rest}`
+    ? Head extends PlaceholderNameChar
+      ? Rest extends ""
+        ? true
+        : IsPlaceholderName<Rest>
+      : false
+    : false;
+
+// 文言の {...} のうち、名前が \w+ でないもの（"{a-b}"・"{}"・"{ max }"）があるか。
+// WHY 型で止める（Issue #125 の reviewer 指摘）: PlaceholderNames は { と } の間の任意の文字列を名前として取り出すが、
+//   実行時の置換（formatMessage）は \w+ だけを置き換える。"{a-b}" は型では params の a-b を要求するのに、実行時には
+//   置き換わらずに {a-b} のまま画面に出る。型と実行時の名前の規則を 1 つにそろえるため、\w+ 以外の {...} を書けなくする。
+//   PlaceholderNames と同じく先頭から 1 つずつ見る（{ の後の最初の } までを 1 つの {...} とする）。対にならない { や } は
+//   {...} にならないので書ける。
+type HasInvalidPlaceholder<S extends string> =
+  S extends `${string}{${infer Name}}${infer Rest}`
+    ? IsPlaceholderName<Name> extends true
+      ? HasInvalidPlaceholder<Rest>
+      : true
+    : false;
+
+// 辞書に書けない文言か: 文字列リテラルの型でない（string）、空白だけ、名前が \w+ でない {...} を含む。
+// WHY string を止める（Issue #125 の reviewer 指摘）: as const の無い変数（const s: string）を渡すと、const の型引数でも
+//   型は string のままになり、空かどうかも placeholder の名前も型で分からない（PlaceholderNames<string> は never なので、
+//   t は params を受け取らない型になる）。検査をすり抜けるので、文言は文字列リテラルで書かせる。
+type IsInvalidText<S extends string> = string extends S
+  ? true
+  : IsBlank<S> extends true
+    ? true
+    : HasInvalidPlaceholder<S>;
 
 // 2 つの文言の placeholder の名前の集合が同じか（順番は問わない。言語によって語順が変わるため）。
 type SamePlaceholders<A extends string, B extends string> = [
@@ -87,18 +140,20 @@ type SamePlaceholders<A extends string, B extends string> = [
     : false
   : false;
 
-// ja の検査: 空白だけの文言を never にする（never に文字列は代入できないので、その行がコンパイルエラーになる）。
+// ja の検査: 書けない文言（IsInvalidText。string 型・空白だけ・名前が \w+ でない {...}）を never にする
+//   （never に文字列は代入できないので、その行がコンパイルエラーになる）。
 type CheckedJa<J extends Dictionary> = {
-  readonly [K in keyof J]: IsBlank<J[K]> extends true ? never : J[K];
+  readonly [K in keyof J]: IsInvalidText<J[K]> extends true ? never : J[K];
 };
 
-// en の検査: ja に無いキー（余分）、placeholder の集合が ja と違う文言、空白だけの文言を never にする。
+// en の検査: ja に無いキー（余分）、placeholder の集合が ja と違う文言、書けない文言（IsInvalidText）を never にする。
 //   en のキーの欠けは、型引数 E の制約（Record<keyof J, string>）で止まる。
+//   en の {...} の名前は、ja の名前（CheckedJa で \w+ に限った）と集合が同じことで \w+ に限られる。
 // WHY never で止める（エラー用のメッセージの型にしない）: エラーの位置が en の該当キーの行になり、どのキーが悪いかは分かる。
 type CheckedEn<J extends Dictionary, E extends Dictionary> = {
   readonly [K in keyof E]: K extends keyof J
     ? SamePlaceholders<J[K], E[K]> extends true
-      ? IsBlank<E[K]> extends true
+      ? IsInvalidText<E[K]> extends true
         ? never
         : E[K]
       : never
@@ -124,6 +179,7 @@ export function defineMessages<
 // --- 翻訳 ---
 
 // 辞書 messages のロケール locale の、キー key の文言の {name} を params の値で置き換える。
+// name は \w+（英数字と _）。defineMessages の型（HasInvalidPlaceholder）も同じ規則で、それ以外の {...} を辞書に書かせない。
 // params に無い名前は {name} のまま残す（"undefined" や空文字に化けると、params の欠けに気づけないため）。
 // WHY Object.hasOwn: params の継承したプロパティ（toString など）を値と取り違えない。
 // WHY 置換をライブラリ（ICU MessageFormat など）にしない: 今の文言は単純な差し込みだけで、複数形や選択の構文が要らない。

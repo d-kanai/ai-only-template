@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, posix, relative, sep } from "node:path";
 import {
+  isCallExpression,
   isIdentifier,
   isJsxAttribute,
   isJsxExpression,
@@ -80,6 +81,11 @@ type ImportStatement = {
   specifier: string;
   // 型だけの参照か（import type / export type / すべての名前に inline の type が付いた import）。
   typeOnly: boolean;
+  // re-export（export ... from）か。export ... from のときだけ true を持つ（import・副作用だけの import・dynamic import は
+  //   持たない。持たないときは false と同じ）。規則 messages-colocation が、辞書の中継（barrel）を止めるのに使う（Issue #125）。
+  // WHY 省略できる形にする: re-export を見る規則は messages-colocation だけで、import の例（抽出・正規化の仕様のテスト）の
+  //   形を変えずに足すため。
+  reExport?: boolean;
 };
 
 type Reference = {
@@ -94,6 +100,8 @@ type Reference = {
   //   パスの形ではなく書き方で区別する。
   own: boolean;
   typeOnly: boolean;
+  // re-export（export ... from）か（ImportStatement の reExport をそのまま持つ）。
+  reExport?: boolean;
 };
 
 // 文字列リテラルかコメントのどちらかに一致する正規表現。左から順に一致を探すので、先に始まった方が優先される。
@@ -125,8 +133,9 @@ function stripComments(source: string): string {
 //   <句> の文字だけでできていてセミコロンの無い文があると、その直後の `import type { X } from "y"` まで 1 つの export 文と
 //   見なし、先頭の type を見落として値の参照と誤判定するため。; の直後も文の先頭に含めるのは、`a(); import { b } from "c";`
 //   のように 1 行に複数の文を書いた場合も拾うため（本リポジトリの Biome の format では起きないが、抽出の仕様として固定している）。
+// グループ: 1 = import / export（re-export かの判定）、2 = 先頭の type、3 = <句>、4 = specifier。
 const IMPORT_EXPORT_FROM =
-  /(?:^|;)\s*(?:import|export)\s+(type\s+)?((?:(?!^\s*(?:import|export)\b)[\w\s{},*$])*?)\s*\bfrom\s*["']([^"']+)["']/gm;
+  /(?:^|;)\s*(import|export)\s+(type\s+)?((?:(?!^\s*(?:import|export)\b)[\w\s{},*$])*?)\s*\bfrom\s*["']([^"']+)["']/gm;
 // `import "x"`（副作用だけの import。CSS など）。
 // WHY 名前付きキャプチャ（(?<name>...)）を使わない: tsconfig.json の target が ES2017 で、next build の型チェックが
 //   「Named capturing groups are only available when targeting 'ES2018' or later」で失敗するため（実測）。
@@ -158,8 +167,10 @@ type Located = ImportStatement & { index: number };
 function findFromStatements(code: string): Located[] {
   return [...code.matchAll(IMPORT_EXPORT_FROM)].map((match) => ({
     index: match.index,
-    specifier: match[3] ?? "",
-    typeOnly: match[1] !== undefined || isInlineTypeOnly(match[2] ?? ""),
+    specifier: match[4] ?? "",
+    typeOnly: match[2] !== undefined || isInlineTypeOnly(match[3] ?? ""),
+    // WHY import のときは reExport を持たせない（false も入れない）: ImportStatement の reExport の WHY と同じ。
+    ...(match[1] === "export" && { reExport: true }),
   }));
 }
 
@@ -210,7 +221,7 @@ function extractImports(source: string): ImportStatement[] {
   ]
     .filter(({ index }) => !isInsideString(ranges, index))
     .sort((a, b) => a.index - b.index)
-    .map(({ specifier, typeOnly }) => ({ specifier, typeOnly }));
+    .map(({ index: _index, ...statement }) => statement);
 }
 
 // WHY 拡張子を外す: 参照先の規則（`backend/features/<f>/presentation/*.api` など）を拡張子なしの形で 1 通りに書くため。
@@ -260,9 +271,9 @@ const WORKSPACE_PACKAGES = [
 //   backend への参照を検査する規則（frontend-to-backend-specifier など）を素通りする。
 function toReference(
   from: string,
-  { specifier, typeOnly }: ImportStatement,
+  { specifier, typeOnly, reExport }: ImportStatement,
 ): Reference {
-  const own = { from, specifier, own: true, typeOnly };
+  const own = { from, specifier, own: true, typeOnly, reExport };
   if (specifier.startsWith("@/")) {
     return {
       ...own,
@@ -292,7 +303,7 @@ function toReference(
       .replace(CODE_EXTENSION, "");
     return { ...own, to };
   }
-  return { from, specifier, to: specifier, own: false, typeOnly };
+  return { from, specifier, to: specifier, own: false, typeOnly, reExport };
 }
 
 function isSourceNonTest(path: string): boolean {
@@ -910,14 +921,24 @@ const RULES: Rule[] = [
     // WHY 参照元を apps/frontend に限らない: apps/e2e/ やリポジトリ直下から辞書を import すると、E2E が文言ではなく辞書の値で
     //   探すことになり、画面に出る文言を確かめなくなる。共通の辞書も apps/frontend の外からは不可。
     //   テストは対象外（列挙がテストを除く）。画面のテストが部品の辞書で期待値を作る（tJa(todoItemMessages, ...)）のは許す。
+    // WHY re-export（export ... from）は同じディレクトリでも、共通の辞書でも違反にする（Issue #125 の reviewer 指摘）: 同じ
+    //   ディレクトリの中継のファイル（zz-barrel.ts の export { x } from "./x.messages"）を別のディレクトリから import すると、
+    //   参照先が *.messages ではないので、この規則を素通りして辞書を別のディレクトリから使えてしまう。辞書を使うファイルは
+    //   辞書を直接 import すればよく、中継する理由が無い。共通の辞書も中継させない（apps/e2e/ が中継のファイルから使えてしまう）。
+    // 限界: import してから別の文で export する（import { x } from "./x.messages"; export { x };）中継は、export 文に from が
+    //   無いので拾わない（見逃す方向。参照の抽出は from のある文だけを見る）。
     id: "messages-colocation",
-    name: "*.messages（画面・部品の辞書）を参照してよいのは同じディレクトリのファイルだけ（apps/frontend/shared/i18n/common.messages は apps/frontend/ のどこからでも可）",
+    name: "*.messages（画面・部品の辞書）を参照してよいのは同じディレクトリのファイルだけ（apps/frontend/shared/i18n/common.messages は apps/frontend/ のどこからでも可）。re-export（export ... from）はどこからでも不可",
     appliesTo: () => true,
     isViolation: (ref) =>
       ref.own &&
       MESSAGES_MODULE.test(ref.to) &&
-      posix.dirname(ref.to) !== posix.dirname(ref.from) &&
-      !(ref.to === COMMON_MESSAGES_MODULE && isUnder(ref.from, FRONTEND_ROOT)),
+      (ref.reExport === true ||
+        (posix.dirname(ref.to) !== posix.dirname(ref.from) &&
+          !(
+            ref.to === COMMON_MESSAGES_MODULE &&
+            isUnder(ref.from, FRONTEND_ROOT)
+          ))),
   },
 ];
 
@@ -1200,7 +1221,8 @@ function findConsoleViolations(root: string): string[] {
 // 画面の文言は辞書（apps/frontend の *.messages.ts。画面・部品の隣と shared/i18n/common.messages.ts）だけに置き、画面は t("key", params) で描く。
 //   backend のエラーは ErrorKey（apps/backend/shared/domain/error-key.ts）と params で表し、自然言語を持たない。
 //   この 2 つを、文言が辞書の外に書かれた時点で止める（CLAUDE.md の原則 7。レビューの目視に頼らない）。
-// 違反にするもの（frontend-hardcoded-text。apps/frontend のテスト以外のソース。辞書 *.messages.ts は除く）:
+// 違反にするもの（frontend-hardcoded-text。apps/frontend のテスト以外のソース。辞書 *.messages.ts は defineMessages(...) の
+//   引数の中だけを除く）:
 //   1. JSX のテキスト（<button>削除</button>、<h1>Todo</h1>）に空白以外の文字がある。ASCII の英語も違反にする。
 //      WHY 英語も止める: 言語を切り替えても英語のまま残り、日本語だけを見る 3 では拾えないため。
 //   2. 利用者に見える JSX 属性（VISIBLE_TEXT_ATTRIBUTES）の値が、文字列リテラル・テンプレートリテラルで、空白以外の文字を持つ
@@ -1247,12 +1269,15 @@ const VISIBLE_TEXT_ATTRIBUTES: ReadonlySet<string> = new Set([
 ]);
 
 // 画面の文言の辞書（apps/frontend の *.messages.ts。画面・部品の隣の todo-screen.messages.ts と、共通の
-//   shared/i18n/common.messages.ts。Issue #125）。ここだけは日本語を書いてよい。
+//   shared/i18n/common.messages.ts。Issue #125）。ここの defineMessages(...) の引数の中だけは文言を書いてよい。
 // WHY 名前（.messages.ts）で決める（ディレクトリで決めない）: 辞書は画面・部品の隣に置く（colocation）ので、場所は画面ごとに違う。
 //   どこから参照してよいかは規則 messages-colocation が見る。
 // WHY .ts だけ（.tsx を除かない）: 辞書は defineMessages({ ja, en }) のオブジェクトだけで JSX を持たない。.tsx にすると
 //   JSX の文言まで例外になる。
-// 限界: 名前が *.messages.ts なら、中身が defineMessages でなくても例外になる（中身までは見ない）。
+// WHY ファイルごと除かず defineMessages(...) の引数の中だけにする（Issue #125 の reviewer 指摘）: 名前が *.messages.ts なら
+//   中身を見ずに例外にしていたため、辞書のファイルに書いた const label = "削除" や createElement の文言が素通りした。
+// 限界: 呼び出しの名前（defineMessages）だけで見る。どこから import したかは見ないので、辞書のファイルの中で同じ名前の別の
+//   関数を定義して呼ぶと、その引数も例外になる（見逃す方向。辞書のファイルは defineMessages の 1 文だけを置く運用）。
 const I18N_MESSAGES = /^apps\/frontend\/.+\.messages\.ts$/;
 
 // 日本語の文字。Unicode の Script（書記体系）で、ひらがな・カタカナ・漢字を見る（u フラグで \p{...} を使う）。
@@ -1265,19 +1290,23 @@ const NON_WHITESPACE = /\S/;
 type HardcodedTextChecks = {
   jsxText: boolean;
   visibleAttributes: ReadonlySet<string>;
+  // 辞書のファイル（defineMessages(...) の引数の中を検査しないファイル）か。frontend は I18N_MESSAGES、サーバ側は無し。
+  isDictionary: (file: string) => boolean;
 };
+
+// 辞書を定義する関数（apps/frontend/shared/i18n/i18n.tsx の defineMessages）の名前。
+const DEFINE_MESSAGES = "defineMessages";
 
 const FRONTEND_HARDCODED_TEXT = {
   id: "frontend-hardcoded-text",
-  name: "画面（apps/frontend）に文言をハードコードしない: JSX のテキスト、利用者に見える属性（aria-label・placeholder・title・alt・label・aria-description）の文字列、日本語の文字列は違反（辞書 apps/frontend/**/*.messages.ts とテストは除く）",
+  name: "画面（apps/frontend）に文言をハードコードしない: JSX のテキスト、利用者に見える属性（aria-label・placeholder・title・alt・label・aria-description）の文字列、日本語の文字列は違反（辞書 apps/frontend/**/*.messages.ts の defineMessages(...) の引数の中とテストは除く）",
   roots: [FRONTEND_ROOT],
   appliesTo: (file: string) =>
-    isSourceNonTest(file) &&
-    isUnder(file, FRONTEND_ROOT) &&
-    !I18N_MESSAGES.test(file),
+    isSourceNonTest(file) && isUnder(file, FRONTEND_ROOT),
   checks: {
     jsxText: true,
     visibleAttributes: VISIBLE_TEXT_ATTRIBUTES,
+    isDictionary: (file) => I18N_MESSAGES.test(file),
   } as HardcodedTextChecks,
 };
 
@@ -1291,6 +1320,7 @@ const SERVER_HARDCODED_TEXT = {
   checks: {
     jsxText: false,
     visibleAttributes: new Set<string>(),
+    isDictionary: () => false,
   } as HardcodedTextChecks,
 };
 
@@ -1388,29 +1418,59 @@ function lineOf(sourceFile: SourceFile, node: Node): number {
   return sourceFile.text.slice(0, start).split("\n").length;
 }
 
-// sourceFile の中のハードコードの文言を、書かれた順に行番号で返す（1 つの節が 2 と 3 の両方に当たっても 1 件）。
-// 構文木を forEachChild で再帰的にたどる（コメントは構文木に無いので見ない）。
+// node が利用者に見える JSX 属性（checks.visibleAttributes）で、値が空白以外の文字を持つ文字列リテラル・テンプレートリテラル
+//   なら、その値の節（上の説明の 2）。それ以外は undefined。
+// WHY findHardcodedTexts から切り出す: 辞書の判定（defineMessages の引数）を足して、Biome の認知的複雑度の上限（15）を超えたため。
+function visibleAttributeTextOf(
+  node: Node,
+  checks: HardcodedTextChecks,
+): Node | undefined {
+  if (
+    !isJsxAttribute(node) ||
+    !isIdentifier(node.name) ||
+    !checks.visibleAttributes.has(node.name.text)
+  ) {
+    return undefined;
+  }
+  const literal = attributeLiteralOf(node);
+  return literal !== undefined &&
+    NON_WHITESPACE.test(literalTextOf(literal) ?? "")
+    ? literal
+    : undefined;
+}
+
+// defineMessages(...) の呼び出し（呼び出す関数が defineMessages という名前の識別子）か。
+function isDefineMessagesCall(node: Node): boolean {
+  return (
+    isCallExpression(node) &&
+    isIdentifier(node.expression) &&
+    node.expression.text === DEFINE_MESSAGES
+  );
+}
+
+// file（リポジトリ相対のパス。辞書かの判定に使う）の構文木 sourceFile の中のハードコードの文言を、書かれた順に行番号で返す
+//   （1 つの節が 2 と 3 の両方に当たっても 1 件）。
+// 構文木を forEachChild で再帰的にたどる（コメントは構文木に無いので見ない）。辞書のファイルでは、defineMessages(...) の
+//   呼び出しの引数の中へは入らない（呼び出す関数の名前の節だけを見る）。
+// WHY file を別に受け取る（sourceFile.fileName を使わない）: 判定の例は仮想のパス（example-<番号>/...）で解析するので、
+//   sourceFile の名前はリポジトリ相対のパスと一致しない。
 function findHardcodedTexts(
+  file: string,
   sourceFile: SourceFile,
   checks: HardcodedTextChecks,
 ): number[] {
   const found = new Set<Node>();
+  const dictionary = checks.isDictionary(file);
   const visit = (node: Node): void => {
+    if (dictionary && isDefineMessagesCall(node)) {
+      return;
+    }
     if (checks.jsxText && isJsxText(node) && NON_WHITESPACE.test(node.text)) {
       found.add(node);
     }
-    if (
-      isJsxAttribute(node) &&
-      isIdentifier(node.name) &&
-      checks.visibleAttributes.has(node.name.text)
-    ) {
-      const literal = attributeLiteralOf(node);
-      if (
-        literal !== undefined &&
-        NON_WHITESPACE.test(literalTextOf(literal) ?? "")
-      ) {
-        found.add(literal);
-      }
+    const attributeText = visibleAttributeTextOf(node, checks);
+    if (attributeText !== undefined) {
+      found.add(attributeText);
     }
     if (JAPANESE.test(literalTextOf(node) ?? "")) {
       found.add(node);
@@ -1421,7 +1481,7 @@ function findHardcodedTexts(
   return [...found].map((node) => lineOf(sourceFile, node));
 }
 
-// 規則の対象のファイル（テスト以外のソース。辞書などの例外を除く）。
+// 規則の対象のファイル（テスト以外のソース。辞書 *.messages.ts は対象に含め、defineMessages の引数の中だけを findHardcodedTexts が除く）。
 function listHardcodedTextCheckedFiles(
   root: string,
   rule: HardcodedTextRule,
@@ -1443,9 +1503,11 @@ function findHardcodedTextViolations(
     ),
   );
   return files.flatMap((file) =>
-    findHardcodedTexts(sourceFiles.get(file) as SourceFile, rule.checks).map(
-      (line) => `${file}:${line}`,
-    ),
+    findHardcodedTexts(
+      file,
+      sourceFiles.get(file) as SourceFile,
+      rule.checks,
+    ).map((line) => `${file}:${line}`),
   );
 }
 
@@ -1841,7 +1903,7 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
     expect(files.filter((file) => file.includes("/.next/"))).toEqual([]);
   });
 
-  it("ハードコードの文言の検査は、apps/frontend・apps/backend・apps/shared のソースを対象にし、辞書・テスト・生成物は対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
+  it("ハードコードの文言の検査は、apps/frontend・apps/backend・apps/shared のソース（辞書 *.messages.ts を含む）を対象にし、テスト・生成物は対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
     const frontend = listHardcodedTextCheckedFiles(
       repoRoot,
       FRONTEND_HARDCODED_TEXT,
@@ -1856,14 +1918,10 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "apps/frontend/proxy.ts",
       ]),
     );
-    expect(frontend.filter((file) => I18N_MESSAGES.test(file))).toEqual([]);
-    // WHY 辞書そのものも列挙できていることを見る: 辞書の例外（I18N_MESSAGES）が実在のファイルに当たらないまま（名前の付け方が
-    //   変わるなど）でも、上の「対象にしない」は空のまま通ってしまう。
-    expect(
-      listSourceFiles(repoRoot, FRONTEND_ROOT).filter((file) =>
-        I18N_MESSAGES.test(file),
-      ),
-    ).toEqual(
+    // WHY 辞書も対象に入っていることを見る（Issue #125 の reviewer 指摘で、辞書を対象から外すのをやめた）: 辞書も
+    //   defineMessages(...) の引数の外は同じ検査をかける。対象から外れると、辞書に書いた引数の外の文言が素通りする。
+    //   辞書の例外（I18N_MESSAGES）が実在のファイルに当たっていることも、ここで見る（名前の付け方が変わったら落ちる）。
+    expect(frontend.filter((file) => I18N_MESSAGES.test(file))).toEqual(
       expect.arrayContaining([
         "apps/frontend/shared/i18n/common.messages.ts",
         "apps/frontend/features/todo/components/todo-item.messages.ts",
@@ -1913,9 +1971,13 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
 // --- 規則ごとの判定の仕様 ---
 // 上の「依存の向き」のテストは今のコードに違反が無いことしか確かめないため、規則そのものが緩すぎても（常に違反なしと
 // 判定しても）通ってしまう。規則ごとに「違反になる例」「ならない例」を架空の参照で固定し、規則の判定が仕様どおりかを確かめる。
-// 例は [参照元のファイル, import に書く specifier, 値の参照か型だけの参照か]。
+// 例は [参照元のファイル, import に書く specifier, 値の参照か型だけの参照か re-export（export ... from。値の参照）か]。
 
-type Example = [from: string, specifier: string, kind: "value" | "type"];
+type Example = [
+  from: string,
+  specifier: string,
+  kind: "value" | "type" | "re-export",
+];
 
 const RULE_EXAMPLES: Record<
   RuleId,
@@ -3016,6 +3078,24 @@ const RULE_EXAMPLES: Record<
         "../frontend/shared/i18n/common.messages",
         "value",
       ],
+      // re-export（export ... from）は、同じディレクトリでも、共通の辞書でも違反（Issue #125 の reviewer 指摘。中継のファイル
+      //   を別のディレクトリから import すると、辞書を別のディレクトリから使えてしまう）。
+      [
+        "apps/frontend/features/todo/screens/todo-screen/zz-barrel.ts",
+        "./todo-screen.messages",
+        "re-export",
+      ],
+      [
+        "apps/frontend/features/todo/components/index.ts",
+        "@/features/todo/components/todo-item.messages",
+        "re-export",
+      ],
+      ["apps/frontend/shared/i18n/index.ts", "./common.messages", "re-export"],
+      [
+        "apps/frontend/features/todo/api/api-error.ts",
+        "@/shared/i18n/common.messages",
+        "re-export",
+      ],
     ],
     allowed: [
       // 同じディレクトリ（"./"・"@/"・拡張子つき・型だけ）。
@@ -3056,6 +3136,17 @@ const RULE_EXAMPLES: Record<
         "apps/frontend/features/todo/components/todo-item.tsx",
         "some-lib/app.messages",
         "value",
+      ],
+      // *.messages ではないものの re-export（re-export を一律に止めるのではない）。
+      [
+        "apps/frontend/features/todo/screens/todo-screen/zz-barrel.ts",
+        "./todo-screen.hook",
+        "re-export",
+      ],
+      [
+        "apps/frontend/features/todo/index.ts",
+        "./screens/todo-screen/todo-screen",
+        "re-export",
       ],
     ],
   },
@@ -3098,7 +3189,11 @@ function judge(id: RuleId, [from, specifier, kind]: Example): boolean {
   if (rule === undefined) {
     throw new Error(`規則 ${id} が RULES にない`);
   }
-  const ref = toReference(from, { specifier, typeOnly: kind === "type" });
+  const ref = toReference(from, {
+    specifier,
+    typeOnly: kind === "type",
+    reExport: kind === "re-export",
+  });
   return rule.appliesTo(ref.from) && rule.isViolation(ref);
 }
 
@@ -3689,6 +3784,33 @@ const HARDCODED_TEXT_EXAMPLES: Record<
         "apps/frontend/features/todo/components/todo-item.messages.helper.ts",
         'export const m = { ja: { delete: "削除" } };',
       ],
+      // 辞書（*.messages.ts）でも、defineMessages(...) の引数の外は同じ検査（Issue #125 の reviewer 指摘）: トップレベルの
+      //   文字列、defineMessages 以外の関数の引数、createElement の利用者向けの属性の日本語。共通の辞書も同じ。
+      [
+        "apps/frontend/features/todo/components/todo-item.messages.ts",
+        'export const label = "削除";',
+      ],
+      [
+        "apps/frontend/features/todo/screens/todo-screen/todo-screen.messages.ts",
+        'export const m = defineMessages({ ja: { a: "あ" }, en: { a: "A" } }); export const label = "削除";',
+      ],
+      [
+        "apps/frontend/features/todo/components/todo-item.messages.ts",
+        'export const m = otherMessages({ ja: { delete: "削除" }, en: { delete: "Delete" } });',
+      ],
+      [
+        "apps/frontend/shared/i18n/common.messages.ts",
+        'export const e = createElement("button", { "aria-label": "削除" });',
+      ],
+      [
+        "apps/frontend/shared/i18n/common.messages.ts",
+        'export const m = defineMessages({ ja: { a: "あ" }, en: { a: "A" } }).ja.a + "件";',
+      ],
+      //   defineMessages の引数の例外は辞書（*.messages.ts）の中だけ。ほかのファイルで defineMessages を呼んでも違反。
+      [
+        "apps/frontend/features/todo/components/x.ts",
+        'export const m = defineMessages({ ja: { delete: "削除" }, en: { delete: "Delete" } });',
+      ],
     ],
     allowed: [
       // 文言を t(...) で描く。キーや params の ASCII の文字列は文言ではない。
@@ -3741,6 +3863,11 @@ const HARDCODED_TEXT_EXAMPLES: Record<
       [
         "apps/frontend/shared/i18n/common.messages.ts",
         'export const m = defineMessages({ ja: { "todo.notFound": "Todo（id: {id}）が見つかりません" }, en: { "todo.notFound": "Todo (id: {id}) was not found" } });',
+      ],
+      //   引数の外の import・コメント・ASCII の文字列（specifier）と、複数行に分けた defineMessages。
+      [
+        "apps/frontend/features/todo/components/todo-item.messages.ts",
+        'import { defineMessages } from "@/shared/i18n/i18n";\n// 部品の辞書\nexport const m = defineMessages({\n  ja: { delete: "削除" },\n  en: { delete: "Delete" },\n});',
       ],
       // テストと、対象外の場所・種類のファイル。
       [
@@ -3840,7 +3967,7 @@ function judgeHardcodedTexts(
     const sourceFile = sourceFiles.get(virtualPath(i, file));
     return (
       sourceFile !== undefined &&
-      findHardcodedTexts(sourceFile, rule.checks).length > 0
+      findHardcodedTexts(file, sourceFile, rule.checks).length > 0
     );
   });
 }
@@ -3882,6 +4009,7 @@ function hardcodedTextLinesOf(
   rule: HardcodedTextRule,
 ): number[] {
   return findHardcodedTexts(
+    file,
     parseSourceFiles({ [file]: source }).get(file) as SourceFile,
     rule.checks,
   );
@@ -3919,6 +4047,33 @@ describe("ハードコードの文言の抽出（findHardcodedTexts）", () => {
     expect(
       hardcodedTextLinesOf("x.tsx", source, FRONTEND_HARDCODED_TEXT),
     ).toEqual([6, 6]);
+  });
+
+  it("辞書（*.messages.ts）では defineMessages(...) の引数の中だけを通し、引数の外の文言は行番号で返す", () => {
+    const source = [
+      'import { defineMessages } from "@/shared/i18n/i18n";',
+      'export const label = "削除";',
+      "export const m = defineMessages({",
+      '  ja: { delete: "削除" },',
+      '  en: { delete: "Delete" },',
+      "});",
+      'export const e = createElement("button", { "aria-label": "閉じる" });',
+    ].join("\n");
+    expect(
+      hardcodedTextLinesOf(
+        "apps/frontend/features/todo/components/x.messages.ts",
+        source,
+        FRONTEND_HARDCODED_TEXT,
+      ),
+    ).toEqual([2, 7]);
+    // 同じ中身でも辞書でないファイルなら、defineMessages の引数の中も違反。
+    expect(
+      hardcodedTextLinesOf(
+        "apps/frontend/features/todo/components/x.ts",
+        source,
+        FRONTEND_HARDCODED_TEXT,
+      ),
+    ).toEqual([2, 4, 7]);
   });
 
   it("構文解析の結果に無いファイルを渡すと例外にする（黙って飛ばして素通りさせない）", () => {
@@ -4562,6 +4717,12 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/frontend/features/todo/components/bad-text.messages.tsx": lines(
     'export const m = { ja: { delete: "削除" } };',
   ),
+  //   辞書（*.messages.ts）でも defineMessages(...) の引数の外は違反（Issue #125 の reviewer 指摘）。2 行目の引数の中は拾わない。
+  "apps/frontend/features/todo/components/bad-label.messages.ts": lines(
+    'import { defineMessages } from "@/shared/i18n/i18n";',
+    'export const m = defineMessages({ ja: { a: "あ" }, en: { a: "A" } });',
+    'export const label = "削除";',
+  ),
   "apps/frontend/shared/i18n/messages/ja.ts": lines(
     'export const ja = { "todo.item.delete": "削除" };',
   ),
@@ -4577,6 +4738,14 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/frontend/features/todo/bad-reexport-messages.ts": lines(
     'export { todoScreenMessages } from "./screens/todo-screen/todo-screen.messages";',
   ),
+  //   中継（barrel）: 同じディレクトリの辞書の re-export（値・型）も違反（Issue #125 の reviewer 指摘）。中継のファイルを
+  //   別のディレクトリから import する側（uses-barrel.tsx）は *.messages を参照しないので、この規則には出ない。
+  "apps/frontend/features/todo/screens/todo-screen/zz-barrel.ts": lines(
+    'export { todoScreenMessages } from "./todo-screen.messages";',
+    'export type { TodoScreenMessages } from "./todo-screen.messages.ts";',
+  ),
+  "apps/frontend/features/todo/screens/todo-detail-screen/uses-barrel.tsx":
+    lines('import { todoScreenMessages } from "../todo-screen/zz-barrel";'),
   "apps/e2e/bad-messages.spec.ts": lines(
     'import { commonMessages } from "../frontend/shared/i18n/common.messages";',
   ),
@@ -4892,6 +5061,7 @@ const MUST_REJECT_VIOLATIONS = [
   "frontend-hardcoded-text: apps/frontend/shared/i18n/messages/nested/ja.ts:1",
   "frontend-hardcoded-text: apps/frontend/shared/i18n/ja.ts:1",
   "frontend-hardcoded-text: apps/frontend/features/todo/components/bad-text.messages.tsx:1",
+  "frontend-hardcoded-text: apps/frontend/features/todo/components/bad-label.messages.ts:3",
   "frontend-hardcoded-text: apps/frontend/shared/i18n/messages/ja.ts:1",
   ...[
     "apps/frontend/features/todo/screens/todo-screen/todo-screen.messages",
@@ -4903,6 +5073,8 @@ const MUST_REJECT_VIOLATIONS = [
       `messages-colocation: apps/frontend/features/todo/screens/todo-detail-screen/bad-import-messages.tsx → ${to}`,
   ),
   "messages-colocation: apps/frontend/features/todo/bad-reexport-messages.ts → apps/frontend/features/todo/screens/todo-screen/todo-screen.messages",
+  "messages-colocation: apps/frontend/features/todo/screens/todo-screen/zz-barrel.ts → apps/frontend/features/todo/screens/todo-screen/todo-screen.messages",
+  "messages-colocation: apps/frontend/features/todo/screens/todo-screen/zz-barrel.ts → apps/frontend/features/todo/screens/todo-screen/todo-screen.messages",
   "messages-colocation: apps/e2e/bad-messages.spec.ts → apps/frontend/shared/i18n/common.messages",
   "server-hardcoded-text: apps/backend/features/todo/domain/bad-text.ts:2",
   "server-hardcoded-text: apps/backend/features/todo/domain/bad-text.ts:4",
@@ -5668,18 +5840,22 @@ describe("参照の抽出（extractImports）", () => {
     ]);
   });
 
-  it("import type / export type は型だけの参照、export { X } from は値の参照になる", () => {
+  it("import type / export type は型だけの参照、export { X } from は値の参照になる。export ... from は re-export の印を持つ", () => {
     const source = [
       'import type { A } from "a";',
       'export type { B } from "b";',
       'export { GET } from "c";',
       'export * from "d";',
+      'import { E } from "e";',
     ].join("\n");
+    // WHY import に reExport が無いことも toEqual で見る: toEqual は undefined のプロパティを無いものと同じに扱うが、
+    //   reExport: true が付けば一致しない（import を re-export と取り違えると、同じディレクトリの辞書の import まで違反になる）。
     expect(extractImports(source)).toEqual([
       { specifier: "a", typeOnly: true },
-      { specifier: "b", typeOnly: true },
-      { specifier: "c", typeOnly: false },
-      { specifier: "d", typeOnly: false },
+      { specifier: "b", typeOnly: true, reExport: true },
+      { specifier: "c", typeOnly: false, reExport: true },
+      { specifier: "d", typeOnly: false, reExport: true },
+      { specifier: "e", typeOnly: false },
     ]);
   });
 
