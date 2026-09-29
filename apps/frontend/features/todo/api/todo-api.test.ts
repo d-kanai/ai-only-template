@@ -240,6 +240,8 @@ describe("エラー時", () => {
     ["key が Object.prototype の名前", { ...notFoundProblem, key: "toString" }],
     ["params がオブジェクトでない", { ...notFoundProblem, params: "missing" }],
     ["params が null", { ...notFoundProblem, params: null }],
+    // 配列は typeof が object なので、配列でないことの検査が要る（{id} が置き換わらないまま画面に出る）。
+    ["params が配列", { ...notFoundProblem, params: ["missing"] }],
     // type・status は RFC 9457 の標準のメンバー。どちらかが無い・型が違う本文は Problem Details とみなさない。
     ["type が無い", { ...notFoundProblem, type: undefined }],
     ["type が文字列でない", { ...notFoundProblem, type: 404 }],

@@ -72,7 +72,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 //   翻訳できない（formatMessage が辞書を引けない）。その応答は Problem Details とみなさず、HTTP ステータスだけを伝える（toError）。
 //   実行時に確かめられるのは「共通の辞書のキー」までで、ErrorKey（サーバのエラーのキー）かどうかは確かめない。error.unknown・
 //   error.unexpected が返っても、その文言が出るだけで壊れない。画面ごとの辞書のキー（"delete" など）は共通の辞書に無いので通さない。
-// WHY params は省略か、オブジェクト: 値の型（string / number）までは確かめない。置換は String() で文字列にするので壊れない。
+// WHY params は省略か、配列でないオブジェクト: 値の型（string / number）までは確かめない。置換は String() で文字列にするので壊れない。
+//   配列は Object.hasOwn で名前を引けず {id} が置き換わらないまま画面に出るので、Problem Details とみなさない（reviewer 指摘、Issue #126）。
 // WHY 型の述語を Problem にする: 上の検査は Problem のすべてのメンバーを確かめるわけではない（type は和のどれか、key は ErrorKey か
 //   までは見ない）が、読むのは type・key・params だけで、読む値はどれも検査済みの形（文字列・辞書のキー・オブジェクト）。
 function isProblem(value: unknown): value is Problem {
@@ -82,7 +83,8 @@ function isProblem(value: unknown): value is Problem {
     typeof value.status === "number" &&
     typeof value.key === "string" &&
     isMessageKey(commonMessages, value.key) &&
-    (value.params === undefined || isRecord(value.params))
+    (value.params === undefined ||
+      (isRecord(value.params) && !Array.isArray(value.params)))
   );
 }
 

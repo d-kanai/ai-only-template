@@ -66,7 +66,8 @@ export type Problem = {
   status: number;
   // この発生に固有の説明（RFC 9457 の 3.1.4 節）。key と params から作る英語（problem-detail.en.ts）。
   detail: string;
-  // この発生を指す URI 参照。リクエストの URL のパス（クエリは含めない。利用者の入力が入りうるため）。
+  // この発生を指す URI 参照。リクエストの URL のパス。クエリは含めない（リクエストログと同じ方針でクエリの値は出さない。Issue #85。
+  //   パスの id は params.id と detail にも出るので、パスを隠す理由にはならない）。
   instance: string;
   // 何が起きたかを表す安定したキー（error-key.ts）。画面はこれを辞書で翻訳し、分岐にも使う。
   //   errors があるときは、その最初の 1 件の key と同じ（errors を読まない画面も 1 つの文言を出せる）。

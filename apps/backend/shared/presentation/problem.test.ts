@@ -114,7 +114,7 @@ describe("toProblemResponse", () => {
   });
 
   // instance はクエリを含まない URL のパス（new URL(request.url).pathname）。
-  // WHY パスだけ: クエリには利用者の入力が入りうる（リクエストログもクエリの値を出さない。Issue #85）。
+  // WHY パスだけ: リクエストログと同じ方針でクエリの値は出さない（Issue #85）。パスの id は params と detail にも出る。
   test("DomainError の not_found は 404 の /problems/not-found になり、instance はリクエストのパス（クエリを除く）", async () => {
     const response = toProblemResponse(
       new DomainError("not_found", "todo.notFound", { id: "abc" }),
