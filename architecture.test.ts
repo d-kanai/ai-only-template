@@ -388,7 +388,7 @@ function isFeatureApi(path: string): boolean {
   return /^apps\/frontend\/features\/[^/]+\/api\//.test(path);
 }
 
-// apps/frontend 直下のファイル（next.config.ts・instrumentation.ts・instrumentation-node.ts）。
+// apps/frontend 直下のファイル（next.config.ts・instrumentation.ts・instrumentation-node.ts・proxy.ts）。
 function isFrontendRootFile(path: string): boolean {
   return /^apps\/frontend\/[^/]+$/.test(path);
 }
@@ -736,8 +736,11 @@ const BACKEND_PLACEMENT = {
 // （Issue #68 の reviewer 指摘）。
 // WHY 置き場所を規則にする: 依存の規則は app/・features/・shared/ と直下のファイル（frontend-root-to-backend）にしかかからない。
 //   apps/frontend/lib/ のような場所のファイルは、backend の container を値で import してもどの規則にもかからず素通りする。
-// WHY 直下は名前で許す: Next の設定（next.config.ts）と規約ファイル（instrumentation.ts）、その Node.js 用の処理
+// WHY 直下は名前で許す: Next の設定（next.config.ts）と規約ファイル（instrumentation.ts・proxy.ts）、その Node.js 用の処理
 //   （instrumentation-node.ts）、Next が生成する型の宣言（next-env.d.ts。.gitignore 済みだが手元にはある）だけが直下に要る。
+//   proxy.ts（リクエストログ。Issue #80）は Next の規約で app/ と同じ階層（プロジェクトのルート）に置く（Next.js 16.3.6 同梱
+//   node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md の「Convention」）。旧名の middleware.ts
+//   は Next 16 で非推奨なので許さない。中身は薄くし、1 行の組み立ては shared/request-log/ に置く（shared/ は置き場所の規則の中）。
 //   名前を決めずに直下を許すと、層に属さないコードの置き場所になる。直下のファイルが backend を参照するときは
 //   frontend-root-to-backend が見る。
 const FRONTEND_SOURCE_DIR = /^apps\/frontend\/(?:app|features|shared)\//;
@@ -745,12 +748,13 @@ const FRONTEND_ROOT_FILES = new Set([
   "apps/frontend/next.config.ts",
   "apps/frontend/instrumentation.ts",
   "apps/frontend/instrumentation-node.ts",
+  "apps/frontend/proxy.ts",
   "apps/frontend/next-env.d.ts",
 ]);
 
 const FRONTEND_PLACEMENT = {
   id: "frontend-placement",
-  name: "apps/frontend/ のソースファイルは app/・features/・shared/ の下か、直下の next.config.ts・instrumentation.ts・instrumentation-node.ts・next-env.d.ts だけに置く",
+  name: "apps/frontend/ のソースファイルは app/・features/・shared/ の下か、直下の next.config.ts・instrumentation.ts・instrumentation-node.ts・proxy.ts・next-env.d.ts だけに置く",
   isMisplaced: (file: string) =>
     isUnder(file, FRONTEND_ROOT) &&
     !FRONTEND_SOURCE_DIR.test(file) &&
@@ -1264,6 +1268,8 @@ const RULE_EXAMPLES: Record<
         "../backend/todo/infra/container",
         "value",
       ],
+      // proxy.ts も直下のファイルなので、backend の env 以外は違反。
+      ["apps/frontend/proxy.ts", "@repo/backend/todo/infra/container", "value"],
       // 前方一致だけが同じ別ファイル（env-helper）は env ではない。
       [
         "apps/frontend/instrumentation-node.ts",
@@ -1284,6 +1290,9 @@ const RULE_EXAMPLES: Record<
       ],
       ["apps/frontend/instrumentation.ts", "./instrumentation-node", "value"],
       ["apps/frontend/next.config.ts", "next", "type"],
+      // proxy.ts（リクエストログ。Issue #80）が frontend の shared/ を使うのは、backend の参照ではないので対象外。
+      ["apps/frontend/proxy.ts", "@/shared/request-log/request-log", "value"],
+      ["apps/frontend/proxy.ts", "next/server", "type"],
       // 直下でないファイルは、この規則の対象外（app/・features/ の規則で検査する）。
       [
         "apps/frontend/app/api/todos/route.ts",
@@ -1770,8 +1779,13 @@ const FRONTEND_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/frontend/app-x/page.tsx",
     "apps/frontend/featuresx/todo/x.ts",
     "apps/frontend/instrumentation-node.helper.ts",
+    "apps/frontend/proxy.helper.ts",
+    // proxy.ts の旧名（Next 16 で非推奨）と、proxy の別の拡張子（許すのは proxy.ts だけ）。
+    "apps/frontend/middleware.ts",
+    "apps/frontend/proxy.js",
     // 許可された名前でも、直下でなければ例外にしない。
     "apps/frontend/lib/next.config.ts",
+    "apps/frontend/lib/proxy.ts",
   ],
   placed: [
     "apps/frontend/app/page.tsx",
@@ -1781,6 +1795,7 @@ const FRONTEND_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/frontend/next.config.ts",
     "apps/frontend/instrumentation.ts",
     "apps/frontend/instrumentation-node.ts",
+    "apps/frontend/proxy.ts",
     "apps/frontend/next-env.d.ts",
     // frontend の規則の対象外（apps/backend は BACKEND_PLACEMENT が見る）。
     "apps/backend/lib/x.ts",
@@ -3177,6 +3192,14 @@ const MUST_PASS_FILES: Record<string, string> = {
     "export async function verifyEnvAtStartup() {",
     '  await import("@repo/backend/shared/infra/env");',
     "}",
+  ),
+  // proxy.ts（Next の規約ファイル。リクエストログ。Issue #80）は直下に置き、1 行の組み立てを frontend の shared/ から使う。
+  "apps/frontend/proxy.ts": lines(
+    'import { type NextRequest, NextResponse } from "next/server";',
+    'import { buildRequestLog } from "@/shared/request-log/request-log";',
+  ),
+  "apps/frontend/shared/request-log/request-log.ts": lines(
+    "export function buildRequestLog() {}",
   ),
   // apps/backend の設定ファイル（apps/backend/drizzle.config.ts）は env.ts を相対パスで import する（backend の中）。
   //   e2e/ とリポジトリ直下の設定ファイルは、frontend と同じく "@repo/backend/..." で import する（Issue #68 の段階 2）。

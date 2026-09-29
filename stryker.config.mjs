@@ -70,7 +70,7 @@ export default {
   //     落とせないため、生き残りとして数えるだけになる。
   //   - 設定ファイル（リポジトリ直下のもの、apps/frontend/next.config.ts・instrumentation*.ts、apps/backend/drizzle.config.ts）、
   //     ルール検査テスト（architecture.test.ts など）、e2e/: 実装ではない（vitest.config.mts の coverage.include と同じ）。
-  //   apps/frontend/shared/ はまだ無い（.claude/rules/frontend.md）が、作ったときに自動で対象になるよう入れておく。
+  //   apps/frontend/shared/ は request-log（Issue #80）から使い始めた（.claude/rules/frontend.md）。
   // 注意（Issue #68 の段階 2。workspace パッケージ @repo/backend）: "@repo/backend/..." で import したファイルは、サンドボックスの
   //   中でも変異していない元の apps/backend を読む。Stryker はサンドボックスの中に、元のリポジトリの node_modules（リポジトリ直下・
   //   apps/frontend・apps/backend）を指す symlink を作り（@stryker-mutator/core 10.0.0 の sandbox.js の symlinkNodeModulesIfNeeded

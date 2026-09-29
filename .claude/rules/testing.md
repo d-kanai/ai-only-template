@@ -41,7 +41,7 @@ paths:
 ## カバレッジ（100%）
 - `pnpm test`（`vitest run --coverage`）は Statements / Branches / Functions / Lines のどれかが 100% 未満なら失敗する（CI でも止まる）。速く回すだけなら `pnpm test:unit`、完了前は必ず `pnpm test`。設定と WHY は `vitest.config.mts`。
 - 計測対象: `apps/frontend/features/`・`apps/frontend/shared/`・`apps/backend/` の `.ts` / `.tsx` と `scripts/` の `.ts`（テスト・`*.d.ts`・`apps/backend/` 直下の `*.config.ts` を除く）。
-- 計測しないもの（ユーザー判断、Issue #45）: `apps/frontend/app/`（ルーティングだけ。E2E で確かめる）、設定ファイル、`instrumentation*.ts`（起動時だけ動く。中身は `env.ts` のテストで固定）、`.sh`（V8 は JS しか測れない）。
+- 計測しないもの（ユーザー判断、Issue #45）: `apps/frontend/app/`（ルーティングだけ。E2E で確かめる）、設定ファイル、`instrumentation*.ts`（起動時だけ動く。中身は `env.ts` のテストで固定）、`apps/frontend/proxy.ts`（Next がリクエストごとに呼ぶ結線だけ。1 行の中身は `shared/request-log/` のテスト、結線は E2E。Issue #80）、`.sh`（V8 は JS しか測れない）。
 - 足りなければテストを足して埋める。`/* v8 ignore */` などで逃がさない。対象外を増やすときは上の方針に当てはまるか確かめ、`vitest.config.mts` とここに理由を書く。
 
 ## globalSetup（テスト用スキーマの後始末）
@@ -87,4 +87,5 @@ paths:
   - ローカルの `reuseExistingServer` で起動済みのサーバを使うときは、そのサーバの環境変数のまま動く（別の DB・古いコードのサーバが残っていないか注意）。
 - 各テストの前に `TRUNCATE todos`（`resetTodos()`）。title に実行時刻を付けるのは補助。WHY: Postgres のデータはサーバを起動し直しても残る。
 - 1 テストで CRUD を一周する（`workers: 1`。1 本の中の順序で状態を担保する）。
+- サーバの stdout を検証するテスト（`e2e/request-log.spec.ts`。リクエストログ）は、webServer ではなくテストの中で `next start -p 0` を子プロセスで起動し、その stdout を読む。WHY: webServer の stdout はテストから読めず（`webServer.stdout: "pipe"` はランナーのプロセスの stdout に流すだけ。テストは別の worker プロセスで動く）、ローカルの `reuseExistingServer` では別のプロセスになる。ポート 0 で空きポートを選ばせ、webServer・並列の worktree と重ならないようにする。本番ビルド（`.next`）は webServer の `pnpm build` が作ったものを使う。
 - Chromium のビルドが合わないとき（クラウド VM）は `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium pnpm test:e2e`。CI は `pnpm exec playwright install --with-deps chromium`、ローカルは `pnpm exec playwright install chromium`。

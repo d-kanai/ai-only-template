@@ -27,7 +27,7 @@ paths:
 - `core-to-persistence`: backend の domain・application（shared を含む）は DB のパッケージ（`drizzle-orm` とサブパス、`pg`。`pg-format` のような前方一致だけの別パッケージは対象外）を参照しない（`import type` も不可）。DB のパッケージを足したら `PERSISTENCE_PACKAGES` にも足す。
 - `apps/backend/shared/` が参照してよい自前コードは shared の中だけ。`next` / `react` / `react-dom` も不可。
 - `app/`（`app/api` 以外）が features / backend / shared を参照するなら `apps/frontend/features/<f>`（`/index`）か `apps/frontend/shared/` だけ。パッケージと `app/` の中の相対参照（`./globals.css`）は検査しない。`app/api/` が参照してよいのは `apps/backend/<x>/presentation/*.api` だけ。
-- 置き場所: `backend-placement`（4 層の下か直下の `<name>.config.<拡張子>`）、`frontend-placement`（`app/`・`features/`・`shared/` か直下の 4 ファイル）。参照の有無に関係なく違反。
+- 置き場所: `backend-placement`（4 層の下か直下の `<name>.config.<拡張子>`）、`frontend-placement`（`app/`・`features/`・`shared/` か直下の 5 ファイル: `next.config.ts`・`instrumentation.ts`・`instrumentation-node.ts`・`proxy.ts`・`next-env.d.ts`。`middleware.ts` と `proxy.js` は違反）。参照の有無に関係なく違反。
 - `env-direct-access`: `process.env`（空白・改行を挟むもの、`process?.env`、`globalThis.process.env` / `global.process.env`、`(process).env`）と `process["env"]` / `process['env']` を、`apps/backend/shared/infra/env.ts` 以外で違反にする。例外は `apps/frontend/instrumentation.ts` の `NEXT_RUNTIME` だけ（`allowedVariables`）。対象は依存の検査と同じファイルに `e2e/` とリポジトリ直下の設定・セットアップファイルを足したもの。判定の例は `ENV_ACCESS_EXAMPLES`。
 
 ## テストの持ち方
