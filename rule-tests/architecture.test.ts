@@ -1971,6 +1971,8 @@ const RULE_EXAMPLES: Record<
         "value",
       ],
       ["apps/backend/todo/domain/x.ts", "node:crypto", "value"],
+      // next / react / DB 以外のパッケージは使ってよい（Todo の不変条件を zod のスキーマで宣言する。Issue #88）。
+      ["apps/backend/todo/domain/x.ts", "zod", "value"],
     ],
   },
   "core-to-persistence": {
@@ -2100,6 +2102,9 @@ const RULE_EXAMPLES: Record<
       ["apps/backend/todo/presentation/x.api.ts", "@repo/shared", "value"],
     ],
     allowed: [
+      // リクエストの形を zod のスキーマで検査する（Issue #88）。
+      ["apps/backend/todo/presentation/x.api.ts", "zod", "value"],
+      ["apps/backend/shared/presentation/x.ts", "zod", "value"],
       [
         "apps/backend/todo/presentation/x.api.ts",
         "../infra/container",
@@ -4003,11 +4008,13 @@ const MUST_PASS_FILES: Record<string, string> = {
     lines("console.error(1);"),
   "scripts/tool.sh": lines("console.log(1)"),
   "apps/backend/shared/presentation/json-body.ts": lines(
-    'import { InvalidRequestError } from "./http-error";',
+    'import { z } from "zod";',
+    'import { type ErrorIssue, InvalidRequestError } from "./http-error";',
     'import { toErrorResponse } from "./http-error";',
   ),
   "apps/backend/todo/domain/todo.ts": lines(
     'import { randomUUID } from "node:crypto";',
+    'import { z } from "zod";',
     'import { DomainError } from "../../shared/domain/domain-error";',
     'import { DomainError as E } from "../../shared/domain/domain-error";',
   ),
@@ -4048,11 +4055,12 @@ const MUST_PASS_FILES: Record<string, string> = {
     '} from "../infra/container";',
   ),
   "apps/backend/todo/presentation/create-todo.api.ts": lines(
+    'import { z } from "zod";',
+    'import { toErrorResponse } from "../../shared/presentation/http-error";',
     "import {",
-    "  InvalidRequestError,",
-    "  toErrorResponse,",
-    '} from "../../shared/presentation/http-error";',
-    'import { readJsonObject } from "../../shared/presentation/json-body";',
+    "  parseJsonBody,",
+    "  requestBodySchema,",
+    '} from "../../shared/presentation/json-body";',
     'import { todoContainer } from "../infra/container";',
     'import { DomainError } from "../../shared/domain/domain-error";',
     'export type { Todo } from "../domain/todo";',
@@ -4077,11 +4085,13 @@ const MUST_PASS_FILES: Record<string, string> = {
     '} from "../infra/container";',
   ),
   "apps/backend/todo/presentation/update-todo.api.ts": lines(
+    'import { z } from "zod";',
+    'import { DomainError } from "../../shared/domain/domain-error";',
+    'import { toErrorResponse } from "../../shared/presentation/http-error";',
     "import {",
-    "  InvalidRequestError,",
-    "  toErrorResponse,",
-    '} from "../../shared/presentation/http-error";',
-    'import { readJsonObject } from "../../shared/presentation/json-body";',
+    "  parseJsonBody,",
+    "  requestBodySchema,",
+    '} from "../../shared/presentation/json-body";',
     'import type { Todo } from "../domain/todo";',
     "import {",
     "  type TodoContainer,",

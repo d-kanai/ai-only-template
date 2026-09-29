@@ -1,4 +1,5 @@
 import { toErrorResponse } from "../../shared/presentation/http-error";
+import { parseUuidParam } from "../../shared/presentation/resource-id";
 import type { Todo } from "../domain/todo";
 import { type TodoContainer, todoContainer } from "../infra/container";
 
@@ -32,12 +33,14 @@ function toTodoDto(todo: Todo): TodoDto {
 export function getTodoApi(container: Pick<TodoContainer, "getTodo">) {
   return async (_request: Request, ctx: Context): Promise<Response> => {
     try {
-      const { id } = await ctx.params;
+      const { id: rawId } = await ctx.params;
+      // uuid の形でない id の message は、query / command が無い id に投げる not_found と同じ文言にそろえる。
+      const id = parseUuidParam(rawId, `Todo（id: ${rawId}）が見つかりません`);
       const todo = await container.getTodo.execute(id);
       const body: GetTodoResponse = toTodoDto(todo);
       return Response.json(body);
     } catch (error) {
-      // 無い id は GetTodoQuery が DomainError(not_found) を投げ、ここで 404 に変換される。
+      // 無い id は GetTodoQuery が、uuid の形でない id は parseUuidParam が DomainError(not_found) を投げ、ここで 404 に変換される。
       return toErrorResponse(error);
     }
   };

@@ -68,7 +68,7 @@ apps/
             todo-detail-screen.test.tsx
             todo-detail-screen.hook.test.ts
   backend/
-    package.json                        # @repo/backend（drizzle-orm / pg / @repo/shared、exports で公開する入口、db:generate / db:migrate）
+    package.json                        # @repo/backend（drizzle-orm / pg / zod / @repo/shared、exports で公開する入口、db:generate / db:migrate）
     tsconfig.json
     drizzle.config.ts                   # drizzle-kit の設定（apps/backend の db:generate / db:migrate が --config で指す）
     drizzle/                            # 生成したマイグレーション（SQL と meta/）。pnpm db:generate が作り、コミットする
@@ -77,9 +77,9 @@ apps/
         domain-error.ts                 # DomainError（code: validation_error / not_found）
         transaction-runner.ts           # TransactionRunner<Tx> の interface（command をトランザクションで実行する窓口）
       presentation/
-        http-error.ts                   # DomainError → HTTP ステータスの変換、ErrorResponse 型、InvalidRequestError
+        http-error.ts                   # DomainError → HTTP ステータスの変換、ErrorResponse・ErrorIssue 型、InvalidRequestError（issues 付き）
         http-error.test.ts
-        json-body.ts                    # リクエスト本文を JSON のオブジェクトとして読む（readJsonObject）
+        json-body.ts                    # リクエスト本文の zod スキーマの土台（requestBodySchema）と、JSON を読んで parse する parseJsonBody
         json-body.test.ts
       infra/
         database.ts                     # Postgres のプール（@repo/shared/env から設定）と Drizzle の db、Executor 型、getDatabase / closeDatabase
@@ -112,7 +112,7 @@ apps/
         delete-todo.command.ts
         delete-todo.command.test.ts
       domain/
-        todo.ts                         # Entity / Value Object
+        todo.ts                         # Entity / Value Object（不変条件は zod のスキーマ。完全コンストラクタ）
         todo.test.ts
         todo-repository.ts              # Repository の interface
       infra/
@@ -152,6 +152,19 @@ tsconfig.json                           # Vitest とリポジトリ全体の型�
 - `pnpm typecheck`（`tsc -p . --noEmit && tsc -p apps/backend --noEmit && tsc -p apps/shared --noEmit`）を CI で `pnpm lint` の後・`pnpm build` の前に実行する（`rule-tests/typecheck.test.ts` が script と CI の順序を検査）。
   - WHY: `apps/frontend` の `next build` は frontend と、そこから import された backend のファイルしか型チェックしない。monorepo 化の前はリポジトリ直下の tsconfig（`**/*.ts`）で `next build` がテスト・ルール検査テスト・e2e・設定まで型チェックしていたが、移動後は backend のテストや `rule-tests/architecture.test.ts` に型エラーを置いても `pnpm build` が exit 0 になった（reviewer の実測）。Vitest は型を検査しない。
 - 段階 2 で tsconfig の paths から `@repo/backend/*` を外した: paths は exports より先に解決に使われ、公開していないファイルも型チェックを通るため。
+
+## 入力検証を zod に統一（Issue #88）
+- 経緯: 以前は「入力検証は手書き（ライブラリは入れない。規模が大きくなったら Issue で検討）」で、presentation が `typeof` で項目の型を、domain（`Todo`）が `if` でタイトルの規則を確かめていた。ユーザーの指示で zod 4.6.5（`apps/backend` の dependencies）に統一した。
+- 理由: 規則の宣言と型の導出を 1 か所にする（`z.infer` / `z.output` でリクエストの型と `TodoProps` をスキーマから作る）。項目ごとの誤りを `ErrorResponse` の `error.issues`（`{ path, message }` の一覧）としてレスポンスに出せる。
+- 分担は変えない: presentation は「形」（`requestBodySchema` = `z.strictObject`、動的セグメントの `id` は `z.uuid()`）、domain は「値の規則」（`todoTitleSchema`）。規則の置き場所・未知のキー・`restore`・`isUuid` の判断と WHY は `.claude/rules/backend.md` の「presentation」と各ファイルのコメント。
+- 実測（zod 4.6.5、2026-09-29）:
+  - `z.string().trim()` は値を置き換え、後の `refine` と parse の結果は trim 後の値になる。`.min` / `.max` は `String#length` なので、タイトルの文字数（コードポイント数）は `refine` と `Array.from` で数える（`"🍎".repeat(100)` は length 200）。
+  - `z.strictObject(shape, { error })` の `error` は、そのオブジェクト自身の issue（`invalid_type` と `unrecognized_keys`）だけに当たり、項目の issue は項目のスキーマの `error` が決める。`unrecognized_keys` の issue は path が `[]` で、`keys` に未知のキーが入る。
+  - `z.uuid()` は RFC 9562 の形（版の桁 1〜8、variant 8 / 9 / a / b、nil と max）だけを受け付け、大文字も通す。Postgres の uuid 型より狭い（版の桁が 0 の値は Postgres は受け付けるが `z.uuid()` は拒否する）。Todo の id は `randomUUID`（v4）なので影響しない。より広い `z.guid()` もあるが、Issue の指示どおり `z.uuid()` にした。
+  - `z.date()` は Invalid Date を拒否する。
+- 採用しなかった案（比較は各プロジェクトの公式の説明による。性能・サイズは実測していない）:
+  - valibot: 主な利点は関数単位の import によるバンドルの小ささで、サーバ側（`apps/backend`）だけで使う今は効かない。
+  - ArkType: スキーマを TypeScript の型に似た文字列の DSL で書く独自の構文で、読み手の学習が要る。利点の検証の速さは、1 リクエスト数項目のこの規模では効かない。
 
 ## 後で別プロセスに分けるとき
 1. `apps/backend` に起動口（`server.ts`。HTTP サーバと api ファイルの結線）と、その起動の script を足す。

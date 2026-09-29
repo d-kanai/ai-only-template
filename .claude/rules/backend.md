@@ -11,7 +11,7 @@ paths:
 ## 置き場所（DDD 4 層）
 - ファイルは `apps/backend/<feature>/`（`apps/backend/shared/` を含む）の `domain/` `application/` `presentation/` `infra/` のどれかの下に置く。例外は `apps/backend/` 直下の設定ファイル `<name>.config.ts`（今は `drizzle.config.ts`）と `drizzle/`（生成したマイグレーション）。
   - WHY: 層に属さない場所のファイルにはどの層の規則もかからず、依存の向きの検査を素通りする（規則 `backend-placement`）。
-- `apps/backend/shared/`: feature をまたぐもの。`domain/domain-error.ts`（DomainError: `validation_error` / `not_found`）、`domain/transaction-runner.ts`（TransactionRunner の interface）、`presentation/http-error.ts`（DomainError → HTTP ステータス、`ErrorResponse`、`InvalidRequestError`）、`presentation/json-body.ts`（`readJsonObject`）、`infra/database.ts`（プールと Drizzle の db、`Executor`）、`infra/drizzle-transaction-runner.ts`。
+- `apps/backend/shared/`: feature をまたぐもの。`domain/domain-error.ts`（DomainError: `validation_error` / `not_found`）、`domain/transaction-runner.ts`（TransactionRunner の interface）、`presentation/http-error.ts`（DomainError → HTTP ステータス、`ErrorResponse`・`ErrorIssue`、`InvalidRequestError`）、`presentation/json-body.ts`（`requestBodySchema`・`parseJsonBody`）、`presentation/resource-id.ts`（`parseUuidParam`: 動的セグメントの id が uuid の形でなければ 404）、`infra/database.ts`（プールと Drizzle の db、`Executor`）、`infra/drizzle-transaction-runner.ts`。
 - 環境変数の唯一の入口 `env.ts` とログの唯一の出口 `logger.ts` は、frontend と backend で共通の workspace パッケージ `apps/shared`（`@repo/shared`）にある（Issue #90。`.claude/rules/shared.md`）。backend からは `@repo/shared/env`・`@repo/shared/logger` で使う。
 
 | 層 | 置くもの | 参照してよい先（許可の一覧。無いものは不可） |
@@ -36,7 +36,7 @@ paths:
   - 今のキー: `./todo/presentation/*.api`（Route Handler と画面側の型）、`./shared/presentation/http-error`（`ErrorResponse`）。env・logger は Issue #90 で `apps/shared` に移し、キーを消した（`@repo/shared` の exports）。
   - 値はキーのパスに `.ts` を付けた TS のソース（ビルドしない）。feature を足したら `./<feature>/presentation/*.api` を足す。それ以外は 1 ファイルずつ。使わなくなったキーは消す（規則 `backend-exports` が過不足を止める）。
   - テスト基盤（`shared/infra/database.test-support`）は公開しない。`vitest.global-setup.ts` からだけ相対パスで読む（唯一の例外）。
-- 依存（`package.json`）: backend のコードが import するもの（`drizzle-orm` / `pg` / `@repo/shared`、devDependencies に `drizzle-kit` / `@types/pg`）を `apps/backend/package.json` に置く（`.claude/rules/dependencies.md`）。
+- 依存（`package.json`）: backend のコードが import するもの（`drizzle-orm` / `pg` / `zod` / `@repo/shared`、devDependencies に `drizzle-kit` / `@types/pg`）を `apps/backend/package.json` に置く（`.claude/rules/dependencies.md`）。
 - `apps/backend/tsconfig.json` は Next の plugin・jsx・DOM の型を持たない（backend 単体の型チェック。`Response#json()` は `unknown` なのでテストでは `as` で型を付ける）。`pnpm typecheck` が検査する。
 
 ## presentation（api ファイル）
@@ -46,10 +46,14 @@ paths:
 - 「コンテナを受け取って handler を返す関数」を export し、本番は共有の `todoContainer` を渡して作る。受け取る型は `Pick<TodoContainer, "listTodos">` のように使うものだけに絞る。
   - WHY: テストでは `listTodosApi(createInMemoryTodoContainer())` で組み立て、共有のコンテナ（前のテストのデータが残る）に依存しない。
 - query / command は `infra/container.ts` で組み立てたコンテナからだけ受け取る。Repository を直接 new しない（テストで `createInMemoryTodoContainer` を使うのは除く）。WHY: 実装の切り替えとトランザクションの張り方を 1 か所で決める。
-- 入力検証は手書き（ライブラリは入れない。規模が大きくなったら Issue で検討）。分担:
-  - presentation は「形」だけ: 本文が JSON のオブジェクトか（`readJsonObject`）、項目の型。違反は `InvalidRequestError` → 400（`validation_error`）。
-  - 値の中身の規則（例: `title` は前後の空白を除いて 1〜100 文字）は domain の不変条件（`Todo.create` / `Todo#rename`）に一本化。違反は `DomainError("validation_error")` → 400。
-  - WHY: 同じ規則を 2 か所に書くと片方だけ直してずれる。どちらもクライアントからは同じ 400 に見える。
+- 入力検証は zod で統一する（Issue #88。以前の「手書き」は撤回）。分担は変えない:
+  - presentation は「形」だけ: 各 api ファイルにリクエストの zod スキーマを置き（`requestBodySchema({ 項目: z.string({ error: "..." }) })`）、`parseJsonBody(request, schema)` で読む。違反は `InvalidRequestError`（`issues` 付き）→ 400（`validation_error`、`ErrorResponse` の `error.issues` に `{ path, message }` の一覧）。型は `z.infer` でスキーマから導出する。
+    - 未知のキーは拒否する（`z.strictObject`）。WHY: 部分更新で項目名を打ち間違えた本文が「何も変えない」200 に化ける。画面と API は同時に変えるので互換性の心配は無い。
+    - 動的セグメントの `id` は `z.uuid()` で確かめ、形が違えば 404（`not_found`。無い Todo と同じ契約）。本文より先に確かめる。
+  - 値の中身の規則（例: `title` は前後の空白を除いて 1〜100 文字。文字数はコードポイント数で、zod の `.min` / `.max`（`String#length`）は使わない）は domain の zod スキーマ（`todo.ts` の `todoTitleSchema`）に一本化。`Todo.create` / `Todo#rename` がそれで検証し、違反は `DomainError("validation_error", message)` → 400（`issues` は付かない）。
+  - 完全コンストラクタ: `Todo` のコンストラクタは検証済みの値（`TodoProps` = `todoPropsSchema` の型）だけを受け取る。`create` は全体を、`rename` はタイトルを parse する。`restore`（DB の行）と `changeCompletion` は parse しない（WHY は `todo.ts` のコメント）。branded 型は使わない（restore で `as` が要るため）。
+  - スキーマは関数の中で作る（最上位の定数にしない）。WHY: static な変異になり mutation testing で数えない（`stryker.config.mjs` の `ignoreStatic`）。
+  - WHY zod: 規則の宣言と型の導出を 1 か所にし、項目ごとの誤り（`issues`）をレスポンスに出せる。同じ規則を 2 か所に書くと片方だけ直してずれるので、presentation に値の規則は書かない（どちらもクライアントからは同じ 400）。経緯と採用しなかった案は `docs/architecture-decisions.md`。
 
 ## application
 - 読むだけ（副作用なし）は query、状態を変えるものは command に分ける。WHY: 副作用の有無をファイル名で見分ける。
@@ -61,8 +65,8 @@ paths:
 - スキーマは feature ごとの `infra/schema.ts` に `pgTable` で宣言する（codebase-first）。SQL は `pnpm db:generate` で生成し、`pnpm db:migrate` で当てる。生成済みの SQL は手で直さない。`drizzle-kit push` は使わない（SQL が残らずレビューも記録もできない）。手順はスキル `db-migration`。
   - schema は infra に置く（テーブルの形は永続化の都合で、domain は知らない）。Entity との変換は Repository の実装が行う。
 - `PostgresTodoRepository` は `Executor`（db かトランザクション）を受け取り、自分ではトランザクションを始めない（query は db、command は tx で同じ実装を使うため）。
-- DB の行から Entity に戻すときは `Todo.restore`（不変条件で検査しない）、利用者の入力からは `Todo.create` / `rename`。
-- id 列は uuid。uuid の形でない id は DB に渡さず「無い」として扱う（Postgres のエラーで 500 になるのを防ぐ）。
+- DB の行から Entity に戻すときは `Todo.restore`（不変条件で検査しない。行の型は Drizzle のスキーマが保証するので zod でも parse しない）、利用者の入力からは `Todo.create` / `rename`。
+- id 列は uuid。uuid の形でない id は DB に渡さず「無い」として扱う（Postgres のエラーで 500 になるのを防ぐ）。presentation も `z.uuid()` で弾くが、Repository の `isUuid` は自分の約束（無い id は undefined）を守る防御として残す。
 - command は一律トランザクション: `createTodoContainer` がすべての command を `TransactionRunner#run` で包む（query は包まない）。run は正常終了で commit、例外で rollback して投げ直す。command / query の本体は Repository を受け取るだけ。
   - WHY: command は「全部成功するか、何も変えないか」。包む場所を 1 か所にして付け忘れを無くす。
   - トランザクションの外の Repository で書き込まない（command には `repositoryFor(tx)` のものしか渡さない）。
