@@ -17,4 +17,4 @@
 | [work-log.md](work-log.md) | 作業ログの強制（Stop フック・CI）の実測と経緯 | `.claude/rules/work-log.md` |
 | [worktree.md](worktree.md) | worktree ごとの外部リソースの分離の実測と一次情報 | `.claude/rules/worktree.md` |
 
-- 作業ログ（日ごとの行動・判断）は `logs/`。
+- 作業ログ（日ごとの行動・判断）は `work-logs/`。

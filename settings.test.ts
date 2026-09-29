@@ -72,7 +72,7 @@ const EXPECTED_HOOKS: ExpectedHook[] = [
   },
   {
     event: "Stop",
-    command: hookCommand("hooks/require-log.sh"),
+    command: hookCommand("hooks/require-work-log.sh"),
     timeout: 60,
   },
   {
@@ -374,7 +374,7 @@ describe("hooks の登録の判定", () => {
         s.hooks.Stop[0].hooks = [
           {
             type: "command",
-            command: hookCommand("hooks/require-logs.sh"),
+            command: hookCommand("hooks/require-work-logs.sh"),
             timeout: 60,
           },
         ];

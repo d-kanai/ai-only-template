@@ -79,8 +79,8 @@ describe("instructions-loaded.sh（InstructionsLoaded フック）", () => {
       file_path: `${repo}/.claude/rules/work-log.md`,
       memory_type: "Project",
       load_reason: "path_glob_match",
-      globs: ["logs/**"],
-      trigger_file_path: `${repo}/logs/2026-09-28.md`,
+      globs: ["work-logs/**"],
+      trigger_file_path: `${repo}/work-logs/2026-09-28.md`,
     });
     const after = Date.now();
     for (const result of [first, second]) {
@@ -101,7 +101,7 @@ describe("instructions-loaded.sh（InstructionsLoaded フック）", () => {
       ts: expect.any(String),
       file_path: `${repo}/.claude/rules/work-log.md`,
       load_reason: "path_glob_match",
-      trigger_file_path: `${repo}/logs/2026-09-28.md`,
+      trigger_file_path: `${repo}/work-logs/2026-09-28.md`,
       memory_type: "Project",
     });
     // ts は実行した時刻（ISO 8601 の UTC）。

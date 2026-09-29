@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR\"/scripts/hooks/require-log.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/scripts/hooks/require-work-log.sh",
             "timeout": 60
           }
         ]

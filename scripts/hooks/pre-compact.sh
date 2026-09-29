@@ -5,8 +5,8 @@
 #   書くもの: 日時・trigger（manual / auto）・ブランチ・HEAD・git status --short・git stash list の件数・直近 5 コミットの 1 行目。
 # WHY: compact で会話が要約されると、どのブランチで何を変更中だったか（未コミットの変更・stash）が要約から落ちることがある。
 #   compact の後に Claude（や人）がこのファイルを読めば、直前の状態を確かめられる。
-# WHY logs/ に書かない: logs/ は人が読む作業の記録。自動の dump を入れると、Stop フック（require-log.sh）の
-#   「logs/<今日>.md が変わったか」の判定が、ログを書いていないのに素通りになる。
+# WHY work-logs/ に書かない: work-logs/ は人が読む作業の記録。自動の dump を入れると、Stop フック（require-work-log.sh）の
+#   「work-logs/<今日>.md が変わったか」の判定が、ログを書いていないのに素通りになる。
 # WHY 上書き: 必要なのは直前の 1 回分だけ。追記するとセッションをまたいで増え続ける。.claude/state/ は .gitignore 済み。
 # 詳細: .claude/rules/work-log.md。
 #

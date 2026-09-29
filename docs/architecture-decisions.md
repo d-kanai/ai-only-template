@@ -7,7 +7,7 @@
 | --- | --- |
 | `apps/frontend/` | `@repo/frontend`（Next.js）。`app/`（ルーティングだけ）・`features/`・`next.config.ts`・`instrumentation*.ts` |
 | `apps/backend/` | `@repo/backend`（API 側。Next・React に依存しない TS）。`<feature>/` の DDD 4 層、`shared/`、`drizzle/`・`drizzle.config.ts` |
-| リポジトリ直下 | ツールの設定・ルール検査テスト・`e2e/`・`scripts/`・`docs/`・`logs/` |
+| リポジトリ直下 | ツールの設定・ルール検査テスト・`e2e/`・`scripts/`・`docs/`・`work-logs/` |
 
 - frontend と backend を `apps/` で分ける理由（Issue #68。ユーザー指示）: パッケージの単位で画面側と API 側を分け、後で API を別プロセスに分離しやすくする。プロセスは増やさず Next 1 つのまま（Hono などの別サーバは入れない）。
 - 段階: 段階 1 でディレクトリを `apps/` に移し、import・設定・検査を書き換えた（`package.json` は 1 つ、`@repo/backend/*` は tsconfig の paths で解決）。段階 2（今の形）で pnpm workspace にし、`apps/backend` を `exports` を明示した `@repo/backend`、`apps/frontend` を `@repo/frontend` にした。段階 1 の限界（frontend から backend を相対パスで参照しても、参照先が許される場所なら違反にしない）は段階 2 の `frontend-to-backend-specifier` で解消した。
@@ -152,7 +152,7 @@ tsconfig.json                           # Vitest とリポジトリ全体の型�
 - `app/` 内に `_components` などの private folder を置き、ルート単位でコードを分ける構成（公式の「Split project files by feature or route」）: URL とコードの置き場所が結びつき、ルートを動かすとコードも動かすことになる。
 - `components/` `hooks/` `lib/` を最上位に並べる層別の構成: 1 つの機能のコードが層をまたいで散る。
 - `src/` の下に置く構成: ユーザーの判断で不要。
-- API を別プロセス（Hono + `@hono/node-server`、Next の `rewrites`、契約用の `packages/contracts`、2 サーバ）にする案（Issue #68 の最初の調査）: ユーザーの指示でプロセスを増やさない方針に変え、取り下げた（実測結果は `logs/2026-09-28.md`）。
+- API を別プロセス（Hono + `@hono/node-server`、Next の `rewrites`、契約用の `packages/contracts`、2 サーバ）にする案（Issue #68 の最初の調査）: ユーザーの指示でプロセスを増やさない方針に変え、取り下げた（実測結果は `work-logs/2026-09-28.md`）。
 - frontend から backend を `@backend/*` のような独自の別名で参照する案: パッケージ名の形（`@repo/backend/*`）にしておけば、段階 1 は paths、段階 2 はパッケージで、同じ書き方のまま解決できる。
 - `apps/backend/package.json` の `exports` を `"./*": "./*.ts"`（全ファイル公開）にする案（researcher の推奨）: ユーザー判断で、公開する入口だけを明示する形にした（公開の範囲をパッケージの設定で読め、型チェック・ビルドでも公開外の import を止める）。
 - 段階 2 でも tsconfig の paths に `@repo/backend/*` を残す案: 上の「tsconfig」のとおり exports を明示した意味がなくなる。

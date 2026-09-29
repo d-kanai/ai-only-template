@@ -140,6 +140,6 @@ AI（Claude Code）への指示は、常に読み込むもの・必要なとき�
 | `.claude/skills/` | 説明は常時、本文は呼び出したとき | 手順（`pr-flow`・`rule-check-test`・`mutation-testing`・`db-migration`・`dependency-update`・`cloud-session`） |
 | `.claude/agents/` | サブエージェントの起動時 | worker / researcher / reviewer の定義 |
 | `docs/` | 読み込まれない | 実測・経緯・一次情報・採用しなかった案（一覧は `docs/README.md`） |
-| `logs/` | 読み込まれない | 日ごとの作業ログ |
+| `work-logs/` | 読み込まれない | 日ごとの作業ログ |
 
 - 文章のルールより、lint・テスト・フック・CI での機械的な強制を優先する（CLAUDE.md の 7）。フックは `.claude/settings.json` と `scripts/hooks/`。

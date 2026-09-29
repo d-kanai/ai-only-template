@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Claude Code の Stop フック（.claude/settings.json の hooks.Stop から呼ぶ）。Issue #64。
 #
-# WHAT: このターン（最後の人間の発言以降）にツールを使ったのに、その日の作業ログ logs/<今日>.md が
+# WHAT: このターン（最後の人間の発言以降）にツールを使ったのに、その日の作業ログ work-logs/<今日>.md が
 #   作業ツリー（未追跡・ステージ済みを含む）でも、このターンの間のコミット（最後の人間の発言の timestamp 以降）でも
 #   変わっていなければ、
 #   {"decision":"block","reason":...} を stdout に出して停止を拒否する（Claude はログを書いてから止まり直す）。
@@ -16,7 +16,7 @@
 #   （公式の 8 回の連続上限までループする）。理由は stderr に出す。
 set -u
 
-warn() { echo "require-log: $*" >&2; }
+warn() { echo "require-work-log: $*" >&2; }
 
 input=$(cat)
 
@@ -51,7 +51,7 @@ parsed=$(
       try {
         hook = JSON.parse(raw);
       } catch {
-        console.error("require-log: 入力を読めない（stdin が JSON ではない）");
+        console.error("require-work-log: 入力を読めない（stdin が JSON ではない）");
         process.exit(3);
       }
       const cwd = typeof hook.cwd === "string" && hook.cwd !== "" ? hook.cwd : process.cwd();
@@ -63,7 +63,7 @@ parsed=$(
       try {
         text = fs.readFileSync(hook.transcript_path, "utf8");
       } catch (error) {
-        console.error(`require-log: transcript を読めない（${hook.transcript_path}）: ${error.message}`);
+        console.error(`require-work-log: transcript を読めない（${hook.transcript_path}）: ${error.message}`);
         process.exit(3);
       }
       const entries = [];
@@ -123,8 +123,8 @@ if ! root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null); then
   exit 0
 fi
 
-# 日付はローカルのタイムゾーン（date +%F）。logs/ のファイル名を付けるときと同じ規則にする（限界は .claude/rules/work-log.md）。
-log="logs/$(date +%F).md"
+# 日付はローカルのタイムゾーン（date +%F）。work-logs/ のファイル名を付けるときと同じ規則にする（限界は .claude/rules/work-log.md）。
+log="work-logs/$(date +%F).md"
 
 # 起点は最後の人間のターンの時刻。timestamp が取れないときだけ今日の 0 時にフォールバックする
 # （止め続けないように緩い方へ倒す。理由は stderr）。
@@ -144,7 +144,7 @@ if [ -n "$(git -C "$root" status --porcelain -- "$log")" ]; then
     exit 0
   fi
 fi
-# このターンの間のコミットでの変更（コミットの日時が起点以降で、logs/<今日>.md を変えたもの）。「ログを追記 → コミット」まで
+# このターンの間のコミットでの変更（コミットの日時が起点以降で、work-logs/<今日>.md を変えたもの）。「ログを追記 → コミット」まで
 # 済ませた後の停止を通すため。-- "$log" で絞る（このターンのほかのコミットでは通さない）。
 # WHY コミットも見る: この環境のユーザー側の Stop フックは未コミットの変更があると止めるので、ログはコミットしてから止まる。
 #   作業ツリーだけを見ると、コミットした後に必ずこのフックで止まってしまう。
@@ -154,6 +154,6 @@ if [ -n "$(git -C "$root" log --since="$since" --format=%H -- "$log")" ]; then
   exit 0
 fi
 
-reason="作業ログ ${log} に、このターンでやったこと（調査・判断・確認した事実）を追記してください（.claude/general/log.md）。追記してからコミットしてください。"
+reason="作業ログ ${log} に、このターンでやったこと（調査・判断・確認した事実）を追記してください（.claude/general/work-log.md）。追記してからコミットしてください。"
 REASON="$reason" node -e 'process.stdout.write(`${JSON.stringify({ decision: "block", reason: process.env.REASON })}\n`)'
 exit 0
