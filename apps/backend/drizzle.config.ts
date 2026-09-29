@@ -2,7 +2,7 @@ import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "drizzle-kit";
 // WHY 相対パスで import する: drizzle-kit は設定ファイルを自前で読み込み、tsconfig の paths を解決する保証がない。
-//   backend の中の import はすべて相対パスにする規則でもある（architecture.test.ts の backend-relative-only）。
+//   backend の中の import はすべて相対パスにする規則でもある（rule-tests/architecture.test.ts の backend-relative-only）。
 //   env.ts は Node の組み込み（node:fs / node:path）しか import しないので、相対パスだけで読める（pnpm db:migrate で確認。Issue #59 / #68）。
 import { env } from "./shared/infra/env";
 

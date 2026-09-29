@@ -6,7 +6,7 @@ paths:
   - "scripts/hooks/guard-git*"
   - "scripts/hooks/check-commit-msg*"
   - "scripts/hooks/subagent-stop*"
-  - "settings.test.ts"
+  - "rule-tests/settings.test.ts"
 ---
 
 # git 操作の機械的な強制（権限・フック・commit-msg）
@@ -21,8 +21,8 @@ JSON にはコメントを書けないので、`.claude/settings.json` の各項
 | commit-msg（Lefthook） | `lefthook.yml` → `scripts/hooks/check-commit-msg.sh` | 形式（`.claude/general/commit.md`）に合わないコミットメッセージ |
 | SubagentStop フック | `scripts/hooks/subagent-stop.sh` | （止めない）共有の Git フックが worktree を指していたら直し、lockfile の未コミットの変更を知らせる |
 
-検査: `settings.test.ts`（deny とフックの登録・matcher・スクリプトの存在と `bash -n`、想定外のフックの登録、`disableAllHooks: true`・`permissions.defaultMode: bypassPermissions`・`permissions.allow` の `Bash` / `Bash(*)` が無いこと）、`scripts/hooks/guard-git.test.ts`、`scripts/hooks/check-commit-msg.test.ts`、`scripts/hooks/subagent-stop.test.ts`。
-deny やフックを足す・変えるときは `settings.test.ts` の `REQUIRED_DENY_RULES` / `EXPECTED_HOOKS` と、スクリプトのテストの must pass / must reject も同じ変更で直す（手順はスキル `rule-check-test`）。
+検査: `rule-tests/settings.test.ts`（deny とフックの登録・matcher・スクリプトの存在と `bash -n`、想定外のフックの登録、`disableAllHooks: true`・`permissions.defaultMode: bypassPermissions`・`permissions.allow` の `Bash` / `Bash(*)` が無いこと）、`scripts/hooks/guard-git.test.ts`、`scripts/hooks/check-commit-msg.test.ts`、`scripts/hooks/subagent-stop.test.ts`。
+deny やフックを足す・変えるときは `rule-tests/settings.test.ts` の `REQUIRED_DENY_RULES` / `EXPECTED_HOOKS` と、スクリプトのテストの must pass / must reject も同じ変更で直す（手順はスキル `rule-check-test`）。
 
 ## settings.json の各項目
 - `model`: メイン（オーケストレータ）のモデル（`.claude/general/orchestration.md`）。
@@ -75,7 +75,7 @@ deny やフックを足す・変えるときは `settings.test.ts` の `REQUIRED
 - 行き先が変数・コマンド置換・`cd -` の `cd` / `-C`（場所が分からず main の判定をしない）。パイプの中の `cd`、`popd`、`cd` の後の別のサブシェルなどの細かいスコープも追わない。
 - main で `git commit-tree` と `git update-ref refs/heads/main` を組み合わせて作るコミット（メインには止めない。サブエージェントには止める）。`git branch -f main`、`git replace` など、ほかの ref を動かすコマンド。
 - GitHub への直接の API 呼び出し（`gh api -X PUT repos/.../pulls/<n>/merge`、`curl` で GitHub API、matcher に入れていない MCP のツール）。
-- Bash 以外のツールでのファイルの書き換え（Write / Edit で `.git/hooks/*` や `.claude/settings.json` を書く）。これらは Claude Code の保護されたパス（`.git`・`.claude`）で、`default` / `acceptEdits` では確認が出て、`auto` では分類器が判断し、`bypassPermissions` では確認なしで書ける（公式 permission-modes の「Protected paths」）。`settings.test.ts` が `bypassPermissions` と `disableAllHooks` を検査する。
+- Bash 以外のツールでのファイルの書き換え（Write / Edit で `.git/hooks/*` や `.claude/settings.json` を書く）。これらは Claude Code の保護されたパス（`.git`・`.claude`）で、`default` / `acceptEdits` では確認が出て、`auto` では分類器が判断し、`bypassPermissions` では確認なしで書ける（公式 permission-modes の「Protected paths」）。`rule-tests/settings.test.ts` が `bypassPermissions` と `disableAllHooks` を検査する。
 
 ## 緊急時（フックを外す）
 - フックを 1 つだけ止める設定や環境変数は用意していない（公式にも個別に無効にする方法は無い。`disableAllHooks` は全フックを止める）。WHY: `LEFTHOOK=0` のような抜け道は、Claude 自身が同じコマンドに付けられ、禁止が効かなくなる。

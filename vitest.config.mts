@@ -16,7 +16,7 @@ export default defineConfig({
     //   apps/frontend/tsconfig.json の両方に同じ行き先で書いている（どちらが使われても同じファイルになる）。
     //   frontend から backend を指す "@repo/backend/..." は paths ではなく、workspace パッケージとして Vite の通常の解決
     //   （node_modules/@repo/backend → apps/backend と、apps/backend/package.json の exports）で解決する（Issue #68 の段階 2）。
-    //   backend の中は相対パスだけなので paths を使わない（architecture.test.ts の backend-relative-only）。
+    //   backend の中は相対パスだけなので paths を使わない（rule-tests/architecture.test.ts の backend-relative-only）。
     //   これがないとテスト対象を "@/..." で import したときに解決に失敗する（apps/frontend/features/ のテストが
     //   "@/features/..." を import しており、解決できなければそれらのテストが失敗することで担保）。
     //   Next.js 公式ガイドは vite-tsconfig-paths プラグインを案内しているが、Vite 8 には同等の標準オプションがある。
@@ -29,11 +29,15 @@ export default defineConfig({
     // jsdom: コンポーネントを render して DOM（見出しの role など）を検証するため、Node 上にブラウザ相当の DOM が必要。
     //   Vitest のデフォルトは "node" で document が存在しない。
     environment: "jsdom",
-    // include: テストファイルの場所。apps/ の中（対象の隣に置いた *.test.ts(x)）、リポジトリ直下のルール検査テスト
-    //   （architecture.test.ts など）、scripts/ のテスト（scripts/cloud-session-start.test.ts）。
+    // include: テストファイルの場所。apps/ の中（対象の隣に置いた *.test.ts(x)）、ルール検査テスト（rule-tests/architecture.test.ts など。
+    //   Issue #86 でリポジトリ直下から移した）、scripts/ のテスト（scripts/cloud-session-start.test.ts）。
     //   WHY 既定（**/*.{test,spec}.?(c|m)[jt]s?(x)）にしない: 置き場所を明示し、apps/frontend/.next/ などの生成物や
     //   想定外の場所のテストを拾わないようにする（Issue #68 で apps/ に移したときに範囲を決め直した）。
-    include: ["apps/**/*.test.{ts,tsx}", "*.test.ts", "scripts/**/*.test.ts"],
+    include: [
+      "apps/**/*.test.{ts,tsx}",
+      "rule-tests/**/*.test.ts",
+      "scripts/**/*.test.ts",
+    ],
     // apps/e2e/**: Playwright の E2E テスト（apps/e2e/*.spec.ts。workspace パッケージ @repo/e2e。Issue #84 で e2e/ から移した）を
     //   Vitest の対象から外す。上の include（apps/**/*.test.{ts,tsx}）は *.spec.ts を拾わないが、E2E の置き場所に *.test.ts を
     //   置いたときや include を既定に戻したときにも拾わないよう、明示して外す。
@@ -79,7 +83,7 @@ export default defineConfig({
       //     （2026-09-28 に実測）。テスト（scripts/*.test.ts）が子プロセスで実行する bash の中身は計測されない。
       //   apps/frontend/shared/（feature をまたぐ部品。最初は request-log/。Issue #80）も対象にする。
       //   apps/backend/ は全体を対象にし、直下の drizzle.config.ts だけを下の exclude で外す（apps/backend/ の中は
-      //   drizzle.config.ts 以外すべて 4 層の下にある。architecture.test.ts の backend-placement）。
+      //   drizzle.config.ts 以外すべて 4 層の下にある。rule-tests/architecture.test.ts の backend-placement）。
       include: [
         "apps/frontend/features/**/*.{ts,tsx}",
         "apps/frontend/shared/**/*.{ts,tsx}",

@@ -23,7 +23,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // 許可される例（must pass）と違反の例（must reject）の両方で固定する。今の package.json に違反が無いことだけでは、
 // 判定が常に「固定済み」を返す壊れ方を検出できないため。
 
-const repoRoot = import.meta.dirname;
+const repoRoot = join(import.meta.dirname, "..");
 
 // WHY x.y.z の数字 3 つだけを許す（プレリリース 1.2.3-beta.1 とビルドメタ 1.2.3+build も拒否する）:
 //   完全固定の狙いは「意図した版だけが入る」ことで、x.y.z はそれ自体は満たす。ただしプレリリースは安定版の前提
@@ -105,7 +105,7 @@ function readManifest(path: string): Manifest {
 }
 
 // pnpm-workspace.yaml の packages（workspace に含めるディレクトリのパターン）を読む。
-// WHY yaml パーサを依存に加えない: pnpm-workspace.test.ts と同じ理由（読みたいのはトップレベルの packages のリストだけ）。
+// WHY yaml パーサを依存に加えない: rule-tests/pnpm-workspace.test.ts と同じ理由（読みたいのはトップレベルの packages のリストだけ）。
 // 読み取りの仕様: 行頭の `packages:` の後ろの、インデントされた `- <パターン>` の行（クォートあり・なし、行末のコメント可）を
 //   次のトップレベルのキーまで読む。コメントの行と空行は飛ばす。
 function readWorkspacePackagePatterns(yaml: string): string[] {

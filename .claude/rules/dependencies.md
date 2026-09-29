@@ -5,8 +5,8 @@ paths:
   - "pnpm-workspace.yaml"
   - "pnpm-lock.yaml"
   - "patches/**"
-  - "package.test.ts"
-  - "pnpm-workspace.test.ts"
+  - "rule-tests/package.test.ts"
+  - "rule-tests/pnpm-workspace.test.ts"
 ---
 
 # 依存パッケージ
@@ -18,7 +18,7 @@ npm パッケージの版は `package.json` と `pnpm-lock.yaml` の両方で固
 - pnpm workspace（`pnpm-workspace.yaml` の `packages: ["apps/*"]`）で、`package.json` はリポジトリ直下・`apps/frontend`（`@repo/frontend`）・`apps/backend`（`@repo/backend`）・`apps/e2e`（`@repo/e2e`。Issue #84）の 4 つ。lockfile と pnpm の設定（サプライチェーン保護・`allowBuilds`・`patchedDependencies`）はリポジトリ直下に 1 つで、workspace 全体に効く。
 - 置き場所: そのパッケージのコードが import するものを、そのパッケージの `package.json` に置く（`next` / `react` / `react-dom` は frontend、`drizzle-orm` / `pg` / `drizzle-kit` は backend、`@playwright/test` と E2E が DB を見るための `pg` / `@types/pg` は e2e）。リポジトリ直下のツールとテストだけが使うもの（Biome・Lefthook・Vitest・Testing Library・Stryker・TypeScript・`@types/node`）はリポジトリ直下。
   - WHY: pnpm は宣言した依存だけを `<パッケージ>/node_modules` に置くので、宣言していないパッケージは import できない。テストはリポジトリ直下の Vitest が動かし、Node の解決は親の `node_modules` も探すので `apps/*` のテストからも見える。
-- 同じパッケージを複数の `package.json` に置くときは同じ版にする（`package.test.ts` の `findInconsistentVersions` が止める）。WHY: 片方だけ上げると workspace に 2 つの版が入り、どのコードがどの版で動くかが読めなくなる。
+- 同じパッケージを複数の `package.json` に置くときは同じ版にする（`rule-tests/package.test.ts` の `findInconsistentVersions` が止める）。WHY: 片方だけ上げると workspace に 2 つの版が入り、どのコードがどの版で動くかが読めなくなる。
   - `@testing-library/react` の peer（`react` / `react-dom`）は、pnpm が workspace の中の `react@19.2.8` で解決している（lockfile の importers の `.`）。React を上げるときは lockfile のこの行も同じ版か確かめる（別の版だと画面のテストで React が 2 つ読み込まれ hook が動かない見込み。未確認）。
 - `packageManager`（pnpm の版）はリポジトリ直下にだけ書く（`.claude/rules/env.md`）。
 - `apps/backend/package.json` の `exports` は `.claude/rules/backend.md`。
@@ -29,11 +29,11 @@ npm パッケージの版は `package.json` と `pnpm-lock.yaml` の両方で固
 - 例外: workspace の中のパッケージへの依存は `workspace:*` だけ（`"@repo/backend": "workspace:*"`）。
   - WHY: レジストリではなくリポジトリの中のソースへの symlink で、範囲内の別の版が入ることが起きない。`workspace:^` / `workspace:~` / `workspace:1.2.3` は書き方を 1 通りにするため使わない（公開しない private のパッケージで、`apps/*` は `version` を書かない）。
 - `pnpm-workspace.yaml` の `savePrefix: ''` で `pnpm add` も完全固定で書かれるが、版は明示する（`pnpm add <pkg>@2` のように範囲を渡すと範囲のまま書かれる）。
-- 担保: `package.test.ts`（判定 `isPinnedVersion` / `isAllowedVersion`、列挙 `listWorkspaceManifests` は `pnpm-workspace.yaml` の `<ディレクトリ>/*` の形だけを扱い、それ以外の形は失敗する。リポジトリ直下・`apps/backend`・`apps/e2e`・`apps/frontend` が列挙に入ることも確かめる）。
+- 担保: `rule-tests/package.test.ts`（判定 `isPinnedVersion` / `isAllowedVersion`、列挙 `listWorkspaceManifests` は `pnpm-workspace.yaml` の `<ディレクトリ>/*` の形だけを扱い、それ以外の形は失敗する。リポジトリ直下・`apps/backend`・`apps/e2e`・`apps/frontend` が列挙に入ることも確かめる）。
 
 ## 版の決め方
 - 原則 **latest**（npm レジストリの dist-tags が 1 次情報）。ただし公開から 5 日未満の版は入らないので、5 日以上経った版のうち最新を使い、latest でなければ理由を PR に書く。
-  - リポジトリの pnpm は `minimumReleaseAge: 7200`（分 = 5 日。`pnpm-workspace.test.ts` が値を検査）。開発機の safe-chain は 14 日。pnpm 側を 14 日に揃えないのは、Next.js などへの追随が 2 週間遅れになるため（Issue #32 のユーザー判断）。pnpm 側の設定は safe-chain の有無（クラウド・CI）に関係なく効く。
+  - リポジトリの pnpm は `minimumReleaseAge: 7200`（分 = 5 日。`rule-tests/pnpm-workspace.test.ts` が値を検査）。開発機の safe-chain は 14 日。pnpm 側を 14 日に揃えないのは、Next.js などへの追随が 2 週間遅れになるため（Issue #32 のユーザー判断）。pnpm 側の設定は safe-chain の有無（クラウド・CI）に関係なく効く。
   - `packageManager`（pnpm 本体）の解決はこの対象外（実測。`.tool-versions` と `packageManager` で明示するので影響はない）。
 - TypeScript は最新版を使う（7.0.2 で `next build` の型チェックと Vitest の動作を確認済み）。
 - 更新は Issue → PR で行う。

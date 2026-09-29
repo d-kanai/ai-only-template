@@ -4,7 +4,7 @@ paths:
   - "scripts/hooks/check-work-logs-diff*"
   - "scripts/hooks/pre-compact*"
   - "scripts/hooks/instructions-loaded*"
-  - "work-logs-check.test.ts"
+  - "rule-tests/work-logs-check.test.ts"
   - ".github/workflows/ci.yml"
 ---
 
@@ -42,7 +42,7 @@ WHY 機械で止める: 調査だけの依頼などでログの追記が漏れ�
 ## CI `scripts/hooks/check-work-logs-diff.sh`（`ci.yml` の「Check work-logs in PR diff」）
 - WHAT: `git diff --name-only --no-renames --diff-filter=AM origin/<base>...HEAD` に `^work-logs/.*\.md$` が 1 件以上なければ失敗する。PR のときだけ（`if: github.event_name == 'pull_request'`）、準備より前（`pnpm lint` より前）に動く。`actions/checkout` は `fetch-depth: 0`（三点 diff の分岐点を求めるのに base ブランチと履歴が要る）。
 - **例外なし**: 文書だけの PR も work-logs を要求する（Issue #64 のユーザー判断）。
-- 検査（ルール検査テスト）: スクリプトの判定は `scripts/hooks/check-work-logs-diff.test.ts`、ci.yml への組み込み（ステップの有無・`if`・`continue-on-error`・`|| true` などの打ち消し・順序・`fetch-depth: 0`）は `work-logs-check.test.ts`。
+- 検査（ルール検査テスト）: スクリプトの判定は `scripts/hooks/check-work-logs-diff.test.ts`、ci.yml への組み込み（ステップの有無・`if`・`continue-on-error`・`|| true` などの打ち消し・順序・`fetch-depth: 0`）は `rule-tests/work-logs-check.test.ts`。
 - 数えるのは追加・変更（`--diff-filter=AM`）だけ。ログを削除しただけの PR は通さない。
 - `--no-renames`: 名前の変更を常に「削除 + 追加」として扱い、利用者の `diff.renames` の設定に結果が左右されないようにする。限界: そのため、ログの名前を変えただけの PR は「追加」があるので通る（`check-work-logs-diff.test.ts` で固定）。
 - 限界: ファイル名だけを見る。中身（その PR の作業が書かれているか）は見ない（reviewer と PR 本文の「実装経緯」で見る。手順はスキル `pr-flow`）。

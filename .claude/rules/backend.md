@@ -6,7 +6,7 @@ paths:
 # backend（API 側。apps/backend）
 
 `apps/backend/` は workspace パッケージ `@repo/backend`。Next・React に依存しない TypeScript で、サーバの起動口は持たない（Next の Route Handler から呼ばれる）。
-依存の向きの規則はすべて `architecture.test.ts` が検査する（規則の一覧は `.claude/rules/architecture-check.md`）。経緯・採用しなかった案・実測は `docs/architecture-decisions.md`。
+依存の向きの規則はすべて `rule-tests/architecture.test.ts` が検査する（規則の一覧は `.claude/rules/architecture-check.md`）。経緯・採用しなかった案・実測は `docs/architecture-decisions.md`。
 
 ## 置き場所（DDD 4 層）
 - ファイルは `apps/backend/<feature>/`（`apps/backend/shared/` を含む）の `domain/` `application/` `presentation/` `infra/` のどれかの下に置く。例外は `apps/backend/` 直下の設定ファイル `<name>.config.ts`（今は `drizzle.config.ts`）と `drizzle/`（生成したマイグレーション）。
@@ -76,7 +76,7 @@ paths:
   - WHY 1 か所に集める: 行の形を呼び出し側ごとにずらさない。出力先を変える（ファイル・外部のログ基盤）ときに直すのが `logger.ts` だけで済む。依存（pino など）は足さない。
   - 使ってよい場所: backend の `presentation`（`http-error.ts` の想定外の例外）・`infra`（`database.ts`）、frontend 直下の `proxy.ts`・`instrumentation-node.ts`（規則 `presentation`・`infra`・`frontend-root-to-backend`）。domain・application は使わない（層の許可に infra が無い）。
   - テストは `vi.spyOn(console, "error")` などで出力を抑え、渡された 1 行を `JSON.parse` して確かめる（`logger.test.ts`・`http-error.test.ts`）。
-- 強制は 2 系統（`env.ts` の `process.env` と同じ設計）: Biome の `suspicious/noConsole`（`allow` なし。`overrides` で `logger.ts` とテストだけ off。`.claude/rules/lint.md`）と、`architecture.test.ts` の規則 `console-direct-access`（`.claude/rules/architecture-check.md`）。どちらか片方だけが拾う書き方と限界は `docs/logger.md`。
+- 強制は 2 系統（`env.ts` の `process.env` と同じ設計）: Biome の `suspicious/noConsole`（`allow` なし。`overrides` で `logger.ts` とテストだけ off。`.claude/rules/lint.md`）と、`rule-tests/architecture.test.ts` の規則 `console-direct-access`（`.claude/rules/architecture-check.md`）。どちらか片方だけが拾う書き方と限界は `docs/logger.md`。
 
 ## 命名
 - ディレクトリ・ファイルは kebab-case。型は PascalCase（`TodoDto`）。

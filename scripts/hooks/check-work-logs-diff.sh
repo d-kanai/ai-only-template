@@ -11,7 +11,7 @@
 # WHY 三点（...）: base-ref と HEAD の分岐点から HEAD までの差分（= PR の変更）だけを見る。二点（..）だと、PR の後に
 #   base 側で入った work-logs の変更まで数えてしまう。分岐点を求めるので、CI の checkout は履歴を全部取る（fetch-depth: 0）。
 # WHY 作業ツリーを見ない: CI で検査するのはコミット済みの PR の差分だけ（未コミットの変更は PR に入らない）。
-# 詳細: .claude/rules/work-log.md。CI への組み込みは work-logs-check.test.ts が検査する。
+# 詳細: .claude/rules/work-log.md。CI への組み込みは rule-tests/work-logs-check.test.ts が検査する。
 set -u
 
 if [ $# -ne 1 ] || [ -z "$1" ]; then

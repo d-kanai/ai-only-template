@@ -31,7 +31,7 @@ import { describe, expect, it } from "vitest";
 //   本リポジトリの TypeScript 7.0.2 に対応していない（docs/architecture-decisions.md の「採用しなかった案」）。
 //   抽出の限界は stripComments / extractImports の WHY に書き、仕様を下の describe と fixture テストで固定する。
 
-const repoRoot = import.meta.dirname;
+const repoRoot = join(import.meta.dirname, "..");
 
 // 検査の対象（.claude/rules/architecture-check.md の「対象と抽出」。Issue #68 で apps/frontend と apps/backend に分けた）。
 //   apps/frontend と apps/backend の全体（再帰）。除くのは依存と生成物のディレクトリ（EXCLUDED_DIRS）だけ。
@@ -818,7 +818,7 @@ const ENV_DIRECT_ACCESS = {
   } as Record<string, string[]>,
   // 対象のファイルか。ENV_CHECK_DIRS の下か、ルート直下（"/" を含まない）の、テストでない TS / JS。
   // WHY ルート直下の設定ファイルを含める: vitest.global-setup.ts・vitest.config.mts などは、接続先やフラグを読むので、
-  //   既定値や直参照が入り込みやすい。ルート直下のテスト（architecture.test.ts など）は除く。apps の設定ファイル
+  //   既定値や直参照が入り込みやすい。ルート直下のテスト（rule-tests/ の architecture.test.ts など）は除く。apps の設定ファイル
   //   （apps/frontend/next.config.ts、apps/backend/drizzle.config.ts）は ENV_CHECK_DIRS の下として対象になる。
   // どのファイルを列挙するか（apps/frontend の .next/ を除くなど）は listEnvCheckedFiles が決める。
   appliesTo: (file: string) =>
@@ -1205,7 +1205,7 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "stryker.config.mjs",
       ]),
     );
-    expect(files).not.toContain("architecture.test.ts");
+    expect(files).not.toContain("rule-tests/architecture.test.ts");
     expect(files).not.toContain("apps/backend/shared/infra/env.test.ts");
     // next build の生成物（apps/frontend/.next/）は数えない（あれば数千件の JS を検査することになる）。
     expect(files.filter((file) => file.includes("/.next/"))).toEqual([]);
@@ -1232,7 +1232,7 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "stryker.config.mjs",
       ]),
     );
-    expect(files).not.toContain("architecture.test.ts");
+    expect(files).not.toContain("rule-tests/architecture.test.ts");
     expect(files).not.toContain("apps/backend/shared/infra/logger.test.ts");
     expect(files).not.toContain("scripts/hooks/guard-git.test.ts");
     expect(files.filter((file) => file.includes("/.next/"))).toEqual([]);

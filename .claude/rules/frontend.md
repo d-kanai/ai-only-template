@@ -6,7 +6,7 @@ paths:
 # frontend（画面側。apps/frontend）
 
 `apps/frontend/` は workspace パッケージ `@repo/frontend`（Next.js の App Router）。Next は `apps/frontend` をカレントディレクトリにして動く（リポジトリ直下の `pnpm dev/build/start` が `pnpm --filter @repo/frontend <script>` を呼ぶ）。
-依存の向きの規則は `architecture.test.ts` が検査する（一覧は `.claude/rules/architecture-check.md`）。API 側は `.claude/rules/backend.md`。経緯・採用しなかった案・一次情報は `docs/architecture-decisions.md`。
+依存の向きの規則は `rule-tests/architecture.test.ts` が検査する（一覧は `.claude/rules/architecture-check.md`）。API 側は `.claude/rules/backend.md`。経緯・採用しなかった案・一次情報は `docs/architecture-decisions.md`。
 
 ## 置き場所
 - ソースは `app/`・`features/`・`shared/` の下か、直下の `next.config.ts`・`instrumentation.ts`・`instrumentation-node.ts`・`proxy.ts`・`next-env.d.ts` だけ（規則 `frontend-placement`）。`src/` は使わない。

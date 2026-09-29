@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // ルール検査テスト（.claude/rules/testing.md）なので、読み取り（readTopLevelSettings）と判定（findWorkspaceSettingViolations）を
 // 関数に切り出し、許可される例（must pass）と違反の例（must reject）の両方で固定する。
 
-const repoRoot = import.meta.dirname;
+const repoRoot = join(import.meta.dirname, "..");
 
 // WHY yaml パーサを依存に加えない: 検査したいのはトップレベルのキーと、その 1 段下のキー（allowBuilds の中身）だけで、
 //   行単位の読み取りで足りる（依存を増やすとサプライチェーンの対象も増える）。

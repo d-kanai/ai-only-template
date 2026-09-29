@@ -23,8 +23,8 @@
 ## `@` import の実測（2026-09-28、Issue #64。claude 2.1.284、使い捨てリポジトリで `claude -p ... --setting-sources project --disallowedTools Read Bash Glob Grep`）
 - CLAUDE.md に `- 要点: @.claude/general/a.md`（`.` で始まるパス、行の途中で空白の直後）と書くと、`a.md` の中身（合言葉）がコンテキストに入っていた。
 - 同じ行をコードスパン（`` `@.claude/general/a.md` ``）にすると読み込まれなかった（「無い」と答えた）。
-- `instructions.test.ts` の @ の抽出（行頭か空白の直後、コードの中は除く）はこれに合わせている。全角の括弧の直後など、ほかの区切りでの挙動は未確認。
+- `rule-tests/instructions.test.ts` の @ の抽出（行頭か空白の直後、コードの中は除く）はこれに合わせている。全角の括弧の直後など、ほかの区切りでの挙動は未確認。
 
 ## 未確認
 - 信頼済みの対話セッションでエージェントのフロントマター `hooks:` が効くか、WorktreeRemove の発火条件、rules の `paths` が Write / Edit で読まれるか、スキルの自動起動の精度。
-- `.claude/rules` の `paths` の glob の方言（dotfile の扱いなど）。`instructions.test.ts` は Node の `path.matchesGlob` で照合しているので、両者で一致の判定が違いうる glob（`**` がドットで始まるディレクトリに一致するか など）は避け、パスを明示する。
+- `.claude/rules` の `paths` の glob の方言（dotfile の扱いなど）。`rule-tests/instructions.test.ts` は Node の `path.matchesGlob` で照合しているので、両者で一致の判定が違いうる glob（`**` がドットで始まるディレクトリに一致するか など）は避け、パスを明示する。

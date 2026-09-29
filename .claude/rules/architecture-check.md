@@ -1,11 +1,11 @@
 ---
 paths:
-  - "architecture.test.ts"
+  - "rule-tests/architecture.test.ts"
 ---
 
-# 依存の向きの検査（architecture.test.ts）
+# 依存の向きの検査（rule-tests/architecture.test.ts）
 
-`architecture.test.ts`（`pnpm test` に含まれ、CI の `ci` ジョブで止まる）が、ディレクトリ構成の規則（`.claude/rules/backend.md`・`.claude/rules/frontend.md`）と環境変数の直参照の禁止（`.claude/rules/env.md`）、`console` の直接の呼び出しの禁止（`.claude/rules/backend.md` の「ログ」）を 1 規則 = 1 テストで検査する。
+`rule-tests/architecture.test.ts`（`pnpm test` に含まれ、CI の `ci` ジョブで止まる）が、ディレクトリ構成の規則（`.claude/rules/backend.md`・`.claude/rules/frontend.md`）と環境変数の直参照の禁止（`.claude/rules/env.md`）、`console` の直接の呼び出しの禁止（`.claude/rules/backend.md` の「ログ」）を 1 規則 = 1 テストで検査する。
 ルール検査テストなので、must pass / must reject と fault injection が必須（`.claude/rules/testing.md`、手順はスキル `rule-check-test`）。
 
 ## 対象と抽出
@@ -46,7 +46,7 @@ paths:
 - 見逃す: 正規表現リテラルやテンプレートリテラルの入れ子でコメント・文字列の区切りを誤認しうる、`${}` の中の `import()`、``import(`@repo/backend/${name}`)``（静的に決められない）、`}` の直後に同じ行で続けた `export ... from`。
 - 多く検出する: 型の位置の `import("x").T` は値の参照として数える。
 - `frontend-to-backend-specifier` と `backend-exports` は `apps/frontend/`・`apps/backend/`・`apps/e2e/`・リポジトリ直下のファイルしか見ない（`scripts/*.ts` のテスト以外などは見ない。今は該当なし）。足すときは `listReferencingFiles` と fixture も直す。
-- 環境変数の抽出の限界（分割代入など）は `.claude/rules/env.md`、console の抽出の限界（`node:console` の import、`${}` の中）は `docs/logger.md`（「console の参照の抽出」のテストで固定）。詳細と WHY は `architecture.test.ts` のコメントと、「参照の抽出」「参照先の正規化」「環境変数の直参照の抽出」のテスト。
+- 環境変数の抽出の限界（分割代入など）は `.claude/rules/env.md`、console の抽出の限界（`node:console` の import、`${}` の中）は `docs/logger.md`（「console の参照の抽出」のテストで固定）。詳細と WHY は `rule-tests/architecture.test.ts` のコメントと、「参照の抽出」「参照先の正規化」「環境変数の直参照の抽出」のテスト。
 
 ## 採用しなかった検査の手段
 - Biome の `noRestrictedImports`（`import type` だけを許せない。feature・層ごとの `overrides` が要る）、dependency-cruiser（TypeScript 7 に未対応）。詳細は `docs/architecture-decisions.md`。

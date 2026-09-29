@@ -21,7 +21,7 @@ Claude Code の Usage limit に早く達しないための方針と、その根�
 | セッション中に指示ファイル（CLAUDE.md / rules / settings.json / agents）を変えない。変更は専用の Issue でセッションの最初に | 変更すると再読み込みが起き、プロンプトキャッシュが効かなくなる（`docs/claude-code-mechanics.md`） |
 
 ## 機械的な強制
-- `instructions.test.ts` の `agent-model`: `.claude/agents/*.md` の `model:` が許可した ID（`claude-opus-5-5` / `claude-sonnet-5-5`）のいずれか。WHY: 別名（`opus` / `sonnet`）や古い ID を書くと、意図しないモデルに解決されて消費や品質が変わる。
+- `rule-tests/instructions.test.ts` の `agent-model`: `.claude/agents/*.md` の `model:` が許可した ID（`claude-opus-5-5` / `claude-sonnet-5-5`）のいずれか。WHY: 別名（`opus` / `sonnet`）や古い ID を書くと、意図しないモデルに解決されて消費や品質が変わる。
 - `.claude/general/*.md` は 25 行以下、`CLAUDE.md` は 200 行以下（同テスト）。
 
 ## 未確認

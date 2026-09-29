@@ -6,13 +6,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import pkg from "./package.json";
+import pkg from "../package.json";
 
 // Biome と Lefthook の導入（.claude/rules/lint.md）を仕様として固定するテスト。
 // 設定ファイルの中身を文字列で照合するのではなく、実際に biome / lefthook を起動して「違反が検出されること」を確かめる。
 // 設定を壊した（例: linter を無効にした、pre-commit から biome を消した）ときにテストで気づけるようにするため。
 
-const repoRoot = import.meta.dirname;
+const repoRoot = join(import.meta.dirname, "..");
 
 // WHY: Biome の recommended には既定 severity が warn / info のルールが多く（noUnusedVariables は warn、useTemplate は info）、
 //   biome check は error がなければ終了コード 0 になる。warn は放置されるため、`--error-on-warnings` で warn でも失敗させる

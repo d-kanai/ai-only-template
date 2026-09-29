@@ -8,7 +8,7 @@
 | `apps/frontend/` | `@repo/frontend`（Next.js）。`app/`（ルーティングだけ）・`features/`・`next.config.ts`・`instrumentation*.ts` |
 | `apps/backend/` | `@repo/backend`（API 側。Next・React に依存しない TS）。`<feature>/` の DDD 4 層、`shared/`、`drizzle/`・`drizzle.config.ts` |
 | `apps/e2e/` | `@repo/e2e`（Playwright の E2E。Issue #84）。`*.spec.ts`・`database.ts`・`playwright.config.ts` |
-| リポジトリ直下 | ツールの設定・ルール検査テスト・`scripts/`・`docs/`・`work-logs/` |
+| リポジトリ直下 | ツールの設定・`rule-tests/`（ルール検査テスト）・`scripts/`・`docs/`・`work-logs/` |
 
 - frontend と backend を `apps/` で分ける理由（Issue #68。ユーザー指示）: パッケージの単位で画面側と API 側を分け、後で API を別プロセスに分離しやすくする。プロセスは増やさず Next 1 つのまま（Hono などの別サーバは入れない）。
 - 段階: 段階 1 でディレクトリを `apps/` に移し、import・設定・検査を書き換えた（`package.json` は 1 つ、`@repo/backend/*` は tsconfig の paths で解決）。段階 2（今の形）で pnpm workspace にし、`apps/backend` を `exports` を明示した `@repo/backend`、`apps/frontend` を `@repo/frontend` にした。段階 1 の限界（frontend から backend を相対パスで参照しても、参照先が許される場所なら違反にしない）は段階 2 の `frontend-to-backend-specifier` で解消した。
@@ -121,7 +121,7 @@ apps/
                                         #   createInMemoryTodoContainer / createPostgresTodoContainer、アプリ共有の todoContainer
         container.test.ts
 apps/e2e/                               # @repo/e2e。Playwright の E2E（*.spec.ts・database.ts・playwright.config.ts。Issue #84）
-architecture.test.ts lint.test.ts …     # ルール検査テスト（リポジトリ直下）
+rule-tests/                             # ルール検査テスト（architecture.test.ts・lint.test.ts など 8 本。Issue #86）
 tsconfig.json                           # Vitest とリポジトリ全体の型チェック用
 ```
 
@@ -136,8 +136,8 @@ tsconfig.json                           # Vitest とリポジトリ全体の型�
 
 ## tsconfig と型チェックのゲート（Issue #68）
 - tsconfig は 3 つ: `apps/frontend/tsconfig.json`（Next 用。paths は `@/*` だけ）、`apps/backend/tsconfig.json`（backend 単体。Next の plugin・jsx・DOM の型なし、paths なし）、リポジトリ直下の `tsconfig.json`（Vitest の `resolve.tsconfigPaths` と全体の型チェック。paths は `@/*` → `./apps/frontend/*`）。WHY は各ファイルのコメント。
-- `pnpm typecheck`（`tsc -p . --noEmit && tsc -p apps/backend --noEmit`）を CI で `pnpm lint` の後・`pnpm build` の前に実行する（`typecheck.test.ts` が script と CI の順序を検査）。
-  - WHY: `apps/frontend` の `next build` は frontend と、そこから import された backend のファイルしか型チェックしない。monorepo 化の前はリポジトリ直下の tsconfig（`**/*.ts`）で `next build` がテスト・ルール検査テスト・e2e・設定まで型チェックしていたが、移動後は backend のテストや `architecture.test.ts` に型エラーを置いても `pnpm build` が exit 0 になった（reviewer の実測）。Vitest は型を検査しない。
+- `pnpm typecheck`（`tsc -p . --noEmit && tsc -p apps/backend --noEmit`）を CI で `pnpm lint` の後・`pnpm build` の前に実行する（`rule-tests/typecheck.test.ts` が script と CI の順序を検査）。
+  - WHY: `apps/frontend` の `next build` は frontend と、そこから import された backend のファイルしか型チェックしない。monorepo 化の前はリポジトリ直下の tsconfig（`**/*.ts`）で `next build` がテスト・ルール検査テスト・e2e・設定まで型チェックしていたが、移動後は backend のテストや `rule-tests/architecture.test.ts` に型エラーを置いても `pnpm build` が exit 0 になった（reviewer の実測）。Vitest は型を検査しない。
 - 段階 2 で tsconfig の paths から `@repo/backend/*` を外した: paths は exports より先に解決に使われ、公開していないファイルも型チェックを通るため。
 
 ## 後で別プロセスに分けるとき
