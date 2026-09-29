@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "TZ=UTC pnpm --filter @repo/frontend dev",
-    "build": "pnpm --filter @repo/frontend build",
-    "start": "TZ=UTC pnpm --filter @repo/frontend start",
+    "dev": "TZ=UTC pnpm --filter @repo/frontend-customer --fail-if-no-match dev",
+    "build": "pnpm --filter @repo/frontend-customer --fail-if-no-match build",
+    "start": "TZ=UTC pnpm --filter @repo/frontend-customer --fail-if-no-match start",
     "test": "vitest run --coverage",
     "test:unit": "vitest run",
-    "test:e2e": "pnpm --filter @repo/e2e test",
+    "test:e2e": "pnpm --filter @repo/e2e --fail-if-no-match test",
     "test:mutation": "stryker run",
     "lint": "biome check --error-on-warnings .",
     "typecheck": "tsc -p . --noEmit && tsc -p apps/backend --noEmit && tsc -p apps/shared --noEmit",
@@ -17,8 +17,8 @@
     "db:up": "docker compose up -d --wait",
     "db:down": "docker compose down",
     "db:psql": "docker compose exec db psql -U app -d app",
-    "db:generate": "pnpm --filter @repo/backend db:generate",
-    "db:migrate": "pnpm --filter @repo/backend db:migrate"
+    "db:generate": "pnpm --filter @repo/backend --fail-if-no-match db:generate",
+    "db:migrate": "pnpm --filter @repo/backend --fail-if-no-match db:migrate"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.13",

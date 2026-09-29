@@ -1,5 +1,5 @@
 // リクエストログ（1 リクエスト = JSON 1 行、5W1H）の 1 行を組み立てる純粋関数（Issue #80）。
-// 出力するのは apps/frontend/proxy.ts（Next の規約ファイル）。ここは受け取った値から 1 行の中身を決めるだけで、
+// 出力するのは apps/frontend_customer/proxy.ts（Next の規約ファイル）。ここは受け取った値から 1 行の中身を決めるだけで、
 // 時刻の取得・乱数・出力をしない。WHY: 仕様（各項目の取り方）をテストで丸ごと固定し、proxy.ts を薄く保つため。
 // 仕様の表は Issue #80、決定は ADR docs/adr/architecture/20260929-request-log-in-proxy.md、限界（status と所要時間が取れない、RSC のリクエストの扱い）は .claude/rules/frontend.md。
 
@@ -68,7 +68,7 @@ export function buildRequestLog(input: RequestLogInput): RequestLog {
 }
 
 // WHY "/api" 自体と "/api/" で始まるものだけ: Route Handler は app/api/ の下にあり、"/apis" や "/api-docs" のような
-//   前方一致だけが同じパスは画面として扱う（apps/frontend/app/ の構成と同じ区切り）。
+//   前方一致だけが同じパスは画面として扱う（apps/frontend_customer/app/ の構成と同じ区切り）。
 function requestKind(pathname: string): RequestLog["kind"] {
   return pathname === "/api" || pathname.startsWith("/api/") ? "api" : "page";
 }

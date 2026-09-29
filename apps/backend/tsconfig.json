@@ -4,7 +4,7 @@
 //   DOM の型が無いので、Request / Response などは @types/node の型になる（Response#json() は unknown を返す）。
 // WHY paths を持たない: backend の中の import は相対パスだけにする（rule-tests/architecture.test.ts の backend-relative-only）。
 //   "@/" は Next（Turbopack）が frontend の tsconfig の paths で解決してしまい、backend のファイルでは使えない。
-// frontend から import された backend のファイルは、Next のビルドでは apps/frontend/tsconfig.json の設定で型チェックされる。
+// frontend から import された backend のファイルは、Next のビルドでは apps/frontend_customer/tsconfig.json の設定で型チェックされる。
 {
   "compilerOptions": {
     "target": "ES2017",

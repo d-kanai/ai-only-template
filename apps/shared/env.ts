@@ -1,7 +1,7 @@
 // 環境変数の唯一の入口（Issue #59）。アプリ・テスト・ツールの設定ファイルは、process.env を直接読まずにここの env / toolEnv を使う。
 // 規則と WHY は .claude/rules/env.md の「環境変数」。process.env を直接読むと Biome（style/noProcessEnv）と
 // rule-tests/architecture.test.ts（規則 env-direct-access）で失敗する。process.env に触ってよいのはこのファイルだけ
-// （例外は apps/frontend/instrumentation.ts が Next.js の規約の NEXT_RUNTIME を読む 1 か所だけ）。
+// （例外は apps/frontend_customer/instrumentation.ts が Next.js の規約の NEXT_RUNTIME を読む 1 か所だけ）。
 // 置き場所は frontend と backend で共通の workspace パッケージ apps/shared（@repo/shared/env。Issue #90 で apps/backend/shared/infra/
 // から移した。frontend 直下の instrumentation-node.ts・backend・apps/e2e/・vitest.global-setup.ts が使う。.claude/rules/shared.md）。
 //
@@ -200,7 +200,7 @@ export function loadDotEnvFile(path: string): boolean {
 }
 
 // start から上に向かって pnpm-workspace.yaml のあるディレクトリ（リポジトリ直下）を探す。見つからなければ start を返す。
-// WHY pnpm-workspace.yaml を目印にする: リポジトリ直下にだけあり、apps/frontend・apps/backend には無い（Issue #68）。
+// WHY pnpm-workspace.yaml を目印にする: リポジトリ直下にだけあり、apps/frontend_customer・apps/backend には無い（Issue #68）。
 //   .git は worktree ではファイルになり、git の無いコピー（Stryker のサンドボックスなど）には無いので使わない。
 // WHY 見つからなければ start を返す: リポジトリの外（.env と環境変数だけを置いた実行環境など）でも、以前と同じく
 //   カレントディレクトリの .env を読めるようにする。
@@ -218,16 +218,16 @@ export function findRepoRoot(start: string): string {
 
 // cwd から探したリポジトリ直下の .env を読む。読み込んだら true、ファイルが無ければ false（loadDotEnvFile と同じ）。
 // WHY リポジトリ直下の .env を 1 つだけ読む（Issue #68 のユーザー判断）: .env は app ごとに置かず、リポジトリ直下に 1 つにする。
-//   vitest はリポジトリ直下で動くが、workspace パッケージの script（pnpm --filter @repo/frontend build /
+//   vitest はリポジトリ直下で動くが、workspace パッケージの script（pnpm --filter @repo/frontend-customer build /
 //   pnpm --filter @repo/backend db:migrate・pnpm --filter @repo/e2e test（playwright。Issue #84）など。Issue #68 の段階 2）は
-//   パッケージのディレクトリ（apps/frontend・apps/backend・apps/e2e）で
+//   パッケージのディレクトリ（apps/frontend_customer・apps/backend・apps/e2e）で
 //   動くため、カレントディレクトリの .env を読むだけでは見つからない。
 // WHY このファイルの場所から探さない（import.meta.dirname を使わない）: Next のビルドでバンドルされると元の場所を指さないため。
 export function loadRepoDotEnv(cwd: string): boolean {
   return loadDotEnvFile(join(findRepoRoot(cwd), ".env"));
 }
 
-// apps/frontend の next dev / build / start では、Next.js は apps/frontend の .env を探すが、そこには置かない（リポジトリ直下に
+// apps/frontend_customer の next dev / build / start では、Next.js は apps/frontend_customer の .env を探すが、そこには置かない（リポジトリ直下に
 //   1 つだけ）。Next.js が読まなくても、ここでリポジトリ直下の .env を読む。
 loadRepoDotEnv(process.cwd());
 

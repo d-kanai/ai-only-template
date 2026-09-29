@@ -14,7 +14,7 @@ import { problemDetail } from "./problem-detail.en";
 //   独自の形（Issue #126 の前の、error の中に code・key・params と項目ごとの誤りを入れた形）だと、クライアントや汎用のツールが形を個別に知る必要がある。
 //   決定と採用しなかった案は ADR docs/adr/architecture/20260929-error-response-rfc9457.md。
 
-// WHY ここから再公開する: 画面（apps/frontend）が backend から import してよいのは apps/backend/package.json の exports に
+// WHY ここから再公開する: 画面（apps/frontend_customer）が backend から import してよいのは apps/backend/package.json の exports に
 //   書いたファイルだけで、shared/domain/error-key.ts は公開していない。画面の辞書はキーと params の形をこの型から作る
 //   （キーを足すと画面の辞書が型エラーで追従を求める。Issue #116）。exports を増やさずに済むよう、Problem と同じ
 //   このファイルから出す。

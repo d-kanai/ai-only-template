@@ -15,12 +15,13 @@ npm パッケージの版は `package.json` と `pnpm-lock.yaml` の両方で固
 追加・更新・lockfile の作り直し・pnpm patch の手順はスキル `dependency-update`。実測（lockfile の再解決、safe-chain、TS 7 の確認など）は 2026-09-28 の work-logs。
 
 ## workspace の package.json（Issue #68）
-- pnpm workspace（`pnpm-workspace.yaml` の `packages: ["apps/*"]`）で、`package.json` はリポジトリ直下・`apps/frontend`（`@repo/frontend`）・`apps/backend`（`@repo/backend`）・`apps/e2e`（`@repo/e2e`。Issue #84）・`apps/shared`（`@repo/shared`。Issue #90）の 5 つ。lockfile と pnpm の設定（サプライチェーン保護・`allowBuilds`・`patchedDependencies`）はリポジトリ直下に 1 つで、workspace 全体に効く。
+- pnpm workspace（`pnpm-workspace.yaml` の `packages: ["apps/*"]`）で、`package.json` はリポジトリ直下・`apps/frontend_customer`（`@repo/frontend-customer`）・`apps/backend`（`@repo/backend`）・`apps/e2e`（`@repo/e2e`。Issue #84）・`apps/shared`（`@repo/shared`。Issue #90）の 5 つ。lockfile と pnpm の設定（サプライチェーン保護・`allowBuilds`・`patchedDependencies`）はリポジトリ直下に 1 つで、workspace 全体に効く。
 - 置き場所: そのパッケージのコードが import するものを、そのパッケージの `package.json` に置く（`next` / `react` / `react-dom` は frontend、`drizzle-orm` / `pg` / `zod` / `drizzle-kit` は backend（`zod` は入力検証と domain の不変条件。Issue #88）、`@playwright/test` と E2E が DB を見るための `pg` / `@types/pg` は e2e）。workspace のパッケージも同じく、使うパッケージに `workspace:*` で置く（`@repo/backend` は frontend、`@repo/shared` は frontend・backend・e2e・リポジトリ直下（`vitest.global-setup.ts`））。`apps/shared` 自身は依存を持たない（Node 標準だけ。`.claude/rules/shared.md`）。リポジトリ直下のツールとテストだけが使うもの（Biome・Lefthook・Vitest・Testing Library・Stryker・TypeScript・`@types/node`）はリポジトリ直下。
   - WHY: pnpm は宣言した依存だけを `<パッケージ>/node_modules` に置くので、宣言していないパッケージは import できない。テストはリポジトリ直下の Vitest が動かし、Node の解決は親の `node_modules` も探すので `apps/*` のテストからも見える。
 - 同じパッケージを複数の `package.json` に置くときは同じ版にする（`rule-tests/package.test.ts` の `findInconsistentVersions` が止める）。WHY: 片方だけ上げると workspace に 2 つの版が入り、どのコードがどの版で動くかが読めなくなる。
   - `@testing-library/react` の peer（`react` / `react-dom`）は、pnpm が workspace の中の `react@19.2.8` で解決している（lockfile の importers の `.`）。React を上げるときは lockfile のこの行も同じ版か確かめる（別の版だと画面のテストで React が 2 つ読み込まれ hook が動かない見込み。未確認）。
 - `packageManager`（pnpm の版）はリポジトリ直下にだけ書く（`.claude/rules/env.md`）。
+- リポジトリ直下の `package.json` の scripts で `pnpm --filter <パッケージ名>` を使うときは `--fail-if-no-match` を付ける（Issue #134）。WHY: pnpm は `--filter` に一致するパッケージが 0 件でも何も実行せず exit 0 で終わる（pnpm 12.7.0 で実測）。パッケージを改名して scripts を直し忘れると、`pnpm build` などが何もせずに成功したように見える。
 - `apps/backend/package.json` の `exports` は `.claude/rules/backend.md`、`apps/shared/package.json` の `exports` は `.claude/rules/shared.md`。
 
 ## 完全固定
@@ -29,7 +30,7 @@ npm パッケージの版は `package.json` と `pnpm-lock.yaml` の両方で固
 - 例外: workspace の中のパッケージへの依存は `workspace:*` だけ（`"@repo/backend": "workspace:*"`）。
   - WHY: レジストリではなくリポジトリの中のソースへの symlink で、範囲内の別の版が入ることが起きない。`workspace:^` / `workspace:~` / `workspace:1.2.3` は書き方を 1 通りにするため使わない（公開しない private のパッケージで、`apps/*` は `version` を書かない）。
 - `pnpm-workspace.yaml` の `savePrefix: ''` で `pnpm add` も完全固定で書かれるが、版は明示する（`pnpm add <pkg>@2` のように範囲を渡すと範囲のまま書かれる）。
-- 担保: `rule-tests/package.test.ts`（判定 `isPinnedVersion` / `isAllowedVersion`、列挙 `listWorkspaceManifests` は `pnpm-workspace.yaml` の `<ディレクトリ>/*` の形だけを扱い、それ以外の形は失敗する。リポジトリ直下・`apps/backend`・`apps/e2e`・`apps/frontend`・`apps/shared` が列挙に入ることも確かめる）。
+- 担保: `rule-tests/package.test.ts`（判定 `isPinnedVersion` / `isAllowedVersion`、列挙 `listWorkspaceManifests` は `pnpm-workspace.yaml` の `<ディレクトリ>/*` の形だけを扱い、それ以外の形は失敗する。リポジトリ直下・`apps/backend`・`apps/e2e`・`apps/frontend_customer`・`apps/shared` が列挙に入ることも確かめる）。
 
 ## 版の決め方
 - 原則 **latest**（npm レジストリの dist-tags が 1 次情報）。ただし公開から 5 日未満の版は入らないので、5 日以上経った版のうち最新を使い、latest でなければ理由を PR に書く。

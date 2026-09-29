@@ -1,6 +1,6 @@
 // エラーの種類を表す安定したキーと、キーごとの params の形（Issue #116。設計 (a)）。
 // WHY 自然言語の文言ではなくキーで表す: 文言を決めるのは画面（言語・言い回し）の仕事で、domain / API は「何が起きたか」だけを
-//   機械可読に返す。画面側（apps/frontend）はキーを辞書で翻訳する。言語を足しても backend は変わらない。
+//   機械可読に返す。画面側（apps/frontend_customer）はキーを辞書で翻訳する。言語を足しても backend は変わらない。
 // WHY domain に置く: DomainError（domain）が使うため。presentation の Problem（problem.ts）も同じ型を使い、problem.ts から
 //   export type で再公開する（画面は @repo/backend/shared/presentation/problem だけを import できる。exports は増やさない）。
 // キーの形: "<領域>.<対象>.<理由>" の dot 区切り（領域 = todo / request / server）。一度公開したキーは画面の辞書が

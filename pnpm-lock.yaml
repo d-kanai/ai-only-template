@@ -246,7 +246,7 @@ importers:
         specifier: 8.23.0
         version: 8.23.0
 
-  apps/frontend:
+  apps/frontend_customer:
     dependencies:
       '@repo/backend':
         specifier: workspace:*

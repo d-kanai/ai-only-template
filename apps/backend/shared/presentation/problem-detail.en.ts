@@ -2,7 +2,7 @@ import type { ErrorKey, ErrorKeyParams } from "../domain/error-key";
 
 // Problem Details（RFC 9457）の detail に入れる、開発者向けの英語の文（Issue #126。ユーザー判断）。
 // WHY 英語だけ・翻訳しない: detail は curl やログで API を読む開発者のためのもので、画面には出さない。画面に出す文言は
-//   画面（apps/frontend）の辞書が key と params から翻訳する。backend に ja / en の辞書を持つと、画面の辞書と二重管理になる
+//   画面（apps/frontend_customer）の辞書が key と params から翻訳する。backend に ja / en の辞書を持つと、画面の辞書と二重管理になる
 //   （採用しなかった案。ADR docs/adr/architecture/20260929-error-response-rfc9457.md）。
 // WHY detail はクライアントとの契約に含めない: 言い回しを変えても画面は壊れない（画面は detail を読まない）。分岐と翻訳には
 //   key を使う。テスト（problem-detail.en.test.ts・各 api のテスト）は文言を固定するが、それは意図しない変更に気づくためで、

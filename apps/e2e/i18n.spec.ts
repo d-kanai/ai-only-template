@@ -3,7 +3,7 @@ import { resetTodos } from "./database";
 
 // 画面の言語（Issue #116）が、ブラウザの言語（Accept-Language）と Cookie NEXT_LOCALE で決まり、クライアントが送った
 //   x-locale では変わらないことを本番ビルドで確かめる E2E テスト。
-// 決め方（Cookie → Accept-Language → 既定の ja）は apps/frontend/shared/i18n/locale.test.ts で固定しているので、ここでは結線
+// 決め方（Cookie → Accept-Language → 既定の ja）は apps/frontend_customer/shared/i18n/locale.test.ts で固定しているので、ここでは結線
 // （proxy.ts が x-locale を載せる → app/layout.tsx が <html lang> と LocaleProvider に渡す → 画面が t で出す）だけを見る。
 // 日本語の表示は apps/e2e/todo.spec.ts（playwright.config.ts の既定の locale: "ja-JP"）で見ている。
 

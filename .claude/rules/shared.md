@@ -11,7 +11,7 @@ paths:
 ## 置いてよいもの
 - `env.ts`（環境変数の唯一の入口。`.claude/rules/env.md`）と `logger.ts`（サーバ側のログの唯一の出口。`.claude/rules/backend.md` の「ログ」）、そのテスト（`env.test.ts`・`logger.test.ts`）、`package.json`・`tsconfig.json` だけ（規則 `shared-placement`。ソース以外のファイルも名前で決める）。
   - WHY: 「frontend と backend の両方で使う」ものは多く、共通の置き場所を自由にすると feature のコードや DB・React に依存するコードが集まり、層の規則（backend の 4 層・画面側の境界）の外で依存が育つ。置いてよいのは、どの層・どのパッケージからも同じものを使うべき基盤（外の世界との入口・出口）だけにする。
-- 文言（`env.ts` のエラー、`logger.ts` のメッセージ）は英語で書き、日本語のリテラルを置かない（規則 `server-hardcoded-text`）。WHY: 利用者に見せる文言は frontend の辞書（`apps/frontend/` の `*.messages.ts`）だけで、運用者向けの文言は英語に統一する。
+- 文言（`env.ts` のエラー、`logger.ts` のメッセージ）は英語で書き、日本語のリテラルを置かない（規則 `server-hardcoded-text`）。WHY: 利用者に見せる文言は frontend の辞書（`apps/frontend_customer/` の `*.messages.ts`）だけで、運用者向けの文言は英語に統一する。
 - 置かないもの: feature のコード（型・DTO を含む。画面とサーバの契約は backend の api ファイルに置く）、DB（`drizzle-orm` / `pg`。永続化は backend の infra）、React・Next・ブラウザの API。
 - 足すときは、Issue で「frontend と backend の両方が使う基盤か」を決めてから、`shared-placement` の一覧（`SHARED_FILES`）・`exports`・このファイルを同じ変更で直す（足すことを規則の変更としてレビューに出す）。
 
@@ -19,7 +19,7 @@ paths:
 - 外からは `@repo/shared/env`・`@repo/shared/logger` で使う（各パッケージの `package.json` に `"@repo/shared": "workspace:*"`）。
   - frontend 直下（`instrumentation-node.ts`・`proxy.ts`）・`apps/e2e/`・リポジトリ直下（`vitest.global-setup.ts`）は `@repo/shared/...` の書き方だけ（相対パスと `@/../shared/...` は不可。規則 `frontend-to-shared-specifier`）。
   - backend の中も `@repo/shared/...` だけで書く（相対パスは違反。規則 `backend-relative-only`）。WHY: exports を経由しない参照を許すと、公開範囲（exports）が意味を持たなくなる。backend の層ごとに使ってよいもの: infra は env・logger、presentation は logger だけ、domain・application は使わない（`SHARED_MODULES_BY_LAYER`）。
-  - 画面側（`apps/frontend/` の `app/`・`features/`・`shared/`）は使わない（規則 `screen-to-shared`）。WHY: env は `process.env` と `.env` のファイルを読み、logger は stdout に書くサーバ専用のもので、ブラウザのバンドルに入れない。
+  - 画面側（`apps/frontend_customer/` の `app/`・`features/`・`shared/`）は使わない（規則 `screen-to-shared`）。WHY: env は `process.env` と `.env` のファイルを読み、logger は stdout に書くサーバ専用のもので、ブラウザのバンドルに入れない。
 - `apps/shared` の中は同じディレクトリのファイルと `node:` の組み込みだけを読む。backend・frontend、React・Next・DB、`node:` 以外のパッケージは参照しない（規則 `shared-self-contained`）。WHY: frontend 直下と backend の両方が読み込む基盤なので、ここから外を参照すると `frontend-root-to-backend` や層の規則を `apps/shared` 経由ですり抜けられ、依存も env・logger を使うすべての場所に入る。
 
 ## exports（`apps/shared/package.json`）
