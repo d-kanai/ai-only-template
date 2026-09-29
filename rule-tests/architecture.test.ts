@@ -559,7 +559,8 @@ type RuleId =
   | "infra"
   | "backend-shared"
   | "app"
-  | "app-api";
+  | "app-api"
+  | "shared-self-contained";
 
 type Rule = {
   id: RuleId;
@@ -814,6 +815,29 @@ const RULES: Rule[] = [
     name: "apps/frontend/app/api/ は apps/backend/<x>/presentation/*.api だけを参照する",
     appliesTo: (from) => isUnder(from, "apps/frontend/app/api"),
     isViolation: (ref) => !(ref.own && PRESENTATION_API.test(ref.to)),
+  },
+  {
+    // 「apps/shared の中は同じディレクトリのファイルだけを読み、ほかのパッケージ（backend・frontend）、React・Next・DB を参照しない」
+    //   （.claude/rules/shared.md。Issue #90 の reviewer 指摘: 文書だけの規則で、logger.ts に backend の container・react・
+    //   drizzle-orm の import を足しても architecture / tsc / biome のどれも止まらなかった）。
+    // WHY: apps/shared は frontend 直下（Next の起動時・Proxy）と backend の両方が読み込む基盤。ここから backend や画面側を
+    //   参照すると、frontend 直下から backend を参照させない規則（frontend-root-to-backend）や層の規則を、apps/shared を経由して
+    //   すり抜けられる。フレームワーク・DB に依存すると、env・logger を使うすべての場所にその依存が入る。
+    // WHY パッケージは node: の付いた Node の組み込みだけ（"apps/shared/package.json の dependencies に無いものは違反" にしない）:
+    //   apps/shared は依存を持たないパッケージ（.claude/rules/dependencies.md）で、今は node: 以外を使う理由が無い。dependencies を
+    //   読んで許す形にすると、依存を足すだけで何でも通り、置いてよいものの判断（shared.md）がレビューに出ない。zod などを足すときは
+    //   Issue で決めて、ここの許可を同じ変更で広げる。"fs" のような node: の付かない組み込みの名前は、パッケージ名と区別できないので不可。
+    // WHY FRAMEWORK_PACKAGES・PERSISTENCE_PACKAGES も明示して書く: 下の「node: 以外は違反」だけでも止まるが、将来パッケージの許可を
+    //   広げたときにも React・Next・DB だけは止め続けるため。
+    id: "shared-self-contained",
+    name: "apps/shared/ の中は apps/shared/ の自前コードと Node の組み込み（node:）だけを参照する（backend・frontend、next・react、DB、ほかのパッケージを参照しない）",
+    appliesTo: (from) => isUnder(from, SHARED_ROOT),
+    isViolation: (ref) =>
+      ref.own
+        ? !isUnder(ref.to, SHARED_ROOT)
+        : usesFramework(ref) ||
+          usesPersistence(ref) ||
+          !ref.specifier.startsWith("node:"),
   },
 ];
 
@@ -2233,6 +2257,34 @@ const RULE_EXAMPLES: Record<
       ["apps/frontend/app/page.tsx", "react", "value"],
     ],
   },
+  "shared-self-contained": {
+    violating: [
+      // apps/shared の外の自前コード（相対パス・"@repo/backend/"・"@/"・前方一致だけが同じ別ディレクトリ）。
+      ["apps/shared/logger.ts", "../backend/todo/infra/container", "value"],
+      ["apps/shared/logger.ts", "@repo/backend/todo/infra/container", "value"],
+      ["apps/shared/env.ts", "@/features/todo", "type"],
+      ["apps/shared/logger.ts", "../shared-x/y", "value"],
+      // フレームワークと DB のパッケージ（サブパス・型だけも含む）。
+      ["apps/shared/logger.ts", "react", "value"],
+      ["apps/shared/env.ts", "next/server", "type"],
+      ["apps/shared/env.ts", "drizzle-orm/pg-core", "type"],
+      ["apps/shared/env.ts", "pg", "value"],
+      // node: 以外のパッケージ（依存を持たないパッケージ。"node:" の付かない組み込みの名前も不可）。
+      ["apps/shared/env.ts", "zod", "value"],
+      ["apps/shared/env.ts", "fs", "value"],
+    ],
+    allowed: [
+      // 同じディレクトリのファイル（相対パス・自パッケージ名）と Node の組み込み（node:）。
+      ["apps/shared/logger.ts", "./env", "type"],
+      ["apps/shared/logger.ts", "@repo/shared/env", "value"],
+      ["apps/shared/env.ts", "node:fs", "value"],
+      ["apps/shared/env.ts", "node:crypto", "value"],
+      // apps/shared の外のファイルは、この規則の対象外。
+      ["apps/backend/shared/infra/database.ts", "pg", "value"],
+      ["apps/frontend/app/page.tsx", "react", "value"],
+      ["apps/shared-x/y.ts", "react", "value"],
+    ],
+  },
   "app-api": {
     violating: [
       [
@@ -2980,9 +3032,9 @@ function violationsOfFixture(files: Record<string, string>): string[] {
 // console の直接の呼び出しの規則（CONSOLE_DIRECT_ACCESS。Issue #85）の違反も置く。
 // apps/shared の規則（Issue #90。frontend-to-shared-specifier・screen-to-shared・SHARED_PLACEMENT・SHARED_EXPORTS と、層の規則の
 // apps/shared の許可 SHARED_MODULES_BY_LAYER）の違反も置く。
-// 規則は全部で 26（RULES の 19 + 置き場所 3 + 環境変数の直参照 + console + exports 2）。Issue #68 で RULES に 3 規則（backend-to-frontend・
+// 規則は全部で 27（RULES の 20 + 置き場所 3 + 環境変数の直参照 + console + exports 2）。Issue #68 で RULES に 3 規則（backend-to-frontend・
 // backend-relative-only・frontend-root-to-backend）を足し、段階 2 で frontend-to-backend-specifier と BACKEND_EXPORTS を足した。
-// Issue #90 で frontend-to-shared-specifier・screen-to-shared・SHARED_PLACEMENT・SHARED_EXPORTS を足した。
+// Issue #90 で frontend-to-shared-specifier・screen-to-shared・shared-self-contained・SHARED_PLACEMENT・SHARED_EXPORTS を足した。
 const MUST_REJECT_FILES: Record<string, string> = {
   // screen-to-backend: apps/frontend/features/<f>/ の api/ 以外から backend への参照は、型でも相対でも違反。
   "apps/frontend/features/todo/components/bad-backend.ts": lines(
@@ -3386,7 +3438,17 @@ const MUST_REJECT_FILES: Record<string, string> = {
   // 例外の env.ts（process.env を読んでも違反にならない）と、shared-exports の違反を置いた package.json。
   //   "./env" は上の参照で使われ、ファイルもある（違反なし）。"./mismatch" は使われるが、値が別のファイルでキーのファイルも無い。
   //   "./unused" は使われず、ファイルも無い。
-  "apps/shared/env.ts": lines("export const env = process.env;"),
+  //   shared-self-contained: apps/shared から外の自前コード（相対パス・"@/"）、フレームワーク・DB、node: 以外のパッケージ。
+  "apps/shared/env.ts": lines(
+    "export const env = process.env;",
+    'import { todoContainer } from "../backend/todo/infra/container";',
+    'import { useState } from "react";',
+    'import type { NodePgDatabase } from "drizzle-orm/node-postgres";',
+    'export { TodoScreen } from "@/features/todo";',
+    'const z = import("zod");',
+    'import { existsSync } from "node:fs";',
+    'import { logger } from "./logger";',
+  ),
   "apps/shared/package.json": JSON.stringify({
     name: "@repo/shared",
     exports: {
@@ -3474,6 +3536,13 @@ const MUST_REJECT_VIOLATIONS = [
     "apps/shared/extra.test.ts",
   ].map((file) => `shared-placement: ${file}`),
   "env-direct-access: apps/shared/lib/logger.ts:1",
+  ...[
+    "apps/backend/todo/infra/container",
+    "react",
+    "drizzle-orm/node-postgres",
+    "apps/frontend/features/todo",
+    "zod",
+  ].map((to) => `shared-self-contained: apps/shared/env.ts → ${to}`),
   "console-direct-access: apps/shared/lib/logger.ts:1",
   "domain: apps/backend/todo/domain/bad-domain-shared.ts → apps/shared/logger",
   "application: apps/backend/todo/application/bad-application-shared.command.ts → apps/shared/env",
@@ -3911,6 +3980,7 @@ const MUST_PASS_FILES: Record<string, string> = {
   ),
   // console を直接書いてよいのは logger.ts だけ（Issue #85。Issue #90 で apps/shared に移した）。
   "apps/shared/logger.ts": lines(
+    'import type { Env } from "./env";',
     "export const logger = {",
     "  info: (line: string) => console.log(line),",
     "  warn: (line: string) => console.warn(line),",
@@ -4071,6 +4141,8 @@ const MUST_PASS_FILES: Record<string, string> = {
   ),
   // Issue #59: process.env を読んでよいのは env.ts だけ（Issue #90 で apps/shared に移した）。
   "apps/shared/env.ts": lines(
+    'import { existsSync } from "node:fs";',
+    'import { dirname, join } from "node:path";',
     'process.loadEnvFile(".env");',
     "export const env = readEnv(process.env);",
     "export const toolEnv = readToolEnv(process . env);",

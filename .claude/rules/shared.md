@@ -19,7 +19,7 @@ paths:
   - frontend 直下（`instrumentation-node.ts`・`proxy.ts`）・`apps/e2e/`・リポジトリ直下（`vitest.global-setup.ts`）は `@repo/shared/...` の書き方だけ（相対パスと `@/../shared/...` は不可。規則 `frontend-to-shared-specifier`）。
   - backend の中も `@repo/shared/...` だけで書く（相対パスは違反。規則 `backend-relative-only`）。WHY: exports を経由しない参照を許すと、公開範囲（exports）が意味を持たなくなる。backend の層ごとに使ってよいもの: infra は env・logger、presentation は logger だけ、domain・application は使わない（`SHARED_MODULES_BY_LAYER`）。
   - 画面側（`apps/frontend/` の `app/`・`features/`・`shared/`）は使わない（規則 `screen-to-shared`）。WHY: env は `process.env` と `.env` のファイルを読み、logger は stdout に書くサーバ専用のもので、ブラウザのバンドルに入れない。
-- `apps/shared` の中は同じディレクトリのファイルだけを相対パスで読む（ほかのパッケージを参照しない）。
+- `apps/shared` の中は同じディレクトリのファイルと `node:` の組み込みだけを読む。backend・frontend、React・Next・DB、`node:` 以外のパッケージは参照しない（規則 `shared-self-contained`）。WHY: frontend 直下と backend の両方が読み込む基盤なので、ここから外を参照すると `frontend-root-to-backend` や層の規則を `apps/shared` 経由ですり抜けられ、依存も env・logger を使うすべての場所に入る。
 
 ## exports（`apps/shared/package.json`）
 - キーは `./env` と `./logger` の 2 つ。1 ファイル = 1 キーで、パターン（`"./*"`）を使わない（規則 `shared-exports` が過不足と値の形を止める。検査の内容は `backend-exports` と同じ）。

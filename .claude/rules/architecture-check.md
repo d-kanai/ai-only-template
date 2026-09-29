@@ -15,7 +15,7 @@ paths:
 - 参照先の正規化: `@/x` → `apps/frontend/x`（backend のファイルに書いても frontend の paths が当たるため）、`@repo/backend/x` → `apps/backend/x`、`@repo/shared/x` → `apps/shared/x`（`@repo/backend-extra`・`@repo/shared-extra` は別パッケージ）、相対パスはリポジトリ相対、それ以外はパッケージ。`@/`・`@repo/backend/`・`@repo/shared/` の後ろの `..` も解決する。
 - 違反は「ファイル → 参照先」（環境変数と console は「ファイル:行」）の一覧で出す。
 
-## 規則（全部で 26 = 依存の 19 `RULES` + 置き場所 3 + 環境変数 1 + console 1 + exports 2）
+## 規則（全部で 27 = 依存の 20 `RULES` + 置き場所 3 + 環境変数 1 + console 1 + exports 2）
 - `frontend-to-backend-specifier`: `apps/frontend/`・`apps/e2e/`・リポジトリ直下から `apps/backend/` へは `@repo/backend/...` だけ。相対パスと `@/../backend/...` は、参照先が許される場所でも違反。例外は `vitest.global-setup.ts` → `apps/backend/shared/infra/database.test-support` の相対参照だけ（`TEST_INFRA_RELATIVE_EXCEPTION`。ファイルと参照先の組で絞る）。
 - `frontend-to-shared-specifier`（Issue #90）: `apps/frontend/`・`apps/e2e/`・リポジトリ直下から `apps/shared/` へは `@repo/shared/...` だけ。相対パスと `@/../shared/...` は違反（例外なし）。`frontend-to-backend-specifier` を広げずに別の規則にしたのは、失敗したときにどちらの境界かが分かり、fault injection も独立にできるため。backend は対象外（backend の中の書き方は `backend-relative-only` が見る）。
 - `backend-exports`: (1) 外の `@repo/backend/<path>` はすべて exports のキーに当たる（Node と同じく完全一致を優先し、次に `*` の前が最も長いパターン）、(2) 各キーは外から 1 か所以上で参照される、(3) キーは `./` で始まり、値はキーのパス + `.ts`、(4) キーが指すファイルがある（パターンなら 1 つ以上）。本番の検査では、exports を 1 件以上読めることと外の参照を取り出せていることも確かめる（読み込みや列挙が壊れて素通りしないため）。
@@ -23,6 +23,7 @@ paths:
 - `backend-to-frontend`: `apps/backend/`（直下の `drizzle.config.ts` を含む）は `apps/frontend/` を参照しない。
 - `backend-relative-only`: backend の中の自前コードへは相対パスだけ（`@/` と `@repo/backend/` は不可。参照先ではなく specifier で判定する）。`apps/shared` へは `@repo/shared/...` だけ（相対パスと `@/../shared/` は不可。exports を経由させるため。Issue #90）。
 - `frontend-root-to-backend`: `apps/frontend/` 直下のファイルは backend を参照しない（例外なし。以前の例外 env・logger は Issue #90 で `apps/shared` に移した）。
+- `shared-self-contained`（Issue #90 の reviewer 指摘）: `apps/shared/` の中は `apps/shared/` の自前コードと `node:` の組み込みだけを参照する。backend・frontend（`@/`・`@repo/backend/`・`../backend/...`）、`next` / `react` / `react-dom`、DB（`drizzle-orm`・`pg`）、`node:` 以外のパッケージ（`zod`、`node:` の付かない `fs` も）は違反。WHY `node:` 以外を一律に不可（`package.json` の dependencies で許さない）: 依存を持たないパッケージで、依存を足すだけで通る形にすると置いてよいものの判断がレビューに出ない。足すときは Issue で決めて規則を広げる。
 - `screen-to-shared`（Issue #90）: `apps/frontend/` の `app/`・`features/`・`shared/` は `apps/shared/` を参照しない（型だけでも不可。env・logger をブラウザのバンドルに持ち込まない）。
 - `features/<f>/` の `api/` 以外と `shared/` は backend を参照しない。`features/<f>/api/` から backend へは `import type` / `export type` だけで、参照先は自 feature の `presentation/*.api` か `apps/backend/shared/presentation/`。
 - 別の feature は `apps/frontend/features/<other>`（`/index`）だけ。`features/` と `shared/` は `app/` を参照しない。`shared/` は `features/` を参照しない。
