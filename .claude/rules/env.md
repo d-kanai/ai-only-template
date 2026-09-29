@@ -1,7 +1,7 @@
 ---
 paths:
   - ".env.example"
-  - "apps/backend/shared/infra/env*"
+  - "apps/shared/env*"
   - "apps/frontend/instrumentation*"
   - "compose.yaml"
   - ".tool-versions"
@@ -24,7 +24,8 @@ paths:
 - CI は `.tool-versions` の `nodejs` 行と `packageManager` から版を取る（ワークフローに直書きしない）。
 
 ## 環境変数
-- 入口は `apps/backend/shared/infra/env.ts` に一元化する。`process.env` を直接読んでよいのは `env.ts` だけ。ほかは `import { env, toolEnv } from ...` で使う（Issue #59）。
+- 入口は `apps/shared/env.ts` に一元化する。`process.env` を直接読んでよいのは `env.ts` だけ。ほかは `import { env, toolEnv } from "@repo/shared/env"` で使う（Issue #59）。
+  - 置き場所は frontend と backend で共通の workspace パッケージ `apps/shared`（`@repo/shared`。Issue #90 で `apps/backend/shared/infra/` から移した。`.claude/rules/shared.md`）。WHY: frontend 直下の `instrumentation-node.ts`・backend・`apps/e2e/`・`vitest.global-setup.ts` が共通で使い、backend の中に置くと frontend 直下から backend を参照する例外が要った。
   - `env`（型 `Env`）: アプリの設定。**すべて必須で、コードに既定値を持たない**。今は `DATABASE_URL` / `DATABASE_POOL_MAX` / `DATABASE_POOL_IDLE_TIMEOUT_MS` / `DATABASE_CONNECTION_TIMEOUT_MS`（値の意味と開発用の値は `.env.example`）。
   - `toolEnv`（型 `ToolEnv`）: 開発ツールの切り替え（任意）。`CI`・`PLAYWRIGHT_CHROMIUM_EXECUTABLE`・`STRYKER_MUTATOR_WORKER`・`E2E_PORT`（ツールの動かし方 = E2E のポート。未設定なら `apps/e2e/playwright.config.ts` が 3100 を使う）。ツールが設定する・ツールの動かし方を切り替えるものだけを足す。アプリの設定は必ず `env` に足して必須にする。
     - 任意でも、値があれば検証し、不正なら読み込み時にエラーにする（`E2E_PORT` は 1〜65535 の整数。黙って既定値に戻すと worktree ごとに分けたポートが 3100 に戻るため）。

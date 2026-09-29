@@ -11,14 +11,15 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, posix, sep } from "node:path";
+import { dirname, join, posix, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
 // ディレクトリ構成ルール（.claude/rules/backend.md・frontend.md。規則の一覧は .claude/rules/architecture-check.md）の依存の向きを、仕様として機械的に検査するテスト。
 // 対象は「依存の向き（全体）」「画面側とサーバ側の境界」「backend の 4 層の依存してよい先」、apps/frontend と apps/backend の
 // 境界（Issue #68。backend → frontend の禁止、backend の中は相対パスだけ、frontend などから backend へは "@repo/backend/..." の
-// 書き方だけ、apps/backend/package.json の exports の過不足）と、環境変数の直参照の禁止（.claude/rules/env.md の「環境変数」。
-// 規則 env-direct-access）。
+// 書き方だけ、apps/backend/package.json の exports の過不足）、frontend と backend で共通の apps/shared（Issue #90。置き場所、
+// "@repo/shared/..." の書き方、画面側から参照しない、apps/shared/package.json の exports の過不足）と、環境変数の直参照の禁止
+// （.claude/rules/env.md の「環境変数」。規則 env-direct-access）。
 //
 // WHY 自前のテストにする（Biome の noRestrictedImports を使わない）:
 //   「features/<f>/api/ から backend へは import type だけ許す」を表現できない。Biome 2.5.13 の noRestrictedImports は
@@ -34,7 +35,7 @@ import { describe, expect, it } from "vitest";
 const repoRoot = join(import.meta.dirname, "..");
 
 // 検査の対象（.claude/rules/architecture-check.md の「対象と抽出」。Issue #68 で apps/frontend と apps/backend に分けた）。
-//   apps/frontend と apps/backend の全体（再帰）。除くのは依存と生成物のディレクトリ（EXCLUDED_DIRS）だけ。
+//   apps/frontend と apps/backend（と Issue #90 の apps/shared）の全体（再帰）。除くのは依存と生成物のディレクトリ（EXCLUDED_DIRS）だけ。
 // WHY 全体を再帰する（app/・features/・shared/ だけにしない）: 以前は app/・features/・shared/ と直下のファイルだけを見ていたため、
 //   apps/frontend/lib/db.ts のような場所のファイルは、backend の container を値で import しても検査に出なかった（Issue #68 の
 //   reviewer が実測）。全体を列挙したうえで、置き場所の規則（FRONTEND_PLACEMENT / BACKEND_PLACEMENT）で、どの規則もかからない
@@ -45,6 +46,10 @@ const BACKEND_ROOT = "apps/backend";
 //   置き場所の規則の対象ではなく、backend を使う側（frontend-to-backend-specifier・backend-exports）と環境変数の直参照
 //   （env-direct-access）の対象。
 const E2E_ROOT = "apps/e2e";
+// frontend と backend で共通の基盤の workspace パッケージ @repo/shared（Issue #90。env.ts と logger.ts を apps/backend/shared/infra/
+//   から移した）。置き場所の規則（SHARED_PLACEMENT）、"@repo/shared/..." の書き方（frontend-to-shared-specifier）、画面側から
+//   参照しない（screen-to-shared）、exports（SHARED_EXPORTS）、環境変数の直参照・console の例外（env.ts・logger.ts）の対象。
+const SHARED_ROOT = "apps/shared";
 
 // WHY テストを対象外にする: テストは組み立てのために規則の外側を参照する（例: presentation のテストが
 //   infra の InMemory リポジトリを new して createTodoContainer に渡す。.claude/rules/testing.md の「置き方と環境」）。
@@ -204,22 +209,38 @@ function toPosix(path: string): string {
 //   node_modules/@repo/backend（apps/backend への symlink）と apps/backend/package.json の exports で解決する。
 const BACKEND_PACKAGE = "@repo/backend";
 
-// "@repo/backend" と "@repo/backend/x" だけ（"@repo/backend-extra" のような前方一致だけが同じ別パッケージは含めない）。
-function isBackendPackage(specifier: string): boolean {
-  return (
-    specifier === BACKEND_PACKAGE || specifier.startsWith(`${BACKEND_PACKAGE}/`)
-  );
+// frontend・backend・e2e・リポジトリ直下から apps/shared を指す書き方（Issue #90）。@repo/backend と同じく、node_modules/@repo/shared
+//   （apps/shared への symlink）と apps/shared/package.json の exports で解決する。
+const SHARED_PACKAGE = "@repo/shared";
+
+// packageName と packageName/x だけ（"@repo/backend-extra" のような前方一致だけが同じ別パッケージは含めない）。
+function isPackageSpecifier(specifier: string, packageName: string): boolean {
+  return specifier === packageName || specifier.startsWith(`${packageName}/`);
 }
+
+function isBackendPackage(specifier: string): boolean {
+  return isPackageSpecifier(specifier, BACKEND_PACKAGE);
+}
+
+function isSharedPackage(specifier: string): boolean {
+  return isPackageSpecifier(specifier, SHARED_PACKAGE);
+}
+
+// 自前の workspace パッケージの名前と、そのディレクトリ（toReference で "<名前>/x" を "<ディレクトリ>/x" にする）。
+const WORKSPACE_PACKAGES = [
+  { packageName: BACKEND_PACKAGE, root: BACKEND_ROOT },
+  { packageName: SHARED_PACKAGE, root: SHARED_ROOT },
+];
 
 // 参照先を、規則で比べる形にそろえる。
 //   "@/x" → "apps/frontend/x"（tsconfig の paths で "@/*" は apps/frontend/*。backend のファイルに書いても、Next の
 //     Turbopack は frontend の tsconfig の paths を当てるので apps/frontend を指す。Issue #68 の researcher の実測）
-//   "@repo/backend/x" → "apps/backend/x"（apps/backend/package.json の exports は、キーのパスに .ts を付けたファイルを
-//     指すことを BACKEND_EXPORTS で検査しているので、キーのパスがそのまま参照先になる）
+//   "@repo/backend/x" → "apps/backend/x"、"@repo/shared/x" → "apps/shared/x"（各 package.json の exports は、キーのパスに .ts を
+//     付けたファイルを指すことを BACKEND_EXPORTS / SHARED_EXPORTS で検査しているので、キーのパスがそのまま参照先になる）
 //   相対パス → 参照元のファイルの位置から解決したリポジトリ相対のパス
 //   それ以外 → パッケージ（specifier のまま）
-// WHY "@/" と "@repo/backend/" の後ろも posix.normalize で ".." を解決する: "@/../backend/x" は tsconfig の paths で
-//   apps/frontend/../backend/x、つまり apps/backend/x に解決される。".." を残すと apps/frontend の下の参照に見え、
+// WHY "@/" と "@repo/backend/"・"@repo/shared/" の後ろも posix.normalize で ".." を解決する: "@/../backend/x" は tsconfig の
+//   paths で apps/frontend/../backend/x、つまり apps/backend/x に解決される。".." を残すと apps/frontend の下の参照に見え、
 //   backend への参照を検査する規則（frontend-to-backend-specifier など）を素通りする。
 function toReference(
   from: string,
@@ -234,11 +255,16 @@ function toReference(
         .replace(CODE_EXTENSION, ""),
     };
   }
-  if (isBackendPackage(specifier)) {
+  const workspacePackage = WORKSPACE_PACKAGES.find(({ packageName }) =>
+    isPackageSpecifier(specifier, packageName),
+  );
+  if (workspacePackage !== undefined) {
     return {
       ...own,
       to: posix
-        .normalize(`${BACKEND_ROOT}${specifier.slice(BACKEND_PACKAGE.length)}`)
+        .normalize(
+          `${workspacePackage.root}${specifier.slice(workspacePackage.packageName.length)}`,
+        )
         .replace(CODE_EXTENSION, ""),
     };
   }
@@ -293,10 +319,14 @@ function listDirectFiles(root: string, dir: string): string[] {
     .map((entry) => (dir === "" ? entry.name : `${dir}/${entry.name}`));
 }
 
+// apps/frontend・apps/backend・apps/shared のソース（テスト以外）。
+// WHY apps/shared も入れる（Issue #90）: apps/shared のファイルも参照元として規則にかけ（置き場所・exports の数え方など）、
+//   環境変数の直参照・console の検査（env.ts・logger.ts が例外であることを含む）の対象にするため。
 function listAllSourceFiles(root: string): string[] {
   return [
     ...listSourceFiles(root, FRONTEND_ROOT),
     ...listSourceFiles(root, BACKEND_ROOT),
+    ...listSourceFiles(root, SHARED_ROOT),
   ];
 }
 
@@ -310,8 +340,9 @@ function referencesOf(root: string, files: string[]): Reference[] {
 
 // 参照を取り出すファイル。依存の向きの対象（listAllSourceFiles）に、apps/e2e/ のソース（apps/e2e/playwright.config.ts を含む）と
 //   リポジトリ直下のファイル（vitest.global-setup.ts など。テストは除く）を足す。
-// WHY apps/e2e/ とリポジトリ直下を足す: backend を @repo/backend として使う側（frontend-to-backend-specifier・BACKEND_EXPORTS）の
-//   検査の対象にするため（Issue #68 の段階 2）。ほかの規則は参照元を apps/ の下に絞っているので、足しても影響しない。
+// WHY apps/e2e/ とリポジトリ直下を足す: backend を @repo/backend として、apps/shared を @repo/shared として使う側
+//   （frontend-to-backend-specifier・BACKEND_EXPORTS・frontend-to-shared-specifier・SHARED_EXPORTS）の検査の対象にするため
+//   （Issue #68 の段階 2・Issue #90）。ほかの規則は参照元を apps/ の下に絞っているので、足しても影響しない。
 // 限界: リポジトリ直下のほかのディレクトリ（scripts/ の .ts のテスト以外など）は見ない。今は該当するソースが無い
 //   （scripts/ はシェルスクリプトとテストだけ）。そこに backend を参照するソースを置くなら、ここと fixture に足す。
 function listReferencingFiles(root: string): string[] {
@@ -397,17 +428,25 @@ function isFrontendRootFile(path: string): boolean {
   return /^apps\/frontend\/[^/]+$/.test(path);
 }
 
-// frontend の直下のファイルが参照してよい backend のファイル（環境変数の唯一の入口）。
-// WHY: instrumentation-node.ts が起動時に env.ts を読み込んで必須の環境変数を検証する（Issue #59）。Issue #68 の方針
-//   「env.ts は backend の shared/infra に置いたままで、frontend の instrumentation-node.ts がそれを読む」。
-const BACKEND_ENV_MODULE = "apps/backend/shared/infra/env";
+// 環境変数の唯一の入口（Issue #59）とサーバ側のログの唯一の出口（Issue #85）。Issue #90 で apps/backend/shared/infra/ から
+//   apps/shared/ に移した（frontend 直下の instrumentation-node.ts・proxy.ts、backend、apps/e2e/、リポジトリ直下が共通で使うため。
+//   以前は frontend 直下から backend を参照する frontend-root-to-backend の例外だった）。
+const SHARED_ENV_MODULE = `${SHARED_ROOT}/env`;
+const SHARED_LOGGER_MODULE = `${SHARED_ROOT}/logger`;
 
-// サーバ側のログの唯一の出口（Issue #85）。frontend の直下のファイル（proxy.ts のリクエストログ、instrumentation-node.ts の
-//   起動時のエラー）と、backend の presentation（http-error.ts の想定外の例外）が使う。
-// WHY presentation にも許す: presentation の infra は自 feature の container だけ（下の presentationAllows）だが、想定外の例外を
-//   ログに残すのは HTTP の境界（toErrorResponse）の仕事で、ログの出口を container 経由で渡すと全 API の組み立てに logger が入る。
-//   logger は状態を持たず、差し替えずにテストできる（console を spy する）ので、直接 import させる。
-const BACKEND_LOGGER_MODULE = "apps/backend/shared/infra/logger";
+// backend の層ごとに、参照してよい apps/shared のモジュール（Issue #90。移す前に backend/shared/infra にあったときと同じ範囲）。
+// WHY domain / application には許さない: env・logger は外の世界（環境変数・stdout）に触る基盤で、移す前も infra 層にあった。
+//   domain / application から使うと、層の規則で infra を参照させなかった意味が無くなる。
+// WHY presentation には logger だけ許す: presentation の infra は自 feature の container だけ（下の presentationAllows）だが、
+//   想定外の例外をログに残すのは HTTP の境界（toErrorResponse）の仕事で、ログの出口を container 経由で渡すと全 API の組み立てに
+//   logger が入る。logger は状態を持たず、差し替えずにテストできる（console を spy する）ので、直接 import させる（Issue #85）。
+//   env は infra（接続先・プールの設定）だけが使う。
+const SHARED_MODULES_BY_LAYER: Record<BackendLayer, ReadonlySet<string>> = {
+  domain: new Set(),
+  application: new Set(),
+  presentation: new Set([SHARED_LOGGER_MODULE]),
+  infra: new Set([SHARED_ENV_MODULE, SHARED_LOGGER_MODULE]),
+};
 
 // features/<f>/api/ から、同じ feature の api ファイル（backend/<f>/presentation/*.api）への参照か。
 // frontend-to-backend-specifier の例外（Issue #68 の段階 2。オーケストレータの判断）: リポジトリ直下の vitest.global-setup.ts
@@ -451,8 +490,8 @@ const LAYERS_MAY_USE: Record<BackendLayer, ReadonlySet<BackendLayer>> = {
 
 // presentation 固有の絞り込み。
 //   - infra は自 feature の infra/container だけ（「presentation は query / command を infra/container.ts で組み立てた
-//     コンテナからだけ受け取る。Repository の実装を直接 new しない」）。例外はログの出口 backend/shared/infra/logger
-//     （BACKEND_LOGGER_MODULE。Issue #85）。
+//     コンテナからだけ受け取る。Repository の実装を直接 new しない」）。ログの出口 apps/shared/logger は backend の外なので
+//     ここではなく SHARED_MODULES_BY_LAYER で許す（Issue #90）。
 //   - feature の domain は import type だけ（「domain（Entity の型の参照のみ）」）。Entity の生成や操作は application を通す。
 //     backend/shared/domain（DomainError）はエラーの変換（instanceof）に値として使うので対象外。
 function presentationAllows(
@@ -461,10 +500,7 @@ function presentationAllows(
   target: BackendLocation,
 ): boolean {
   if (target.layer === "infra") {
-    return (
-      ref.to === `apps/backend/${self.feature}/infra/container` ||
-      ref.to === BACKEND_LOGGER_MODULE
-    );
+    return ref.to === `apps/backend/${self.feature}/infra/container`;
   }
   if (target.layer === "domain" && target.feature !== "shared") {
     return ref.typeOnly;
@@ -473,12 +509,18 @@ function presentationAllows(
 }
 
 // backend の層にあるファイルから、自前コードへの参照が許可の一覧に入っているか。
-// 許すのは、自 feature か backend/shared の、参照元の層が参照してよい層だけ。他 feature のどの層も、画面側
-// （features/ app/ shared/）も、層に属さない場所も許さない。
+// 許すのは、自 feature か backend/shared の、参照元の層が参照してよい層と、参照元の層が使ってよい apps/shared のモジュール
+// （SHARED_MODULES_BY_LAYER）だけ。他 feature のどの層も、画面側（features/ app/ shared/）も、層に属さない場所も許さない。
 function backendMayUse(ref: Reference): boolean {
   const self = backendLayerOf(ref.from);
+  if (self === undefined) {
+    return false;
+  }
+  if (isUnder(ref.to, SHARED_ROOT)) {
+    return SHARED_MODULES_BY_LAYER[self.layer].has(ref.to);
+  }
   const target = backendLayerOf(ref.to);
-  if (self === undefined || target === undefined) {
+  if (target === undefined) {
     return false;
   }
   const sameFeatureOrShared =
@@ -500,10 +542,12 @@ function violatesBackendLayer(ref: Reference): boolean {
 // 規則の識別子。規則ごとの判定テスト（RULE_EXAMPLES）から規則を引くために使う。
 type RuleId =
   | "frontend-to-backend-specifier"
+  | "frontend-to-shared-specifier"
   | "backend-to-frontend"
   | "backend-relative-only"
   | "frontend-root-to-backend"
   | "screen-to-backend"
+  | "screen-to-shared"
   | "feature-api-to-backend"
   | "feature-to-feature"
   | "screen-to-app"
@@ -548,6 +592,24 @@ const RULES: Rule[] = [
       !isTestInfraRelativeException(ref),
   },
   {
+    // 「frontend（と apps/e2e/・リポジトリ直下の設定ファイル）から apps/shared への参照は "@repo/shared/..." だけ」（Issue #90）。
+    // WHY frontend-to-backend-specifier を広げずに別の規則にする: 1 規則 = 1 テストで、失敗したときにどちらのパッケージの境界が
+    //   破れたかがテスト名で分かり、fault injection も規則ごとに独立に行える。backend 側だけにある例外
+    //   （vitest.global-setup.ts → database.test-support の相対パス）を apps/shared に持ち込まないためでもある。
+    // WHY 相対パスを禁止する: frontend-to-backend-specifier と同じく、apps/shared/package.json の exports（公開する入口）を通らずに
+    //   apps/shared の中のファイルを指せてしまい、公開の過不足（SHARED_EXPORTS）を検査できなくなる。
+    // WHY backend は対象にしない: backend の中の書き方は backend-relative-only が 1 つの規則で見る（backend の中は相対パス、
+    //   apps/shared へは "@repo/shared/..." だけ）。ここで backend も見ると、同じ参照が 2 つの規則で重ねて出る。
+    id: "frontend-to-shared-specifier",
+    name: 'apps/frontend/・apps/e2e/・リポジトリ直下のファイルから apps/shared/ への参照は "@repo/shared/..." の書き方だけ（相対パスや "@/../shared/" を使わない）',
+    appliesTo: (from) =>
+      isUnder(from, FRONTEND_ROOT) ||
+      isUnder(from, E2E_ROOT) ||
+      !from.includes("/"),
+    isViolation: (ref) =>
+      ownUnder(ref, SHARED_ROOT) && !isSharedPackage(ref.specifier),
+  },
+  {
     // 「backend → frontend は禁止」（Issue #68）。backend は Next / React・画面側に依存しない pure な TypeScript にし、
     //   後で別プロセスに分けるときに frontend を持ち出さずに済むようにする。
     // WHY 4 層の規則と別に持つ: 4 層の規則は層の下のファイルにしかかからない。apps/backend 直下の drizzle.config.ts のような
@@ -565,24 +627,31 @@ const RULES: Rule[] = [
     //   入口だけにする（ユーザー判断）。自パッケージ名の参照は exports を通るので、公開していない内部のファイルを
     //   指せなくなる。相対パスなら exports に関係なく解決する。
     // WHY 参照先ではなく書き方（specifier）で判定する: "@repo/backend/x" と "../x" は同じファイルを指し、参照先では区別できない。
+    // WHY apps/shared へは "@repo/shared/..." だけ（Issue #90。相対パスの "../../../shared/env" も違反）: apps/shared は別の
+    //   workspace パッケージで、backend の中ではない。apps/backend/package.json に "@repo/shared": "workspace:*" を置き、
+    //   exports（apps/shared/package.json）を通して使う。exports を経由しない参照を許すと、apps/shared の公開範囲（exports。
+    //   SHARED_EXPORTS）が意味を持たなくなる（frontend・e2e の frontend-to-shared-specifier と同じ扱い。オーケストレータの判断）。
+    //   どの層から何を使ってよいかは層の規則（SHARED_MODULES_BY_LAYER）が見る。
     id: "backend-relative-only",
-    name: 'apps/backend/ の中の import は相対パスだけで、"@/" と "@repo/backend/" を使わない',
+    name: 'apps/backend/ の中の自前コードへの import は相対パスだけで（"@/" と "@repo/backend/" を使わない）、apps/shared へは "@repo/shared/..." だけ（相対パスは使わない）',
     appliesTo: (from) => isUnder(from, BACKEND_ROOT),
     isViolation: (ref) =>
-      ref.specifier.startsWith("@/") || isBackendPackage(ref.specifier),
+      ref.specifier.startsWith("@/") ||
+      isBackendPackage(ref.specifier) ||
+      (ownUnder(ref, SHARED_ROOT) && !isSharedPackage(ref.specifier)),
   },
   {
-    // 「frontend から backend への参照は app/api（値）と features/*/api（型）だけ」（Issue #68）の例外。
-    //   apps/frontend 直下の instrumentation-node.ts は、起動時の検証のために env.ts を読み込む（Issue #59）。
-    //   proxy.ts と instrumentation-node.ts は、ログを logger（BACKEND_LOGGER_MODULE）で出す（Issue #85）。
+    // 「frontend から backend への参照は app/api（値）と features/*/api（型）だけ」（Issue #68）。apps/frontend 直下のファイルは
+    //   backend を参照しない。
     // WHY 直下のファイルに規則を置く: 置かないと、next.config.ts などから backend の何を参照しても検査を素通りする。
+    // WHY 例外を持たない（Issue #90）: 以前は instrumentation-node.ts の起動時の検証（env。Issue #59）と proxy.ts・
+    //   instrumentation-node.ts のログ（logger。Issue #85）のために backend/shared/infra の env・logger だけを許していた。
+    //   env・logger は frontend と backend で共通のものなので apps/shared（@repo/shared）に移し、直下のファイルは
+    //   "@repo/shared/..." で使う（frontend-to-shared-specifier）。
     id: "frontend-root-to-backend",
-    name: "apps/frontend/ 直下のファイルが apps/backend/ を参照するときは apps/backend/shared/infra/env と apps/backend/shared/infra/logger だけ",
+    name: "apps/frontend/ 直下のファイルは apps/backend/ を参照しない（env・logger は apps/shared から使う）",
     appliesTo: isFrontendRootFile,
-    isViolation: (ref) =>
-      ownUnder(ref, BACKEND_ROOT) &&
-      ref.to !== BACKEND_ENV_MODULE &&
-      ref.to !== BACKEND_LOGGER_MODULE,
+    isViolation: (ref) => ownUnder(ref, BACKEND_ROOT),
   },
   {
     // 「`features/<feature>/` の `api/` 以外は backend を参照せず、`api/` が re-export した型を使う」
@@ -594,6 +663,22 @@ const RULES: Rule[] = [
       (isUnder(from, "apps/frontend/features") && !isFeatureApi(from)) ||
       isUnder(from, "apps/frontend/shared"),
     isViolation: (ref) => ownUnder(ref, BACKEND_ROOT),
+  },
+  {
+    // 「apps/frontend の app/・features/・shared/ は apps/shared を参照しない」（Issue #90）。apps/shared を使ってよいのは
+    //   frontend では直下のサーバ側のファイル（instrumentation-node.ts・proxy.ts）だけ。
+    // WHY: apps/shared の env（process.env を読み、.env をファイルから読み込む）と logger（stdout への出力）はサーバ側の基盤で、
+    //   画面のコード（Client Component から読み込まれうる）に入れると、ブラウザのバンドルに Node の API や環境変数の読み込みが
+    //   入る。画面側のログは出さない（.claude/rules/frontend.md）。
+    // WHY 画面側の shared/ も含める: screen-to-backend と同じく、shared/ は features から使われる画面側の部品で、Client Component
+    //   からも読み込まれるため。app/api/ も含める（app-api が api ファイル以外を止めるので重ねて検出するが、範囲を app/ 全体で書く）。
+    id: "screen-to-shared",
+    name: "apps/frontend の app/・features/・shared/ は apps/shared/ を参照しない（env・logger をブラウザのバンドルに持ち込まない）",
+    appliesTo: (from) =>
+      isUnder(from, "apps/frontend/app") ||
+      isUnder(from, "apps/frontend/features") ||
+      isUnder(from, "apps/frontend/shared"),
+    isViolation: (ref) => ownUnder(ref, SHARED_ROOT),
   },
   {
     // 「画面側で backend を参照してよいのは `features/<feature>/api/` だけ。参照先は
@@ -671,12 +756,13 @@ const RULES: Rule[] = [
     isViolation: violatesBackendLayer,
   },
   {
-    // 「presentation の依存してよい先: application、domain（Entity の型の参照のみ）、infra/container.ts、backend/shared」
+    // 「presentation の依存してよい先: application、domain（Entity の型の参照のみ）、infra/container.ts、backend/shared、
+    //   apps/shared の logger（Issue #85・#90）」
     //   同じ presentation の中の参照（api ファイル間の re-export など）は許す。
     // WHY next も禁止する: api ファイルは Web 標準の Request / Response で書き、Next を起動せずにテストできるようにしているため
     //   （.claude/rules/testing.md の「置き方と環境」）。
     id: "presentation",
-    name: "apps/backend/<f>/presentation/ が参照してよい自前コードは自 feature と apps/backend/shared/ の application/・domain/（feature の domain は型だけ）・presentation/ と自 feature の infra/container・apps/backend/shared/infra/logger だけで、next・react も参照しない",
+    name: "apps/backend/<f>/presentation/ が参照してよい自前コードは自 feature と apps/backend/shared/ の application/・domain/（feature の domain は型だけ）・presentation/ と自 feature の infra/container・apps/shared/logger だけで、next・react も参照しない",
     appliesTo: (from) => backendLayerOf(from)?.layer === "presentation",
     isViolation: violatesBackendLayer,
   },
@@ -685,19 +771,23 @@ const RULES: Rule[] = [
     //   application（container で組み立てる）」。container.ts が同じ infra の Repository の実装を組み立てるので、infra/ の中の
     //   参照も許す。
     id: "infra",
-    name: "apps/backend/<f>/infra/ が参照してよい自前コードは自 feature と apps/backend/shared/ の domain/・application/・infra/ だけで、next・react も参照しない",
+    name: "apps/backend/<f>/infra/ が参照してよい自前コードは自 feature と apps/backend/shared/ の domain/・application/・infra/ と apps/shared/ の env・logger だけで、next・react も参照しない",
     appliesTo: (from) => backendLayerOf(from)?.layer === "infra",
     isViolation: violatesBackendLayer,
   },
   {
     // 「backend/shared/: feature をまたいで使う型や処理」。各 feature が shared に依存するので、逆向きにすると循環する。
     //   画面側の shared/ も含め、backend/shared/ の外の自前コードは参照しない。
+    // WHY apps/shared は許す（Issue #90）: frontend と backend で共通の基盤（env・logger）で、feature ではないので循環しない。
+    //   どの層がどのモジュールを使ってよいかは層の規則（SHARED_MODULES_BY_LAYER）が見る。
     id: "backend-shared",
-    name: "apps/backend/shared/ が参照してよい自前コードは apps/backend/shared/ の中だけで、next・react も参照しない",
+    name: "apps/backend/shared/ が参照してよい自前コードは apps/backend/shared/ の中と apps/shared/ だけで、next・react も参照しない",
     appliesTo: (from) => isUnder(from, "apps/backend/shared"),
     isViolation: (ref) =>
       usesFramework(ref) ||
-      (ref.own && !isUnder(ref.to, "apps/backend/shared")),
+      (ref.own &&
+        !isUnder(ref.to, "apps/backend/shared") &&
+        !isUnder(ref.to, SHARED_ROOT)),
   },
   {
     // 「`app/` はルーティングだけ。`page.tsx` は screen を返すだけ」「feature の外から import してよいのは index.ts だけ」
@@ -782,8 +872,46 @@ const FRONTEND_PLACEMENT = {
 // 置き場所の規則（参照ではなくファイルの場所で決まる）。collectViolations で使う。
 const PLACEMENT_RULES = [BACKEND_PLACEMENT, FRONTEND_PLACEMENT];
 
+// apps/shared（@repo/shared。Issue #90）に置いてよいのは、名前を決めたファイルだけ（env.ts・logger.ts とそのテスト、
+//   package.json・tsconfig.json）。
+// WHY 何でも置ける場所にしない: 「frontend と backend の両方で使う」ものは多く、共通の置き場所を自由にすると、feature の
+//   コードや DB・React に依存するコードが集まり、層の規則（backend の 4 層・画面側の境界）の外で依存が育つ。
+//   置いてよいのは横断的な基盤（環境変数の入口とログの出口）だけにし、足すときはこの一覧・exports（SHARED_EXPORTS）・
+//   .claude/rules/shared.md を同じ変更で直す（足すことを規則の変更としてレビューに出す）。
+// WHY ソース以外（.md・.json・テスト）も含めてすべてのファイルを見る（BACKEND_PLACEMENT / FRONTEND_PLACEMENT はソースだけ）:
+//   置いてよいものを名前で決めているので、テストだけ・説明だけのファイルも一覧の外なら違反にし、置き場所の意図を 1 か所で持つ。
+//   除くのは依存と生成物のディレクトリ（EXCLUDED_DIRS。pnpm が作る apps/shared/node_modules/ など）だけ。
+const SHARED_FILES = new Set(
+  [
+    "env.ts",
+    "env.test.ts",
+    "logger.ts",
+    "logger.test.ts",
+    "package.json",
+    "tsconfig.json",
+  ].map((name) => `${SHARED_ROOT}/${name}`),
+);
+
+const SHARED_PLACEMENT = {
+  id: "shared-placement",
+  name: "apps/shared/ に置いてよいのは env.ts・logger.ts とそのテスト（env.test.ts・logger.test.ts）、package.json・tsconfig.json だけ",
+  isMisplaced: (file: string) =>
+    isUnder(file, SHARED_ROOT) && !SHARED_FILES.has(file),
+};
+
+// dir の下のすべてのファイル（再帰。ソース以外も含む。依存と生成物のディレクトリの中は除く）。SHARED_PLACEMENT で使う。
+function listAllFiles(root: string, dir: string): string[] {
+  if (!existsSync(join(root, dir))) {
+    return [];
+  }
+  return readdirSync(join(root, dir), { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => toPosix(relative(root, join(entry.parentPath, entry.name))))
+    .filter((path) => !isGeneratedOrDependency(path));
+}
+
 // --- 環境変数の直参照（規則 env-direct-access。.claude/rules/env.md の「環境変数」） ---
-// process.env を読んでよいのは apps/backend/shared/infra/env.ts だけ。ほかは env.ts の env / toolEnv を使う。
+// process.env を読んでよいのは apps/shared/env.ts だけ（Issue #90 で apps/backend/shared/infra/ から移した）。ほかは env.ts の env / toolEnv を使う。
 // WHY 参照（import）の規則と別に持つ: 参照先ではなくソースの中身（process.env という式）で決まり、対象のファイルも違う
 //   （apps/e2e/ とルート直下の設定ファイルも含める）ため。置き場所の規則（BACKEND_PLACEMENT / FRONTEND_PLACEMENT）と同じく、RULES の外に置く。
 // WHY Biome の style/noProcessEnv と二重に検査する: Biome は biome.json の overrides で対象外を決めるので、overrides の
@@ -798,16 +926,17 @@ const PLACEMENT_RULES = [BACKEND_PLACEMENT, FRONTEND_PLACEMENT];
 //     これと import { env } from "node:process" は Biome の noProcessEnv だけが検出する（2026-09-28 実測）。
 //   - 逆に、global.process.env と (process).env はこちらだけが検出する（Biome の noProcessEnv は検出しない。2026-09-28 実測）。
 
-// 検査の対象にするディレクトリ。依存の向きの対象（apps/frontend と apps/backend）に、E2E（apps/e2e/）を足す。
+// 検査の対象にするディレクトリ。依存の向きの対象（apps/frontend・apps/backend・apps/shared）に、E2E（apps/e2e/）を足す。
 // WHY apps/e2e/ を含める: E2E の補助（apps/e2e/database.ts）と設定（apps/e2e/playwright.config.ts）は接続先やフラグを読むので、
 //   既定値や直参照が入り込みやすい。
-const ENV_CHECK_DIRS = [FRONTEND_ROOT, BACKEND_ROOT, E2E_ROOT];
+// WHY apps/shared を含める（Issue #90）: 例外の env.ts がここにあり、同じ場所のほかのファイル（env-helper.ts など）は違反にするため。
+const ENV_CHECK_DIRS = [FRONTEND_ROOT, BACKEND_ROOT, SHARED_ROOT, E2E_ROOT];
 
 const ENV_DIRECT_ACCESS = {
   id: "env-direct-access",
-  name: "process.env を直接読んでよいのは apps/backend/shared/infra/env.ts だけ（例外は apps/frontend/instrumentation.ts の NEXT_RUNTIME だけ。apps/frontend・apps/backend・apps/e2e/ とルート直下の設定ファイルが対象。テストは除く）",
+  name: "process.env を直接読んでよいのは apps/shared/env.ts だけ（例外は apps/frontend/instrumentation.ts の NEXT_RUNTIME だけ。apps/frontend・apps/backend・apps/shared・apps/e2e/ とルート直下の設定ファイルが対象。テストは除く）",
   // 何を読んでもよいファイル（環境変数の唯一の入口）。
-  allowedFile: "apps/backend/shared/infra/env.ts",
+  allowedFile: `${SHARED_ENV_MODULE}.ts`,
   // ファイルごとに、読んでよい変数だけを許す例外。
   // WHY instrumentation.ts の NEXT_RUNTIME: Next.js がビルド時に値を埋め込む規約の変数で、Edge 向けのビルドから Node.js 専用の
   //   import を消すために process.env.NEXT_RUNTIME の形で書く必要がある（Next.js 16.3.6 同梱ドキュメント
@@ -878,7 +1007,7 @@ function findEnvViolations(root: string): string[] {
 }
 
 // --- console の直接の呼び出し（規則 console-direct-access。.claude/rules/backend.md の「ログ」。Issue #85） ---
-// console を書いてよいのは apps/backend/shared/infra/logger.ts（サーバ側のログの唯一の出口）だけ。ほかは logger を使う。
+// console を書いてよいのは apps/shared/logger.ts（サーバ側のログの唯一の出口。Issue #90 で apps/backend/shared/infra/ から移した）だけ。ほかは logger を使う。
 //   画面側のクライアントコード（features/ など）は logger も console も使わない（.claude/rules/frontend.md）。
 // WHY Biome の suspicious/noConsole と二重に検査する: env-direct-access と同じ設計。Biome は biome.json の overrides で
 //   対象外を決めるので、overrides の書き換え（対象外のパスを広げる、ルールを off にする）や allow の追加（console.error を
@@ -905,9 +1034,9 @@ const CONSOLE_CHECK_DIRS = [...ENV_CHECK_DIRS, SCRIPTS_ROOT];
 
 const CONSOLE_DIRECT_ACCESS = {
   id: "console-direct-access",
-  name: "console を直接書いてよいのは apps/backend/shared/infra/logger.ts だけ（apps/frontend・apps/backend・apps/e2e/・scripts/ とルート直下の設定ファイルが対象。テストは除く）",
+  name: "console を直接書いてよいのは apps/shared/logger.ts だけ（apps/frontend・apps/backend・apps/shared・apps/e2e/・scripts/ とルート直下の設定ファイルが対象。テストは除く）",
   // console を書いてよいファイル（ログの唯一の出口）。
-  allowedFile: "apps/backend/shared/infra/logger.ts",
+  allowedFile: `${SHARED_LOGGER_MODULE}.ts`,
   // 対象のファイルか。CONSOLE_CHECK_DIRS の下か、ルート直下（"/" を含まない）の、テストでない TS / JS。
   // WHY テストを除く: テストは console を spy して出力を抑えたり、ログに残したことを確かめたりする
   //   （vi.spyOn(console, "error")）。Biome の overrides でもテストは off にしている。
@@ -952,11 +1081,12 @@ function findConsoleViolations(root: string): string[] {
     );
 }
 
-// --- apps/backend/package.json の exports（規則 backend-exports。Issue #68 の段階 2） ---
-// exports は、@repo/backend として外（apps/frontend・apps/e2e/・リポジトリ直下の設定ファイル）に公開するファイルの一覧。
-//   ユーザー判断で、全ファイル（"./*"）ではなく、外が使う入口だけを明示する（.claude/rules/backend.md の「import の書き方と公開の範囲（exports）」）。
-// 検査すること（1 つでも破ると「backend-exports: ...」の行を出す）:
-//   (1) 外から "@repo/backend/<path>" で参照するものは、すべて exports のどれかのキーに当たる。
+// --- workspace パッケージの exports（規則 backend-exports。Issue #68 の段階 2。規則 shared-exports。Issue #90） ---
+// exports は、@repo/backend・@repo/shared として外（そのパッケージのディレクトリの外）に公開するファイルの一覧。
+//   ユーザー判断で、全ファイル（"./*"）ではなく、外が使う入口だけを明示する（.claude/rules/backend.md の「import の書き方と
+//   公開の範囲（exports）」、.claude/rules/shared.md）。
+// 検査すること（1 つでも破ると「<規則の id>: ...」の行を出す）:
+//   (1) 外から "<パッケージ名>/<path>" で参照するものは、すべて exports のどれかのキーに当たる。
 //       WHY: 当たらないと Next / Vitest / tsc の解決で失敗するが、その前に「どのファイルのどの参照か」を一覧で出す。
 //       exports を足すときに、何を公開するかをこのテストの失敗で決めさせる。
 //   (2) exports の各キーは、外から少なくとも 1 か所で参照されている。
@@ -968,20 +1098,49 @@ function findConsoleViolations(root: string): string[] {
 //   (4) キーが指すファイルが存在する（パターンなら、当たるファイルが 1 つ以上ある）。
 // キーの照合は Node.js の exports の解決（packageExportsResolve）に合わせる: 完全一致を優先し、次に "*" を 1 つだけ含む
 //   パターンのうち、"*" の前が最も長いもの（同じ長さならキーが長いもの）。"*" は 1 文字以上に当たり、"/" も含みうる。
-// WHY apps/backend の中の参照は対象外: backend の中は相対パスだけ（規則 backend-relative-only）で、exports を通らない。
-const BACKEND_MANIFEST = `${BACKEND_ROOT}/package.json`;
-
-const BACKEND_EXPORTS = {
-  id: "backend-exports",
-  name: 'apps/backend/package.json の exports は、外（apps/frontend・apps/e2e/・リポジトリ直下）が "@repo/backend/..." で参照するものをすべて含み、参照されないキーを持たず、各キーはそのパスの .ts を指す',
+// WHY パッケージの中の参照は対象外: backend の中は相対パスだけ（規則 backend-relative-only）で、exports を通らない。
+//   apps/shared の中も、同じパッケージのファイルを自分の名前で指す理由が無い。
+// WHY @repo/backend と @repo/shared で同じ関数を使う（Issue #90）: 公開の範囲の決め方（外が使う入口だけ）と検査の内容が同じで、
+//   パッケージごとに書き写すと片方だけ直す（検査がずれる）ことになる。違うのはディレクトリとパッケージ名だけ。
+type ExportedPackage = {
+  id: string;
+  name: string;
+  // パッケージのディレクトリ（リポジトリ相対）と、import に書くパッケージ名。
+  root: string;
+  packageName: string;
 };
 
-type BackendExports = Record<string, unknown>;
+const BACKEND_EXPORTS: ExportedPackage = {
+  id: "backend-exports",
+  name: 'apps/backend/package.json の exports は、外（apps/frontend・apps/e2e/・リポジトリ直下）が "@repo/backend/..." で参照するものをすべて含み、参照されないキーを持たず、各キーはそのパスの .ts を指す',
+  root: BACKEND_ROOT,
+  packageName: BACKEND_PACKAGE,
+};
 
-// WHY package.json が無い・exports が object でないときは空にする: 外からの "@repo/backend/..." の参照がすべて (1) の違反になり、
+// apps/shared/package.json の exports（Issue #90）。今のキーは "./env" と "./logger" の 2 つ（1 ファイル = 1 キー。パターンを使わない
+//   のは .claude/rules/shared.md の方針で、置き場所の規則 SHARED_PLACEMENT と合わせて公開するものを名前で決めるため）。
+const SHARED_EXPORTS: ExportedPackage = {
+  id: "shared-exports",
+  name: 'apps/shared/package.json の exports は、外（apps/frontend・apps/backend・apps/e2e/・リポジトリ直下）が "@repo/shared/..." で参照するものをすべて含み、参照されないキーを持たず、各キーはそのパスの .ts を指す',
+  root: SHARED_ROOT,
+  packageName: SHARED_PACKAGE,
+};
+
+const EXPORTED_PACKAGES = [BACKEND_EXPORTS, SHARED_EXPORTS];
+
+type PackageExports = Record<string, unknown>;
+
+function manifestOf(pkg: ExportedPackage): string {
+  return `${pkg.root}/package.json`;
+}
+
+// WHY package.json が無い・exports が object でないときは空にする: 外からの "<パッケージ名>/..." の参照がすべて (1) の違反になり、
 //   見逃す方向に倒れない。本番の検査では、exports を 1 件以上読めることを別に確かめる。
-function readBackendExports(root: string): BackendExports {
-  const path = join(root, BACKEND_MANIFEST);
+function readPackageExports(
+  root: string,
+  pkg: ExportedPackage,
+): PackageExports {
+  const path = join(root, manifestOf(pkg));
   if (!existsSync(path)) {
     return {};
   }
@@ -989,13 +1148,13 @@ function readBackendExports(root: string): BackendExports {
     exports?: unknown;
   };
   return typeof exports === "object" && exports !== null
-    ? (exports as BackendExports)
+    ? (exports as PackageExports)
     : {};
 }
 
 // "@repo/backend/x" → "./x"、"@repo/backend" → "."（exports のキーと同じ形）
-function exportSubpath(specifier: string): string {
-  return `.${specifier.slice(BACKEND_PACKAGE.length)}`;
+function exportSubpath(pkg: ExportedPackage, specifier: string): string {
+  return `.${specifier.slice(pkg.packageName.length)}`;
 }
 
 // "*" を 1 つだけ含むパターンに当たるか。"*" は 1 文字以上（Node.js と同じく、長さがパターン以上のものだけ）。
@@ -1021,21 +1180,26 @@ function resolveExportKey(subpath: string, keys: string[]): string | undefined {
     .sort((a, b) => b.indexOf("*") - a.indexOf("*") || b.length - a.length)[0];
 }
 
-// キーが指すはずのファイル（apps/backend/<キーのパス>.ts。パターンなら "*" を含む）が backendFiles にあるか。
-function exportTargetExists(key: string, backendFiles: string[]): boolean {
-  const target = `${BACKEND_ROOT}/${key.slice(2)}.ts`;
+// キーが指すはずのファイル（<パッケージのディレクトリ>/<キーのパス>.ts。パターンなら "*" を含む）が packageFiles にあるか。
+function exportTargetExists(
+  pkg: ExportedPackage,
+  key: string,
+  packageFiles: string[],
+): boolean {
+  const target = `${pkg.root}/${key.slice(2)}.ts`;
   return target.includes("*")
-    ? backendFiles.some((file) => matchesPattern(file, target))
-    : backendFiles.includes(target);
+    ? packageFiles.some((file) => matchesPattern(file, target))
+    : packageFiles.includes(target);
 }
 
 function exportEntryViolations(
+  pkg: ExportedPackage,
   key: string,
   value: unknown,
   used: ReadonlySet<string>,
-  backendFiles: string[],
+  packageFiles: string[],
 ): string[] {
-  const entry = `${BACKEND_MANIFEST} の exports "${key}"`;
+  const entry = `${manifestOf(pkg)} の exports "${key}"`;
   return [
     ...(used.has(key) ? [] : [`${entry} はどこからも参照されていない`]),
     ...(key.startsWith("./") && value === `${key}.ts`
@@ -1043,26 +1207,30 @@ function exportEntryViolations(
       : [
           `${entry} の値 ${JSON.stringify(value)} は、キーのパスに .ts を付けたものではない`,
         ]),
-    ...(exportTargetExists(key, backendFiles)
+    ...(exportTargetExists(pkg, key, packageFiles)
       ? []
       : [`${entry} が指すファイルが無い`]),
   ];
 }
 
-// exports の違反の一覧（(1) は「参照元 → specifier」、(2)〜(4) は「apps/backend/package.json の exports "キー" ...」）。
+// exports の違反の一覧（(1) は「参照元 → specifier」、(2)〜(4) は「<パッケージ>/package.json の exports "キー" ...」）。
 function findExportsViolations(
-  exports: BackendExports,
+  pkg: ExportedPackage,
+  exports: PackageExports,
   references: Reference[],
-  backendFiles: string[],
+  packageFiles: string[],
 ): string[] {
   const keys = Object.keys(exports);
   const used = new Set<string>();
   const unexported: string[] = [];
   for (const ref of references) {
-    if (isUnder(ref.from, BACKEND_ROOT) || !isBackendPackage(ref.specifier)) {
+    if (
+      isUnder(ref.from, pkg.root) ||
+      !isPackageSpecifier(ref.specifier, pkg.packageName)
+    ) {
       continue;
     }
-    const key = resolveExportKey(exportSubpath(ref.specifier), keys);
+    const key = resolveExportKey(exportSubpath(pkg, ref.specifier), keys);
     if (key === undefined) {
       unexported.push(`${ref.from} → ${ref.specifier}`);
     } else {
@@ -1072,9 +1240,23 @@ function findExportsViolations(
   return [
     ...unexported,
     ...Object.entries(exports).flatMap(([key, value]) =>
-      exportEntryViolations(key, value, used, backendFiles),
+      exportEntryViolations(pkg, key, value, used, packageFiles),
     ),
   ];
+}
+
+// root のツリーで、pkg の exports の違反を検査する（本番の検査と fixture で同じ経路を通す）。
+function findPackageExportsViolations(
+  root: string,
+  pkg: ExportedPackage,
+  references: Reference[],
+): string[] {
+  return findExportsViolations(
+    pkg,
+    readPackageExports(root, pkg),
+    references,
+    listSourceFiles(root, pkg.root),
+  );
 }
 
 function findViolations(references: Reference[], rule: Rule): string[] {
@@ -1088,7 +1270,8 @@ function findViolations(references: Reference[], rule: Rule): string[] {
 //   置き場所の違反は「backend-placement: ファイル」「frontend-placement: ファイル」の 1 行で出す。
 //   環境変数の直参照は「env-direct-access: ファイル:行」を参照ごとに 1 行で出す（同じファイルの複数の書き方を、
 //   1 つずつ拾えているかまで比べるため）。console の直接の呼び出しも「console-direct-access: ファイル:行」で同じく出す。
-//   exports の違反は「backend-exports: ...」の 1 行で出す（findExportsViolations）。
+//   exports の違反は「backend-exports: ...」「shared-exports: ...」の 1 行で出す（findExportsViolations）。
+//   apps/shared の置き場所の違反は「shared-placement: ファイル」の 1 行で出す（ソース以外も含め、apps/shared の全ファイルを見る）。
 // WHY 置き場所の規則も参照を取り出すファイル（listReferencingFiles。apps/e2e/ とリポジトリ直下を含む）全体にかける:
 //   置き場所の規則は isMisplaced の中で apps/backend・apps/frontend の下かを見るので、それ以外のファイルは違反にならない。
 //   apps/e2e/ など対象外の場所のファイルも判定に通し、判定が対象を広げる壊れ方（apps/ の下をすべて frontend と見なすなど）を
@@ -1111,11 +1294,14 @@ function collectViolations(root: string): string[] {
     ...findConsoleViolations(root).map(
       (line) => `${CONSOLE_DIRECT_ACCESS.id}: ${line}`,
     ),
-    ...findExportsViolations(
-      readBackendExports(root),
-      references,
-      listSourceFiles(root, BACKEND_ROOT),
-    ).map((line) => `${BACKEND_EXPORTS.id}: ${line}`),
+    ...listAllFiles(root, SHARED_ROOT)
+      .filter(SHARED_PLACEMENT.isMisplaced)
+      .map((file) => `${SHARED_PLACEMENT.id}: ${file}`),
+    ...EXPORTED_PACKAGES.flatMap((pkg) =>
+      findPackageExportsViolations(root, pkg, references).map(
+        (line) => `${pkg.id}: ${line}`,
+      ),
+    ),
   ].sort();
 }
 
@@ -1138,6 +1324,21 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
     ).toEqual([]);
   });
 
+  it(SHARED_PLACEMENT.name, () => {
+    expect(
+      listAllFiles(repoRoot, SHARED_ROOT).filter(SHARED_PLACEMENT.isMisplaced),
+    ).toEqual([]);
+  });
+
+  // WHY: 列挙が空（ディレクトリ名の書き間違い・列挙の壊れ）なら置き場所の違反も 0 件で常に緑になる。
+  // WHY arrayContaining（一覧の外のファイルがあっても落とさない）: 一覧の外のファイルは上の shared-placement の 1 件だけで落とし、
+  //   規則を破ったときに、どの規則が破れたかをテスト名で分かるようにする。
+  it("apps/shared の全ファイル（ソース・テスト・package.json・tsconfig.json）を列挙できている（列挙が壊れて素通りするのを防ぐ）", () => {
+    expect(listAllFiles(repoRoot, SHARED_ROOT)).toEqual(
+      expect.arrayContaining([...SHARED_FILES]),
+    );
+  });
+
   for (const rule of RULES) {
     it(rule.name, () => {
       // 失敗時にどのファイルがどこを参照しているかが出力に出るよう、違反を「ファイル → 参照先」の一覧にして空配列と比較する。
@@ -1155,18 +1356,18 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
     expect(findConsoleViolations(repoRoot)).toEqual([]);
   });
 
-  it(BACKEND_EXPORTS.name, () => {
-    expect(
-      findExportsViolations(
-        readBackendExports(repoRoot),
-        references,
-        listSourceFiles(repoRoot, BACKEND_ROOT),
-      ),
-    ).toEqual([]);
-  });
+  for (const pkg of EXPORTED_PACKAGES) {
+    it(pkg.name, () => {
+      expect(findPackageExportsViolations(repoRoot, pkg, references)).toEqual(
+        [],
+      );
+    });
+  }
 
-  it("exports を 1 件以上読め、apps/frontend・apps/e2e/・リポジトリ直下の @repo/backend の参照を取り出せている（読み込みや列挙が壊れて素通りするのを防ぐ）", () => {
-    expect(Object.keys(readBackendExports(repoRoot)).length).toBeGreaterThan(0);
+  it("apps/backend の exports を 1 件以上読め、apps/frontend の @repo/backend の参照を取り出せている（読み込みや列挙が壊れて素通りするのを防ぐ）", () => {
+    expect(
+      Object.keys(readPackageExports(repoRoot, BACKEND_EXPORTS)).length,
+    ).toBeGreaterThan(0);
     const consumers = new Set(
       references
         .filter((ref) => isBackendPackage(ref.specifier))
@@ -1176,7 +1377,26 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
       expect.arrayContaining([
         "apps/frontend/app/api/todos/route.ts",
         "apps/frontend/features/todo/api/todo-api.ts",
+      ]),
+    );
+  });
+
+  it("apps/shared の exports を読め、apps/frontend 直下・apps/backend・apps/e2e/・リポジトリ直下の @repo/shared の参照を取り出せている（読み込みや列挙が壊れて素通りするのを防ぐ）", () => {
+    expect(
+      Object.keys(readPackageExports(repoRoot, SHARED_EXPORTS)).sort(),
+    ).toEqual(["./env", "./logger"]);
+    const consumers = new Set(
+      references
+        .filter((ref) => isSharedPackage(ref.specifier))
+        .map((ref) => ref.from),
+    );
+    expect([...consumers]).toEqual(
+      expect.arrayContaining([
         "apps/frontend/instrumentation-node.ts",
+        "apps/frontend/proxy.ts",
+        "apps/backend/drizzle.config.ts",
+        "apps/backend/shared/infra/database.ts",
+        "apps/backend/shared/presentation/http-error.ts",
         "apps/e2e/database.ts",
         "apps/e2e/playwright.config.ts",
         "vitest.global-setup.ts",
@@ -1188,7 +1408,8 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
     const files = listEnvCheckedFiles(repoRoot);
     expect(files).toEqual(
       expect.arrayContaining([
-        "apps/backend/shared/infra/env.ts",
+        "apps/shared/env.ts",
+        "apps/shared/logger.ts",
         "apps/backend/shared/infra/database.ts",
         "apps/backend/shared/infra/database.test-support.ts",
         "apps/backend/todo/infra/container.ts",
@@ -1206,7 +1427,7 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
       ]),
     );
     expect(files).not.toContain("rule-tests/architecture.test.ts");
-    expect(files).not.toContain("apps/backend/shared/infra/env.test.ts");
+    expect(files).not.toContain("apps/shared/env.test.ts");
     // next build の生成物（apps/frontend/.next/）は数えない（あれば数千件の JS を検査することになる）。
     expect(files.filter((file) => file.includes("/.next/"))).toEqual([]);
   });
@@ -1215,7 +1436,8 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
     const files = listConsoleCheckedFiles(repoRoot);
     expect(files).toEqual(
       expect.arrayContaining([
-        "apps/backend/shared/infra/logger.ts",
+        "apps/shared/logger.ts",
+        "apps/shared/env.ts",
         "apps/backend/shared/infra/database.ts",
         "apps/backend/shared/presentation/http-error.ts",
         "apps/backend/todo/presentation/list-todos.api.ts",
@@ -1233,7 +1455,7 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
       ]),
     );
     expect(files).not.toContain("rule-tests/architecture.test.ts");
-    expect(files).not.toContain("apps/backend/shared/infra/logger.test.ts");
+    expect(files).not.toContain("apps/shared/logger.test.ts");
     expect(files).not.toContain("scripts/hooks/guard-git.test.ts");
     expect(files.filter((file) => file.includes("/.next/"))).toEqual([]);
   });
@@ -1311,8 +1533,16 @@ const RULE_EXAMPLES: Record<
         "@repo/backend/todo/presentation/list-todos.api",
         "value",
       ],
-      ["apps/e2e/database.ts", "@repo/backend/shared/infra/env", "value"],
-      ["vitest.global-setup.ts", "@repo/backend/shared/infra/env", "value"],
+      [
+        "apps/e2e/x.ts",
+        "@repo/backend/todo/presentation/list-todos.api",
+        "type",
+      ],
+      [
+        "vitest.config.mts",
+        "@repo/backend/shared/presentation/http-error",
+        "type",
+      ],
       // 例外: テスト基盤の vitest.global-setup.ts だけは、database.test-support を相対パスで参照してよい。
       [
         "vitest.global-setup.ts",
@@ -1329,7 +1559,39 @@ const RULE_EXAMPLES: Record<
       // 前方一致だけが同じ別ディレクトリ（apps/backend-x）は backend ではない。
       ["apps/frontend/app/page.tsx", "../../backend-x/y", "value"],
       // backend の中の相対パスは、この規則の対象外（参照元が backend。backend-relative-only が見る）。
-      ["apps/backend/drizzle.config.ts", "./shared/infra/env", "value"],
+      ["apps/backend/drizzle.config.ts", "./todo/infra/schema", "value"],
+      // apps/shared への相対パスは、この規則の対象外（frontend-to-shared-specifier が見る。Issue #90）。
+      ["apps/frontend/proxy.ts", "../shared/logger", "value"],
+    ],
+  },
+  "frontend-to-shared-specifier": {
+    violating: [
+      ["apps/frontend/instrumentation-node.ts", "../shared/env", "value"],
+      // "@/" の後ろの ".." で apps/frontend の外に出る書き方も、apps/shared への参照として数える（toReference の normalize）。
+      ["apps/frontend/proxy.ts", "@/../shared/logger", "value"],
+      ["apps/e2e/database.ts", "../shared/env", "value"],
+      ["apps/e2e/playwright.config.ts", "../shared/env.ts", "type"],
+      ["vitest.global-setup.ts", "./apps/shared/env", "value"],
+      // backend と違い、リポジトリ直下のテスト基盤にも相対パスの例外は無い。
+      ["vitest.config.mts", "./apps/shared/logger", "value"],
+      [
+        "apps/frontend/features/todo/api/x.ts",
+        "../../../../shared/env",
+        "type",
+      ],
+    ],
+    allowed: [
+      ["apps/frontend/instrumentation-node.ts", "@repo/shared/env", "value"],
+      ["apps/frontend/proxy.ts", "@repo/shared/logger", "value"],
+      ["apps/e2e/playwright.config.ts", "@repo/shared/env", "value"],
+      ["vitest.global-setup.ts", "@repo/shared/env", "value"],
+      // 画面側の shared/（apps/frontend/shared/）は apps/shared ではない。前方一致だけが同じ別ディレクトリ（apps/shared-x）も。
+      ["apps/frontend/proxy.ts", "@/shared/request-log/request-log", "value"],
+      ["apps/frontend/app/page.tsx", "../../shared-x/y", "value"],
+      // 前方一致だけが同じ別パッケージ（@repo/shared-extra）はパッケージの参照。
+      ["apps/e2e/database.ts", "@repo/shared-extra/x", "value"],
+      // backend は対象外（backend の中の書き方は backend-relative-only が見る。Issue #90）。
+      ["apps/backend/drizzle.config.ts", "../shared/env", "value"],
     ],
   },
   "backend-to-frontend": {
@@ -1344,7 +1606,7 @@ const RULE_EXAMPLES: Record<
       ["apps/backend/todo/domain/x.ts", "@/shared/x", "type"],
     ],
     allowed: [
-      ["apps/backend/drizzle.config.ts", "./shared/infra/env", "value"],
+      ["apps/backend/drizzle.config.ts", "@repo/shared/env", "value"],
       ["apps/backend/todo/infra/x.ts", "../domain/todo", "value"],
       // 前方一致だけが同じ別ディレクトリ（apps/frontend-x）は frontend ではない。
       ["apps/backend/todo/infra/x.ts", "../../../frontend-x/y", "value"],
@@ -1376,9 +1638,29 @@ const RULE_EXAMPLES: Record<
       ],
       ["apps/backend/todo/application/x.ts", "@repo/backend", "value"],
       ["apps/backend/todo/infra/x.ts", "@/features/todo", "value"],
+      // "@/" で apps/shared を指す書き方も "@/" なので違反（Issue #90）。
+      ["apps/backend/shared/infra/database.ts", "@/../shared/env", "value"],
+      // 相対パスで apps/shared を指すのも違反（exports を経由しない。Issue #90）。
+      ["apps/backend/drizzle.config.ts", "../shared/env", "value"],
+      [
+        "apps/backend/shared/infra/database.ts",
+        "../../../shared/logger",
+        "value",
+      ],
+      ["apps/backend/todo/infra/x.ts", "../../../shared/env.ts", "type"],
     ],
     allowed: [
       ["apps/backend/todo/domain/x.ts", "./todo", "value"],
+      // apps/shared（別の workspace パッケージ）は "@repo/shared/..." で参照してよい（Issue #90）。
+      ["apps/backend/shared/infra/database.ts", "@repo/shared/env", "value"],
+      [
+        "apps/backend/shared/presentation/http-error.ts",
+        "@repo/shared/logger",
+        "value",
+      ],
+      ["apps/backend/drizzle.config.ts", "@repo/shared/env", "value"],
+      // 前方一致だけが同じ別ディレクトリ（apps/shared-x）は apps/shared ではない（backend の外への相対パスの扱いは層の規則が見る）。
+      ["apps/backend/drizzle.config.ts", "../shared-x/y", "value"],
       ["apps/backend/todo/infra/x.ts", "../../shared/infra/database", "type"],
       // 前方一致だけが同じ別パッケージ（@repo/backend-extra）はパッケージの参照。
       ["apps/backend/todo/infra/x.ts", "@repo/backend-extra/x", "value"],
@@ -1409,23 +1691,8 @@ const RULE_EXAMPLES: Record<
         "../backend/todo/infra/container",
         "value",
       ],
-      // proxy.ts も直下のファイルなので、backend の env 以外は違反。
       ["apps/frontend/proxy.ts", "@repo/backend/todo/infra/container", "value"],
-      // 前方一致だけが同じ別ファイル（env-helper）は env ではない。
-      [
-        "apps/frontend/instrumentation-node.ts",
-        "@repo/backend/shared/infra/env-helper",
-        "value",
-      ],
-      // logger も前方一致だけが同じ別ファイル・別の場所の logger は許さない（Issue #85）。
-      [
-        "apps/frontend/proxy.ts",
-        "@repo/backend/shared/infra/logger-helper",
-        "value",
-      ],
-      ["apps/frontend/proxy.ts", "@repo/backend/todo/infra/logger", "value"],
-    ],
-    allowed: [
+      // Issue #90 で例外を無くした: 以前許していた env・logger（backend/shared/infra）も、alias でも相対パスでも違反。
       [
         "apps/frontend/instrumentation-node.ts",
         "@repo/backend/shared/infra/env",
@@ -1436,18 +1703,25 @@ const RULE_EXAMPLES: Record<
         "../backend/shared/infra/env",
         "value",
       ],
-      ["apps/frontend/instrumentation.ts", "./instrumentation-node", "value"],
-      // ログの唯一の出口（Issue #85）。proxy.ts のリクエストログと instrumentation-node.ts の起動時のエラー。
       ["apps/frontend/proxy.ts", "@repo/backend/shared/infra/logger", "value"],
       [
         "apps/frontend/instrumentation-node.ts",
         "@repo/backend/shared/infra/logger",
-        "value",
+        "type",
       ],
+    ],
+    allowed: [
+      // env・logger は apps/shared から使う（Issue #90）。
+      ["apps/frontend/instrumentation-node.ts", "@repo/shared/env", "value"],
+      ["apps/frontend/proxy.ts", "@repo/shared/logger", "value"],
+      ["apps/frontend/instrumentation-node.ts", "@repo/shared/logger", "value"],
+      ["apps/frontend/instrumentation.ts", "./instrumentation-node", "value"],
       ["apps/frontend/next.config.ts", "next", "type"],
       // proxy.ts（リクエストログ。Issue #80）が frontend の shared/ を使うのは、backend の参照ではないので対象外。
       ["apps/frontend/proxy.ts", "@/shared/request-log/request-log", "value"],
       ["apps/frontend/proxy.ts", "next/server", "type"],
+      // 前方一致だけが同じ別パッケージ（@repo/backend-extra）はパッケージの参照。
+      ["apps/frontend/next.config.ts", "@repo/backend-extra/x", "value"],
       // 直下でないファイルは、この規則の対象外（app/・features/ の規則で検査する）。
       [
         "apps/frontend/app/api/todos/route.ts",
@@ -1486,6 +1760,48 @@ const RULE_EXAMPLES: Record<
         "type",
       ],
       ["apps/frontend/shared/x.ts", "react", "value"],
+    ],
+  },
+  "screen-to-shared": {
+    violating: [
+      [
+        "apps/frontend/features/todo/components/x.tsx",
+        "@repo/shared/logger",
+        "value",
+      ],
+      // 型だけの参照も違反（apps/shared の型を画面側に持ち込む理由が無い。書き方を 1 つにする）。
+      [
+        "apps/frontend/features/todo/api/todo-api.ts",
+        "@repo/shared/env",
+        "type",
+      ],
+      ["apps/frontend/app/page.tsx", "@repo/shared/env", "value"],
+      ["apps/frontend/app/api/todos/route.ts", "@repo/shared/logger", "value"],
+      [
+        "apps/frontend/shared/request-log/request-log.ts",
+        "@repo/shared/logger",
+        "value",
+      ],
+      [
+        "apps/frontend/features/todo/screens/s/s.hook.ts",
+        "../../../../../shared/env",
+        "value",
+      ],
+    ],
+    allowed: [
+      // frontend 直下のサーバ側のファイルは apps/shared を使ってよい（この規則の対象外）。
+      ["apps/frontend/instrumentation-node.ts", "@repo/shared/env", "value"],
+      ["apps/frontend/proxy.ts", "@repo/shared/logger", "value"],
+      // 画面側の shared/（apps/frontend/shared/）は apps/shared ではない。
+      [
+        "apps/frontend/features/todo/components/x.tsx",
+        "@/shared/request-log/request-log",
+        "value",
+      ],
+      // 前方一致だけが同じ別パッケージ（@repo/shared-extra）はパッケージの参照。
+      ["apps/frontend/app/page.tsx", "@repo/shared-extra/x", "value"],
+      // backend は対象外（層の規則が見る）。
+      ["apps/backend/shared/infra/database.ts", "@repo/shared/env", "value"],
     ],
   },
   "feature-api-to-backend": {
@@ -1618,6 +1934,9 @@ const RULE_EXAMPLES: Record<
       ],
       ["apps/backend/todo/domain/x.ts", "@/features/todo", "value"],
       ["apps/backend/todo/domain/x.ts", "@/shared/x", "value"],
+      // apps/shared の env・logger は domain から使わない（Issue #90。SHARED_MODULES_BY_LAYER）。
+      ["apps/backend/todo/domain/x.ts", "@repo/shared/logger", "value"],
+      ["apps/backend/shared/domain/x.ts", "@repo/shared/env", "type"],
     ],
     allowed: [
       ["apps/backend/todo/domain/x.ts", "./todo", "value"],
@@ -1677,6 +1996,9 @@ const RULE_EXAMPLES: Record<
         "../../../frontend/shared/x",
         "value",
       ],
+      // apps/shared の env・logger は application から使わない（Issue #90。SHARED_MODULES_BY_LAYER）。
+      ["apps/backend/todo/application/x.ts", "@repo/shared/env", "value"],
+      ["apps/backend/todo/application/x.ts", "@repo/shared/logger", "value"],
     ],
     allowed: [
       [
@@ -1735,15 +2057,23 @@ const RULE_EXAMPLES: Record<
         "../../shared/infra/container",
         "value",
       ],
-      // infra で使ってよいのは backend/shared/infra/logger だけ。前方一致だけが同じ別ファイル、自 feature の infra の logger、
-      //   backend/shared/infra のほかのファイルは不可（Issue #85）。
-      [
-        "apps/backend/shared/presentation/x.ts",
-        "../infra/logger-helper",
-        "value",
-      ],
+      // infra は自 feature の container だけ。自 feature の infra の logger、backend/shared/infra のファイル（Issue #90 で
+      //   logger を移した後の旧パスを含む）は不可（Issue #85・#90）。
       ["apps/backend/todo/presentation/x.api.ts", "../infra/logger", "value"],
       ["apps/backend/shared/presentation/x.ts", "../infra/database", "type"],
+      [
+        "apps/backend/shared/presentation/http-error.ts",
+        "../infra/logger",
+        "value",
+      ],
+      // apps/shared で使ってよいのは logger だけ。env、前方一致だけが同じ別ファイル、パッケージ名だけ（apps/shared）は不可（Issue #90）。
+      ["apps/backend/todo/presentation/x.api.ts", "@repo/shared/env", "value"],
+      [
+        "apps/backend/shared/presentation/x.ts",
+        "@repo/shared/logger-helper",
+        "value",
+      ],
+      ["apps/backend/todo/presentation/x.api.ts", "@repo/shared", "value"],
     ],
     allowed: [
       [
@@ -1773,15 +2103,21 @@ const RULE_EXAMPLES: Record<
         "../domain/domain-error",
         "value",
       ],
-      // ログの唯一の出口（Issue #85）。http-error.ts が想定外の例外を logger.error で残す。feature の presentation からも使える。
+      // ログの唯一の出口（Issue #85。Issue #90 で apps/shared に移した）。http-error.ts が想定外の例外を logger.error で残す。
+      //   feature の presentation からも使える。相対パスで書いても参照先は同じ（書き方は backend-relative-only が見る）。
       [
         "apps/backend/shared/presentation/http-error.ts",
-        "../infra/logger",
+        "@repo/shared/logger",
         "value",
       ],
       [
         "apps/backend/todo/presentation/x.api.ts",
-        "../../shared/infra/logger",
+        "@repo/shared/logger",
+        "value",
+      ],
+      [
+        "apps/backend/todo/presentation/x.api.ts",
+        "../../../shared/logger",
         "value",
       ],
     ],
@@ -1798,6 +2134,9 @@ const RULE_EXAMPLES: Record<
       ["apps/backend/todo/infra/x.ts", "@/shared/x", "value"],
       ["apps/backend/todo/infra/x.ts", "@/app/page", "value"],
       ["apps/backend/todo/infra/x.ts", "next/server", "value"],
+      // apps/shared で使ってよいのは env・logger だけ。前方一致だけが同じ別ファイル、パッケージ名だけは不可（Issue #90）。
+      ["apps/backend/todo/infra/x.ts", "@repo/shared/env-helper", "value"],
+      ["apps/backend/shared/infra/x.ts", "@repo/shared", "value"],
     ],
     allowed: [
       ["apps/backend/todo/infra/x.ts", "../domain/todo", "value"],
@@ -1817,6 +2156,10 @@ const RULE_EXAMPLES: Record<
         "value",
       ],
       ["apps/backend/todo/infra/x.ts", "node:crypto", "value"],
+      // 環境変数の入口とログの出口（Issue #90 で apps/shared に移した）。
+      ["apps/backend/shared/infra/database.ts", "@repo/shared/env", "value"],
+      ["apps/backend/shared/infra/database.ts", "@repo/shared/logger", "value"],
+      ["apps/backend/todo/infra/x.ts", "../../../shared/env", "type"],
     ],
   },
   "backend-shared": {
@@ -1835,6 +2178,8 @@ const RULE_EXAMPLES: Record<
       ["apps/backend/shared/x.ts", "@/app/page", "value"],
       ["apps/backend/shared/domain/x.ts", "@/shared/x", "value"],
       ["apps/backend/shared/presentation/x.ts", "next/server", "value"],
+      // 前方一致だけが同じ別ディレクトリ（apps/shared-x）は apps/shared ではない（Issue #90）。
+      ["apps/backend/shared/infra/x.ts", "../../../shared-x/y", "value"],
     ],
     allowed: [
       [
@@ -1849,6 +2194,13 @@ const RULE_EXAMPLES: Record<
       ],
       ["apps/backend/shared/domain/x.ts", "node:crypto", "value"],
       ["apps/backend/shared/presentation/x.ts", "some-package/sub", "value"],
+      // apps/shared（frontend と backend で共通の基盤。Issue #90）。
+      ["apps/backend/shared/infra/database.ts", "@repo/shared/env", "value"],
+      [
+        "apps/backend/shared/presentation/http-error.ts",
+        "@repo/shared/logger",
+        "value",
+      ],
     ],
   },
   app: {
@@ -1945,6 +2297,9 @@ const PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/e2e/database.ts",
     "apps/e2e/playwright.config.ts",
     "apps/e2e/todo.spec.ts",
+    // apps/shared（@repo/shared。Issue #90）も backend の規則の対象外（SHARED_PLACEMENT が見る）。
+    "apps/shared/env.ts",
+    "apps/shared/extra.ts",
   ],
 };
 
@@ -1982,6 +2337,38 @@ const FRONTEND_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/e2e/database.ts",
     "apps/e2e/playwright.config.ts",
     "apps/e2e/todo.spec.ts",
+    // apps/shared（@repo/shared。Issue #90）も frontend の規則の対象外（SHARED_PLACEMENT が見る）。
+    "apps/shared/logger.ts",
+    "apps/shared/extra.ts",
+  ],
+};
+
+// apps/shared の置き場所の規則（SHARED_PLACEMENT。Issue #90）の判定例。
+const SHARED_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
+  misplaced: [
+    "apps/shared/extra.ts",
+    // 名前の前方一致だけが同じ別ファイル、別の拡張子、許した名前でも直下でないもの。
+    "apps/shared/env-helper.ts",
+    "apps/shared/logger.tsx",
+    "apps/shared/env.js",
+    "apps/shared/lib/env.ts",
+    // ソース以外（説明・テストだけ・設定）も、決めた名前でなければ違反。
+    "apps/shared/README.md",
+    "apps/shared/extra.test.ts",
+    "apps/shared/vitest.config.mts",
+  ],
+  placed: [
+    "apps/shared/env.ts",
+    "apps/shared/env.test.ts",
+    "apps/shared/logger.ts",
+    "apps/shared/logger.test.ts",
+    "apps/shared/package.json",
+    "apps/shared/tsconfig.json",
+    // apps/shared の外は対象外（前方一致だけが同じ別ディレクトリ・backend の shared/・画面側の shared/）。
+    "apps/shared-x/extra.ts",
+    "apps/backend/shared/infra/database.ts",
+    "apps/frontend/shared/request-log/request-log.ts",
+    "apps/e2e/database.ts",
   ],
 };
 
@@ -1992,6 +2379,21 @@ describe("backend の置き場所の判定", () => {
   it.each(PLACEMENT_EXAMPLES.placed)("%s は置き場所の違反ではない", (file) => {
     expect(BACKEND_PLACEMENT.isMisplaced(file)).toBe(false);
   });
+});
+
+describe("apps/shared の置き場所の判定", () => {
+  it.each(SHARED_PLACEMENT_EXAMPLES.misplaced)(
+    "%s は置き場所の違反",
+    (file) => {
+      expect(SHARED_PLACEMENT.isMisplaced(file)).toBe(true);
+    },
+  );
+  it.each(SHARED_PLACEMENT_EXAMPLES.placed)(
+    "%s は置き場所の違反ではない",
+    (file) => {
+      expect(SHARED_PLACEMENT.isMisplaced(file)).toBe(false);
+    },
+  );
 });
 
 describe("frontend の置き場所の判定", () => {
@@ -2026,10 +2428,13 @@ const ENV_ACCESS_EXAMPLES: {
     ["apps/frontend/app/page.jsx", "const v = process?.env.X;"],
     ["vitest.config.mts", "const v = process['env'];"],
     // env.ts と名前の前方一致だけが同じ別ファイル。
+    ["apps/shared/env-helper.ts", "export const v = process.env;"],
+    // Issue #90 で移す前の場所（apps/backend/shared/infra/env.ts）は、もう例外ではない。
     [
-      "apps/backend/shared/infra/env-helper.ts",
-      "export const v = process.env;",
+      "apps/backend/shared/infra/env.ts",
+      "export const v = process.env.DATABASE_URL;",
     ],
+    ["apps/shared/logger.ts", "const v = process.env.X;"],
     ["apps/frontend/shared/x.cjs", "module.exports = process[`env`];"],
     // 括弧で囲んだ process と、global 経由。
     ["apps/backend/todo/infra/x.ts", "const v = (process).env.X;"],
@@ -2052,11 +2457,13 @@ const ENV_ACCESS_EXAMPLES: {
     ["apps/backend/todo/infra/x.ts", "const r = process.env.NEXT_RUNTIME;"],
   ],
   allowed: [
-    // 例外の env.ts。
+    // 例外の env.ts（Issue #90 で apps/shared に移した）。
     [
-      "apps/backend/shared/infra/env.ts",
+      "apps/shared/env.ts",
       'process.loadEnvFile(".env");\nexport const env = readEnv(process.env);',
     ],
+    // apps/shared のテスト。
+    ["apps/shared/env.test.ts", "const path = process.env.PATH;"],
     // コメント・文字列の中。
     ["apps/backend/todo/infra/x.ts", "// process.env.DATABASE_URL は読まない"],
     ["apps/backend/todo/infra/x.ts", "/* process.env */ export const a = 1;"],
@@ -2192,16 +2599,19 @@ const CONSOLE_ACCESS_EXAMPLES: {
     ["scripts/hooks/tool.mjs", "console.log(1);"],
     ["vitest.config.mts", "console.log(1);"],
     ["stryker.config.mjs", "console.log(1);"],
-    // logger.ts と名前の前方一致だけが同じ別ファイル・別の場所の logger.ts。
-    ["apps/backend/shared/infra/logger-helper.ts", "console.log(1);"],
+    // logger.ts と名前の前方一致だけが同じ別ファイル・別の場所の logger.ts（Issue #90 で移す前の場所を含む）。
+    ["apps/shared/logger-helper.ts", "console.log(1);"],
+    ["apps/backend/shared/infra/logger.ts", "console.log(1);"],
     ["apps/backend/todo/infra/logger.ts", "console.log(1);"],
+    ["apps/shared/env.ts", "console.error(1);"],
   ],
   allowed: [
-    // 例外の logger.ts。
+    // 例外の logger.ts（Issue #90 で apps/shared に移した）。
     [
-      "apps/backend/shared/infra/logger.ts",
+      "apps/shared/logger.ts",
       "console.log(line); console.warn(line); console.error(line);",
     ],
+    ["apps/shared/logger.test.ts", 'vi.spyOn(console, "log");'],
     // コメント・文字列の中。
     ["apps/backend/todo/infra/x.ts", '// console.log("x") は書かない'],
     ["apps/backend/todo/infra/x.ts", "/* console.error */ export const a = 1;"],
@@ -2315,7 +2725,7 @@ describe("規則ごとの判定", () => {
   }
 });
 
-// --- exports の判定（BACKEND_EXPORTS）の仕様 ---
+// --- exports の判定（BACKEND_EXPORTS・SHARED_EXPORTS）の仕様 ---
 // 参照 1 件ごとではなく、exports の中身と参照の集まりで決まるので、RULES の外で例を持つ。
 
 const EXPORT_KEY_EXAMPLES: {
@@ -2366,7 +2776,10 @@ describe("exports のキーの照合（resolveExportKey）", () => {
     "%s は %s に当たる",
     (specifier, key) => {
       expect(
-        resolveExportKey(exportSubpath(specifier), EXPORT_KEY_EXAMPLES.keys),
+        resolveExportKey(
+          exportSubpath(BACKEND_EXPORTS, specifier),
+          EXPORT_KEY_EXAMPLES.keys,
+        ),
       ).toBe(key);
     },
   );
@@ -2375,7 +2788,10 @@ describe("exports のキーの照合（resolveExportKey）", () => {
     "%s はどのキーにも当たらない",
     (specifier) => {
       expect(
-        resolveExportKey(exportSubpath(specifier), EXPORT_KEY_EXAMPLES.keys),
+        resolveExportKey(
+          exportSubpath(BACKEND_EXPORTS, specifier),
+          EXPORT_KEY_EXAMPLES.keys,
+        ),
       ).toBeUndefined();
     },
   );
@@ -2395,6 +2811,7 @@ describe("exports の違反の検出（findExportsViolations）", () => {
   it("すべての参照がキーに当たり、すべてのキーが使われ、値がキーのパスの .ts でファイルがあれば、違反は 0 件", () => {
     expect(
       findExportsViolations(
+        BACKEND_EXPORTS,
         {
           "./todo/presentation/*.api": "./todo/presentation/*.api.ts",
           "./shared/infra/env": "./shared/infra/env.ts",
@@ -2420,6 +2837,7 @@ describe("exports の違反の検出（findExportsViolations）", () => {
   it("キーに当たらない参照、使われないキー、キーと違う値、ファイルの無いキーを、それぞれ検出する", () => {
     expect(
       findExportsViolations(
+        BACKEND_EXPORTS,
         {
           "./todo/presentation/*.api": "./todo/presentation/*.api.ts",
           "./unused": "./unused.ts",
@@ -2459,6 +2877,7 @@ describe("exports の違反の検出（findExportsViolations）", () => {
   it('キーが "./" で始まらないものは、値の形の違反にする', () => {
     expect(
       findExportsViolations(
+        BACKEND_EXPORTS,
         { "./x": "./x.ts", x: "x.ts" },
         [ref("apps/e2e/a.ts", "@repo/backend/x")],
         ["apps/backend/x.ts"],
@@ -2467,6 +2886,64 @@ describe("exports の違反の検出（findExportsViolations）", () => {
       'apps/backend/package.json の exports "x" はどこからも参照されていない',
       'apps/backend/package.json の exports "x" の値 "x.ts" は、キーのパスに .ts を付けたものではない',
       'apps/backend/package.json の exports "x" が指すファイルが無い',
+    ]);
+  });
+});
+
+describe("apps/shared の exports の違反の検出（findExportsViolations と SHARED_EXPORTS。Issue #90）", () => {
+  const ref = (from: string, specifier: string): Reference =>
+    toReference(from, { specifier, typeOnly: false });
+  const sharedFiles = ["apps/shared/env.ts", "apps/shared/logger.ts"];
+  const exports = {
+    "./env": "./env.ts",
+    "./logger": "./logger.ts",
+  };
+
+  it("frontend 直下・backend・apps/e2e/・リポジトリ直下の参照がすべてキーに当たり、すべてのキーが使われていれば、違反は 0 件", () => {
+    expect(
+      findExportsViolations(
+        SHARED_EXPORTS,
+        exports,
+        [
+          ref("apps/frontend/proxy.ts", "@repo/shared/logger"),
+          ref("apps/backend/shared/infra/database.ts", "@repo/shared/env"),
+          ref("apps/e2e/database.ts", "@repo/shared/env"),
+          ref("vitest.global-setup.ts", "@repo/shared/env"),
+          // apps/shared の中の参照と、前方一致だけが同じ別パッケージ・@repo/backend の参照は数えない。
+          ref("apps/shared/x.ts", "@repo/shared/missing"),
+          ref("apps/frontend/app/page.tsx", "@repo/shared-extra/x"),
+          ref("apps/e2e/a.ts", "@repo/backend/env"),
+        ],
+        sharedFiles,
+      ),
+    ).toEqual([]);
+  });
+
+  it("キーに当たらない参照（backend からのものも）、使われないキー、キーと違う値、ファイルの無いキーを検出し、apps/shared/package.json の名前で出す", () => {
+    expect(
+      findExportsViolations(
+        SHARED_EXPORTS,
+        {
+          ...exports,
+          "./unused": "./unused.ts",
+          "./mismatch": "./env.ts",
+        },
+        [
+          ref("apps/frontend/proxy.ts", "@repo/shared/logger"),
+          ref("apps/backend/shared/infra/database.ts", "@repo/shared/env"),
+          ref("apps/backend/shared/infra/database.ts", "@repo/shared/database"),
+          ref("apps/e2e/a.ts", "@repo/shared"),
+          ref("apps/e2e/a.ts", "@repo/shared/mismatch"),
+        ],
+        sharedFiles,
+      ),
+    ).toEqual([
+      "apps/backend/shared/infra/database.ts → @repo/shared/database",
+      "apps/e2e/a.ts → @repo/shared",
+      'apps/shared/package.json の exports "./unused" はどこからも参照されていない',
+      'apps/shared/package.json の exports "./unused" が指すファイルが無い',
+      'apps/shared/package.json の exports "./mismatch" の値 "./env.ts" は、キーのパスに .ts を付けたものではない',
+      'apps/shared/package.json の exports "./mismatch" が指すファイルが無い',
     ]);
   });
 });
@@ -2501,8 +2978,11 @@ function violationsOfFixture(files: Record<string, string>): string[] {
 // あわせて、置き場所の規則（BACKEND_PLACEMENT / FRONTEND_PLACEMENT）、環境変数の直参照の規則（ENV_DIRECT_ACCESS）、
 // exports の規則（BACKEND_EXPORTS。fixture の apps/backend/package.json）の違反も置く。
 // console の直接の呼び出しの規則（CONSOLE_DIRECT_ACCESS。Issue #85）の違反も置く。
-// 規則は全部で 22（RULES の 17 + 置き場所 2 + 環境変数の直参照 + console + exports）。Issue #68 で RULES に 3 規則（backend-to-frontend・
+// apps/shared の規則（Issue #90。frontend-to-shared-specifier・screen-to-shared・SHARED_PLACEMENT・SHARED_EXPORTS と、層の規則の
+// apps/shared の許可 SHARED_MODULES_BY_LAYER）の違反も置く。
+// 規則は全部で 26（RULES の 19 + 置き場所 3 + 環境変数の直参照 + console + exports 2）。Issue #68 で RULES に 3 規則（backend-to-frontend・
 // backend-relative-only・frontend-root-to-backend）を足し、段階 2 で frontend-to-backend-specifier と BACKEND_EXPORTS を足した。
+// Issue #90 で frontend-to-shared-specifier・screen-to-shared・SHARED_PLACEMENT・SHARED_EXPORTS を足した。
 const MUST_REJECT_FILES: Record<string, string> = {
   // screen-to-backend: apps/frontend/features/<f>/ の api/ 以外から backend への参照は、型でも相対でも違反。
   "apps/frontend/features/todo/components/bad-backend.ts": lines(
@@ -2874,6 +3354,66 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import { todoContainer } from "@repo/backend/todo/infra/container";',
     'import { env } from "@repo/backend";',
   ),
+  // Issue #90: apps/shared（@repo/shared）。
+  // screen-to-shared: 画面側（features/・app/・shared/）から apps/shared は、alias でも相対パスでも、型でも dynamic でも違反。
+  //   相対パスのものは frontend-to-shared-specifier にもかかる。"@repo/shared/logger" は fixture の exports に無いので
+  //   shared-exports にもかかる。
+  "apps/frontend/features/todo/components/bad-shared-base.tsx": lines(
+    'import { logger } from "@repo/shared/logger";',
+    'import type { Env } from "@repo/shared/env";',
+    'const e = import("../../../../shared/env");',
+  ),
+  "apps/frontend/app/bad-shared-page.tsx": lines(
+    'import { env } from "@repo/shared/env";',
+  ),
+  "apps/frontend/shared/bad-shared-base.ts": lines(
+    'export { logger } from "@repo/shared/mismatch";',
+  ),
+  // frontend-to-shared-specifier: frontend 直下・apps/e2e/・リポジトリ直下から相対パス・"@/../shared/" で apps/shared を指す。
+  //   参照先は許される（直下のサーバ側のファイルの env・logger）ので、この規則だけにかかる。
+  "apps/frontend/proxy.ts": lines(
+    'import { logger } from "../shared/logger";',
+    'import { env } from "@/../shared/env";',
+  ),
+  "apps/e2e/bad-shared.ts": lines('import { env } from "../shared/env";'),
+  "bad-shared.config.mts": lines('import { env } from "./apps/shared/env";'),
+  // shared-placement: 決めた名前以外のファイル（ソース・Markdown・テストだけのもの・入れ子のディレクトリの中）。
+  //   入れ子の lib/logger.ts は例外の apps/shared/logger.ts ではないので、process.env と console も違反。
+  "apps/shared/extra.ts": lines("export const x = 1;"),
+  "apps/shared/README.md": "# shared",
+  "apps/shared/lib/logger.ts": lines("console.log(process.env.X);"),
+  "apps/shared/extra.test.ts": lines("console.log(1);"),
+  // 例外の env.ts（process.env を読んでも違反にならない）と、shared-exports の違反を置いた package.json。
+  //   "./env" は上の参照で使われ、ファイルもある（違反なし）。"./mismatch" は使われるが、値が別のファイルでキーのファイルも無い。
+  //   "./unused" は使われず、ファイルも無い。
+  "apps/shared/env.ts": lines("export const env = process.env;"),
+  "apps/shared/package.json": JSON.stringify({
+    name: "@repo/shared",
+    exports: {
+      "./env": "./env.ts",
+      "./mismatch": "./env.ts",
+      "./unused": "./unused.ts",
+    },
+  }),
+  // 層の規則の apps/shared の許可（SHARED_MODULES_BY_LAYER）: domain / application は使えない、presentation は logger だけ
+  //   （移す前の backend/shared/infra/logger も、もう使えない）、infra は env・logger だけ。
+  "apps/backend/todo/domain/bad-domain-shared.ts": lines(
+    'import { logger } from "@repo/shared/logger";',
+  ),
+  "apps/backend/todo/application/bad-application-shared.command.ts": lines(
+    'import { env } from "../../../shared/env";',
+  ),
+  "apps/backend/todo/presentation/bad-presentation-shared.api.ts": lines(
+    'import { env } from "@repo/shared/env";',
+    'import { logger } from "../../shared/infra/logger";',
+  ),
+  //   backend-relative-only: "@/" と相対パスで apps/shared を指すのは違反（"@repo/shared/..." だけを許す。Issue #90）。
+  //   logger は infra で使ってよいので、相対パスの行は backend-relative-only だけにかかる。
+  "apps/backend/shared/infra/bad-shared-infra-base.ts": lines(
+    'import { helper } from "@repo/shared/env-helper";',
+    'import { env } from "@/../shared/env";',
+    'import { logger } from "../../../shared/logger";',
+  ),
 };
 
 const MUST_REJECT_VIOLATIONS = [
@@ -2910,6 +3450,48 @@ const MUST_REJECT_VIOLATIONS = [
   ].map(
     (to) => `frontend-root-to-backend: apps/frontend/next.config.ts → ${to}`,
   ),
+  // Issue #90 で frontend-root-to-backend の例外（backend/shared/infra の env・logger）を無くしたので、相対パスの env も違反。
+  "frontend-root-to-backend: apps/frontend/instrumentation-node.ts → apps/backend/shared/infra/env",
+  // Issue #90: apps/shared の規則。
+  ...[
+    "apps/frontend/features/todo/components/bad-shared-base.tsx → apps/shared/logger",
+    "apps/frontend/features/todo/components/bad-shared-base.tsx → apps/shared/env",
+    "apps/frontend/features/todo/components/bad-shared-base.tsx → apps/shared/env",
+    "apps/frontend/app/bad-shared-page.tsx → apps/shared/env",
+    "apps/frontend/shared/bad-shared-base.ts → apps/shared/mismatch",
+  ].map((line) => `screen-to-shared: ${line}`),
+  ...[
+    "apps/frontend/features/todo/components/bad-shared-base.tsx → apps/shared/env",
+    "apps/frontend/proxy.ts → apps/shared/logger",
+    "apps/frontend/proxy.ts → apps/shared/env",
+    "apps/e2e/bad-shared.ts → apps/shared/env",
+    "bad-shared.config.mts → apps/shared/env",
+  ].map((line) => `frontend-to-shared-specifier: ${line}`),
+  ...[
+    "apps/shared/extra.ts",
+    "apps/shared/README.md",
+    "apps/shared/lib/logger.ts",
+    "apps/shared/extra.test.ts",
+  ].map((file) => `shared-placement: ${file}`),
+  "env-direct-access: apps/shared/lib/logger.ts:1",
+  "console-direct-access: apps/shared/lib/logger.ts:1",
+  "domain: apps/backend/todo/domain/bad-domain-shared.ts → apps/shared/logger",
+  "application: apps/backend/todo/application/bad-application-shared.command.ts → apps/shared/env",
+  "presentation: apps/backend/todo/presentation/bad-presentation-shared.api.ts → apps/shared/env",
+  "presentation: apps/backend/todo/presentation/bad-presentation-shared.api.ts → apps/backend/shared/infra/logger",
+  "infra: apps/backend/shared/infra/bad-shared-infra-base.ts → apps/shared/env-helper",
+  "backend-relative-only: apps/backend/shared/infra/bad-shared-infra-base.ts → apps/shared/env",
+  "backend-relative-only: apps/backend/shared/infra/bad-shared-infra-base.ts → apps/shared/logger",
+  "backend-relative-only: apps/backend/todo/application/bad-application-shared.command.ts → apps/shared/env",
+  ...[
+    "apps/frontend/features/todo/components/bad-shared-base.tsx → @repo/shared/logger",
+    "apps/backend/todo/domain/bad-domain-shared.ts → @repo/shared/logger",
+    "apps/backend/shared/infra/bad-shared-infra-base.ts → @repo/shared/env-helper",
+    'apps/shared/package.json の exports "./mismatch" の値 "./env.ts" は、キーのパスに .ts を付けたものではない',
+    'apps/shared/package.json の exports "./mismatch" が指すファイルが無い',
+    'apps/shared/package.json の exports "./unused" はどこからも参照されていない',
+    'apps/shared/package.json の exports "./unused" が指すファイルが無い',
+  ].map((line) => `shared-exports: ${line}`),
   // Issue #68: 既存の fixture のうち、backend から画面側（features / shared / app）を参照している行は、層の規則に加えて
   //   backend-to-frontend にかかる。"@/" で書いたものは backend-relative-only にもかかる（相対パスで書いたものはかからない）。
   ...[
@@ -3323,12 +3905,12 @@ const MUST_PASS_FILES: Record<string, string> = {
     "  DomainError,",
     "  type DomainErrorCode,",
     '} from "../domain/domain-error";',
-    // Issue #85: 想定外の例外はログの唯一の出口（backend/shared/infra/logger）で残す。
-    'import { logger } from "../infra/logger";',
+    // Issue #85: 想定外の例外はログの唯一の出口（Issue #90 で apps/shared に移した logger）で残す。
+    'import { logger } from "@repo/shared/logger";',
     'logger.error({ message: "x" });',
   ),
-  // console を直接書いてよいのは logger.ts だけ（Issue #85）。
-  "apps/backend/shared/infra/logger.ts": lines(
+  // console を直接書いてよいのは logger.ts だけ（Issue #85。Issue #90 で apps/shared に移した）。
+  "apps/shared/logger.ts": lines(
     "export const logger = {",
     "  info: (line: string) => console.log(line),",
     "  warn: (line: string) => console.warn(line),",
@@ -3345,9 +3927,7 @@ const MUST_PASS_FILES: Record<string, string> = {
     "myconsole.log(1); console_.log(2);",
   ),
   // テストの console（出力の抑制や spy）は検査しない。
-  "apps/backend/shared/infra/logger.test.ts": lines(
-    'vi.spyOn(console, "log");',
-  ),
+  "apps/shared/logger.test.ts": lines('vi.spyOn(console, "log");'),
   "scripts/hooks/tool.test.ts": lines("console.log(1);"),
   "apps/frontend/features/todo/components/x.test.tsx":
     lines("console.error(1);"),
@@ -3483,12 +4063,14 @@ const MUST_PASS_FILES: Record<string, string> = {
   "apps/backend/shared/infra/database.ts": lines(
     'import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";',
     'import { Pool, type PoolConfig } from "pg";',
-    // Issue #59: 設定は env.ts から取る（backend/shared/infra → backend/shared/infra の値の参照）。
-    'import { env } from "./env";',
-    'import { env as e } from "./env";',
+    // Issue #59: 設定は env.ts から、ログは logger から取る（Issue #90 で apps/shared に移した。backend の infra から apps/shared）。
+    //   apps/shared へは "@repo/shared/..." だけ（相対パスは backend-relative-only の違反）。
+    'import { env } from "@repo/shared/env";',
+    'import { logger } from "@repo/shared/logger";',
+    'import { env as e } from "@repo/shared/env";',
   ),
-  // Issue #59: process.env を読んでよいのは env.ts だけ。
-  "apps/backend/shared/infra/env.ts": lines(
+  // Issue #59: process.env を読んでよいのは env.ts だけ（Issue #90 で apps/shared に移した）。
+  "apps/shared/env.ts": lines(
     'process.loadEnvFile(".env");',
     "export const env = readEnv(process.env);",
     "export const toolEnv = readToolEnv(process . env);",
@@ -3503,7 +4085,20 @@ const MUST_PASS_FILES: Record<string, string> = {
     "const v = myprocess.env; process.envelope;",
   ),
   // テスト、対象外の場所（scripts/・ルート直下のディレクトリの中）、TS / JS 以外のファイルは検査しない。
-  "apps/backend/shared/infra/env.test.ts": lines("const p = process.env.PATH;"),
+  "apps/shared/env.test.ts": lines("const p = process.env.PATH;"),
+  // apps/shared の package.json・tsconfig.json は置いてよい。依存のディレクトリ（node_modules）の中は置き場所の規則でも見ない。
+  "apps/shared/package.json": JSON.stringify({
+    name: "@repo/shared",
+    exports: {
+      "./env": "./env.ts",
+      "./logger": "./logger.ts",
+    },
+  }),
+  "apps/shared/tsconfig.json": "{}",
+  "apps/shared/node_modules/pkg/index.js": lines(
+    "module.exports = process.env;",
+    "console.log(1);",
+  ),
   "apps/e2e/todo.test.ts": lines("const p = process.env.PATH;"),
   "architecture.test.ts": lines("const p = process.env.PATH;"),
   "scripts/tool.ts": lines("const p = process.env.PATH;"),
@@ -3551,15 +4146,15 @@ const MUST_PASS_FILES: Record<string, string> = {
     "}",
   ),
   "apps/frontend/instrumentation-node.ts": lines(
-    'import { logger } from "@repo/backend/shared/infra/logger";',
+    'import { logger } from "@repo/shared/logger";',
     "export async function verifyEnvAtStartup() {",
-    '  await import("@repo/backend/shared/infra/env");',
+    '  await import("@repo/shared/env");',
     "}",
   ),
   // proxy.ts（Next の規約ファイル。リクエストログ。Issue #80）は直下に置き、1 行の組み立てを frontend の shared/ から使う。
-  //   出力はログの唯一の出口（backend/shared/infra/logger。Issue #85）を通す。
+  //   出力はログの唯一の出口（apps/shared/logger。Issue #85・#90）を通す。
   "apps/frontend/proxy.ts": lines(
-    'import { logger } from "@repo/backend/shared/infra/logger";',
+    'import { logger } from "@repo/shared/logger";',
     'import { type NextRequest, NextResponse } from "next/server";',
     'import { buildRequestLog } from "@/shared/request-log/request-log";',
     "logger.info(buildRequestLog());",
@@ -3567,20 +4162,20 @@ const MUST_PASS_FILES: Record<string, string> = {
   "apps/frontend/shared/request-log/request-log.ts": lines(
     "export function buildRequestLog() {}",
   ),
-  // apps/backend の設定ファイル（apps/backend/drizzle.config.ts）は env.ts を相対パスで import する（backend の中）。
-  //   apps/e2e/ とリポジトリ直下の設定ファイルは、frontend と同じく "@repo/backend/..." で import する（Issue #68 の段階 2）。
+  // env.ts は apps/shared（@repo/shared。Issue #90）にあり、apps/backend の設定ファイル（apps/backend/drizzle.config.ts）・apps/e2e/・
+  //   リポジトリ直下の設定ファイルは "@repo/shared/env" で import する。
   "apps/backend/drizzle.config.ts": lines(
-    'import { env } from "./shared/infra/env";',
+    'import { env } from "@repo/shared/env";',
     "export default { url: env.DATABASE_URL };",
   ),
   "apps/e2e/database.ts": lines(
     'import { Client } from "pg";',
-    'import { env } from "@repo/backend/shared/infra/env";',
+    'import { env } from "@repo/shared/env";',
     "export const url = env.DATABASE_URL;",
   ),
   "apps/e2e/playwright.config.ts": lines(
     'import { defineConfig } from "@playwright/test";',
-    'import { env, toolEnv } from "@repo/backend/shared/infra/env";',
+    'import { env, toolEnv } from "@repo/shared/env";',
   ),
   // E2E のテスト（*.spec.ts。Vitest のテスト *.test.ts ではないので検査の対象）。apps/e2e は置き場所の規則
   //   （BACKEND_PLACEMENT / FRONTEND_PLACEMENT）の対象外で、直下に置いても違反にならない（Issue #84）。
@@ -3590,7 +4185,7 @@ const MUST_PASS_FILES: Record<string, string> = {
   ),
   // テスト基盤の vitest.global-setup.ts だけは、database.test-support を相対パスで参照する（exports に含めない例外）。
   "vitest.global-setup.ts": lines(
-    'import { env, toolEnv } from "@repo/backend/shared/infra/env";',
+    'import { env, toolEnv } from "@repo/shared/env";',
     "import {",
     "  cleanupTestSchemas,",
     "  testSchemaPrefix,",
@@ -3603,8 +4198,6 @@ const MUST_PASS_FILES: Record<string, string> = {
     exports: {
       "./todo/presentation/*.api": "./todo/presentation/*.api.ts",
       "./shared/presentation/http-error": "./shared/presentation/http-error.ts",
-      "./shared/infra/env": "./shared/infra/env.ts",
-      "./shared/infra/logger": "./shared/infra/logger.ts",
     },
   }),
   "apps/backend/shared/infra/drizzle-transaction-runner.ts": lines(
@@ -3619,7 +4212,7 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { migrate } from "drizzle-orm/node-postgres/migrator";',
     'import { Pool } from "pg";',
     'import type { Database } from "./database";',
-    'import { env } from "./env";',
+    'import { env } from "@repo/shared/env";',
   ),
   "apps/backend/todo/infra/schema.ts": lines(
     'import { boolean, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";',
@@ -3817,6 +4410,36 @@ describe("参照先の正規化（toReference）", () => {
     expect(
       toReference(from, { specifier: "@repo/backend", typeOnly: false }).to,
     ).toBe("apps/backend");
+  });
+
+  it('"@repo/shared/" と "@repo/shared" は apps/shared からのパスにし、"@repo/shared-extra/x" は自前のコードにしない（Issue #90）', () => {
+    expect(
+      toReference(from, { specifier: "@repo/shared/env.ts", typeOnly: false }),
+    ).toEqual({
+      from,
+      specifier: "@repo/shared/env.ts",
+      to: "apps/shared/env",
+      own: true,
+      typeOnly: false,
+    });
+    expect(
+      toReference(from, { specifier: "@repo/shared", typeOnly: false }).to,
+    ).toBe("apps/shared");
+    expect(
+      toReference(from, {
+        specifier: "@repo/shared/../backend/x",
+        typeOnly: false,
+      }).to,
+    ).toBe("apps/backend/x");
+    expect(
+      toReference(from, { specifier: "@repo/shared-extra/x", typeOnly: false }),
+    ).toEqual({
+      from,
+      specifier: "@repo/shared-extra/x",
+      to: "@repo/shared-extra/x",
+      own: false,
+      typeOnly: false,
+    });
   });
 
   it('"@/" と "@repo/backend/" の後ろの ".." は解決する（"@/../backend/x" は apps/backend/x）', () => {

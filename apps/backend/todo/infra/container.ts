@@ -113,7 +113,7 @@ export function createPostgresTodoContainer(db: Database): TodoContainer {
 // アプリ（Route Handler）が使う、プロセス内で共有するコンテナ。常に Postgres で組み立てる。
 // WHY DATABASE_URL が無いときに InMemory へ切り替えない（Issue #59）: 以前は DB を起動していなくても pnpm dev で画面を
 //   触れるよう InMemory に落としていたが、設定漏れ（.env の書き忘れ、CI での渡し忘れ）でも黙って InMemory で動き、
-//   データが保存されないまま気づけなかった。環境変数はすべて必須にし（apps/backend/shared/infra/env.ts）、欠けていれば起動時に止める。
+//   データが保存されないまま気づけなかった。環境変数はすべて必須にし（apps/shared/env.ts）、欠けていれば起動時に止める。
 //   pnpm dev の前に pnpm db:up と pnpm db:migrate が要る（README.md の手順）。
 // WHY 共有する: プールは getDatabase が globalThis に 1 つだけ持つので、/api/todos と /api/todos/[id] で同じプールを使う。
 // WHY モジュールの変数で足りる（globalThis に置かない）: 2 つの route.ts がこのモジュールを別々に読み込んでも、

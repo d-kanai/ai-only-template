@@ -1,17 +1,17 @@
 import { defineConfig, devices } from "@playwright/test";
-import { env, toolEnv } from "@repo/backend/shared/infra/env";
+import { env, toolEnv } from "@repo/shared/env";
 
 // Playwright（E2E テスト）の設定。最小構成で、Chromium だけで apps/e2e/ のテスト（*.spec.ts）を実行する。
 // 実行: リポジトリ直下の pnpm test:e2e（= pnpm --filter @repo/e2e test = apps/e2e をカレントディレクトリにした playwright test）。
 //   Next の本番ビルドを webServer で起動し、ブラウザから画面を操作する。
 // WHY apps/e2e を workspace パッケージ @repo/e2e にする（Issue #84）: apps/frontend・apps/backend と同じ形にし、E2E だけが使う
 //   依存（@playwright/test・pg・@types/pg）を apps/e2e/package.json に置いて、リポジトリ直下から外す（.claude/rules/testing.md の「E2E」）。
-// WHY env.ts を "@repo/backend/..." で import する（Issue #68 の段階 2）: frontend と同じく、backend は workspace パッケージの
-//   公開の入口（apps/backend/package.json の exports）からだけ使う（rule-tests/architecture.test.ts の frontend-to-backend-specifier）。
-//   apps/e2e/package.json の devDependencies に "@repo/backend": "workspace:*" があるので、Node の解決
-//   （apps/e2e/node_modules/@repo/backend → apps/backend）で見つかる。tsconfig の paths には頼らない。
+// WHY env.ts を "@repo/shared/..." で import する（Issue #68 の段階 2・Issue #90）: env.ts は frontend と backend で共通の workspace
+//   パッケージ apps/shared にあり、公開の入口（apps/shared/package.json の exports）からだけ使う（rule-tests/architecture.test.ts の
+//   frontend-to-shared-specifier）。apps/e2e/package.json の devDependencies に "@repo/shared": "workspace:*" があるので、Node の解決
+//   （apps/e2e/node_modules/@repo/shared → apps/shared）で見つかる。tsconfig の paths には頼らない。
 // .env: カレントディレクトリは apps/e2e だが、env.ts はカレントディレクトリから上にたどってリポジトリ直下の .env を 1 つだけ読む
-//   （apps/backend/shared/infra/env.ts の findRepoRoot）。E2E_PORT・PLAYWRIGHT_CHROMIUM_EXECUTABLE・DATABASE_URL もそこから読む。
+//   （apps/shared/env.ts の findRepoRoot）。E2E_PORT・PLAYWRIGHT_CHROMIUM_EXECUTABLE・DATABASE_URL もそこから読む。
 
 // E2E 用のサーバのポート（toolEnv.E2E_PORT。.env / 環境変数の E2E_PORT を env.ts が 1〜65535 の整数として検証した値。任意）。
 // WHY 既定が 3100: pnpm dev の既定（3000）と重ならないようにし、開発サーバを起動したままでも E2E を実行できるようにする。

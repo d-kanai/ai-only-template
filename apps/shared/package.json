@@ -1,0 +1,8 @@
+{
+  "name": "@repo/shared",
+  "private": true,
+  "exports": {
+    "./env": "./env.ts",
+    "./logger": "./logger.ts"
+  }
+}

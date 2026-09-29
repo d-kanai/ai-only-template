@@ -6,7 +6,7 @@
 
 ## 決めたこと
 - 出す場所は Proxy（ユーザー判断 2026-09-29）。backend の presentation 層のラッパー（status と所要時間が取れる）は採らず、1 行出れば十分とした。
-- 出力は `logger.info(line)`（`apps/backend/shared/infra/logger.ts`。Issue #85 で `console.log(JSON.stringify(line))` から変えた）の 1 行（stdout）。ライブラリは入れない。stdout への書き込みは同期で終わるので `event.waitUntil` は使わない。
+- 出力は `logger.info(line)`（`apps/shared/logger.ts`。Issue #90 で移した。Issue #85 で `console.log(JSON.stringify(line))` から変えた）の 1 行（stdout）。ライブラリは入れない。stdout への書き込みは同期で終わるので `event.waitUntil` は使わない。
 - 応答ヘッダ `x-request-id` に `requestId` を付け、応答と行を突き合わせられるようにする。
 
 ## 1 行の形（5W1H）

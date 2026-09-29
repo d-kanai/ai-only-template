@@ -6,7 +6,7 @@ import { resetTodos } from "./database";
 // リクエストログ（apps/frontend/proxy.ts。Issue #80）が、本番ビルドの next start の stdout に 1 リクエスト = JSON 1 行で出ることを
 // 確かめる E2E テスト。1 行の中身の決め方は apps/frontend/shared/request-log/request-log.test.ts で固定しているので、ここでは
 // proxy.ts の結線（規約の場所で呼ばれる・matcher・logger 経由で stdout への 1 行・応答ヘッダ x-request-id）だけを見る。
-// 行の先頭の level / timestamp は logger（apps/backend/shared/infra/logger.ts。Issue #85）が付ける（形は logger.test.ts で固定）。
+// 行の先頭の level / timestamp は logger（apps/shared/logger.ts。Issue #85・#90）が付ける（形は logger.test.ts で固定）。
 // WHY playwright.config.ts の webServer を使わず、このテストの中で next start を子プロセスで起動する:
 //   webServer の stdout はテストから読めない（Playwright 1.63.0 の webServer.stdout は "pipe" にしてもランナーのプロセスの
 //   stdout に流すだけ。types/test.d.ts の説明。テストは別の worker プロセスで動く）。ローカルの reuseExistingServer では、起動済みのサーバ（別のプロセス）を使うので stdout を取る手段がない。

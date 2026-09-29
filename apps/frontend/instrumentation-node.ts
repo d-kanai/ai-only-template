@@ -1,4 +1,4 @@
-import { logger } from "@repo/backend/shared/infra/logger";
+import { logger } from "@repo/shared/logger";
 
 // サーバ（next start / next dev）の起動時に、Node.js runtime でだけ実行する処理。instrumentation.ts の register が
 // NEXT_RUNTIME === "nodejs" のときに import する（Next.js 16.3.6 同梱ドキュメント
@@ -14,7 +14,7 @@ import { logger } from "@repo/backend/shared/infra/logger";
 // WHY logger を静的に import してよい: logger は env.ts を含め何も import しないので、環境変数が欠けていても読み込みに失敗しない。
 export async function verifyEnvAtStartup(): Promise<void> {
   try {
-    await import("@repo/backend/shared/infra/env");
+    await import("@repo/shared/env");
   } catch (error) {
     // ログはすべて logger を通す（Issue #85）。Error は { name, message } になり、欠けた変数の名前は message に入る（env.ts）。
     logger.error({ message: "起動時の環境変数の検証に失敗しました", error });

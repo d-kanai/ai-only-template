@@ -1,4 +1,4 @@
-import { logger } from "@repo/backend/shared/infra/logger";
+import { logger } from "@repo/shared/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { buildRequestLog } from "@/shared/request-log/request-log";
 
@@ -6,7 +6,7 @@ import { buildRequestLog } from "@/shared/request-log/request-log";
 // ルーティングの前に Node.js runtime で 1 回呼ばれる（Next.js 16.3.6 同梱
 // node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md）。
 // ここでは画面アクセスとブラウザからの API route 呼び出しを、1 リクエスト = JSON 1 行（stdout）で出す（Issue #80）。
-// 出力はサーバ側のログの唯一の出口 logger（apps/backend/shared/infra/logger.ts。Issue #85）を通す。
+// 出力はサーバ側のログの唯一の出口 logger（apps/shared/logger.ts。Issue #85。Issue #90 で apps/shared に移した）を通す。
 // WHY 薄く保つ: 1 行の中身の決め方は shared/request-log/request-log.ts（純粋関数。テストで固定）に置き、ここは NextRequest の
 //   値を渡して出力し、応答に x-request-id を付けるだけにする。このファイルは next start / next dev の中でだけ動くので
 //   カバレッジの対象外にし（vitest.config.mts）、結線は E2E（apps/e2e/request-log.spec.ts）で確かめる。

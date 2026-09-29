@@ -1,17 +1,25 @@
 # ディレクトリ構成の経緯・実測・採用しなかった案
 
-規則と WHY は `.claude/rules/backend.md`・`.claude/rules/frontend.md`・`.claude/rules/architecture-check.md`。ここは読み込まれない記録（Issue #64 で旧ルールファイルから移した）。
+規則と WHY は `.claude/rules/backend.md`・`.claude/rules/frontend.md`・`.claude/rules/shared.md`・`.claude/rules/architecture-check.md`。ここは読み込まれない記録（Issue #64 で旧ルールファイルから移した）。
 
 ## 全体像（Issue #39 / #68）
 | ディレクトリ | 役割 |
 | --- | --- |
 | `apps/frontend/` | `@repo/frontend`（Next.js）。`app/`（ルーティングだけ）・`features/`・`next.config.ts`・`instrumentation*.ts` |
 | `apps/backend/` | `@repo/backend`（API 側。Next・React に依存しない TS）。`<feature>/` の DDD 4 層、`shared/`、`drizzle/`・`drizzle.config.ts` |
+| `apps/shared/` | `@repo/shared`（frontend と backend で共通の基盤。Issue #90）。`env.ts`（環境変数の入口）・`logger.ts`（ログの出口）だけ |
 | `apps/e2e/` | `@repo/e2e`（Playwright の E2E。Issue #84）。`*.spec.ts`・`database.ts`・`playwright.config.ts` |
 | リポジトリ直下 | ツールの設定・`rule-tests/`（ルール検査テスト）・`scripts/`・`docs/`・`work-logs/` |
 
 - frontend と backend を `apps/` で分ける理由（Issue #68。ユーザー指示）: パッケージの単位で画面側と API 側を分け、後で API を別プロセスに分離しやすくする。プロセスは増やさず Next 1 つのまま（Hono などの別サーバは入れない）。
 - 段階: 段階 1 でディレクトリを `apps/` に移し、import・設定・検査を書き換えた（`package.json` は 1 つ、`@repo/backend/*` は tsconfig の paths で解決）。段階 2（今の形）で pnpm workspace にし、`apps/backend` を `exports` を明示した `@repo/backend`、`apps/frontend` を `@repo/frontend` にした。段階 1 の限界（frontend から backend を相対パスで参照しても、参照先が許される場所なら違反にしない）は段階 2 の `frontend-to-backend-specifier` で解消した。
+
+## apps/shared（Issue #90）
+- 何を: 環境変数の入口 `env.ts`（Issue #59）とログの出口 `logger.ts`（Issue #85）を、`apps/backend/shared/infra/` から workspace パッケージ `apps/shared`（`@repo/shared`。exports は `./env`・`./logger`）に `git mv` で移した。
+- なぜ（ユーザー指摘、2026-09-29）: どちらも frontend 直下（`instrumentation-node.ts`・`proxy.ts`）・backend・`apps/e2e/`・`vitest.global-setup.ts` が共通で使うもので、backend の中に置くと frontend 直下から backend を参照する例外（`frontend-root-to-backend` の env・logger）が要った。共通のものを共通の場所に置き、`frontend-root-to-backend` の例外を無くした（直下のファイルは backend を参照しない）。
+- `packages/` ではなく `apps/` の下に置く: ユーザー判断（workspace のパッケージを `apps/` の下にそろえる。`pnpm-workspace.yaml` の `packages: ["apps/*"]` もそのまま）。
+- 何でも置ける場所にしない: 置いてよいファイルを名前で決め（`shared-placement`）、exports も 1 ファイルずつ（`shared-exports`）。画面側（`app/`・`features/`・`shared/`）からは参照しない（`screen-to-shared`）。backend の層ごとの許可は移す前と同じ（infra は env・logger、presentation は logger、domain・application は使わない）。規則と WHY は `.claude/rules/shared.md`。
+- 採用しなかった案: `frontend-to-backend-specifier` を「backend と shared」に広げる案（1 規則 = 1 テストで、失敗したときにどちらの境界かが分かるよう、`frontend-to-shared-specifier` を別に足した）。
 
 ## 例（Todo）のファイル構成
 ファイル名は例。実際のファイルはリポジトリを正とする。
@@ -21,10 +29,10 @@ pnpm-workspace.yaml                     # packages: ["apps/*"]（workspace の�
 package.json                            # リポジトリ直下（ツール・共通の devDependencies、pnpm --filter で apps の script を呼ぶ）
 apps/
   frontend/
-    package.json                        # @repo/frontend（next / react / "@repo/backend": "workspace:*"）
+    package.json                        # @repo/frontend（next / react / "@repo/backend"・"@repo/shared": "workspace:*"）
     next.config.ts                      # Next の設定
     instrumentation.ts                  # Next の規約ファイル（起動時の環境変数の検証。.claude/rules/env.md）
-    instrumentation-node.ts             # Node.js runtime 用の処理。@repo/backend/shared/infra/env を読み込む
+    instrumentation-node.ts             # Node.js runtime 用の処理。@repo/shared/env を読み込む
     tsconfig.json
     app/
       layout.tsx                        # Next の規約ファイル（loading.tsx / error.tsx なども app/ に置く）
@@ -60,7 +68,7 @@ apps/
             todo-detail-screen.test.tsx
             todo-detail-screen.hook.test.ts
   backend/
-    package.json                        # @repo/backend（drizzle-orm / pg、exports で公開する入口、db:generate / db:migrate）
+    package.json                        # @repo/backend（drizzle-orm / pg / @repo/shared、exports で公開する入口、db:generate / db:migrate）
     tsconfig.json
     drizzle.config.ts                   # drizzle-kit の設定（apps/backend の db:generate / db:migrate が --config で指す）
     drizzle/                            # 生成したマイグレーション（SQL と meta/）。pnpm db:generate が作り、コミットする
@@ -74,9 +82,7 @@ apps/
         json-body.ts                    # リクエスト本文を JSON のオブジェクトとして読む（readJsonObject）
         json-body.test.ts
       infra/
-        env.ts                          # 環境変数の唯一の入口（env: 必須の設定を検証した値、toolEnv: 開発ツールのフラグ）。リポジトリ直下の .env を読む
-        env.test.ts
-        database.ts                     # Postgres のプール（env から設定）と Drizzle の db、Executor 型、getDatabase / closeDatabase
+        database.ts                     # Postgres のプール（@repo/shared/env から設定）と Drizzle の db、Executor 型、getDatabase / closeDatabase
         database.test.ts
         database.test-support.ts        # 実 Postgres を使うテスト用。テストファイルごとの別スキーマにマイグレーションを当てる
         database.test-support.test.ts
@@ -120,6 +126,13 @@ apps/
         container.ts                    # 組み立て（DI）。createTodoContainer({ runner, repositoryFor, readExecutor })、
                                         #   createInMemoryTodoContainer / createPostgresTodoContainer、アプリ共有の todoContainer
         container.test.ts
+  shared/
+    package.json                        # @repo/shared（依存なし。exports は ./env・./logger。Issue #90）
+    tsconfig.json                       # apps/backend と同じ方針（DOM の型なし）
+    env.ts                              # 環境変数の唯一の入口（env: 必須の設定を検証した値、toolEnv: 開発ツールのフラグ）。リポジトリ直下の .env を読む
+    env.test.ts
+    logger.ts                           # サーバ側のログの唯一の出口（JSON 1 行。Issue #85）
+    logger.test.ts
 apps/e2e/                               # @repo/e2e。Playwright の E2E（*.spec.ts・database.ts・playwright.config.ts。Issue #84）
 rule-tests/                             # ルール検査テスト（architecture.test.ts・lint.test.ts など 8 本。Issue #86）
 tsconfig.json                           # Vitest とリポジトリ全体の型チェック用
@@ -135,19 +148,19 @@ tsconfig.json                           # Vitest とリポジトリ全体の型�
 - Route Handler は Web 標準の `Request` / `Response` で書けるので、api ファイルの handler は Next を起動せずにテストできる。
 
 ## tsconfig と型チェックのゲート（Issue #68）
-- tsconfig は 3 つ: `apps/frontend/tsconfig.json`（Next 用。paths は `@/*` だけ）、`apps/backend/tsconfig.json`（backend 単体。Next の plugin・jsx・DOM の型なし、paths なし）、リポジトリ直下の `tsconfig.json`（Vitest の `resolve.tsconfigPaths` と全体の型チェック。paths は `@/*` → `./apps/frontend/*`）。WHY は各ファイルのコメント。
-- `pnpm typecheck`（`tsc -p . --noEmit && tsc -p apps/backend --noEmit`）を CI で `pnpm lint` の後・`pnpm build` の前に実行する（`rule-tests/typecheck.test.ts` が script と CI の順序を検査）。
+- tsconfig は 4 つ: `apps/frontend/tsconfig.json`（Next 用。paths は `@/*` だけ）、`apps/backend/tsconfig.json`（backend 単体。Next の plugin・jsx・DOM の型なし、paths なし）、`apps/shared/tsconfig.json`（Issue #90。backend と同じ方針）、リポジトリ直下の `tsconfig.json`（Vitest の `resolve.tsconfigPaths` と全体の型チェック。paths は `@/*` → `./apps/frontend/*`）。WHY は各ファイルのコメント。
+- `pnpm typecheck`（`tsc -p . --noEmit && tsc -p apps/backend --noEmit && tsc -p apps/shared --noEmit`）を CI で `pnpm lint` の後・`pnpm build` の前に実行する（`rule-tests/typecheck.test.ts` が script と CI の順序を検査）。
   - WHY: `apps/frontend` の `next build` は frontend と、そこから import された backend のファイルしか型チェックしない。monorepo 化の前はリポジトリ直下の tsconfig（`**/*.ts`）で `next build` がテスト・ルール検査テスト・e2e・設定まで型チェックしていたが、移動後は backend のテストや `rule-tests/architecture.test.ts` に型エラーを置いても `pnpm build` が exit 0 になった（reviewer の実測）。Vitest は型を検査しない。
 - 段階 2 で tsconfig の paths から `@repo/backend/*` を外した: paths は exports より先に解決に使われ、公開していないファイルも型チェックを通るため。
 
 ## 後で別プロセスに分けるとき
 1. `apps/backend` に起動口（`server.ts`。HTTP サーバと api ファイルの結線）と、その起動の script を足す。
 2. `apps/frontend/app/api/**` を消し、Next の `rewrites` で `/api/*` を backend のサーバに向ける。
-3. `apps/frontend/package.json` の `@repo/backend` は型だけの依存になる（`features/*/api/` の `import type`。exports から `*.api` の値の利用が無くなる）。`instrumentation-node.ts` の env の検証は backend のサーバ側に移す。
+3. `apps/frontend/package.json` の `@repo/backend` は型だけの依存になる（`features/*/api/` の `import type`。exports から `*.api` の値の利用が無くなる）。env・logger は `apps/shared`（Issue #90）にあるので、frontend と backend のサーバの両方がそのまま使える。
 - backend は Next・React に依存せず、中の import は相対パスだけなので、そのまま動く想定。Node で直接動かすときの TS の扱い（`constructor(private readonly ...)` は Node の型除去だけでは動かない見込み）は未確認。
 
 ## Stryker と workspace（Issue #68 の段階 2）
-- サンドボックスの中でも、`@repo/backend/...` で import したファイルは変異していない元の `apps/backend` を読む（サンドボックスの `node_modules` は元のリポジトリへの symlink）。backend のテストは相対パスで import するので影響はなく、score は 100%（killed 570 / timeout 3 / survived 0 / ignored 16）。
+- サンドボックスの中でも、`@repo/backend/...`（Issue #90 からは `@repo/shared/...` も）で import したファイルは変異していない元の `apps/backend`（`apps/shared`）を読む（サンドボックスの `node_modules` は元のリポジトリへの symlink）。backend のテストは相対パスで import するので影響はなく、score は 100%（killed 570 / timeout 3 / survived 0 / ignored 16）。
 
 ## 採用しなかった案
 - `app/` 内に `_components` などの private folder を置き、ルート単位でコードを分ける構成（公式の「Split project files by feature or route」）: URL とコードの置き場所が結びつき、ルートを動かすとコードも動かすことになる。

@@ -143,10 +143,10 @@ describe("biome check（pnpm lint と同じ引数）", () => {
     expect(output).toContain(rule);
   });
 
-  // style/noProcessEnv（Issue #59）: process.env を読んでよいのは apps/backend/shared/infra/env.ts とテストだけ
+  // style/noProcessEnv（Issue #59）: process.env を読んでよいのは apps/shared/env.ts とテストだけ
   //   （.claude/rules/env.md の「環境変数」）。既定 severity が info なので、biome.json で error にしている。
   // WHY 一時ディレクトリに置いたファイルで must-reject を確かめる: overrides の includes はリポジトリ直下からの相対パスで
-  //   照合され、リポジトリの外のファイルは env.ts と同じ名前（.../apps/backend/shared/infra/env.ts）でも一致しない（2026-09-28 実測）。
+  //   照合され、リポジトリの外のファイルは env.ts と同じ名前（.../apps/shared/env.ts）でも一致しない（2026-09-28 実測）。
   //   そのため「env.ts という名前なら何でも許す」ような緩い overrides になっていないことも、同じ仕組みで確かめられる。
   it.each([
     ["env.ts 以外のファイル", "config.ts"],
@@ -178,8 +178,8 @@ describe("biome check（pnpm lint と同じ引数）", () => {
     },
   );
 
-  it("apps/backend/shared/infra/env.ts は process.env を読んでいても 0 で終わる（環境変数の唯一の入口）", () => {
-    const envModule = "apps/backend/shared/infra/env.ts";
+  it("apps/shared/env.ts は process.env を読んでいても 0 で終わる（環境変数の唯一の入口）", () => {
+    const envModule = "apps/shared/env.ts";
     // 前提: env.ts が実際に process.env を読んでいること（読んでいなければ、この検査は何も確かめていない）。
     expect(readFileSync(join(repoRoot, envModule), "utf8")).toContain(
       "process.env",
@@ -190,7 +190,7 @@ describe("biome check（pnpm lint と同じ引数）", () => {
     expect(result.status, result.stdout + result.stderr).toBe(0);
   });
 
-  // suspicious/noConsole（Issue #85）: console を書いてよいのは apps/backend/shared/infra/logger.ts（ログの唯一の出口）と
+  // suspicious/noConsole（Issue #85）: console を書いてよいのは apps/shared/logger.ts（ログの唯一の出口）と
   //   テストだけ（.claude/rules/backend.md の「ログ」）。allow は空にし、console.error / console.warn も違反にする。
   // WHY noProcessEnv と同じく一時ディレクトリのファイルで must-reject を確かめる: overrides の includes はリポジトリ直下からの
   //   相対パスで照合されるので、リポジトリの外の logger.ts という名前のファイルが通らないことで、「logger.ts という名前なら
@@ -245,8 +245,8 @@ describe("biome check（pnpm lint と同じ引数）", () => {
     },
   );
 
-  it("apps/backend/shared/infra/logger.ts は console を書いていても 0 で終わる（ログの唯一の出口）", () => {
-    const loggerModule = "apps/backend/shared/infra/logger.ts";
+  it("apps/shared/logger.ts は console を書いていても 0 で終わる（ログの唯一の出口）", () => {
+    const loggerModule = "apps/shared/logger.ts";
     // 前提: logger.ts が実際に console を使っていること（使っていなければ、この検査は何も確かめていない）。
     const source = readFileSync(join(repoRoot, loggerModule), "utf8");
     expect(source).toContain("console.log(");

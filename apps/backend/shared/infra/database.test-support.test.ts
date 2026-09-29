@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { randomUUID } from "node:crypto";
+import { env } from "@repo/shared/env";
 import { sql } from "drizzle-orm";
 import { Client } from "pg";
 import { describe, expect, test, vi } from "vitest";
@@ -9,7 +10,6 @@ import {
   createTestDatabase,
   testSchemaPrefix,
 } from "./database.test-support";
-import { env } from "./env";
 
 // 実 Postgres（compose.yaml）に対して実行する。
 describe("createTestDatabase", () => {

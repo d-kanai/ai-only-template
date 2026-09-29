@@ -1,4 +1,4 @@
-import { env, toolEnv } from "@repo/backend/shared/infra/env";
+import { env, toolEnv } from "@repo/shared/env";
 import {
   cleanupTestSchemas,
   testSchemaPrefix,
@@ -10,8 +10,9 @@ import {
 // env.ts を読み込むので、.env が無い・必須の変数が欠けているときも、テストファイルを動かす前にここで欠けた名前を出して止まる。
 // WHY ここ（テストの前）で消すか: テストファイルはまだ 1 つも動いていないので、消してよいのは前の実行の残りだけになる。
 //   同じ理由で、Stryker の worker の中では消さない（他の worker が並行して動いているため。WHY は cleanupTestSchemas）。
-// WHY env は "@repo/backend/..." で import する（Issue #68 の段階 2）: リポジトリ直下のファイルも、backend は公開の入口
-//   （apps/backend/package.json の exports）からだけ使う（rule-tests/architecture.test.ts の frontend-to-backend-specifier）。
+// WHY env は "@repo/shared/env" で import する（Issue #68 の段階 2・Issue #90）: env.ts は frontend と backend で共通の workspace
+//   パッケージ apps/shared にあり、リポジトリ直下のファイルも公開の入口（apps/shared/package.json の exports）からだけ使う
+//   （rule-tests/architecture.test.ts の frontend-to-shared-specifier）。
 // WHY database.test-support だけは相対パスで import する: テストのための処理で、パッケージの公開面（exports）に含めない
 //   （exports はアプリの入口だけ）。exports に無いので @repo/backend では解決できない。このファイルからのこの参照だけを、
 //   frontend-to-backend-specifier の例外（TEST_INFRA_RELATIVE_EXCEPTION）として許している。

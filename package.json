@@ -11,7 +11,7 @@
     "test:e2e": "pnpm --filter @repo/e2e test",
     "test:mutation": "stryker run",
     "lint": "biome check --error-on-warnings .",
-    "typecheck": "tsc -p . --noEmit && tsc -p apps/backend --noEmit",
+    "typecheck": "tsc -p . --noEmit && tsc -p apps/backend --noEmit && tsc -p apps/shared --noEmit",
     "format": "biome format --write .",
     "check": "biome check --write --error-on-warnings .",
     "db:up": "docker compose up -d --wait",
@@ -22,7 +22,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.13",
-    "@repo/backend": "workspace:*",
+    "@repo/shared": "workspace:*",
     "@stryker-mutator/core": "10.0.0",
     "@stryker-mutator/vitest-runner": "10.0.0",
     "@testing-library/dom": "10.4.2",
