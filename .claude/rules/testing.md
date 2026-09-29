@@ -79,7 +79,7 @@ paths:
 - 今の disable の一覧（すべて等価。足す・消すときはここを直す）:
   - `apps/frontend/features/todo/screens/todo-screen/todo-screen.hook.ts` の依存配列 5 か所（`reloadTodos` は依存の無い useCallback で作り直されず、それを依存に持つ effect・`mutateAndReload`・`toggleTodo`・`removeTodo` も作り直されない）。
   - `apps/frontend/features/todo/screens/todo-detail-screen/todo-detail-screen.hook.ts` の世代の `+=`（`-=` でも毎回別の値になる）。
-- 残る static は `apps/backend/todo/infra/schema.ts` のテーブル宣言だけ（等価の理由は `stryker.config.mjs`）。
+- 残る static は `apps/backend/features/todo/infra/schema.ts` のテーブル宣言だけ（等価の理由は `stryker.config.mjs`）。
 - テストで `@repo/backend/...`・`@repo/shared/...` から値を import すると、その変異はテストに届かない。backend・apps/shared の振る舞いはそれぞれの中のテスト（相対 import）で確かめる。
 
 ## E2E（Playwright）

@@ -1,17 +1,17 @@
-import type { ErrorResponse } from "@repo/backend/shared/presentation/http-error";
 import type {
   CreateTodoRequest,
   CreateTodoResponse,
-} from "@repo/backend/todo/presentation/create-todo.api";
-import type { GetTodoResponse } from "@repo/backend/todo/presentation/get-todo.api";
+} from "@repo/backend/features/todo/presentation/create-todo.api";
+import type { GetTodoResponse } from "@repo/backend/features/todo/presentation/get-todo.api";
 import type {
   ListTodosResponse,
   TodoDto,
-} from "@repo/backend/todo/presentation/list-todos.api";
+} from "@repo/backend/features/todo/presentation/list-todos.api";
 import type {
   UpdateTodoRequest,
   UpdateTodoResponse,
-} from "@repo/backend/todo/presentation/update-todo.api";
+} from "@repo/backend/features/todo/presentation/update-todo.api";
+import type { ErrorResponse } from "@repo/backend/shared/presentation/http-error";
 
 // /api/todos を呼ぶ薄いラッパー。画面側のデータ取得は必ず「hook → ここ → Route Handler」を通す（SSR を前提にしない構成）。
 // リクエスト / レスポンスの型は backend の presentation 層の型を import type で参照するだけにする。

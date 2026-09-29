@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
-import { DomainError } from "../../shared/domain/domain-error";
+import { DomainError } from "../../../shared/domain/domain-error";
 import { Todo } from "./todo";
 
 // message は API の ErrorResponse の message として画面に出る（クライアントとの契約）ので、文言まで検証する。

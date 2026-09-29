@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
-import type { ErrorResponse } from "../../shared/presentation/http-error";
+import type { ErrorResponse } from "../../../shared/presentation/http-error";
 import { createInMemoryTodoContainer } from "../infra/container";
 import { type CreateTodoResponse, createTodoApi } from "./create-todo.api";
 

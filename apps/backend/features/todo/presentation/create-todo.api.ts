@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { toErrorResponse } from "../../shared/presentation/http-error";
+import { toErrorResponse } from "../../../shared/presentation/http-error";
 import {
   parseJsonBody,
   requestBodySchema,
-} from "../../shared/presentation/json-body";
+} from "../../../shared/presentation/json-body";
 import type { Todo } from "../domain/todo";
 import { type TodoContainer, todoContainer } from "../infra/container";
 

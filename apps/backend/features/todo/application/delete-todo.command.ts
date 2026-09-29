@@ -1,4 +1,4 @@
-import { DomainError } from "../../shared/domain/domain-error";
+import { DomainError } from "../../../shared/domain/domain-error";
 import type { TodoRepository } from "../domain/todo-repository";
 
 // Todo を削除する（command: 状態を変える）。

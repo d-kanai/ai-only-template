@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { toErrorResponse } from "../../shared/presentation/http-error";
+import { toErrorResponse } from "../../../shared/presentation/http-error";
 import {
   parseJsonBody,
   requestBodySchema,
-} from "../../shared/presentation/json-body";
-import { parseUuidParam } from "../../shared/presentation/resource-id";
+} from "../../../shared/presentation/json-body";
+import { parseUuidParam } from "../../../shared/presentation/resource-id";
 import type { Todo } from "../domain/todo";
 import { type TodoContainer, todoContainer } from "../infra/container";
 

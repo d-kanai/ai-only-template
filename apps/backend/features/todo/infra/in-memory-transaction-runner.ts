@@ -1,4 +1,4 @@
-import type { TransactionRunner } from "../../shared/domain/transaction-runner";
+import type { TransactionRunner } from "../../../shared/domain/transaction-runner";
 import type { InMemoryTodoRepository } from "./todo-repository.in-memory";
 
 // InMemory のリポジトリ向けの TransactionRunner。DATABASE_URL が無いときと単体テストで、Postgres と同じく

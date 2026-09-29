@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { randomUUID } from "node:crypto";
 import { describe, expect, test, vi } from "vitest";
-import type { ErrorResponse } from "../../shared/presentation/http-error";
+import type { ErrorResponse } from "../../../shared/presentation/http-error";
 import { createInMemoryTodoContainer } from "../infra/container";
 import { InMemoryTodoRepository } from "../infra/todo-repository.in-memory";
 import { type UpdateTodoResponse, updateTodoApi } from "./update-todo.api";

@@ -1,5 +1,5 @@
-import { toErrorResponse } from "../../shared/presentation/http-error";
-import { parseUuidParam } from "../../shared/presentation/resource-id";
+import { toErrorResponse } from "../../../shared/presentation/http-error";
+import { parseUuidParam } from "../../../shared/presentation/resource-id";
 import { type TodoContainer, todoContainer } from "../infra/container";
 
 // DELETE /api/todos/:id: Todo を削除する。204（本文なし）。無ければ 404。

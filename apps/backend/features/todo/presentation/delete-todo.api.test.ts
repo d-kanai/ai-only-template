@@ -1,23 +1,22 @@
 // @vitest-environment node
 import { randomUUID } from "node:crypto";
 import { describe, expect, test, vi } from "vitest";
-import type { ErrorResponse } from "../../shared/presentation/http-error";
+import type { ErrorResponse } from "../../../shared/presentation/http-error";
 import { createInMemoryTodoContainer } from "../infra/container";
 import { InMemoryTodoRepository } from "../infra/todo-repository.in-memory";
-import { type GetTodoResponse, getTodoApi } from "./get-todo.api";
+import { deleteTodoApi } from "./delete-todo.api";
 
 function setup() {
   const container = createInMemoryTodoContainer();
-  return { container, GET: getTodoApi(container) };
+  return { container, DELETE: deleteTodoApi(container) };
 }
 
-// Next 16 では Route Handler の第 2 引数の params が Promise で渡される。本番と同じ形で渡す。
 function context(id: string) {
   return { params: Promise.resolve({ id }) };
 }
 
-function getRequest(id: string): Request {
-  return new Request(`http://localhost/api/todos/${id}`);
+function deleteRequest(id: string): Request {
+  return new Request(`http://localhost/api/todos/${id}`, { method: "DELETE" });
 }
 
 // 問い合わせを記録するリポジトリ。uuid の形でない id で、presentation が query / command に渡す前に
@@ -42,28 +41,23 @@ const NOT_UUID_IDS = [
   ["版の桁が 0", "8d0f4f39-6f0b-0a39-9d53-0a3f8b1c2d4e"],
 ] as const;
 
-describe("GET /api/todos/:id", () => {
-  test("200 と TodoDto を返す", async () => {
-    const { container, GET } = setup();
+describe("DELETE /api/todos/:id", () => {
+  test("204 と空の本文を返し、Todo が消える", async () => {
+    const { container, DELETE } = setup();
     const todo = await container.createTodo.execute({ title: "牛乳を買う" });
 
-    const response = await GET(getRequest(todo.id), context(todo.id));
+    const response = await DELETE(deleteRequest(todo.id), context(todo.id));
 
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as GetTodoResponse;
-    expect(body).toEqual({
-      id: todo.id,
-      title: "牛乳を買う",
-      completed: false,
-      createdAt: todo.createdAt.toISOString(),
-    });
+    expect(response.status).toBe(204);
+    await expect(response.text()).resolves.toBe("");
+    await expect(container.listTodos.execute()).resolves.toEqual([]);
   });
 
   test("uuid の形だが存在しない id なら 404 と not_found を、その id を示す message 付きで返す", async () => {
-    const { GET } = setup();
+    const { DELETE } = setup();
     const id = randomUUID();
 
-    const response = await GET(getRequest(id), context(id));
+    const response = await DELETE(deleteRequest(id), context(id));
 
     expect(response.status).toBe(404);
     const body = (await response.json()) as ErrorResponse;
@@ -77,9 +71,9 @@ describe("GET /api/todos/:id", () => {
     "id が %s なら、Repository に問い合わせずに 404 と not_found を返す",
     async (_label, id) => {
       const { repository, ...spies } = spiedRepository();
-      const GET = getTodoApi(createInMemoryTodoContainer(repository));
+      const DELETE = deleteTodoApi(createInMemoryTodoContainer(repository));
 
-      const response = await GET(getRequest(id), context(id));
+      const response = await DELETE(deleteRequest(id), context(id));
 
       expect(response.status).toBe(404);
       const body = (await response.json()) as ErrorResponse;

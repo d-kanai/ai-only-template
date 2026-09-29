@@ -1,6 +1,6 @@
 #!/bin/bash
 # クラウドセッション（Claude Code on the web）の VM に、.tool-versions と同じ Node.js / pnpm を用意し、
-# compose.yaml の Postgres を起動してマイグレーション（apps/backend/drizzle/）を当てる（フックのときだけ）。
+# compose.yaml の Postgres を起動してマイグレーション（apps/backend/shared/drizzle/）を当てる（フックのときだけ）。
 # 詳細・役割分担は .claude/rules/cloud-session.md を参照。
 #
 # 使い方:
@@ -557,11 +557,11 @@ ensure_dotenv() {
   fi
 }
 
-# 起動した Postgres に apps/backend/drizzle/ のマイグレーションを当てる（pnpm db:migrate = drizzle-kit migrate。Issue #57）。
+# 起動した Postgres に apps/backend/shared/drizzle/ のマイグレーションを当てる（pnpm db:migrate = drizzle-kit migrate。Issue #57）。
 # WHY フックで当てるか: VM はセッションごとに新しく、Postgres もデータの無い状態で起動する。表が無いままだと、
 #   pnpm dev / pnpm test:e2e が「relation "todos" does not exist」で失敗する。
 #   当て済みのものは飛ばす（drizzle.__drizzle_migrations に記録がある）ので、何度実行しても同じ結果になる。
-# 接続先（DATABASE_URL）は apps/backend/drizzle.config.ts が env.ts 経由で .env から読む（.env は main で Docker の段より前に
+# 接続先（DATABASE_URL）は apps/backend/shared/drizzle/drizzle.config.ts が env.ts 経由で .env から読む（.env は main で Docker の段より前に
 #   ensure_dotenv が用意済み）。スクリプトは接続先を持たず、DATABASE_URL を差し込まない（既定値を 1 か所 = .env.example に
 #   するため。Issue #59）。フックの環境に DATABASE_URL があれば、そのまま引き継がれて .env より優先される。
 # WHY timeout 15: 実測は約 1 秒（2026-09-28、表 1 つ）。15 秒かかるなら止まっているとみなす。フック全体の最悪ケースを

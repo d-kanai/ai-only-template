@@ -40,7 +40,7 @@ Stryker が実装に変異（条件の反転・戻り値の差し替え・文字
 ## static な変異（`ignoreStatic: true`）
 - モジュールの読み込み時にだけ実行される変異（最上位の式）は数えない（Ignored）。WHY: Stryker は static な変異で全テストを読み込み直し、読み込みが壊れるとテスト 0 件のまま Survived と数えるため。
 - ロジックの定数（正規表現・変換表・URL・接頭辞）は最上位に置かず、呼び出し時に評価する関数の中に置く。WHY: 最上位だと static になり検査から外れる。
-- 残る static は `apps/backend/todo/infra/schema.ts` のテーブル宣言だけ（等価の理由は `stryker.config.mjs`）。
+- 残る static は `apps/backend/features/todo/infra/schema.ts` のテーブル宣言だけ（等価の理由は `stryker.config.mjs`）。
 
 ## 日次ジョブ
 - `.github/workflows/mutation.yml` が main を毎日 08:55 JST（UTC 23:55）に実行し、`reports/mutation/` を artifact `mutation-report`（30 日保存）に残す。Actions の画面から手動実行もできる（`workflow_dispatch`）。PR ごとには実行しない（ユーザー判断、Issue #52）。
