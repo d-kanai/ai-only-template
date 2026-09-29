@@ -15,9 +15,9 @@ import {
   updateTodo,
 } from "@/features/todo/api/todo-api";
 import { useTodoScreen } from "@/features/todo/screens/todo-screen/todo-screen.hook";
+import { commonMessages } from "@/shared/i18n/common.messages";
+import { formatMessage, LocaleProvider } from "@/shared/i18n/i18n";
 import { JaLocale, tJa } from "@/shared/i18n/i18n.test-support";
-import { LocaleProvider } from "@/shared/i18n/locale-provider";
-import { formatMessage } from "@/shared/i18n/messages";
 
 // hook の関心は「いつ・何で API を呼び、結果をどの状態に反映するか」なので、HTTP の詳細（todo-api.test.ts で検証済み）は差し替える。
 vi.mock("@/features/todo/api/todo-api");
@@ -195,7 +195,9 @@ describe("初回の読み込み", () => {
 
     const { result } = await renderLoaded();
 
-    expect(result.current.error).toBe(tJa("error.unknown", { status: 503 }));
+    expect(result.current.error).toBe(
+      tJa(commonMessages, "error.unknown", { status: 503 }),
+    );
     expect(result.current.todos).toEqual([]);
   });
 
@@ -212,7 +214,7 @@ describe("初回の読み込み", () => {
 
     await waitFor(() =>
       expect(result.current.error).toBe(
-        formatMessage("en", "server.internalError"),
+        formatMessage(commonMessages, "en", "server.internalError"),
       ),
     );
   });
@@ -228,7 +230,9 @@ describe("初回の読み込み", () => {
 
       const { result } = await renderLoaded();
 
-      expect(result.current.error).toBe(tJa("error.unexpected"));
+      expect(result.current.error).toBe(
+        tJa(commonMessages, "error.unexpected"),
+      );
     },
   );
 });
@@ -283,7 +287,9 @@ describe("追加", () => {
     await act(() => result.current.addTodo());
 
     expect(createTodo).toHaveBeenCalledWith({ title: "牛乳を買う" });
-    expect(result.current.error).toBe(tJa("server.internalError"));
+    expect(result.current.error).toBe(
+      tJa(commonMessages, "server.internalError"),
+    );
     expect(result.current.newTitle).toBe("牛乳を買う");
   });
 
@@ -335,7 +341,9 @@ describe("追加", () => {
     act(() => result.current.setNewTitle("牛乳を買う"));
     await act(() => result.current.addTodo());
 
-    expect(result.current.error).toBe(tJa("todo.title.tooLong", { max: 100 }));
+    expect(result.current.error).toBe(
+      tJa(commonMessages, "todo.title.tooLong", { max: 100 }),
+    );
     expect(result.current.newTitle).toBe("牛乳を買う");
   });
 });
@@ -380,7 +388,9 @@ describe("削除", () => {
     const { result } = await renderLoaded();
 
     await act(() => result.current.deleteTodo("todo-1"));
-    expect(result.current.error).toBe(tJa("todo.notFound", { id: "todo-1" }));
+    expect(result.current.error).toBe(
+      tJa(commonMessages, "todo.notFound", { id: "todo-1" }),
+    );
 
     await act(() => result.current.deleteTodo("todo-1"));
     expect(result.current.error).toBeNull();

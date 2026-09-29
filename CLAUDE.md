@@ -61,7 +61,7 @@
 | --- | --- | --- |
 | `backend.md` | `apps/backend/**` | DDD 4 層と許可の一覧、exports、永続化（Drizzle / Postgres / トランザクション）、命名 |
 | `frontend.md` | `apps/frontend/**` | app はルーティングだけ、features の構成、画面側とサーバ側の境界、SSR を前提にしない |
-| `architecture-check.md` | `rule-tests/architecture.test.ts` | 依存の向きの 29 規則、足すときの手順、限界 |
+| `architecture-check.md` | `rule-tests/architecture.test.ts` | 依存の向きの 30 規則、足すときの手順、限界 |
 | `testing.md` | `**/*.test.ts(x)`・`apps/e2e/**`・テストの設定 | テスト = 仕様、置き方、テストダブル、ルール検査テスト、Stryker、E2E |
 | `lint.md` | `biome.json`・`rule-tests/lint.test.ts`・`lefthook.yml`・`package.json` | Biome の方針と設定の WHY、pre-commit |
 | `env.md` | `.env.example`・`env.ts`・`instrumentation*`・`compose.yaml`・`.tool-versions` | Node / pnpm の版、環境変数の一元化と検査 |

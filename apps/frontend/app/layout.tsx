@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import { LocaleProvider } from "@/shared/i18n/i18n";
 import { LOCALE_HEADER, localeFromHeader } from "@/shared/i18n/locale";
-import { LocaleProvider } from "@/shared/i18n/locale-provider";
 
 export const metadata: Metadata = {
   title: "ai-only-template",

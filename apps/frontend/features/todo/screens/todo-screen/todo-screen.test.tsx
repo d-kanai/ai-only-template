@@ -14,8 +14,11 @@ import {
   listTodos,
   updateTodo,
 } from "@/features/todo/api/todo-api";
+import { todoItemMessages } from "@/features/todo/components/todo-item.messages";
+import { commonMessages } from "@/shared/i18n/common.messages";
+import { LocaleProvider } from "@/shared/i18n/i18n";
 import { JaLocale, tJa } from "@/shared/i18n/i18n.test-support";
-import { LocaleProvider } from "@/shared/i18n/locale-provider";
+import { todoScreenMessages } from "./todo-screen.messages";
 
 // 画面は「hook の状態を描き、操作を hook に渡す」ことを検証する。API は差し替え、操作の結果として呼ばれたかで見る。
 // 再取得などの細かいロジックは todo-screen.hook.test.ts で固定している。
@@ -41,7 +44,10 @@ test("level 1 の見出しに Todo が表示される", async () => {
   render(<TodoScreen />, { wrapper: JaLocale });
 
   expect(
-    screen.getByRole("heading", { level: 1, name: tJa("todo.list.title") }),
+    screen.getByRole("heading", {
+      level: 1,
+      name: tJa(todoScreenMessages, "title"),
+    }),
   ).toBeDefined();
   // 初回の取得が終わるのを待ってからテストを終える（終了後の state 更新を残さないため）。
   expect(await screen.findByRole("list")).toBeDefined();
@@ -52,9 +58,9 @@ test("一覧の取得中は読み込み中と表示され、取得後は Todo �
 
   render(<TodoScreen />, { wrapper: JaLocale });
 
-  expect(screen.getByText(tJa("todo.loading"))).toBeDefined();
+  expect(screen.getByText(tJa(todoScreenMessages, "loading"))).toBeDefined();
   expect(await screen.findByRole("link", { name: "牛乳を買う" })).toBeDefined();
-  expect(screen.queryByText(tJa("todo.loading"))).toBeNull();
+  expect(screen.queryByText(tJa(todoScreenMessages, "loading"))).toBeNull();
 });
 
 test("エラーが無いときは alert を表示しない", async () => {
@@ -73,7 +79,7 @@ test("追加のフォームを送信しても、ブラウザの既定の送信�
   await screen.findByRole("list");
 
   const form = screen
-    .getByRole("button", { name: tJa("todo.form.submit") })
+    .getByRole("button", { name: tJa(todoScreenMessages, "form.submit") })
     .closest("form");
   if (form === null) throw new Error("追加ボタンが form の中にない");
 
@@ -86,7 +92,7 @@ test("一覧の取得に失敗すると、エラーのキーを翻訳した文�
   render(<TodoScreen />, { wrapper: JaLocale });
 
   expect((await screen.findByRole("alert")).textContent).toBe(
-    tJa("server.internalError"),
+    tJa(commonMessages, "server.internalError"),
   );
 });
 
@@ -115,13 +121,17 @@ test("title を入力して追加ボタンを押すと、その title で作成�
   await screen.findByRole("list");
 
   fireEvent.change(
-    screen.getByRole("textbox", { name: tJa("todo.form.newTitle") }),
+    screen.getByRole("textbox", {
+      name: tJa(todoScreenMessages, "form.newTitle"),
+    }),
     {
       target: { value: "牛乳を買う" },
     },
   );
   fireEvent.click(
-    screen.getByRole("button", { name: tJa("todo.form.submit") }),
+    screen.getByRole("button", {
+      name: tJa(todoScreenMessages, "form.submit"),
+    }),
   );
 
   expect(await screen.findByRole("link", { name: "牛乳を買う" })).toBeDefined();
@@ -129,7 +139,7 @@ test("title を入力して追加ボタンを押すと、その title で作成�
   expect(
     (
       screen.getByRole("textbox", {
-        name: tJa("todo.form.newTitle"),
+        name: tJa(todoScreenMessages, "form.newTitle"),
       }) as HTMLInputElement
     ).value,
   ).toBe("");
@@ -144,13 +154,13 @@ test("完了チェックボックスを押すと、その Todo が完了に更�
 
   fireEvent.click(
     await screen.findByRole("checkbox", {
-      name: tJa("todo.item.toggle", { title: "牛乳を買う" }),
+      name: tJa(todoItemMessages, "toggle", { title: "牛乳を買う" }),
     }),
   );
 
   expect(
     await screen.findByRole("checkbox", {
-      name: tJa("todo.item.toggle", { title: "牛乳を買う" }),
+      name: tJa(todoItemMessages, "toggle", { title: "牛乳を買う" }),
       checked: true,
     }),
   ).toBeDefined();
@@ -166,7 +176,7 @@ test("削除ボタンを押すと、その Todo が削除され一覧から消�
 
   fireEvent.click(
     await screen.findByRole("button", {
-      name: tJa("todo.item.deleteAria", { title: "牛乳を買う" }),
+      name: tJa(todoItemMessages, "deleteAria", { title: "牛乳を買う" }),
     }),
   );
 

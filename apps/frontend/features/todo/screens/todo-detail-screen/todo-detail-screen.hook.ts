@@ -6,7 +6,7 @@ import {
   type UpdateTodoRequest,
   updateTodo,
 } from "@/features/todo/api/todo-api";
-import { useLocale } from "@/shared/i18n/use-t";
+import { useLocale } from "@/shared/i18n/i18n";
 
 // 失敗の理由（catch で受けた値）を包んで state に持つ。null（失敗なし）と、reject された値そのものが null / undefined の場合を区別するため。
 // WHY 文言ではなく理由を持ち、描画のときに翻訳する（toErrorMessage）: ロケールが変わっても表示中のエラーがそのロケールで出る。

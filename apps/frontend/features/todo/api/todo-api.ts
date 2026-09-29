@@ -12,7 +12,8 @@ import type {
   UpdateTodoResponse,
 } from "@repo/backend/features/todo/presentation/update-todo.api";
 import type { ErrorResponse } from "@repo/backend/shared/presentation/http-error";
-import { isMessageKey } from "@/shared/i18n/messages";
+import { commonMessages } from "@/shared/i18n/common.messages";
+import { isMessageKey } from "@/shared/i18n/i18n";
 import { ApiError } from "./api-error";
 
 // /api/todos を呼ぶ薄いラッパー。画面側のデータ取得は必ず「hook → ここ → Route Handler」を通す（SSR を前提にしない構成）。
@@ -60,17 +61,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 // WHY `"error" in value` で絞り込まない: 無いプロパティは undefined として読めるので、in の検査は判定の結果を変えない。
 //   結果を変えない検査は mutation testing で消しても落ちない（等価な変異）ため、Record として読んで型だけで判定する（Issue #55）。
-// WHY key が辞書のキーかまで確かめる: 版の違う backend が画面の辞書に無いキーを返すと、翻訳できない（formatMessage が辞書を引けない）。
-//   その応答は ErrorResponse とみなさず、HTTP ステータスだけを伝える（toError）。
-//   実行時に確かめられるのは「辞書のキー」までで、ErrorKey（サーバのエラーのキー）かどうかは確かめない。辞書の画面の文言のキーが
-//   返っても、その文言が出るだけで壊れない。
+// WHY key が共通の辞書（shared/i18n/common.messages.ts）のキーかまで確かめる: 版の違う backend が辞書に無いキーを返すと、
+//   翻訳できない（formatMessage が辞書を引けない）。その応答は ErrorResponse とみなさず、HTTP ステータスだけを伝える（toError）。
+//   実行時に確かめられるのは「共通の辞書のキー」までで、ErrorKey（サーバのエラーのキー）かどうかは確かめない。error.unknown・
+//   error.unexpected が返っても、その文言が出るだけで壊れない。画面ごとの辞書のキー（"delete" など）は共通の辞書に無いので通さない。
 // WHY params は省略か、オブジェクト: 値の型（string / number）までは確かめない。置換は String() で文字列にするので壊れない。
 function isErrorResponse(value: unknown): value is ErrorResponse {
   return (
     isRecord(value) &&
     isRecord(value.error) &&
     typeof value.error.key === "string" &&
-    isMessageKey(value.error.key) &&
+    isMessageKey(commonMessages, value.error.key) &&
     (value.error.params === undefined || isRecord(value.error.params))
   );
 }

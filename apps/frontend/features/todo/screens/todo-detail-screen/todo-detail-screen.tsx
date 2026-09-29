@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useT } from "@/shared/i18n/use-t";
+import { useT } from "@/shared/i18n/i18n";
 import { useTodoDetailScreen } from "./todo-detail-screen.hook";
+import { todoDetailScreenMessages } from "./todo-detail-screen.messages";
 
 type TodoDetailScreenProps = {
   // URL の動的セグメント（/todo/[id]）から app/todo/[id]/page.tsx が取り出して渡す。
@@ -15,9 +16,9 @@ type TodoDetailScreenProps = {
 
 // 詳細画面の見た目。状態・データ取得は useTodoDetailScreen に置き、ここは戻り値を描くだけにする。
 // "use client": データは hook から /api/todos/:id を fetch して取る（SSR を前提にしない構成）ため。
-// 文言はすべて辞書のキーで t から出す（.claude/rules/frontend.md の「i18n」）。
+// 文言はすべて隣の辞書（todo-detail-screen.messages.ts）のキーで t から出す（.claude/rules/frontend.md の「i18n」）。
 export function TodoDetailScreen({ todoId }: TodoDetailScreenProps) {
-  const t = useT();
+  const t = useT(todoDetailScreenMessages);
   const {
     todo,
     title,
@@ -34,7 +35,7 @@ export function TodoDetailScreen({ todoId }: TodoDetailScreenProps) {
         // 取得に失敗した（not_found など）ときも一覧に戻れるよう、リンクは状態によらず常に出す。
         href="/"
       >
-        {t("todo.detail.back")}
+        {t("back")}
       </Link>
       {error === null ? null : (
         <p
@@ -44,7 +45,7 @@ export function TodoDetailScreen({ todoId }: TodoDetailScreenProps) {
           {error}
         </p>
       )}
-      {isLoading ? <p>{t("todo.loading")}</p> : null}
+      {isLoading ? <p>{t("loading")}</p> : null}
       {todo === null ? null : (
         <>
           <h1>
@@ -61,14 +62,14 @@ export function TodoDetailScreen({ todoId }: TodoDetailScreenProps) {
             }}
           >
             <label>
-              {t("todo.detail.titleLabel")}
+              {t("titleLabel")}
               <input
                 // htmlFor + id で結び付けると固定 id が必要になるため、label で input を包んで名前を付ける。
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
               />
             </label>
-            <button type="submit">{t("todo.detail.save")}</button>
+            <button type="submit">{t("save")}</button>
           </form>
           <label>
             <input
@@ -76,7 +77,7 @@ export function TodoDetailScreen({ todoId }: TodoDetailScreenProps) {
               checked={todo.completed}
               onChange={() => void toggleCompleted()}
             />
-            {t("todo.detail.completed")}
+            {t("completed")}
           </label>
         </>
       )}
