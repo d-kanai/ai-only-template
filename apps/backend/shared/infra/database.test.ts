@@ -119,6 +119,21 @@ describe("getDatabase / closeDatabase", () => {
     );
   });
 
+  // WHY モジュールを読み直して確かめる: next dev の HMR はモジュールを評価し直すので、上の「何度呼んでも同じ」だけでは
+  //   「モジュールの変数に置く実装」（読み直すたびに新しいプールができる）を見分けられない。vi.resetModules() で
+  //   database.ts を別のモジュール実体として読み込み、それでも globalThis の同じプールが返ることを固定する（Issue #132）。
+  test("モジュールを読み直しても（next dev の HMR 相当）、globalThis に置いた同じプールを返す", async () => {
+    const before = getDatabase();
+
+    vi.resetModules();
+    const reloaded = await import("./database");
+
+    // 別のモジュール実体であること（読み直しが起きていないなら、この検査に意味がない）。
+    expect(reloaded.getDatabase).not.toBe(getDatabase);
+    expect(reloaded.getDatabase()).toBe(before);
+    expect(reloaded.getDatabase().pool).toBe(before.pool);
+  });
+
   test("closeDatabase でプールを閉じ、次の getDatabase は新しいプールを作る", async () => {
     const first = getDatabase();
     const end = vi.spyOn(first.pool, "end");
