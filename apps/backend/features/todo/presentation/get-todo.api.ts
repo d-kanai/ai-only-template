@@ -1,5 +1,5 @@
 import { getDatabase } from "../../../shared/infra/database";
-import { toErrorResponse } from "../../../shared/presentation/http-error";
+import { toProblemResponse } from "../../../shared/presentation/problem";
 import { parseUuidParam } from "../../../shared/presentation/resource-id";
 import { GetTodoQuery } from "../application/get-todo.query";
 import type { Todo } from "../domain/todo";
@@ -37,7 +37,7 @@ export class GetTodoApi {
   constructor(private readonly getTodo: Pick<GetTodoQuery, "execute">) {}
 
   readonly handle = async (
-    _request: Request,
+    request: Request,
     ctx: Context,
   ): Promise<Response> => {
     try {
@@ -50,7 +50,7 @@ export class GetTodoApi {
       return Response.json(body);
     } catch (error) {
       // 無い id は GetTodoQuery が、uuid の形でない id は parseUuidParam が DomainError(not_found) を投げ、ここで 404 に変換される。
-      return toErrorResponse(error);
+      return toProblemResponse(error, request);
     }
   };
 }

@@ -1,5 +1,5 @@
 import { getDatabase } from "../../../shared/infra/database";
-import { toErrorResponse } from "../../../shared/presentation/http-error";
+import { toProblemResponse } from "../../../shared/presentation/problem";
 import { ListTodosQuery } from "../application/list-todos.query";
 import type { Todo } from "../domain/todo";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
@@ -44,13 +44,13 @@ export class ListTodosApi {
   // WHY アロー関数のプロパティにする: Route Handler として `export const GET = new ListTodosApi(...).handle` のように
   //   インスタンスから取り出して渡すと、メソッドでは this が外れて this.listTodos を読めない。アロー関数は作ったときの
   //   this（インスタンス）を持ち続ける。
-  readonly handle = async (_request: Request): Promise<Response> => {
+  readonly handle = async (request: Request): Promise<Response> => {
     try {
       const todos = await this.listTodos.execute();
       const body: ListTodosResponse = { todos: todos.map(toTodoDto) };
       return Response.json(body);
     } catch (error) {
-      return toErrorResponse(error);
+      return toProblemResponse(error, request);
     }
   };
 }

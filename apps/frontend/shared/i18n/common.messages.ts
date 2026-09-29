@@ -10,7 +10,7 @@ import { defineMessages } from "./i18n";
 // placeholder は {name}（name は英数字と _）。キー・placeholder の型と en の検査は defineMessages（i18n.tsx）。
 export const commonMessages = defineMessages({
   ja: {
-    // サーバのエラー（backend の ErrorKey。apps/backend/shared/presentation/http-error.ts）
+    // サーバのエラー（backend の ErrorKey。apps/backend/shared/presentation/problem.ts）
     "todo.title.empty": "タイトルを入力してください",
     "todo.title.tooLong": "タイトルは {max} 文字以内で入力してください",
     "todo.title.invalid": "タイトルが不正です",
@@ -27,7 +27,7 @@ export const commonMessages = defineMessages({
     "server.internalError": "サーバでエラーが発生しました",
 
     // 画面側だけのエラー
-    // 本文が ErrorResponse の形でない失敗（プロキシや Next のエラーページなど、backend を通らない応答）。HTTP ステータスだけが分かる。
+    // 本文が Problem Details の形でない失敗（プロキシや Next のエラーページなど、backend を通らない応答）。HTTP ステータスだけが分かる。
     "error.unknown": "通信に失敗しました（HTTP {status}）",
     // API の応答ではない失敗（ネットワークの切断など、fetch そのものの失敗）。
     "error.unexpected": "予期しないエラーが発生しました",

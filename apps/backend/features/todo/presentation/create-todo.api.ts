@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { getDatabase } from "../../../shared/infra/database";
-import { toErrorResponse } from "../../../shared/presentation/http-error";
 import {
   parseJsonBody,
   requestBodySchema,
 } from "../../../shared/presentation/json-body";
+import { toProblemResponse } from "../../../shared/presentation/problem";
 import { CreateTodoCommand } from "../application/create-todo.command";
 import type { Todo } from "../domain/todo";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
@@ -14,11 +14,11 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 // リクエスト本文の「形」（項目の有無と型。未知の項目は拒否）。
 // WHY 形だけを見て、空・長さは見ない: タイトルの中身の規則（trim 後 1〜100 文字）は Todo の不変条件として
 //   domain（Todo.create の zod スキーマ）が持つ。ここにも書くと規則が 2 か所になり、片方だけ直してずれる。
-//   domain の DomainError(validation_error) も toErrorResponse で同じ 400 になるので、クライアントから見た結果は同じ。
+//   domain の DomainError(validation_error) も toProblemResponse で同じ 400 になるので、クライアントから見た結果は同じ。
 // WHY 関数にする: スキーマを最上位の定数にすると static な変異になり mutation testing で数えない（json-body.ts の requestBodySchema）。
 function createTodoRequestSchema() {
   return requestBodySchema({
-    // 型が違う・無いときのキー（request.field.notString）は json-body.ts の toErrorIssue が決める（ここに error は書かない）。
+    // 型が違う・無いときのキー（request.field.notString）は json-body.ts の toProblemError が決める（ここに error は書かない）。
     title: z.string(),
   });
 }
@@ -62,7 +62,7 @@ export class CreateTodoApi {
       const body: CreateTodoResponse = toTodoDto(todo);
       return Response.json(body, { status: 201 });
     } catch (error) {
-      return toErrorResponse(error);
+      return toProblemResponse(error, request);
     }
   };
 }

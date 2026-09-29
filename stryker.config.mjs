@@ -124,7 +124,7 @@ export default {
   //   - 実行時間: 既定では static な変異 124 件（全体の 21%）が実行時間の 83% を占めると警告され、全体で約 5 分かかった。
   //     有効にすると約 3.3 分（2026-09-28、ローカル 4 コアで実測。576 変異、3 分 18 秒）。
   //   ロジックの定数は static にしない: 読み込み時に固定される定数（正規表現・変換表・URL・接頭辞など）は、呼び出し時に
-  //   評価する関数の中に置く（todo-repository.postgres.ts の isUuid、http-error.ts の statusOf、todo-api.ts の todosPath、
+  //   評価する関数の中に置く（todo-repository.postgres.ts の isUuid、problem.ts の problemKindOf、todo-api.ts の todosPath、
   //   database.test-support.ts の testSchemaPrefix）。最上位の定数のままだと、既定の実行では killed になる変異も
   //   ignoreStatic で数えなくなるため（reviewer 指摘。Issue #55 で 18 件が該当した）。
   //   残る static（数えないもの）: schema.ts の 10 件だけ。ignoreStatic を false にして schema.ts を --mutate した実測で、

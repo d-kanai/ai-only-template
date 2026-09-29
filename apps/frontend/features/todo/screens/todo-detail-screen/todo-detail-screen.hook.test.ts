@@ -92,7 +92,12 @@ describe("初回の読み込み", () => {
 
   test("取得に失敗すると（not_found など）、todo は null のまま、ApiError のキーと params を翻訳した文言が error に入る", async () => {
     vi.mocked(getTodo).mockRejectedValue(
-      new ApiError("todo.notFound", { id: "missing" }),
+      new ApiError({
+        status: 404,
+        type: "/problems/not-found",
+        key: "todo.notFound",
+        params: { id: "missing" },
+      }),
     );
 
     const { result } = await renderLoaded("missing");
@@ -106,7 +111,12 @@ describe("初回の読み込み", () => {
   // WHY 翻訳は描画のときに LocaleProvider のロケールで行う（hook はキーと params を持つ失敗を保持する）。
   test("LocaleProvider のロケールが en なら、error は英語の文言になる", async () => {
     vi.mocked(getTodo).mockRejectedValue(
-      new ApiError("todo.notFound", { id: "missing" }),
+      new ApiError({
+        status: 404,
+        type: "/problems/not-found",
+        key: "todo.notFound",
+        params: { id: "missing" },
+      }),
     );
 
     const { result } = renderHook(() => useTodoDetailScreen("missing"), {
@@ -155,7 +165,14 @@ describe("初回の読み込み", () => {
   test("todoId が変わると、新しい Todo の取得を待つ間は前の Todo とエラーを消して読み込み中にする", async () => {
     const breadResponse = deferred<typeof bread>();
     vi.mocked(getTodo)
-      .mockRejectedValueOnce(new ApiError("todo.notFound", { id: "todo-1" }))
+      .mockRejectedValueOnce(
+        new ApiError({
+          status: 404,
+          type: "/problems/not-found",
+          key: "todo.notFound",
+          params: { id: "todo-1" },
+        }),
+      )
       .mockReturnValueOnce(breadResponse.promise);
     const { result, rerender } = renderWithTodoId("todo-1");
     await waitFor(() =>
@@ -364,7 +381,12 @@ describe("title の保存", () => {
   test("更新に失敗すると error に message が入り、編集中の title は残る", async () => {
     vi.mocked(getTodo).mockResolvedValue(milk);
     vi.mocked(updateTodo).mockRejectedValue(
-      new ApiError("todo.title.tooLong", { max: 100 }),
+      new ApiError({
+        status: 400,
+        type: "/problems/validation-error",
+        key: "todo.title.tooLong",
+        params: { max: 100 },
+      }),
     );
     const { result } = await renderLoaded();
 
@@ -406,7 +428,13 @@ describe("完了の切り替え", () => {
   test("前の操作のエラーは、次の操作が成功すると消える", async () => {
     vi.mocked(getTodo).mockResolvedValue(milk);
     vi.mocked(updateTodo)
-      .mockRejectedValueOnce(new ApiError("server.internalError"))
+      .mockRejectedValueOnce(
+        new ApiError({
+          status: 500,
+          type: "/problems/internal-error",
+          key: "server.internalError",
+        }),
+      )
       .mockResolvedValueOnce({ ...milk, completed: true });
     const { result } = await renderLoaded();
 
