@@ -28,7 +28,7 @@ paths:
 | `apps/backend/**/domain` | 純粋な単体テスト | Node |
 | `apps/shared/`（`env.ts`・`logger.ts`） | 純粋な単体テスト（一時ディレクトリの `.env`、`console` の spy） | Node |
 | `apps/backend/**/application` | InMemory リポジトリを渡して検証 | Node |
-| `apps/backend/**/infra` の Postgres の実装（`*.postgres.ts`・`drizzle-transaction-runner.ts`・`database.ts`） | 実 Postgres。`createTestDatabase()` でファイルごとの別スキーマ（`test_<UUID>`）にマイグレーションを当て、各テストの前に `TRUNCATE` | Node |
+| `apps/backend/**/infra` の Postgres の実装（`*.postgres.ts`・`database.ts`） | 実 Postgres。`createTestDatabase()` でファイルごとの別スキーマ（`test_<UUID>`）にマイグレーションを当て、各テストの前に `TRUNCATE` | Node |
 | `apps/backend/**/presentation` | 空の InMemory で組み立てた handler（`new ListTodosApi(new ListTodosQuery(new InMemoryTodoRepository())).handle`）に `new Request()`（と `ctx`）を渡し、`Response` を検証。本番の handler（`export const GET` など）は、Postgres の Repository の prototype を spy して結線だけを確かめる | Node |
 | `apps/frontend/features/**/*.hook.ts` | `renderHook` で状態とイベント | jsdom |
 | `apps/frontend/features/**/*-screen.tsx` | render して操作し、表示を検証 | jsdom |
