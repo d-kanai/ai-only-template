@@ -28,7 +28,7 @@
 - 変更時はコメントとコードの整合性がずれないように注意を払い、コードとコメントの両方を変更する。
 
 ## 6. 変更前の背景確認
-- 実装やルールを修正する前に、該当箇所の commit history（`git log -p -- <path>`）、関連する Issue / PR、`logs/` の作業ログを確認し、なぜ今の形になっているかを理解したうえで修正内容を検討する。
+- 実装やルールを修正する前に、該当箇所の commit history（`git log -p -- <path>`）、関連する Issue / PR、`work-logs/` の作業ログを確認し、なぜ今の形になっているかを理解したうえで修正内容を検討する。
 - 狙い: 経緯を知らずに変更して、過去に解決した問題を再発させる（デグレ）のを防ぐ。
 - 確認した背景と、それを踏まえた判断は PR の「実装経緯」に書く。
 
@@ -43,7 +43,7 @@
 - オーケストレーション: @.claude/general/orchestration.md
 - Issue → ブランチ → PR → マージ: @.claude/general/workflow.md
 - コミットメッセージ: @.claude/general/commit.md
-- 作業ログ: @.claude/general/log.md
+- 作業ログ: @.claude/general/work-log.md
 
 ## 指示ファイルの置き場所
 常時読み込むのはこのファイル・LEARNINGS.md・`.claude/general/` だけにし、ほかは必要なときだけ読まれる形に分けている（WHY と公式の仕様・実測は `docs/claude-code-mechanics.md`。構成は `instructions.test.ts` が検査する）。
@@ -53,7 +53,7 @@
 | `.claude/rules/*.md` | フロントマターの `paths` に一致するファイルを触ったとき | 規則と WHY |
 | `.claude/skills/<name>/SKILL.md` | 説明は常時、本文は呼び出したとき | 手順 |
 | `docs/` | 読み込まれない（必要なら自分で読む） | 実測・経緯・一次情報・採用しなかった案。一覧は `docs/README.md` |
-| `logs/` | 読み込まれない | 日ごとの作業ログ |
+| `work-logs/` | 読み込まれない | 日ごとの作業ログ |
 
 ### .claude/rules（パス依存）
 | ファイル | 触ったときに読まれる主なファイル | 内容 |
@@ -67,7 +67,7 @@
 | `cloud-session.md` | `scripts/cloud-session-start*`・`.claude/settings.json` | クラウドセッションの setup script とフック |
 | `dependencies.md` | `package.json`・`pnpm-workspace.yaml`・lockfile・`patches/**` | 完全固定、置き場所、版の決め方、pnpm patch |
 | `git-guard.md` | `.claude/settings.json`・`lefthook.yml`・`scripts/hooks/guard-git*` など | git 操作の権限・フック・commit-msg |
-| `work-log.md` | `logs/**`・`scripts/hooks/require-log*` など | 作業ログの強制（Stop フック・CI） |
+| `work-log.md` | `scripts/hooks/require-work-log*`・`check-work-logs-diff*`・`ci.yml` など | 作業ログの強制（Stop フック・CI） |
 | `worktree.md` | worktree のフックと生成規則 | worktree ごとの `.env`・DB・ポート |
 
 ### スキル（手順。`/<name>` でも呼べる）
@@ -80,6 +80,6 @@
 
 ### 機械的な強制（原則 7）
 - git: PreToolUse フック `scripts/hooks/guard-git.sh`（サブエージェントの commit / push / PR、main への commit / push、force push、`--no-verify` を拒否）、lefthook の pre-commit（Biome）と commit-msg（形式）。
-- 作業ログ: Stop フック `scripts/hooks/require-log.sh` と CI の `scripts/hooks/check-logs-diff.sh`。
+- 作業ログ: Stop フック `scripts/hooks/require-work-log.sh` と CI の `scripts/hooks/check-work-logs-diff.sh`。
 - worktree: WorktreeCreate フック `scripts/hooks/worktree-create.sh`、SubagentStop フック `scripts/hooks/subagent-stop.sh`（共有フックの修復）。
 - コード: `pnpm lint` / `pnpm typecheck` / `pnpm test`（カバレッジ 100%・ルール検査テスト）/ CI の `ci` ジョブ（required status check）。

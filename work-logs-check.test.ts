@@ -6,22 +6,22 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 // 作業ログの CI の検査（Issue #64）が ci.yml に効く形で入っていることを、仕様として固定するルール検査テスト。
-// WHY: 作業ログ（logs/YYYY-MM-DD.md）の追記漏れを PR 単位で止める（ユーザー判断。文書だけの PR も例外なし）。
+// WHY: 作業ログ（work-logs/YYYY-MM-DD.md）の追記漏れを PR 単位で止める（ユーザー判断。文書だけの PR も例外なし）。
 //   ステップが消える・失敗を打ち消す書き方になる・push でも動いて main の CI を壊す・履歴が浅くて差分を取れない、
 //   のどれでも検査は黙って効かなくなるか、関係のない失敗になる。
 // 検査すること（checksLogsInPullRequests）:
-//   - `bash scripts/hooks/check-logs-diff.sh origin/${{ github.base_ref }}` をそのまま実行するステップがある
+//   - `bash scripts/hooks/check-work-logs-diff.sh origin/${{ github.base_ref }}` をそのまま実行するステップがある
 //     （`|| true` / `; exit 0` などを足すと一致しない）。
 //   - そのステップの if が `github.event_name == 'pull_request'`（`${{ }}` で囲んでもよい）。
 //     WHY: push（main への push）では github.base_ref が空で、差分を取る相手が無い。PR だけで動かす。
 //   - continue-on-error が無い（false は可）。
 //   - pnpm lint のステップより前にある（lint より先に、原因の分かるメッセージで止める）。
 //   - actions/checkout のステップに fetch-depth: 0 がある（三点 diff の分岐点を求めるのに base ブランチと履歴が要る）。
-// スクリプトそのものの判定は scripts/hooks/check-logs-diff.test.ts。
+// スクリプトそのものの判定は scripts/hooks/check-work-logs-diff.test.ts。
 
 const repoRoot = import.meta.dirname;
 
-const CHECK_COMMAND = `bash scripts/hooks/check-logs-diff.sh origin/\${{ github.base_ref }}`;
+const CHECK_COMMAND = `bash scripts/hooks/check-work-logs-diff.sh origin/\${{ github.base_ref }}`;
 const PULL_REQUEST_CONDITION = "github.event_name == 'pull_request'";
 
 type WorkflowStep = Record<string, string>;
@@ -196,7 +196,7 @@ describe("ワークフローの判定（checksLogsInPullRequests）", () => {
       workflow(
         ...checkout,
         "      - if: github.event_name == 'pull_request'",
-        "        run: bash scripts/hooks/check-logs-diff.sh origin/main",
+        "        run: bash scripts/hooks/check-work-logs-diff.sh origin/main",
         ...lint,
       ),
     ],
@@ -233,7 +233,7 @@ describe("ワークフローの判定（checksLogsInPullRequests）", () => {
 });
 
 describe("作業ログの CI の検査（実ファイル）", () => {
-  it(".github/workflows/ci.yml は PR のときだけ check-logs-diff.sh を失敗で止まる形で pnpm lint より前に実行し、checkout は fetch-depth: 0", () => {
+  it(".github/workflows/ci.yml は PR のときだけ check-work-logs-diff.sh を失敗で止まる形で pnpm lint より前に実行し、checkout は fetch-depth: 0", () => {
     const yaml = readFileSync(
       join(repoRoot, ".github/workflows/ci.yml"),
       "utf8",

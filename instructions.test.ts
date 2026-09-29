@@ -28,7 +28,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 //   rules-paths       .claude/rules/*.md はフロントマターに paths（1 件以上の glob）を持ち、各 glob がリポジトリのファイルに
 //                     1 件以上一致する（一致しない glob は typo として扱う。そのルールは読み込まれないまま残るため）。
 //   legacy-rules      旧 rules/ ディレクトリが無く、ファイルに rules/code/・rules/general/ への参照が残っていない
-//                     （logs/ は過去の記録なので除く。このファイルは例を持つので除く）。
+//                     （work-logs/ は過去の記録なので除く。このファイルは例を持つので除く）。
 //   orphan-docs       docs/*.md は CLAUDE.md・.claude/**/*.md・README.md・docs/README.md のどこかから参照されている
 //                     （docs は読み込まれない記録なので、どこからも辿れないと存在しないのと同じになる）。
 //   skill-frontmatter .claude/skills/*/SKILL.md はフロントマターに name と description を持つ（公式 https://code.claude.com/docs/en/skills 。
@@ -199,7 +199,7 @@ function findSkillViolations(path: string, markdown: string): string[] {
 const LEGACY_REFERENCE = /(?<!\.claude\/)\brules\/(?:code|general)\b/;
 
 function isLegacyScanTarget(path: string): boolean {
-  return !path.startsWith("logs/") && path !== SELF;
+  return !path.startsWith("work-logs/") && path !== SELF;
 }
 
 function findLegacyReferences(path: string, text: string): string[] {
@@ -498,11 +498,11 @@ describe("旧 rules/ への参照", () => {
     expect(findLegacyReferences("x.ts", line)).toEqual([]);
   });
 
-  it("logs/ とこのファイルは検査しない", () => {
-    expect(isLegacyScanTarget("logs/2026-09-28.md")).toBe(false);
+  it("work-logs/ とこのファイルは検査しない", () => {
+    expect(isLegacyScanTarget("work-logs/2026-09-28.md")).toBe(false);
     expect(isLegacyScanTarget(SELF)).toBe(false);
     expect(isLegacyScanTarget("README.md")).toBe(true);
-    expect(isLegacyScanTarget("docs/logs/x.md")).toBe(true);
+    expect(isLegacyScanTarget("docs/work-logs/x.md")).toBe(true);
   });
 });
 
@@ -542,7 +542,7 @@ describe("docs の参照", () => {
     expect(isDocLinkSource("README.md")).toBe(true);
     expect(isDocLinkSource("docs/README.md")).toBe(true);
     expect(isDocLinkSource("docs/a.md")).toBe(false);
-    expect(isDocLinkSource("logs/2026-09-28.md")).toBe(false);
+    expect(isDocLinkSource("work-logs/2026-09-28.md")).toBe(false);
     expect(isDocLinkSource(".claude/settings.json")).toBe(false);
   });
 });
@@ -577,7 +577,7 @@ describe("fixture のリポジトリを検査したときに検出される違�
     "apps/backend/x.ts": "export const x = 1;\n",
     "docs/README.md": "- [decisions](decisions.md)\n",
     "docs/decisions.md": "経緯\n",
-    "logs/2026-09-28.md": "rules/code/test.md を書いた（過去の記録）\n",
+    "work-logs/2026-09-28.md": "rules/code/test.md を書いた（過去の記録）\n",
     ".gitignore": "ignored/\n",
     "ignored/rules/code/x.md": "rules/code/x.md\n",
   };
@@ -591,7 +591,7 @@ describe("fixture のリポジトリを検査したときに検出される違�
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("許可される構成では違反 0 件（must pass。.gitignore の中と logs/ の旧参照は数えない）", () => {
+  it("許可される構成では違反 0 件（must pass。.gitignore の中と work-logs/ の旧参照は数えない）", () => {
     expect(check(makeRepo("pass", passing))).toEqual([]);
   });
 

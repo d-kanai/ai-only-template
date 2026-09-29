@@ -7,7 +7,7 @@
 # WHY: 実際にどの指示ファイルが、いつ・何をきっかけに読まれたか（session_start / path_glob_match / nested_traversal /
 #   include / compact）を後から確かめるため（Issue #64 の完了条件「読めているかを実証する」）。rules の paths の書き間違いで
 #   ルールが黙って読まれない、を記録で見つけられるようにする。
-# WHY .claude/state/: セッションごとの一時的な記録で、コミットしない（.gitignore 済み）。logs/ に書かない理由は
+# WHY .claude/state/: セッションごとの一時的な記録で、コミットしない（.gitignore 済み）。work-logs/ に書かない理由は
 #   pre-compact.sh と同じ（Stop フックの判定が素通りになる）。
 # 見方: .claude/rules/work-log.md。
 #
