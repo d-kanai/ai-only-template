@@ -52,7 +52,7 @@ apps/
         application/        # 読むだけの query（list-todos.query.ts）と状態を変える command（create-todo.command.ts）
         domain/             # Entity / Value Object / Repository の interface
         infra/              # Repository の実装（Postgres と、テスト用の InMemory）、schema.ts（Drizzle のスキーマ）
-    shared/             # API 側で feature をまたぐ共通部品（domain/ に DomainError とエラーのキー、presentation/ に HTTP ステータス変換と本文の読み取り、infra/ に Postgres のプールと Drizzle の db）
+    shared/             # API 側で feature をまたぐ共通部品（domain/ に DomainError とエラーのキー、presentation/ にエラー応答（RFC 9457 の Problem Details）と本文の読み取り、infra/ に Postgres のプールと Drizzle の db）
       drizzle/            # drizzle.config.ts（drizzle-kit の設定）と、生成したマイグレーション（*.sql と meta/。pnpm db:generate が作る。コミットする）
   shared/               # @repo/shared。frontend と backend で共通の基盤だけ（Issue #90。.claude/rules/shared.md）
     package.json        # 依存なし。exports は ./env・./logger だけ

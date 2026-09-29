@@ -8,7 +8,7 @@ import { DEFAULT_LOCALE, type Locale } from "./locale";
 // 辞書は 1 つにまとめず、画面・部品ごとに隣の <name>.messages.ts に defineMessages({ ja, en }) で置く（colocation）。
 //   共通（API のエラー ErrorKey と error.*）だけが shared/i18n/common.messages.ts にある。
 // 使い方: 画面・部品は const t = useT(todoScreenMessages)（その辞書のキーだけを受け付ける型付きの t）。
-//   キーが実行時の値（サーバの ErrorResponse から来たキー）のときだけ formatMessage を使う（features/todo/api/api-error.ts）。
+//   キーが実行時の値（サーバの Problem Details から来たキー）のときだけ formatMessage を使う（features/todo/api/api-error.ts）。
 //
 // "use client": LocaleProvider（context）と useLocale / useT は Client Component でしか動かない。
 //   app/layout.tsx（Server Component）がこのファイルから使うのは LocaleProvider だけ（ロケールの文字列だけを渡す）。
@@ -65,7 +65,7 @@ export type Translate<M extends Messages> = <K extends MessageKey<M>>(
   ...args: TranslateArgs<M, K>
 ) => string;
 
-// 実行時の params（サーバの ErrorResponse の params など、型で名前を決められないもの）。
+// 実行時の params（サーバの Problem Details の params など、型で名前を決められないもの）。
 export type RuntimeParams = Readonly<Record<string, string | number>>;
 
 // --- defineMessages（辞書の定義） ---
@@ -204,7 +204,7 @@ export function createTranslator<M extends Messages>(
   return (key, ...args) => formatMessage(messages, locale, key, args[0]);
 }
 
-// サーバから届いた文字列が辞書 messages のキーかを確かめる（features/todo/api/ が ErrorResponse を読むときに使う）。
+// サーバから届いた文字列が辞書 messages のキーかを確かめる（features/todo/api/ が Problem Details を読むときに使う）。
 // WHY Object.hasOwn: "toString" や "__proto__" のような Object.prototype の名前を、辞書のキーと取り違えない。
 export function isMessageKey<M extends Messages>(
   messages: M,

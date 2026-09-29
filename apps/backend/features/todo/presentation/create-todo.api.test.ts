@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, describe, expect, test, vi } from "vitest";
-import type { ErrorResponse } from "../../../shared/presentation/http-error";
+import type { Problem } from "../../../shared/presentation/problem";
 import { CreateTodoCommand } from "../application/create-todo.command";
 import { InMemoryTodoRepository } from "../infra/todo-repository.in-memory";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
@@ -22,6 +22,10 @@ function setup() {
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+// 400 の本文のうち、誤りごとに変わる部分（detail・key・params・errors）。type・title・status・instance は 400 のどれも同じなので、
+//   テストの中で固定の値を足して本文全体と比べる。
+type ProblemBody = Pick<Problem, "detail" | "key" | "params" | "errors">;
 
 function postRequest(body: string): Request {
   return new Request("http://localhost/api/todos", {
@@ -82,38 +86,49 @@ describe("POST /api/todos", () => {
     await expect(response.json()).resolves.toMatchObject({ title });
   });
 
-  // key・params・issues は画面が翻訳する（クライアントとの契約。Issue #116）ので、本文全体を検証する。
-  // issues: リクエストの形（presentation の zod スキーマ）の誤りだけに付く。JSON として読めない誤りと、
-  //   値の規則（domain の不変条件）の誤りには付かない（ErrorResponse のコメント）。
-  // WHY toStrictEqual: toEqual は undefined のプロパティと無いプロパティを同じとみなす。params・issues の無い誤りで
+  // 本文は RFC 9457 の Problem Details（problem.ts）。type・status・key・params・errors は画面との契約で、detail は英語の文言を
+  //   固定する（problem-detail.en.ts）ので、本文全体を検証する。
+  // errors: リクエストの形（presentation の zod スキーマ）の誤りだけに付く。JSON として読めない誤りと、
+  //   値の規則（domain の不変条件）の誤りには付かない（problem.ts の Problem のコメント）。
+  // WHY toStrictEqual: toEqual は undefined のプロパティと無いプロパティを同じとみなす。params・errors の無い誤りで
   //   本文にそのキーが出ないこと（JSON は undefined を出さないので、出ていれば値がある）も確かめる。
-  test.each<[string, string, ErrorResponse["error"]]>([
+  test.each<[string, string, ProblemBody]>([
     [
       "JSON でない",
       "{title:",
-      { code: "validation_error", key: "request.body.notJson" },
+      {
+        detail: "Request body must be valid JSON.",
+        key: "request.body.notJson",
+      },
     ],
     [
       "オブジェクトでない",
       '["牛乳を買う"]',
       {
-        code: "validation_error",
+        detail: "Request body must be a JSON object.",
         key: "request.body.notObject",
-        issues: [{ path: "", key: "request.body.notObject" }],
+        errors: [
+          {
+            pointer: "#",
+            key: "request.body.notObject",
+            detail: "Request body must be a JSON object.",
+          },
+        ],
       },
     ],
     [
       "title が無い",
       "{}",
       {
-        code: "validation_error",
+        detail: "title must be a string.",
         key: "request.field.notString",
         params: { path: "title" },
-        issues: [
+        errors: [
           {
-            path: "title",
+            pointer: "#/title",
             key: "request.field.notString",
             params: { path: "title" },
+            detail: "title must be a string.",
           },
         ],
       },
@@ -122,14 +137,15 @@ describe("POST /api/todos", () => {
       "title が文字列でない",
       JSON.stringify({ title: 1 }),
       {
-        code: "validation_error",
+        detail: "title must be a string.",
         key: "request.field.notString",
         params: { path: "title" },
-        issues: [
+        errors: [
           {
-            path: "title",
+            pointer: "#/title",
             key: "request.field.notString",
             params: { path: "title" },
+            detail: "title must be a string.",
           },
         ],
       },
@@ -138,14 +154,15 @@ describe("POST /api/todos", () => {
       "定義されていない項目がある",
       JSON.stringify({ title: "牛乳を買う", completed: true }),
       {
-        code: "validation_error",
+        detail: "Request body has unknown fields: completed.",
         key: "request.body.unknownKeys",
         params: { keys: "completed" },
-        issues: [
+        errors: [
           {
-            path: "",
+            pointer: "#",
             key: "request.body.unknownKeys",
             params: { keys: "completed" },
+            detail: "Request body has unknown fields: completed.",
           },
         ],
       },
@@ -153,18 +170,18 @@ describe("POST /api/todos", () => {
     [
       "title が空",
       JSON.stringify({ title: "" }),
-      { code: "validation_error", key: "todo.title.empty" },
+      { detail: "Title must not be empty.", key: "todo.title.empty" },
     ],
     [
       "title が空白だけ",
       JSON.stringify({ title: "  " }),
-      { code: "validation_error", key: "todo.title.empty" },
+      { detail: "Title must not be empty.", key: "todo.title.empty" },
     ],
     [
       "title が 101 文字",
       JSON.stringify({ title: "a".repeat(101) }),
       {
-        code: "validation_error",
+        detail: "Title must be at most 100 characters.",
         key: "todo.title.tooLong",
         params: { max: 100 },
       },
@@ -173,21 +190,28 @@ describe("POST /api/todos", () => {
       "title が絵文字 101 個",
       JSON.stringify({ title: "🍎".repeat(101) }),
       {
-        code: "validation_error",
+        detail: "Title must be at most 100 characters.",
         key: "todo.title.tooLong",
         params: { max: 100 },
       },
     ],
   ])(
-    "%s なら 400 と validation_error を、理由の key（と params・issues）付きで返し、何も保存しない",
+    "%s なら 400 の /problems/validation-error を、理由の key（と params・errors）と英語の detail 付きで返し、何も保存しない",
     async (_label, body, expected) => {
       const { repository, POST } = setup();
 
       const response = await POST(postRequest(body));
 
       expect(response.status).toBe(400);
+      expect(response.headers.get("content-type")).toBe(
+        "application/problem+json",
+      );
       await expect(response.json()).resolves.toStrictEqual({
-        error: expected,
+        type: "/problems/validation-error",
+        title: "Validation error",
+        status: 400,
+        instance: "/api/todos",
+        ...expected,
       });
       await expect(repository.findAll()).resolves.toEqual([]);
     },

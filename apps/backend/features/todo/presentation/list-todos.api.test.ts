@@ -96,8 +96,8 @@ describe("GET /api/todos", () => {
     });
   });
 
-  test("一覧の取得で想定外の例外が起きたら、500 と内部の情報を含まない internal_error を返し、例外をログに残す", async () => {
-    // toErrorResponse が想定外の例外を logger.error（中で console.error）に出す。テストの出力を汚さないよう抑制し、
+  test("一覧の取得で想定外の例外が起きたら、500 と内部の情報を含まない /problems/internal-error を返し、例外をログに残す", async () => {
+    // toProblemResponse が想定外の例外を logger.error（中で console.error）に出す。テストの出力を汚さないよう抑制し、
     //   例外の name と message が 1 行に入ったことだけを確かめる（行の形は logger.test.ts で固定している）。
     const consoleError = vi
       .spyOn(console, "error")
@@ -110,8 +110,17 @@ describe("GET /api/todos", () => {
     const response = await failingGet(listRequest());
 
     expect(response.status).toBe(500);
+    expect(response.headers.get("content-type")).toBe(
+      "application/problem+json",
+    );
+    // RFC 9457 の Problem Details。detail は固定の英語で、例外の message（接続先など内部の情報）を含めない。
     await expect(response.json()).resolves.toStrictEqual({
-      error: { code: "internal_error", key: "server.internalError" },
+      type: "/problems/internal-error",
+      title: "Internal error",
+      status: 500,
+      detail: "Internal server error.",
+      instance: "/api/todos",
+      key: "server.internalError",
     });
     expect(consoleError).toHaveBeenCalledTimes(1);
     const [line] = consoleError.mock.calls[0] as [string];

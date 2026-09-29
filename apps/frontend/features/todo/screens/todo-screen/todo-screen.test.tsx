@@ -87,7 +87,13 @@ test("追加のフォームを送信しても、ブラウザの既定の送信�
 });
 
 test("一覧の取得に失敗すると、エラーのキーを翻訳した文言が alert として表示される", async () => {
-  vi.mocked(listTodos).mockRejectedValue(new ApiError("server.internalError"));
+  vi.mocked(listTodos).mockRejectedValue(
+    new ApiError({
+      status: 500,
+      type: "/problems/internal-error",
+      key: "server.internalError",
+    }),
+  );
 
   render(<TodoScreen />, { wrapper: JaLocale });
 
