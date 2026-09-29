@@ -65,7 +65,7 @@ function requiredString(raw: string): Check<string> {
 // WHY /^\d+$/ で判定する: Number() は "1e3"・" 5"・"0x10" も数にしてしまい、書き間違いを見逃すため。
 function nonNegativeInteger(raw: string): Check<number> {
   if (!/^\d+$/.test(raw)) {
-    return { problem: `0 以上の整数で指定してください（値: ${raw}）` };
+    return { problem: `must be an integer >= 0 (got: ${raw})` };
   }
   return { value: Number(raw) };
 }
@@ -73,7 +73,7 @@ function nonNegativeInteger(raw: string): Check<number> {
 // 接続数 0 のプールはクエリを永久に待たせるだけなので、1 以上に限る。
 function positiveInteger(raw: string): Check<number> {
   if (!/^\d+$/.test(raw) || Number(raw) === 0) {
-    return { problem: `1 以上の整数で指定してください（値: ${raw}）` };
+    return { problem: `must be an integer >= 1 (got: ${raw})` };
   }
   return { value: Number(raw) };
 }
@@ -82,7 +82,7 @@ function positiveInteger(raw: string): Check<number> {
 // WHY 0 を拒否する: 0 は「OS が空きポートを選ぶ」意味になり、webServer と baseURL（テスト側）の番号がずれる。
 function portNumber(raw: string): Check<number> {
   if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 65_535) {
-    return { problem: `1〜65535 の整数で指定してください（値: ${raw}）` };
+    return { problem: `must be an integer from 1 to 65535 (got: ${raw})` };
   }
   return { value: Number(raw) };
 }
@@ -105,7 +105,7 @@ export function readEnv(source: EnvSource): Env {
   for (const name of Object.keys(PARSERS) as (keyof Env)[]) {
     const raw = source[name];
     if (raw === undefined || raw.trim() === "") {
-      problems.push(`${name}: 設定されていません`);
+      problems.push(`${name}: is not set`);
       continue;
     }
     const checked = PARSERS[name](raw);
@@ -118,9 +118,9 @@ export function readEnv(source: EnvSource): Env {
   if (problems.length > 0) {
     throw new Error(
       [
-        "環境変数が足りないか、値が正しくありません。",
+        "Environment variables are missing or invalid.",
         ...problems.map((problem) => `  - ${problem}`),
-        "リポジトリ直下で cp .env.example .env を実行して .env を作り、値を確かめてください（.claude/rules/env.md の「環境変数」）。",
+        "Run cp .env.example .env at the repository root to create .env, then check the values (see .claude/rules/env.md).",
       ].join("\n"),
     );
   }
@@ -164,7 +164,7 @@ export function readToolEnv(source: EnvSource): ToolEnv {
   if (problems.length > 0) {
     throw new Error(
       [
-        "環境変数の値が正しくありません。",
+        "Environment variable values are invalid.",
         ...problems.map((problem) => `  - ${problem}`),
       ].join("\n"),
     );

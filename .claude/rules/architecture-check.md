@@ -5,7 +5,7 @@ paths:
 
 # 依存の向きの検査（rule-tests/architecture.test.ts）
 
-`rule-tests/architecture.test.ts`（`pnpm test` に含まれ、CI の `ci` ジョブで止まる）が、ディレクトリ構成の規則（`.claude/rules/backend.md`・`.claude/rules/frontend.md`・`.claude/rules/shared.md`）と環境変数の直参照の禁止（`.claude/rules/env.md`）、`console` の直接の呼び出しの禁止（`.claude/rules/backend.md` の「ログ」）、画面と backend のハードコードの文言の禁止（Issue #116 の i18n）を 1 規則 = 1 テストで検査する。
+`rule-tests/architecture.test.ts`（`pnpm test` に含まれ、CI の `ci` ジョブで止まる）が、ディレクトリ構成の規則（`.claude/rules/backend.md`・`.claude/rules/frontend.md`・`.claude/rules/shared.md`）と環境変数の直参照の禁止（`.claude/rules/env.md`）、`console` の直接の呼び出しの禁止（`.claude/rules/backend.md` の「ログ」）、画面と、サーバ側（backend・shared）のハードコードの文言の禁止（Issue #116 の i18n）を 1 規則 = 1 テストで検査する。
 ルール検査テストなので、must pass / must reject と fault injection が必須（`.claude/rules/testing.md`、手順はスキル `rule-check-test`）。
 
 ## 対象と抽出
@@ -37,7 +37,7 @@ paths:
 - `console-direct-access`（Issue #85）: `console` という識別子（`console.log` / `console?.log` / `console["log"]`、`globalThis.console` / `global.console`、`(console)`、別名・分割代入・引数に渡すものも含む。`consoleLog`・`myconsole`・`console_` は別の識別子）を、`apps/shared/logger.ts` 以外で違反にする。対象は `env-direct-access` と同じファイルに `scripts/` のソース（テスト以外。今は無い）を足したもの。判定の例は `CONSOLE_ACCESS_EXAMPLES`。Biome の `noConsole` と 2 系統にする理由は ADR `docs/adr/architecture/20260929-logger-single-exit.md`、どちらか片方だけが拾う書き方は `rule-tests/architecture.test.ts` のコメントと「console の参照の抽出」のテスト。
 
 - `frontend-hardcoded-text`（Issue #116）: `apps/frontend/` のテスト以外のソース（辞書 `apps/frontend/shared/i18n/messages/` の直下の `*.ts` は除く。下の階層・`messages/` の外・`.tsx` は除かない）で、(1) JSX のテキストに空白以外の文字がある（英語も）、(2) 利用者に見える属性（`VISIBLE_TEXT_ATTRIBUTES`: `aria-label`・`aria-description`・`placeholder`・`title`・`alt`・`label`）の値が文字列リテラル・テンプレートリテラル（`"x"`・`{"x"}`・``{`x ${y}`}``）で空白以外の文字を持つ、(3) どこであれ文字列リテラル・テンプレートリテラル（型の位置、エスケープを解釈した値も）に日本語（`\p{Script=Hiragana}`・`Katakana`・`Han`）がある、のどれかを違反にする。通すもの: `{t("...")}`・`aria-label={t("x", { title })}`、一覧に無い属性（`className` など）、空白だけの値（`alt=""`）と埋め込み式だけのテンプレート、JSX ではない ASCII の文字列（`layout.tsx` の `metadata.title`）、コメント（構文木に現れない）。1 つの値が (2) と (3) の両方に当たっても 1 件。判定の例は `HARDCODED_TEXT_EXAMPLES`。
-- `backend-hardcoded-text`（Issue #116）: `apps/backend/` のテスト以外のソースで、上の (3) だけを違反にする（例外なし。エラーは `ErrorKey` と params で表す）。ログのメッセージ・開発者向けのエラー（`database.test-support.ts` のようなテスト以外の補助も）も対象。JSX のテキストと属性は見ない（ASCII の文字列は ErrorKey・ログ・SQL など文言でないものが大半のため）。
+- `server-hardcoded-text`（Issue #116。もとの名前は `backend-hardcoded-text`。`apps/shared` を対象に加えて改名）: `apps/backend/` と `apps/shared/` のテスト以外のソースで、上の (3) だけを違反にする（例外なし。エラーは `ErrorKey` と params で表す）。ログのメッセージ・開発者向けのエラー（`database.test-support.ts` のようなテスト以外の補助、`apps/shared/env.ts` のエラー、`logger.ts` のメッセージも）も対象で、運用者向けの文言は英語で書く。JSX のテキストと属性は見ない（ASCII の文字列は ErrorKey・ログ・SQL など文言でないものが大半のため）。
 
 ## テストの持ち方
 - 規則ごとに判定の例（`RULE_EXAMPLES`。違反になる例・ならない例を架空の参照で 3 件以上ずつ）。今のコードに違反が無いことだけでは、規則が緩すぎても気づけない。`RULES` のすべての規則に例があることもテストで確かめる。exports は `resolveExportKey`・`findExportsViolations` に当たる例・当たらない例・違反の例を持つ。

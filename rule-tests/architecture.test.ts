@@ -34,7 +34,7 @@ import { describe, expect, it } from "vitest";
 // 書き方だけ、apps/backend/package.json の exports の過不足）、frontend と backend で共通の apps/shared（Issue #90。置き場所、
 // "@repo/shared/..." の書き方、画面側から参照しない、apps/shared/package.json の exports の過不足）と、環境変数の直参照の禁止
 // （.claude/rules/env.md の「環境変数」。規則 env-direct-access）、画面と backend のハードコードの文言の禁止（Issue #116 の i18n。
-// 規則 frontend-hardcoded-text・backend-hardcoded-text。これだけは正規表現ではなく構文木で見る。WHY は該当の節）。
+// 規則 frontend-hardcoded-text・server-hardcoded-text。これだけは正規表現ではなく構文木で見る。WHY は該当の節）。
 //
 // WHY 自前のテストにする（Biome の noRestrictedImports を使わない）:
 //   「features/<f>/api/ から backend へは import type だけ許す」を表現できない。Biome 2.5.13 の noRestrictedImports は
@@ -1142,7 +1142,7 @@ function findConsoleViolations(root: string): string[] {
     );
 }
 
-// --- ハードコードの文言（規則 frontend-hardcoded-text・backend-hardcoded-text。Issue #116 の i18n） ---
+// --- ハードコードの文言（規則 frontend-hardcoded-text・server-hardcoded-text。Issue #116 の i18n） ---
 // 画面の文言は apps/frontend/shared/i18n/messages/ の辞書（ja.ts / en.ts）だけに置き、画面は t("key", params) で描く。
 //   backend のエラーは ErrorKey（apps/backend/shared/domain/error-key.ts）と params で表し、自然言語を持たない。
 //   この 2 つを、文言が辞書の外に書かれた時点で止める（CLAUDE.md の原則 7。レビューの目視に頼らない）。
@@ -1156,8 +1156,10 @@ function findConsoleViolations(root: string): string[] {
 //      WHY 埋め込み式だけのテンプレート（aria-label={`${title}`}）は通す: 書かれた文字が無く、辞書に移す文言が無い。
 //   3. ファイルのどこであれ、文字列リテラル・テンプレートリテラル（型の位置の "..." も含む）に日本語（ひらがな・カタカナ・漢字）がある。
 //      WHY: 1・2 の外（エラーメッセージ、変数に入れてから渡す文言、属性の一覧に無い props）に書いた日本語を拾うため。
-// 違反にするもの（backend-hardcoded-text。apps/backend のテスト以外のソース。例外なし）: 3 だけ。
+// 違反にするもの（server-hardcoded-text。apps/backend と apps/shared のテスト以外のソース。例外なし）: 3 だけ。
 //   WHY 例外を置かない: エラーは ErrorKey と params で表し、文言は画面側の辞書で組み立てる（DomainError に日本語を渡さない）。
+//   WHY apps/shared も対象にする（Issue #116 の仕上げ）: env.ts のエラーと logger.ts のメッセージは運用者（開発者）向けで、
+//     利用者に見せる文言は frontend の辞書、運用者向けの文言は英語、と決めたため。日本語が残ると 2 つの言語が混ざる。
 //   WHY 1・2 を backend にかけない: backend は JSX を持たず（置き場所の規則と .claude/rules/backend.md）、ASCII の文字列は
 //     ErrorKey・ログのメッセージ・SQL など文言ではないものが大半で、ASCII まで止めると誤検知が多い。
 // WHY テストを除く: テストは画面に出た文言（「削除」のボタンがあること）を確かめるため、日本語を書く。
@@ -1201,7 +1203,7 @@ const I18N_MESSAGES = /^apps\/frontend\/shared\/i18n\/messages\/[^/]+\.ts$/;
 const JAPANESE = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u;
 const NON_WHITESPACE = /\S/;
 
-// どの種類の文言を違反にするか。frontend は 1・2・3、backend は 3 だけ（上の説明の番号）。
+// どの種類の文言を違反にするか。frontend は 1・2・3、サーバ側（backend・shared）は 3 だけ（上の説明の番号）。
 type HardcodedTextChecks = {
   jsxText: boolean;
   visibleAttributes: ReadonlySet<string>;
@@ -1210,7 +1212,7 @@ type HardcodedTextChecks = {
 const FRONTEND_HARDCODED_TEXT = {
   id: "frontend-hardcoded-text",
   name: "画面（apps/frontend）に文言をハードコードしない: JSX のテキスト、利用者に見える属性（aria-label・placeholder・title・alt・label・aria-description）の文字列、日本語の文字列は違反（辞書 apps/frontend/shared/i18n/messages/*.ts とテストは除く）",
-  root: FRONTEND_ROOT,
+  roots: [FRONTEND_ROOT],
   appliesTo: (file: string) =>
     isSourceNonTest(file) &&
     isUnder(file, FRONTEND_ROOT) &&
@@ -1221,19 +1223,20 @@ const FRONTEND_HARDCODED_TEXT = {
   } as HardcodedTextChecks,
 };
 
-const BACKEND_HARDCODED_TEXT = {
-  id: "backend-hardcoded-text",
-  name: "backend（apps/backend）の文字列に日本語を書かない（エラーは ErrorKey と params で表す。テストは除く。例外なし）",
-  root: BACKEND_ROOT,
+const SERVER_HARDCODED_TEXT = {
+  id: "server-hardcoded-text",
+  name: "apps/backend と apps/shared の非テストコードは日本語のリテラルを持たない（エラーは ErrorKey と params で表し、運用者向けの文言は英語。テストは除く。例外なし）",
+  roots: [BACKEND_ROOT, SHARED_ROOT],
   appliesTo: (file: string) =>
-    isSourceNonTest(file) && isUnder(file, BACKEND_ROOT),
+    isSourceNonTest(file) &&
+    (isUnder(file, BACKEND_ROOT) || isUnder(file, SHARED_ROOT)),
   checks: {
     jsxText: false,
     visibleAttributes: new Set<string>(),
   } as HardcodedTextChecks,
 };
 
-const HARDCODED_TEXT_RULES = [FRONTEND_HARDCODED_TEXT, BACKEND_HARDCODED_TEXT];
+const HARDCODED_TEXT_RULES = [FRONTEND_HARDCODED_TEXT, SERVER_HARDCODED_TEXT];
 type HardcodedTextRule = (typeof HARDCODED_TEXT_RULES)[number];
 
 // tsgo に渡す仮想のファイルシステムの根。実ディスクのパスと重ならない名前にする。
@@ -1365,7 +1368,9 @@ function listHardcodedTextCheckedFiles(
   root: string,
   rule: HardcodedTextRule,
 ): string[] {
-  return listSourceFiles(root, rule.root).filter(rule.appliesTo);
+  return rule.roots
+    .flatMap((ruleRoot) => listSourceFiles(root, ruleRoot))
+    .filter(rule.appliesTo);
 }
 
 // 「ファイル:行」の一覧。
@@ -1575,7 +1580,7 @@ function findViolations(references: Reference[], rule: Rule): string[] {
 //   置き場所の違反は「backend-placement: ファイル」「frontend-placement: ファイル」の 1 行で出す。
 //   環境変数の直参照は「env-direct-access: ファイル:行」を参照ごとに 1 行で出す（同じファイルの複数の書き方を、
 //   1 つずつ拾えているかまで比べるため）。console の直接の呼び出しも「console-direct-access: ファイル:行」で同じく出す。
-//   ハードコードの文言も「frontend-hardcoded-text: ファイル:行」「backend-hardcoded-text: ファイル:行」を文言ごとに 1 行で出す。
+//   ハードコードの文言も「frontend-hardcoded-text: ファイル:行」「server-hardcoded-text: ファイル:行」を文言ごとに 1 行で出す。
 //   exports の違反は「backend-exports: ...」「shared-exports: ...」の 1 行で出す（findExportsViolations）。
 //   apps/shared の置き場所の違反は「shared-placement: ファイル」の 1 行で出す（ソース以外も含め、apps/shared の全ファイルを見る）。
 // WHY 置き場所の規則も参照を取り出すファイル（listReferencingFiles。apps/e2e/ とリポジトリ直下を含む）全体にかける:
@@ -1778,7 +1783,7 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
     expect(files.filter((file) => file.includes("/.next/"))).toEqual([]);
   });
 
-  it("ハードコードの文言の検査は、apps/frontend・apps/backend のソースを対象にし、辞書・テスト・生成物は対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
+  it("ハードコードの文言の検査は、apps/frontend・apps/backend・apps/shared のソースを対象にし、辞書・テスト・生成物は対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
     const frontend = listHardcodedTextCheckedFiles(
       repoRoot,
       FRONTEND_HARDCODED_TEXT,
@@ -1796,7 +1801,7 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
     expect(frontend.filter((file) => I18N_MESSAGES.test(file))).toEqual([]);
     const backend = listHardcodedTextCheckedFiles(
       repoRoot,
-      BACKEND_HARDCODED_TEXT,
+      SERVER_HARDCODED_TEXT,
     );
     expect(backend).toEqual(
       expect.arrayContaining([
@@ -1804,6 +1809,8 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "apps/backend/shared/presentation/http-error.ts",
         "apps/backend/features/todo/infra/container.ts",
         "apps/backend/shared/drizzle/drizzle.config.ts",
+        "apps/shared/env.ts",
+        "apps/shared/logger.ts",
       ]),
     );
     for (const files of [frontend, backend]) {
@@ -3334,7 +3341,7 @@ describe("console の参照の抽出（findConsoleAccesses）", () => {
   });
 });
 
-// ハードコードの文言の規則（FRONTEND_HARDCODED_TEXT・BACKEND_HARDCODED_TEXT。Issue #116）の判定例。[ファイル, ソース] で決まる。
+// ハードコードの文言の規則（FRONTEND_HARDCODED_TEXT・SERVER_HARDCODED_TEXT。Issue #116）の判定例。[ファイル, ソース] で決まる。
 // WHY 架空のソースで固定する: 実リポジトリの検査は「今の画面に文言が無い」ことしか確かめず、判定が緩すぎても（常に違反なし）
 //   通ってしまう。書き方（JSX のテキスト・属性・テンプレートリテラル・エスケープ・型の位置）と、通すもの（t(...)・className・
 //   コメント・辞書・テスト）の境界を、規則ごとに例で持つ。
@@ -3508,8 +3515,17 @@ const HARDCODED_TEXT_EXAMPLES: Record<
       ["README.md", "<p>削除</p>"],
     ],
   },
-  "backend-hardcoded-text": {
+  "server-hardcoded-text": {
     violating: [
+      // apps/shared（env.ts のエラーと logger.ts のメッセージ）も対象。
+      [
+        "apps/shared/env.ts",
+        `export const m = (raw) => \`0 以上の整数で指定してください（値: \${raw}）\`;`,
+      ],
+      [
+        "apps/shared/logger.ts",
+        'export const m = "logger: event を JSON にできなかった";',
+      ],
       [
         "apps/backend/features/todo/domain/todo.ts",
         `export const e = (id) => new DomainError("not_found", \`Todo（id: \${id}）が見つかりません\`);`,
@@ -3551,6 +3567,11 @@ const HARDCODED_TEXT_EXAMPLES: Record<
       ],
       ["apps/frontend/shared/i18n/messages/ja.ts", 'export const s = "削除";'],
       ["apps/shared/logger.ts", 'export const s = "Delete";'],
+      [
+        "apps/shared/env.ts",
+        `// 日本語のコメントは拾わない\nexport const m = (raw) => \`must be an integer >= 0 (got: \${raw})\`;`,
+      ],
+      ["apps/shared/env.test.ts", 'expect(m).toBe("設定されていません");'],
       ["README.md", "削除"],
     ],
   },
@@ -3958,7 +3979,7 @@ function violationsOfFixture(files: Record<string, string>): string[] {
 // console の直接の呼び出しの規則（CONSOLE_DIRECT_ACCESS。Issue #85）の違反も置く。
 // apps/shared の規則（Issue #90。frontend-to-shared-specifier・screen-to-shared・SHARED_PLACEMENT・SHARED_EXPORTS と、層の規則の
 // apps/shared の許可 SHARED_MODULES_BY_LAYER）の違反も置く。
-// ハードコードの文言の規則（FRONTEND_HARDCODED_TEXT・BACKEND_HARDCODED_TEXT。Issue #116）の違反も置く。
+// ハードコードの文言の規則（FRONTEND_HARDCODED_TEXT・SERVER_HARDCODED_TEXT。Issue #116）の違反も置く。
 // 規則は全部で 29（RULES の 20 + 置き場所 3 + 環境変数の直参照 + console + exports 2 + ハードコードの文言 2）。Issue #68 で RULES に 3 規則（backend-to-frontend・
 // backend-relative-only・frontend-root-to-backend）を足し、段階 2 で frontend-to-backend-specifier と BACKEND_EXPORTS を足した。
 // Issue #90 で frontend-to-shared-specifier・screen-to-shared・shared-self-contained・SHARED_PLACEMENT・SHARED_EXPORTS を足した。
@@ -4287,7 +4308,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/frontend/shared/i18n/ja.ts": lines(
     'export const ja = { "todo.item.delete": "削除" };',
   ),
-  // backend-hardcoded-text（Issue #116）: 日本語の文字列（テンプレートリテラル・zod の error）。コメント（3 行目）と ErrorKey（5 行目）は拾わない。
+  // server-hardcoded-text（Issue #116）: 日本語の文字列（テンプレートリテラル・zod の error）。コメント（3 行目）と ErrorKey（5 行目）は拾わない。
   "apps/backend/features/todo/domain/bad-text.ts": lines(
     "export const notFound = (id) =>",
     `  new DomainError("not_found", \`Todo（id: \${id}）が見つかりません\`);`,
@@ -4410,7 +4431,11 @@ const MUST_REJECT_FILES: Record<string, string> = {
   //   入れ子の lib/logger.ts は例外の apps/shared/logger.ts ではないので、process.env と console も違反。
   "apps/shared/extra.ts": lines("export const x = 1;"),
   "apps/shared/README.md": "# shared",
-  "apps/shared/lib/logger.ts": lines("console.log(process.env.X);"),
+  //   2 行目は server-hardcoded-text（apps/shared の日本語の文字列）の違反。
+  "apps/shared/lib/logger.ts": lines(
+    "console.log(process.env.X);",
+    'export const m = "設定されていません";',
+  ),
   "apps/shared/extra.test.ts": lines("console.log(1);"),
   // 例外の env.ts（process.env を読んでも違反にならない）と、shared-exports の違反を置いた package.json。
   //   "./env" は上の参照で使われ、ファイルもある（違反なし）。"./mismatch" は使われるが、値が別のファイルでキーのファイルも無い。
@@ -4594,8 +4619,9 @@ const MUST_REJECT_VIOLATIONS = [
   "frontend-hardcoded-text: apps/frontend/features/todo/api/bad-text.ts:1",
   "frontend-hardcoded-text: apps/frontend/shared/i18n/messages/nested/ja.ts:1",
   "frontend-hardcoded-text: apps/frontend/shared/i18n/ja.ts:1",
-  "backend-hardcoded-text: apps/backend/features/todo/domain/bad-text.ts:2",
-  "backend-hardcoded-text: apps/backend/features/todo/domain/bad-text.ts:4",
+  "server-hardcoded-text: apps/backend/features/todo/domain/bad-text.ts:2",
+  "server-hardcoded-text: apps/backend/features/todo/domain/bad-text.ts:4",
+  "server-hardcoded-text: apps/shared/lib/logger.ts:2",
   ...[
     "apps/backend/features/todo/presentation/list-todos.api",
     "apps/backend/features/todo/domain/todo",
@@ -5309,7 +5335,7 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import type { Todo } from "../domain/todo";',
     'import type { TodoRepository } from "../domain/todo-repository";',
   ),
-  // frontend-hardcoded-text・backend-hardcoded-text（Issue #116）: 辞書の日本語、t(...) で描く画面、一覧に無い属性、
+  // frontend-hardcoded-text・server-hardcoded-text（Issue #116）: 辞書の日本語、t(...) で描く画面、一覧に無い属性、
   //   空白だけの alt、埋め込み式だけのテンプレート、コメントの日本語、ErrorKey で表すエラー、テストの日本語は通す。
   "apps/frontend/shared/i18n/messages/ja.ts": lines(
     'export const ja = { "todo.item.delete": "削除", "todo.item.deleteLabel": "「{title}」を削除" } as const;',

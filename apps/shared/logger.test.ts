@@ -118,7 +118,8 @@ describe("logger", () => {
     expect(JSON.parse(onlyLine(spies, "error"))).toEqual({
       level: "error",
       timestamp: NOW,
-      message: "logger: event を JSON にできなかった（循環参照・BigInt など）",
+      message:
+        "logger: event could not be serialized to JSON (circular reference, BigInt, etc.)",
     });
   });
 
@@ -199,7 +200,7 @@ describe("logger", () => {
         level: "warn",
         timestamp: NOW,
         message:
-          "logger: event を JSON にできなかった（循環参照・BigInt など）",
+          "logger: event could not be serialized to JSON (circular reference, BigInt, etc.)",
       });
     },
   );
