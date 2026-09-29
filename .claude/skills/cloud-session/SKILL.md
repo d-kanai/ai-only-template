@@ -6,7 +6,7 @@ description: クラウドセッション（Claude Code on the web）の環境の
 # cloud-session（Claude Code on the web の環境）
 
 クラウド VM には asdf が無いので、`scripts/cloud-session-start.sh` が `.tool-versions` と同じ Node / pnpm を入れ、Postgres を起動してマイグレーションを当てる。
-スクリプトの仕様と WHY は `.claude/rules/cloud-session.md`、VM の実測・時間・経緯は `docs/cloud-session.md`。
+スクリプトの仕様と WHY は `.claude/rules/cloud-session.md`、決定は ADR `docs/adr/20260928-cloud-session-setup-script-and-hook.md`、VM の実測・時間は 2026-09-28 の work-logs。
 
 ## 仕組み（2 つの入口）
 - **SessionStart フック**（`.claude/settings.json`、matcher `startup|resume`）: 毎セッション `bash scripts/cloud-session-start.sh` を実行する。`CLAUDE_CODE_REMOTE=true` のときだけ動く（ローカルでは何もしない）。既存の Node / pnpm を見つけて PATH を `CLAUDE_ENV_FILE` に書き出し → `pnpm install --frozen-lockfile` → `.env` が無ければ `.env.example` からコピー → `dockerd` の起動 → `docker compose pull`（再試行つき）→ `up --wait` → `pnpm db:migrate`。Node / pnpm が無ければ自分で入れる。

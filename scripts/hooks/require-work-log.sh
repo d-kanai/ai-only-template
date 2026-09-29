@@ -7,7 +7,7 @@
 #   {"decision":"block","reason":...} を stdout に出して停止を拒否する（Claude はログを書いてから止まり直す）。
 # WHY: 調査だけの依頼などで作業ログの追記が漏れた（LEARNINGS.md、Issue #64 のユーザー判断）。文章のルールではなく
 #   フックで止める（CLAUDE.md の「7. 機械的な強制を優先」）。
-# 詳細（判定の限界・タイムゾーン・ユーザー側の Stop フックとの順序）: .claude/rules/work-log.md、実測は docs/work-log.md。
+# 詳細（判定の限界・タイムゾーン・ユーザー側の Stop フックとの順序）: .claude/rules/work-log.md、決定は ADR docs/adr/20260928-work-log-enforced-by-stop-hook-and-ci.md。
 #
 # 入力（stdin の JSON。公式 https://code.claude.com/docs/en/hooks.md の Stop input）:
 #   transcript_path: 会話の JSONL。stop_hook_active: Stop フックの block で続けている途中なら true。cwd: 作業ディレクトリ。
@@ -149,7 +149,7 @@ fi
 # WHY コミットも見る: この環境のユーザー側の Stop フックは未コミットの変更があると止めるので、ログはコミットしてから止まる。
 #   作業ツリーだけを見ると、コミットした後に必ずこのフックで止まってしまう。
 # WHY 今日の 0 時ではなくターンの開始: 今日の 0 時以降にすると、その日に 1 度でもログがコミットされれば（main の取り込みを含む）
-#   以後のターンがすべて素通りした（Issue #64 の実測で当日 66 件。docs/work-log.md）。
+#   以後のターンがすべて素通りした（Issue #64 の実測で当日 66 件。2026-09-28 の work-logs）。
 if [ -n "$(git -C "$root" log --since="$since" --format=%H -- "$log")" ]; then
   exit 0
 fi

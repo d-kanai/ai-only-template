@@ -1,7 +1,7 @@
 // リクエストログ（1 リクエスト = JSON 1 行、5W1H）の 1 行を組み立てる純粋関数（Issue #80）。
 // 出力するのは apps/frontend/proxy.ts（Next の規約ファイル）。ここは受け取った値から 1 行の中身を決めるだけで、
 // 時刻の取得・乱数・出力をしない。WHY: 仕様（各項目の取り方）をテストで丸ごと固定し、proxy.ts を薄く保つため。
-// 仕様の表・一次情報・限界（status と所要時間が取れない、RSC のリクエストの扱い）は docs/request-log.md。
+// 仕様の表は Issue #80、決定は ADR docs/adr/20260929-request-log-in-proxy.md、限界（status と所要時間が取れない、RSC のリクエストの扱い）は .claude/rules/frontend.md。
 
 // 1 行の JSON の形。フィールド名は Issue #80 の表のとおり（5W1H）。
 // WHY ヘッダ由来の項目を null にする（省略しない）: どの行も同じキーを持たせ、集計側で「無かった」と「出し忘れ」を区別するため。
@@ -75,7 +75,7 @@ function requestKind(pathname: string): RequestLog["kind"] {
 
 // WHY x-forwarded-for の先頭: プロキシを経るごとに右に追記されるので、先頭が最初の接続元（クライアント）になる。
 //   Next.js v15 で request.ip は削除され、ヘッダから取るしかない（proxy.md）。ヘッダは偽装できるので、信頼できる
-//   プロキシの後ろで動かす前提の値（docs/request-log.md の限界）。
+//   プロキシの後ろで動かす前提の値（.claude/rules/frontend.md の限界: 信頼できるリバースプロキシがヘッダを付け直す前提）。
 function clientIp(headers: Headers): string | null {
   const forwardedFor = headers.get("x-forwarded-for")?.split(",")[0].trim();
   return nonEmpty(forwardedFor) ?? nonEmpty(headers.get("x-real-ip"));

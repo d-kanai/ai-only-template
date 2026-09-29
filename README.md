@@ -68,7 +68,7 @@ apps/
 - 画面側からサーバ側へは、各 api ファイル（`apps/backend/<feature>/presentation/<name>.api.ts`）の型を `import type` で参照するだけ。型で担保されるのはリクエスト / レスポンスの形で、URL・メソッド・実行時の JSON の形は担保されない。
 - テストは対象の隣に置く（`app/` には置かない）。
 
-詳細は `.claude/rules/backend.md`（API 側）・`.claude/rules/frontend.md`（画面側）・`.claude/rules/architecture-check.md`（依存の向きの検査）・`.claude/rules/testing.md`（テストの置き方）、経緯と採用しなかった案は `docs/architecture-decisions.md` を参照。
+詳細は `.claude/rules/backend.md`（API 側）・`.claude/rules/frontend.md`（画面側）・`.claude/rules/architecture-check.md`（依存の向きの検査）・`.claude/rules/testing.md`（テストの置き方）、決定と採用しなかった案は ADR（`docs/adr/README.md` の一覧）を参照。
 
 ## セットアップ
 
@@ -105,7 +105,7 @@ pnpm db:generate # apps/backend/*/infra/schema.ts を変えたら、差分の SQ
 - 接続・プールの環境変数（`DATABASE_POOL_MAX` など）は `.claude/rules/backend.md` の「永続化（Drizzle + Postgres）」、スキーマの変え方はスキル `db-migration` を参照。
 - Docker Desktop は、従業員 250 人以上または年間売上 1,000 万ドル以上の企業での業務利用などに有料サブスクリプションが必要になる（[Docker Desktop license agreement](https://docs.docker.com/subscription-billing/desktop-license/)）。該当する場合は [Podman](https://podman.io/) の `podman compose up -d --wait` でも同じ `compose.yaml` を使える想定（Podman での実動作は未確認）。
 
-Claude Code のクラウドセッション（asdf が無い環境）では、`scripts/cloud-session-start.sh` で `.tool-versions` どおりの Node.js / pnpm を用意する（環境設定の setup script に `bash scripts/cloud-session-start.sh --install-only` を書くと初回だけで済む）。`.tool-versions` の版を上げたら setup script も更新してキャッシュを作り直す。あわせて SessionStart フックが毎セッション `dockerd` を起動し、`docker compose pull`（最大 3 回再試行）と `docker compose up -d --wait --wait-timeout 120` で Postgres を立ち上げ、`.env` が無ければ `.env.example` からコピーして、`pnpm db:migrate` でマイグレーションを当てる。詳細は `.claude/rules/cloud-session.md`（規則）・スキル `cloud-session`（確認と復旧）・`docs/cloud-session.md`（実測）を参照。
+Claude Code のクラウドセッション（asdf が無い環境）では、`scripts/cloud-session-start.sh` で `.tool-versions` どおりの Node.js / pnpm を用意する（環境設定の setup script に `bash scripts/cloud-session-start.sh --install-only` を書くと初回だけで済む）。`.tool-versions` の版を上げたら setup script も更新してキャッシュを作り直す。あわせて SessionStart フックが毎セッション `dockerd` を起動し、`docker compose pull`（最大 3 回再試行）と `docker compose up -d --wait --wait-timeout 120` で Postgres を立ち上げ、`.env` が無ければ `.env.example` からコピーして、`pnpm db:migrate` でマイグレーションを当てる。詳細は `.claude/rules/cloud-session.md`（規則）・スキル `cloud-session`（確認と復旧）・ADR `docs/adr/20260928-cloud-session-setup-script-and-hook.md`（決定）を参照。
 
 ## 開発
 
@@ -135,7 +135,7 @@ pnpm start     # 本番ビルドを起動（pnpm --filter @repo/frontend start�
 
 ## 指示ファイルの構成
 
-AI（Claude Code）への指示は、常に読み込むもの・必要なときだけ読み込むもの・読み込まない記録に分けている（Issue #64。仕組みと実測は `docs/claude-code-mechanics.md`）。構成は `rule-tests/instructions.test.ts` が検査する（CLAUDE.md の行数と `@` import、`.claude/rules` の `paths`、docs の参照、スキルのフロントマター）。
+AI（Claude Code）への指示は、常に読み込むもの・必要なときだけ読み込むもの・読み込まない記録に分けている（Issue #64。決定は ADR `docs/adr/20260928-instruction-files-by-load-timing.md`）。構成は `rule-tests/instructions.test.ts` が検査する（CLAUDE.md の行数と `@` import、`.claude/rules` の `paths`、ADR の形式、スキルのフロントマター）。
 
 | 置き場所 | 読み込まれるとき | 置くもの |
 | --- | --- | --- |
@@ -145,7 +145,7 @@ AI（Claude Code）への指示は、常に読み込むもの・必要なとき�
 | `.claude/rules/` | フロントマターの `paths` に一致するファイルを触ったとき | 規則と WHY（backend・frontend・依存の向きの検査・テスト・lint・環境変数・クラウドセッション・依存・git ガード・作業ログ・worktree） |
 | `.claude/skills/` | 説明は常時、本文は呼び出したとき | 手順（`pr-flow`・`rule-check-test`・`mutation-testing`・`db-migration`・`dependency-update`・`cloud-session`） |
 | `.claude/agents/` | サブエージェントの起動時 | worker / researcher / reviewer の定義 |
-| `docs/` | 読み込まれない | 実測・経緯・一次情報・採用しなかった案（一覧は `docs/README.md`） |
+| `docs/adr/` | 読み込まれない | ADR（決定の記録。1 決定 1 ファイル、不変。一覧は `docs/adr/README.md`） |
 | `work-logs/` | 読み込まれない | 日ごとの作業ログ |
 
 - 文章のルールより、lint・テスト・フック・CI での機械的な強制を優先する（CLAUDE.md の 7）。フックは `.claude/settings.json` と `scripts/hooks/`。

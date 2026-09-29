@@ -10,7 +10,7 @@ paths:
 
 # 作業ログの強制と、フックの記録（Issue #64）
 
-作業ログ（`work-logs/YYYY-MM-DD.md`）の書き方は `.claude/general/work-log.md`（常時読み込み）。このファイルの `paths:` に `work-logs/**` を入れない（ログを書くたびにフックの説明が読み込まれ、書き方は `.claude/general/work-log.md` で足りるため）。ここは、記録漏れを止める仕組み（Stop フック・CI）と、compact・指示ファイルの読み込みを記録するフックの WHAT / WHY / 限界。実測と経緯は `docs/work-log.md`。
+作業ログ（`work-logs/YYYY-MM-DD.md`）の書き方は `.claude/general/work-log.md`（常時読み込み）。このファイルの `paths:` に `work-logs/**` を入れない（ログを書くたびにフックの説明が読み込まれ、書き方は `.claude/general/work-log.md` で足りるため）。ここは、記録漏れを止める仕組み（Stop フック・CI）と、compact・指示ファイルの読み込みを記録するフックの WHAT / WHY / 限界。決定は ADR `docs/adr/20260928-work-log-enforced-by-stop-hook-and-ci.md`、実測は 2026-09-28 の work-logs、公式の仕様と未確認の点は 2026-09-29 の work-logs「docs/ から移した記録」。
 
 WHY 機械で止める: 調査だけの依頼などでログの追記が漏れた（LEARNINGS.md。ユーザーの指摘）。文章のルールは読み落とされる（CLAUDE.md の原則 7）。
 
@@ -28,7 +28,9 @@ WHY 機械で止める: 調査だけの依頼などでログの追記が漏れ�
   - 数えるのは、その後の `type: "assistant"` の行の `tool_use`（Bash / Agent / WebFetch / MCP など、種類を問わない）。0 なら会話だけのターンとして止めない。
   - `stop_hook_active: true`（Stop フックの block で続けている途中）なら判定しない。git リポジトリでない・transcript が読めない・入力が JSON でないときも止めない（理由は stderr）。判定できない状態で止め続けると、Claude が停止できずに上限（8 回）までループするため。
 - 限界:
-  - コミットを見る起点は最後の人間のターンの `timestamp`（数える起点と同じ行）。WHY: 起点を「今日の 0 時」にしていた最初の版は、その日に 1 度でもログがコミットされると（main の取り込みを含む）以後のターンがすべて素通りした（`docs/work-log.md` の実測）。
+  - コミットを見る起点は最後の人間のターンの `timestamp`（数える起点と同じ行）。WHY: 起点を「今日の 0 時」にしていた最初の版は、その日に 1 度でもログがコミットされると（main の取り込みを含む）以後のターンがすべて素通りした（Issue #64 の実測。2026-09-28 の work-logs）。
+  - `timestamp` は ISO 8601 の UTC（ミリ秒付き。例 `2026-09-28T21:37:27.487Z`）。秒に切り捨てて `git log --since=2026-09-28T21:37:27Z` の形で渡す。git がこの形を読むことは fixture（ターンの前のコミット → block、後のコミット → 許可）で確かめた。
+  - CI で `origin/<base_ref>...HEAD` が引けるのは、`actions/checkout` の `fetch-depth: 0` が全ブランチを `refs/remotes/origin/*` に取るため（`src/ref-helper.ts` の `getRefSpecForAllHistory` が `+refs/heads/*:refs/remotes/origin/*`。README「Set fetch-depth: 0 to fetch all history for all branches and tags」）。
   - その行に `timestamp` が無い・日時として読めないときだけ、今日の 0 時（ローカル）にフォールバックする（コミットも更新時刻も。理由を stderr に出す）。フォールバック中は、その日の以前のログのコミット・書き込みで素通りしうる。
   - 作業ツリーの変更は、更新時刻が起点以降のときだけ数える。WHY: `git status` は「HEAD と違うか」しか見ないので、前のターンで書いて未コミットのまま残ったログがあると、以後のターンがログを書かずに通っていた（reviewer 指摘）。更新時刻は `stat -c %Y`（Linux）か `stat -f %m`（macOS）。
   - 見ているのは「起点以降に今日のログのファイルに書いた（更新時刻）か、起点以降のコミットで今日のログが変わったか」だけで、中身がこのターンの作業かは見ない。ログの中身を変えずに保存し直す（`touch` など）と通る。ターンの途中に main を取り込み、今日のログが変わったマージコミットが入ると、それでも通る。

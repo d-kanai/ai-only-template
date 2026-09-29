@@ -10,7 +10,7 @@ paths:
 
 # テスト
 
-テストは仕様。仕様が黙って外れたり、壊れたコードを見逃したりしない状態を保つ。このルールの根拠になった実例は `docs/testing.md`。
+テストは仕様。仕様が黙って外れたり、壊れたコードを見逃したりしない状態を保つ。
 
 ## 基本
 - テストを先に書き、**失敗することを確認してから**実装する（CLAUDE.md の Test Driven）。WHY: 先に失敗を見ないと、実装に関係なく通る（何も検査していない）テストに気づけない。
@@ -35,7 +35,7 @@ paths:
 | `apps/e2e/*.spec.ts` | Playwright で本番ビルドを起動し、Chromium で操作 | Chromium |
 
 - `apps/backend/`・`apps/shared/` のテストは先頭に `// @vitest-environment node`（既定は jsdom）。WHY: サーバのコードは DOM の無い環境で検証する。
-- 実 Postgres を別スキーマに分ける WHY: Vitest はファイルを並列に、Stryker はさらに複数プロセスで実行する。同じ `public.todos` を使うと互いの `TRUNCATE` でデータが消え、`pnpm dev` や E2E の表も消える。drizzle の migrator には同時実行の排他が無い。
+- 実 Postgres を別スキーマに分ける WHY: Vitest はファイルを並列に、Stryker はさらに複数プロセスで実行する。同じ `public.todos` を使うと互いの `TRUNCATE` でデータが消え、`pnpm dev` や E2E の表も消える。drizzle の migrator には同時実行の排他が無い（drizzle-orm 0.45.3 の `pg-core/dialect.js` の `migrate` を読んで確認）。
 - `pnpm test` / `pnpm test:unit` / `pnpm test:mutation` は Postgres が起動している前提（`pnpm db:up`）。接続先は `.env` の `DATABASE_URL`。
 
 ## カバレッジ（100%）
@@ -61,24 +61,25 @@ paths:
 - 非同期の順序（古い応答が後から届く、画面を離れた後に失敗が届く）は、任意のタイミングで resolve できる `deferred()` で作る（各テストファイルの中に定義）。WHY: `mockResolvedValue` は即時に resolve し、タイマーは実行環境の速さに左右される。
 
 ## ルール検査テスト（規則・設定が効いていることを検査するテスト）
-今あるもの: `rule-tests/architecture.test.ts`（`.claude/rules/architecture-check.md`）、`rule-tests/lint.test.ts`（`.claude/rules/lint.md`）、`rule-tests/package.test.ts`・`rule-tests/pnpm-workspace.test.ts`（`.claude/rules/dependencies.md`）、`rule-tests/typecheck.test.ts`（`pnpm typecheck` と CI の順序）、`scripts/cloud-session-start.test.ts`（`.claude/rules/cloud-session.md`）、`rule-tests/instructions.test.ts`（CLAUDE.md の行数と @ import、`.claude/rules` の paths、docs の参照、スキルのフロントマター、旧 rules/ の参照）と、git ガード・作業ログ・worktree のフックのテスト（`scripts/hooks/*.test.ts` など）。テスト以外のゲート（カバレッジ・フック・CI の required check・型チェック）も同じ扱い。
+今あるもの: `rule-tests/architecture.test.ts`（`.claude/rules/architecture-check.md`）、`rule-tests/lint.test.ts`（`.claude/rules/lint.md`）、`rule-tests/package.test.ts`・`rule-tests/pnpm-workspace.test.ts`（`.claude/rules/dependencies.md`）、`rule-tests/typecheck.test.ts`（`pnpm typecheck` と CI の順序）、`scripts/cloud-session-start.test.ts`（`.claude/rules/cloud-session.md`）、`rule-tests/instructions.test.ts`（CLAUDE.md の行数と @ import、`.claude/rules` の paths、ADR の形式（ファイル名・見出し・メタ・README の一覧）、スキルのフロントマター、旧 rules/ の参照）と、git ガード・作業ログ・worktree のフックのテスト（`scripts/hooks/*.test.ts` など）。テスト以外のゲート（カバレッジ・フック・CI の required check・型チェック）も同じ扱い。
 - **must pass と must reject の両方**を持つ。WHY: must reject だけだと「何でも違反にする」壊れ方を、must pass だけだと「何も違反にしない」（常に緑）壊れ方を検出できない。「今のリポジトリで違反 0 件」は must pass の 1 例にすぎない。
 - 判定は関数に切り出し、架空の入力で許可・拒否を固定したうえで、同じ関数で実ファイルを検査する。must reject は取り違えやすい境界を網羅する（import の書き方、版の書き方、設定のキーの有無・コメントアウト・ネスト、違反を単独で含むファイル、対象外のファイル）。
 - 実ファイルで end-to-end に通す fixture を持つ（一時ディレクトリは `mkdtempSync(join(tmpdir(), "<name>-"))` で作り `afterAll` で消す）。違反の集合は `toEqual` で丸ごと比較する。WHY: 判定が正しくても、抽出・列挙が漏れれば見逃す。
 - 列挙が空なら失敗させる（対象 0 件なら常に緑になる）。
 - 規則を足す・変えるときは例と fixture も同じ変更で直し、規則の文書と突き合わせる。
-- **fault injection** は必須。既定は最小セット（規則を破る 1 件 → そのテストだけが落ちる、判定を常に許可 → must reject が落ちる、判定を常に拒否 → must pass が落ちる）。列挙を空・設定を戻す・境界の網羅（数十件の変異）は、新しいルール検査テストやゲートを作るときだけ行う。元に戻して `git status --short` と `git diff` を確かめ、何を壊して何件落ちたかを報告・PR に書く。reviewer はロジックのある変更で別の壊し方を独立に行う。WHY 最小セット: 見逃しの検出に効くのは主に「常に許可」「常に拒否」で、数十件の変異は消費の大半を占めた（`docs/usage.md`）。手順はスキル `rule-check-test`。
+- **fault injection** は必須。既定は最小セット（規則を破る 1 件 → そのテストだけが落ちる、判定を常に許可 → must reject が落ちる、判定を常に拒否 → must pass が落ちる）。列挙を空・設定を戻す・境界の網羅（数十件の変異）は、新しいルール検査テストやゲートを作るときだけ行う。元に戻して `git status --short` と `git diff` を確かめ、何を壊して何件落ちたかを報告・PR に書く。reviewer はロジックのある変更で別の壊し方を独立に行う。WHY 最小セット: 見逃しの検出に効くのは主に「常に許可」「常に拒否」で、数十件の変異は消費の大半を占めた（ADR `docs/adr/20260929-save-usage-limit.md`）。手順はスキル `rule-check-test`。
 
 ## mutation testing（Stryker）
-実行手順・生き残りの直し方・日次ジョブはスキル `mutation-testing`、score の実測と経緯は `docs/mutation-testing.md`、各設定の WHY は `stryker.config.mjs`。
+実行手順・生き残りの直し方・日次ジョブはスキル `mutation-testing`、決定は ADR `docs/adr/20260928-mutation-testing-daily-with-score-100.md`、score の実測は 2026-09-28 の work-logs、各設定の WHY は `stryker.config.mjs`。
 - 目標は score 100%（`thresholds.break: 100`。survived が 1 件でも日次ジョブが失敗する。ユーザー判断、Issue #55）。
+- Vitest のカバレッジのしきい値（`vitest.config.mts`）は Stryker の実行では効かない。WHY: vitest-runner が coverage を無効にし、Stryker が変異ごとに、その変異を通るテストだけを実行するため（https://stryker-mutator.io/docs/stryker-js/vitest-runner/ ）。カバレッジ 100% のゲートは `pnpm test` が担う。
 - ロジックの変異はテストを足して殺す。API のエラーの message（`ErrorResponse`）は検証して殺す。
 - `// Stryker disable next-line <Mutator>: <理由>` で除いてよいのは、**等価な変異**と**検証しない文言**（内部のログなど）だけ。理由を必ず書く。殺せるのに手間を省くために使わない。「等価」と決める前にほかの実行経路を探す（React の `<Activity mode="hidden">` では隠すときに effect の片付けが走り、state 更新も反映される）。
 - 等価な変異を生む書き方をしない: 結果を変えない検査（`"error" in value` の後の型の確認）は書かない、例外を握りつぶす `try` は握りつぶしたい呼び出しだけを囲む、ロジックの定数（正規表現・変換表・URL・接頭辞）は最上位に置かず関数の中に置く（最上位は static な変異になり `ignoreStatic` で検査から外れる）。
 - 今の disable の一覧（すべて等価。足す・消すときはここを直す）:
   - `apps/frontend/features/todo/screens/todo-screen/todo-screen.hook.ts` の依存配列 5 か所（`reloadTodos` は依存の無い useCallback で作り直されず、それを依存に持つ effect・`mutateAndReload`・`toggleTodo`・`removeTodo` も作り直されない）。
   - `apps/frontend/features/todo/screens/todo-detail-screen/todo-detail-screen.hook.ts` の世代の `+=`（`-=` でも毎回別の値になる）。
-- 残る static は `apps/backend/todo/infra/schema.ts` のテーブル宣言だけ（等価の理由は `stryker.config.mjs` と `docs/mutation-testing.md`）。
+- 残る static は `apps/backend/todo/infra/schema.ts` のテーブル宣言だけ（等価の理由は `stryker.config.mjs`）。
 - テストで `@repo/backend/...`・`@repo/shared/...` から値を import すると、その変異はテストに届かない。backend・apps/shared の振る舞いはそれぞれの中のテスト（相対 import）で確かめる。
 
 ## E2E（Playwright）

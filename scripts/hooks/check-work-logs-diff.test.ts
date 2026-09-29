@@ -132,7 +132,7 @@ describe("check-work-logs-diff.sh", () => {
     });
 
     it("work-logs 以外の .md だけを変えた（文書だけの）PR も 1 で終わる", () => {
-      commitFiles({ "docs/work-log.md": "# doc\n", "README.md": "changed\n" });
+      commitFiles({ "docs/adr/x.md": "# doc\n", "README.md": "changed\n" });
       expect(run(["main"]).status).toBe(1);
     });
 

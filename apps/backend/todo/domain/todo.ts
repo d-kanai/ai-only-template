@@ -41,7 +41,7 @@ function todoTitleSchema() {
 // WHY 項目ごとに日本語の message を付ける: validate が最初の issue の message を DomainError の message にする。
 //   zod の既定の文言（英語で zod の語彙を含む）を domain の外に出さない。
 // WHY id は z.uuid()（RFC 9562 の形）: presentation の parseUuidParam と同じ形にそろえる。Todo の id は randomUUID（v4）で
-//   作るので必ず満たす（docs/architecture-decisions.md の「入力検証を zod に統一」の実測）。
+//   作るので必ず満たす（ADR docs/adr/20260929-zod-for-backend-validation.md。z.uuid() は RFC 9562 の形だけで大文字も通す。.claude/rules/backend.md）。
 function todoPropsSchema() {
   return z.object({
     id: z.uuid({ error: "id が不正です" }),

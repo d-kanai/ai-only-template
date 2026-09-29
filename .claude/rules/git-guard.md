@@ -12,7 +12,7 @@ paths:
 # git 操作の機械的な強制（権限・フック・commit-msg）
 
 文章で禁止していた git 操作を、Claude Code の権限（`permissions.deny`）・フック・Lefthook で止める（CLAUDE.md の原則 7。Issue #64）。
-JSON にはコメントを書けないので、`.claude/settings.json` の各項目の WHAT / WHY はここに書く。実測と一次情報は `docs/git-guard.md`。
+JSON にはコメントを書けないので、`.claude/settings.json` の各項目の WHAT / WHY はここに書く。決定は ADR `docs/adr/20260928-git-operations-enforced-by-hooks.md`、実測は 2026-09-28 の work-logs。
 
 | 仕組み | ファイル | 止めるもの |
 | --- | --- | --- |
@@ -28,6 +28,7 @@ deny やフックを足す・変えるときは `rule-tests/settings.test.ts` �
 - `model`: メイン（オーケストレータ）のモデル（`.claude/general/orchestration.md`）。
 - `permissions.deny`: Claude が実行しようとした Bash のコマンドが一致すると、フックの結果に関係なく拒否される（公式 hooks の「PreToolUse decision control」: deny ルールはフックが何を返しても評価される）。
   - `Bash(git push --force*)` / `Bash(git push -f*)`: force push。末尾の `*` の前に空白を置かないので、`--force-with-lease` や `-fu` も含む（公式 permissions の「Wildcard patterns」: `Bash(ls*)` は `lsof` にも当たる）。
+  - deny が当たらない形（公式 https://code.claude.com/docs/en/permissions.md の「What a rule doesn't match」）: `Bash(git push *)` は `git -C . push origin main`・`git -c push.default=current push origin main`・`git 'push' origin main` に当たらず、`Bash(rm *)` は `bash -c 'rm -rf build/'` に当たらない（使い捨てリポジトリでも `git -C . tag` と `bash -c 'git --version'` は拒否されず承認待ちだった）。この抜け道を PreToolUse フックで補う。deny / ask は先頭の変数の代入を読み飛ばして照合し、`&&` `||` `;` `|` の後ろ・サブシェル・コマンド置換の中も見る。
   - `Bash(git push origin main*)` / `Bash(git push -u origin main*)`: main への push。`main-xxx` という名前のブランチへの push も止まるが、ブランチは `<type>/<Issue番号>-<内容>` なので当たらない。
   - `Bash(git commit --no-verify*)`: フックを飛ばすコミット。
   - `Bash(git merge --squash*)`: マージは merge commit だけ（`.claude/general/workflow.md`）。
@@ -54,7 +55,7 @@ deny やフックを足す・変えるときは `rule-tests/settings.test.ts` �
   - main への push（`main` / `HEAD:main` / `x:main` / `refs/heads/main` / `:main` / `--delete main`、main を含みうる `--all` / `--branches` / ワイルドカードの refspec）。プッシュ先が無い（`git push` / `git push origin`）か `HEAD` のときはカレントブランチで判定する。`-o` / `--push-option` などの値はブランチ名として数えない。
   - カレントブランチが main での `git commit` / `git merge`。ブランチは、区切りの前の `cd` / `pushd`（サブシェルの `( )` を閉じたら戻す）と `git -C <dir>` / `--git-dir` を反映した場所で `git symbolic-ref --short HEAD` を見る（コミットの無いブランチでも取れるため。取れなければ判定しない）。同じコマンドの中の `git checkout main` / `git switch main` の後は main、`-b` / `-c` で作った後はそのブランチとみなす（フックは実行の前に動くため）。
   - `--no-verify`、`git commit -n`、`git merge --squash`、`gh pr merge --squash / --squash=true / -s / --rebase / -r`（`-sd` のような束も）、MCP の `merge_pull_request` の `merge_method: squash / rebase`、MCP の push_files / create_or_update_file / delete_file の `branch: main`。
-  - 長いオプションの省略形: git は一意な接頭辞を受け付けるので、`--no-v` 以上の `--no-verify` の接頭辞、`--for` 以上の force 系、`--m` 以上の `--mirror`、`--sq` 以上の `--squash`、`--al` 以上の `--all`、`--b` 以上の `--branches` を拾う。最短の長さは、ほかのオプションと曖昧にならない長さ（git 2.43.0 のオプション定義。`docs/git-guard.md`）。曖昧な短さ（`--no-ver` は `--no-verbose` とも一致）も止める（git がエラーにするので害はない）。
+  - 長いオプションの省略形: git は一意な接頭辞を受け付けるので、`--no-v` 以上の `--no-verify` の接頭辞、`--for` 以上の force 系、`--m` 以上の `--mirror`、`--sq` 以上の `--squash`、`--al` 以上の `--all`、`--b` 以上の `--branches` を拾う。最短の長さは、ほかのオプションと曖昧にならない長さ（git 2.43.0 の `builtin/commit.c`・`push.c`・`merge.c` のオプション定義。https://raw.githubusercontent.com/git/git/v2.43.0/builtin/commit.c 。`--no-v`〜`--no-ver` は `--no-verbose` とも当たり `--no-veri` から決まる、push は `--fo` が follow-tags と・`--a` が atomic と曖昧、merge は `--s` が stat・summary・squash・strategy・signoff と曖昧で `--sq` から決まり、`--no-verify-signatures` は `--no-verify` の接頭辞ではない）。曖昧な短さ（`--no-ver` は `--no-verbose` とも一致）も止める（git がエラーにするので害はない）。
   - フックを飛ばす・差し替える設定: `core.hooksPath`（`-c` / `--config-env` / `git config` / `GIT_CONFIG_PARAMETERS` など書き方を問わず、文字列にあれば）、`LEFTHOOK=0` / `LEFTHOOK=false`、`LEFTHOOK_EXCLUDE=` / `LEFTHOOK_BIN=` / `LEFTHOOK_CONFIG=`（lefthook 2.1.12 が読む変数。`LEFTHOOK_VERBOSE` / `LEFTHOOK_OUTPUT` は表示だけなので許す）。
 - コマンド置換（`$(...)` / `` `...` ``）は、中身を別のコマンドとして検査し、外側では 1 語に置き換える（`git -C "$(pwd)" commit` の git と commit が分かれないように）。行き先が変数やコマンド置換の `cd` / `-C` は、場所が分からないので main の判定をしない（サブエージェントの commit などは場所に関係なく止まる）。
 - 拒否は stdout の JSON（`permissionDecision: "deny"`、理由は Claude に渡る）で返し、exit 0。exit 2 を使わないのは、フックの失敗と区別するため。
@@ -64,7 +65,7 @@ deny やフックを足す・変えるときは `rule-tests/settings.test.ts` �
 - シェルの構文解析をせず、クォートとバックスラッシュを消した文字列から拾うので、文字列の中の git も止める: `echo "git push --force"`、`grep "git commit" ...`、本文に `git push --force` などを含む `git commit -m "..."`、ヒアドキュメントの中身。`core.hooksPath` は読むだけ（`git config --get core.hooksPath`）でも止まる。`gh pr merge` の `-b` / `-t` の値の中の単語が `-s` / `-r` に見えると止まる。
   - WHY 受け入れるか: シェルを正しく解析するにはパーサが要り（依存を足さない）、解析の漏れは見逃し（止めるべきものが通る）になる。誤検知は止める側の誤りで、書き方を変えれば済む。
   - 回避: コミットメッセージは Write ツールでファイルに書いて `git commit -F <file>` で渡す。禁止のパターンを含む文章は Bash のヒアドキュメントではなく Write / Edit ツールで書く（matcher は Bash と MCP だけなので、Write / Edit は検査されない）。
-  - 2026-09-28、このフックを入れた直後のサブエージェントの Bash（`git commit / push` という文字列を含む Python のヒアドキュメント）が実際に拒否された（`docs/git-guard.md`）。
+  - 2026-09-28、このフックを入れた直後のサブエージェントの Bash（`git commit / push` という文字列を含む Python のヒアドキュメント）が実際に拒否された（Issue #64 の実測）。
 
 ## 見逃す方向の限界（止まらない書き方）
 フックは Bash のコマンド文字列だけを見るので、次は止まらない。サブエージェントの commit / push は、GitHub の Ruleset（main への直接 push の禁止）と、オーケストレータが差分とコミットを確かめる運用でも防ぐ。

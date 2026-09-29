@@ -7,7 +7,7 @@ paths:
 # worktree ごとの外部リソースの分離（WorktreeCreate / WorktreeRemove フック）
 
 並列の worktree（`claude --worktree`、サブエージェントの `isolation: "worktree"`）が、同じ Postgres のデータベースや E2E のポートを使って互いに干渉しないようにする（Issue #64 のユーザー判断）。
-実測と公式の仕様の引用は `docs/worktree.md`。仕様は `scripts/worktree-env.test.ts`・`scripts/hooks/worktree-create.test.ts`・`scripts/hooks/worktree-remove.test.ts` で固定している。
+決定は ADR `docs/adr/20260928-worktree-isolated-external-resources.md`、実測は 2026-09-28 の work-logs（2026-09-29 の「docs/ から移した記録」に担当 D の実測）。仕様は `scripts/worktree-env.test.ts`・`scripts/hooks/worktree-create.test.ts`・`scripts/hooks/worktree-remove.test.ts` で固定している。
 
 ## 設計: 一意な名前 → 導出 → `.env` → 作成
 1. worktree の一意な名前（WorktreeCreate の入力の `name`。例 `agent-a3f2`）を決める（Claude Code が決める）。
@@ -29,7 +29,7 @@ paths:
 4. テストを先に足す: 導出は `scripts/worktree-env.test.ts`、作成・削除は偽のコマンドを PATH に置く `scripts/hooks/worktree-*.test.ts`。
 
 ## WorktreeCreate（`scripts/hooks/worktree-create.sh`）
-- 公式の契約（https://code.claude.com/docs/en/hooks.md の「WorktreeCreate」）: フックを設定すると Claude Code は自分では git worktree を作らない。command フックは作ったパスを stdout の最後の空でない行に出す（JSON は返せない。`hookSpecificOutput.worktreePath` は HTTP フック用）。0 以外で終わると作成が失敗する。
+- 公式の契約（https://code.claude.com/docs/en/hooks.md の「WorktreeCreate」）: フックを設定すると Claude Code は自分では git worktree を作らない。command フックは作ったパスを stdout の最後の空でない行に出す（JSON は返せない。`hookSpecificOutput.worktreePath` は HTTP フック用）。0 以外で終わると作成が失敗する。フックが git の既定の動作を丸ごと置き換えるので `.worktreeinclude` は処理されない（だからフックの中で `.env` を作る。公式 hooks.md）。
 - 手順: (1) `<メイン>/.claude/worktrees/<name>` に `<name>` ブランチの worktree を作る（既にあれば使う、ブランチがあればそれを使う、無ければ HEAD から作る）→ (2) 孤立した `app_wt_*` の DB を drop → (3) worktree で `CI=true pnpm install --frozen-lockfile` → (4) `.env` を書く → (5) DB が無ければ `create database`、worktree で `pnpm db:migrate` → (6) 共有フックの修復 → (7) パスを出す。
 - メインの作業ツリーは `git worktree list` の 1 件目（cwd が worktree の中でもメインの下に作る）。
 - docker（`docker compose exec -T db psql -U app -d app ...`）は必ずメインの作業ツリーで実行する。compose のプロジェクト名はディレクトリ名から決まるので、worktree の中では起動中の db コンテナが見つからない。
@@ -56,4 +56,4 @@ paths:
 - `reuseExistingServer` は同じポートのサーバしか使わないので、worktree ごとに `next build` を待つ（メインで起動したサーバは使えない）。
 - `.env` は WorktreeCreate のたびに作り直す（手で直した値は、同じ名前で作り直すと消える）。
 - Postgres 以外の外部リソース（Docker のコンテナ名・ボリュームなど）は分けていない。compose の db コンテナはメインと全 worktree で 1 つを共有する。
-- フックとしての実動作（Claude Code から呼ばれたときに、この経路で worktree が作られ、以降の作業がその `.env` で動くこと）は未確認。スクリプトを直接呼ぶ確認は `docs/worktree.md`。
+- フックとしての実動作（Claude Code から呼ばれたときに、この経路で worktree が作られ、以降の作業がその `.env` で動くこと）は未確認。スクリプトを直接呼ぶ確認は 2026-09-29 の work-logs「docs/ から移した記録」。

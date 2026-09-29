@@ -7,7 +7,7 @@ paths:
 # クラウドセッション（scripts/cloud-session-start.sh）
 
 Claude Code on the web（クラウドセッション）には asdf が無いため、`scripts/cloud-session-start.sh` で `.tool-versions` と同じ Node.js / pnpm を用意し、Postgres を起動する。
-確認・復旧の手順はスキル `cloud-session`。VM の実測（前提・時間・403・レート制限）と検証状況は `docs/cloud-session.md`。仕様は `scripts/cloud-session-start.test.ts` で固定している。
+確認・復旧の手順はスキル `cloud-session`。決定は ADR `docs/adr/20260928-cloud-session-setup-script-and-hook.md`、VM の実測（前提・時間・403・レート制限）は 2026-09-28 の work-logs、検証状況（未確認の点）は 2026-09-29 の work-logs「docs/ から移した記録」。仕様は `scripts/cloud-session-start.test.ts` で固定している。
 
 ## 前提（公式 https://code.claude.com/docs/en/cloud-environments.md ）
 - セッションごとに新しい VM（Ubuntu 24.04、x86_64）。Node 20 / 21 / 22 が入り 22 が PATH にある。asdf は無い。`CLAUDE_CODE_REMOTE=true` が設定される。
@@ -33,7 +33,7 @@ Claude Code on the web（クラウドセッション）には asdf が無いた�
 - `.env` はリポジトリ直下に無ければ `.env.example` からコピーする（あれば触らない）。Docker の段より前に行う（docker が無い・失敗しても `pnpm test` / `pnpm dev` が動くように）。
 - Docker / Postgres（フックのときだけ）: `docker info` が通れば何もしない。通らなければ `setsid nohup dockerd ... &` で起動し（`setsid` が無ければ `nohup` だけ）、最大 30 秒待つ。`timeout 45 docker compose pull` を最大 3 回（2 秒・4 秒待って再試行）、`docker compose up -d --wait --wait-timeout 120`、成功したら `timeout 15 pnpm db:migrate`（VM ごとに DB が空なので表を作る）。`docker` / `dockerd` が無ければ warn で飛ばす。Node / pnpm に失敗しても Postgres は起動し、migrate は VM 既定の pnpm でも試す。
   - 既定のソケット・データ置き場のまま使うので `DOCKER_HOST` は書き出さない。
-- 時間の上限: フックは 600 秒で打ち切られるので、最悪ケースの合計をそれ以下に収める。curl には `--connect-timeout 15` と `--max-time`（数十 MB の tarball 60 秒、メタデータ・SHASUMS・1 MB の pnpm tarball 20 秒）を付ける。Node / pnpm 280 + dockerd 30 + pull 45 × 3 + 間隔 6 + up 120 + migrate 15 = 586 秒（見積もりの内訳と判断は `docs/cloud-session.md`）。値を変えるときはこの合計を計算し直す。
+- 時間の上限: フックは 600 秒で打ち切られるので、最悪ケースの合計をそれ以下に収める。curl には `--connect-timeout 15` と `--max-time`（数十 MB の tarball 60 秒、メタデータ・SHASUMS・1 MB の pnpm tarball 20 秒）を付ける。Node / pnpm 280 + dockerd 30 + pull 45 × 3 + 間隔 6 + up 120 + migrate 15 = 586 秒。内訳と判断: curl の最悪ケースは接続タイムアウトも足すと 400 秒だが、`--max-time` は接続を含む全体の上限なので実際の上限は max-time の和の 280 秒。migrate の 15 秒は実測約 1 秒の 15 倍で、これ以上は長くしない（15 秒かかるなら止まっているとみなす）。pull を 240 秒 × 3 回にすると Docker の段だけで 30 + 720 + 6 + 120 = 876 秒になり 600 秒を超えるので、回数（3 回。一時的な 429 に再試行が効く）は残して 1 回の上限を 45 秒（実測の初回 pull 10.5 秒の 4 倍強）にした。値を変えるときはこの合計を計算し直す。
 - setup script でイメージを pull しておく案は入れていない（キャッシュに `/var/lib/docker` が含まれて使えるか未確認）。
 
 ## 確認コマンド

@@ -12,7 +12,7 @@ paths:
 # 依存パッケージ
 
 npm パッケージの版は `package.json` と `pnpm-lock.yaml` の両方で固定し、意図した版だけが入る状態を保つ。
-追加・更新・lockfile の作り直し・pnpm patch の手順はスキル `dependency-update`。実測（lockfile の再解決、safe-chain、TS 7 の確認など）は `docs/dependencies.md`。
+追加・更新・lockfile の作り直し・pnpm patch の手順はスキル `dependency-update`。実測（lockfile の再解決、safe-chain、TS 7 の確認など）は 2026-09-28 の work-logs。
 
 ## workspace の package.json（Issue #68）
 - pnpm workspace（`pnpm-workspace.yaml` の `packages: ["apps/*"]`）で、`package.json` はリポジトリ直下・`apps/frontend`（`@repo/frontend`）・`apps/backend`（`@repo/backend`）・`apps/e2e`（`@repo/e2e`。Issue #84）・`apps/shared`（`@repo/shared`。Issue #90）の 5 つ。lockfile と pnpm の設定（サプライチェーン保護・`allowBuilds`・`patchedDependencies`）はリポジトリ直下に 1 つで、workspace 全体に効く。
@@ -47,4 +47,4 @@ npm パッケージの版は `package.json` と `pnpm-lock.yaml` の両方で固
 - 依存の不具合を上流の修正を待たずに直すときだけ使う。条件（すべて）: 上流の不具合で設定や使い方では避けられない / 修正が数行 / 上流の Issue・PR を確認し `patchedDependencies` のコメントにリンク（無い・確認できないならその旨と理由）/ 当てる前に不具合を再現し、当てて直ることを実測する。
 - パッチは `patches/<pkg>@<版>.patch`、対応は `pnpm-workspace.yaml` の `patchedDependencies`。何を・なぜ直したかは `pnpm-workspace.yaml` と、そのパッケージを使う設定ファイルのコメントに書く。`patches/`・`pnpm-workspace.yaml`・`pnpm-lock.yaml` は同じコミットに入れる（lockfile にパッチのハッシュが入る）。
 - 上流が直した版が出たら、その版に上げてパッチを消す（キーは版まで固定なので、版を上げるたびに要否を見直す）。
-- 現在のパッチ: `@stryker-mutator/vitest-runner@10.0.0`（Issue #52）: テスト名の連結を ` > ` にする（Vitest 5.0.1 との組み合わせの不具合）。上流の Issue / PR の有無は未確認（GitHub の Issue 検索がこの環境から 403）。詳細は `stryker.config.mjs` と `docs/mutation-testing.md`。
+- 現在のパッチ: `@stryker-mutator/vitest-runner@10.0.0`（Issue #52）: テスト名の連結を ` > ` にする（Vitest 5.0.1 との組み合わせの不具合）。上流の Issue / PR の有無は未確認（GitHub の Issue 検索がこの環境から 403）。詳細は `stryker.config.mjs` と ADR `docs/adr/20260928-patch-stryker-vitest-runner.md`。
