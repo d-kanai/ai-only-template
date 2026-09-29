@@ -23,10 +23,10 @@ Node / pnpm 本体の版（`.tool-versions`・`packageManager`）は `.claude/ru
 2. 版を明示して追加する（リポジトリ直下で実行）:
    ```sh
    pnpm --filter @repo/backend add <pkg>@<x.y.z>       # apps/backend の dependencies
-   pnpm --filter @repo/frontend add -D <pkg>@<x.y.z>   # apps/frontend の devDependencies
+   pnpm --filter @repo/frontend-customer add -D <pkg>@<x.y.z>   # apps/frontend_customer の devDependencies
    pnpm add -D <pkg>@<x.y.z>                           # リポジトリ直下（ツール）
    ```
-   - `--filter` はパッケージ名（`@repo/backend` / `@repo/frontend`）で指定する。リポジトリ直下では `-w` なしの `pnpm add` でも直下の `package.json` に入った（pnpm 12.7.0、2026-09-28 実測）。
+   - `--filter` はパッケージ名（`@repo/backend` / `@repo/frontend-customer`）で指定する。リポジトリ直下では `-w` なしの `pnpm add` でも直下の `package.json` に入った（pnpm 12.7.0、2026-09-28 実測）。
    - `savePrefix: ''` で完全固定で書かれるが、版は必ず明示する。WHY: `pnpm add <pkg>@2` のように範囲を渡すと範囲のまま書かれる。
    - workspace の中のパッケージへの依存は `"<name>": "workspace:*"` と書いて `pnpm install`。
 3. 同じパッケージを複数の `package.json` に置くなら、すべて同じ版にする。

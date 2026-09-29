@@ -23,17 +23,17 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 | ORM / マイグレーション | [Drizzle ORM](https://orm.drizzle.team/) + [drizzle-kit](https://orm.drizzle.team/docs/kit-overview) | スキーマを TypeScript で宣言し、`pnpm db:generate` で SQL を生成、`pnpm db:migrate` で当てる（`push` は使わない。`.claude/rules/backend.md` の「永続化（Drizzle + Postgres）」・スキル `db-migration`） |
 | DB ドライバ | [node-postgres（pg）](https://node-postgres.com/) | 接続先とプールの設定は `.env` から読む（`apps/shared/env.ts`。値は `.env.example`。本番用の値は Issue #58 で決める） |
 
-ツールのバージョンは `.tool-versions` が正（決め方と更新手順は `.claude/rules/env.md`）。npm パッケージのバージョンは各 `package.json`（リポジトリ直下・`apps/frontend`・`apps/backend`・`apps/e2e`・`apps/shared`）と `pnpm-lock.yaml` が正（`.claude/rules/dependencies.md`）。pnpm のサプライチェーン保護設定は `pnpm-workspace.yaml` を参照。
+ツールのバージョンは `.tool-versions` が正（決め方と更新手順は `.claude/rules/env.md`）。npm パッケージのバージョンは各 `package.json`（リポジトリ直下・`apps/frontend_customer`・`apps/backend`・`apps/e2e`・`apps/shared`）と `pnpm-lock.yaml` が正（`.claude/rules/dependencies.md`）。pnpm のサプライチェーン保護設定は `pnpm-workspace.yaml` を参照。
 
 ## ディレクトリ構成
 
-機能（feature）単位で置く。画面側（Next.js）を `apps/frontend/`、API 側（Next・React に依存しない TypeScript）を `apps/backend/` に分け、それぞれ pnpm workspace のパッケージ（`@repo/frontend` / `@repo/backend`）にする（Issue #68。プロセスは Next 1 つのまま）。両方が使う環境変数の入口とログの出口は `apps/shared/`（`@repo/shared`。Issue #90）に置く。`src/` は使わない（例は Todo）。
+機能（feature）単位で置く。画面側（Next.js）を `apps/frontend_customer/`、API 側（Next・React に依存しない TypeScript）を `apps/backend/` に分け、それぞれ pnpm workspace のパッケージ（`@repo/frontend-customer` / `@repo/backend`）にする（Issue #68。プロセスは Next 1 つのまま）。両方が使う環境変数の入口とログの出口は `apps/shared/`（`@repo/shared`。Issue #90）に置く。`src/` は使わない（例は Todo）。
 
 ```
 pnpm-workspace.yaml     # packages: apps/*（workspace の範囲）と pnpm の設定
 package.json            # ツールと共通の devDependencies。pnpm dev/build/start・db:generate/db:migrate は pnpm --filter で apps の script を呼ぶ
 apps/
-  frontend/             # @repo/frontend。Next.js（apps/frontend で next dev/build/start）
+  frontend_customer/    # @repo/frontend-customer。Next.js（apps/frontend_customer で next dev/build/start）
     package.json        # next / react / "@repo/backend"・"@repo/shared": "workspace:*"
     app/                # ルーティングだけ（page.tsx は screen を返すだけ、api/**/route.ts は backend の api ファイルの GET / POST などを re-export するだけ）
     features/todo/      # 画面側
@@ -86,9 +86,9 @@ asdf install
 cp .env.example .env
 ```
 
-- `.env` はコミットしない（`.gitignore` 済み）。変数はすべて必須で、コードに既定値は無い。`.env` が無い・変数が欠けていると、`pnpm dev` / `pnpm start` / `pnpm build` / `pnpm test` / `pnpm test:e2e` / `pnpm db:migrate` は欠けた変数の名前を出して起動時に止まる（非 0 で終わる。`pnpm dev` / `pnpm start` は `apps/frontend/instrumentation.ts` で検証する）。
+- `.env` はコミットしない（`.gitignore` 済み）。変数はすべて必須で、コードに既定値は無い。`.env` が無い・変数が欠けていると、`pnpm dev` / `pnpm start` / `pnpm build` / `pnpm test` / `pnpm test:e2e` / `pnpm db:migrate` は欠けた変数の名前を出して起動時に止まる（非 0 で終わる。`pnpm dev` / `pnpm start` は `apps/frontend_customer/instrumentation.ts` で検証する）。
 - コマンドの前に付けた環境変数（`DATABASE_URL=... pnpm db:migrate`）は `.env` より優先される。
-- `.env` はリポジトリ直下に 1 つだけ置く（`apps/frontend/` などには置かない）。
+- `.env` はリポジトリ直下に 1 つだけ置く（`apps/frontend_customer/` などには置かない）。
 - 仕組み（`apps/shared/env.ts` への一元化、`process.env` の直参照の禁止）は `.claude/rules/env.md` の「環境変数」を参照。
 
 開発用の PostgreSQL は Docker Compose（`compose.yaml`）で起動する。
@@ -111,7 +111,7 @@ Claude Code のクラウドセッション（asdf が無い環境）では、`sc
 
 ```sh
 pnpm install   # 依存をインストール（リポジトリ直下で実行する。workspace のすべてのパッケージに入る）
-pnpm dev       # 開発サーバを起動（http://localhost:3000。pnpm --filter @repo/frontend dev。引数は pnpm dev -p 3001 のように渡せる）
+pnpm dev       # 開発サーバを起動（http://localhost:3000。pnpm --filter @repo/frontend-customer dev。引数は pnpm dev -p 3001 のように渡せる）
 pnpm typecheck # 型チェック（リポジトリ全体と apps/backend・apps/shared の tsconfig。next build は frontend から import したファイルしか見ないため）
 pnpm test      # 単体テストを実行し、カバレッジ 100% 未満なら失敗（Vitest。詳細は .claude/rules/testing.md）
 pnpm test:unit # 単体テストだけを実行（カバレッジを計測しない。速く回したいとき）
@@ -120,11 +120,11 @@ pnpm test:mutation # mutation testing を実行し、reports/mutation/ にレポ
 pnpm lint      # lint + format の違反を検査（Biome。変更しない）
 pnpm check     # 安全な自動修正を適用して再検査（Biome）
 pnpm format    # format だけを適用（Biome）
-pnpm build     # 本番ビルド（pnpm --filter @repo/frontend build。apps/frontend/.next/ に出力）
-pnpm start     # 本番ビルドを起動（pnpm --filter @repo/frontend start）
+pnpm build     # 本番ビルド（pnpm --filter @repo/frontend-customer build。apps/frontend_customer/.next/ に出力）
+pnpm start     # 本番ビルドを起動（pnpm --filter @repo/frontend-customer start）
 ```
 
-- コマンドはリポジトリ直下で実行する。`dev` / `build` / `start` は `apps/frontend`、`db:generate` / `db:migrate` は `apps/backend` の script を `pnpm --filter` で呼ぶ（そのパッケージのディレクトリで動くが、`.env` はリポジトリ直下の 1 つを読む）。依存の追加は `pnpm --filter @repo/backend add <pkg>@<x.y.z>` のように置き場所のパッケージを指定する（`.claude/rules/dependencies.md`）。
+- コマンドはリポジトリ直下で実行する。`dev` / `build` / `start` は `apps/frontend_customer`、`db:generate` / `db:migrate` は `apps/backend` の script を `pnpm --filter` で呼ぶ（そのパッケージのディレクトリで動くが、`.env` はリポジトリ直下の 1 つを読む）。依存の追加は `pnpm --filter @repo/backend add <pkg>@<x.y.z>` のように置き場所のパッケージを指定する（`.claude/rules/dependencies.md`）。
 
 - どのコマンドも `.env` がある前提（上の「セットアップ」）。
 - `pnpm dev` は Postgres の起動とマイグレーションが前提（先に `pnpm db:up && pnpm db:migrate`）。

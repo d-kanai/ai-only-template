@@ -2,7 +2,7 @@
 paths:
   - ".env.example"
   - "apps/shared/env*"
-  - "apps/frontend/instrumentation*"
+  - "apps/frontend_customer/instrumentation*"
   - "compose.yaml"
   - ".tool-versions"
 ---
@@ -35,7 +35,7 @@ paths:
 - WHY ツールのフラグを分ける: 手元では `CI` も `PLAYWRIGHT_CHROMIUM_EXECUTABLE` も無いのが正常。必須にすると `.env.example` に嘘の値を置くことになり、コピーした `.env` で CI として動く。
 - 起動時に全件検証する: `env.ts` の読み込み時に `readEnv(process.env)` が、欠けている・空（空白だけを含む）・不正な値（数でない、負、小数、`DATABASE_POOL_MAX=0`）の名前を**すべて**集めて 1 つのエラーにし、`cp .env.example .env` の手順を出して止まる。WHY すべて集める: 直すたびに次の 1 件が見つかる往復を無くす。
   - `pnpm build` / `pnpm test` / `pnpm test:e2e` / `pnpm db:migrate` / `pnpm start` / `pnpm dev` はすべて exit 1 で止まる（2026-09-28 に実測）。
-- `next start` / `next dev` の起動時の検証: `apps/frontend/instrumentation.ts` の `register`（起動時に 1 回、リクエストを受け付ける前に完了する Next の規約。同梱ドキュメント `02-guides/instrumentation.md` の「Convention」で、`instrumentation.ts` はプロジェクトのルートに置く）が、`process.env.NEXT_RUNTIME === "nodejs"` のときだけ `instrumentation-node.ts` の `verifyEnvAtStartup` を呼び、`env.ts` を読み込む。
+- `next start` / `next dev` の起動時の検証: `apps/frontend_customer/instrumentation.ts` の `register`（起動時に 1 回、リクエストを受け付ける前に完了する Next の規約。同梱ドキュメント `02-guides/instrumentation.md` の「Convention」で、`instrumentation.ts` はプロジェクトのルートに置く）が、`process.env.NEXT_RUNTIME === "nodejs"` のときだけ `instrumentation-node.ts` の `verifyEnvAtStartup` を呼び、`env.ts` を読み込む。
   - WHY: API の route は最初のリクエストまで読み込まれず、`env.ts` だけではサーバが起動したまま最初の `/api/todos` が 500 になるまで気づけない。
   - `register` が失敗しても `next start` は動き続けるので、エラーを出してから `process.exit(1)` する。
   - WHY `NEXT_RUNTIME` で分ける: `register` は Edge 向けにもビルドされ、分岐が無いと Node の API が Edge に入って `next build` が警告を出す。Next がビルド時に埋め込む変数なので `process.env.NEXT_RUNTIME` と書く必要があり、ここだけを直参照の例外にしている（Biome は行単位の `biome-ignore`、`rule-tests/architecture.test.ts` は変数名まで絞った `allowedVariables`）。
@@ -45,7 +45,7 @@ paths:
 - 作り方: リポジトリ直下で `cp .env.example .env`。`.env` はコミットしない（`.gitignore` の `.env*`、`!.env.example`）。置くのはリポジトリ直下の 1 つだけ（`apps/*/.env` は置かない。Issue #68 のユーザー判断）。worktree では WorktreeCreate フックが worktree ごとの値で `.env` を書く（`.claude/rules/worktree.md`）。
 - `.env.local`（や `.env.development` など）は使わない。残っていれば消す。WHY: Next.js は `.env.local` を `.env` より優先して読むが、`env.ts` は `.env` だけを読むので、`pnpm dev` と `pnpm test` / `pnpm db:migrate` で値がずれる。
 - 読み込み: `env.ts` が読み込み時に、カレントディレクトリから上に `pnpm-workspace.yaml` のあるディレクトリ（リポジトリ直下）を探し（`findRepoRoot`。無ければカレントディレクトリ）、そこの `.env` を Node 標準の `process.loadEnvFile` で読む（`loadRepoDotEnv`）。依存（dotenv など）は足さない。
-  - WHY 上に探す: `pnpm --filter` の script はパッケージのディレクトリ（`apps/frontend`・`apps/backend`）で動く。Next.js 自身は `apps/frontend` の `.env` を探すので、リポジトリ直下の `.env` は `env.ts` が読む。
+  - WHY 上に探す: `pnpm --filter` の script はパッケージのディレクトリ（`apps/frontend_customer`・`apps/backend`）で動く。Next.js 自身は `apps/frontend_customer` の `.env` を探すので、リポジトリ直下の `.env` は `env.ts` が読む。
   - WHY `pnpm-workspace.yaml` を目印にする: リポジトリ直下にだけあり、`.git` のように worktree でファイルになったり Stryker のサンドボックスに無かったりしない。`import.meta.dirname` から探さないのは、Next のビルドでバンドルされると元の場所を指さないため。
   - `.env` が無いとき（`ENOENT`）だけ何もしない（環境変数だけで渡す動かし方を許す。足りなければ `readEnv` が止める）。ほかの読み込みエラーは投げる。
   - 既に環境にある変数はファイルの値で上書きされない（`DATABASE_URL=... pnpm db:migrate` が優先される）。

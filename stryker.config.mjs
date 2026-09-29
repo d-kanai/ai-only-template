@@ -49,9 +49,9 @@ export default {
   //   Stryker が起動直後に失敗した（2026-09-28 実測。@stryker-mutator/core 10.0.0 の
   //   dist/src/sandbox/ts-config-preprocessor.js）。この処理は、指定したパスが
   //   サンドボックスにコピーするファイルの中に無ければ何もしない（同ファイルの rewriteTSConfigFile）。
-  //   書き換えを止めても問題ない理由: tsconfig（リポジトリ直下・apps/frontend・apps/backend・apps/shared）に extends / references が無く、
+  //   書き換えを止めても問題ない理由: tsconfig（リポジトリ直下・apps/frontend_customer・apps/backend・apps/shared）に extends / references が無く、
   //   include / exclude / paths にもサンドボックスの外を指すパスが無いため、書き換える対象がそもそも無い
-  //   （paths は "@/*" だけで、apps/frontend の中を指す。Issue #68）。extends / references を足すときはこの設定を見直す。
+  //   （paths は "@/*" だけで、apps/frontend_customer の中を指す。Issue #68）。extends / references を足すときはこの設定を見直す。
   //   typescript-checker（型エラーになる変異を除く checker）も同じ JS API を使うため、TS 7 では動かないと判断して
   //   入れていない（.claude/rules/testing.md の「mutation testing（Stryker）」）。
   tsconfigFile: "stryker-skips-tsconfig-rewrite.json",
@@ -60,23 +60,23 @@ export default {
   //   （公式ドキュメントの「Limitations」）。
 
   // mutate: 変異を入れるファイル。vitest.config.mts の coverage.include のうち、TypeScript の実装がある
-  //   apps/frontend/features/ apps/frontend/shared/ apps/backend/ apps/shared/ と同じ範囲にする（カバレッジ 100% で「実行されている」
+  //   apps/frontend_customer/features/ apps/frontend_customer/shared/ apps/backend/ apps/shared/ と同じ範囲にする（カバレッジ 100% で「実行されている」
   //   ことを担保した範囲に対して、「テストが結果を検証している」かを確かめる）。
   //   含めないもの:
   //   - テスト（*.test.ts / *.test.tsx）と型宣言（*.d.ts）: 変異させる対象（実装）ではない。
   //   - scripts/: いまある実装は cloud-session-start.sh（シェル）だけで、Stryker は JS / TS しか変異させられない。
   //     scripts/ の .ts はテストだけなので、coverage.include の scripts/**/*.ts は入れていない。
-  //   - apps/frontend/app/: ルーティングだけで単体テストを置かない方針（.claude/rules/frontend.md）。変異させても単体テストで
+  //   - apps/frontend_customer/app/: ルーティングだけで単体テストを置かない方針（.claude/rules/frontend.md）。変異させても単体テストで
   //     落とせないため、生き残りとして数えるだけになる。
-  //   - 設定ファイル（リポジトリ直下のもの、apps/frontend/next.config.ts・instrumentation*.ts、apps/backend/shared/drizzle/drizzle.config.ts）、
+  //   - 設定ファイル（リポジトリ直下のもの、apps/frontend_customer/next.config.ts・instrumentation*.ts、apps/backend/shared/drizzle/drizzle.config.ts）、
   //     ルール検査テスト（rule-tests/architecture.test.ts など）、apps/e2e/: 実装ではない（vitest.config.mts の coverage.include と同じ）。
-  //   apps/frontend/shared/ は request-log（Issue #80）から使い始めた（.claude/rules/frontend.md）。
+  //   apps/frontend_customer/shared/ は request-log（Issue #80）から使い始めた（.claude/rules/frontend.md）。
   //   apps/shared/（frontend と backend で共通の env.ts・logger.ts。Issue #90）も coverage.include と同じく対象にする。
   //   env.test.ts・logger.test.ts は同じディレクトリのファイルを相対パスで import するので、サンドボックスの変異したファイルを読む
   //   （下の注意の "@repo/shared/..." で読むのは backend・frontend 側で、その変異はここのテストで殺す）。
   // 注意（Issue #68 の段階 2。workspace パッケージ @repo/backend。Issue #90 の @repo/shared も同じ）: "@repo/backend/..." で import したファイルは、サンドボックスの
   //   中でも変異していない元の apps/backend を読む。Stryker はサンドボックスの中に、元のリポジトリの node_modules（リポジトリ直下・
-  //   apps/frontend・apps/backend）を指す symlink を作り（@stryker-mutator/core 10.0.0 の sandbox.js の symlinkNodeModulesIfNeeded
+  //   apps/frontend_customer・apps/backend）を指す symlink を作り（@stryker-mutator/core 10.0.0 の sandbox.js の symlinkNodeModulesIfNeeded
   //   の symlinkJunction(path.resolve(nodeModules), path.join(this.workingDirectory, nodeModules)) と file-utils.js の
   //   findNodeModulesList）、その先の @repo/backend は pnpm が作った相対の symlink（../../../backend など）で、
   //   元のリポジトリの apps/backend に解決されるため（2026-09-28、実行中のサンドボックスで readlink -f して確認）。
@@ -87,8 +87,8 @@ export default {
   //   将来、テストが "@repo/backend/..." から backend の値を import すると、その変異はテストに届かず survived になる。
   //   backend の振る舞いは backend の中のテスト（相対パスの import）で確かめる。
   mutate: [
-    "apps/frontend/features/**/*.{ts,tsx}",
-    "apps/frontend/shared/**/*.{ts,tsx}",
+    "apps/frontend_customer/features/**/*.{ts,tsx}",
+    "apps/frontend_customer/shared/**/*.{ts,tsx}",
     "apps/backend/**/*.{ts,tsx}",
     "apps/shared/**/*.ts",
     "!apps/backend/shared/drizzle/*.config.ts",

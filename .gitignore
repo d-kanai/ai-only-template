@@ -13,8 +13,8 @@ node_modules/
 # testing
 /coverage
 
-# next.js（pnpm build → pnpm --filter @repo/frontend build → apps/frontend の next build は apps/frontend/.next/ に出力する。Issue #68）
-/apps/frontend/.next/
+# next.js（pnpm build → pnpm --filter @repo/frontend-customer build → apps/frontend_customer の next build は apps/frontend_customer/.next/ に出力する。Issue #68）
+/apps/frontend_customer/.next/
 /out/
 
 # production

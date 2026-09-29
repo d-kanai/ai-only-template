@@ -100,7 +100,7 @@ jobs:
         run: pnpm db:migrate
       - run: pnpm lint
       # 型チェック（tsc -p . --noEmit && tsc -p apps/backend --noEmit && tsc -p apps/shared --noEmit。package.json の typecheck）。
-      # WHY: next build（apps/frontend で実行）は apps/frontend と、そこから import された backend のファイルしか型チェックしない
+      # WHY: next build（apps/frontend_customer で実行）は apps/frontend_customer と、そこから import された backend のファイルしか型チェックしない
       #   （Issue #68 で monorepo にする前は、next build がリポジトリ直下の tsconfig で全体を型チェックしていた）。
       #   テスト・ルール検査テスト・e2e・設定ファイルの型エラーと、backend・apps/shared が DOM の型に依存すること（apps/backend・
       #   apps/shared の tsconfig は DOM の型を持たない）は、ここで止める。Vitest は型を検査しないので pnpm test でも止まらない。

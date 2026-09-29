@@ -1,23 +1,23 @@
 ---
 paths:
-  - "apps/frontend/**"
+  - "apps/frontend_customer/**"
 ---
 
-# frontend（画面側。apps/frontend）
+# frontend（画面側。apps/frontend_customer）
 
-`apps/frontend/` は workspace パッケージ `@repo/frontend`（Next.js の App Router）。Next は `apps/frontend` をカレントディレクトリにして動く（リポジトリ直下の `pnpm dev/build/start` が `pnpm --filter @repo/frontend <script>` を呼ぶ）。
+`apps/frontend_customer/` は workspace パッケージ `@repo/frontend-customer`（Next.js の App Router）。Next は `apps/frontend_customer` をカレントディレクトリにして動く（リポジトリ直下の `pnpm dev/build/start` が `pnpm --filter @repo/frontend-customer <script>` を呼ぶ）。
 依存の向きの規則は `rule-tests/architecture.test.ts` が検査する（一覧は `.claude/rules/architecture-check.md`）。API 側は `.claude/rules/backend.md`。決定と採用しなかった案は ADR `docs/adr/architecture/20260928-feature-based-directory-and-ddd-backend.md`。
 
 ## 置き場所
 - ソースは `app/`・`features/`・`shared/` の下か、直下の `next.config.ts`・`instrumentation.ts`・`instrumentation-node.ts`・`proxy.ts`・`next-env.d.ts` だけ（規則 `frontend-placement`）。`src/` は使わない。
-  - WHY: 依存の規則はこれらの場所にしかかからず、`apps/frontend/lib/db.ts` のような場所から backend の container を import しても素通りしていた（Issue #68 の reviewer 指摘）。
-- `apps/frontend/shared/<name>/`: feature をまたぐ部品。今あるのは `request-log/`（リクエストログの 1 行を組み立てる純粋関数）と `i18n/`（翻訳の仕組み・共通の辞書・ロケール・日時の表示。下の「i18n」）。`components/` `hooks/` は使うものが出るまで作らない。`shared/` は `features/`・`app/`・backend・`apps/shared` を参照しない（規則 `shared-to-features`・`screen-to-app`・`screen-to-backend`・`screen-to-shared`）。`apps/frontend/shared/`（画面側の部品）と `apps/shared/`（frontend と backend で共通のサーバ側の基盤。`.claude/rules/shared.md`）は別のもの。
+  - WHY: 依存の規則はこれらの場所にしかかからず、`apps/frontend_customer/lib/db.ts` のような場所から backend の container を import しても素通りしていた（Issue #68 の reviewer 指摘）。
+- `apps/frontend_customer/shared/<name>/`: feature をまたぐ部品。今あるのは `request-log/`（リクエストログの 1 行を組み立てる純粋関数）と `i18n/`（翻訳の仕組み・共通の辞書・ロケール・日時の表示。下の「i18n」）。`components/` `hooks/` は使うものが出るまで作らない。`shared/` は `features/`・`app/`・backend・`apps/shared` を参照しない（規則 `shared-to-features`・`screen-to-app`・`screen-to-backend`・`screen-to-shared`）。`apps/frontend_customer/shared/`（画面側の部品）と `apps/shared/`（frontend と backend で共通のサーバ側の基盤。`.claude/rules/shared.md`）は別のもの。
 
 ## app/（ルーティングだけ）
 - 置くもの: Next の規約ファイル（`page.tsx` / `layout.tsx` / `loading.tsx` / `error.tsx` など）と `app/api/**/route.ts` だけ。テストは置かない（仕様は screen と api ファイルのテストで固定し、ルーティングにロジックを置かせない）。
 - `page.tsx` は screen を返すだけ（`return <TodoScreen />`。動的セグメントは `await params` で取り出して props で渡す）。
 - `app/api/**/route.ts` は backend の api ファイルが export する HTTP メソッド名の関数を re-export するだけ（`export { GET } from "@repo/backend/features/todo/presentation/list-todos.api";`）。同じ URL の複数メソッドはそれぞれ別の api ファイルから re-export する。入力検証やレスポンスの組み立ては書かない。
-- `instrumentation.ts` は Next の規約で `apps/frontend/` 直下に置く（起動時の環境変数の検証。`.claude/rules/env.md`）。直下のファイルは backend を参照しない（規則 `frontend-root-to-backend`）。起動時の検証の `env` とログの `logger` は、frontend と backend で共通の `apps/shared` から `@repo/shared/env`・`@repo/shared/logger` で使う（Issue #90。以前は backend の中にあり、この規則の例外だった）。
+- `instrumentation.ts` は Next の規約で `apps/frontend_customer/` 直下に置く（起動時の環境変数の検証。`.claude/rules/env.md`）。直下のファイルは backend を参照しない（規則 `frontend-root-to-backend`）。起動時の検証の `env` とログの `logger` は、frontend と backend で共通の `apps/shared` から `@repo/shared/env`・`@repo/shared/logger` で使う（Issue #90。以前は backend の中にあり、この規則の例外だった）。
 - `proxy.ts`（Next の Proxy。旧 `middleware.ts` は使わない）も規約で直下に置く。画面アクセスと `/api/**` の呼び出しを 1 リクエスト 1 行の JSON で stdout に出すだけにし、1 行の中身は `shared/request-log/` の `buildRequestLog`（テストで固定）で組み立て、`logger.info` で出す。認可・リダイレクトなどのロジックは置かない。決定は ADR `docs/adr/architecture/20260929-request-log-in-proxy.md`、ブラウザのリクエスト一覧の実測は 2026-09-29 の work-logs「docs/ から移した記録」。限界: status と所要時間は取れない（Proxy は応答の前に動く）、プリフェッチは matcher で除く、ブラウザの戻る・進むで Next のルーターのキャッシュが使われると画面の行は出ない（出るのは画面が呼ぶ API の行だけ）、`client.ip` は `x-forwarded-for` を信じる値でクライアントが偽装できるので、信頼できるリバースプロキシがヘッダを付け直す前提で使う。
 - WHY ルーティングを分ける: URL を変えてもコードを動かさずに済む（Next は構成について unopinionated で、`app/` の外にコードを置くのは公式の例の 1 つ）。
 
@@ -48,21 +48,21 @@ paths:
   - WHY: `output: "export"` では Route Handler が GET だけのビルド時の静的なレスポンスになる。ブラウザ専用 API は `useEffect` の中で触れば prerender と両立する。
 
 ## import の書き方
-- frontend の中は `@/<path>`（tsconfig の paths `@/*` → `apps/frontend/*`）。
+- frontend の中は `@/<path>`（tsconfig の paths `@/*` → `apps/frontend_customer/*`）。
 - backend へは `@repo/backend/<path>` だけ（workspace パッケージと `apps/backend/package.json` の `exports` で解決）。相対パス（`../backend/...`）と `@/../backend/...` は使わない（規則 `frontend-to-backend-specifier`）。
 - `apps/shared` へは `@repo/shared/<name>` だけ（直下のファイルから。`apps/shared/package.json` の `exports`）。相対パス（`../shared/...`）と `@/../shared/...` は使わない（規則 `frontend-to-shared-specifier`）。
   - WHY: 相対パスは `exports`（公開する入口）を通らずに backend のどのファイルでも指せ、後で別プロセスに分けたときにも壊れる。
 - exports に無いファイルを import すると `tsc` / `next build` が「Cannot find module」で止まる。足し方は `.claude/rules/backend.md` の「exports」。
-- `apps/frontend/tsconfig.json`: Next 用（plugin・jsx・DOM の型、paths は `@/*` だけ）。`@repo/backend/...`・`@repo/shared/...` を paths に書かない（書くと exports を通らずにパッケージのどのファイルも指せてしまう）。
+- `apps/frontend_customer/tsconfig.json`: Next 用（plugin・jsx・DOM の型、paths は `@/*` だけ）。`@repo/backend/...`・`@repo/shared/...` を paths に書かない（書くと exports を通らずにパッケージのどのファイルも指せてしまう）。
 
 ## i18n（Issue #116・#125。決定と採用しなかった案は ADR `docs/adr/architecture/20260929-i18n-without-library.md` と `docs/adr/architecture/20260929-messages-colocated-per-screen.md`）
 - 対応するロケールは `ja`（既定）と `en`（`shared/i18n/locale.ts` の `SUPPORTED_LOCALES`）。ライブラリは使わない。
 - ファイル構成: `shared/i18n/` は `i18n.tsx`（`defineMessages`・`useT`・`useLocale`・`LocaleProvider`・`formatMessage`・`isMessageKey`・型）、`locale.ts`（ロケールの判定。Proxy から React なしで使う）、`format.ts`（日時の表示）、`common.messages.ts`（共通の辞書）と、テスト用の `i18n.test-support.tsx` だけ。
 - 辞書は画面・部品ごとに隣に置く（colocation）: `screens/<name>-screen/<name>-screen.messages.ts`、`components/<name>.messages.ts`。書き方は `export const todoScreenMessages = defineMessages({ ja: {...}, en: {...} })`。平坦なオブジェクトで、キーは dot 区切りの 1 つの文字列。
   - 共通の辞書 `shared/i18n/common.messages.ts` に置くのは、API から返る `ErrorKey` の文言と画面側だけのエラー `error.*` だけ（どの画面の操作でも同じキーで出るため）。画面・部品に固有の文言は置かない（`api-error.test.ts` が「共通の辞書のキー = `ErrorKey` + `error.unknown` + `error.unexpected`」を型で検査する）。
-  - `*.messages.ts` を import してよいのは同じディレクトリのファイルだけ（`./todo-screen.messages`）。`common.messages.ts` だけは `apps/frontend/` のどこからでも可（`@/shared/i18n/common.messages`）。検査は `rule-tests/architecture.test.ts` の規則 `messages-colocation`（テストは対象外で、画面のテストが部品の辞書で期待値を作るのは可）。辞書を re-export（`export ... from`）して中継しない（同じディレクトリでも違反）。複数の画面で同じ言い回しを使うときも、それぞれの辞書に書く。
+  - `*.messages.ts` を import してよいのは同じディレクトリのファイルだけ（`./todo-screen.messages`）。`common.messages.ts` だけは `apps/frontend_customer/` のどこからでも可（`@/shared/i18n/common.messages`）。検査は `rule-tests/architecture.test.ts` の規則 `messages-colocation`（テストは対象外で、画面のテストが部品の辞書で期待値を作るのは可）。辞書を re-export（`export ... from`）して中継しない（同じディレクトリでも違反）。複数の画面で同じ言い回しを使うときも、それぞれの辞書に書く。
   - WHY: 1 つの辞書では、画面を消す・言い回しを変えるときに、どのキーがどの画面のものかを辞書を読んで探すことになる。隣に置けば、画面のディレクトリだけで完結し、ディレクトリごと消せる（`screens/` の方針と同じ）。
-  - 画面に出す文言（JSX のテキスト、`aria-label` などの利用者向けの属性、エラーの文言）は辞書にだけ書き、画面・hook・components は `t(...)` を通す。検査は規則 `frontend-hardcoded-text`（例外は `apps/frontend/` の `*.messages.ts` の `defineMessages(...)` の引数の中だけ。辞書のファイルでも引数の外に文言を書くと違反）。サーバのログ（`proxy.ts`・`instrumentation-node.ts`）は辞書の対象外で、英語で書く。
+  - 画面に出す文言（JSX のテキスト、`aria-label` などの利用者向けの属性、エラーの文言）は辞書にだけ書き、画面・hook・components は `t(...)` を通す。検査は規則 `frontend-hardcoded-text`（例外は `apps/frontend_customer/` の `*.messages.ts` の `defineMessages(...)` の引数の中だけ。辞書のファイルでも引数の外に文言を書くと違反）。サーバのログ（`proxy.ts`・`instrumentation-node.ts`）は辞書の対象外で、英語で書く。
   - WHY: 文言が散らばると、言語を足すときに漏れ、言い回しの変更がコードの変更になる。
 - キーの命名: 画面・部品の辞書のキーは、その画面の中で短く付ける（`title`・`form.submit`・`deleteAria`。画面の名前はファイルの場所で分かるので入れない）。共通の辞書のサーバのエラーは backend の `ErrorKey` と同じ文字列（`<対象>.<項目>.<理由>`。例 `todo.title.tooLong`）、画面側だけのエラーは `error.<理由>`（`error.unknown` = HTTP ステータスだけが分かる失敗、`error.unexpected` = API の応答ではない失敗）。
 - 型（`defineMessages`）: `ja` がキーの一覧と placeholder の正（`const` の型引数で文字列リテラルの型になるので `as const` は書かない）。`en` のキーの欠け・余分、placeholder の名前の集合の違い（順番は問わない）、空白だけの文言（全角の空白・`\r` を含む）、文字列リテラルでない `string` 型の値はコンパイルエラーになる。

@@ -1,5 +1,5 @@
 {
-  "name": "@repo/frontend",
+  "name": "@repo/frontend-customer",
   "private": true,
   "scripts": {
     "dev": "next dev",

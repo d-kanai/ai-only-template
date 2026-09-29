@@ -2,7 +2,7 @@
 // apps/shared は frontend と backend で共通の基盤（環境変数の入口 env.ts・ログの出口 logger.ts）で、サーバ側（Node.js）でだけ動く。
 // WHY apps/backend/tsconfig.json と同じ方針（DOM の型なし・Next の plugin なし・jsx なし）: env.ts・logger.ts は Node の API
 //   （process・node:fs・console）だけを使う pure な TypeScript にし、ブラウザや React の API を使うと型エラーになるようにする。
-//   frontend から import される（instrumentation-node.ts・proxy.ts）が、Next のビルドでは apps/frontend/tsconfig.json の設定で
+//   frontend から import される（instrumentation-node.ts・proxy.ts）が、Next のビルドでは apps/frontend_customer/tsconfig.json の設定で
 //   型チェックされるので、DOM の型が無いことの検査はここ（と apps/backend の tsconfig。backend も import する）で行う。
 // WHY paths を持たない: apps/shared の中は同じディレクトリのファイルを相対パスで読むだけで（今はファイル同士の import も無い）、
 //   ほかのパッケージ（@repo/backend・frontend の "@/"）を参照しない（.claude/rules/shared.md）。

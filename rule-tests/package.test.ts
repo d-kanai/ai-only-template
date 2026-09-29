@@ -455,14 +455,14 @@ describe("package.json の実ファイル", () => {
   }));
 
   // WHY: 列挙が漏れる（pnpm-workspace.yaml の読み違い・パターンの書き換え）と、そのパッケージの範囲指定は検査されない。
-  //   今の workspace のパッケージ（リポジトリ直下・apps/backend・apps/e2e・apps/frontend・apps/shared）がすべて入っていることを確かめる。
+  //   今の workspace のパッケージ（リポジトリ直下・apps/backend・apps/e2e・apps/frontend_customer・apps/shared）がすべて入っていることを確かめる。
   it("リポジトリ直下と apps/* の package.json をすべて列挙できる", () => {
     expect(manifestPaths).toEqual(
       expect.arrayContaining([
         "package.json",
         "apps/backend/package.json",
         "apps/e2e/package.json",
-        "apps/frontend/package.json",
+        "apps/frontend_customer/package.json",
         "apps/shared/package.json",
       ]),
     );

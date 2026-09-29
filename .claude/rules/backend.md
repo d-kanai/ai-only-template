@@ -11,7 +11,7 @@ paths:
 ## 置き場所（DDD 4 層）
 - `apps/backend/` の直下は `features/` と `shared/` だけ（ほかは `package.json`・`tsconfig.json`）。ファイルは `apps/backend/features/<feature>/` か `apps/backend/shared/` の `domain/` `application/` `presentation/` `infra/` のどれかの下に置く。例外は `apps/backend/shared/drizzle/`（drizzle-kit の設定 `drizzle.config.ts` と、生成したマイグレーションの `*.sql`・`meta/`。ソースは `drizzle.config.ts` だけ）。
   - WHY: 層に属さない場所のファイルにはどの層の規則もかからず、依存の向きの検査を素通りする（規則 `backend-placement`）。
-  - WHY `features/` と `shared/`（Issue #98。ユーザー判断）: frontend（`apps/frontend/features/`・`shared/`）と同じ構成にし、feature を足すときの置き場所をそろえる。Drizzle は `shared/drizzle/`（`shared/infra/drizzle/` のように深くしない）に置き、直下の例外を無くす。決定と採用しなかった案は ADR `docs/adr/architecture/20260929-backend-features-and-shared-directories.md`。
+  - WHY `features/` と `shared/`（Issue #98。ユーザー判断）: frontend（`apps/frontend_customer/features/`・`shared/`）と同じ構成にし、feature を足すときの置き場所をそろえる。Drizzle は `shared/drizzle/`（`shared/infra/drizzle/` のように深くしない）に置き、直下の例外を無くす。決定と採用しなかった案は ADR `docs/adr/architecture/20260929-backend-features-and-shared-directories.md`。
 - `apps/backend/shared/`: feature をまたぐもの。`domain/error-key.ts`（`ErrorKey`・`ErrorKeyParams`: エラーのキーとキーごとの params の形）、`domain/domain-error.ts`（DomainError: `validation_error` / `not_found` と key・params）、`presentation/problem.ts`（例外 → RFC 9457 の Problem Details の応答 `toProblemResponse`、`Problem`・`ProblemError`、`InvalidRequestError`。`ErrorKey`・`ErrorKeyParams` を再公開）、`presentation/problem-detail.en.ts`（`detail` の英語の文。英語の文言はここだけ）、`presentation/json-body.ts`（`requestBodySchema`・`parseJsonBody`）、`presentation/resource-id.ts`（`parseUuidParam`: 動的セグメントの id が uuid の形でなければ 404）、`infra/database.ts`（プールと Drizzle の db の型 `Database`）。
 - 環境変数の唯一の入口 `env.ts` とログの唯一の出口 `logger.ts` は、frontend と backend で共通の workspace パッケージ `apps/shared`（`@repo/shared`）にある（Issue #90。`.claude/rules/shared.md`）。backend からは `@repo/shared/env`・`@repo/shared/logger` で使う。
 
@@ -22,7 +22,7 @@ paths:
 | `domain/` | Entity / Value Object / Repository の interface | 自 feature と shared の `domain` だけ。パッケージは application と同じ制限（`node:crypto` などは可） |
 | `infra/` | Repository の実装（Postgres と、テスト用の InMemory）、Drizzle のスキーマ `schema.ts`、プール（`shared/infra/database.ts`） | 自 feature と shared の `domain`・`application`・`infra`、`@repo/shared/env`・`@repo/shared/logger`。パッケージは `next` / `react` / `react-dom` 以外 |
 
-- 向き: `apps/frontend/app/api → presentation → application → domain`。infra は domain の interface を実装する（依存性の逆転）。他 feature・`apps/frontend/`・層に属さない場所は参照しない。
+- 向き: `apps/frontend_customer/app/api → presentation → application → domain`。infra は domain の interface を実装する（依存性の逆転）。他 feature・`apps/frontend_customer/`・層に属さない場所は参照しない。
   - WHY 許可の一覧にする: 禁止の一覧だと、書き忘れた参照先が黙って通る。
 - `apps/backend/shared/` が参照してよい自前コードは shared の中と `apps/shared`（`@repo/shared`）だけ（層の許可にも従う）。`next` / `react` / `react-dom` も不可。
 - `apps/shared` を使ってよい層は、移す前（`backend/shared/infra` にあったとき）と同じ: infra は env・logger、presentation は logger だけ、domain・application は使わない（`rule-tests/architecture.test.ts` の `SHARED_MODULES_BY_LAYER`）。WHY: env・logger は外の世界（環境変数・stdout）に触る基盤で、domain・application から使うと infra を参照させない意味が無くなる。
@@ -33,7 +33,7 @@ paths:
   - WHY `apps/shared` へ相対パスを使わない: exports を経由しない参照を許すと、`apps/shared` の公開範囲（exports。規則 `shared-exports`）が意味を持たなくなる（frontend・e2e と同じ扱い）。
   - WHY `@/` 不可: Next（Turbopack）は backend のファイルの `@/` にも frontend の paths を当て、ビルドが失敗する。
   - WHY `@repo/backend/` 不可: 自パッケージ名の参照は `exports` を通り、公開していない内部のファイルを指せなくなる。
-- 外（apps/frontend・apps/e2e/・リポジトリ直下の設定）が使ってよいのは `apps/backend/package.json` の `exports` に書いたファイルだけ。全ファイル（`"./*"`）は公開しない（ユーザー判断）。
+- 外（apps/frontend_customer・apps/e2e/・リポジトリ直下の設定）が使ってよいのは `apps/backend/package.json` の `exports` に書いたファイルだけ。全ファイル（`"./*"`）は公開しない（ユーザー判断）。
   - 今のキー: `./features/todo/presentation/*.api`（Route Handler と画面側の型）、`./shared/presentation/problem`（`Problem`・`ErrorKey`・`ErrorKeyParams`。Issue #126 で `http-error` から改名）。env・logger は Issue #90 で `apps/shared` に移し、キーを消した（`@repo/shared` の exports）。
   - 値はキーのパスに `.ts` を付けた TS のソース（ビルドしない）。feature を足したら `./features/<feature>/presentation/*.api` を足す（Node の exports のパターンは `*` を 1 つしか持てないので、feature ごとにキーを分ける）。それ以外は 1 ファイルずつ。使わなくなったキーは消す（規則 `backend-exports` が過不足を止める）。
   - テスト基盤（`shared/infra/database.test-support`）は公開しない。`vitest.global-setup.ts` からだけ相対パスで読む（唯一の例外）。
@@ -51,7 +51,7 @@ paths:
     - WHY api ファイルごとに `new PostgresTodoRepository(getDatabase().db)` してよい: プールは `getDatabase` が `globalThis` に 1 つだけ持つので、Repository を api ファイルの数だけ作ってもプールは 1 つ。
   - WHY クラス + コンストラクタ injection: application の query / command と同じ形にそろえる。テストは `new CreateTodoApi(new CreateTodoCommand(new InMemoryTodoRepository())).handle(request)` のように、空の InMemory のリポジトリで組み立てる（前のテストのデータに依存しない）。差し替えはコンストラクタで行い `vi.mock` は使わない（型で縛られ、query / command の形が変わればテストがコンパイルエラーになる）。
 - presentation の本番コードが参照してよい infra は、組み立てに使う自 feature の `infra/<名前>-repository.postgres` と `apps/backend/shared/infra/database` だけ（規則 `presentation`）。InMemory の実装（`*.in-memory`）と `schema` は参照しない。WHY: 本番の handler が InMemory で動くと、データが保存されないまま気づけない（Issue #59）。
-- エラーは安定したキー（`ErrorKey`）と params で表す（Issue #116。設計 (a)）。画面に出す文言は画面（apps/frontend）の辞書が key と params から翻訳する。`apps/backend` の非テストコードに日本語のリテラルを置かない（規則 `server-hardcoded-text` が止めるのは日本語だけ。ログ・開発者向けの Error の message・`detail` は英語）。
+- エラーは安定したキー（`ErrorKey`）と params で表す（Issue #116。設計 (a)）。画面に出す文言は画面（apps/frontend_customer）の辞書が key と params から翻訳する。`apps/backend` の非テストコードに日本語のリテラルを置かない（規則 `server-hardcoded-text` が止めるのは日本語だけ。ログ・開発者向けの Error の message・`detail` は英語）。
   - WHY: 文言（言語・言い回し）は画面の関心で、backend が持つと言語を足すたび・言い回しを変えるたびに API を変えることになる。key は分岐にも翻訳にも使える機械可読な契約になる。
   - キーは `"<領域>.<対象>.<理由>"`（`todo.title.tooLong`・`request.field.notString` など）。キーを足すときは `apps/backend/shared/domain/error-key.ts` の `ErrorKeyParams` に足す（params の形も一緒に決める。値は string か number だけ）。画面の辞書はこの型から作るので、訳の書き忘れは画面側の型エラーで止まる。公開したキーの名前は変えない（変えるなら画面の辞書と同じ変更で）。
   - `new DomainError(code, key, params)` / `new InvalidRequestError(key, params, errors)` / `parseUuidParam(id, key, params)` は、キーごとに params を型で縛る（params の要るキーに渡し忘れる・形を間違える・要らないキーに渡すとコンパイルエラー。`error-key.ts` の `ErrorParamsArgs`）。検査は `domain-error.test.ts` などの `@ts-expect-error`（`pnpm typecheck`）。
@@ -111,4 +111,4 @@ paths:
 - api ファイル・query・command は `<verb>-<noun>`（`list-todos`・`get-todo`・`create-todo`・`update-todo`・`delete-todo`）に役割の接尾辞（`.api.ts`・`.query.ts`・`.command.ts`・`.in-memory.ts`・`.postgres.ts`・`.test.ts`）。クラス名は `<Verb><Noun>` に役割（`ListTodosApi`・`ListTodosQuery`・`CreateTodoCommand`）。Repository の実装は `<名前>-repository.<実装>.ts`（規則 `presentation` がファイル名 `*-repository.postgres` で組み立てに使う実装を見分ける）。
 
 ## 後で別プロセスに分けるとき
-`apps/backend` に起動口（`server.ts`）と script を足し、`apps/frontend/app/api/**` を消して Next の `rewrites` で `/api/*` を向ける。frontend の `@repo/backend` は型だけの依存になる。env・logger は `apps/shared` にあるので、両方のプロセスがそのまま使える（詳細は ADR `docs/adr/architecture/20260928-monorepo-apps-frontend-backend.md`）。
+`apps/backend` に起動口（`server.ts`）と script を足し、`apps/frontend_customer/app/api/**` を消して Next の `rewrites` で `/api/*` を向ける。frontend の `@repo/backend` は型だけの依存になる。env・logger は `apps/shared` にあるので、両方のプロセスがそのまま使える（詳細は ADR `docs/adr/architecture/20260928-monorepo-apps-frontend-backend.md`）。

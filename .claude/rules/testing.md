@@ -21,7 +21,7 @@ paths:
 - テストを足す・書き換えたら、そのテストが守るコードを 1 度壊して落ちることを確かめ、元に戻す（条件の反転・戻り値の変更・呼び出しの削除など）。WHY: 検証が弱いと壊しても緑のまま。書き換えで既存の検証が消えることもある。
 
 ## 置き方と環境
-対象と同じディレクトリに `<対象>.test.ts(x)` で置く（`apps/frontend/app/` には置かない）。E2E だけ workspace パッケージ `@repo/e2e` の `apps/e2e/<feature>.spec.ts`（画面・API・ルーティングをまたぐため）。
+対象と同じディレクトリに `<対象>.test.ts(x)` で置く（`apps/frontend_customer/app/` には置かない）。E2E だけ workspace パッケージ `@repo/e2e` の `apps/e2e/<feature>.spec.ts`（画面・API・ルーティングをまたぐため）。
 
 | 対象 | 方法 | 環境 |
 | --- | --- | --- |
@@ -30,8 +30,8 @@ paths:
 | `apps/backend/**/application` | InMemory リポジトリを渡して検証 | Node |
 | `apps/backend/**/infra` の Postgres の実装（`*.postgres.ts`・`database.ts`） | 実 Postgres。`createTestDatabase()` でファイルごとの別スキーマ（`test_<UUID>`）にマイグレーションを当て、各テストの前に `TRUNCATE` | Node |
 | `apps/backend/**/presentation` | 空の InMemory で組み立てた handler（`new ListTodosApi(new ListTodosQuery(new InMemoryTodoRepository())).handle`）に `new Request()`（と `ctx`）を渡し、`Response` を検証。本番の handler（`export const GET` など）は、Postgres の Repository の prototype を spy して結線だけを確かめる | Node |
-| `apps/frontend/features/**/*.hook.ts` | `renderHook` で状態とイベント | jsdom |
-| `apps/frontend/features/**/*-screen.tsx` | render して操作し、表示を検証 | jsdom |
+| `apps/frontend_customer/features/**/*.hook.ts` | `renderHook` で状態とイベント | jsdom |
+| `apps/frontend_customer/features/**/*-screen.tsx` | render して操作し、表示を検証 | jsdom |
 | `apps/e2e/*.spec.ts` | Playwright で本番ビルドを起動し、Chromium で操作 | Chromium |
 
 - `apps/backend/`・`apps/shared/` のテストは先頭に `// @vitest-environment node`（既定は jsdom）。WHY: サーバのコードは DOM の無い環境で検証する。
@@ -40,8 +40,8 @@ paths:
 
 ## カバレッジ（100%）
 - `pnpm test`（`vitest run --coverage`）は Statements / Branches / Functions / Lines のどれかが 100% 未満なら失敗する（CI でも止まる）。速く回すだけなら `pnpm test:unit`、完了前は必ず `pnpm test`。設定と WHY は `vitest.config.mts`。
-- 計測対象: `apps/frontend/features/`・`apps/frontend/shared/`・`apps/backend/` の `.ts` / `.tsx`、`apps/shared/` の `.ts`（Issue #90）と `scripts/` の `.ts`（テスト・`*.d.ts`・`apps/backend/` 直下の `*.config.ts` を除く）。
-- 計測しないもの（ユーザー判断、Issue #45）: `apps/frontend/app/`（ルーティングだけ。E2E で確かめる）、設定ファイル、`instrumentation*.ts`（起動時だけ動く。中身は `env.ts` のテストで固定）、`apps/frontend/proxy.ts`（Next がリクエストごとに呼ぶ結線だけ。1 行の中身は `shared/request-log/` のテスト、結線は E2E。Issue #80）、`.sh`（V8 は JS しか測れない）。
+- 計測対象: `apps/frontend_customer/features/`・`apps/frontend_customer/shared/`・`apps/backend/` の `.ts` / `.tsx`、`apps/shared/` の `.ts`（Issue #90）と `scripts/` の `.ts`（テスト・`*.d.ts`・`apps/backend/` 直下の `*.config.ts` を除く）。
+- 計測しないもの（ユーザー判断、Issue #45）: `apps/frontend_customer/app/`（ルーティングだけ。E2E で確かめる）、設定ファイル、`instrumentation*.ts`（起動時だけ動く。中身は `env.ts` のテストで固定）、`apps/frontend_customer/proxy.ts`（Next がリクエストごとに呼ぶ結線だけ。1 行の中身は `shared/request-log/` のテスト、結線は E2E。Issue #80）、`.sh`（V8 は JS しか測れない）。
 - 足りなければテストを足して埋める。`/* v8 ignore */` などで逃がさない。対象外を増やすときは上の方針に当てはまるか確かめ、`vitest.config.mts` とここに理由を書く。
 
 ## globalSetup（テスト用スキーマの後始末）
@@ -77,14 +77,14 @@ paths:
 - `// Stryker disable next-line <Mutator>: <理由>` で除いてよいのは、**等価な変異**と**検証しない文言**（内部のログなど）だけ。理由を必ず書く。殺せるのに手間を省くために使わない。「等価」と決める前にほかの実行経路を探す（React の `<Activity mode="hidden">` では隠すときに effect の片付けが走り、state 更新も反映される）。
 - 等価な変異を生む書き方をしない: 結果を変えない検査（`"error" in value` の後の型の確認）は書かない、例外を握りつぶす `try` は握りつぶしたい呼び出しだけを囲む、ロジックの定数（正規表現・変換表・URL・接頭辞）は最上位に置かず関数の中に置く（最上位は static な変異になり `ignoreStatic` で検査から外れる）。
 - 今の disable の一覧（すべて等価。足す・消すときはここを直す）:
-  - `apps/frontend/features/todo/screens/todo-screen/todo-screen.hook.ts` の依存配列 5 か所（`reloadTodos` は依存の無い useCallback で作り直されず、それを依存に持つ effect・`mutateAndReload`・`toggleTodo`・`removeTodo` も作り直されない）。
-  - `apps/frontend/features/todo/screens/todo-detail-screen/todo-detail-screen.hook.ts` の世代の `+=`（`-=` でも毎回別の値になる）。
+  - `apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.hook.ts` の依存配列 5 か所（`reloadTodos` は依存の無い useCallback で作り直されず、それを依存に持つ effect・`mutateAndReload`・`toggleTodo`・`removeTodo` も作り直されない）。
+  - `apps/frontend_customer/features/todo/screens/todo-detail-screen/todo-detail-screen.hook.ts` の世代の `+=`（`-=` でも毎回別の値になる）。
 - 残る static は `apps/backend/features/todo/infra/schema.ts` のテーブル宣言だけ（等価の理由は `stryker.config.mjs`）。
 - テストで `@repo/backend/...`・`@repo/shared/...` から値を import すると、その変異はテストに届かない。backend・apps/shared の振る舞いはそれぞれの中のテスト（相対 import）で確かめる。
 
 ## E2E（Playwright）
 - `apps/e2e` は workspace パッケージ `@repo/e2e`（Issue #84）。`@playwright/test`・`pg`・`@types/pg`・`"@repo/shared": "workspace:*"`（`env.ts`。Issue #90）は `apps/e2e/package.json` に置く。
-  - WHY: `apps/frontend`・`apps/backend` と同じ形（依存は使うパッケージの `package.json`）にし、E2E だけが使う Playwright と `pg` をリポジトリ直下から外す。`.env` はリポジトリ直下の 1 つを `env.ts` が上にたどって読むので、カレントディレクトリが `apps/e2e` でも同じ値になる。
+  - WHY: `apps/frontend_customer`・`apps/backend` と同じ形（依存は使うパッケージの `package.json`）にし、E2E だけが使う Playwright と `pg` をリポジトリ直下から外す。`.env` はリポジトリ直下の 1 つを `env.ts` が上にたどって読むので、カレントディレクトリが `apps/e2e` でも同じ値になる。
 - `pnpm test:e2e`（= `pnpm --filter @repo/e2e test` = `apps/e2e` で `playwright test`。設定は `apps/e2e/playwright.config.ts`）。`webServer` が `pnpm -w build && pnpm -w start -p <E2E_PORT>`（`-w` でリポジトリ直下の script を呼ぶ）（`.env` の `E2E_PORT`。メインの作業ツリーは 3100）で本番ビルドを起動する（ローカルで起動済みならそれを使う）。`pnpm test`（Vitest）には含めない。
 - Postgres で動かす。サーバ（`webServer.env`）とテスト（`apps/e2e/database.ts`）は同じ `env.DATABASE_URL` を使う。前提は `pnpm db:up && pnpm db:migrate`（`webServer.command` では当てない）。
   - ローカルの `reuseExistingServer` で起動済みのサーバを使うときは、そのサーバの環境変数のまま動く（別の DB・古いコードのサーバが残っていないか注意）。
