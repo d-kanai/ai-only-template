@@ -12,7 +12,7 @@ Claude Code の Usage limit に早く達しないための方針と、その根�
 | 方針 | WHY |
 | --- | --- |
 | 1 Issue = 1 セッション（`/clear`）。長期の文脈は `work-logs/` と Issue コメントに置く | 毎ターン全コンテキストを送るので、ターン数 × コンテキスト量が消費になる。8 時間超・150k 超が 100% / 87% |
-| push は 1 ラウンド 1 回、CI の待ちは 1 本のポーリング（30〜60 秒）で完了時に 1 回だけ起きる | push ごとに CI が再実行され、完了通知ごとに wake（全コンテキストのターン）が増える |
+| push は 1 ラウンド 1 回。CI はポーリングで待たず、PR に auto-merge（merge commit）を付けて終える。auto-merge が無効なら次の人間のターンで 1 回だけ確認してマージ（Issue #82） | push ごとに CI が再実行され、ポーリングの完了通知ごとに wake（全コンテキストのターン）が増える。マージ条件は Ruleset の required check が守る |
 | 未コミットを長く残さない（worker 完了ごとにコミット） | 環境側の Stop フック（Claude Code Remote の `~/.claude/stop-hook-git-check.sh`。未コミットがあれば exit 2 で止める）はリポジトリから変えられず、止まるたびに wake になる |
 | 機械的な作業は `worker-light`（Sonnet 5.5）、単発の検索は組み込みの Explore | 改名・参照更新・文書の書き換えは Opus でも Sonnet でも結果が変わらず、消費だけが違う |
 | 機械的な変更（改名・文書・参照更新だけ）は reviewer を省く。reviewer には差分と観点を絞って渡す | reviewer 1 回で 30 万トークン規模。ロジックの無い変更はオーケストレータのテスト実行と差分確認で足りる |
