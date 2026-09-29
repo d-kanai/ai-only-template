@@ -1,6 +1,5 @@
 // @vitest-environment node
 import { afterEach, describe, expect, test, vi } from "vitest";
-import type { ErrorResponse } from "../../../shared/presentation/http-error";
 import type { TodoRepository } from "../domain/todo-repository";
 import {
   createInMemoryTodoContainer,
@@ -92,12 +91,8 @@ describe("GET /api/todos", () => {
     const response = await GET(listRequest());
 
     expect(response.status).toBe(500);
-    const body = (await response.json()) as ErrorResponse;
-    expect(body).toEqual({
-      error: {
-        code: "internal_error",
-        message: "サーバでエラーが発生しました",
-      },
+    await expect(response.json()).resolves.toStrictEqual({
+      error: { code: "internal_error", key: "server.internalError" },
     });
     expect(consoleError).toHaveBeenCalledTimes(1);
     const [line] = consoleError.mock.calls[0] as [string];

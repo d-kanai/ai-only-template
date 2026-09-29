@@ -34,8 +34,9 @@ export function getTodoApi(container: Pick<TodoContainer, "getTodo">) {
   return async (_request: Request, ctx: Context): Promise<Response> => {
     try {
       const { id: rawId } = await ctx.params;
-      // uuid の形でない id の message は、query / command が無い id に投げる not_found と同じ文言にそろえる。
-      const id = parseUuidParam(rawId, `Todo（id: ${rawId}）が見つかりません`);
+      // uuid の形でない id のキーと params は、query / command が無い id に投げる not_found と同じにそろえる
+      //   （画面から見て「無い Todo」と同じ契約）。
+      const id = parseUuidParam(rawId, "todo.notFound", { id: rawId });
       const todo = await container.getTodo.execute(id);
       const body: GetTodoResponse = toTodoDto(todo);
       return Response.json(body);

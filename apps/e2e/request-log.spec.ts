@@ -14,7 +14,7 @@ import { resetTodos } from "./database";
 //   サーバを使うときは、そのビルドが今のコードのものか注意する（.claude/rules/testing.md の E2E）。
 // WHY ポート 0: OS に空いているポートを選ばせ、webServer（E2E_PORT）・開発サーバ・並列の worktree のサーバと重ならないようにする。
 //   選ばれたポートは next start が出す「Local: http://localhost:<port>」の行から読む。
-// WHY 環境変数を渡さない（親の環境を引き継ぐ）: next start は .env を読み、webServer と同じく apps/e2e/database.ts と同じ DB を使う。
+// WHY 環境変数を渡さない（親の環境を引き継ぐ。TZ だけ UTC にする）: next start は .env を読み、webServer と同じく apps/e2e/database.ts と同じ DB を使う。
 //   コマンドの前に DATABASE_URL を付けて変えたときも、その値を引き継ぐので同じ DB になる。
 
 // WHY __dirname（このファイルのある apps/e2e）から相対でたどる: カレントディレクトリ（pnpm --filter @repo/e2e test では apps/e2e）に
@@ -50,9 +50,15 @@ function loggedRequests(): LoggedRequest[] {
 
 test.beforeAll(async () => {
   // WHY next の JS を node で直接起動する（pnpm start を通さない）: pnpm を挟むと子プロセスが増え、kill で next が残りうる。
+  // WHY env コマンドで TZ=UTC を付ける: サーバは UTC でなければ起動しない（apps/frontend/instrumentation-node.ts。Issue #116）。
+  //   pnpm start を通さないので package.json の TZ=UTC が付かない。env は TZ を足して node に exec する（プロセスは増えず、kill が
+  //   next に届く）。spawn の env オプションで足すと process.env を直接読むことになり、env.ts 以外での直参照の禁止
+  //   （Biome の noProcessEnv と rule-tests/architecture.test.ts の env-direct-access）に当たる。
   const child = spawn(
-    process.execPath,
+    "env",
     [
+      "TZ=UTC",
+      process.execPath,
       resolve(frontendDir, "node_modules/next/dist/bin/next"),
       "start",
       "-p",

@@ -18,10 +18,9 @@ import { type TodoContainer, todoContainer } from "../infra/container";
 // WHY 未知の項目を拒否する: 項目名の打ち間違い（{ complete: true }）が「何も変えない」200 に化けるのを防ぐ（json-body.ts の requestBodySchema）。
 function updateTodoRequestSchema() {
   return requestBodySchema({
-    title: z.string({ error: "title は文字列で指定してください" }).optional(),
-    completed: z
-      .boolean({ error: "completed は true か false で指定してください" })
-      .optional(),
+    // 型が違うときのキー（request.field.notString / notBoolean）は json-body.ts の toErrorIssue が決める（ここに error は書かない）。
+    title: z.string().optional(),
+    completed: z.boolean().optional(),
   });
 }
 
@@ -59,8 +58,9 @@ export function updateTodoApi(container: Pick<TodoContainer, "updateTodo">) {
       // WHY id を本文より先に確かめる: URL が指す Todo が存在しえないなら、本文の誤りを直しても成功しない。
       //   直しても意味の無い 400 ではなく 404 を返す。
       const { id: rawId } = await ctx.params;
-      // uuid の形でない id の message は、query / command が無い id に投げる not_found と同じ文言にそろえる。
-      const id = parseUuidParam(rawId, `Todo（id: ${rawId}）が見つかりません`);
+      // uuid の形でない id のキーと params は、query / command が無い id に投げる not_found と同じにそろえる
+      //   （画面から見て「無い Todo」と同じ契約）。
+      const id = parseUuidParam(rawId, "todo.notFound", { id: rawId });
       const input = await parseJsonBody(request, updateTodoRequestSchema());
       const todo = await container.updateTodo.execute({ id, ...input });
       const body: UpdateTodoResponse = toTodoDto(todo);

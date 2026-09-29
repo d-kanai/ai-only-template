@@ -12,7 +12,7 @@ paths:
 - `apps/backend/` の直下は `features/` と `shared/` だけ（ほかは `package.json`・`tsconfig.json`）。ファイルは `apps/backend/features/<feature>/` か `apps/backend/shared/` の `domain/` `application/` `presentation/` `infra/` のどれかの下に置く。例外は `apps/backend/shared/drizzle/`（drizzle-kit の設定 `drizzle.config.ts` と、生成したマイグレーションの `*.sql`・`meta/`。ソースは `drizzle.config.ts` だけ）。
   - WHY: 層に属さない場所のファイルにはどの層の規則もかからず、依存の向きの検査を素通りする（規則 `backend-placement`）。
   - WHY `features/` と `shared/`（Issue #98。ユーザー判断）: frontend（`apps/frontend/features/`・`shared/`）と同じ構成にし、feature を足すときの置き場所をそろえる。Drizzle は `shared/drizzle/`（`shared/infra/drizzle/` のように深くしない）に置き、直下の例外を無くす。決定と採用しなかった案は ADR `docs/adr/architecture/20260929-backend-features-and-shared-directories.md`。
-- `apps/backend/shared/`: feature をまたぐもの。`domain/domain-error.ts`（DomainError: `validation_error` / `not_found`）、`domain/transaction-runner.ts`（TransactionRunner の interface）、`presentation/http-error.ts`（DomainError → HTTP ステータス、`ErrorResponse`・`ErrorIssue`、`InvalidRequestError`）、`presentation/json-body.ts`（`requestBodySchema`・`parseJsonBody`）、`presentation/resource-id.ts`（`parseUuidParam`: 動的セグメントの id が uuid の形でなければ 404）、`infra/database.ts`（プールと Drizzle の db、`Executor`）、`infra/drizzle-transaction-runner.ts`。
+- `apps/backend/shared/`: feature をまたぐもの。`domain/error-key.ts`（`ErrorKey`・`ErrorKeyParams`: エラーのキーとキーごとの params の形）、`domain/domain-error.ts`（DomainError: `validation_error` / `not_found` と key・params）、`domain/transaction-runner.ts`（TransactionRunner の interface）、`presentation/http-error.ts`（DomainError → HTTP ステータス、`ErrorResponse`・`ErrorIssue`、`InvalidRequestError`。`ErrorKey`・`ErrorKeyParams` を再公開）、`presentation/json-body.ts`（`requestBodySchema`・`parseJsonBody`）、`presentation/resource-id.ts`（`parseUuidParam`: 動的セグメントの id が uuid の形でなければ 404）、`infra/database.ts`（プールと Drizzle の db、`Executor`）、`infra/drizzle-transaction-runner.ts`。
 - 環境変数の唯一の入口 `env.ts` とログの唯一の出口 `logger.ts` は、frontend と backend で共通の workspace パッケージ `apps/shared`（`@repo/shared`）にある（Issue #90。`.claude/rules/shared.md`）。backend からは `@repo/shared/env`・`@repo/shared/logger` で使う。
 
 | 層 | 置くもの | 参照してよい先（許可の一覧。無いものは不可） |
@@ -34,7 +34,7 @@ paths:
   - WHY `@/` 不可: Next（Turbopack）は backend のファイルの `@/` にも frontend の paths を当て、ビルドが失敗する。
   - WHY `@repo/backend/` 不可: 自パッケージ名の参照は `exports` を通り、公開していない内部のファイルを指せなくなる。
 - 外（apps/frontend・apps/e2e/・リポジトリ直下の設定）が使ってよいのは `apps/backend/package.json` の `exports` に書いたファイルだけ。全ファイル（`"./*"`）は公開しない（ユーザー判断）。
-  - 今のキー: `./features/todo/presentation/*.api`（Route Handler と画面側の型）、`./shared/presentation/http-error`（`ErrorResponse`）。env・logger は Issue #90 で `apps/shared` に移し、キーを消した（`@repo/shared` の exports）。
+  - 今のキー: `./features/todo/presentation/*.api`（Route Handler と画面側の型）、`./shared/presentation/http-error`（`ErrorResponse`・`ErrorKey`・`ErrorKeyParams`）。env・logger は Issue #90 で `apps/shared` に移し、キーを消した（`@repo/shared` の exports）。
   - 値はキーのパスに `.ts` を付けた TS のソース（ビルドしない）。feature を足したら `./features/<feature>/presentation/*.api` を足す（Node の exports のパターンは `*` を 1 つしか持てないので、feature ごとにキーを分ける）。それ以外は 1 ファイルずつ。使わなくなったキーは消す（規則 `backend-exports` が過不足を止める）。
   - テスト基盤（`shared/infra/database.test-support`）は公開しない。`vitest.global-setup.ts` からだけ相対パスで読む（唯一の例外）。
 - 依存（`package.json`）: backend のコードが import するもの（`drizzle-orm` / `pg` / `zod` / `@repo/shared`、devDependencies に `drizzle-kit` / `@types/pg`）を `apps/backend/package.json` に置く（`.claude/rules/dependencies.md`）。
@@ -47,11 +47,21 @@ paths:
 - 「コンテナを受け取って handler を返す関数」を export し、本番は共有の `todoContainer` を渡して作る。受け取る型は `Pick<TodoContainer, "listTodos">` のように使うものだけに絞る。
   - WHY: テストでは `listTodosApi(createInMemoryTodoContainer())` で組み立て、共有のコンテナ（前のテストのデータが残る）に依存しない。
 - query / command は `infra/container.ts` で組み立てたコンテナからだけ受け取る。Repository を直接 new しない（テストで `createInMemoryTodoContainer` を使うのは除く）。WHY: 実装の切り替えとトランザクションの張り方を 1 か所で決める。
+- エラーは自然言語の文言ではなく、安定したキー（`ErrorKey`）と params で表す（Issue #116。設計 (a)）。domain・application・presentation のどこにも画面に出す文言を書かない（`apps/backend` の非テストコードに日本語のリテラルを置かない。ログ・開発者向けの Error の message は英語）。
+  - `ErrorResponse` は `{ error: { code, key, params?, issues? } }`（`message` は無い）。`issues` の各要素は `{ path, key, params? }`。画面（apps/frontend）が key と params を辞書で翻訳する。
+  - WHY: 文言（言語・言い回し）は画面の関心で、backend が持つと言語を足すたび・言い回しを変えるたびに API を変えることになる。key は分岐にも翻訳にも使える機械可読な契約になる。
+  - キーは `"<領域>.<対象>.<理由>"`（`todo.title.tooLong`・`request.field.notString` など）。キーを足すときは `apps/backend/shared/domain/error-key.ts` の `ErrorKeyParams` に足す（params の形も一緒に決める。値は string か number だけ）。画面の辞書はこの型から作るので、訳の書き忘れは画面側の型エラーで止まる。公開したキーの名前は変えない（変えるなら画面の辞書と同じ変更で）。
+  - `new DomainError(code, key, params)` / `new InvalidRequestError(key, params, issues)` / `parseUuidParam(id, key, params)` は、キーごとに params を型で縛る（params の要るキーに渡し忘れる・形を間違える・要らないキーに渡すとコンパイルエラー。`error-key.ts` の `ErrorParamsArgs`）。検査は `domain-error.test.ts` などの `@ts-expect-error`（`pnpm typecheck`）。
+  - Error の `message` は開発者向けの `<key> <params の JSON>`（`describeErrorKey`。例 `todo.notFound {"id":"..."}`）。ログから画面の辞書を引ける。
 - 入力検証は zod で統一する（Issue #88。以前の「手書き」は撤回）。分担は変えない:
-  - presentation は「形」だけ: 各 api ファイルにリクエストの zod スキーマを置き（`requestBodySchema({ 項目: z.string({ error: "..." }) })`）、`parseJsonBody(request, schema)` で読む。違反は `InvalidRequestError`（`issues` 付き）→ 400（`validation_error`、`ErrorResponse` の `error.issues` に `{ path, message }` の一覧）。型は `z.infer` でスキーマから導出する。
+  - presentation は「形」だけ: 各 api ファイルにリクエストの zod スキーマを置き（`requestBodySchema({ 項目: z.string() })`。`error` は書かない）、`parseJsonBody(request, schema)` で読む。違反は `InvalidRequestError`（`issues` 付き）→ 400（`validation_error`、`ErrorResponse` の `error.issues` に `{ path, key, params }` の一覧、`error.key`・`error.params` は最初の 1 件）。型は `z.infer` でスキーマから導出する。
+    - zod の issue からキーを決める対応は `json-body.ts` の `toErrorIssue` 1 か所だけに書く（未知の項目 → `request.body.unknownKeys`、本文がオブジェクトでない → `request.body.notObject`、文字列・真偽値の項目の型違い → `request.field.notString` / `notBoolean`）。対応の無い issue（数値の項目を足したときなど）は InvalidRequestError ではない Error（500）にする。
+      - WHY 各 api ファイルの zod の `error` にキーを書かない: 同じ対応（文字列の項目 → notString）を項目ごとに重ねて書くことになる。WHY 対応の無い issue を 500 にする: キーの集合は画面の辞書と共有する閉じた集合で、近いキーに寄せると画面が誤った文言を出す。キーと対応を足し忘れたことをテストで気づかせる。
     - 未知のキーは拒否する（`z.strictObject`）。WHY: 部分更新で項目名を打ち間違えた本文が「何も変えない」200 に化ける。画面と API は同時に変えるので互換性の心配は無い。
     - 動的セグメントの `id` は `z.uuid()` で確かめ、形が違えば 404（`not_found`。無い Todo と同じ契約）。本文より先に確かめる。
-  - 値の中身の規則（例: `title` は前後の空白を除いて 1〜100 文字。文字数はコードポイント数で、zod の `.min` / `.max`（`String#length`）は使わない）は domain の zod スキーマ（`todo.ts` の `todoTitleSchema`）に一本化。`Todo` のコンストラクタがそれで検証し、違反は `DomainError("validation_error", message)` → 400（`issues` は付かない）。
+  - 値の中身の規則（例: `title` は前後の空白を除いて 1〜100 文字。文字数はコードポイント数で、zod の `.min` / `.max`（`String#length`）は使わない）は domain の zod スキーマ（`todo.ts` の `todoTitleSchema`）に一本化。`Todo` のコンストラクタがそれで検証し、違反は `DomainError("validation_error", key, params)` → 400（`issues` は付かない）。
+    - domain の zod スキーマ・refine の `error` にはキーだけを書く（キー以外の文字列は書かない）。`keyedIssue(key, params)`（`todo.ts`）を通して `{ error: key, params }` を作り、キーと params を型で縛る。params は zod の refine の `params` で運ぶ（zod 4.6.5 は refine の `params` を失敗した custom の issue にそのまま載せる。実測 2026-09-29）。`validate` が最初の issue の message（= キー）と params を DomainError に戻す。
+    - WHY キーと params を JSON にして `error` の文字列に詰めない: 文字列の組み立て・解析の誤りが入る。WHY `{ error: "todo.title.empty" }` と直接書かない: zod の `error` は任意の文字列を受け付け、打ち間違い・params の渡し忘れを型で止められない。
   - 完全コンストラクタ: `Todo` の private コンストラクタが毎回、値のすべてを `todoPropsSchema`（Todo の不変条件）で検証する。`create` / `reconstruct`（DB の行）/ `rename` / `changeCompletion` はコンストラクタに値を渡すだけで、口ごとに検証の範囲を分けない（Issue #94。Issue #88 の「restore は検証しない」を撤回）。WHY: 「Todo 型の値 = 不変条件を満たす値」が常に成り立つ。規則を変えるときは既存のデータを移行（スキル `db-migration`）して追従する。branded 型は使わない（Todo 型そのものが不変条件を満たす値を表すため。`todo.ts` のコメント）。
   - スキーマは関数の中で作る（最上位の定数にしない）。WHY: static な変異になり mutation testing で数えない（`stryker.config.mjs` の `ignoreStatic`）。
   - WHY zod: 規則の宣言と型の導出を 1 か所にし、項目ごとの誤り（`issues`）をレスポンスに出せる。同じ規則を 2 か所に書くと片方だけ直してずれるので、presentation に値の規則は書かない（どちらもクライアントからは同じ 400）。決定と採用しなかった案は ADR `docs/adr/architecture/20260929-zod-for-backend-validation.md`。zod 4.6.5 の実測（2026-09-29）: `.min` / `.max` は `String#length` なのでコードポイント数は `refine` と `Array.from` で数える（`"🍎".repeat(100)` は length 200）。`z.uuid()` は RFC 9562 の形（版の桁 1〜8、variant 8 / 9 / a / b、nil と max）だけを受け付け、大文字も通す（Postgres の uuid 型より狭く、版の桁が 0 の値は拒否する。Todo の id は `randomUUID`（v4）なので影響しない。広い `z.guid()` は採らなかった）。

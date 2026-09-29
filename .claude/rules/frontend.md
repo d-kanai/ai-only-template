@@ -11,7 +11,7 @@ paths:
 ## 置き場所
 - ソースは `app/`・`features/`・`shared/` の下か、直下の `next.config.ts`・`instrumentation.ts`・`instrumentation-node.ts`・`proxy.ts`・`next-env.d.ts` だけ（規則 `frontend-placement`）。`src/` は使わない。
   - WHY: 依存の規則はこれらの場所にしかかからず、`apps/frontend/lib/db.ts` のような場所から backend の container を import しても素通りしていた（Issue #68 の reviewer 指摘）。
-- `apps/frontend/shared/<name>/`: feature をまたぐ部品。今あるのは `request-log/`（リクエストログの 1 行を組み立てる純粋関数）だけ。`components/` `hooks/` は使うものが出るまで作らない。`shared/` は `features/`・`app/`・backend・`apps/shared` を参照しない（規則 `shared-to-features`・`screen-to-app`・`screen-to-backend`・`screen-to-shared`）。`apps/frontend/shared/`（画面側の部品）と `apps/shared/`（frontend と backend で共通のサーバ側の基盤。`.claude/rules/shared.md`）は別のもの。
+- `apps/frontend/shared/<name>/`: feature をまたぐ部品。今あるのは `request-log/`（リクエストログの 1 行を組み立てる純粋関数）と `i18n/`（辞書・ロケール・日時の表示。下の「i18n」）。`components/` `hooks/` は使うものが出るまで作らない。`shared/` は `features/`・`app/`・backend・`apps/shared` を参照しない（規則 `shared-to-features`・`screen-to-app`・`screen-to-backend`・`screen-to-shared`）。`apps/frontend/shared/`（画面側の部品）と `apps/shared/`（frontend と backend で共通のサーバ側の基盤。`.claude/rules/shared.md`）は別のもの。
 
 ## app/（ルーティングだけ）
 - 置くもの: Next の規約ファイル（`page.tsx` / `layout.tsx` / `loading.tsx` / `error.tsx` など）と `app/api/**/route.ts` だけ。テストは置かない（仕様は screen と api ファイルのテストで固定し、ルーティングにロジックを置かせない）。
@@ -53,6 +53,21 @@ paths:
   - WHY: 相対パスは `exports`（公開する入口）を通らずに backend のどのファイルでも指せ、後で別プロセスに分けたときにも壊れる。
 - exports に無いファイルを import すると `tsc` / `next build` が「Cannot find module」で止まる。足し方は `.claude/rules/backend.md` の「exports」。
 - `apps/frontend/tsconfig.json`: Next 用（plugin・jsx・DOM の型、paths は `@/*` だけ）。`@repo/backend/...`・`@repo/shared/...` を paths に書かない（書くと exports を通らずにパッケージのどのファイルも指せてしまう）。
+
+## i18n（Issue #116。決定と採用しなかった案は ADR `docs/adr/architecture/20260929-i18n-without-library.md`）
+- 対応するロケールは `ja`（既定）と `en`（`shared/i18n/locale.ts` の `SUPPORTED_LOCALES`）。ライブラリは使わない。
+- 辞書: `shared/i18n/messages/ja.ts`（`as const`。キーの一覧と placeholder の正）と `en.ts`（`satisfies Dictionary` でキーの過不足をコンパイルエラーにする）。平坦なオブジェクトで、キーは dot 区切りの 1 つの文字列。
+  - 画面に出す文言（JSX のテキスト、`aria-label` などの利用者向けの属性、エラーの文言）は辞書にだけ書き、画面・hook・components は `t(...)` を通す。検査は `rule-tests/architecture.test.ts` の規則 `frontend-hardcoded-text`（例外は `shared/i18n/messages/` 直下の `*.ts` だけ）。サーバのログ（`proxy.ts`・`instrumentation-node.ts`）は辞書の対象外で、英語で書く。
+  - WHY: 文言が散らばると、言語を足すときに漏れ、言い回しの変更がコードの変更になる。
+- キーの命名: サーバのエラーは backend の `ErrorKey` と同じ文字列（`<対象>.<項目>.<理由>`。例 `todo.title.tooLong`）、画面の文言は `<feature>.<画面・部品>.<要素>`（例 `todo.item.delete`）、画面側だけのエラーは `error.<理由>`（`error.unknown` = HTTP ステータスだけが分かる失敗、`error.unexpected` = API の応答ではない失敗）。
+- params の型: `t(key, params)` の params は ja の文言の `{name}` から型で導く（`shared/i18n/messages.ts` の `MessageParams`）。placeholder が無いキーは params を渡せず、あるキーは必須で、名前の違いもコンパイルエラーになる。en の placeholder が ja と同じ集合であることは `messages.test.ts` が検査する（型で表せないため）。
+  - 使い方: 画面では `const t = useT();`（`shared/i18n/use-t.ts`）。キーが実行時の値（サーバの `ErrorResponse`）のときだけ `formatMessage(locale, key, params)` を使う（`features/todo/api/api-error.ts` の `toErrorMessage`）。
+- サーバのエラー: `features/<f>/api/` は失敗を `ApiError`（`key` と `params`）で投げ、hook は失敗の理由を持って描画のときに翻訳する（ロケールが変わっても、その言語で出る）。backend の `ErrorKey` がすべて辞書にあること・params の名前が placeholder と同じことは、`api-error.ts` の `ApiErrorKey` の型の制約と `api-error.test.ts` の型の検査で止める（`shared/` は backend を参照できないので、`api/` で突き合わせる）。
+- ロケールの決め方: `proxy.ts` が Cookie `NEXT_LOCALE` → Accept-Language（q 値の高い順、言語の部分で照合）→ 既定の ja で決め（`negotiateLocale`）、リクエストヘッダ `x-locale` に載せる（`/api/**` には載せない）。`app/layout.tsx` が `headers()` で読み、`<html lang>` と `LocaleProvider` に渡す。URL のパスは変えない（`app/[lang]` にしない）。
+  - 限界: `headers()` を読むので全画面が動的レンダリングになり、ビルド時の静的な prerender は無い。matcher が除く `next/link` のプリフェッチには `x-locale` が付かないが、root layout はクライアント遷移で描き直されないので表示は変わらない（E2E `apps/e2e/i18n.spec.ts`）。
+- 日時の表示: `shared/i18n/format.ts` の `formatDateTime(iso, locale, timeZone)`（`Intl.DateTimeFormat`、`dateStyle: "medium"` / `timeStyle: "short"`）に、ブラウザのタイムゾーン（`Intl.DateTimeFormat().resolvedOptions().timeZone`）を渡す。サーバは UTC で動かす（リポジトリ直下の `package.json` の `dev` / `start` の `TZ=UTC`、`instrumentation-node.ts` が UTC でなければ起動を止める）。テストは `vitest.config.mts` の `test.env.TZ = "UTC"`、E2E はブラウザを `ja-JP` / `Asia/Tokyo` にする（`apps/e2e/playwright.config.ts`）。
+  - WHY: DB は timestamptz（UTC）で API は ISO 8601。表示だけを利用者のタイムゾーンで行い、サーバの動作は環境のタイムゾーンに依存させない。ブラウザのタイムゾーンを描画で読んでよいのは、一覧が useEffect の取得後にブラウザでだけ描かれるため（hydration の不一致にならない）。
+- テスト: 画面・components は `shared/i18n/i18n.test-support.tsx` の `JaLocale` を wrapper にして描き、期待する文言は `tJa(key, params)` と比べる（言い回しの変更でテストを直さずに済む。辞書の中身は `messages.test.ts` で固定）。en で描いて英語になることも画面ごとに 1 件見る。
 
 ## 命名
 - ディレクトリ・ファイルは kebab-case（`todo-screen/`）。コンポーネントと型は PascalCase（`TodoScreen`）。hook は `use` 始まり（`useTodoScreen`）。役割の接尾辞は `.` の後ろ（`.hook.ts`・`.test.tsx`）。

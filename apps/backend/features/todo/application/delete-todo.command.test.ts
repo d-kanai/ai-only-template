@@ -15,12 +15,13 @@ describe("DeleteTodoCommand", () => {
     await expect(repository.findById(todo.id)).resolves.toBeUndefined();
   });
 
-  test("無い id なら、その id を示す message 付きの DomainError(not_found) を投げる", async () => {
+  test("無い id なら、その id を params に持つ DomainError(not_found, todo.notFound) を投げる", async () => {
     const command = new DeleteTodoCommand(new InMemoryTodoRepository());
 
     await expect(command.execute("missing")).rejects.toMatchObject({
       code: "not_found",
-      message: "Todo（id: missing）が見つかりません",
+      key: "todo.notFound",
+      params: { id: "missing" },
     });
   });
 });

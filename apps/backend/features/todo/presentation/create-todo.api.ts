@@ -16,7 +16,8 @@ import { type TodoContainer, todoContainer } from "../infra/container";
 // WHY 関数にする: スキーマを最上位の定数にすると static な変異になり mutation testing で数えない（json-body.ts の requestBodySchema）。
 function createTodoRequestSchema() {
   return requestBodySchema({
-    title: z.string({ error: "title は文字列で指定してください" }),
+    // 型が違う・無いときのキー（request.field.notString）は json-body.ts の toErrorIssue が決める（ここに error は書かない）。
+    title: z.string(),
   });
 }
 

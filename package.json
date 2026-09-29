@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "pnpm --filter @repo/frontend dev",
+    "dev": "TZ=UTC pnpm --filter @repo/frontend dev",
     "build": "pnpm --filter @repo/frontend build",
-    "start": "pnpm --filter @repo/frontend start",
+    "start": "TZ=UTC pnpm --filter @repo/frontend start",
     "test": "vitest run --coverage",
     "test:unit": "vitest run",
     "test:e2e": "pnpm --filter @repo/e2e test",

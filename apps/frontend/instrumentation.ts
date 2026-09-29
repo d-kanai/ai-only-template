@@ -2,7 +2,8 @@
 // リクエストを受け付ける前に完了する（Next.js 16.3.6 同梱ドキュメント
 // node_modules/next/dist/docs/01-app/02-guides/instrumentation.md の「Convention」）。
 // 置き場所はルート直下。app/ の中には置けない（同ドキュメントの「Good to know」）。
-// 起動時にする処理の本体は instrumentation-node.ts（Node.js runtime 専用）に置き、ここは runtime の判定だけにする。
+// 起動時にする処理（環境変数の検証とタイムゾーンの検査）の本体は instrumentation-node.ts（Node.js runtime 専用）に置き、
+// ここは runtime の判定だけにする。
 export async function register(): Promise<void> {
   // WHY Node.js runtime のときだけ読み込む: register は Edge runtime 向けにもビルドされる（同ドキュメントの
   //   「Importing runtime-specific code」）。分岐が無いと、Edge 向けのビルドに env.ts の process.loadEnvFile や
@@ -13,7 +14,10 @@ export async function register(): Promise<void> {
   //   読み込むことになり分岐の意味がない。例外はこの NEXT_RUNTIME だけ（rule-tests/architecture.test.ts の env-direct-access も同じ）。
   // biome-ignore lint/style/noProcessEnv: Next.js の規約の NEXT_RUNTIME（ビルド時に埋め込まれる）。env.ts 経由では分岐できない
   if (process.env.NEXT_RUNTIME === "nodejs") {
-    const { verifyEnvAtStartup } = await import("./instrumentation-node");
+    const { verifyEnvAtStartup, verifyTimeZoneAtStartup } = await import(
+      "./instrumentation-node"
+    );
     await verifyEnvAtStartup();
+    verifyTimeZoneAtStartup();
   }
 }

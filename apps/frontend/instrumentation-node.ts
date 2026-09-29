@@ -17,7 +17,30 @@ export async function verifyEnvAtStartup(): Promise<void> {
     await import("@repo/shared/env");
   } catch (error) {
     // ログはすべて logger を通す（Issue #85）。Error は { name, message } になり、欠けた変数の名前は message に入る（env.ts）。
-    logger.error({ message: "起動時の環境変数の検証に失敗しました", error });
+    // WHY 英語: サーバのログは運用者向けで、画面の辞書（shared/i18n/）の対象外。運用者向けの文言は英語にそろえる（Issue #116）。
+    logger.error({
+      message: "Environment variable validation failed at startup",
+      error,
+    });
+    process.exit(1);
+  }
+}
+
+// サーバのタイムゾーンが UTC でなければ、起動エラーにする（Issue #116）。
+// WHY UTC に固定する: DB は timestamptz（UTC）で持ち、API は ISO 8601（UTC の Z 付き）で返す。サーバのローカル時刻に依存する処理が
+//   入っても、環境（開発者の端末は Asia/Tokyo、本番・CI は UTC など）で結果が変わらないようにする。日時を利用者のタイムゾーンで
+//   出すのはブラウザ（features/todo/components/todo-item.tsx）。
+// WHY 起動時に止める（警告で続けない）: 環境変数の検証（verifyEnvAtStartup）と同じく、ずれたまま動き続けると後で気づけない。
+//   package.json の dev / start は TZ=UTC を付けて起動するので、それ以外の起動（next start の直接実行など）で TZ を付け忘れたときに止まる。
+// WHY Intl の解決結果で見る（process.env.TZ を見ない）: TZ が無くても OS の設定が UTC なら問題なく、TZ が "Etc/UTC" などの
+//   別名でも Intl は "UTC" に解決する。実際に使われるタイムゾーンを確かめる。
+export function verifyTimeZoneAtStartup(): void {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (timeZone !== "UTC") {
+    logger.error({
+      message: "The server time zone must be UTC; start the server with TZ=UTC",
+      timeZone,
+    });
     process.exit(1);
   }
 }

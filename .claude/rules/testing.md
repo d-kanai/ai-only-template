@@ -48,7 +48,7 @@ paths:
 - `vitest.global-setup.ts` が実行の最初に 1 回、`test_` で始まるスキーマを `DROP SCHEMA ... CASCADE` で消す（`cleanupTestSchemas`）。`afterAll` での削除も残す。
   - WHY: プロセスが `afterAll` の前に止まる（Stryker が worker を止める・Ctrl-C）と残る。テストの前なら消してよいのは前の実行の残りだけ。
 - 探し方は `starts_with(schema_name, 'test_')`（LIKE の `_` は任意の 1 文字に一致するため使わない）。
-- Postgres に接続できなければ「`pnpm db:up` で起動してから実行してください」のエラーで止める。
+- Postgres に接続できなければ「cannot connect to Postgres … start it with pnpm db:up」のエラー（英語。Issue #116 で非テストコードの日本語を無くした）で止める。
 - Stryker の worker の中（`STRYKER_MUTATOR_WORKER` がある）では消さない（並行する worker の使用中のスキーマを消すため）。同じ DB に `pnpm test` を 2 つ同時に動かさない。
 - `cleanupTestSchemas` のテストはテストごとの接頭辞（`test_cleanup_<UUID>_`）で行う（`test_` だと並列の他のファイルのスキーマを消す）。
 

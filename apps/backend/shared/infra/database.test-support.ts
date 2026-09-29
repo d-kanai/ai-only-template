@@ -104,8 +104,9 @@ export async function cleanupTestSchemas(
     await client.connect();
   } catch (error) {
     await client.end();
+    // WHY 英語の文言: apps/backend の非テストコード（*.test.ts 以外）には自然言語の日本語を置かない（Issue #116）。
     throw new Error(
-      `Postgres（${url}）に接続できません。単体テストは Postgres が必要です。pnpm db:up で起動してから実行してください`,
+      `cannot connect to Postgres (${url}). Unit tests need Postgres: start it with pnpm db:up and run again`,
       { cause: error },
     );
   }

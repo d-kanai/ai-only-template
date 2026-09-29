@@ -43,11 +43,9 @@ export function createDatabase(
   //   'error' イベントを出す。リスナーが無いと Node の EventEmitter の規則で例外になり、プロセスが落ちる
   //   （node-postgres の Pool のドキュメント）。切れた接続はプールから捨てられ、次のクエリは新しい接続を作るので、
   //   ログに残して続ける。
+  // WHY 英語の文言: ログは開発者が読むもので、apps/backend の非テストコードには自然言語の日本語を置かない（Issue #116）。
   pool.on("error", (error) => {
-    logger.error({
-      message: "Postgres のアイドル中の接続でエラーが発生しました",
-      error,
-    });
+    logger.error({ message: "idle Postgres connection error", error });
   });
   return { db: drizzle({ client: pool }), pool };
 }

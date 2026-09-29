@@ -193,7 +193,8 @@ describe("cleanupTestSchemas", () => {
         uniquePrefix(),
       ),
     ).rejects.toMatchObject({
-      message: expect.stringContaining("pnpm db:up"),
+      message:
+        "cannot connect to Postgres (postgresql://u:p@127.0.0.1:1/x). Unit tests need Postgres: start it with pnpm db:up and run again",
       cause: expect.objectContaining({ code: "ECONNREFUSED" }),
     });
   });

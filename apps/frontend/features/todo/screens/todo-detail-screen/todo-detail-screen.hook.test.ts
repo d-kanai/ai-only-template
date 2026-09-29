@@ -1,7 +1,12 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { ApiError } from "@/features/todo/api/api-error";
 import { getTodo, updateTodo } from "@/features/todo/api/todo-api";
 import { useTodoDetailScreen } from "@/features/todo/screens/todo-detail-screen/todo-detail-screen.hook";
+import { JaLocale, tJa } from "@/shared/i18n/i18n.test-support";
+import { LocaleProvider } from "@/shared/i18n/locale-provider";
+import { formatMessage } from "@/shared/i18n/messages";
 
 // HTTP の詳細は todo-api.test.ts で検証済みなので差し替え、hook が API をいつ何で呼び、結果をどう状態に反映するかを見る。
 vi.mock("@/features/todo/api/todo-api");
@@ -38,12 +43,15 @@ function renderWithTodoId(todoId: string) {
     (props: { todoId: string }) => useTodoDetailScreen(props.todoId),
     {
       initialProps: { todoId },
+      wrapper: JaLocale,
     },
   );
 }
 
 async function renderLoaded(todoId = "todo-1") {
-  const view = renderHook(() => useTodoDetailScreen(todoId));
+  const view = renderHook(() => useTodoDetailScreen(todoId), {
+    wrapper: JaLocale,
+  });
   await waitFor(() => expect(view.result.current.isLoading).toBe(false));
   return view;
 }
@@ -70,7 +78,9 @@ describe("初回の読み込み", () => {
   test("id の Todo を取得し、todo と編集中の title に入れる", async () => {
     vi.mocked(getTodo).mockResolvedValue(milk);
 
-    const { result } = renderHook(() => useTodoDetailScreen("todo-1"));
+    const { result } = renderHook(() => useTodoDetailScreen("todo-1"), {
+      wrapper: JaLocale,
+    });
 
     expect(result.current.isLoading).toBe(true);
     await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -80,23 +90,50 @@ describe("初回の読み込み", () => {
     expect(result.current.error).toBeNull();
   });
 
-  test("取得に失敗すると（not_found など）、todo は null のまま error に message が入る", async () => {
-    vi.mocked(getTodo).mockRejectedValue(new Error("Todo が見つかりません"));
+  test("取得に失敗すると（not_found など）、todo は null のまま、ApiError のキーと params を翻訳した文言が error に入る", async () => {
+    vi.mocked(getTodo).mockRejectedValue(
+      new ApiError("todo.notFound", { id: "missing" }),
+    );
 
     const { result } = await renderLoaded("missing");
 
     expect(result.current.todo).toBeNull();
-    expect(result.current.error).toBe("Todo が見つかりません");
+    expect(result.current.error).toBe(tJa("todo.notFound", { id: "missing" }));
   });
 
-  test("Error 以外の値で取得に失敗すると、固定の文言が error に入る", async () => {
-    vi.mocked(getTodo).mockRejectedValue("network down");
+  // WHY 翻訳は描画のときに LocaleProvider のロケールで行う（hook はキーと params を持つ失敗を保持する）。
+  test("LocaleProvider のロケールが en なら、error は英語の文言になる", async () => {
+    vi.mocked(getTodo).mockRejectedValue(
+      new ApiError("todo.notFound", { id: "missing" }),
+    );
 
-    const { result } = await renderLoaded();
+    const { result } = renderHook(() => useTodoDetailScreen("missing"), {
+      wrapper: ({ children }) =>
+        createElement(LocaleProvider, { locale: "en", children }),
+    });
 
-    expect(result.current.todo).toBeNull();
-    expect(result.current.error).toBe("予期しないエラーが発生しました");
+    await waitFor(() =>
+      expect(result.current.error).toBe(
+        formatMessage("en", "todo.notFound", { id: "missing" }),
+      ),
+    );
   });
+
+  // fetch そのものの失敗（ネットワークの切断で TypeError）など、API の応答ではない失敗。
+  test.each([
+    ["ApiError でない Error", new TypeError("Failed to fetch")],
+    ["Error でない値", "network down"],
+  ])(
+    "%s で取得に失敗すると、固定の文言（error.unexpected）が error に入る",
+    async (_label, reason) => {
+      vi.mocked(getTodo).mockRejectedValue(reason);
+
+      const { result } = await renderLoaded();
+
+      expect(result.current.todo).toBeNull();
+      expect(result.current.error).toBe(tJa("error.unexpected"));
+    },
+  );
 
   test("todoId が変わると、新しい todoId の Todo を取得し直す", async () => {
     vi.mocked(getTodo).mockImplementation(async (id) =>
@@ -114,11 +151,11 @@ describe("初回の読み込み", () => {
   test("todoId が変わると、新しい Todo の取得を待つ間は前の Todo とエラーを消して読み込み中にする", async () => {
     const breadResponse = deferred<typeof bread>();
     vi.mocked(getTodo)
-      .mockRejectedValueOnce(new Error("Todo が見つかりません"))
+      .mockRejectedValueOnce(new ApiError("todo.notFound", { id: "todo-1" }))
       .mockReturnValueOnce(breadResponse.promise);
     const { result, rerender } = renderWithTodoId("todo-1");
     await waitFor(() =>
-      expect(result.current.error).toBe("Todo が見つかりません"),
+      expect(result.current.error).toBe(tJa("todo.notFound", { id: "todo-1" })),
     );
 
     rerender({ todoId: "todo-2" });
@@ -320,13 +357,15 @@ describe("title の保存", () => {
 
   test("更新に失敗すると error に message が入り、編集中の title は残る", async () => {
     vi.mocked(getTodo).mockResolvedValue(milk);
-    vi.mocked(updateTodo).mockRejectedValue(new Error("title が長すぎます"));
+    vi.mocked(updateTodo).mockRejectedValue(
+      new ApiError("todo.title.tooLong", { max: 100 }),
+    );
     const { result } = await renderLoaded();
 
     act(() => result.current.setTitle("豆乳を買う"));
     await act(() => result.current.saveTitle());
 
-    expect(result.current.error).toBe("title が長すぎます");
+    expect(result.current.error).toBe(tJa("todo.title.tooLong", { max: 100 }));
     expect(result.current.title).toBe("豆乳を買う");
     expect(result.current.todo).toEqual(milk);
   });
@@ -359,12 +398,12 @@ describe("完了の切り替え", () => {
   test("前の操作のエラーは、次の操作が成功すると消える", async () => {
     vi.mocked(getTodo).mockResolvedValue(milk);
     vi.mocked(updateTodo)
-      .mockRejectedValueOnce(new Error("更新に失敗しました"))
+      .mockRejectedValueOnce(new ApiError("server.internalError"))
       .mockResolvedValueOnce({ ...milk, completed: true });
     const { result } = await renderLoaded();
 
     await act(() => result.current.toggleCompleted());
-    expect(result.current.error).toBe("更新に失敗しました");
+    expect(result.current.error).toBe(tJa("server.internalError"));
 
     await act(() => result.current.toggleCompleted());
     expect(result.current.error).toBeNull();
@@ -373,7 +412,9 @@ describe("完了の切り替え", () => {
   test("Todo の取得が終わる前に切り替えても、反転元の completed が無いので更新を送らない", async () => {
     const todoResponse = deferred<typeof milk>();
     vi.mocked(getTodo).mockReturnValue(todoResponse.promise);
-    const { result } = renderHook(() => useTodoDetailScreen("todo-1"));
+    const { result } = renderHook(() => useTodoDetailScreen("todo-1"), {
+      wrapper: JaLocale,
+    });
 
     await act(() => result.current.toggleCompleted());
 

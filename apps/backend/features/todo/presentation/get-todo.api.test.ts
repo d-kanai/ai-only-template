@@ -1,7 +1,6 @@
 // @vitest-environment node
 import { randomUUID } from "node:crypto";
 import { describe, expect, test, vi } from "vitest";
-import type { ErrorResponse } from "../../../shared/presentation/http-error";
 import { createInMemoryTodoContainer } from "../infra/container";
 import { InMemoryTodoRepository } from "../infra/todo-repository.in-memory";
 import { type GetTodoResponse, getTodoApi } from "./get-todo.api";
@@ -59,22 +58,20 @@ describe("GET /api/todos/:id", () => {
     });
   });
 
-  test("uuid の形だが存在しない id なら 404 と not_found を、その id を示す message 付きで返す", async () => {
+  test("uuid の形だが存在しない id なら 404 と not_found を、todo.notFound と id の params 付きで返す", async () => {
     const { GET } = setup();
     const id = randomUUID();
 
     const response = await GET(getRequest(id), context(id));
 
     expect(response.status).toBe(404);
-    const body = (await response.json()) as ErrorResponse;
-    expect(body.error).toEqual({
-      code: "not_found",
-      message: `Todo（id: ${id}）が見つかりません`,
+    await expect(response.json()).resolves.toStrictEqual({
+      error: { code: "not_found", key: "todo.notFound", params: { id } },
     });
   });
 
   test.each(NOT_UUID_IDS)(
-    "id が %s なら、Repository に問い合わせずに 404 と not_found を返す",
+    "id が %s なら、Repository に問い合わせずに 404 と not_found（todo.notFound と id の params）を返す",
     async (_label, id) => {
       const { repository, ...spies } = spiedRepository();
       const GET = getTodoApi(createInMemoryTodoContainer(repository));
@@ -82,10 +79,8 @@ describe("GET /api/todos/:id", () => {
       const response = await GET(getRequest(id), context(id));
 
       expect(response.status).toBe(404);
-      const body = (await response.json()) as ErrorResponse;
-      expect(body.error).toEqual({
-        code: "not_found",
-        message: `Todo（id: ${id}）が見つかりません`,
+      await expect(response.json()).resolves.toStrictEqual({
+        error: { code: "not_found", key: "todo.notFound", params: { id } },
       });
       expect(spies.findById).not.toHaveBeenCalled();
       expect(spies.save).not.toHaveBeenCalled();

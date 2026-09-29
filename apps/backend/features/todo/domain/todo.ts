@@ -1,6 +1,24 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { DomainError } from "../../../shared/domain/domain-error";
+import type {
+  ErrorKey,
+  ErrorKeyParams,
+  ErrorParamsArgs,
+} from "../../../shared/domain/error-key";
+
+// zod のスキーマ・refine の第 2 引数（{ error, params }）を、ErrorKey と params の組として作る（Issue #116）。
+// WHY error にキーを入れる: zod は error の文字列を issue の message にする。validate がそれを DomainError の key に戻す。
+//   domain は自然言語の文言を持たない（画面がキーを辞書で翻訳する）。
+// WHY params を zod の params で運ぶ（キーと params を JSON にして error に詰めない）: zod 4.6.5 の refine（$ZodCustomParams）は
+//   params を受け取り、失敗した issue（code: "custom"）にそのまま載せる（実測。型は Record<string, any>）。文字列に詰めて
+//   戻すより、文字列の組み立て・解析の誤りが入らない。型の検査（z.string など）の issue は params を持たないが、今の型の
+//   検査のキーは params を持たないので足りる。
+// WHY この関数を通す（{ error: "todo.title.empty" } と直接書かない）: zod の error は任意の文字列を受け付けるので、
+//   キーの打ち間違い・params の渡し忘れ（todo.title.tooLong の max）を型で止めるため（error-key.ts の ErrorParamsArgs）。
+function keyedIssue<K extends ErrorKey>(key: K, ...rest: ErrorParamsArgs<K>) {
+  return { error: key, params: rest[0] };
+}
 
 // タイトルの不変条件: 前後の空白を除いて 1〜100 文字。規則はこのスキーマ 1 か所に宣言する（Issue #88）。
 // WHY trim してから数え、trim した値を保持する: 空白だけのタイトルを「空」とみなし、
@@ -8,7 +26,7 @@ import { DomainError } from "../../../shared/domain/domain-error";
 //   trim 後の値）。
 // WHY 文字数を Array.from で数える（zod の .min / .max を使わない）: .min / .max は String#length（UTF-16 のコード単位の数）で
 //   数え、絵文字（サロゲートペア）を 2 と数える。利用者の感覚の「文字数」に近いコードポイント数で数える。
-// WHY refine を 2 つに分ける: 空と長すぎで message を変える（どちらも API の ErrorResponse の message として画面に出る契約）。
+// WHY refine を 2 つに分ける: 空と長すぎでキーを変える（どちらも API の ErrorResponse の key として画面が翻訳する契約）。
 //   zod は同じスキーマの refine をすべて実行するが、同じ値で両方が失敗することは無い（0 文字と 101 文字以上は両立しない）。
 // WHY 100 文字: 一覧で 1 行に収まる程度の上限。上限を設けないと巨大な文字列でメモリと画面が埋まる。
 // WHY 関数にする（スキーマを最上位の定数にしない）: 最上位の式は読み込み時にだけ評価される static な変異になり、
@@ -21,33 +39,37 @@ import { DomainError } from "../../../shared/domain/domain-error";
 //   （Issue #94 で撤回した分け方）。規則はいつも全体で当てる。
 function todoTitleSchema() {
   const maxLength = 100;
-  // WHY 文字列でないときの message も付ける: todoPropsSchema の「zod の既定の文言を domain の外に出さない」に
+  // WHY 文字列でないときのキーも付ける: todoPropsSchema の「zod の既定の文言を domain の外に出さない」に
   //   そろえる。この経路を通るのは型を as で偽ったときだけ（presentation は z.string で弾き、DB の列は NOT NULL text）。
   return z
-    .string({ error: "タイトルが不正です" })
+    .string(keyedIssue("todo.title.invalid"))
     .trim()
-    .refine((title) => Array.from(title).length >= 1, {
-      error: "タイトルを入力してください",
-    })
-    .refine((title) => Array.from(title).length <= maxLength, {
-      error: `タイトルは ${maxLength} 文字以内で入力してください`,
-    });
+    .refine(
+      (title) => Array.from(title).length >= 1,
+      keyedIssue("todo.title.empty"),
+    )
+    .refine(
+      (title) => Array.from(title).length <= maxLength,
+      // 画面の文言に上限の文字数を埋め込めるよう、params で渡す（上限を変えても画面の辞書を直さずに済む）。
+      keyedIssue("todo.title.tooLong", { max: maxLength }),
+    );
 }
 
 // Todo が持つ値のすべて（完全コンストラクタが検証する値）の規則 = Todo の不変条件。
 // WHY タイトル以外（id・完了状態・作成日時）も規則に含める: どの口から来た値も、すべてが規則を満たすことを 1 つの
 //   スキーマで宣言する。create の id は randomUUID で常に満たすが、reconstruct は DB の行（Postgres の uuid 型は
 //   版の桁が 0 の値も受け付ける）を、create の作成日時は引数（Invalid Date を渡せる）を受け取る。
-// WHY 項目ごとに日本語の message を付ける: validate が最初の issue の message を DomainError の message にする。
-//   zod の既定の文言（英語で zod の語彙を含む）を domain の外に出さない。
+// WHY 項目ごとにキーを付ける: validate が最初の issue の message（= キー）を DomainError の key にする。
+//   zod の既定の文言（英語で zod の語彙を含む）を domain の外に出さない。キーの無い issue を作らないよう、検査を持つ
+//   zod のスキーマ・refine にはすべて keyedIssue を渡す（z.object 自身は、値が型の上でオブジェクトなので失敗しない）。
 // WHY id は z.uuid()（RFC 9562 の形）: presentation の parseUuidParam と同じ形にそろえる。Todo の id は randomUUID（v4）で
 //   作るので必ず満たす（ADR docs/adr/architecture/20260929-zod-for-backend-validation.md。z.uuid() は RFC 9562 の形だけで大文字も通す。.claude/rules/backend.md）。
 function todoPropsSchema() {
   return z.object({
-    id: z.uuid({ error: "id が不正です" }),
+    id: z.uuid(keyedIssue("todo.id.invalid")),
     title: todoTitleSchema(),
-    completed: z.boolean({ error: "完了状態が不正です" }),
-    createdAt: z.date({ error: "作成日時が不正です" }),
+    completed: z.boolean(keyedIssue("todo.completed.invalid")),
+    createdAt: z.date(keyedIssue("todo.createdAt.invalid")),
   });
 }
 
@@ -58,7 +80,7 @@ type TodoProps = z.input<ReturnType<typeof todoPropsSchema>>;
 // 規則で検証し、違反なら DomainError(validation_error) を投げる。
 // WHY ZodError をそのまま投げない: domain の外（presentation の toErrorResponse）は DomainError だけを見て 400 に変換する。
 //   zod を使っていることを domain の外に漏らさない。
-// WHY message は最初の issue: 失敗した safeParse の issues は必ず 1 件以上ある。タイトルの規則は同じ値で 1 つしか
+// WHY key と params は最初の issue: 失敗した safeParse の issues は必ず 1 件以上ある。タイトルの規則は同じ値で 1 つしか
 //   失敗しないので、最初の 1 件がそのまま理由になる。複数の項目が同時に違反するとき（id とタイトルなど）は
 //   スキーマの項目の順で最初のものになる。利用者の入力で違反しうるのはタイトルだけなので、1 件で足りる。
 function validate<Schema extends z.ZodType>(
@@ -67,7 +89,18 @@ function validate<Schema extends z.ZodType>(
 ): z.output<Schema> {
   const result = schema.safeParse(value);
   if (!result.success) {
-    throw new DomainError("validation_error", result.error.issues[0].message);
+    // WHY as: zod の issue の message は string、params は Record<string, any>（refine の custom の issue だけが持ち、
+    //   型の検査の issue には無い）で、ErrorKey との対応を型で持たない。組はスキーマの宣言（keyedIssue）が型で縛って
+    //   作ったので、ここではそれを DomainError に戻すだけにする。
+    const { message, params } = result.error.issues[0] as {
+      message: string;
+      params?: ErrorKeyParams[ErrorKey];
+    };
+    throw new DomainError(
+      "validation_error",
+      message as ErrorKey,
+      ...([params] as ErrorParamsArgs<ErrorKey>),
+    );
   }
   return result.data;
 }

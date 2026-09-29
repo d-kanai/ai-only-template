@@ -1,23 +1,38 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
 import { DomainError } from "../../../shared/domain/domain-error";
+import type { ErrorKey } from "../../../shared/domain/error-key";
 import { Todo } from "./todo";
 
-// message は API の ErrorResponse の message として画面に出る（クライアントとの契約）ので、文言まで検証する。
-function expectValidationError(action: () => unknown, message: string): void {
+// key と params は API の ErrorResponse として画面に渡る（画面が翻訳するクライアントとの契約。Issue #116）ので、両方を検証する。
+// WHY toEqual に params: undefined を含める: params の無いキーで params が {} などになっていないことも確かめる
+//   （toEqual は undefined のプロパティと無いプロパティを同じに扱うが、{} とは区別する）。
+function expectValidationError(
+  action: () => unknown,
+  expected: { key: ErrorKey; params?: Record<string, string | number> },
+): void {
   try {
     action();
   } catch (error) {
     expect(error).toBeInstanceOf(DomainError);
-    expect((error as DomainError).code).toBe("validation_error");
-    expect((error as DomainError).message).toBe(message);
+    const { code, key, params } = error as DomainError;
+    expect({ code, key, params }).toEqual({
+      code: "validation_error",
+      params: undefined,
+      ...expected,
+    });
     return;
   }
   throw new Error("DomainError(validation_error) が投げられなかった");
 }
 
-const EMPTY_TITLE_MESSAGE = "タイトルを入力してください";
-const TOO_LONG_TITLE_MESSAGE = "タイトルは 100 文字以内で入力してください";
+const EMPTY_TITLE = { key: "todo.title.empty" } as const;
+const TOO_LONG_TITLE = {
+  key: "todo.title.tooLong",
+  params: { max: 100 },
+} as const;
+const INVALID_ID = { key: "todo.id.invalid" } as const;
+const INVALID_CREATED_AT = { key: "todo.createdAt.invalid" } as const;
 
 describe("Todo.create", () => {
   test("未完了で作られ、id と作成日時が付く", () => {
@@ -58,15 +73,15 @@ describe("Todo.create", () => {
   });
 
   test.each([
-    ["空文字", "", EMPTY_TITLE_MESSAGE],
-    ["空白だけ", "   \t\n", EMPTY_TITLE_MESSAGE],
-    ["101 文字", "a".repeat(101), TOO_LONG_TITLE_MESSAGE],
-    ["空白を除いて 101 文字", ` ${"a".repeat(101)} `, TOO_LONG_TITLE_MESSAGE],
-    ["絵文字 101 個", "🍎".repeat(101), TOO_LONG_TITLE_MESSAGE],
+    ["空文字", "", EMPTY_TITLE],
+    ["空白だけ", "   \t\n", EMPTY_TITLE],
+    ["101 文字", "a".repeat(101), TOO_LONG_TITLE],
+    ["空白を除いて 101 文字", ` ${"a".repeat(101)} `, TOO_LONG_TITLE],
+    ["絵文字 101 個", "🍎".repeat(101), TOO_LONG_TITLE],
   ])(
-    "タイトルが%sなら validation_error を、理由の message 付きで投げる",
-    (_label, title, message) => {
-      expectValidationError(() => Todo.create(title), message);
+    "タイトルが%sなら validation_error を、理由の key（と params）付きで投げる",
+    (_label, title, expected) => {
+      expectValidationError(() => Todo.create(title), expected);
     },
   );
 
@@ -74,7 +89,7 @@ describe("Todo.create", () => {
   test("作成日時が日付として不正（Invalid Date）なら validation_error を投げる", () => {
     expectValidationError(
       () => Todo.create("牛乳を買う", new Date("not a date")),
-      "作成日時が不正です",
+      INVALID_CREATED_AT,
     );
   });
 });
@@ -106,14 +121,14 @@ describe("Todo#rename", () => {
   });
 
   test.each([
-    ["空白だけ", " ", EMPTY_TITLE_MESSAGE],
-    ["101 文字", "a".repeat(101), TOO_LONG_TITLE_MESSAGE],
+    ["空白だけ", " ", EMPTY_TITLE],
+    ["101 文字", "a".repeat(101), TOO_LONG_TITLE],
   ])(
     "作成時と同じ不変条件を守る（%sなら validation_error）",
-    (_label, title, message) => {
+    (_label, title, expected) => {
       const todo = Todo.create("牛乳を買う");
 
-      expectValidationError(() => todo.rename(title), message);
+      expectValidationError(() => todo.rename(title), expected);
     },
   );
 });
@@ -139,7 +154,7 @@ describe("Todo#changeCompletion", () => {
 
     expectValidationError(
       () => todo.changeCompletion("true" as unknown as boolean),
-      "完了状態が不正です",
+      { key: "todo.completed.invalid" },
     );
   });
 });
@@ -148,7 +163,7 @@ describe("Todo.reconstruct", () => {
   const VALID_ID = "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e";
   const CREATED_AT = new Date("2026-09-28T00:00:00.000Z");
 
-  // WHY 型に反する値を as で渡す: 型の上では string しか渡せないが、文字列でない値の message も日本語に固定する
+  // WHY 型に反する値を as で渡す: 型の上では string しか渡せないが、文字列でない値にもキーを付ける
   //   （zod の既定の英語の文言を domain の外に出さない。todo.ts の todoTitleSchema のコメント）。
   test("title が文字列でなければ validation_error を投げる", () => {
     expectValidationError(
@@ -159,7 +174,7 @@ describe("Todo.reconstruct", () => {
           completed: false,
           createdAt: CREATED_AT,
         }),
-      "タイトルが不正です",
+      { key: "todo.title.invalid" },
     );
   });
 
@@ -193,24 +208,24 @@ describe("Todo.reconstruct", () => {
   // Issue #94: 保存済みの値も今の不変条件で検査する（Todo 型 = 不変条件を満たす値）。規則を厳しくしたときは、
   //   既存のデータを移行（スキル db-migration）してから規則を変える。
   test.each([
-    ["タイトルが空文字", { title: "" }, EMPTY_TITLE_MESSAGE],
-    ["タイトルが空白だけ", { title: "   \t\n" }, EMPTY_TITLE_MESSAGE],
-    ["タイトルが 101 文字", { title: "a".repeat(101) }, TOO_LONG_TITLE_MESSAGE],
-    ["id が uuid の形でない", { id: "missing" }, "id が不正です"],
+    ["タイトルが空文字", { title: "" }, EMPTY_TITLE],
+    ["タイトルが空白だけ", { title: "   \t\n" }, EMPTY_TITLE],
+    ["タイトルが 101 文字", { title: "a".repeat(101) }, TOO_LONG_TITLE],
+    ["id が uuid の形でない", { id: "missing" }, INVALID_ID],
     // Postgres の uuid 型は受け付けるが、RFC 9562 の形ではない（版の桁が 0）。
     [
       "id の版の桁が 0",
       { id: "8d0f4f39-6f0b-0a39-9d53-0a3f8b1c2d4e" },
-      "id が不正です",
+      INVALID_ID,
     ],
     [
       "作成日時が Invalid Date",
       { createdAt: new Date("not a date") },
-      "作成日時が不正です",
+      INVALID_CREATED_AT,
     ],
   ])(
-    "%sなら validation_error を、理由の message 付きで投げる",
-    (_label, override, message) => {
+    "%sなら validation_error を、理由の key（と params）付きで投げる",
+    (_label, override, expected) => {
       expectValidationError(
         () =>
           Todo.reconstruct({
@@ -220,7 +235,7 @@ describe("Todo.reconstruct", () => {
             createdAt: CREATED_AT,
             ...override,
           }),
-        message,
+        expected,
       );
     },
   );
