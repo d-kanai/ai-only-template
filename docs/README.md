@@ -16,5 +16,6 @@
 | [git-guard.md](git-guard.md) | git 操作の強制（権限・PreToolUse フック・commit-msg）の実測と一次情報 | `.claude/rules/git-guard.md` |
 | [work-log.md](work-log.md) | 作業ログの強制（Stop フック・CI）の実測と経緯 | `.claude/rules/work-log.md` |
 | [worktree.md](worktree.md) | worktree ごとの外部リソースの分離の実測と一次情報 | `.claude/rules/worktree.md` |
+| [usage.md](usage.md) | Usage limit の節約（`/usage` の実測、セッション分割・wake 削減・軽い worker・reviewer と fault injection の最小化の WHY） | `.claude/general/orchestration.md`・`workflow.md` |
 
 - 作業ログ（日ごとの行動・判断）は `work-logs/`。

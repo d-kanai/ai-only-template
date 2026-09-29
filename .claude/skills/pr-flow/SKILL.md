@@ -12,10 +12,10 @@ main は常にマージ可能に保つ。main への直接コミット・push �
 
 ## 手順
 1. **Issue**: 無ければ作る（目的・完了条件を書く）。type ラベルを 1 つ付ける: `gh issue create --label <type>`（`feat` / `fix` / `docs` / `chore` / `refactor`）。
-   - 1 Issue = 1 PR。大きければ Issue を分ける。WHY: PR の差分とレビューを小さく保つ。
+   - 1 Issue = 1 PR = 1 セッション。大きければ Issue を分け、Issue が終わったら `/clear` で新しいセッションにする。WHY: PR の差分とレビューを小さく保ち、長いセッションで毎ターン送る全コンテキストの消費を抑える（`docs/usage.md`）。
    - Projects への追加と Status の変更は GitHub 側のワークフローが行う。Projects の API は呼ばない（`github-settings.md`）。
 2. **ブランチ**: main の最新から切る。`git checkout main && git pull && git checkout -b <type>/<Issue番号>-<内容>`（例: `feat/12-branch-rules`）。type は Issue のラベルと同じ。
-3. **実装**: テストから書く（CLAUDE.md の Test Driven）。作業の分担は `.claude/agents/`（worker / researcher / reviewer）。
+3. **実装**: テストから書く（CLAUDE.md の Test Driven）。作業の分担は `.claude/agents/`（worker / worker-light / researcher / reviewer。使い分けは `.claude/general/orchestration.md`）。worker が完了するごとにコミットし、未コミットを長く残さない。
 4. **作業ログ**: `work-logs/<YYYY-MM-DD>.md` に、このタスクでやったこと・根拠・判断を追記する。WHY: CI が PR の差分に `work-logs/*.md` の変更が無いと失敗する（文書だけの PR も例外なし）。
 5. **コミット**: 1 行目にサマリ、本文に 🎯 WHY / 📝 WHAT / 🛠️ 実装経緯 / ✅ 検証内容、末尾に `Co-Authored-By: <モデル名>`（メールアドレスは任意。詳細は CLAUDE.md から読み込むコミットのルール）。
 6. **PR 作成**: `gh pr create --label <type>`。
@@ -23,7 +23,7 @@ main は常にマージ可能に保つ。main への直接コミット・push �
    - 本文: `.github/PULL_REQUEST_TEMPLATE.md` の 🎯 WHY / 📝 WHAT / 🛠️ 実装経緯 / ✅ 検証内容を埋め、`Closes #<Issue番号>` を入れる。WHY: マージで Issue が自動クローズされ、Projects の Status も進む。
    - 「実装経緯」に、確認した背景（`git log -p`・関連 Issue / PR・work-logs）と判断を書き、手順 4 で追記した `work-logs/<日付>.md` の項目名（`## ...` の見出し）を列挙する。WHY: PR から作業ログへ辿れるようにする。
    - 「検証内容」に、実行したコマンドと結果、fault injection の内容、未確認のことを書く。
-7. **レビュー**: reviewer サブエージェントに検証させる。使えないときはオーケストレータ自身がテスト実行・差分確認で確かめ、その旨を報告に書く。指摘は同じブランチで直して push する。
+7. **レビュー**: ロジックのある変更は reviewer サブエージェントに差分と観点を絞って検証させる。機械的な変更（改名・文書・参照の更新だけ）と、reviewer が使えないときは、オーケストレータ自身がテスト実行・差分確認で確かめ、その旨を PR の「検証内容」に書く。指摘は同じブランチで直し、1 ラウンド（実装 → 検証 → 指摘の反映）につき push は 1 回にまとめる（push ごとに CI が再実行され、完了の通知で wake が増える）。
 8. **CI を待つ**: push した HEAD の check run `ci` が `completed` / `success` になるまで待つ。
    ```sh
    sha=$(git rev-parse HEAD)
@@ -31,7 +31,7 @@ main は常にマージ可能に保つ。main への直接コミット・push �
      "https://api.github.com/repos/d-kanai/ai-only-template/commits/$sha/check-runs" \
      | python3 -c 'import sys,json; rs=[r for r in json.load(sys.stdin)["check_runs"] if r["name"]=="ci"]; print(rs[0]["status"], rs[0]["conclusion"]) if rs else print("no ci yet")'
    ```
-   - `no ci yet` や `in_progress` の間は間隔をあけて繰り返す。
+   - `no ci yet` や `in_progress` の間は 30〜60 秒の間隔で繰り返す。ポーリングは 1 本だけをバックグラウンドで動かし、完了時に 1 回だけ起きる（複数のポーリングや短い間隔は wake を増やす）。
    - 赤なら原因をこのブランチで直して push する。テストの skip や無効化で緑にしない（Biome の `noSkippedTests` でも止まる）。
 9. **マージ条件（すべて満たす）**: (1) reviewer の検証で問題なし、(2) CI の `ci` ジョブが緑（`protect-main` の required status check。赤ではマージできない）、(3) main との競合がない。
    - `ci` の中身: Postgres の起動と接続確認 → `pnpm db:migrate` → `pnpm lint` → `pnpm typecheck` → `pnpm test` → `pnpm build` → `pnpm test:e2e`（`.github/workflows/ci.yml`）。

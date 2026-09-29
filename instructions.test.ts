@@ -33,6 +33,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 //                     （docs は読み込まれない記録なので、どこからも辿れないと存在しないのと同じになる）。
 //   skill-frontmatter .claude/skills/*/SKILL.md はフロントマターに name と description を持つ（公式 https://code.claude.com/docs/en/skills 。
 //                     description は起動時に一覧として読まれ、いつ使うかの判断に使われる）。
+//   agent-model       .claude/agents/*.md はフロントマターの model が許可したフル ID（ALLOWED_AGENT_MODELS）のいずれか
+//                     （Issue #78。別名 `opus` / `sonnet` や古い ID は意図しないモデルに解決され、消費と品質が変わる。
+//                     `.claude/general/orchestration.md`、`docs/usage.md`）。
 
 const repoRoot = import.meta.dirname;
 const SELF = "instructions.test.ts";
@@ -194,6 +197,23 @@ function findSkillViolations(path: string, markdown: string): string[] {
     .map((key) => `skill-frontmatter: ${path} に ${key} が無い`);
 }
 
+// --- サブエージェントの model ---
+// WHY フル ID だけを許す: `opus` のような別名は Claude Code の版で解決先が変わり、古い ID はフォールバックや拒否になる。
+//   どのモデルで動くかを定義ファイルの差分で読めるようにし、機械的な作業に軽いモデル（Sonnet）を使う運用（docs/usage.md）で
+//   意図したモデルだけが使われるようにする。
+const ALLOWED_AGENT_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5"];
+
+function findAgentModelViolations(path: string, markdown: string): string[] {
+  const model = parseFrontmatter(markdown)?.model;
+  if (typeof model === "string" && ALLOWED_AGENT_MODELS.includes(model)) {
+    return [];
+  }
+  const shown = typeof model === "string" ? `"${model}"` : "無し";
+  return [
+    `agent-model: ${path} の model が ${shown}（許可: ${ALLOWED_AGENT_MODELS.join(" / ")}）`,
+  ];
+}
+
 // --- 旧 rules/ への参照 ---
 // WHY .claude/rules/ を除く: 新しい置き場所（.claude/rules/general.md のような名前）を旧パスと取り違えないため。
 const LEGACY_REFERENCE = /(?<!\.claude\/)\brules\/(?:code|general)\b/;
@@ -262,6 +282,7 @@ type Inventory = {
   generalFiles: string[];
   docs: string[];
   skills: string[];
+  agents: string[];
 };
 
 function inventory(files: string[]): Inventory {
@@ -279,6 +300,7 @@ function inventory(files: string[]): Inventory {
     skills: files.filter((file) =>
       /^\.claude\/skills\/[^/]+\/SKILL\.md$/.test(file),
     ),
+    agents: files.filter((file) => /^\.claude\/agents\/[^/]+\.md$/.test(file)),
   };
 }
 
@@ -313,6 +335,9 @@ function collectInstructionViolations(
     ),
     ...found.skills.flatMap((path) =>
       findSkillViolations(path, read(path) ?? ""),
+    ),
+    ...found.agents.flatMap((path) =>
+      findAgentModelViolations(path, read(path) ?? ""),
     ),
   ];
 }
@@ -476,6 +501,36 @@ describe("スキルのフロントマター", () => {
   });
 });
 
+describe("サブエージェントの model", () => {
+  it.each(ALLOWED_AGENT_MODELS)(
+    "許可したフル ID %s なら違反にしない（must pass）",
+    (model) => {
+      expect(
+        findAgentModelViolations(
+          ".claude/agents/x.md",
+          `---\nname: x\nmodel: ${model}\n---\n本文\n`,
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["別名", "---\nname: x\nmodel: opus\n---\n", '"opus"'],
+    [
+      "古い ID",
+      "---\nname: x\nmodel: claude-opus-4-1\n---\n",
+      '"claude-opus-4-1"',
+    ],
+    ["空", "---\nname: x\nmodel:\n---\n", "無し"],
+    ["model が無い", "---\nname: x\n---\n", "無し"],
+    ["フロントマターが無い", "本文だけ\n", "無し"],
+  ])("%s なら違反にする（must reject）", (_name, markdown, shown) => {
+    expect(findAgentModelViolations(".claude/agents/x.md", markdown)).toEqual([
+      `agent-model: .claude/agents/x.md の model が ${shown}（許可: claude-opus-5-5 / claude-sonnet-5-5）`,
+    ]);
+  });
+});
+
 describe("旧 rules/ への参照", () => {
   it.each([
     "詳細は rules/code/architecture.md",
@@ -574,6 +629,8 @@ describe("fixture のリポジトリを検査したときに検出される違�
       '---\npaths:\n  - "apps/backend/**"\n---\n規則は docs/decisions.md\n',
     ".claude/skills/pr-flow/SKILL.md":
       "---\nname: pr-flow\ndescription: PR を作るとき\n---\n",
+    ".claude/agents/worker.md":
+      "---\nname: worker\nmodel: claude-opus-5-5\n---\n本文\n",
     "apps/backend/x.ts": "export const x = 1;\n",
     "docs/README.md": "- [decisions](decisions.md)\n",
     "docs/decisions.md": "経緯\n",
@@ -603,6 +660,7 @@ describe("fixture のリポジトリを検査したときに検出される違�
       ".claude/rules/no-paths.md": "# paths が無い\n",
       ".claude/rules/typo.md": '---\npaths:\n  - "apps/backnd/**"\n---\n',
       ".claude/skills/broken/SKILL.md": "---\nname: broken\n---\n",
+      ".claude/agents/alias.md": "---\nname: alias\nmodel: sonnet\n---\n",
       "rules/code/test.md": "旧ルール\n",
       "README.md": "詳細は rules/general/branch.md\n",
       "docs/orphan.md": "どこからも参照されない\n",
@@ -618,6 +676,7 @@ describe("fixture のリポジトリを検査したときに検出される違�
       "legacy-rules: README.md:1",
       "orphan-docs: docs/orphan.md がどこからも参照されていない",
       "skill-frontmatter: .claude/skills/broken/SKILL.md に description が無い",
+      'agent-model: .claude/agents/alias.md の model が "sonnet"（許可: claude-opus-5-5 / claude-sonnet-5-5）',
     ]);
   });
 });
@@ -632,6 +691,7 @@ describe("リポジトリの指示ファイル", () => {
     expect(found.generalFiles.length).toBeGreaterThan(0);
     expect(found.docs.length).toBeGreaterThan(0);
     expect(found.skills.length).toBeGreaterThan(0);
+    expect(found.agents.length).toBeGreaterThan(0);
     expect(
       extractImports(readFileSync(join(repoRoot, CLAUDE_MD), "utf8")).length,
     ).toBeGreaterThan(0);
