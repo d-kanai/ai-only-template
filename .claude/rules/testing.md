@@ -67,7 +67,7 @@ paths:
 - 実ファイルで end-to-end に通す fixture を持つ（一時ディレクトリは `mkdtempSync(join(tmpdir(), "<name>-"))` で作り `afterAll` で消す）。違反の集合は `toEqual` で丸ごと比較する。WHY: 判定が正しくても、抽出・列挙が漏れれば見逃す。
 - 列挙が空なら失敗させる（対象 0 件なら常に緑になる）。
 - 規則を足す・変えるときは例と fixture も同じ変更で直し、規則の文書と突き合わせる。
-- **fault injection**（規則を 1 つずつ破る → そのテストだけが落ちる、判定を常に true / false・列挙を空・設定を戻す → 落ちる、元に戻して `git status --short` と `git diff` を確かめる、何を壊して何件落ちたかを報告・PR に書く、reviewer も別の壊し方で独立に行う）は必須。手順はスキル `rule-check-test`。
+- **fault injection** は必須。既定は最小セット（規則を破る 1 件 → そのテストだけが落ちる、判定を常に許可 → must reject が落ちる、判定を常に拒否 → must pass が落ちる）。列挙を空・設定を戻す・境界の網羅（数十件の変異）は、新しいルール検査テストやゲートを作るときだけ行う。元に戻して `git status --short` と `git diff` を確かめ、何を壊して何件落ちたかを報告・PR に書く。reviewer はロジックのある変更で別の壊し方を独立に行う。WHY 最小セット: 見逃しの検出に効くのは主に「常に許可」「常に拒否」で、数十件の変異は消費の大半を占めた（`docs/usage.md`）。手順はスキル `rule-check-test`。
 
 ## mutation testing（Stryker）
 実行手順・生き残りの直し方・日次ジョブはスキル `mutation-testing`、score の実測と経緯は `docs/mutation-testing.md`、各設定の WHY は `stryker.config.mjs`。
