@@ -5,7 +5,7 @@
 - 関連: Issue #82 / PR #83 / スキル `pr-flow` / `.claude/general/workflow.md`
 
 ## 背景
-マージ条件「CI の `ci` ジョブが緑」を確かめるため、オーケストレータが check-runs をポーリングしていた（20260929-save-usage-limit.md）。完了の通知で起きる wake は、全コンテキストのターンになる。
+マージ条件「CI の `ci` ジョブが緑」を確かめるため、オーケストレータが check-runs をポーリングしていた（workflow/20260929-save-usage-limit.md）。完了の通知で起きる wake は、全コンテキストのターンになる。
 
 ## 決定
 - PR を作ったら auto-merge（merge commit）を付けて終える。CI が緑になった時点で GitHub がマージする。

@@ -1,11 +1,11 @@
 # 実測・経緯・一次情報・採用しなかった案は、読み込まれない docs/ に置き、規則からリンクする
 
 - 日付: 2026-09-28
-- 状態: 置き換え（→ 20260929-replace-docs-with-adr.md）
+- 状態: 置き換え（→ workflow/20260929-replace-docs-with-adr.md）
 - 関連: Issue #64 / PR #75
 
 ## 背景
-旧 `rules/**` には、規則と一緒に実測値・経緯・一次情報の引用が入っていて、常時読み込まれる量を増やしていた（20260928-instruction-files-by-load-timing.md）。
+旧 `rules/**` には、規則と一緒に実測値・経緯・一次情報の引用が入っていて、常時読み込まれる量を増やしていた（workflow/20260928-instruction-files-by-load-timing.md）。
 
 ## 決定
 - 実測値・経緯・一次情報の引用・採用しなかった案は、Claude Code が自動では読み込まない `docs/` に移し、`.claude/rules` とスキルからリンクする（Issue #64 の方針 5）。
@@ -20,4 +20,4 @@
 ## 影響
 - 良い点: 規則の文書が短くなった。
 - 悪い点: Issue ごとの節が積み上がって時系列のログに寄り、最新の規則（`.claude/rules`）と二重になった（2026-09-29 の work-logs「質問: docs/（読み込まれない記録）は何のためにあるか。ログか、最新の設計か」）。
-- 見直す条件: 上の悪い点から Issue #96 で見直し、20260929-replace-docs-with-adr.md に置き換えた。
+- 見直す条件: 上の悪い点から Issue #96 で見直し、workflow/20260929-replace-docs-with-adr.md に置き換えた。

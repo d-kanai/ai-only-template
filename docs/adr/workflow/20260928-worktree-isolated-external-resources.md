@@ -11,7 +11,7 @@ worktree を分けて並列に作業すると、テストの Postgres（globalSe
 - worktree ごとに一意な名前を決め、WorktreeCreate フックがその名前から各リソースの値（Postgres のデータベース名、E2E のポート。将来は Redis の DB 番号やキーの接頭辞など）を導いて `.env` に書き、`create database` と migrate まで行う。
 - リソースを足すときは、`Env`（`env.ts`）・`.env.example`・フックの生成規則を足すだけにする。
 - 後始末は WorktreeRemove に頼らず、WorktreeCreate が、対応する worktree の無いデータベースを消す。
-- InMemory / WASM の DB には置き換えない（20260928-always-use-postgres-no-in-memory-switch.md）。
+- InMemory / WASM の DB には置き換えない（architecture/20260928-always-use-postgres-no-in-memory-switch.md）。
 
 ## 理由
 - ユーザーの判断（Issue #64 のコメント、2026-09-28）。値の入口は `env.ts` の 1 か所なので、リソースの種類を増やしても同じ形で足せる。

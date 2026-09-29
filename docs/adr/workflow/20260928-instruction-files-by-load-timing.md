@@ -11,7 +11,7 @@ CLAUDE.md が `@rules/...` で全ルールを常時読み込み、常時のコ�
 - 常時読むのは CLAUDE.md（200 行以下）・LEARNINGS.md・`.claude/general/*.md`（1 ファイル 25 行以下）だけ。`@` で読んでよいのは LEARNINGS.md と `.claude/general/*.md` だけ。
 - 規則と WHY は `.claude/rules/*.md` に置き、フロントマターの `paths` で、触ったファイルに応じて読ませる。
 - 手順はスキル（`.claude/skills/<name>/SKILL.md`）。worker / reviewer は `skills:` で事前に読む。
-- 機械で止められるものはフック・権限・テスト・CI に寄せ（CLAUDE.md の原則 7。Issue #63）、文書には参照と WHY だけを残す（20260928-git-operations-enforced-by-hooks.md、20260928-work-log-enforced-by-stop-hook-and-ci.md、20260928-worktree-isolated-external-resources.md）。
+- 機械で止められるものはフック・権限・テスト・CI に寄せ（CLAUDE.md の原則 7。Issue #63）、文書には参照と WHY だけを残す（workflow/20260928-git-operations-enforced-by-hooks.md、workflow/20260928-work-log-enforced-by-stop-hook-and-ci.md、workflow/20260928-worktree-isolated-external-resources.md）。
 - 構成（行数・`@` の参照先・`paths` の一致・スキルのフロントマター）は `rule-tests/instructions.test.ts` で検査する。
 
 ## 理由
@@ -23,7 +23,7 @@ CLAUDE.md が `@rules/...` で全ルールを常時読み込み、常時のコ�
 ## 採用しなかった案
 - CLAUDE.md をディレクトリごとに分けて減らす: ユーザーの判断「Claude.md を分けるよりスキルやフック」（2026-09-28 の work-logs の同じ項目）。
 - コード知能プラグイン（TypeScript の LSP）: 今回は入れない（ユーザー判断。規模が大きくなったら検討）。
-- サブエージェントの強制を `.claude/agents/*.md` のフロントマター `hooks:` / `disallowedTools` に置く: 20260928-git-operations-enforced-by-hooks.md の「採用しなかった案」。
+- サブエージェントの強制を `.claude/agents/*.md` のフロントマター `hooks:` / `disallowedTools` に置く: workflow/20260928-git-operations-enforced-by-hooks.md の「採用しなかった案」。
 - `rule-check-test` スキルに `context: fork` を付ける（Issue #64 の方針 3）: worker / reviewer が作業中の文脈のまま手順として使うため付けない（PR #75）。
 
 ## 影響

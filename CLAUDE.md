@@ -46,13 +46,13 @@
 - 作業ログ: @.claude/general/work-log.md
 
 ## 指示ファイルの置き場所
-常時読み込むのはこのファイル・LEARNINGS.md・`.claude/general/` だけにし、ほかは必要なときだけ読まれる形に分けている（WHY と公式の仕様は ADR `docs/adr/20260928-instruction-files-by-load-timing.md`、実測は 2026-09-29 の work-logs。構成は `rule-tests/instructions.test.ts` が検査する）。
+常時読み込むのはこのファイル・LEARNINGS.md・`.claude/general/` だけにし、ほかは必要なときだけ読まれる形に分けている（WHY と公式の仕様は ADR `docs/adr/workflow/20260928-instruction-files-by-load-timing.md`、実測は 2026-09-29 の work-logs。構成は `rule-tests/instructions.test.ts` が検査する）。
 
 | 置き場所 | 読み込まれるとき | 置くもの |
 | --- | --- | --- |
 | `.claude/rules/*.md` | フロントマターの `paths` に一致するファイルを触ったとき | 規則と WHY |
 | `.claude/skills/<name>/SKILL.md` | 説明は常時、本文は呼び出したとき | 手順 |
-| `docs/adr/` | 読み込まれない（必要なら自分で読む） | ADR（決定の記録。1 決定 1 ファイル、不変。命名 `yyyymmdd-<topic>.md`、形式は `rule-tests/instructions.test.ts` が検査する。一覧は `docs/adr/README.md`） |
+| `docs/adr/` | 読み込まれない（必要なら自分で読む） | ADR（決定の記録。1 決定 1 ファイル、不変。命名 `<分類>/yyyymmdd-<topic>.md`、分類は `architecture`（構造・境界・設計パターン）/ `tech-stack`（言語・ツールの選定）/ `quality`（品質ゲート・テスト方針）/ `workflow`（開発プロセス・環境・エージェント運用）、形式は `rule-tests/instructions.test.ts` が検査する。一覧は `docs/adr/README.md`） |
 | `work-logs/` | 読み込まれない | 日ごとの作業ログ |
 | `rule-tests/` | 読み込まれない | ルール検査テスト 8 本（`architecture` / `instructions` / `lint` / `package` / `pnpm-workspace` / `settings` / `typecheck` / `work-logs-check` の `*.test.ts`。Issue #86） |
 

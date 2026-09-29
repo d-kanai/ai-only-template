@@ -5,7 +5,7 @@
 - 関連: Issue #68 / PR #73 / PR #74 / `.claude/rules/frontend.md` / `.claude/rules/backend.md` / `.claude/rules/architecture-check.md`
 
 ## 背景
-リポジトリ直下の `app/` `features/` `backend/`（20260928-feature-based-directory-and-ddd-backend.md）を、後で API を別プロセスに分けやすい形にしたかった（ユーザーの要望）。最初の調査では、Hono の別サーバと Next の rewrites、契約用の `packages/contracts` による 2 サーバ構成を計画した。
+リポジトリ直下の `app/` `features/` `backend/`（architecture/20260928-feature-based-directory-and-ddd-backend.md）を、後で API を別プロセスに分けやすい形にしたかった（ユーザーの要望）。最初の調査では、Hono の別サーバと Next の rewrites、契約用の `packages/contracts` による 2 サーバ構成を計画した。
 
 ## 決定
 - pnpm workspace（`packages: ["apps/*"]`）にし、`apps/frontend`（`@repo/frontend`、Next.js）と `apps/backend`（`@repo/backend`、Next・React に依存しない TS）に分ける。プロセスは Next 1 つのまま（別のサーバは入れない）。

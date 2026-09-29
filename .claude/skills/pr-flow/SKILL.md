@@ -12,7 +12,7 @@ main は常にマージ可能に保つ。main への直接コミット・push �
 
 ## 手順
 1. **Issue**: 無ければ作る（目的・完了条件を書く）。type ラベルを 1 つ付ける: `gh issue create --label <type>`（`feat` / `fix` / `docs` / `chore` / `refactor`）。
-   - 1 Issue = 1 PR = 1 セッション。大きければ Issue を分け、Issue が終わったら `/clear` で新しいセッションにする。WHY: PR の差分とレビューを小さく保ち、長いセッションで毎ターン送る全コンテキストの消費を抑える（ADR `docs/adr/20260929-save-usage-limit.md`）。
+   - 1 Issue = 1 PR = 1 セッション。大きければ Issue を分け、Issue が終わったら `/clear` で新しいセッションにする。WHY: PR の差分とレビューを小さく保ち、長いセッションで毎ターン送る全コンテキストの消費を抑える（ADR `docs/adr/workflow/20260929-save-usage-limit.md`）。
    - Projects への追加と Status の変更は GitHub 側のワークフローが行う。Projects の API は呼ばない（`github-settings.md`）。
 2. **ブランチ**: main の最新から切る。`git checkout main && git pull && git checkout -b <type>/<Issue番号>-<内容>`（例: `feat/12-branch-rules`）。type は Issue のラベルと同じ。
 3. **実装**: テストから書く（CLAUDE.md の Test Driven）。作業の分担は `.claude/agents/`（worker / worker-light / researcher / reviewer。使い分けは `.claude/general/orchestration.md`）。worker が完了するごとにコミットし、未コミットを長く残さない。
@@ -24,7 +24,7 @@ main は常にマージ可能に保つ。main への直接コミット・push �
    - 「実装経緯」に、確認した背景（`git log -p`・関連 Issue / PR・work-logs）と判断を書き、手順 4 で追記した `work-logs/<日付>.md` の項目名（`## ...` の見出し）を列挙する。WHY: PR から作業ログへ辿れるようにする。
    - 「検証内容」に、実行したコマンドと結果、fault injection の内容、未確認のことを書く。
 7. **レビュー**: ロジックのある変更は reviewer サブエージェントに差分と観点を絞って検証させる。機械的な変更（改名・文書・参照の更新だけ）と、reviewer が使えないときは、オーケストレータ自身がテスト実行・差分確認で確かめ、その旨を PR の「検証内容」に書く。指摘は同じブランチで直し、1 ラウンド（実装 → 検証 → 指摘の反映）につき push は 1 回にまとめる（push ごとに CI が再実行され、完了の通知で wake が増える）。
-8. **CI は待たない**（ユーザー判断 2026-09-29、Issue #82）: マージ条件の「`ci` が緑」は Ruleset `protect-main` の required status check が守るので、オーケストレータがポーリングで待つ必要はない（ポーリングの完了通知は wake になり消費が増える。ADR `docs/adr/20260929-save-usage-limit.md`）。
+8. **CI は待たない**（ユーザー判断 2026-09-29、Issue #82）: マージ条件の「`ci` が緑」は Ruleset `protect-main` の required status check が守るので、オーケストレータがポーリングで待つ必要はない（ポーリングの完了通知は wake になり消費が増える。ADR `docs/adr/workflow/20260929-save-usage-limit.md`）。
    - PR を作ったら auto-merge（merge commit）を付けて、そのターンを終える: `gh pr merge <PR番号> --merge --auto`（クラウドでは GitHub MCP の `enable_pr_auto_merge`、`mergeMethod: MERGE`）。緑になった時点で GitHub 側がマージし、赤なら止まったままになる。
    - リポジトリの auto-merge は有効（2026-09-29 にユーザーが Settings → General → Pull Requests → Allow auto-merge を ON）。付けられなかったとき（無効に戻っている・API のエラー）だけ、ポーリングせず次の人間のターンで下の curl を 1 回だけ実行し、緑ならマージする（手順 10）。
    ```sh

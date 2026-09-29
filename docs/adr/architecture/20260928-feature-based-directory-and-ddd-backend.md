@@ -28,7 +28,7 @@ create-next-app の `app/page.tsx` だけの状態から、以後の機能追加
 - URL・メソッドを担保する（各 api ファイルから path の定数を export する案、route.ts の場所を検証する契約テストの案）: ユーザーの判断で入れない。Next の `typedRoutes` は `fetch` の URL には効かない（同梱 `03-api-reference/05-config/02-typescript.md`）。
 
 ## 影響
-- 良い点: 機能を足すときの置き場所が決まっていて、依存の向きを機械で検査できる（20260928-dependency-direction-checked-by-own-test.md）。
+- 良い点: 機能を足すときの置き場所が決まっていて、依存の向きを機械で検査できる（quality/20260928-dependency-direction-checked-by-own-test.md）。
 - 悪い点: SSR を使わないので、初回の表示はクライアントでのデータ取得を待つ。URL の打ち間違いは型では止まらない（E2E で確かめる）。
-- 同時に決めた「永続化は当面 InMemory」「入力検証は手書き」は、後の決定で変わった（20260928-drizzle-with-generated-sql-migrations.md、20260929-zod-for-backend-validation.md）。ディレクトリの位置は 20260928-monorepo-apps-frontend-backend.md で `apps/` の下に移した。
+- 同時に決めた「永続化は当面 InMemory」「入力検証は手書き」は、後の決定で変わった（architecture/20260928-drizzle-with-generated-sql-migrations.md、architecture/20260929-zod-for-backend-validation.md）。ディレクトリの位置は architecture/20260928-monorepo-apps-frontend-backend.md で `apps/` の下に移した。
 - 見直す条件: 記録に無い。

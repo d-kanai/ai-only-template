@@ -6,7 +6,7 @@ description: Stryker による mutation testing（pnpm test:mutation）の実行
 # mutation-testing（Stryker）
 
 Stryker が実装に変異（条件の反転・戻り値の差し替え・文字列を空にする など）を入れ、Vitest の単体テストが失敗する（killed）か緑のまま（survived）かを数える。設定は `stryker.config.mjs`（各設定の WHY はファイル内のコメント）。
-テストの書き方の規則と disable の一覧は `.claude/rules/testing.md`、決定は ADR `docs/adr/20260928-mutation-testing-daily-with-score-100.md`、実測の score・時間は 2026-09-28 の work-logs。
+テストの書き方の規則と disable の一覧は `.claude/rules/testing.md`、決定は ADR `docs/adr/quality/20260928-mutation-testing-daily-with-score-100.md`、実測の score・時間は 2026-09-28 の work-logs。
 
 ## 位置づけ
 - 検証の弱いテスト（呼び出すだけ・値を見ていない）を日次でまとめて拾う。テストを書いたその場での「守っているコードを壊すと落ちる」確認（手作業）の代わりにはしない。

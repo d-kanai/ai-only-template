@@ -5,7 +5,7 @@
 - 関連: Issue #17 / PR #19 / `.claude/rules/dependencies.md`
 
 ## 背景
-Next.js 16.3.6 の導入時（PR #14）は、create-next-app が指定する TypeScript 5 系だった。依存を完全固定する（20260928-pin-exact-dependency-versions.md）にあわせて、最新の 7.0.2 に上げるかを決める必要があった。7 系は従来の JS API（`typescript.js`）を持たない。
+Next.js 16.3.6 の導入時（PR #14）は、create-next-app が指定する TypeScript 5 系だった。依存を完全固定する（quality/20260928-pin-exact-dependency-versions.md）にあわせて、最新の 7.0.2 に上げるかを決める必要があった。7 系は従来の JS API（`typescript.js`）を持たない。
 
 ## 決定
 - TypeScript は 7.0.2 を使う。採用の条件は「Next.js 16 のビルドと Vitest で動くこと」で、動かなければ 5 系のまま固定し理由を書く、としていた（Issue #17）。
@@ -20,5 +20,5 @@ Next.js 16.3.6 の導入時（PR #14）は、create-next-app が指定する Typ
 
 ## 影響
 - 良い点: 依存の版を「最新」の方針にそろえられる。
-- 悪い点: TypeScript の JS API に依存するツールが使えない。ESLint（typescript-eslint）の代わりに Biome（20260928-biome-instead-of-eslint.md）、dependency-cruiser の代わりに自前のテスト（20260928-dependency-direction-checked-by-own-test.md）、Stryker の typescript-checker は入れない（20260928-mutation-testing-daily-with-score-100.md）。
+- 悪い点: TypeScript の JS API に依存するツールが使えない。ESLint（typescript-eslint）の代わりに Biome（tech-stack/20260928-biome-instead-of-eslint.md）、dependency-cruiser の代わりに自前のテスト（quality/20260928-dependency-direction-checked-by-own-test.md）、Stryker の typescript-checker は入れない（quality/20260928-mutation-testing-daily-with-score-100.md）。
 - 見直す条件: 上のツールが TS 7 に対応したとき（それぞれの ADR の見直す条件）。

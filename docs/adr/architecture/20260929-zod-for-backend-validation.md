@@ -12,7 +12,7 @@ Issue #39 から「入力検証は手書き（ライブラリは入れない。�
 - presentation は「形」: 各 api ファイルにリクエストの zod スキーマ（`z.strictObject` で未知の項目を拒否）を置き、型は `z.infer` で導く。誤りは 400 と、`ErrorResponse` の `issues`（`{ path, message }` の一覧）。動的セグメントの id は `z.uuid()` で確かめ、形が違えば 404。
 - domain は「値の規則」: `Todo` の不変条件を zod のスキーマで書き、コンストラクタは検証済みの値だけを受け取る（完全コンストラクタ）。
 - branded 型は使わない。スキーマは関数の中で作る（Stryker の `ignoreStatic` で検査から外れないように）。
-- どの口で検証するかは 20260929-todo-restore-skips-validation.md で決めた（のちに 20260929-todo-invariants-always-validated.md で置き換え）。
+- どの口で検証するかは architecture/20260929-todo-restore-skips-validation.md で決めた（のちに architecture/20260929-todo-invariants-always-validated.md で置き換え）。
 
 ## 理由
 - ユーザーの指示（2026-09-29 の work-logs「zod の導入指示（presentation の入力・domain の不変条件・完全コンストラクタの検証を zod で統一）→ Issue #88」）。規則の宣言と型の導出を 1 か所にし、項目ごとの誤りをレスポンスに出せる。

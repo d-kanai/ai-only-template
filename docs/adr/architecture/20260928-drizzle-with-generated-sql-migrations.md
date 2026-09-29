@@ -5,7 +5,7 @@
 - 関連: Issue #57 / PR #60 / `.claude/rules/backend.md` / スキル `db-migration` / `apps/backend/drizzle.config.ts`
 
 ## 背景
-Compose で起動できる Postgres（20260928-postgres-via-docker-compose-everywhere.md）に、アプリから接続する必要があった。それまでの永続化は InMemory だった（20260928-feature-based-directory-and-ddd-backend.md）。TypeScript は 7 系（20260928-typescript-7.md）。
+Compose で起動できる Postgres（workflow/20260928-postgres-via-docker-compose-everywhere.md）に、アプリから接続する必要があった。それまでの永続化は InMemory だった（architecture/20260928-feature-based-directory-and-ddd-backend.md）。TypeScript は 7 系（tech-stack/20260928-typescript-7.md）。
 
 ## 決定
 - ORM は Drizzle（drizzle-orm / drizzle-kit）、ドライバは `pg`。
@@ -23,5 +23,5 @@ Compose で起動できる Postgres（20260928-postgres-via-docker-compose-every
 
 ## 影響
 - 良い点: スキーマの形の正が 1 か所（TypeScript）で、SQL もレビューできる。
-- 悪い点: Drizzle のトランザクションは `tx` を明示的に渡す方式で、Repository が実行先（`Executor`）を受け取る設計が要る（20260928-commands-always-in-transaction.md）。生成した SQL は手で直さない。
+- 悪い点: Drizzle のトランザクションは `tx` を明示的に渡す方式で、Repository が実行先（`Executor`）を受け取る設計が要る（architecture/20260928-commands-always-in-transaction.md）。生成した SQL は手で直さない。
 - 見直す条件: 記録に無い。

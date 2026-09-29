@@ -5,7 +5,7 @@
 - 関連: Issue #94 / PR #95 / `.claude/rules/backend.md` / スキル `db-migration` / `apps/backend/todo/domain/todo.ts`
 
 ## 背景
-20260929-todo-restore-skips-validation.md で `restore` を検証しないとした連鎖で、`rename` はタイトルだけ、`changeCompletion` は検証なし、と口ごとに範囲が分かれ、規則を満たさない Todo が存在しうる状態だった。
+architecture/20260929-todo-restore-skips-validation.md で `restore` を検証しないとした連鎖で、`rename` はタイトルだけ、`changeCompletion` は検証なし、と口ごとに範囲が分かれ、規則を満たさない Todo が存在しうる状態だった。
 
 ## 決定
 - `Todo` の private コンストラクタが毎回、全フィールドのスキーマ（`todoPropsSchema`）で検証する。`create` / `reconstruct` / `rename` / `changeCompletion` は値を渡すだけ。
@@ -19,7 +19,7 @@
 - `restore` は意味が伝わりにくい（Issue #94）。
 
 ## 採用しなかった案
-- 口ごとに検証の範囲を分ける（20260929-todo-restore-skips-validation.md）: 規則を満たさない Todo が存在しうる。
+- 口ごとに検証の範囲を分ける（architecture/20260929-todo-restore-skips-validation.md）: 規則を満たさない Todo が存在しうる。
 - 不正な行を DomainError（validation_error）のまま 400 にする: クライアントに直せない誤りを、入力の誤りと伝えてしまう。
 - 不正な行を一覧から読み飛ばす: データが消えたように見え、不整合に気づけない。
 

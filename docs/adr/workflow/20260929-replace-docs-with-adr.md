@@ -5,7 +5,7 @@
 - 関連: Issue #96 / `docs/adr/README.md` / `rule-tests/instructions.test.ts`
 
 ## 背景
-`docs/` の 14 本（20260928-records-in-docs.md）は「最新の設計判断の根拠を主題ごとに置く」意図だったが、Issue ごとの節が積み上がってログに寄り、最新の規則は `.claude/rules/` にあった（2026-09-29 の work-logs「質問: docs/（読み込まれない記録）は何のためにあるか。ログか、最新の設計か」「質問: 最新の規則は .claude/rules で、ADR を別に用意するなら docs/ は不要か」）。
+`docs/` の 14 本（workflow/20260928-records-in-docs.md）は「最新の設計判断の根拠を主題ごとに置く」意図だったが、Issue ごとの節が積み上がってログに寄り、最新の規則は `.claude/rules/` にあった（2026-09-29 の work-logs「質問: docs/（読み込まれない記録）は何のためにあるか。ログか、最新の設計か」「質問: 最新の規則は .claude/rules で、ADR を別に用意するなら docs/ は不要か」）。
 
 ## 決定
 - `docs/` の 14 本と `docs/README.md` を廃止し、中身を振り分ける: 決定と採用しなかった案 → ADR（`docs/adr/yyyymmdd-<topic>.md`、1 決定 1 ファイル）、日付付きの実測 → `work-logs/`、一次情報の URL と要点 → `.claude/rules/*.md` の WHY。

@@ -7,7 +7,7 @@
 #   {"decision":"block","reason":...} を stdout に出して停止を拒否する（Claude はログを書いてから止まり直す）。
 # WHY: 調査だけの依頼などで作業ログの追記が漏れた（LEARNINGS.md、Issue #64 のユーザー判断）。文章のルールではなく
 #   フックで止める（CLAUDE.md の「7. 機械的な強制を優先」）。
-# 詳細（判定の限界・タイムゾーン・ユーザー側の Stop フックとの順序）: .claude/rules/work-log.md、決定は ADR docs/adr/20260928-work-log-enforced-by-stop-hook-and-ci.md。
+# 詳細（判定の限界・タイムゾーン・ユーザー側の Stop フックとの順序）: .claude/rules/work-log.md、決定は ADR docs/adr/workflow/20260928-work-log-enforced-by-stop-hook-and-ci.md。
 #
 # 入力（stdin の JSON。公式 https://code.claude.com/docs/en/hooks.md の Stop input）:
 #   transcript_path: 会話の JSONL。stop_hook_active: Stop フックの block で続けている途中なら true。cwd: 作業ディレクトリ。

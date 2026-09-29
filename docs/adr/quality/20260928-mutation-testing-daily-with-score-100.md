@@ -5,7 +5,7 @@
 - 関連: Issue #52 / PR #56 / Issue #55 / PR #66 / `.claude/rules/testing.md` / スキル `mutation-testing` / `stryker.config.mjs` / `.github/workflows/mutation.yml`
 
 ## 背景
-カバレッジ 100%（20260928-coverage-gate-100.md）は、分岐を通すだけのテストでも満たせる。テストが実装の変異を検出できるかを、手作業の fault injection だけでなく機械で測りたかった。Stryker 10.0.0 の初回の計測では、生き残った変異が多かった（2026-09-28 の work-logs「Stryker（mutation testing）を main で日次実行する方針（Issue #52）」）。
+カバレッジ 100%（quality/20260928-coverage-gate-100.md）は、分岐を通すだけのテストでも満たせる。テストが実装の変異を検出できるかを、手作業の fault injection だけでなく機械で測りたかった。Stryker 10.0.0 の初回の計測では、生き残った変異が多かった（2026-09-28 の work-logs「Stryker（mutation testing）を main で日次実行する方針（Issue #52）」）。
 
 ## 決定
 - Stryker を main で毎日（08:55 JST）実行する。PR ごとには実行しない。
@@ -17,7 +17,7 @@
 - 全件の変異の実行は時間がかかるので、PR ごとではなく日次にした（ユーザー判断「mutation テストは main branch でのアクションで日次で実行でよい」。同日の work-logs）。GitHub の schedule は毎時 0 分が混雑して遅延しうる（GitHub Docs）ので 08:55 にした。
 - Issue #55 は当初「95% 以上を目標、break 90」だったが、等価な変異は除外でき、Ignored は score の分母に入らないので、残りは全部殺せると分かり、ユーザー判断で 100 にした（2026-09-28 の work-logs「mutation score を 85.52% から 100% に上げ…」、Issue #64 のコメント）。
 - `ignoreStatic` が無いと、static な変異が実行時間の大半を占め、読み込み時の変異はテストが 1 件も動かないまま Survived と数えられた（同日の work-logs。https://stryker-mutator.io/docs/stryker-js/configuration/ 、https://stryker-mutator.io/docs/mutation-testing-elements/static-mutants/ ）。
-- typescript-checker は TypeScript の JS API を使うが、TypeScript 7.0.2 はそれを export しない（20260928-typescript-7.md。同日の work-logs）。
+- typescript-checker は TypeScript の JS API を使うが、TypeScript 7.0.2 はそれを export しない（tech-stack/20260928-typescript-7.md。同日の work-logs）。
 
 ## 採用しなかった案
 - PR ごとに実行する: 時間がかかる。

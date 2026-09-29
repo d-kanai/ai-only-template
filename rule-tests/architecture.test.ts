@@ -29,7 +29,7 @@ import { describe, expect, it } from "vitest";
 //
 // WHY 依存を増やさず正規表現で抽出する: 検査に必要なのは import / export の参照先と「型だけか」の 2 つで、
 //   TypeScript の構文木までは要らない。dependency-cruiser は 18.4.0 の supportedTranspilers.typescript が <7.0.0 で、
-//   本リポジトリの TypeScript 7.0.2 に対応していない（ADR docs/adr/20260928-dependency-direction-checked-by-own-test.md の「採用しなかった案」）。
+//   本リポジトリの TypeScript 7.0.2 に対応していない（ADR docs/adr/quality/20260928-dependency-direction-checked-by-own-test.md の「採用しなかった案」）。
 //   抽出の限界は stripComments / extractImports の WHY に書き、仕様を下の describe と fixture テストで固定する。
 
 const repoRoot = join(import.meta.dirname, "..");
@@ -871,7 +871,7 @@ const RULES: Rule[] = [
 //   features/ と shared/ の 2 つに固定する。名前を drizzle.config に限るのは、shared/drizzle/ を層に属さないアプリのコード
 //   （shared/drizzle/app.ts）や別の設定の置き場所にさせないため。依存の規則は backend-to-frontend・backend-relative-only と、
 //   backend/shared の中なので backend-shared がかかる（feature のコードを import せず、schema は glob の文字列で指す）。
-// 決定と採用しなかった案は ADR docs/adr/20260929-backend-features-and-shared-directories.md。
+// 決定と採用しなかった案は ADR docs/adr/architecture/20260929-backend-features-and-shared-directories.md。
 const BACKEND_LAYER_DIR =
   /^apps\/backend\/(?:features\/[^/]+|shared)\/(?:domain|application|presentation|infra)\//;
 const BACKEND_DRIZZLE_CONFIG =
@@ -1070,7 +1070,7 @@ function findEnvViolations(root: string): string[] {
 //   - テンプレートリテラルの ${} の中の console は、文字列の中とみなして拾わない（見逃す方向。extractImports と同じ）。
 //     これは Biome の noConsole が検出する。
 //   - 逆に、global.console・(console).log・別名・分割代入・引数に渡す console はこちらだけが検出する（Biome の noConsole は
-//     検出しない。2026-09-29 実測）。決定は ADR docs/adr/20260929-logger-single-exit.md。
+//     検出しない。2026-09-29 実測）。決定は ADR docs/adr/architecture/20260929-logger-single-exit.md。
 
 // 検査の対象にするディレクトリ。環境変数の直参照の対象（ENV_CHECK_DIRS）に scripts/ を足す。
 // WHY scripts/ を含める: scripts/ の TS / JS（今はテストだけで、ソースは無い）はフックなどから動かすツールになり、

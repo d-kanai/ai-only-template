@@ -20,5 +20,5 @@
 
 ## 影響
 - 良い点: 分岐を足したらテストも足すことが強制される。
-- 悪い点: 分岐を通すだけのテストでも 100% になる。振る舞いの検証の強さは mutation testing で補う（20260928-mutation-testing-daily-with-score-100.md）。
+- 悪い点: 分岐を通すだけのテストでも 100% になる。振る舞いの検証の強さは mutation testing で補う（quality/20260928-mutation-testing-daily-with-score-100.md）。
 - 見直す条件: 記録に無い。

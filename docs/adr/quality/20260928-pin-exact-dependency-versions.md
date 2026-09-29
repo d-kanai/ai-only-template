@@ -12,7 +12,7 @@ create-next-app の生成物は `^` 付きの範囲指定で、lockfile を作�
 - `pnpm add` が範囲を付けないよう `savePrefix: ''` を設定し、`rule-tests/package.test.ts` で検査する。
 
 ## 理由
-- lockfile だけに頼ると、lockfile の作り直し（20260928-pnpm-minimum-release-age-5-days.md の再解決など）で意図しない版が入る。`package.json` で固定すれば、版の変化は必ず `package.json` の差分に出る。
+- lockfile だけに頼ると、lockfile の作り直し（quality/20260928-pnpm-minimum-release-age-5-days.md の再解決など）で意図しない版が入る。`package.json` で固定すれば、版の変化は必ず `package.json` の差分に出る。
 - 文章のルールではなくテストで止める。範囲指定の依存でテストが失敗することを確かめてから固定した（2026-09-28 の work-logs「rules を general / code に分割し、npm 依存の完全固定をルール化（Issue #17）」、PR #19）。
 
 ## 採用しなかった案

@@ -61,16 +61,16 @@ paths:
 - 非同期の順序（古い応答が後から届く、画面を離れた後に失敗が届く）は、任意のタイミングで resolve できる `deferred()` で作る（各テストファイルの中に定義）。WHY: `mockResolvedValue` は即時に resolve し、タイマーは実行環境の速さに左右される。
 
 ## ルール検査テスト（規則・設定が効いていることを検査するテスト）
-今あるもの: `rule-tests/architecture.test.ts`（`.claude/rules/architecture-check.md`）、`rule-tests/lint.test.ts`（`.claude/rules/lint.md`）、`rule-tests/package.test.ts`・`rule-tests/pnpm-workspace.test.ts`（`.claude/rules/dependencies.md`）、`rule-tests/typecheck.test.ts`（`pnpm typecheck` と CI の順序）、`scripts/cloud-session-start.test.ts`（`.claude/rules/cloud-session.md`）、`rule-tests/instructions.test.ts`（CLAUDE.md の行数と @ import、`.claude/rules` の paths、ADR の形式（ファイル名・見出し・メタ・README の一覧）、スキルのフロントマター、旧 rules/ の参照）と、git ガード・作業ログ・worktree のフックのテスト（`scripts/hooks/*.test.ts` など）。テスト以外のゲート（カバレッジ・フック・CI の required check・型チェック）も同じ扱い。
+今あるもの: `rule-tests/architecture.test.ts`（`.claude/rules/architecture-check.md`）、`rule-tests/lint.test.ts`（`.claude/rules/lint.md`）、`rule-tests/package.test.ts`・`rule-tests/pnpm-workspace.test.ts`（`.claude/rules/dependencies.md`）、`rule-tests/typecheck.test.ts`（`pnpm typecheck` と CI の順序）、`scripts/cloud-session-start.test.ts`（`.claude/rules/cloud-session.md`）、`rule-tests/instructions.test.ts`（CLAUDE.md の行数と @ import、`.claude/rules` の paths、ADR の形式（分類ディレクトリは 4 つの固定の集合・ファイル名・見出し・メタ・README の一覧。参照は `<分類>/<ファイル名>`）、スキルのフロントマター、旧 rules/ の参照）と、git ガード・作業ログ・worktree のフックのテスト（`scripts/hooks/*.test.ts` など）。テスト以外のゲート（カバレッジ・フック・CI の required check・型チェック）も同じ扱い。
 - **must pass と must reject の両方**を持つ。WHY: must reject だけだと「何でも違反にする」壊れ方を、must pass だけだと「何も違反にしない」（常に緑）壊れ方を検出できない。「今のリポジトリで違反 0 件」は must pass の 1 例にすぎない。
 - 判定は関数に切り出し、架空の入力で許可・拒否を固定したうえで、同じ関数で実ファイルを検査する。must reject は取り違えやすい境界を網羅する（import の書き方、版の書き方、設定のキーの有無・コメントアウト・ネスト、違反を単独で含むファイル、対象外のファイル）。
 - 実ファイルで end-to-end に通す fixture を持つ（一時ディレクトリは `mkdtempSync(join(tmpdir(), "<name>-"))` で作り `afterAll` で消す）。違反の集合は `toEqual` で丸ごと比較する。WHY: 判定が正しくても、抽出・列挙が漏れれば見逃す。
 - 列挙が空なら失敗させる（対象 0 件なら常に緑になる）。
 - 規則を足す・変えるときは例と fixture も同じ変更で直し、規則の文書と突き合わせる。
-- **fault injection** は必須。既定は最小セット（規則を破る 1 件 → そのテストだけが落ちる、判定を常に許可 → must reject が落ちる、判定を常に拒否 → must pass が落ちる）。列挙を空・設定を戻す・境界の網羅（数十件の変異）は、新しいルール検査テストやゲートを作るときだけ行う。元に戻して `git status --short` と `git diff` を確かめ、何を壊して何件落ちたかを報告・PR に書く。reviewer はロジックのある変更で別の壊し方を独立に行う。WHY 最小セット: 見逃しの検出に効くのは主に「常に許可」「常に拒否」で、数十件の変異は消費の大半を占めた（ADR `docs/adr/20260929-save-usage-limit.md`）。手順はスキル `rule-check-test`。
+- **fault injection** は必須。既定は最小セット（規則を破る 1 件 → そのテストだけが落ちる、判定を常に許可 → must reject が落ちる、判定を常に拒否 → must pass が落ちる）。列挙を空・設定を戻す・境界の網羅（数十件の変異）は、新しいルール検査テストやゲートを作るときだけ行う。元に戻して `git status --short` と `git diff` を確かめ、何を壊して何件落ちたかを報告・PR に書く。reviewer はロジックのある変更で別の壊し方を独立に行う。WHY 最小セット: 見逃しの検出に効くのは主に「常に許可」「常に拒否」で、数十件の変異は消費の大半を占めた（ADR `docs/adr/workflow/20260929-save-usage-limit.md`）。手順はスキル `rule-check-test`。
 
 ## mutation testing（Stryker）
-実行手順・生き残りの直し方・日次ジョブはスキル `mutation-testing`、決定は ADR `docs/adr/20260928-mutation-testing-daily-with-score-100.md`、score の実測は 2026-09-28 の work-logs、各設定の WHY は `stryker.config.mjs`。
+実行手順・生き残りの直し方・日次ジョブはスキル `mutation-testing`、決定は ADR `docs/adr/quality/20260928-mutation-testing-daily-with-score-100.md`、score の実測は 2026-09-28 の work-logs、各設定の WHY は `stryker.config.mjs`。
 - 目標は score 100%（`thresholds.break: 100`。survived が 1 件でも日次ジョブが失敗する。ユーザー判断、Issue #55）。
 - Vitest のカバレッジのしきい値（`vitest.config.mts`）は Stryker の実行では効かない。WHY: vitest-runner が coverage を無効にし、Stryker が変異ごとに、その変異を通るテストだけを実行するため（https://stryker-mutator.io/docs/stryker-js/vitest-runner/ ）。カバレッジ 100% のゲートは `pnpm test` が担う。
 - ロジックの変異はテストを足して殺す。API のエラーの message（`ErrorResponse`）は検証して殺す。

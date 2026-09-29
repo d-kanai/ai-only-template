@@ -12,7 +12,7 @@ paths:
 # git 操作の機械的な強制（権限・フック・commit-msg）
 
 文章で禁止していた git 操作を、Claude Code の権限（`permissions.deny`）・フック・Lefthook で止める（CLAUDE.md の原則 7。Issue #64）。
-JSON にはコメントを書けないので、`.claude/settings.json` の各項目の WHAT / WHY はここに書く。決定は ADR `docs/adr/20260928-git-operations-enforced-by-hooks.md`、実測は 2026-09-28 の work-logs。
+JSON にはコメントを書けないので、`.claude/settings.json` の各項目の WHAT / WHY はここに書く。決定は ADR `docs/adr/workflow/20260928-git-operations-enforced-by-hooks.md`、実測は 2026-09-28 の work-logs。
 
 | 仕組み | ファイル | 止めるもの |
 | --- | --- | --- |

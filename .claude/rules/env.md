@@ -9,7 +9,7 @@ paths:
 
 # 実行環境と環境変数
 
-決定は ADR `docs/adr/20260928-env-single-entry-all-required.md`、実測（どこで止まるか、Next の `.env` の読み方、検査の限界の確かめ方など）は 2026-09-28 の work-logs。クラウドセッションは `.claude/rules/cloud-session.md`。
+決定は ADR `docs/adr/architecture/20260928-env-single-entry-all-required.md`、実測（どこで止まるか、Next の `.env` の読み方、検査の限界の確かめ方など）は 2026-09-28 の work-logs。クラウドセッションは `.claude/rules/cloud-session.md`。
 
 ## ツールの版（asdf）
 ツールの版は asdf で管理し、`.tool-versions` をコミットして全員（人間・AI）が同じ環境で動かす。
@@ -60,7 +60,7 @@ paths:
   - Biome だけが拾う: テンプレートリテラルの `${process.env.X}`、`import { env } from "node:process"`。
   - `rule-tests/architecture.test.ts` だけが拾う: `global.process.env`、`(process).env`。
   - `rule-tests/architecture.test.ts` 側の限界は、同ファイルの「環境変数の直参照の抽出」のテストで固定している。
-- 同じ設計（Biome のルール + `rule-tests/architecture.test.ts` の規則で、唯一の入口・出口のファイルだけを許す）を、ログの `console` にも使っている（`noConsole` と `console-direct-access`。`.claude/rules/backend.md` の「ログ」、ADR `docs/adr/20260929-logger-single-exit.md`）。
+- 同じ設計（Biome のルール + `rule-tests/architecture.test.ts` の規則で、唯一の入口・出口のファイルだけを許す）を、ログの `console` にも使っている（`noConsole` と `console-direct-access`。`.claude/rules/backend.md` の「ログ」、ADR `docs/adr/architecture/20260929-logger-single-exit.md`）。
 
 ## 変数を足すとき
 - `env.ts` の `Env` と `PARSERS` に足し（必須、既定値なし）、`.env.example` に開発用の値と WHAT / WHY のコメントを書き、`env.test.ts` に検証のテストを足す。CI・クラウドは `.env.example` をコピーするので、ワークフローやスクリプトは直さなくてよい。
@@ -68,4 +68,4 @@ paths:
 - テスト用の接続先（`database.test-support.ts`・`apps/e2e/database.ts`・`drizzle.config.ts`）もアプリと同じ `env.DATABASE_URL` を使う。
 
 ## compose.yaml（開発用 Postgres）
-- 手元・CI・クラウドで同じ `compose.yaml` を使う。イメージは `mirror.gcr.io/library/postgres:18-alpine`（Docker Hub の匿名 pull のレート制限を避ける。経緯は ADR `docs/adr/20260928-postgres-via-docker-compose-everywhere.md` と 2026-09-28 の work-logs）。healthcheck は `pg_isready`。
+- 手元・CI・クラウドで同じ `compose.yaml` を使う。イメージは `mirror.gcr.io/library/postgres:18-alpine`（Docker Hub の匿名 pull のレート制限を避ける。経緯は ADR `docs/adr/workflow/20260928-postgres-via-docker-compose-everywhere.md` と 2026-09-28 の work-logs）。healthcheck は `pg_isready`。

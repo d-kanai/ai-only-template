@@ -9,7 +9,7 @@
 
 ## 決定
 - 1 Issue = 1 PR = 1 セッション（`/clear`）。長期の文脈は work-logs と Issue コメントに置く。
-- wake を減らす: push は 1 ラウンド 1 回、worker が終わるごとにコミットして未コミットを長く残さない、CI の完了はポーリング 1 本で待つ（Issue #82 で auto-merge に変えた。20260929-merge-with-auto-merge.md）。
+- wake を減らす: push は 1 ラウンド 1 回、worker が終わるごとにコミットして未コミットを長く残さない、CI の完了はポーリング 1 本で待つ（Issue #82 で auto-merge に変えた。workflow/20260929-merge-with-auto-merge.md）。
 - 機械的な作業は `worker-light`（Sonnet 5.5）、単発の検索は組み込みの Explore。サブエージェントの model はフル ID で固定し、`rule-tests/instructions.test.ts` の `agent-model` で検査する。
 - 機械的な変更（改名・文書・参照の更新だけ）は reviewer を省く。reviewer には差分と観点を絞って渡す。
 - fault injection の既定は最小セット（規則を破る 1 件・判定を常に許可・常に拒否）。境界の網羅は新しいルール検査テストを作るときだけ。
