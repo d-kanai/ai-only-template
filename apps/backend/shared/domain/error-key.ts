@@ -34,6 +34,43 @@ export type ErrorKeyParams = {
 
 export type ErrorKey = keyof ErrorKeyParams;
 
+// params を持たないキー（ErrorKeyParams の値が Record<string, never>）。
+// WHY 分ける: zod の型の検査（z.string など）の issue は params を運ばない（refine の custom の issue だけが載せる。zod 4.6.5）。
+//   型の検査に付けられるキーをこれに限り、params の要るキーを付けて実行時に params が落ちるのを型で止める（todo.ts の keyedIssue）。
+export type ParamlessErrorKey = {
+  [K in ErrorKey]: ErrorKeyParams[K] extends Record<string, never> ? K : never;
+}[ErrorKey];
+
+// ErrorKey の実行時の一覧（isErrorKey が使う）。型の ErrorKeyParams は実行時に残らないので、同じ集合を値でも持つ。
+// WHY satisfies readonly ErrorKey[]: ErrorKeyParams に無いキー（打ち間違い）を型エラーにする。
+// 足し忘れ（ErrorKeyParams にあって、ここに無いキー）は error-key.test.ts の型の検査（toEqualTypeOf）が pnpm typecheck で止める。
+//   WHY テストで検査する: satisfies は「要素がどれも ErrorKey」だけを見て、網羅は見ない。網羅を型で書くには使われない
+//   型エイリアスが要るので、テスト（expectTypeOf）に置く。
+// キーを足すときは ErrorKeyParams とここの両方に足す。
+export const ERROR_KEYS = [
+  "todo.title.empty",
+  "todo.title.tooLong",
+  "todo.title.invalid",
+  "todo.id.invalid",
+  "todo.completed.invalid",
+  "todo.createdAt.invalid",
+  "todo.notFound",
+  "request.body.notJson",
+  "request.body.notObject",
+  "request.body.unknownKeys",
+  "request.field.notString",
+  "request.field.notBoolean",
+  "server.internalError",
+] as const satisfies readonly ErrorKey[];
+
+// 実行時の文字列が ErrorKey かを確かめる。zod の issue の message（キーを付け忘れた項目では zod の英語の文言）を
+//   DomainError の key に戻す前に使う（todo.ts の validate）。
+// WHY 配列の includes で判定する（オブジェクトのプロパティで引かない）: "constructor" など Object.prototype の名前を
+//   キーと取り違えない。
+export function isErrorKey(value: string): value is ErrorKey {
+  return (ERROR_KEYS as readonly string[]).includes(value);
+}
+
 // キー K に渡す params の残り引数の型。params の無いキー（Record<string, never>）は省略でき、あるキーは必須にする。
 //   例: new DomainError("not_found", "todo.notFound", { id }) / new DomainError("validation_error", "todo.title.empty")
 // WHY [params?: undefined] にする（[] にしない）: params の後ろに引数を続ける InvalidRequestError（key, params, issues）で、

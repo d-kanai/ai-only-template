@@ -45,7 +45,7 @@ export const ja = {
 
   // 詳細画面（features/todo/screens/todo-detail-screen）
   "todo.detail.back": "一覧へ戻る",
-  "todo.detail.titleLabel": "title",
+  "todo.detail.titleLabel": "タイトル",
   "todo.detail.save": "保存",
   "todo.detail.completed": "完了",
 } as const;

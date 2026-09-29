@@ -30,6 +30,7 @@
 - 設計 (b) API が Accept-Language で翻訳する / (c) 両方: API の契約が言語に依存し、辞書が backend と frontend に分かれる。
 - Temporal: Node 24 で未実装、Safari が未対応。
 - `z.config(z.locales.ja())`: グローバルな設定で、項目の `error` が優先されるので、項目ごとのキーと両立しない。
+- クライアント側で `navigator.language` から決める: prerender は残るが、サーバの HTML は ja で hydration 後に切り替わってちらつき、`<html lang>` も誤る。
 
 ## 影響
 - 良い点: 文言の追加・変更は辞書だけで済み、キーと params の誤りはコンパイルで止まる。画面のハードコードは `rule-tests/architecture.test.ts` の `frontend-hardcoded-text` で止まる。

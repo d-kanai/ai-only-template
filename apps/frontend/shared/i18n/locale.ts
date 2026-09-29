@@ -33,8 +33,28 @@ export function isLocale(value: string | null): value is Locale {
 
 type LanguageRange = { tag: string; quality: number };
 
+// q 値の文字列を重みにする。qvalue の書き方でなければ NaN（parseAcceptLanguage が候補から外す）。
+// qvalue = ( "0" [ "." 0*3DIGIT ] ) / ( "1" [ "." 0*3("0") ] )（RFC 9110 の 12.4.2）。0〜1、小数点以下 3 桁まで。
+//   これを「0 か 1 で始まり、小数点以下は 3 桁までの数字」（正規表現）と「1 以下」（1.001〜1.999 を外す）に分けて判定する。
+// WHY 書き方で判定する（Number() に変換してから 0〜1 の範囲だけを見ない）: Number() は "0x1"（16 進）・"1e0"（指数）・
+//   " 1"（空白）も数にするので、qvalue ではない値を有効な重みとして扱ってしまう。
+// WHY 文法どおりの 1 本の正規表現（0(\.\d{0,3})?|1(\.0{0,3})?）にしない: "0" の後ろの小数部を必須にする変異が、
+//   q=0 も書き方の誤りもどちらも候補から外すので結果を変えず、mutation testing で消せない（等価な変異。
+//   .claude/rules/testing.md）。分けた形なら、どの変異も有効な値か無効な値のどちらかの結果を変える。
+// WHY 書き方の誤りを候補から外す（q=1 扱いにしない）: 重みの分からない言語を最優先にすると、利用者が低くしたつもりの
+//   言語が選ばれる。外しても、他に対応する言語が無ければ既定の ja になるだけ。
+// WHY 正規表現を関数の中に書く（最上位の定数にしない）: 最上位の式は static な変異になり mutation testing で数えない
+//   （stryker.config.mjs の ignoreStatic）。関数の中なら、正規表現の変異（桁数・アンカー）をテストで検出できる。
+function parseQuality(value: string): number {
+  const quality = Number(value);
+  return /^[01](?:\.\d{0,3})?$/.test(value) && quality <= 1
+    ? quality
+    : Number.NaN;
+}
+
 // Accept-Language を「タグと q 値」の一覧にし、q 値の高い順に並べる（同じ q 値は書いた順のまま。Array.prototype.sort は安定）。
-// q=0（受け付けない。RFC 9110 の 12.4.2）と、q 値が数でないもの（NaN）は除く。
+// q=0（受け付けない。RFC 9110 の 12.4.2）と、q 値が qvalue の書き方でないもの（NaN）は除く。
+// WHY "q=" を大文字・小文字を区別せずに探す: パラメータ名は大文字・小文字を区別しない（RFC 9110 の 5.6.6）。
 // WHY 空のタグ（", ," など）を除く検査を書かない: 空のタグはどのロケールとも一致せず、結果を変えない。結果を変えない検査は
 //   mutation testing で消しても落ちない（等価な変異。.claude/rules/testing.md）。
 function parseAcceptLanguage(header: string | null): LanguageRange[] {
@@ -47,10 +67,10 @@ function parseAcceptLanguage(header: string | null): LanguageRange[] {
       const [tag, ...parameters] = part.split(";");
       const q = parameters
         .map((parameter) => parameter.trim())
-        .find((parameter) => parameter.startsWith("q="));
+        .find((parameter) => parameter.toLowerCase().startsWith("q="));
       return {
         tag: tag.trim().toLowerCase(),
-        quality: q === undefined ? 1 : Number(q.slice("q=".length)),
+        quality: q === undefined ? 1 : parseQuality(q.slice("q=".length)),
       };
     })
     .filter((range) => range.quality > 0)

@@ -1,23 +1,39 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { DomainError } from "../../../shared/domain/domain-error";
-import type {
-  ErrorKey,
-  ErrorKeyParams,
-  ErrorParamsArgs,
+import {
+  type ErrorKey,
+  type ErrorKeyParams,
+  type ErrorParamsArgs,
+  isErrorKey,
+  type ParamlessErrorKey,
 } from "../../../shared/domain/error-key";
 
-// zod のスキーマ・refine の第 2 引数（{ error, params }）を、ErrorKey と params の組として作る（Issue #116）。
+// zod のスキーマ・refine の引数（{ error } / { error, params }）を、ErrorKey（と params）から作る（Issue #116）。
 // WHY error にキーを入れる: zod は error の文字列を issue の message にする。validate がそれを DomainError の key に戻す。
 //   domain は自然言語の文言を持たない（画面がキーを辞書で翻訳する）。
-// WHY params を zod の params で運ぶ（キーと params を JSON にして error に詰めない）: zod 4.6.5 の refine（$ZodCustomParams）は
-//   params を受け取り、失敗した issue（code: "custom"）にそのまま載せる（実測。型は Record<string, any>）。文字列に詰めて
-//   戻すより、文字列の組み立て・解析の誤りが入らない。型の検査（z.string など）の issue は params を持たないが、今の型の
-//   検査のキーは params を持たないので足りる。
 // WHY この関数を通す（{ error: "todo.title.empty" } と直接書かない）: zod の error は任意の文字列を受け付けるので、
-//   キーの打ち間違い・params の渡し忘れ（todo.title.tooLong の max）を型で止めるため（error-key.ts の ErrorParamsArgs）。
-function keyedIssue<K extends ErrorKey>(key: K, ...rest: ErrorParamsArgs<K>) {
-  return { error: key, params: rest[0] };
+//   キーの打ち間違いを型で止めるため。
+// WHY 2 つに分ける（keyedIssue は params の無いキーだけ、keyedRefine は params の要るキーだけ）: 型の検査（z.string など）の
+//   issue は params を運ばず、refine の issue（code: "custom"）だけが params をそのまま載せる（zod 4.6.5 の $ZodCustomParams。
+//   実測）。1 つの関数で両方を受け付けると、params の要るキーを型の検査に付けても型は通り、実行時に params が落ちる
+//   （Issue #116 の reviewer の実測）。keyedIssue は params の無いキーしか受け付けないので、型の検査にも refine にも使える。
+//   params の要るキーは keyedRefine でしか作れないので、refine に付ける。
+// 残る穴: keyedRefine の結果を型の検査に渡すことは型では止められない（zod の型の検査の引数は、変数・関数の戻り値の
+//   余分なプロパティ（params）を拒まない）。keyedRefine は refine の引数にだけ書く。
+// WHY params を zod の params で運ぶ（キーと params を JSON にして error に詰めない）: 文字列に詰めて戻すより、
+//   文字列の組み立て・解析の誤りが入らない。
+// WHY export する: validate の変換（キーの無い issue を 500 にする）を、keyedIssue を付けない一時的なスキーマで直接
+//   テストするため（todo.test.ts）。
+export function keyedIssue<K extends ParamlessErrorKey>(key: K) {
+  return { error: key };
+}
+
+export function keyedRefine<K extends Exclude<ErrorKey, ParamlessErrorKey>>(
+  key: K,
+  params: ErrorKeyParams[K],
+) {
+  return { error: key, params };
 }
 
 // タイトルの不変条件: 前後の空白を除いて 1〜100 文字。規則はこのスキーマ 1 か所に宣言する（Issue #88）。
@@ -51,7 +67,7 @@ function todoTitleSchema() {
     .refine(
       (title) => Array.from(title).length <= maxLength,
       // 画面の文言に上限の文字数を埋め込めるよう、params で渡す（上限を変えても画面の辞書を直さずに済む）。
-      keyedIssue("todo.title.tooLong", { max: maxLength }),
+      keyedRefine("todo.title.tooLong", { max: maxLength }),
     );
 }
 
@@ -61,7 +77,8 @@ function todoTitleSchema() {
 //   版の桁が 0 の値も受け付ける）を、create の作成日時は引数（Invalid Date を渡せる）を受け取る。
 // WHY 項目ごとにキーを付ける: validate が最初の issue の message（= キー）を DomainError の key にする。
 //   zod の既定の文言（英語で zod の語彙を含む）を domain の外に出さない。キーの無い issue を作らないよう、検査を持つ
-//   zod のスキーマ・refine にはすべて keyedIssue を渡す（z.object 自身は、値が型の上でオブジェクトなので失敗しない）。
+//   zod のスキーマ・refine にはすべて keyedIssue / keyedRefine を渡す（z.object 自身は、値が型の上でオブジェクトなので
+//   失敗しない）。渡し忘れは validate が DomainError ではない Error（500）にする。
 // WHY id は z.uuid()（RFC 9562 の形）: presentation の parseUuidParam と同じ形にそろえる。Todo の id は randomUUID（v4）で
 //   作るので必ず満たす（ADR docs/adr/architecture/20260929-zod-for-backend-validation.md。z.uuid() は RFC 9562 の形だけで大文字も通す。.claude/rules/backend.md）。
 function todoPropsSchema() {
@@ -83,22 +100,33 @@ type TodoProps = z.input<ReturnType<typeof todoPropsSchema>>;
 // WHY key と params は最初の issue: 失敗した safeParse の issues は必ず 1 件以上ある。タイトルの規則は同じ値で 1 つしか
 //   失敗しないので、最初の 1 件がそのまま理由になる。複数の項目が同時に違反するとき（id とタイトルなど）は
 //   スキーマの項目の順で最初のものになる。利用者の入力で違反しうるのはタイトルだけなので、1 件で足りる。
-function validate<Schema extends z.ZodType>(
+// WHY export する: keyedIssue / keyedRefine を付けない一時的なスキーマで、キーの無い issue の扱いを直接テストするため。
+export function validate<Schema extends z.ZodType>(
   schema: Schema,
   value: z.input<Schema>,
 ): z.output<Schema> {
   const result = schema.safeParse(value);
   if (!result.success) {
-    // WHY as: zod の issue の message は string、params は Record<string, any>（refine の custom の issue だけが持ち、
-    //   型の検査の issue には無い）で、ErrorKey との対応を型で持たない。組はスキーマの宣言（keyedIssue）が型で縛って
+    // WHY as: zod の issue の params は Record<string, any>（refine の custom の issue だけが持ち、型の検査の issue には
+    //   無い）で、キーとの対応を型で持たない。キーと params の組はスキーマの宣言（keyedIssue / keyedRefine）が型で縛って
     //   作ったので、ここではそれを DomainError に戻すだけにする。
     const { message, params } = result.error.issues[0] as {
       message: string;
       params?: ErrorKeyParams[ErrorKey];
     };
+    // WHY キーでない message を DomainError にしない: keyedIssue / keyedRefine を渡し忘れた検査では、message が zod の既定の
+    //   英語の文言になる。それを key として返すと、画面の辞書に無いキーで API の契約（ErrorResponse の key）を破る。
+    //   利用者の入力の誤り（400）ではなく実装の誤りなので、DomainError ではない Error にして presentation に 500 を返させ、
+    //   ログ（message と cause の ZodError）で開発中に足し忘れに気づけるようにする。
+    if (!isErrorKey(message)) {
+      throw new Error(
+        `zod issue has no ErrorKey (pass keyedIssue / keyedRefine to the schema): ${message}`,
+        { cause: result.error },
+      );
+    }
     throw new DomainError(
       "validation_error",
-      message as ErrorKey,
+      message,
       ...([params] as ErrorParamsArgs<ErrorKey>),
     );
   }

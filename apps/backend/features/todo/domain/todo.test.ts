@@ -1,8 +1,9 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
+import { z } from "zod";
 import { DomainError } from "../../../shared/domain/domain-error";
 import type { ErrorKey } from "../../../shared/domain/error-key";
-import { Todo } from "./todo";
+import { keyedIssue, keyedRefine, Todo, validate } from "./todo";
 
 // key と params は API の ErrorResponse として画面に渡る（画面が翻訳するクライアントとの契約。Issue #116）ので、両方を検証する。
 // WHY toEqual に params: undefined を含める: params の無いキーで params が {} などになっていないことも確かめる
@@ -239,4 +240,68 @@ describe("Todo.reconstruct", () => {
       );
     },
   );
+});
+
+// keyedIssue / keyedRefine はスキーマに ErrorKey（と params）を付ける口。validate が issue から DomainError に戻す。
+describe("keyedIssue / keyedRefine", () => {
+  test("keyedIssue は params の無いキーを zod の error にする", () => {
+    expect(keyedIssue("todo.title.empty")).toEqual({
+      error: "todo.title.empty",
+    });
+  });
+
+  test("keyedRefine はキーを zod の error に、params を zod の params にする", () => {
+    expect(keyedRefine("todo.title.tooLong", { max: 100 })).toEqual({
+      error: "todo.title.tooLong",
+      params: { max: 100 },
+    });
+  });
+
+  // WHY 型で止める: 型の検査（z.string など）の issue は params を運ばない（zod 4.6.5。refine の custom の issue だけが
+  //   params を載せる）。params の要るキーを型の検査に付けると、型は通っても実行時に params が落ち、画面の文言の
+  //   埋め込み（{max}）が欠ける。
+  test("params の要るキーは keyedIssue に渡せない（型の検査に付けると params が落ちる）", () => {
+    // @ts-expect-error todo.title.tooLong は params を持つので keyedIssue では付けられない（refine に keyedRefine で付ける）
+    z.string(keyedIssue("todo.title.tooLong", { max: 100 }));
+  });
+
+  test("keyedRefine は params の要るキーだけを受け付ける（params の無いキーは keyedIssue で付ける）", () => {
+    // @ts-expect-error todo.title.empty は params を持たない
+    keyedRefine("todo.title.empty", {});
+  });
+});
+
+describe("validate", () => {
+  test("keyedRefine で付けたキーと params を DomainError の key と params にする", () => {
+    const schema = z
+      .string()
+      .refine(() => false, keyedRefine("todo.title.tooLong", { max: 3 }));
+
+    expectValidationError(() => validate(schema, "abcd"), {
+      key: "todo.title.tooLong",
+      params: { max: 3 },
+    });
+  });
+
+  // keyedIssue / keyedRefine を付け忘れた検査では、issue の message が zod の既定の英語の文言になる。それを ErrorKey として
+  //   返すと、画面の辞書に無いキーとして API の契約を破る。利用者の入力の誤り（400）ではなく実装の誤りなので、
+  //   DomainError ではない Error（presentation が 500 にしてログに出す）にし、開発中に気づけるようにする。
+  test("キーを付け忘れた検査で失敗したら、DomainError ではない Error を zod の文言と ZodError を添えて投げる", () => {
+    const schema = z.string().min(1);
+    const zodMessage = schema.safeParse("").error?.issues[0]?.message;
+
+    try {
+      validate(schema, "");
+    } catch (error) {
+      expect(error).not.toBeInstanceOf(DomainError);
+      expect(error).toEqual(
+        new Error(
+          `zod issue has no ErrorKey (pass keyedIssue / keyedRefine to the schema): ${zodMessage}`,
+        ),
+      );
+      expect((error as Error).cause).toBeInstanceOf(z.ZodError);
+      return;
+    }
+    throw new Error("Error が投げられなかった");
+  });
 });

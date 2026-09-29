@@ -44,6 +44,7 @@ paths:
 - 画面にサーバロジックを書かない。Server Components でのデータ取得や Server Functions（Server Actions）は使わず、データは hook → `api/` → `/api/...`（Route Handler）で取る。
   - WHY: データ取得の経路を 1 本にし、サーバの処理を `apps/backend/` の 4 層に集める。画面と API の境界が HTTP になり、それぞれ単独でテストできる。
 - ビルド時の Client Components の prerender は止めない。`output: "export"` と `next/dynamic` の `ssr: false` は、ブラウザ専用 API で困るまで使わない。
+  - 例外: i18n のため root layout が `headers()` を読むので、今は全ルートが動的レンダリングで、ビルド時の prerender は無い（下の「i18n」の限界）。ここで止めないのは `output: "export"` / `ssr: false` のような静的化・SSR の無効化のこと。
   - WHY: `output: "export"` では Route Handler が GET だけのビルド時の静的なレスポンスになる。ブラウザ専用 API は `useEffect` の中で触れば prerender と両立する。
 
 ## import の書き方
