@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import type { ErrorResponse } from "../../../shared/presentation/http-error";
+import type { Problem } from "../../../shared/presentation/problem";
 import { UpdateTodoCommand } from "../application/update-todo.command";
 import { Todo } from "../domain/todo";
 import { InMemoryTodoRepository } from "../infra/todo-repository.in-memory";
@@ -28,6 +28,33 @@ async function setup() {
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+// 404 の Problem Details（RFC 9457。problem.ts）。無い id と uuid の形でない id で同じ本文になる（画面から見て「無い Todo」）。
+// WHY 関数にして本文全体を返す: id ごとに detail・instance・params が変わるだけで、ほかは同じ契約。テストの中で丸ごと比べる。
+function notFoundProblem(id: string): Problem {
+  return {
+    type: "/problems/not-found",
+    title: "Not found",
+    status: 404,
+    detail: `Todo ${id} was not found.`,
+    instance: `/api/todos/${id}`,
+    key: "todo.notFound",
+    params: { id },
+  };
+}
+
+// WHY Content-Type も確かめる: application/problem+json（RFC 9457 の 3 節）で、汎用のクライアントが Problem Details と見分ける。
+async function expectProblem(
+  response: Response,
+  expected: Problem,
+): Promise<void> {
+  expect(response.status).toBe(expected.status);
+  expect(response.headers.get("content-type")).toBe("application/problem+json");
+  await expect(response.json()).resolves.toStrictEqual(expected);
+}
+
+// 400 の本文のうち、誤りごとに変わる部分（detail・key・params・errors）。type・title・status・instance は固定の値を足して比べる。
+type ProblemBody = Pick<Problem, "detail" | "key" | "params" | "errors">;
 
 function context(id: string) {
   return { params: Promise.resolve({ id }) };
@@ -153,7 +180,7 @@ describe("PUT /api/todos/:id", () => {
     });
   });
 
-  test("uuid の形だが存在しない id なら 404 と not_found を、todo.notFound と id の params 付きで返す", async () => {
+  test("uuid の形だが存在しない id なら 404 の /problems/not-found を、todo.notFound と id の params 付きで返す", async () => {
     const { PUT } = await setup();
     const id = randomUUID();
 
@@ -162,10 +189,7 @@ describe("PUT /api/todos/:id", () => {
       context(id),
     );
 
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toStrictEqual({
-      error: { code: "not_found", key: "todo.notFound", params: { id } },
-    });
+    await expectProblem(response, notFoundProblem(id));
   });
 
   // WHY id を本文より先に確かめる: URL が指す Todo が存在しえないなら、本文の誤りを直しても成功しない。
@@ -184,52 +208,59 @@ describe("PUT /api/todos/:id", () => {
       ]),
     ),
   )(
-    "id が %s なら、%sときも、Repository に問い合わせずに 404 と not_found（todo.notFound と id の params）を返す",
+    "id が %s なら、%sときも、Repository に問い合わせずに 404 の /problems/not-found（todo.notFound と id の params）を返す",
     async (_idLabel, _bodyLabel, id, requestBody) => {
       const { repository, ...spies } = spiedRepository();
       const PUT = new UpdateTodoApi(new UpdateTodoCommand(repository)).handle;
 
       const response = await PUT(putRequest(id, requestBody), context(id));
 
-      expect(response.status).toBe(404);
-      await expect(response.json()).resolves.toStrictEqual({
-        error: { code: "not_found", key: "todo.notFound", params: { id } },
-      });
+      await expectProblem(response, notFoundProblem(id));
       expect(spies.findById).not.toHaveBeenCalled();
       expect(spies.save).not.toHaveBeenCalled();
       expect(spies.delete).not.toHaveBeenCalled();
     },
   );
 
-  // key・params・issues は画面が翻訳する（クライアントとの契約。Issue #116）ので、本文全体を toStrictEqual で検証する
-  //   （WHY は create-todo.api.test.ts と同じ）。issues はリクエストの形（presentation の zod スキーマ）の誤りだけに付く。
-  test.each<[string, string, ErrorResponse["error"]]>([
+  // 本文は RFC 9457 の Problem Details で、本文全体を toStrictEqual で検証する（WHY は create-todo.api.test.ts と同じ）。
+  //   errors はリクエストの形（presentation の zod スキーマ）の誤りだけに付く。
+  test.each<[string, string, ProblemBody]>([
     [
       "JSON でない",
       "{completed:",
-      { code: "validation_error", key: "request.body.notJson" },
+      {
+        detail: "Request body must be valid JSON.",
+        key: "request.body.notJson",
+      },
     ],
     [
       "オブジェクトでない",
       "null",
       {
-        code: "validation_error",
+        detail: "Request body must be a JSON object.",
         key: "request.body.notObject",
-        issues: [{ path: "", key: "request.body.notObject" }],
+        errors: [
+          {
+            pointer: "#",
+            key: "request.body.notObject",
+            detail: "Request body must be a JSON object.",
+          },
+        ],
       },
     ],
     [
       "title が文字列でない",
       JSON.stringify({ title: null }),
       {
-        code: "validation_error",
+        detail: "title must be a string.",
         key: "request.field.notString",
         params: { path: "title" },
-        issues: [
+        errors: [
           {
-            path: "title",
+            pointer: "#/title",
             key: "request.field.notString",
             params: { path: "title" },
+            detail: "title must be a string.",
           },
         ],
       },
@@ -238,14 +269,15 @@ describe("PUT /api/todos/:id", () => {
       "completed が boolean でない",
       JSON.stringify({ completed: "true" }),
       {
-        code: "validation_error",
+        detail: "completed must be a boolean.",
         key: "request.field.notBoolean",
         params: { path: "completed" },
-        issues: [
+        errors: [
           {
-            path: "completed",
+            pointer: "#/completed",
             key: "request.field.notBoolean",
             params: { path: "completed" },
+            detail: "completed must be a boolean.",
           },
         ],
       },
@@ -254,19 +286,21 @@ describe("PUT /api/todos/:id", () => {
       "title と completed の両方の型が違う",
       JSON.stringify({ title: 1, completed: 1 }),
       {
-        code: "validation_error",
+        detail: "title must be a string.",
         key: "request.field.notString",
         params: { path: "title" },
-        issues: [
+        errors: [
           {
-            path: "title",
+            pointer: "#/title",
             key: "request.field.notString",
             params: { path: "title" },
+            detail: "title must be a string.",
           },
           {
-            path: "completed",
+            pointer: "#/completed",
             key: "request.field.notBoolean",
             params: { path: "completed" },
+            detail: "completed must be a boolean.",
           },
         ],
       },
@@ -277,14 +311,15 @@ describe("PUT /api/todos/:id", () => {
       "定義されていない項目がある（項目名の打ち間違い）",
       JSON.stringify({ complete: true }),
       {
-        code: "validation_error",
+        detail: "Request body has unknown fields: complete.",
         key: "request.body.unknownKeys",
         params: { keys: "complete" },
-        issues: [
+        errors: [
           {
-            path: "",
+            pointer: "#",
             key: "request.body.unknownKeys",
             params: { keys: "complete" },
+            detail: "Request body has unknown fields: complete.",
           },
         ],
       },
@@ -292,27 +327,30 @@ describe("PUT /api/todos/:id", () => {
     [
       "title が空",
       JSON.stringify({ title: "" }),
-      { code: "validation_error", key: "todo.title.empty" },
+      { detail: "Title must not be empty.", key: "todo.title.empty" },
     ],
     [
       "title が 101 文字",
       JSON.stringify({ title: "a".repeat(101) }),
       {
-        code: "validation_error",
+        detail: "Title must be at most 100 characters.",
         key: "todo.title.tooLong",
         params: { max: 100 },
       },
     ],
   ])(
-    "%s なら 400 と validation_error を、理由の key（と params・issues）付きで返し、Todo は変わらない",
+    "%s なら 400 の /problems/validation-error を、理由の key（と params・errors）と英語の detail 付きで返し、Todo は変わらない",
     async (_label, body, expected) => {
       const { repository, todo, PUT } = await setup();
 
       const response = await PUT(putRequest(todo.id, body), context(todo.id));
 
-      expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toStrictEqual({
-        error: expected,
+      await expectProblem(response, {
+        type: "/problems/validation-error",
+        title: "Validation error",
+        status: 400,
+        instance: `/api/todos/${todo.id}`,
+        ...expected,
       });
       await expect(repository.findById(todo.id)).resolves.toEqual(todo);
     },

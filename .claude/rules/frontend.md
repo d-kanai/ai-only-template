@@ -29,7 +29,7 @@ paths:
 - `index.ts`: 公開 API。feature の外（`app/`・他の feature）から import してよいのはここだけ（内部の構成を変えても外の import を直さずに済む）。feature 同士は原則 import せず、必要なら相手の `index.ts` だけ。
 
 ## 画面側とサーバ側の境界
-- `features/<f>/api/` から backend への参照は `import type` / `export type` だけで、参照先は自 feature の `apps/backend/features/<f>/presentation/<name>.api.ts` と `apps/backend/shared/presentation/`（`ErrorResponse`）。api ファイルの関数や application・domain・infra の実装は import しない。
+- `features/<f>/api/` から backend への参照は `import type` / `export type` だけで、参照先は自 feature の `apps/backend/features/<f>/presentation/<name>.api.ts` と `apps/backend/shared/presentation/problem.ts`（`Problem`・`ErrorKey`・`ErrorKeyParams`）。api ファイルの関数や application・domain・infra の実装は import しない。
   - WHY: 画面とサーバで同じ契約（型）を使い、ずれを型チェックで検出する。`import type` はビルドで消えるので、サーバのコードがバンドルに入らない。
 - screens / components / hooks は backend を直接参照せず、`api/` が re-export した型を使う（`import type { TodoDto } from "@/features/todo/api/todo-api"`）。WHY: 契約が変わったときの影響を `api/` の 1 ファイルで追える。
 - 型で担保されること: リクエスト / レスポンスの形（`pnpm build` / `pnpm typecheck` で不一致を検出）。
@@ -68,8 +68,8 @@ paths:
 - 型（`defineMessages`）: `ja` がキーの一覧と placeholder の正（`const` の型引数で文字列リテラルの型になるので `as const` は書かない）。`en` のキーの欠け・余分、placeholder の名前の集合の違い（順番は問わない）、空白だけの文言（全角の空白・`\r` を含む）、文字列リテラルでない `string` 型の値はコンパイルエラーになる。
   - placeholder の名前は英数字と `_` だけ（`{max}`・`{max_1}`）。実行時の置換（`formatMessage` の `/\{(\w+)\}/`）と同じ規則を型でも強制し、`{a-b}`・`{}`・`{ max }` のような `{...}` を含む文言はコンパイルエラーになる（対にならない `{` や `}` は書ける）。
   - `t(key, params)` の params は ja の文言の `{name}` から型で導く（`i18n.tsx` の `MessageParams`）。placeholder が無いキーは params を渡せず、あるキーは必須で、名前の違いもコンパイルエラーになる。
-  - 使い方: 画面・部品では `const t = useT(todoScreenMessages);`（その辞書のキーだけを受け付ける `t`。別の画面の辞書のキーはコンパイルエラー）。キーが実行時の値（サーバの `ErrorResponse`）のときだけ `formatMessage(commonMessages, locale, key, params)` を使う（`features/todo/api/api-error.ts` の `toErrorMessage`）。
-- サーバのエラー: `features/<f>/api/` は失敗を `ApiError`（`key` と `params`）で投げ、hook は失敗の理由を持って描画のときに翻訳する（ロケールが変わっても、その言語で出る）。backend の `ErrorKey` がすべて共通の辞書にあること・params の名前が placeholder と同じことは、`api-error.ts` の `ApiErrorKey` の型の制約と `api-error.test.ts` の型の検査で止める（`shared/` は backend を参照できないので、`api/` で突き合わせる）。
+  - 使い方: 画面・部品では `const t = useT(todoScreenMessages);`（その辞書のキーだけを受け付ける `t`。別の画面の辞書のキーはコンパイルエラー）。キーが実行時の値（サーバの Problem Details の `key`）のときだけ `formatMessage(commonMessages, locale, key, params)` を使う（`features/todo/api/api-error.ts` の `toErrorMessage`）。
+- サーバのエラー: backend は RFC 9457 の Problem Details（`application/problem+json`。`.claude/rules/backend.md`）を返す。`features/<f>/api/` は本文が Problem Details（`type` が文字列・`status` が数値・`key` が共通の辞書のキー・`params` は省略かオブジェクト。`todo-api.ts` の `isProblem`）なら `ApiError`（`status`（HTTP の応答のステータス）・`type`・`key`・`params`）を、そうでなければ `error.unknown`（`params.status`、`type` は無し）の `ApiError` を投げる。`detail` は開発者向けの英語で読まない・出さない。hook は失敗の理由を持って描画のときに翻訳する（ロケールが変わっても、その言語で出る）。backend の `ErrorKey` がすべて共通の辞書にあること・params の名前が placeholder と同じことは、`api-error.ts` の `ApiErrorKey` の型の制約と `api-error.test.ts` の型の検査で止める（`shared/` は backend を参照できないので、`api/` で突き合わせる）。
 - ロケールの決め方: `proxy.ts` が Cookie `NEXT_LOCALE` → Accept-Language（q 値の高い順、言語の部分で照合）→ 既定の ja で決め（`negotiateLocale`）、リクエストヘッダ `x-locale` に載せる（`/api/**` には載せない）。`app/layout.tsx` が `headers()` で読み、`<html lang>` と `LocaleProvider` に渡す。URL のパスは変えない（`app/[lang]` にしない）。
   - 限界: `headers()` を読むので全画面が動的レンダリングになり、ビルド時の静的な prerender は無い。matcher が除く `next/link` のプリフェッチには `x-locale` が付かないが、root layout はクライアント遷移で描き直されないので表示は変わらない（E2E `apps/e2e/i18n.spec.ts`）。
 - 日時の表示: `shared/i18n/format.ts` の `formatDateTime(iso, locale, timeZone)`（`Intl.DateTimeFormat`、`dateStyle: "medium"` / `timeStyle: "short"`）に、ブラウザのタイムゾーン（`Intl.DateTimeFormat().resolvedOptions().timeZone`）を渡す。サーバは UTC で動かす（リポジトリ直下の `package.json` の `dev` / `start` の `TZ=UTC`、`instrumentation-node.ts` が UTC でなければ起動を止める）。テストは `vitest.config.mts` の `test.env.TZ = "UTC"`、E2E はブラウザを `ja-JP` / `Asia/Tokyo` にする（`apps/e2e/playwright.config.ts`）。

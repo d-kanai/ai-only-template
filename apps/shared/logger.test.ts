@@ -5,7 +5,7 @@ import { logger } from "./logger";
 // logger（サーバ側のログの唯一の出口。Issue #85）の仕様。出力先は console の各メソッドを spy して確かめる。
 // WHY console を spy する（stdout / stderr のストリームを直接見ない）: logger は console.log / console.warn / console.error
 //   に 1 行の文字列を渡すだけで、ストリームへの書き込みは Node の console に任せている。呼び出し側のテスト
-//   （http-error.test.ts など）も同じく console を spy して、ログに残したことを確かめる。
+//   （problem.test.ts など）も同じく console を spy して、ログに残したことを確かめる。
 
 const NOW = "2026-09-29T01:02:03.456Z";
 

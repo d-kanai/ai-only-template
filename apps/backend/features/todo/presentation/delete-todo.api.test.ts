@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import type { Problem } from "../../../shared/presentation/problem";
 import { DeleteTodoCommand } from "../application/delete-todo.command";
 import { Todo } from "../domain/todo";
 import { InMemoryTodoRepository } from "../infra/todo-repository.in-memory";
@@ -19,6 +20,30 @@ function setup() {
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+// 404 の Problem Details（RFC 9457。problem.ts）。無い id と uuid の形でない id で同じ本文になる（画面から見て「無い Todo」）。
+// WHY 関数にして本文全体を返す: id ごとに detail・instance・params が変わるだけで、ほかは同じ契約。テストの中で丸ごと比べる。
+function notFoundProblem(id: string): Problem {
+  return {
+    type: "/problems/not-found",
+    title: "Not found",
+    status: 404,
+    detail: `Todo ${id} was not found.`,
+    instance: `/api/todos/${id}`,
+    key: "todo.notFound",
+    params: { id },
+  };
+}
+
+// WHY Content-Type も確かめる: application/problem+json（RFC 9457 の 3 節）で、汎用のクライアントが Problem Details と見分ける。
+async function expectProblem(
+  response: Response,
+  expected: Problem,
+): Promise<void> {
+  expect(response.status).toBe(expected.status);
+  expect(response.headers.get("content-type")).toBe("application/problem+json");
+  await expect(response.json()).resolves.toStrictEqual(expected);
+}
 
 function context(id: string) {
   return { params: Promise.resolve({ id }) };
@@ -83,20 +108,17 @@ describe("DELETE /api/todos/:id", () => {
     expect(remove.mock.calls).toEqual([[todo.id]]);
   });
 
-  test("uuid の形だが存在しない id なら 404 と not_found を、todo.notFound と id の params 付きで返す", async () => {
+  test("uuid の形だが存在しない id なら 404 の /problems/not-found を、todo.notFound と id の params 付きで返す", async () => {
     const { DELETE } = setup();
     const id = randomUUID();
 
     const response = await DELETE(deleteRequest(id), context(id));
 
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toStrictEqual({
-      error: { code: "not_found", key: "todo.notFound", params: { id } },
-    });
+    await expectProblem(response, notFoundProblem(id));
   });
 
   test.each(NOT_UUID_IDS)(
-    "id が %s なら、Repository に問い合わせずに 404 と not_found（todo.notFound と id の params）を返す",
+    "id が %s なら、Repository に問い合わせずに 404 の /problems/not-found（todo.notFound と id の params）を返す",
     async (_label, id) => {
       const { repository, ...spies } = spiedRepository();
       const DELETE = new DeleteTodoApi(new DeleteTodoCommand(repository))
@@ -104,10 +126,7 @@ describe("DELETE /api/todos/:id", () => {
 
       const response = await DELETE(deleteRequest(id), context(id));
 
-      expect(response.status).toBe(404);
-      await expect(response.json()).resolves.toStrictEqual({
-        error: { code: "not_found", key: "todo.notFound", params: { id } },
-      });
+      await expectProblem(response, notFoundProblem(id));
       expect(spies.findById).not.toHaveBeenCalled();
       expect(spies.save).not.toHaveBeenCalled();
       expect(spies.delete).not.toHaveBeenCalled();

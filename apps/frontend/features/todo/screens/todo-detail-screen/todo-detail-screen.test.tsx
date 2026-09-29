@@ -96,7 +96,12 @@ test("一覧へ戻るリンクは / を指す", async () => {
 
 test("取得に失敗すると（not_found など）、エラーのキーを翻訳した文言が alert として表示され、一覧へ戻るリンクは残る", async () => {
   vi.mocked(getTodo).mockRejectedValue(
-    new ApiError("todo.notFound", { id: "missing" }),
+    new ApiError({
+      status: 404,
+      type: "/problems/not-found",
+      key: "todo.notFound",
+      params: { id: "missing" },
+    }),
   );
 
   render(<TodoDetailScreen todoId="missing" />, { wrapper: JaLocale });

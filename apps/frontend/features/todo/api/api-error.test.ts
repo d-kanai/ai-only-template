@@ -1,7 +1,7 @@
 import type {
   ErrorKey,
   ErrorKeyParams,
-} from "@repo/backend/shared/presentation/http-error";
+} from "@repo/backend/shared/presentation/problem";
 import { describe, expect, expectTypeOf, test } from "vitest";
 import { ApiError, toErrorMessage } from "@/features/todo/api/api-error";
 import type { commonMessages } from "@/shared/i18n/common.messages";
@@ -10,25 +10,42 @@ import type { MessageKey, MessageParams } from "@/shared/i18n/i18n";
 type CommonMessages = typeof commonMessages;
 
 describe("ApiError", () => {
-  test("サーバのエラーのキーと params を持つ Error", () => {
-    const error = new ApiError("todo.title.tooLong", { max: 100 });
+  // status と type は、画面が文言以外で失敗を見分けるための値（Problem Details の type。RFC 9457）。
+  test("サーバのエラーの HTTP ステータス・type・キー・params を持つ Error", () => {
+    const error = new ApiError({
+      status: 400,
+      type: "/problems/validation-error",
+      key: "todo.title.tooLong",
+      params: { max: 100 },
+    });
 
     expect(error).toBeInstanceOf(Error);
     expect(error.name).toBe("ApiError");
+    expect(error.status).toBe(400);
+    expect(error.type).toBe("/problems/validation-error");
     expect(error.key).toBe("todo.title.tooLong");
     expect(error.params).toEqual({ max: 100 });
     // message は画面に出さない（出すのは key の翻訳）。ログや開発者ツールで何のエラーかが分かるよう key を入れる。
     expect(error.message).toBe("todo.title.tooLong");
   });
 
-  test("params を省くと空のオブジェクトになる", () => {
-    expect(new ApiError("todo.title.empty").params).toEqual({});
+  // 本文が Problem Details でない失敗（error.unknown）は type が分からない。
+  test("type と params を省くと、type は undefined、params は空のオブジェクトになる", () => {
+    const error = new ApiError({ status: 502, key: "error.unknown" });
+
+    expect(error.type).toBeUndefined();
+    expect(error.params).toEqual({});
   });
 });
 
 describe("toErrorMessage（失敗の理由を画面の文言にする）", () => {
   test("ApiError はキーと params を、ロケールの辞書で翻訳する", () => {
-    const error = new ApiError("todo.notFound", { id: "todo-1" });
+    const error = new ApiError({
+      status: 404,
+      type: "/problems/not-found",
+      key: "todo.notFound",
+      params: { id: "todo-1" },
+    });
 
     expect(toErrorMessage(error, "ja")).toBe(
       "Todo（id: todo-1）が見つかりません",
@@ -38,7 +55,14 @@ describe("toErrorMessage（失敗の理由を画面の文言にする）", () =>
 
   test("HTTP ステータスだけが分かる失敗（error.unknown）は、ステータスを入れて翻訳する", () => {
     expect(
-      toErrorMessage(new ApiError("error.unknown", { status: 502 }), "ja"),
+      toErrorMessage(
+        new ApiError({
+          status: 502,
+          key: "error.unknown",
+          params: { status: 502 },
+        }),
+        "ja",
+      ),
     ).toBe("通信に失敗しました（HTTP 502）");
   });
 

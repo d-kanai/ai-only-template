@@ -190,7 +190,11 @@ describe("初回の読み込み", () => {
 
   test("一覧の取得に失敗すると、ApiError のキーと params を翻訳した文言が error に入る", async () => {
     vi.mocked(listTodos).mockRejectedValue(
-      new ApiError("error.unknown", { status: 503 }),
+      new ApiError({
+        status: 503,
+        key: "error.unknown",
+        params: { status: 503 },
+      }),
     );
 
     const { result } = await renderLoaded();
@@ -204,7 +208,11 @@ describe("初回の読み込み", () => {
   // WHY 翻訳は描画のときに LocaleProvider のロケールで行う（hook はキーと params を持つ失敗を保持する）。
   test("LocaleProvider のロケールが en なら、error は英語の文言になる", async () => {
     vi.mocked(listTodos).mockRejectedValue(
-      new ApiError("server.internalError"),
+      new ApiError({
+        status: 500,
+        type: "/problems/internal-error",
+        key: "server.internalError",
+      }),
     );
 
     const { result } = renderHook(() => useTodoScreen(), {
@@ -279,7 +287,13 @@ describe("追加", () => {
   test("作成は成功しても、その後の一覧の再取得に失敗すると、error に message が入り、入力は残る", async () => {
     vi.mocked(listTodos)
       .mockResolvedValueOnce({ todos: [] })
-      .mockRejectedValueOnce(new ApiError("server.internalError"));
+      .mockRejectedValueOnce(
+        new ApiError({
+          status: 500,
+          type: "/problems/internal-error",
+          key: "server.internalError",
+        }),
+      );
     vi.mocked(createTodo).mockResolvedValue(milk);
     const { result } = await renderLoaded();
 
@@ -334,7 +348,12 @@ describe("追加", () => {
   test("作成に失敗すると error に message が入り、入力は残る", async () => {
     vi.mocked(listTodos).mockResolvedValue({ todos: [] });
     vi.mocked(createTodo).mockRejectedValue(
-      new ApiError("todo.title.tooLong", { max: 100 }),
+      new ApiError({
+        status: 400,
+        type: "/problems/validation-error",
+        key: "todo.title.tooLong",
+        params: { max: 100 },
+      }),
     );
     const { result } = await renderLoaded();
 
@@ -383,7 +402,14 @@ describe("削除", () => {
   test("前の操作のエラーは、次の操作が成功すると消える", async () => {
     vi.mocked(listTodos).mockResolvedValue({ todos: [milk] });
     vi.mocked(deleteTodo)
-      .mockRejectedValueOnce(new ApiError("todo.notFound", { id: "todo-1" }))
+      .mockRejectedValueOnce(
+        new ApiError({
+          status: 404,
+          type: "/problems/not-found",
+          key: "todo.notFound",
+          params: { id: "todo-1" },
+        }),
+      )
       .mockResolvedValueOnce(undefined);
     const { result } = await renderLoaded();
 

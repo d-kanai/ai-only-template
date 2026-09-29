@@ -73,7 +73,7 @@ paths:
 実行手順・生き残りの直し方・日次ジョブはスキル `mutation-testing`、決定は ADR `docs/adr/quality/20260928-mutation-testing-daily-with-score-100.md`、score の実測は 2026-09-28 の work-logs、各設定の WHY は `stryker.config.mjs`。
 - 目標は score 100%（`thresholds.break: 100`。survived が 1 件でも日次ジョブが失敗する。ユーザー判断、Issue #55）。
 - Vitest のカバレッジのしきい値（`vitest.config.mts`）は Stryker の実行では効かない。WHY: vitest-runner が coverage を無効にし、Stryker が変異ごとに、その変異を通るテストだけを実行するため（https://stryker-mutator.io/docs/stryker-js/vitest-runner/ ）。カバレッジ 100% のゲートは `pnpm test` が担う。
-- ロジックの変異はテストを足して殺す。API のエラーの message（`ErrorResponse`）は検証して殺す。
+- ロジックの変異はテストを足して殺す。API のエラーの本文（Problem Details の `title`・`detail` など。`apps/backend/shared/presentation/problem.ts`・`problem-detail.en.ts`）は検証して殺す。
 - `// Stryker disable next-line <Mutator>: <理由>` で除いてよいのは、**等価な変異**と**検証しない文言**（内部のログなど）だけ。理由を必ず書く。殺せるのに手間を省くために使わない。「等価」と決める前にほかの実行経路を探す（React の `<Activity mode="hidden">` では隠すときに effect の片付けが走り、state 更新も反映される）。
 - 等価な変異を生む書き方をしない: 結果を変えない検査（`"error" in value` の後の型の確認）は書かない、例外を握りつぶす `try` は握りつぶしたい呼び出しだけを囲む、ロジックの定数（正規表現・変換表・URL・接頭辞）は最上位に置かず関数の中に置く（最上位は static な変異になり `ignoreStatic` で検査から外れる）。
 - 今の disable の一覧（すべて等価。足す・消すときはここを直す）:

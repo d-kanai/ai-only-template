@@ -60,6 +60,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-29 | backend も最初の階層を features/ と shared/ にし、Drizzle の設定とマイグレーションは shared/drizzle/ に置く | 採用 | [20260929-backend-features-and-shared-directories.md](architecture/20260929-backend-features-and-shared-directories.md) |
 | 2026-09-29 | DI コンテナとトランザクションの runner を廃止し、各クラスはコンストラクタ injection にして api ファイルで組み立てる | 採用 | [20260929-constructor-injection-without-container.md](architecture/20260929-constructor-injection-without-container.md) |
 | 2026-09-29 | E2E は apps/e2e の workspace パッケージ @repo/e2e にする | 採用 | [20260929-e2e-as-workspace-package.md](architecture/20260929-e2e-as-workspace-package.md) |
+| 2026-09-29 | API のエラー応答は RFC 9457（Problem Details）の形にし、key と params を拡張メンバーに、開発者向けの英語を detail に入れる | 採用 | [20260929-error-response-rfc9457.md](architecture/20260929-error-response-rfc9457.md) |
 | 2026-09-29 | 画面の i18n はライブラリを使わずに自前の型付き辞書で行い、URL は変えずに Proxy と root layout でロケールを決め、API のエラーは key と params で返す | 採用 | [20260929-i18n-without-library.md](architecture/20260929-i18n-without-library.md) |
 | 2026-09-29 | サーバ側のログは logger.ts を唯一の出口にし、console の直接の呼び出しを Biome とテストの 2 系統で止める | 採用 | [20260929-logger-single-exit.md](architecture/20260929-logger-single-exit.md) |
 | 2026-09-29 | 画面の文言の辞書は画面・部品ごとに隣の *.messages.ts に置き、共通の辞書は API のエラーだけにし、自前の i18n を 3 ファイルにまとめる | 採用 | [20260929-messages-colocated-per-screen.md](architecture/20260929-messages-colocated-per-screen.md) |

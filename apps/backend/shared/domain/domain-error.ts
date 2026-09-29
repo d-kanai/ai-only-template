@@ -8,16 +8,16 @@ import {
 // ドメインのルール違反を表す例外。
 // WHY Error を継承した専用クラスにする: presentation 層で「想定したルール違反（400 / 404）」と
 //   「想定外の例外（500）」を instanceof で見分けるため。ただの Error だと区別できない。
-// WHY code を持たせる: HTTP のステータスは機械可読な code で決める（http-error.ts の変換表）。
+// WHY code を持たせる: HTTP のステータスは機械可読な code で決める（problem.ts の対応表）。
 // WHY 文言ではなく key と params を持たせる（Issue #116）: 画面に出す文言は画面側が key を辞書で翻訳して決める。
 //   domain は自然言語を持たず「何が起きたか」（key）と、文言に埋め込む値（params）だけを表す。
 //   key と params の組はキーごとに型で縛る（error-key.ts の ErrorKeyParams）。
 // WHY domain に置く: domain 層は HTTP を知らない。「何が起きたか」だけを表し、
-//   HTTP のステータスへの変換は presentation 層（apps/backend/shared/presentation/http-error.ts）が行う。
+//   HTTP のステータスへの変換は presentation 層（apps/backend/shared/presentation/problem.ts）が行う。
 
 // validation_error: 不変条件（例: タイトルの長さ）を満たさない。
 // not_found: 指定された集約が存在しない。
-// 新しい種類が必要になったらここに足し、http-error.ts の変換表にも対応するステータスを足す。
+// 新しい種類が必要になったらここに足し、problem.ts の対応表（problemKindOf）にも対応する type・title・status を足す（書き忘れは型エラー）。
 export type DomainErrorCode = "validation_error" | "not_found";
 
 // WHY クラスを K で型引数にする: TypeScript のコンストラクタは自分の型引数を持てないので、key から params の型を
