@@ -337,7 +337,8 @@ type ReadDirectory = (absolutePath: string) => Dirent[];
 const readDirectory: ReadDirectory = (absolutePath) =>
   readdirSync(absolutePath, { withFileTypes: true });
 
-// symlink は先がディレクトリならディレクトリとして扱う（先が無い・たどれない symlink はファイルとして返す）。
+// symlink は先がディレクトリならディレクトリとして扱う（先が無い symlink はファイルとして返す。循環する symlink は statSync が
+//   ELOOP を投げて列挙が例外で止まる。無限には再帰しない。reviewer の実測 2026-09-29）。
 function isDirectoryEntry(absolutePath: string, entry: Dirent): boolean {
   if (entry.isDirectory()) {
     return true;
@@ -4854,7 +4855,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   //   許すわけではない。
   "apps/frontend/foo.config.ts": lines("export default {};"),
   // backend-placement: "." で始まるディレクトリ（apps/backend/.lib/）も検査し、4 層の外として違反にする（除外するのは
-  //   node_modules と .next だけ）。"@/" で frontend を参照しているので、backend-to-frontend と backend-relative-only にもかかる。
+  //   EXCLUDED_DIRS の既知の生成物・依存だけ）。"@/" で frontend を参照しているので、backend-to-frontend と backend-relative-only にもかかる。
   "apps/backend/.lib/x.ts": lines(
     'import { TodoScreen } from "@/features/todo";',
   ),
@@ -5984,7 +5985,8 @@ describe("ファイルの列挙（walkFiles・listSourceFiles・listAllFiles）"
   });
 
   // WHY symlink の先も列挙する: 以前の列挙（readdirSync の recursive: true）と同じ範囲を検査し、symlink で置いたディレクトリの
-  //   コードが検査を素通りしないようにする（除外のディレクトリの外で循環すれば ELOOP で止まる。以前の列挙と同じ）。
+  //   コードが検査を素通りしないようにする。除外のディレクトリの外で循環すれば ELOOP の例外で止まる（以前の列挙は ELOOP を
+  //   黙って握りつぶして途中までの一覧を返していた。今は音を立てて失敗する）。
   it("除外しないディレクトリの symlink は、先のディレクトリの中も列挙する", () => {
     withTree(
       {

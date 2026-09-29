@@ -59,6 +59,8 @@ jobs:
 
       # wrangler はリポジトリで版を固定した devDependency（apps/frontend/package.json）を使う。cloudflare/wrangler-action は
       #   使わない（別の版の wrangler を持ち込まないため）。
+      # --fail-if-no-match: フィルタに一致するパッケージが無ければ失敗させる。WHY: pnpm --filter は 0 件一致でも exit 0 で
+      #   「No projects matched」を出すだけなので、パッケージ名を変えたときに何もデプロイせず緑で終わる（2026-09-29 実測）。
       # 必要な Secrets（リポジトリの Settings → Secrets and variables → Actions）:
       #   CLOUDFLARE_API_TOKEN: テンプレート「Edit Cloudflare Workers」で作った API token
       #   CLOUDFLARE_ACCOUNT_ID: Cloudflare のアカウント ID
@@ -67,4 +69,4 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: pnpm --filter @repo/frontend run deploy
+        run: pnpm --filter @repo/frontend --fail-if-no-match run deploy
