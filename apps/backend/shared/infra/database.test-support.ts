@@ -41,7 +41,9 @@ export type TestDatabase = {
 export async function createTestDatabase(): Promise<TestDatabase> {
   const url = env.DATABASE_URL;
   const schema = `${testSchemaPrefix()}${randomUUID().replaceAll("-", "")}`;
-  // max 4: DrizzleTransactionRunner のテストが「トランザクションの中」と「外」の 2 本を同時に使うため、2 以上にする。
+  // max 4: 以前はトランザクションの runner のテストが「トランザクションの中」と「外」の 2 本を同時に使うため 2 以上にしていた
+  //   （Issue #123 で runner を廃止）。値はそのまま残す（下げる理由が無く、同時に複数の接続を使うテストを足しても
+  //   接続待ちで止まらない）。
   // options: 接続の開始時に Postgres に渡す設定（node-postgres の options）。search_path をテスト用のスキーマだけにする。
   const pool = new Pool({
     connectionString: url,

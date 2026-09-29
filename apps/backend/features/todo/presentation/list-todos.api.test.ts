@@ -1,16 +1,25 @@
 // @vitest-environment node
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { ListTodosQuery } from "../application/list-todos.query";
+import { Todo } from "../domain/todo";
 import type { TodoRepository } from "../domain/todo-repository";
+import { InMemoryTodoRepository } from "../infra/todo-repository.in-memory";
+import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 import {
-  createInMemoryTodoContainer,
-  createTodoContainer,
-} from "../infra/container";
-import { type ListTodosResponse, listTodosApi } from "./list-todos.api";
+  ListTodosApi,
+  type ListTodosResponse,
+  GET as productionGet,
+} from "./list-todos.api";
 
-// テストごとに空のリポジトリで組み立てる（アプリ共有のコンテナを使うとテストの順序で結果が変わるため）。
+// テストごとに空の InMemory のリポジトリで組み立てる（本番の GET は Postgres を使い、テストの順序で結果が変わるため）。
+// handle をインスタンスから取り出して呼ぶ: 本番（`export const GET = new ListTodosApi(...).handle`）と同じ渡し方にし、
+//   this が外れても動くこと（handle がアロー関数のプロパティであること）も確かめる。
 function setup() {
-  const container = createInMemoryTodoContainer();
-  return { container, GET: listTodosApi(container) };
+  const repository = new InMemoryTodoRepository();
+  return {
+    repository,
+    GET: new ListTodosApi(new ListTodosQuery(repository)).handle,
+  };
 }
 
 // 想定外の例外（DB の接続断など）を再現するため、一覧の取得が必ず失敗するリポジトリ。
@@ -43,11 +52,26 @@ describe("GET /api/todos", () => {
     expect(body).toEqual({ todos: [] });
   });
 
+  // WHY 本番の GET（モジュールの最下部で組み立てたもの）を確かめる: 環境変数などで InMemory に切り替える分岐を持たない
+  //   （Issue #59）ことを、Postgres の Repository が呼ばれることで固定する。findAll を差し替えるので DB には接続しない。
+  test("本番の GET は Postgres の Repository で組み立てている", async () => {
+    const findAll = vi
+      .spyOn(PostgresTodoRepository.prototype, "findAll")
+      .mockResolvedValue([]);
+
+    const response = await productionGet(listRequest());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ todos: [] });
+    expect(findAll).toHaveBeenCalledTimes(1);
+  });
+
   test("作成した Todo を TodoDto の形で、作成した順（作成日時の昇順）に返す", async () => {
-    const { container, GET } = setup();
-    const first = await container.createTodo.execute({ title: "牛乳を買う" });
-    const second = await container.createTodo.execute({ title: "卵を買う" });
-    await container.updateTodo.execute({ id: second.id, completed: true });
+    const { repository, GET } = setup();
+    const first = Todo.create("牛乳を買う");
+    const second = Todo.create("卵を買う").changeCompletion(true);
+    await repository.save(first);
+    await repository.save(second);
 
     const response = await GET(listRequest());
 
@@ -78,17 +102,11 @@ describe("GET /api/todos", () => {
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
     const cause = new Error("connection refused: db.internal:5432");
-    // InMemory の runner はスナップショットを取れるリポジトリが要るので、失敗するリポジトリはそのまま渡す runner で組み立てる。
-    const repository = failingRepository(cause);
-    const GET = listTodosApi(
-      createTodoContainer({
-        runner: { run: (fn) => fn(repository) },
-        repositoryFor: (executor: TodoRepository) => executor,
-        readExecutor: repository,
-      }),
-    );
+    const failingGet = new ListTodosApi(
+      new ListTodosQuery(failingRepository(cause)),
+    ).handle;
 
-    const response = await GET(listRequest());
+    const response = await failingGet(listRequest());
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toStrictEqual({

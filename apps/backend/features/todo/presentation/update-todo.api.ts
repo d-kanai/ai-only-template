@@ -1,12 +1,14 @@
 import { z } from "zod";
+import { getDatabase } from "../../../shared/infra/database";
 import { toErrorResponse } from "../../../shared/presentation/http-error";
 import {
   parseJsonBody,
   requestBodySchema,
 } from "../../../shared/presentation/json-body";
 import { parseUuidParam } from "../../../shared/presentation/resource-id";
+import { UpdateTodoCommand } from "../application/update-todo.command";
 import type { Todo } from "../domain/todo";
-import { type TodoContainer, todoContainer } from "../infra/container";
+import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 
 // PUT /api/todos/:id: Todo の title / completed を更新する。無ければ 404。
 
@@ -51,9 +53,17 @@ function toTodoDto(todo: Todo): TodoDto {
   };
 }
 
-// コンテナを受け取って Route Handler を返す（WHY は list-todos.api.ts の listTodosApi のコメント）。
-export function updateTodoApi(container: Pick<TodoContainer, "updateTodo">) {
-  return async (request: Request, ctx: Context): Promise<Response> => {
+// PUT /api/todos/:id の Route Handler を持つクラス。コンストラクタで command を受け取り、handle を Route Handler として export する
+//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにするは list-todos.api.ts の ListTodosApi のコメント）。
+export class UpdateTodoApi {
+  constructor(
+    private readonly updateTodo: Pick<UpdateTodoCommand, "execute">,
+  ) {}
+
+  readonly handle = async (
+    request: Request,
+    ctx: Context,
+  ): Promise<Response> => {
     try {
       // WHY id を本文より先に確かめる: URL が指す Todo が存在しえないなら、本文の誤りを直しても成功しない。
       //   直しても意味の無い 400 ではなく 404 を返す。
@@ -62,7 +72,7 @@ export function updateTodoApi(container: Pick<TodoContainer, "updateTodo">) {
       //   （画面から見て「無い Todo」と同じ契約）。
       const id = parseUuidParam(rawId, "todo.notFound", { id: rawId });
       const input = await parseJsonBody(request, updateTodoRequestSchema());
-      const todo = await container.updateTodo.execute({ id, ...input });
+      const todo = await this.updateTodo.execute({ id, ...input });
       const body: UpdateTodoResponse = toTodoDto(todo);
       return Response.json(body);
     } catch (error) {
@@ -71,5 +81,8 @@ export function updateTodoApi(container: Pick<TodoContainer, "updateTodo">) {
   };
 }
 
-// app/api/todos/[id]/route.ts が re-export する Route Handler。
-export const PUT = updateTodoApi(todoContainer);
+// app/api/todos/[id]/route.ts が re-export する Route Handler。本番は常に Postgres で組み立てる。
+// 組み立ての WHY（ここで組み立てる・Repository を api ファイルごとに作ってよい・InMemory に切り替えない）は list-todos.api.ts の GET のコメント。
+export const PUT = new UpdateTodoApi(
+  new UpdateTodoCommand(new PostgresTodoRepository(getDatabase().db)),
+).handle;

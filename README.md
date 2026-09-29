@@ -48,11 +48,11 @@ apps/
     package.json        # @repo/backend。drizzle-orm / pg / @repo/shared、exports（外に公開するファイルの一覧）、db:generate / db:migrate
     features/           # 機能ごとのまとまり（frontend の features/ と同じ。Issue #98）
       todo/               # API 側（DDD 4 層）
-        presentation/       # 1 API = 1 ファイル（list-todos.api.ts など）。コンテナを受け取って handler を返す関数（listTodosApi(container)）、本番用の GET / POST など、リクエスト / レスポンスの型を export
+        presentation/       # 1 API = 1 ファイル（list-todos.api.ts など）。クラス <Verb><Noun>Api（コンストラクタで query / command を受け取り、handle が Route Handler）、ファイルの最下部で組み立てた本番用の GET / POST など、リクエスト / レスポンスの型を export
         application/        # 読むだけの query（list-todos.query.ts）と状態を変える command（create-todo.command.ts）
         domain/             # Entity / Value Object / Repository の interface
-        infra/              # Repository の実装（Postgres / InMemory）、schema.ts（Drizzle のスキーマ）、container.ts（DI。command をトランザクションで包む）
-    shared/             # API 側で feature をまたぐ共通部品（domain/ に DomainError と TransactionRunner、presentation/ に HTTP ステータス変換と本文の読み取り、infra/ に Postgres のプールと Drizzle のトランザクション）
+        infra/              # Repository の実装（Postgres と、テスト用の InMemory）、schema.ts（Drizzle のスキーマ）
+    shared/             # API 側で feature をまたぐ共通部品（domain/ に DomainError とエラーのキー、presentation/ に HTTP ステータス変換と本文の読み取り、infra/ に Postgres のプールと Drizzle の db）
       drizzle/            # drizzle.config.ts（drizzle-kit の設定）と、生成したマイグレーション（*.sql と meta/。pnpm db:generate が作る。コミットする）
   shared/               # @repo/shared。frontend と backend で共通の基盤だけ（Issue #90。.claude/rules/shared.md）
     package.json        # 依存なし。exports は ./env・./logger だけ

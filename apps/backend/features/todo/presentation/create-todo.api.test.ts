@@ -1,13 +1,27 @@
 // @vitest-environment node
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { ErrorResponse } from "../../../shared/presentation/http-error";
-import { createInMemoryTodoContainer } from "../infra/container";
-import { type CreateTodoResponse, createTodoApi } from "./create-todo.api";
+import { CreateTodoCommand } from "../application/create-todo.command";
+import { InMemoryTodoRepository } from "../infra/todo-repository.in-memory";
+import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
+import {
+  CreateTodoApi,
+  type CreateTodoResponse,
+  POST as productionPost,
+} from "./create-todo.api";
 
+// テストごとに空の InMemory のリポジトリで組み立てる（本番の POST は Postgres を使い、テストの順序で結果が変わるため）。
 function setup() {
-  const container = createInMemoryTodoContainer();
-  return { container, POST: createTodoApi(container) };
+  const repository = new InMemoryTodoRepository();
+  return {
+    repository,
+    POST: new CreateTodoApi(new CreateTodoCommand(repository)).handle,
+  };
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function postRequest(body: string): Request {
   return new Request("http://localhost/api/todos", {
@@ -19,7 +33,7 @@ function postRequest(body: string): Request {
 
 describe("POST /api/todos", () => {
   test("201 と作成した TodoDto を返し、保存される", async () => {
-    const { container, POST } = setup();
+    const { repository, POST } = setup();
 
     const response = await POST(
       postRequest(JSON.stringify({ title: " 牛乳を買う " })),
@@ -35,9 +49,25 @@ describe("POST /api/todos", () => {
     });
     // createdAt は ISO 8601（Date#toISOString の形）で返す。
     expect(new Date(body.createdAt).toISOString()).toBe(body.createdAt);
-    await expect(container.getTodo.execute(body.id)).resolves.toMatchObject({
+    await expect(repository.findById(body.id)).resolves.toMatchObject({
       title: "牛乳を買う",
     });
+  });
+
+  // WHY 本番の POST（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない（Issue #59）
+  //   ことを、Postgres の Repository に保存されることで固定する。save を差し替えるので DB には接続しない。
+  test("本番の POST は Postgres の Repository に保存する", async () => {
+    const save = vi
+      .spyOn(PostgresTodoRepository.prototype, "save")
+      .mockResolvedValue();
+
+    const response = await productionPost(
+      postRequest(JSON.stringify({ title: "牛乳を買う" })),
+    );
+
+    expect(response.status).toBe(201);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0]?.[0]).toMatchObject({ title: "牛乳を買う" });
   });
 
   test("title の前後の空白を除いて 100 文字（絵文字は 1 文字と数える）なら作れる", async () => {
@@ -151,7 +181,7 @@ describe("POST /api/todos", () => {
   ])(
     "%s なら 400 と validation_error を、理由の key（と params・issues）付きで返し、何も保存しない",
     async (_label, body, expected) => {
-      const { container, POST } = setup();
+      const { repository, POST } = setup();
 
       const response = await POST(postRequest(body));
 
@@ -159,7 +189,7 @@ describe("POST /api/todos", () => {
       await expect(response.json()).resolves.toStrictEqual({
         error: expected,
       });
-      await expect(container.listTodos.execute()).resolves.toEqual([]);
+      await expect(repository.findAll()).resolves.toEqual([]);
     },
   );
 });

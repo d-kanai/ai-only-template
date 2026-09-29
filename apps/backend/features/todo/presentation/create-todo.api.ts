@@ -1,11 +1,13 @@
 import { z } from "zod";
+import { getDatabase } from "../../../shared/infra/database";
 import { toErrorResponse } from "../../../shared/presentation/http-error";
 import {
   parseJsonBody,
   requestBodySchema,
 } from "../../../shared/presentation/json-body";
+import { CreateTodoCommand } from "../application/create-todo.command";
 import type { Todo } from "../domain/todo";
-import { type TodoContainer, todoContainer } from "../infra/container";
+import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 
 // POST /api/todos: Todo を作る。201 と作った Todo を返す。
 
@@ -46,12 +48,17 @@ function toTodoDto(todo: Todo): TodoDto {
   };
 }
 
-// コンテナを受け取って Route Handler を返す（WHY は list-todos.api.ts の listTodosApi のコメント）。
-export function createTodoApi(container: Pick<TodoContainer, "createTodo">) {
-  return async (request: Request): Promise<Response> => {
+// POST /api/todos の Route Handler を持つクラス。コンストラクタで command を受け取り、handle を Route Handler として export する
+//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにするは list-todos.api.ts の ListTodosApi のコメント）。
+export class CreateTodoApi {
+  constructor(
+    private readonly createTodo: Pick<CreateTodoCommand, "execute">,
+  ) {}
+
+  readonly handle = async (request: Request): Promise<Response> => {
     try {
       const input = await parseJsonBody(request, createTodoRequestSchema());
-      const todo = await container.createTodo.execute(input);
+      const todo = await this.createTodo.execute(input);
       const body: CreateTodoResponse = toTodoDto(todo);
       return Response.json(body, { status: 201 });
     } catch (error) {
@@ -60,5 +67,8 @@ export function createTodoApi(container: Pick<TodoContainer, "createTodo">) {
   };
 }
 
-// app/api/todos/route.ts が re-export する Route Handler。
-export const POST = createTodoApi(todoContainer);
+// app/api/todos/route.ts が re-export する Route Handler。本番は常に Postgres で組み立てる。
+// 組み立ての WHY（ここで組み立てる・Repository を api ファイルごとに作ってよい・InMemory に切り替えない）は list-todos.api.ts の GET のコメント。
+export const POST = new CreateTodoApi(
+  new CreateTodoCommand(new PostgresTodoRepository(getDatabase().db)),
+).handle;

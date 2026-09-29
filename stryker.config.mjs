@@ -117,7 +117,7 @@ export default {
   //   - 読み込み時の変異は、その結果を読み込むテストファイル自体の読み込みを壊すことがある。env.ts の
   //     `export const env = readEnv(process.env)` は読み込み時に readEnv を実行するので、readEnv の中の変異で
   //     読み込みが失敗し、テストが 1 件も実行されないまま Survived と数えられていた（testsCompleted 0。Issue #59 で判明）。
-  //   - 読み込み時とテスト中の両方で実行される変異（hybrid。env.ts の readEnv、container.ts の組み立てなど）は、
+  //   - 読み込み時とテスト中の両方で実行される変異（hybrid。env.ts の readEnv、api ファイル最下部の Route Handler の組み立てなど）は、
   //     ignoreStatic を有効にするとテスト中の実行だけを対象に、その変異を通るテストだけで判定される（上の static-mutants の
   //     「What Stryker does」。@stryker-mutator/core 10.0.0 の dist/src/mutants/mutant-test-planner.js の planMutant）。
   //     そのため readEnv の変異は env.test.ts で正しく killed になる。

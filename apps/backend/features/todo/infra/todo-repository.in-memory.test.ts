@@ -67,29 +67,4 @@ describe("InMemoryTodoRepository", () => {
 
     await expect(repository.findAll()).resolves.toHaveLength(1);
   });
-
-  test("snapshot を取った後の変更は、restore でスナップショットの時点に戻る", async () => {
-    const repository = new InMemoryTodoRepository();
-    const kept = Todo.create("牛乳を買う");
-    await repository.save(kept);
-    const snapshot = repository.snapshot();
-
-    await repository.save(kept.rename("卵を買う"));
-    await repository.save(Todo.create("パンを買う"));
-    repository.restore(snapshot);
-
-    await expect(repository.findAll()).resolves.toEqual([kept]);
-  });
-
-  test("snapshot は取った時点の中身を保ち、その後の変更に引きずられない", async () => {
-    const repository = new InMemoryTodoRepository();
-    const snapshot = repository.snapshot();
-
-    await repository.save(Todo.create("牛乳を買う"));
-    repository.restore(snapshot);
-    await repository.save(Todo.create("卵を買う"));
-    repository.restore(snapshot);
-
-    await expect(repository.findAll()).resolves.toEqual([]);
-  });
 });

@@ -245,17 +245,4 @@ describe("PostgresTodoRepository", () => {
       );
     },
   );
-
-  test("トランザクションの executor を渡すと、その中で読み書きする", async () => {
-    const todo = Todo.create("牛乳を買う");
-
-    await expect(
-      database.db.transaction(async (tx) => {
-        await new PostgresTodoRepository(tx).save(todo);
-        throw new Error("rollback させる");
-      }),
-    ).rejects.toEqual(new Error("rollback させる"));
-
-    await expect(repository().findAll()).resolves.toEqual([]);
-  });
 });

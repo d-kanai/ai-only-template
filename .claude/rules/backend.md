@@ -12,15 +12,15 @@ paths:
 - `apps/backend/` の直下は `features/` と `shared/` だけ（ほかは `package.json`・`tsconfig.json`）。ファイルは `apps/backend/features/<feature>/` か `apps/backend/shared/` の `domain/` `application/` `presentation/` `infra/` のどれかの下に置く。例外は `apps/backend/shared/drizzle/`（drizzle-kit の設定 `drizzle.config.ts` と、生成したマイグレーションの `*.sql`・`meta/`。ソースは `drizzle.config.ts` だけ）。
   - WHY: 層に属さない場所のファイルにはどの層の規則もかからず、依存の向きの検査を素通りする（規則 `backend-placement`）。
   - WHY `features/` と `shared/`（Issue #98。ユーザー判断）: frontend（`apps/frontend/features/`・`shared/`）と同じ構成にし、feature を足すときの置き場所をそろえる。Drizzle は `shared/drizzle/`（`shared/infra/drizzle/` のように深くしない）に置き、直下の例外を無くす。決定と採用しなかった案は ADR `docs/adr/architecture/20260929-backend-features-and-shared-directories.md`。
-- `apps/backend/shared/`: feature をまたぐもの。`domain/error-key.ts`（`ErrorKey`・`ErrorKeyParams`: エラーのキーとキーごとの params の形）、`domain/domain-error.ts`（DomainError: `validation_error` / `not_found` と key・params）、`domain/transaction-runner.ts`（TransactionRunner の interface）、`presentation/http-error.ts`（DomainError → HTTP ステータス、`ErrorResponse`・`ErrorIssue`、`InvalidRequestError`。`ErrorKey`・`ErrorKeyParams` を再公開）、`presentation/json-body.ts`（`requestBodySchema`・`parseJsonBody`）、`presentation/resource-id.ts`（`parseUuidParam`: 動的セグメントの id が uuid の形でなければ 404）、`infra/database.ts`（プールと Drizzle の db、`Executor`）、`infra/drizzle-transaction-runner.ts`。
+- `apps/backend/shared/`: feature をまたぐもの。`domain/error-key.ts`（`ErrorKey`・`ErrorKeyParams`: エラーのキーとキーごとの params の形）、`domain/domain-error.ts`（DomainError: `validation_error` / `not_found` と key・params）、`presentation/http-error.ts`（DomainError → HTTP ステータス、`ErrorResponse`・`ErrorIssue`、`InvalidRequestError`。`ErrorKey`・`ErrorKeyParams` を再公開）、`presentation/json-body.ts`（`requestBodySchema`・`parseJsonBody`）、`presentation/resource-id.ts`（`parseUuidParam`: 動的セグメントの id が uuid の形でなければ 404）、`infra/database.ts`（プールと Drizzle の db の型 `Database`）。
 - 環境変数の唯一の入口 `env.ts` とログの唯一の出口 `logger.ts` は、frontend と backend で共通の workspace パッケージ `apps/shared`（`@repo/shared`）にある（Issue #90。`.claude/rules/shared.md`）。backend からは `@repo/shared/env`・`@repo/shared/logger` で使う。
 
 | 層 | 置くもの | 参照してよい先（許可の一覧。無いものは不可） |
 | --- | --- | --- |
-| `presentation/` | api ファイル（1 API = 1 ファイル `<verb>-<noun>.api.ts`）。コンテナを受け取って handler を返す関数（`listTodosApi(container)`）、本番用の HTTP メソッド名の定数（`export const GET = listTodosApi(todoContainer)`）、その API のリクエスト / レスポンスの型 | 自 feature と shared の `application`、`domain`（feature の domain は `import type` のみ。shared の domain は値でも可）、`presentation`、自 feature の `infra/container.ts`（コンテナの型と本番用のコンテナだけ）、`@repo/shared/logger`。パッケージは `next` / `react` / `react-dom` 以外 |
+| `presentation/` | api ファイル（1 API = 1 ファイル `<verb>-<noun>.api.ts`）。クラス `<Verb><Noun>Api`（コンストラクタで query / command を受け取り、`handle` が Route Handler）、ファイルの最下部で組み立てた本番用の HTTP メソッド名の定数（`export const GET = new ListTodosApi(new ListTodosQuery(new PostgresTodoRepository(getDatabase().db))).handle`）、その API のリクエスト / レスポンスの型 | 自 feature と shared の `application`、`domain`（feature の domain は `import type` のみ。shared の domain は値でも可）、`presentation`、組み立てに使う自 feature の `infra/<名前>-repository.postgres`（Postgres の Repository の実装）と `apps/backend/shared/infra/database`（feature の presentation だけ。InMemory の実装・`schema` は不可）、`@repo/shared/logger`。パッケージは `next` / `react` / `react-dom` 以外 |
 | `application/` | ユースケース 1 つ = 1 ファイル。読むだけは `<verb>-<noun>.query.ts`、状態を変えるものは `<verb>-<noun>.command.ts` | 自 feature と shared の `domain`・`application`。パッケージは `next` / `react` / `react-dom` と DB（`drizzle-orm` とサブパス、`pg`。型だけでも不可）以外 |
 | `domain/` | Entity / Value Object / Repository の interface | 自 feature と shared の `domain` だけ。パッケージは application と同じ制限（`node:crypto` などは可） |
-| `infra/` | Repository の実装、Drizzle のスキーマ `schema.ts`、TransactionRunner の実装、`container.ts`（DI） | 自 feature と shared の `domain`・`application`・`infra`、`@repo/shared/env`・`@repo/shared/logger`。パッケージは `next` / `react` / `react-dom` 以外 |
+| `infra/` | Repository の実装（Postgres と、テスト用の InMemory）、Drizzle のスキーマ `schema.ts`、プール（`shared/infra/database.ts`） | 自 feature と shared の `domain`・`application`・`infra`、`@repo/shared/env`・`@repo/shared/logger`。パッケージは `next` / `react` / `react-dom` 以外 |
 
 - 向き: `apps/frontend/app/api → presentation → application → domain`。infra は domain の interface を実装する（依存性の逆転）。他 feature・`apps/frontend/`・層に属さない場所は参照しない。
   - WHY 許可の一覧にする: 禁止の一覧だと、書き忘れた参照先が黙って通る。
@@ -44,9 +44,13 @@ paths:
 - 1 API = 1 ファイルにし、その API のリクエスト / レスポンスの型（DTO）もそのファイルで定義して export する。複数の API が同じ形（`TodoDto` など）を返しても各ファイルで定義する（共通の型ファイルを置かない）。
   - WHY: api ファイルを 1 つ開けば契約と処理がすべて見える（ユーザー判断）。形を変えるときに複数ファイルを直す手間より優先する。
 - handler は `(request: Request) => Promise<Response>`。動的セグメントがあれば `(request, ctx: { params: Promise<{ id: string }> })` で、`await ctx.params` は api ファイル側で行う。
-- 「コンテナを受け取って handler を返す関数」を export し、本番は共有の `todoContainer` を渡して作る。受け取る型は `Pick<TodoContainer, "listTodos">` のように使うものだけに絞る。
-  - WHY: テストでは `listTodosApi(createInMemoryTodoContainer())` で組み立て、共有のコンテナ（前のテストのデータが残る）に依存しない。
-- query / command は `infra/container.ts` で組み立てたコンテナからだけ受け取る。Repository を直接 new しない（テストで `createInMemoryTodoContainer` を使うのは除く）。WHY: 実装の切り替えとトランザクションの張り方を 1 か所で決める。
+- 各 api ファイルはクラス `<Verb><Noun>Api`（`ListTodosApi`・`GetTodoApi`・`CreateTodoApi`・`UpdateTodoApi`・`DeleteTodoApi`）を export する。コンストラクタで query / command を受け取り（型は `Pick<CreateTodoCommand, "execute">` のように execute だけ）、`handle` を Route Handler にする（Issue #123。ユーザー判断）。
+  - `handle` はアロー関数のプロパティ（`readonly handle = async (request) => { ... }`）にする。WHY: `export const POST = new CreateTodoApi(...).handle` のようにインスタンスから取り出して渡すと、メソッドでは `this` が外れる。
+  - 組み立てはファイルの最下部: `export const POST = new CreateTodoApi(new CreateTodoCommand(new PostgresTodoRepository(getDatabase().db))).handle;`。本番は常に Postgres（下の「永続化」）。
+    - WHY api ファイルで組み立てる（DI コンテナを置かない）: コンテナ（以前の `infra/container.ts`）は分かりにくい（ユーザー判断）。その API が何で動くかを、api ファイル 1 つで読める。
+    - WHY api ファイルごとに `new PostgresTodoRepository(getDatabase().db)` してよい: プールは `getDatabase` が `globalThis` に 1 つだけ持つので、Repository を api ファイルの数だけ作ってもプールは 1 つ。
+  - WHY クラス + コンストラクタ injection: application の query / command と同じ形にそろえる。テストは `new CreateTodoApi(new CreateTodoCommand(new InMemoryTodoRepository())).handle(request)` のように、空の InMemory のリポジトリで組み立てる（前のテストのデータに依存しない）。差し替えはコンストラクタで行い `vi.mock` は使わない（型で縛られ、query / command の形が変わればテストがコンパイルエラーになる）。
+- presentation の本番コードが参照してよい infra は、組み立てに使う自 feature の `infra/<名前>-repository.postgres` と `apps/backend/shared/infra/database` だけ（規則 `presentation`）。InMemory の実装（`*.in-memory`）と `schema` は参照しない。WHY: 本番の handler が InMemory で動くと、データが保存されないまま気づけない（Issue #59）。
 - エラーは自然言語の文言ではなく、安定したキー（`ErrorKey`）と params で表す（Issue #116。設計 (a)）。domain・application・presentation のどこにも画面に出す文言を書かない（`apps/backend` の非テストコードに日本語のリテラルを置かない。ログ・開発者向けの Error の message は英語）。
   - `ErrorResponse` は `{ error: { code, key, params?, issues? } }`（`message` は無い）。`issues` の各要素は `{ path, key, params? }`。画面（apps/frontend）が key と params を辞書で翻訳する。
   - WHY: 文言（言語・言い回し）は画面の関心で、backend が持つと言語を足すたび・言い回しを変えるたびに API を変えることになる。key は分岐にも翻訳にも使える機械可読な契約になる。
@@ -70,23 +74,21 @@ paths:
 - 読むだけ（副作用なし）は query、状態を変えるものは command に分ける。WHY: 副作用の有無をファイル名で見分ける。
 
 ## 永続化（Drizzle + Postgres）
-- アプリは常に Postgres（Drizzle + node-postgres）。InMemory（`todo-repository.in-memory.ts`・`InMemoryTransactionRunner`）はテスト用。
-  - `todoContainer` は常に `createPostgresTodoContainer(getDatabase().db)`。環境変数で InMemory に切り替える分岐は持たない（Issue #59）。WHY: 以前は `DATABASE_URL` が無いと InMemory に落ち、書き忘れでもデータが保存されないまま動いた。
-  - そのため `pnpm dev` の前にも `pnpm db:up` と `pnpm db:migrate` が要る。`container.ts` を読み込むテストは `.env` が要る（プールは作るが、接続は最初のクエリまで張らない）。
+- アプリは常に Postgres（Drizzle + node-postgres）。InMemory（`todo-repository.in-memory.ts`）はテスト用で、query / command のコンストラクタに渡す。
+  - api ファイルの本番の handler は常に `new PostgresTodoRepository(getDatabase().db)` で組み立てる。環境変数で InMemory に切り替える分岐は持たない（Issue #59）。WHY: 以前は `DATABASE_URL` が無いと InMemory に落ち、書き忘れでもデータが保存されないまま動いた。各 api ファイルのテストが、本番の handler が Postgres の Repository を呼ぶことを確かめる（prototype の spy。DB には接続しない）。
+  - そのため `pnpm dev` の前にも `pnpm db:up` と `pnpm db:migrate` が要る。api ファイルを読み込むテストは `.env` が要る（プールは作るが、接続は最初のクエリまで張らない）。
 - スキーマは feature ごとの `infra/schema.ts`（`apps/backend/features/<feature>/infra/schema.ts`。drizzle-kit の設定 `shared/drizzle/drizzle.config.ts` が glob で読む）に `pgTable` で宣言する（codebase-first）。SQL は `pnpm db:generate` で `apps/backend/shared/drizzle/` に生成し、`pnpm db:migrate` で当てる。生成済みの SQL は手で直さない。`drizzle-kit push` は使わない（SQL が残らずレビューも記録もできない）。手順はスキル `db-migration`。
   - schema は infra に置く（テーブルの形は永続化の都合で、domain は知らない）。Entity との変換は Repository の実装が行う。
-- `PostgresTodoRepository` は `Executor`（db かトランザクション）を受け取り、自分ではトランザクションを始めない（query は db、command は tx で同じ実装を使うため）。
+- `PostgresTodoRepository` はコンストラクタで `Database`（Drizzle の db）を受け取る。自分ではトランザクションを始めない。
 - DB の行から Entity に戻すときは `Todo.reconstruct`（コンストラクタが不変条件で検証する。行の型は Drizzle のスキーマが保証するので Repository では zod で parse しない）、利用者の入力からは `Todo.create` / `rename`。
   - 不変条件を満たさない行が 1 件あると、一覧（findAll）とその id への GET / PUT / DELETE はすべて 500 になり、画面からは直せず消せない（reviewer の実測、Issue #94）。直すのは DB 側（規則を変えたときはスキル `db-migration` でデータを先に移行する。手で入れた行は SQL で直す）。ログの id と理由で行を特定する。
   - 不変条件を満たさない行（規則を変えたのに移行していない・手で入れた行）は、Repository（`toTodo`）が DomainError ではない `Error`（id と違反の理由を message に、元の DomainError を cause に）にして投げ、API は 500。WHY: DomainError のままだと 400 になり、クライアントに直せない誤りを「リクエストの誤り」と伝える。500 なら `toErrorResponse` がログに残す。行を読み飛ばさない（不整合に気づけない）。
 - id 列は uuid。uuid の形でない id は DB に渡さず「無い」として扱う（Postgres のエラーで 500 になるのを防ぐ）。presentation も `z.uuid()` で弾くが、Repository の `isUuid` は自分の約束（無い id は undefined）を守る防御として残す。
-- command は一律トランザクション: `createTodoContainer` がすべての command を `TransactionRunner#run` で包む（query は包まない）。run は正常終了で commit、例外で rollback して投げ直す。command / query の本体は Repository を受け取るだけ。
-  - WHY: command は「全部成功するか、何も変えないか」。包む場所を 1 か所にして付け忘れを無くす。
-  - トランザクションの外の Repository で書き込まない（command には `repositoryFor(tx)` のものしか渡さない）。
-  - command の中で遅い処理（外部 API など）をしない（接続を 1 本占有する。接続待ちは `DATABASE_CONNECTION_TIMEOUT_MS` でエラーにする）。
-  - 入れ子にしない（command の中から `runner.run` を呼ばない）。Drizzle の runner は db から新しいトランザクションを始めるので外側の rollback で戻らず、InMemory の runner は前の run を待って止まる。
-  - 分離レベルは既定の READ COMMITTED（同時更新は後勝ち = lost update を許容）。防ぐ必要が出たら `SELECT ... FOR UPDATE` か分離レベルを Issue で検討する。
-  - InMemory の runner は run を 1 つずつ実行する。query は待たないので、実行中の command の途中の状態が見えることがある（WHY は `in-memory-transaction-runner.ts`）。
+- トランザクション: command を一律に包む仕組み（以前のトランザクションの runner と DI コンテナ）は持たない（Issue #123。ADR `docs/adr/architecture/20260929-constructor-injection-without-container.md`）。command はトランザクションを意識せずに書く。
+  - WHY 今は要らない: 今の command は書き込みが 1 文だけ（`save` の `INSERT ... ON CONFLICT DO UPDATE` か `delete`）で、Postgres は 1 文を原子的に実行する（途中まで書かれた状態は残らない）。
+  - 複数の書き込みが要る command が出たら、その command にトランザクションを扱う依存をコンストラクタで注入し、command の中で `db.transaction(async (tx) => ...)` の範囲を書く（包む場所を command ごとに明示する）。ただし今の規則では application から `Database`（`apps/backend/shared/infra/database`）と `drizzle-orm` を参照できない（規則 `application`・`core-to-persistence`）ので、依存の形（domain に interface を置くか、規則を変えるか）はその Issue で決める。
+  - command の中で遅い処理（外部 API など）をしない（トランザクションを張ったときに接続を 1 本占有する。接続待ちは `DATABASE_CONNECTION_TIMEOUT_MS` でエラーにする）。
+  - 分離レベルは既定の READ COMMITTED（読んでから書くまでの同時更新は後勝ち = lost update を許容。update / delete の command は findById と save / delete が別の文）。防ぐ必要が出たら `SELECT ... FOR UPDATE` か分離レベルを Issue で検討する。
 - 接続とプール（`database.ts`）: `pg.Pool` を `env` の値で作る（変数の一覧は `.claude/rules/env.md`）。アイドル中の接続のエラーは `pool.on("error")` で `logger.error` に出すだけ。プールは `globalThis` に 1 つ（`next dev` の HMR で増やさない）。終了時は `closeDatabase()`。値は開発・CI・E2E 用の暫定で、本番用は Issue #58。
 - テスト: 実 Postgres を使うテストは `createTestDatabase()` でファイルごとに別スキーマを使う（`.claude/rules/testing.md`）。
 
@@ -100,7 +102,7 @@ paths:
 
 ## 命名
 - ディレクトリ・ファイルは kebab-case。型は PascalCase（`TodoDto`）。
-- api ファイル・query・command は `<verb>-<noun>`（`list-todos`・`get-todo`・`create-todo`・`update-todo`・`delete-todo`）に役割の接尾辞（`.api.ts`・`.query.ts`・`.command.ts`・`.in-memory.ts`・`.postgres.ts`・`.test.ts`）。
+- api ファイル・query・command は `<verb>-<noun>`（`list-todos`・`get-todo`・`create-todo`・`update-todo`・`delete-todo`）に役割の接尾辞（`.api.ts`・`.query.ts`・`.command.ts`・`.in-memory.ts`・`.postgres.ts`・`.test.ts`）。クラス名は `<Verb><Noun>` に役割（`ListTodosApi`・`ListTodosQuery`・`CreateTodoCommand`）。Repository の実装は `<名前>-repository.<実装>.ts`（規則 `presentation` がファイル名 `*-repository.postgres` で組み立てに使う実装を見分ける）。
 
 ## 後で別プロセスに分けるとき
 `apps/backend` に起動口（`server.ts`）と script を足し、`apps/frontend/app/api/**` を消して Next の `rewrites` で `/api/*` を向ける。frontend の `@repo/backend` は型だけの依存になる。env・logger は `apps/shared` にあるので、両方のプロセスがそのまま使える（詳細は ADR `docs/adr/architecture/20260928-monorepo-apps-frontend-backend.md`）。

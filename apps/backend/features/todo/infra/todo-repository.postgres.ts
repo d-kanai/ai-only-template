@@ -1,5 +1,5 @@
 import { asc, eq } from "drizzle-orm";
-import type { Executor } from "../../../shared/infra/database";
+import type { Database } from "../../../shared/infra/database";
 import { Todo } from "../domain/todo";
 import type { TodoRepository } from "../domain/todo-repository";
 import { todos } from "./schema";
@@ -49,10 +49,13 @@ function toTodo(row: TodoRow): Todo {
 }
 
 // TodoRepository の Postgres 実装（Drizzle）。
-// WHY executor を受け取る: 同じ実装を、query ではトランザクションの外（db）で、command ではトランザクションの中（tx）で
-//   使うため。どちらを渡すかは infra/container.ts が決める（リポジトリはトランザクションを始めない）。
+// WHY db（Database）をコンストラクタで受け取る: プールは getDatabase が globalThis に 1 つだけ持ち、api ファイルが
+//   `new PostgresTodoRepository(getDatabase().db)` と組み立てる（Issue #123）。テストはテスト用のスキーマの db を渡す。
+// WHY トランザクションを張らない: 今の command は書き込みが 1 文（save の INSERT ... ON CONFLICT か delete）だけで、
+//   Postgres は 1 文を原子的に実行する。複数の書き込みが要る command が出たら、その command にトランザクションを扱う依存を
+//   注入する（.claude/rules/backend.md の「永続化（Drizzle + Postgres）」。ADR architecture/20260929-constructor-injection-without-container.md）。
 export class PostgresTodoRepository implements TodoRepository {
-  constructor(private readonly executor: Executor) {}
+  constructor(private readonly db: Database) {}
 
   // WHY 作成日時の昇順で返す: TodoRepository は順序を約束しない（並べ替えは ListTodosQuery が行う）が、
   //   DB は ORDER BY が無いと返す順が決まらない。毎回同じ順で返すため、並び順をここで決める。
@@ -60,7 +63,7 @@ export class PostgresTodoRepository implements TodoRepository {
   //   （行の物理的な位置や実行計画で変わりうる）。一意な id で並べれば、同じ時刻の行どうしの順序も毎回固定される
   //   （ListTodosQuery の並べ替えは安定ソートなので、この順が一覧の順になる）。
   async findAll(): Promise<Todo[]> {
-    const rows = await this.executor
+    const rows = await this.db
       .select()
       .from(todos)
       .orderBy(asc(todos.createdAt), asc(todos.id));
@@ -77,10 +80,7 @@ export class PostgresTodoRepository implements TodoRepository {
     if (!isUuid(id)) {
       return undefined;
     }
-    const rows = await this.executor
-      .select()
-      .from(todos)
-      .where(eq(todos.id, id));
+    const rows = await this.db.select().from(todos).where(eq(todos.id, id));
     const row = rows[0];
     return row === undefined ? undefined : toTodo(row);
   }
@@ -89,7 +89,7 @@ export class PostgresTodoRepository implements TodoRepository {
   //   先に存在を確かめてから INSERT / UPDATE を分けると、問い合わせが 2 回になり、間に別の保存が入る余地もできる。
   // WHY 上書きするのは title と completed だけ: 作成日時は作った後で変わらない（Todo に変える操作が無い）。
   async save(todo: Todo): Promise<void> {
-    await this.executor
+    await this.db
       .insert(todos)
       .values({
         id: todo.id,
@@ -108,6 +108,6 @@ export class PostgresTodoRepository implements TodoRepository {
     if (!isUuid(id)) {
       return;
     }
-    await this.executor.delete(todos).where(eq(todos.id, id));
+    await this.db.delete(todos).where(eq(todos.id, id));
   }
 }
