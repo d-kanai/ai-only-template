@@ -21,8 +21,10 @@ import { DomainError } from "../../shared/domain/domain-error";
 //   （Issue #94 で撤回した分け方）。規則はいつも全体で当てる。
 function todoTitleSchema() {
   const maxLength = 100;
+  // WHY 文字列でないときの message も付ける: todoPropsSchema の「zod の既定の文言を domain の外に出さない」に
+  //   そろえる。この経路を通るのは型を as で偽ったときだけ（presentation は z.string で弾き、DB の列は NOT NULL text）。
   return z
-    .string()
+    .string({ error: "タイトルが不正です" })
     .trim()
     .refine((title) => Array.from(title).length >= 1, {
       error: "タイトルを入力してください",

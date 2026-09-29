@@ -148,6 +148,21 @@ describe("Todo.reconstruct", () => {
   const VALID_ID = "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e";
   const CREATED_AT = new Date("2026-09-28T00:00:00.000Z");
 
+  // WHY 型に反する値を as で渡す: 型の上では string しか渡せないが、文字列でない値の message も日本語に固定する
+  //   （zod の既定の英語の文言を domain の外に出さない。todo.ts の todoTitleSchema のコメント）。
+  test("title が文字列でなければ validation_error を投げる", () => {
+    expectValidationError(
+      () =>
+        Todo.reconstruct({
+          id: VALID_ID,
+          title: undefined as unknown as string,
+          completed: false,
+          createdAt: CREATED_AT,
+        }),
+      "タイトルが不正です",
+    );
+  });
+
   test("保存済みの値（id・title・completed・作成日時）をそのまま持つ Todo を作る", () => {
     const todo = Todo.reconstruct({
       id: VALID_ID,

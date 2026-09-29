@@ -170,7 +170,7 @@ tsconfig.json                           # Vitest とリポジトリ全体の型�
 ## 常に全体を検証する・restore を reconstruct に改名（Issue #94）
 - ユーザーの判断: 口ごとに検証の範囲を分けず、`Todo` の private コンストラクタが毎回 `todoPropsSchema`（全フィールド）で検証する。「Todo 型の値 = 不変条件を満たす値」を常に成り立たせる方が単純。規則を変えるときは既存のデータを移行（スキル `db-migration`）して追従する。
 - 改名: `Todo.restore` → `Todo.reconstruct`（DB の行から Entity を再構成する口）。`InMemoryTodoRepository#restore(snapshot)`（トランザクションの rollback の代わりに snapshot の時点へ戻す）は別の意味で、`snapshot` と対の名前なので変えていない。
-- DB の行が不変条件を満たさないとき: `PostgresTodoRepository` の `toTodo` が DomainError ではない `Error` にして投げ、API は 500（`internal_error`、ログに id と違反の理由）。400 にしない理由は、クライアントに直せないサーバ側のデータの不整合だから。
+- DB の行が不変条件を満たさないとき: `PostgresTodoRepository` の `toTodo` が DomainError ではない `Error` にして投げ、API は 500（`internal_error`、ログに id と違反の理由）。400 にしない理由は、クライアントに直せないサーバ側のデータの不整合だから。影響（reviewer が Postgres で実測）: 満たさない行が 1 件あると、一覧とその id への GET / PUT / DELETE がすべて 500 になり、画面からは直せず消せない。直すのは DB 側（`db-migration` でデータを先に移行するか、SQL で直す）。
 - 採用しなかった案: DomainError(validation_error) のまま 400 にする（クライアントに直せない誤りを入力の誤りと伝える）。不正な行を一覧から読み飛ばす（データが消えたように見え、不整合に気づけない）。
 - presentation のテスト（get / update / delete）は、以前は uuid の形でない id の Todo を `restore` でリポジトリに置き「あっても 404」を見ていた。そうした Todo は作れなくなったので、Repository のメソッドの spy が呼ばれないこと（`parseUuidParam` が query / command に渡す前に 404 にする）で確かめる。
 
