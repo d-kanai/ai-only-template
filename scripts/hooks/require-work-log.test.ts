@@ -15,7 +15,7 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // Stop フック（scripts/hooks/require-work-log.sh）の仕様。Issue #64。
-// このターンでツールを使ったのに、その日の作業ログ（work-logs/<今日>.md）が作業ツリーでも今日のコミットでも変わっていなければ、
+// このターンでツールを使ったのに、その日の作業ログ（docs/work-logs/<今日>.md）が作業ツリーでも今日のコミットでも変わっていなければ、
 // {"decision":"block"} で停止を拒否する。WHY と限界は .claude/rules/work-log.md。
 
 const scriptPath = resolve(import.meta.dirname, "require-work-log.sh");
@@ -41,7 +41,7 @@ const turnStart = new Date(now.getTime() - 60_000);
 // このターンより前だが今日（通常は）のコミットの日時。git の raw 形式（<unix 秒> <タイムゾーン>）で渡す。
 // 限界: 0 時の直後 2 分以内に実行すると昨日の日付になるが、その場合も期待値（拒否）は同じ。
 const beforeTurnGitDate = `${Math.floor(turnStart.getTime() / 1000) - 60} +0000`;
-const todayLog = `work-logs/${today}.md`;
+const todayLog = `docs/work-logs/${today}.md`;
 
 type Entry = Record<string, unknown>;
 
@@ -223,8 +223,8 @@ describe("require-work-log.sh（Stop フック）", () => {
     writeFileSync(join(home, "gitconfig"), "");
     git(["init", "-q", "-b", "main"]);
     writeRepoFile("README.md", "readme\n");
-    writeRepoFile(`work-logs/${yesterday}.md`, "# 昨日\n");
-    // 最初のコミットは昨日の日付にする（今日のコミットに work-logs/<今日>.md が無い状態から始める）。
+    writeRepoFile(`docs/work-logs/${yesterday}.md`, "# 昨日\n");
+    // 最初のコミットは昨日の日付にする（今日のコミットに docs/work-logs/<今日>.md が無い状態から始める）。
     const yesterdayDate = `${yesterday}T12:00:00`;
     commit("init", {
       GIT_AUTHOR_DATE: yesterdayDate,
@@ -262,7 +262,7 @@ describe("require-work-log.sh（Stop フック）", () => {
     });
 
     it("このターンに別のファイルだけをコミットした（ログはコミットしていない）なら拒否する", () => {
-      // コミット側の判定は work-logs/<今日>.md に絞る（-- "$log"）。絞らないと、このターンのどのコミットでも通ってしまう。
+      // コミット側の判定は docs/work-logs/<今日>.md に絞る（-- "$log"）。絞らないと、このターンのどのコミットでも通ってしまう。
       writeTranscript(turnWithTool());
       writeRepoFile("src.ts", "x\n");
       commit("code");
@@ -305,7 +305,7 @@ describe("require-work-log.sh（Stop フック）", () => {
       expectBlocked(run(stopInput()));
     });
 
-    it("ツールを使ったのに work-logs/<今日>.md が作業ツリーでもコミットでも変わっていなければ、block と理由を返す", () => {
+    it("ツールを使ったのに docs/work-logs/<今日>.md が作業ツリーでもコミットでも変わっていなければ、block と理由を返す", () => {
       writeTranscript(turnWithTool());
       expectBlocked(run(stopInput()));
     });
@@ -343,14 +343,14 @@ describe("require-work-log.sh（Stop フック）", () => {
       expectBlocked(run(stopInput()));
     });
 
-    it("変更されたのが昨日の work-logs だけなら拒否する", () => {
+    it("変更されたのが昨日の作業ログだけなら拒否する", () => {
       writeTranscript(turnWithTool());
-      writeRepoFile(`work-logs/${yesterday}.md`, "# 昨日\n追記\n");
+      writeRepoFile(`docs/work-logs/${yesterday}.md`, "# 昨日\n追記\n");
       writeRepoFile("src.ts", "x\n");
       expectBlocked(run(stopInput()));
     });
 
-    it("work-logs/<今日>.md が、今日だが最後の人間のターンより前のコミットでしか変わっていなければ拒否する", () => {
+    it("docs/work-logs/<今日>.md が、今日だが最後の人間のターンより前のコミットでしか変わっていなければ拒否する", () => {
       // 1 日の中で 1 度ログをコミットすると、以後のターンが素通りしていた（Issue #64 の worker の実測で 66 件）。
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# 今日\n");
@@ -374,7 +374,7 @@ describe("require-work-log.sh（Stop フック）", () => {
       expect(result.stderr).toContain("今日の 0 時を起点にして判定する");
     });
 
-    it("work-logs/<今日>.md が昨日の日付のコミットにしか無ければ拒否する", () => {
+    it("docs/work-logs/<今日>.md が昨日の日付のコミットにしか無ければ拒否する", () => {
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# 今日\n");
       const yesterdayDate = `${yesterday}T13:00:00`;
@@ -396,7 +396,22 @@ describe("require-work-log.sh（Stop フック）", () => {
       );
     });
 
-    it("cwd がリポジトリのサブディレクトリでも、リポジトリ直下の work-logs/<今日>.md で判定する", () => {
+    // WHY 旧い置き場所を must reject に置く: Issue #101 で work-logs/ を docs/ の下に移した。旧い置き場所に書いたログで
+    //   通すと、リポジトリ直下に作り直した旧いディレクトリに書く誤りを見逃す。
+    it("旧い置き場所（リポジトリ直下の work-logs/<今日>.md）にこのターンで書いただけなら拒否する", () => {
+      writeTranscript(turnWithTool());
+      writeRepoFile(`work-logs/${today}.md`, "# 旧い置き場所\n");
+      expectBlocked(run(stopInput()));
+    });
+
+    it("旧い置き場所（リポジトリ直下の work-logs/<今日>.md）をこのターンでコミットしただけなら拒否する", () => {
+      writeTranscript(turnWithTool());
+      writeRepoFile(`work-logs/${today}.md`, "# 旧い置き場所\n");
+      commit("old log");
+      expectBlocked(run(stopInput()));
+    });
+
+    it("cwd がリポジトリのサブディレクトリでも、リポジトリ直下の docs/work-logs/<今日>.md で判定する", () => {
       writeTranscript(turnWithTool());
       mkdirSync(join(repo, "sub"));
       expectBlocked(run(stopInput({ cwd: join(repo, "sub") })));
@@ -430,13 +445,13 @@ describe("require-work-log.sh（Stop フック）", () => {
       },
     );
 
-    it("work-logs/<今日>.md が作業ツリーで新しく作られていれば（未追跡）許可する", () => {
+    it("docs/work-logs/<今日>.md が作業ツリーで新しく作られていれば（未追跡）許可する", () => {
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# 今日\n");
       expectAllowed(run(stopInput()));
     });
 
-    it("コミット済みの work-logs/<今日>.md が作業ツリーで変更されていれば許可する", () => {
+    it("コミット済みの docs/work-logs/<今日>.md が作業ツリーで変更されていれば許可する", () => {
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# 今日\n");
       commit("log", {
@@ -447,14 +462,14 @@ describe("require-work-log.sh（Stop フック）", () => {
       expectAllowed(run(stopInput()));
     });
 
-    it("work-logs/<今日>.md の変更がステージ済みなら許可する", () => {
+    it("docs/work-logs/<今日>.md の変更がステージ済みなら許可する", () => {
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# 今日\n");
       git(["add", todayLog]);
       expectAllowed(run(stopInput()));
     });
 
-    it("work-logs/<今日>.md が最後の人間のターン以降のコミットで変更されていれば（作業ツリーはきれいでも）許可する", () => {
+    it("docs/work-logs/<今日>.md が最後の人間のターン以降のコミットで変更されていれば（作業ツリーはきれいでも）許可する", () => {
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# 今日\n");
       commit("log");
@@ -493,7 +508,7 @@ describe("require-work-log.sh（Stop フック）", () => {
       expect(result.stderr).toContain("今日の 0 時を起点にして判定する");
     });
 
-    it("cwd がリポジトリのサブディレクトリでも、リポジトリ直下の work-logs/<今日>.md の変更を見て許可する", () => {
+    it("cwd がリポジトリのサブディレクトリでも、リポジトリ直下の docs/work-logs/<今日>.md の変更を見て許可する", () => {
       writeTranscript(turnWithTool());
       mkdirSync(join(repo, "sub"));
       writeRepoFile(todayLog, "# 今日\n");

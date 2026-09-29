@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // CI の PR で作業ログの追記を必須にするスクリプト（scripts/hooks/check-work-logs-diff.sh <base-ref>）の仕様。Issue #64。
-// `git diff --name-only <base-ref>...HEAD` に work-logs/ の .md が 1 件以上あれば exit 0、無ければ理由を出して exit 1。
+// `git diff --name-only <base-ref>...HEAD` に docs/work-logs/ の .md が 1 件以上あれば exit 0、無ければ理由を出して exit 1。
 // CI の ci.yml に組み込まれていることは rule-tests/work-logs-check.test.ts が検査する。
 
 const scriptPath = resolve(import.meta.dirname, "check-work-logs-diff.sh");
@@ -68,7 +68,7 @@ describe("check-work-logs-diff.sh", () => {
     };
     git(["init", "-q", "-b", "main"]);
     commitFiles(
-      { "README.md": "readme\n", "work-logs/2026-09-27.md": "# 27\n" },
+      { "README.md": "readme\n", "docs/work-logs/2026-09-27.md": "# 27\n" },
       "init",
     );
     git(["checkout", "-q", "-b", "work"]);
@@ -79,24 +79,27 @@ describe("check-work-logs-diff.sh", () => {
   });
 
   describe("通す（must pass）", () => {
-    it("work-logs/ に .md を足した PR は 0 で終わる", () => {
-      commitFiles({ "src.ts": "x\n", "work-logs/2026-09-28.md": "# 28\n" });
+    it("docs/work-logs/ に .md を足した PR は 0 で終わる", () => {
+      commitFiles({
+        "src.ts": "x\n",
+        "docs/work-logs/2026-09-28.md": "# 28\n",
+      });
       const result = run(["main"]);
       expect(result.status).toBe(0);
     });
 
-    it("既存の work-logs/*.md に追記しただけの PR も 0 で終わる", () => {
-      commitFiles({ "work-logs/2026-09-27.md": "# 27\n追記\n" });
+    it("既存の docs/work-logs/*.md に追記しただけの PR も 0 で終わる", () => {
+      commitFiles({ "docs/work-logs/2026-09-27.md": "# 27\n追記\n" });
       expect(run(["main"]).status).toBe(0);
     });
 
-    it("work-logs/ のサブディレクトリの .md も数える", () => {
-      commitFiles({ "work-logs/2026/09-28.md": "# 28\n" });
+    it("docs/work-logs/ のサブディレクトリの .md も数える", () => {
+      commitFiles({ "docs/work-logs/2026/09-28.md": "# 28\n" });
       expect(run(["main"]).status).toBe(0);
     });
 
-    it("base が PR の後に work-logs を変えずに進んでいても、PR 側の work-logs の変更で 0 になる", () => {
-      commitFiles({ "work-logs/2026-09-28.md": "# 28\n" });
+    it("base が PR の後に作業ログを変えずに進んでいても、PR 側の作業ログの変更で 0 になる", () => {
+      commitFiles({ "docs/work-logs/2026-09-28.md": "# 28\n" });
       git(["checkout", "-q", "main"]);
       commitFiles({ "other.ts": "y\n" });
       git(["checkout", "-q", "work"]);
@@ -109,13 +112,21 @@ describe("check-work-logs-diff.sh", () => {
       // --no-renames: 利用者の diff.renames の設定に左右されず、名前の変更を常に「削除 + 追加」として扱う。
       //   rename の検出が効くと R になり --diff-filter=AM で外れる（設定で結果が変わる）。
       // 限界: 中身を足していない名前の変更でも通る（.claude/rules/work-log.md）。
-      git(["mv", "work-logs/2026-09-27.md", "work-logs/2026-09-26.md"]);
+      git([
+        "mv",
+        "docs/work-logs/2026-09-27.md",
+        "docs/work-logs/2026-09-26.md",
+      ]);
       git(["commit", "-q", "-m", "rename log"]);
       expect(run(["main"]).status).toBe(0);
     });
 
     it("diff.renames=false の設定でも結果が同じ（0）", () => {
-      git(["mv", "work-logs/2026-09-27.md", "work-logs/2026-09-26.md"]);
+      git([
+        "mv",
+        "docs/work-logs/2026-09-27.md",
+        "docs/work-logs/2026-09-26.md",
+      ]);
       git(["commit", "-q", "-m", "rename log"]);
       git(["config", "diff.renames", "false"]);
       expect(run(["main"]).status).toBe(0);
@@ -123,32 +134,44 @@ describe("check-work-logs-diff.sh", () => {
   });
 
   describe("落とす（must reject）", () => {
-    it("work-logs の変更が無い PR は 1 で終わり、理由を stderr に出す", () => {
+    it("作業ログの変更が無い PR は 1 で終わり、理由を stderr に出す", () => {
       commitFiles({ "src.ts": "x\n" });
       const result = run(["main"]);
       expect(result.status).toBe(1);
-      expect(result.stderr).toContain("work-logs/");
+      expect(result.stderr).toContain("docs/work-logs/");
       expect(result.stderr).toContain("main...HEAD");
     });
 
-    it("work-logs 以外の .md だけを変えた（文書だけの）PR も 1 で終わる", () => {
+    it("作業ログ以外の .md だけを変えた（文書だけの）PR も 1 で終わる", () => {
       commitFiles({ "docs/adr/x.md": "# doc\n", "README.md": "changed\n" });
       expect(run(["main"]).status).toBe(1);
     });
 
-    it("work-logs/ の .md を削除しただけの PR は 1 で終わる（追加・変更だけを数える）", () => {
-      git(["rm", "-q", "work-logs/2026-09-27.md"]);
+    it("docs/work-logs/ の .md を削除しただけの PR は 1 で終わる（追加・変更だけを数える）", () => {
+      git(["rm", "-q", "docs/work-logs/2026-09-27.md"]);
       git(["commit", "-q", "-m", "remove log"]);
       expect(run(["main"]).status).toBe(1);
     });
 
-    it("work-logs/ の .md 以外のファイル（work-logs/x.txt）だけなら 1 で終わる", () => {
-      commitFiles({ "work-logs/x.txt": "x\n" });
+    it("docs/work-logs/ の .md 以外のファイル（docs/work-logs/x.txt）だけなら 1 で終わる", () => {
+      commitFiles({ "docs/work-logs/x.txt": "x\n" });
       expect(run(["main"]).status).toBe(1);
     });
 
-    it("別のディレクトリの work-logs/（apps/work-logs/a.md）は数えない", () => {
-      commitFiles({ "apps/work-logs/a.md": "x\n" });
+    it("別のディレクトリの docs/work-logs/（apps/docs/work-logs/a.md）は数えない", () => {
+      commitFiles({ "apps/docs/work-logs/a.md": "x\n" });
+      expect(run(["main"]).status).toBe(1);
+    });
+
+    // WHY 旧い置き場所を must reject に置く: Issue #101 で work-logs/ を docs/ の下に移した。旧い置き場所のログを数えると、
+    //   リポジトリ直下に作り直した旧いディレクトリに書く誤りを CI が見逃す。
+    it("旧い置き場所（リポジトリ直下の work-logs/）の .md だけなら 1 で終わる", () => {
+      commitFiles({ "work-logs/2026-09-28.md": "# 28\n" });
+      expect(run(["main"]).status).toBe(1);
+    });
+
+    it("docs/work-logs の前方一致のディレクトリ（docs/work-logs-old/）の .md だけなら 1 で終わる", () => {
+      commitFiles({ "docs/work-logs-old/a.md": "x\n" });
       expect(run(["main"]).status).toBe(1);
     });
 
@@ -157,19 +180,22 @@ describe("check-work-logs-diff.sh", () => {
       //   --diff-filter=AM で外れて 1 になる（二点に壊しても落ちない）。変更（M）なら二点では数えてしまい 0 になる。
       commitFiles({ "src.ts": "x\n" });
       git(["checkout", "-q", "main"]);
-      commitFiles({ "work-logs/2026-09-27.md": "# 27\nmain で追記\n" });
+      commitFiles({ "docs/work-logs/2026-09-27.md": "# 27\nmain で追記\n" });
       git(["checkout", "-q", "work"]);
       expect(run(["main"]).status).toBe(1);
     });
 
-    it("作業ツリーにある未コミットの work-logs の変更は数えない（PR の差分だけを見る）", () => {
+    it("作業ツリーにある未コミットの作業ログの変更は数えない（PR の差分だけを見る）", () => {
       commitFiles({ "src.ts": "x\n" });
-      writeFileSync(join(repo, "work-logs/2026-09-28.md"), "# 未コミット\n");
+      writeFileSync(
+        join(repo, "docs/work-logs/2026-09-28.md"),
+        "# 未コミット\n",
+      );
       expect(run(["main"]).status).toBe(1);
     });
 
     it("base-ref が存在しなければ 0 以外で終わる（差分を取れないまま通さない）", () => {
-      commitFiles({ "work-logs/2026-09-28.md": "# 28\n" });
+      commitFiles({ "docs/work-logs/2026-09-28.md": "# 28\n" });
       const result = run(["origin/nope"]);
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("origin/nope");

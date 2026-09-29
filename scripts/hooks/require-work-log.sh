@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Claude Code の Stop フック（.claude/settings.json の hooks.Stop から呼ぶ）。Issue #64。
 #
-# WHAT: このターン（最後の人間の発言以降）にツールを使ったのに、その日の作業ログ work-logs/<今日>.md が
+# WHAT: このターン（最後の人間の発言以降）にツールを使ったのに、その日の作業ログ docs/work-logs/<今日>.md が
 #   作業ツリー（未追跡・ステージ済みを含む）でも、このターンの間のコミット（最後の人間の発言の timestamp 以降）でも
 #   変わっていなければ、
 #   {"decision":"block","reason":...} を stdout に出して停止を拒否する（Claude はログを書いてから止まり直す）。
@@ -123,8 +123,9 @@ if ! root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null); then
   exit 0
 fi
 
-# 日付はローカルのタイムゾーン（date +%F）。work-logs/ のファイル名を付けるときと同じ規則にする（限界は .claude/rules/work-log.md）。
-log="work-logs/$(date +%F).md"
+# 日付はローカルのタイムゾーン（date +%F）。docs/work-logs/ のファイル名を付けるときと同じ規則にする（限界は .claude/rules/work-log.md）。
+# 置き場所は Issue #101 でリポジトリ直下の work-logs/ から docs/work-logs/ に移した（旧い置き場所のログでは通さない）。
+log="docs/work-logs/$(date +%F).md"
 
 # 起点は最後の人間のターンの時刻。timestamp が取れないときだけ今日の 0 時にフォールバックする
 # （止め続けないように緩い方へ倒す。理由は stderr）。
@@ -144,7 +145,7 @@ if [ -n "$(git -C "$root" status --porcelain -- "$log")" ]; then
     exit 0
   fi
 fi
-# このターンの間のコミットでの変更（コミットの日時が起点以降で、work-logs/<今日>.md を変えたもの）。「ログを追記 → コミット」まで
+# このターンの間のコミットでの変更（コミットの日時が起点以降で、docs/work-logs/<今日>.md を変えたもの）。「ログを追記 → コミット」まで
 # 済ませた後の停止を通すため。-- "$log" で絞る（このターンのほかのコミットでは通さない）。
 # WHY コミットも見る: この環境のユーザー側の Stop フックは未コミットの変更があると止めるので、ログはコミットしてから止まる。
 #   作業ツリーだけを見ると、コミットした後に必ずこのフックで止まってしまう。
