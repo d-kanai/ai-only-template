@@ -2112,6 +2112,13 @@ const RULE_EXAMPLES: Record<
   },
   application: {
     violating: [
+      // Issue #98: "../../shared/..." は features/shared/（別の feature）を指す（domain の例と同じ。backend/shared は
+      //   "../../../shared/..."）。
+      [
+        "apps/backend/features/todo/application/x.ts",
+        "../../shared/application/x",
+        "value",
+      ],
       [
         "apps/backend/features/todo/application/x.ts",
         "../infra/container",
@@ -2181,6 +2188,19 @@ const RULE_EXAMPLES: Record<
   },
   presentation: {
     violating: [
+      // reviewer の指摘（Issue #98）: feature の名前が shared でも、自 feature の domain は型だけ（backend/shared の
+      //   domain と名前で取り違えない）。
+      [
+        "apps/backend/features/shared/presentation/x.api.ts",
+        "../domain/x",
+        "value",
+      ],
+      // Issue #98: "../../shared/..." は features/shared/（別の feature）を指す（backend/shared は "../../../shared/..."）。
+      [
+        "apps/backend/features/todo/presentation/x.api.ts",
+        "../../shared/presentation/http-error",
+        "value",
+      ],
       [
         "apps/backend/features/todo/presentation/x.api.ts",
         "../infra/todo-repository.in-memory",
@@ -2374,6 +2394,18 @@ const RULE_EXAMPLES: Record<
   },
   "backend-shared": {
     violating: [
+      // reviewer の指摘（Issue #98）: features/shared（shared という名前の feature）は backend/shared ではない。
+      //   層に属さない shared/drizzle/drizzle.config.ts も、この規則で features/ への参照を止める。
+      [
+        "apps/backend/shared/drizzle/drizzle.config.ts",
+        "../../features/shared/infra/schema",
+        "value",
+      ],
+      [
+        "apps/backend/shared/domain/x.ts",
+        "../../features/shared/domain/x",
+        "type",
+      ],
       [
         "apps/backend/shared/presentation/x.ts",
         "../../features/todo/domain/todo",
@@ -2546,6 +2578,12 @@ const PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/backend/shared/drizzle/meta/x.ts",
     "apps/backend/shared/drizzle/other.config.ts",
     "apps/backend/shared/drizzle/drizzle.config.ts.bak.ts",
+    // reviewer の指摘（Issue #98）: 例外は apps/backend/shared/drizzle/ 直下の設定だけ。features/shared/drizzle/（shared という
+    //   名前の feature）と、shared/drizzle/ の下の階層には広げない。
+    "apps/backend/features/shared/drizzle/drizzle.config.ts",
+    "apps/backend/shared/drizzle/sub/drizzle.config.ts",
+    "apps/backend/shared/drizzle/sub/x.ts",
+    "apps/backend/features/shared/x.ts",
   ],
   placed: [
     "apps/backend/features/todo/domain/todo.ts",
