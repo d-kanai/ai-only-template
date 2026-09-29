@@ -16,16 +16,33 @@ function isUuid(id: string): boolean {
 type TodoRow = typeof todos.$inferSelect;
 
 // 行 → Entity の変換。
-// WHY zod で parse しない（Issue #88）: 行の型（uuid・text・boolean・timestamptz の NOT NULL）は Drizzle のスキーマ
-//   （schema.ts）と DB の列の定義が保証し、TodoRow の型として届く。restore もタイトルの規則で検査しない
-//   （Todo.restore のコメント）ので、parse し直しても一覧の読み込みが遅くなるだけで守れるものが無い。
+// WHY Repository で zod の parse をしない: 行の型（uuid・text・boolean・timestamptz の NOT NULL）は Drizzle のスキーマ
+//   （schema.ts）と DB の列の定義が保証し、TodoRow の型として届く。値の規則（タイトルの長さ・id の形など）は
+//   Todo.reconstruct（完全コンストラクタ）が検証する（Issue #94）。
+// WHY 不変条件を満たさない行を DomainError ではない Error にする（API は 500 internal_error。Issue #94 で決めた）:
+//   DomainError(validation_error) のまま投げると presentation の toErrorResponse が 400 にし、「リクエストを直せば
+//   通る」とクライアントに伝えてしまう。保存済みのデータの不整合（規則を変えたのに移行していない、手で入れた行）は
+//   クライアントには直せないサーバ側の誤りで、直すのは運用（データの移行。スキル db-migration）。500 なら
+//   toErrorResponse が logger.error で 1 行残すので、どの行が何に違反したかをログで追える。
+// WHY message に id と違反の理由を入れる: logger は Error を { name, message } にし、cause は出さない。
+//   クライアントへの本文は固定の文言（toErrorResponse）なので、ここに書いた内容は外に出ない。
+// WHY 行を読み飛ばさない（一覧から黙って外さない）: データが消えたように見え、不整合に気づけない。
+// WHY cause に元の DomainError を持たせる: 例外を調べるとき（テスト・デバッガ）に元の例外をたどれるようにする。
 function toTodo(row: TodoRow): Todo {
-  return Todo.restore({
-    id: row.id,
-    title: row.title,
-    completed: row.completed,
-    createdAt: row.createdAt,
-  });
+  try {
+    return Todo.reconstruct({
+      id: row.id,
+      title: row.title,
+      completed: row.completed,
+      createdAt: row.createdAt,
+    });
+  } catch (error) {
+    // reconstruct が投げるのは不変条件の違反（DomainError）だけ（todo.ts の validate）。
+    throw new Error(
+      `保存済みの Todo（id: ${row.id}）が不変条件を満たしません: ${(error as Error).message}`,
+      { cause: error },
+    );
+  }
 }
 
 // TodoRepository の Postgres 実装（Drizzle）。

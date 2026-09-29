@@ -50,8 +50,8 @@ paths:
   - presentation は「形」だけ: 各 api ファイルにリクエストの zod スキーマを置き（`requestBodySchema({ 項目: z.string({ error: "..." }) })`）、`parseJsonBody(request, schema)` で読む。違反は `InvalidRequestError`（`issues` 付き）→ 400（`validation_error`、`ErrorResponse` の `error.issues` に `{ path, message }` の一覧）。型は `z.infer` でスキーマから導出する。
     - 未知のキーは拒否する（`z.strictObject`）。WHY: 部分更新で項目名を打ち間違えた本文が「何も変えない」200 に化ける。画面と API は同時に変えるので互換性の心配は無い。
     - 動的セグメントの `id` は `z.uuid()` で確かめ、形が違えば 404（`not_found`。無い Todo と同じ契約）。本文より先に確かめる。
-  - 値の中身の規則（例: `title` は前後の空白を除いて 1〜100 文字。文字数はコードポイント数で、zod の `.min` / `.max`（`String#length`）は使わない）は domain の zod スキーマ（`todo.ts` の `todoTitleSchema`）に一本化。`Todo.create` / `Todo#rename` がそれで検証し、違反は `DomainError("validation_error", message)` → 400（`issues` は付かない）。
-  - 完全コンストラクタ: `Todo` のコンストラクタは検証済みの値（`TodoProps` = `todoPropsSchema` の型）だけを受け取る。`create` は全体を、`rename` はタイトルを parse する。`restore`（DB の行）と `changeCompletion` は parse しない（WHY は `todo.ts` のコメント）。branded 型は使わない（restore で `as` が要るため）。
+  - 値の中身の規則（例: `title` は前後の空白を除いて 1〜100 文字。文字数はコードポイント数で、zod の `.min` / `.max`（`String#length`）は使わない）は domain の zod スキーマ（`todo.ts` の `todoTitleSchema`）に一本化。`Todo` のコンストラクタがそれで検証し、違反は `DomainError("validation_error", message)` → 400（`issues` は付かない）。
+  - 完全コンストラクタ: `Todo` の private コンストラクタが毎回、値のすべてを `todoPropsSchema`（Todo の不変条件）で検証する。`create` / `reconstruct`（DB の行）/ `rename` / `changeCompletion` はコンストラクタに値を渡すだけで、口ごとに検証の範囲を分けない（Issue #94。Issue #88 の「restore は検証しない」を撤回）。WHY: 「Todo 型の値 = 不変条件を満たす値」が常に成り立つ。規則を変えるときは既存のデータを移行（スキル `db-migration`）して追従する。branded 型は使わない（Todo 型そのものが不変条件を満たす値を表すため。`todo.ts` のコメント）。
   - スキーマは関数の中で作る（最上位の定数にしない）。WHY: static な変異になり mutation testing で数えない（`stryker.config.mjs` の `ignoreStatic`）。
   - WHY zod: 規則の宣言と型の導出を 1 か所にし、項目ごとの誤り（`issues`）をレスポンスに出せる。同じ規則を 2 か所に書くと片方だけ直してずれるので、presentation に値の規則は書かない（どちらもクライアントからは同じ 400）。経緯と採用しなかった案は `docs/architecture-decisions.md`。
 
@@ -65,7 +65,9 @@ paths:
 - スキーマは feature ごとの `infra/schema.ts` に `pgTable` で宣言する（codebase-first）。SQL は `pnpm db:generate` で生成し、`pnpm db:migrate` で当てる。生成済みの SQL は手で直さない。`drizzle-kit push` は使わない（SQL が残らずレビューも記録もできない）。手順はスキル `db-migration`。
   - schema は infra に置く（テーブルの形は永続化の都合で、domain は知らない）。Entity との変換は Repository の実装が行う。
 - `PostgresTodoRepository` は `Executor`（db かトランザクション）を受け取り、自分ではトランザクションを始めない（query は db、command は tx で同じ実装を使うため）。
-- DB の行から Entity に戻すときは `Todo.restore`（不変条件で検査しない。行の型は Drizzle のスキーマが保証するので zod でも parse しない）、利用者の入力からは `Todo.create` / `rename`。
+- DB の行から Entity に戻すときは `Todo.reconstruct`（コンストラクタが不変条件で検証する。行の型は Drizzle のスキーマが保証するので Repository では zod で parse しない）、利用者の入力からは `Todo.create` / `rename`。
+  - 不変条件を満たさない行が 1 件あると、一覧（findAll）とその id への GET / PUT / DELETE はすべて 500 になり、画面からは直せず消せない（reviewer の実測、Issue #94）。直すのは DB 側（規則を変えたときはスキル `db-migration` でデータを先に移行する。手で入れた行は SQL で直す）。ログの id と理由で行を特定する。
+  - 不変条件を満たさない行（規則を変えたのに移行していない・手で入れた行）は、Repository（`toTodo`）が DomainError ではない `Error`（id と違反の理由を message に、元の DomainError を cause に）にして投げ、API は 500。WHY: DomainError のままだと 400 になり、クライアントに直せない誤りを「リクエストの誤り」と伝える。500 なら `toErrorResponse` がログに残す。行を読み飛ばさない（不整合に気づけない）。
 - id 列は uuid。uuid の形でない id は DB に渡さず「無い」として扱う（Postgres のエラーで 500 になるのを防ぐ）。presentation も `z.uuid()` で弾くが、Repository の `isUuid` は自分の約束（無い id は undefined）を守る防御として残す。
 - command は一律トランザクション: `createTodoContainer` がすべての command を `TransactionRunner#run` で包む（query は包まない）。run は正常終了で commit、例外で rollback して投げ直す。command / query の本体は Repository を受け取るだけ。
   - WHY: command は「全部成功するか、何も変えないか」。包む場所を 1 か所にして付け忘れを無くす。

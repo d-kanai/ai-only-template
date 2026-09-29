@@ -156,7 +156,8 @@ tsconfig.json                           # Vitest とリポジトリ全体の型�
 ## 入力検証を zod に統一（Issue #88）
 - 経緯: 以前は「入力検証は手書き（ライブラリは入れない。規模が大きくなったら Issue で検討）」で、presentation が `typeof` で項目の型を、domain（`Todo`）が `if` でタイトルの規則を確かめていた。ユーザーの指示で zod 4.6.5（`apps/backend` の dependencies）に統一した。
 - 理由: 規則の宣言と型の導出を 1 か所にする（`z.infer` / `z.output` でリクエストの型と `TodoProps` をスキーマから作る）。項目ごとの誤りを `ErrorResponse` の `error.issues`（`{ path, message }` の一覧）としてレスポンスに出せる。
-- 分担は変えない: presentation は「形」（`requestBodySchema` = `z.strictObject`、動的セグメントの `id` は `z.uuid()`）、domain は「値の規則」（`todoTitleSchema`）。規則の置き場所・未知のキー・`restore`・`isUuid` の判断と WHY は `.claude/rules/backend.md` の「presentation」と各ファイルのコメント。
+- 分担は変えない: presentation は「形」（`requestBodySchema` = `z.strictObject`、動的セグメントの `id` は `z.uuid()`）、domain は「値の規則」（`todoTitleSchema`）。規則の置き場所・未知のキー・`isUuid` の判断と WHY は `.claude/rules/backend.md` の「presentation」と各ファイルのコメント。
+- 当時は `Todo.restore`（DB の行から組み立てる口）を検証せず、`rename` はタイトルだけ、`changeCompletion` は検証なし、と口ごとに検証の範囲を分けていた（規則を厳しくしたときに既存のデータの読み込みで失敗させないため）。Issue #94 で撤回した（次の節）。
 - 実測（zod 4.6.5、2026-09-29）:
   - `z.string().trim()` は値を置き換え、後の `refine` と parse の結果は trim 後の値になる。`.min` / `.max` は `String#length` なので、タイトルの文字数（コードポイント数）は `refine` と `Array.from` で数える（`"🍎".repeat(100)` は length 200）。
   - `z.strictObject(shape, { error })` の `error` は、そのオブジェクト自身の issue（`invalid_type` と `unrecognized_keys`）だけに当たり、項目の issue は項目のスキーマの `error` が決める。`unrecognized_keys` の issue は path が `[]` で、`keys` に未知のキーが入る。
@@ -165,6 +166,13 @@ tsconfig.json                           # Vitest とリポジトリ全体の型�
 - 採用しなかった案（比較は各プロジェクトの公式の説明による。性能・サイズは実測していない）:
   - valibot: 主な利点は関数単位の import によるバンドルの小ささで、サーバ側（`apps/backend`）だけで使う今は効かない。
   - ArkType: スキーマを TypeScript の型に似た文字列の DSL で書く独自の構文で、読み手の学習が要る。利点の検証の速さは、1 リクエスト数項目のこの規模では効かない。
+
+## 常に全体を検証する・restore を reconstruct に改名（Issue #94）
+- ユーザーの判断: 口ごとに検証の範囲を分けず、`Todo` の private コンストラクタが毎回 `todoPropsSchema`（全フィールド）で検証する。「Todo 型の値 = 不変条件を満たす値」を常に成り立たせる方が単純。規則を変えるときは既存のデータを移行（スキル `db-migration`）して追従する。
+- 改名: `Todo.restore` → `Todo.reconstruct`（DB の行から Entity を再構成する口）。`InMemoryTodoRepository#restore(snapshot)`（トランザクションの rollback の代わりに snapshot の時点へ戻す）は別の意味で、`snapshot` と対の名前なので変えていない。
+- DB の行が不変条件を満たさないとき: `PostgresTodoRepository` の `toTodo` が DomainError ではない `Error` にして投げ、API は 500（`internal_error`、ログに id と違反の理由）。400 にしない理由は、クライアントに直せないサーバ側のデータの不整合だから。影響（reviewer が Postgres で実測）: 満たさない行が 1 件あると、一覧とその id への GET / PUT / DELETE がすべて 500 になり、画面からは直せず消せない。直すのは DB 側（`db-migration` でデータを先に移行するか、SQL で直す）。
+- 採用しなかった案: DomainError(validation_error) のまま 400 にする（クライアントに直せない誤りを入力の誤りと伝える）。不正な行を一覧から読み飛ばす（データが消えたように見え、不整合に気づけない）。
+- presentation のテスト（get / update / delete）は、以前は uuid の形でない id の Todo を `restore` でリポジトリに置き「あっても 404」を見ていた。そうした Todo は作れなくなったので、Repository のメソッドの spy が呼ばれないこと（`parseUuidParam` が query / command に渡す前に 404 にする）で確かめる。
 
 ## 後で別プロセスに分けるとき
 1. `apps/backend` に起動口（`server.ts`。HTTP サーバと api ファイルの結線）と、その起動の script を足す。

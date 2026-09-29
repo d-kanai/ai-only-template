@@ -8,11 +8,13 @@ import {
   expect,
   test,
 } from "vitest";
+import { DomainError } from "../../shared/domain/domain-error";
 import {
   createTestDatabase,
   type TestDatabase,
 } from "../../shared/infra/database.test-support";
 import { Todo } from "../domain/todo";
+import { todos } from "./schema";
 import { PostgresTodoRepository } from "./todo-repository.postgres";
 
 // 実 Postgres（compose.yaml。`pnpm db:up` で起動）に対して実行する。
@@ -55,7 +57,7 @@ describe("PostgresTodoRepository", () => {
 
   // 並び順のテスト用に id を固定した Todo を作る（Todo.create の id は乱数で、id の大小が決まらないため）。
   function todoWith(id: string, title: string, createdAt: string): Todo {
-    return Todo.restore({
+    return Todo.reconstruct({
       id,
       title,
       completed: false,
@@ -175,6 +177,67 @@ describe("PostgresTodoRepository", () => {
 
     await expect(repository().findAll()).resolves.toEqual([kept]);
   });
+
+  // DB の行が Todo の不変条件を満たさない（手で入れた行・規則を変えたのに移行していない行）ときの扱い（Issue #94）。
+  // WHY DomainError ではなく Error を投げる（= API は 500）: DomainError(validation_error) は presentation で 400 になり、
+  //   「リクエストを直せば通る」とクライアントに伝える。DB のデータの不整合はクライアントには直せないサーバ側の誤り。
+  //   toEqual は Error の name・message・cause を比べるので、DomainError のまま投げる実装はこのテストで落ちる。
+  // 行は Todo を通さずに insert する（Todo は不変条件を満たさない値を作れない）。
+  const INVALID_ROWS = [
+    ["タイトルが空", { title: "" }, "タイトルを入力してください"],
+    [
+      "タイトルが 101 文字",
+      { title: "a".repeat(101) },
+      "タイトルは 100 文字以内で入力してください",
+    ],
+    [
+      "id の版の桁が 0（Postgres の uuid 型は受け付ける）",
+      { id: "8d0f4f39-6f0b-0a39-9d53-0a3f8b1c2d4e" },
+      "id が不正です",
+    ],
+  ] as const;
+
+  function invalidRow(override: { id?: string; title?: string }) {
+    return {
+      id: "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e",
+      title: "牛乳を買う",
+      completed: false,
+      createdAt: new Date("2026-09-28T00:00:00.000Z"),
+      ...override,
+    };
+  }
+
+  function corruptedRowError(id: string, message: string): Error {
+    return new Error(
+      `保存済みの Todo（id: ${id}）が不変条件を満たしません: ${message}`,
+      { cause: new DomainError("validation_error", message) },
+    );
+  }
+
+  test.each(INVALID_ROWS)(
+    "不変条件を満たさない行（%s）の findById は、DomainError ではない Error を投げる（API で 500 になるように）",
+    async (_label, override, message) => {
+      const row = invalidRow(override);
+      await database.db.insert(todos).values(row);
+
+      await expect(repository().findById(row.id)).rejects.toEqual(
+        corruptedRowError(row.id, message),
+      );
+    },
+  );
+
+  test.each(INVALID_ROWS)(
+    "不変条件を満たさない行（%s）が 1 行でもあれば、findAll は DomainError ではない Error を投げる",
+    async (_label, override, message) => {
+      const row = invalidRow(override);
+      await repository().save(Todo.create("卵を買う"));
+      await database.db.insert(todos).values(row);
+
+      await expect(repository().findAll()).rejects.toEqual(
+        corruptedRowError(row.id, message),
+      );
+    },
+  );
 
   test("トランザクションの executor を渡すと、その中で読み書きする", async () => {
     const todo = Todo.create("牛乳を買う");

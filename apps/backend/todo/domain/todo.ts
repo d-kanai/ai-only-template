@@ -14,13 +14,17 @@ import { DomainError } from "../../shared/domain/domain-error";
 // WHY 関数にする（スキーマを最上位の定数にしない）: 最上位の式は読み込み時にだけ評価される static な変異になり、
 //   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に作れば、上限や message の変異を
 //   テストで検出できる（Issue #55）。
-// WHY branded 型（TodoTitle）にしない: restore は保存済みの値を検証せずに受け取る（下の restore のコメント）ので、
-//   brand を付けるには as で「検証済み」と偽ることになる。Todo のコンストラクタは private で、値を作る口（create /
-//   rename / restore）が限られているので、Todo 型そのものが「口を通った値」であることを表している。
+// WHY branded 型（TodoTitle）にしない: Todo のコンストラクタは private で、どの口（create / reconstruct / rename /
+//   changeCompletion）もコンストラクタの検証（todoPropsSchema）を通る。Todo 型そのものが「不変条件を満たす値」で
+//   あることを表しているので、title だけに brand を付けても守れるものが増えない。
+// WHY todoPropsSchema の中でだけ使う: 口ごとに一部の項目だけを検証すると、どの口を通ったかで守られる規則が変わる
+//   （Issue #94 で撤回した分け方）。規則はいつも全体で当てる。
 function todoTitleSchema() {
   const maxLength = 100;
+  // WHY 文字列でないときの message も付ける: todoPropsSchema の「zod の既定の文言を domain の外に出さない」に
+  //   そろえる。この経路を通るのは型を as で偽ったときだけ（presentation は z.string で弾き、DB の列は NOT NULL text）。
   return z
-    .string()
+    .string({ error: "タイトルが不正です" })
     .trim()
     .refine((title) => Array.from(title).length >= 1, {
       error: "タイトルを入力してください",
@@ -30,26 +34,33 @@ function todoTitleSchema() {
     });
 }
 
-// Todo が持つ値のすべて（完全コンストラクタが受け取る値）の規則。
-// WHY create でタイトル以外（id・作成日時）も検証する: コンストラクタに渡る値がすべて規則を満たすことを 1 つのスキーマで
-//   宣言する。id は randomUUID で作るので常に満たすが、作成日時は引数で受け取れる（Invalid Date を渡せる）。
+// Todo が持つ値のすべて（完全コンストラクタが検証する値）の規則 = Todo の不変条件。
+// WHY タイトル以外（id・完了状態・作成日時）も規則に含める: どの口から来た値も、すべてが規則を満たすことを 1 つの
+//   スキーマで宣言する。create の id は randomUUID で常に満たすが、reconstruct は DB の行（Postgres の uuid 型は
+//   版の桁が 0 の値も受け付ける）を、create の作成日時は引数（Invalid Date を渡せる）を受け取る。
+// WHY 項目ごとに日本語の message を付ける: validate が最初の issue の message を DomainError の message にする。
+//   zod の既定の文言（英語で zod の語彙を含む）を domain の外に出さない。
+// WHY id は z.uuid()（RFC 9562 の形）: presentation の parseUuidParam と同じ形にそろえる。Todo の id は randomUUID（v4）で
+//   作るので必ず満たす（docs/architecture-decisions.md の「入力検証を zod に統一」の実測）。
 function todoPropsSchema() {
   return z.object({
-    id: z.uuid(),
+    id: z.uuid({ error: "id が不正です" }),
     title: todoTitleSchema(),
-    completed: z.boolean(),
+    completed: z.boolean({ error: "完了状態が不正です" }),
     createdAt: z.date({ error: "作成日時が不正です" }),
   });
 }
 
 // WHY 型をスキーマから導出する: 規則と型を 1 か所で宣言し、項目を足したときのずれを無くす。
-type TodoProps = z.output<ReturnType<typeof todoPropsSchema>>;
+// WHY 入力の型（z.input）にする: コンストラクタは検証する前の値を受け取る（出力の型と同じ形だが、「検証済み」を意味しない）。
+type TodoProps = z.input<ReturnType<typeof todoPropsSchema>>;
 
 // 規則で検証し、違反なら DomainError(validation_error) を投げる。
 // WHY ZodError をそのまま投げない: domain の外（presentation の toErrorResponse）は DomainError だけを見て 400 に変換する。
 //   zod を使っていることを domain の外に漏らさない。
 // WHY message は最初の issue: 失敗した safeParse の issues は必ず 1 件以上ある。タイトルの規則は同じ値で 1 つしか
-//   失敗しないので、最初の 1 件がそのまま理由になる。
+//   失敗しないので、最初の 1 件がそのまま理由になる。複数の項目が同時に違反するとき（id とタイトルなど）は
+//   スキーマの項目の順で最初のものになる。利用者の入力で違反しうるのはタイトルだけなので、1 件で足りる。
 function validate<Schema extends z.ZodType>(
   schema: Schema,
   value: z.input<Schema>,
@@ -66,11 +77,16 @@ function validate<Schema extends z.ZodType>(
 //   InMemory リポジトリは Todo をそのまま Map に保持するため、可変だと「取得した Todo を書き換えただけで
 //   save 前にリポジトリの中身が変わる」ことが起きる。不変にすれば状態が変わるのは save したときだけになり、
 //   DB に差し替えても同じ振る舞いになる。
-// 完全コンストラクタ: コンストラクタは検証済みの値（TodoProps）だけを受け取り、自分では検証しない。
-// WHY コンストラクタを private にする: 値を作る口を create / rename（todoPropsSchema・todoTitleSchema で検証する）と
-//   restore（保存済みの値。検証しない理由は restore のコメント）に限り、規則を通らない Todo が作られないようにする。
-// WHY コンストラクタで検証しない: restore（保存済みの値をそのまま受け取る）と changeCompletion（タイトルに触れない）で
-//   タイトルを検証し直さないため。検証するのは値が外から入る口（create / rename）だけにする。
+// 完全コンストラクタ: コンストラクタが毎回、値のすべてを不変条件（todoPropsSchema）で検証する（Issue #94）。
+//   create / reconstruct / rename / changeCompletion はコンストラクタに値を渡すだけで、自分では検証しない。
+// WHY 口によらず常に全体を検証する（口ごとに検証の範囲を分けない）: 「Todo 型の値 = 不変条件を満たす値」が
+//   いつも成り立ち、どの口を通ったかを考えずに済む（ユーザー判断、Issue #94）。
+//   以前（Issue #88）は reconstruct（当時の restore）は検証しない・rename はタイトルだけ・changeCompletion は検証しない、
+//   と分けていた。規則を厳しくしたときに既存のデータを読んだだけで失敗させないためだったが、その代わりに
+//   「規則を満たさない Todo」が存在しうる状態になっていた。
+//   規則を変えるときは、既存のデータを先に移行（スキル db-migration）して規則に追従させる。
+// WHY コンストラクタを private にする: 値を作る口を上の 4 つに限り、コンストラクタの検証を通らない Todo を作らせない。
+// WHY 検証の結果（parse した値）を持つ: タイトルは trim した値が規則の対象で、その値を保持する（todoTitleSchema のコメント）。
 export class Todo {
   readonly id: string;
   readonly title: string;
@@ -78,50 +94,41 @@ export class Todo {
   readonly createdAt: Date;
 
   private constructor(props: TodoProps) {
-    this.id = props.id;
-    this.title = props.title;
-    this.completed = props.completed;
-    this.createdAt = props.createdAt;
+    const valid = validate(todoPropsSchema(), props);
+    this.id = valid.id;
+    this.title = valid.title;
+    this.completed = valid.completed;
+    this.createdAt = valid.createdAt;
   }
 
   // WHY createdAt を引数で受け取れるようにする: 一覧の並び順（作成日時の昇順）をテストで
   //   決まった時刻で検証するため。通常は省略して現在時刻を使う。
   static create(title: string, createdAt: Date = new Date()): Todo {
-    return new Todo(
-      validate(todoPropsSchema(), {
-        id: randomUUID(),
-        title,
-        completed: false,
-        createdAt,
-      }),
-    );
+    return new Todo({ id: randomUUID(), title, completed: false, createdAt });
   }
 
   // 永続化した値から Todo を組み立て直す（Repository の実装が読み込みに使う）。
   // WHY create と分ける: create は新しい Todo を作る操作で、id と作成日時を自分で決め、未完了から始める。
   //   保存済みの Todo は id・完了状態・作成日時が決まっているので、それをそのまま受け取る口が要る
   //   （コンストラクタは private のため、Repository の実装から new できない）。
-  // WHY todoPropsSchema で parse しない（Issue #88 で決めた）:
-  //   - タイトルの規則: 値は保存するときに create / rename で検査済み。後から規則を厳しくした
-  //     （上限の文字数を減らすなど）ときに、既存のデータを読んだだけで例外になり一覧が 500 になるのを避ける。
-  //   - 型（id が文字列、completed が boolean、作成日時が Date）: DB の列の型と NOT NULL を Drizzle のスキーマ
-  //     （infra/schema.ts）が保証し、Repository は型の付いた行から渡す。一覧のたびに全行を parse し直す意味が無い。
-  //   そのため、利用者の入力から Todo を作るときには使わない（入力は create / rename を通す）。
+  // WHY 保存済みの値も検証する（Issue #94。Issue #88 の「検証しない」を撤回）: 他の口と同じく、コンストラクタが
+  //   不変条件で検証する。満たさない値（規則を厳しくしたのに移行していない行、手で入れた行）は
+  //   DomainError(validation_error) になる。それをどう扱うか（クライアントの誤りではないので 500）は
+  //   Repository の実装が決める（infra/todo-repository.postgres.ts の toTodo）。
   // WHY 引数をオブジェクトにする: 同じ型（string / boolean）の引数が並ぶので、順番の取り違えを防ぐ。
-  static restore(values: TodoProps): Todo {
+  static reconstruct(values: TodoProps): Todo {
     return new Todo(values);
   }
 
-  // WHY タイトルだけを検証する（todoPropsSchema で全体を parse しない）: 他の値は作ったとき（create）か保存済み（restore）の
-  //   もので、ここで変えない。全体を検証し直すと、restore した値に今の規則を当てることになる（restore のコメント）。
+  // WHY 他の値（id・完了状態・作成日時）を { ...this } で引き継ぐ: タイトルだけを変える操作。
+  //   引き継いだ値も含めてコンストラクタが全体を検証する。
   rename(title: string): Todo {
-    return new Todo({ ...this, title: validate(todoTitleSchema(), title) });
+    return new Todo({ ...this, title });
   }
 
   // WHY toggle（反転）ではなく値を受け取る: API は「完了にする / 未完了に戻す」を completed の値で指定する。
   //   反転だと同じリクエストを 2 回送ったときに結果が変わる（冪等でなくなる）。
-  // WHY タイトルを検証し直さない: 規則を厳しくした後の保存済みの Todo（restore したもの）でも、タイトルに触れない操作は
-  //   できるようにする。completed は型（boolean）だけが規則。
+  // completed の規則（boolean であること）も含めて、コンストラクタが全体を検証する。
   changeCompletion(completed: boolean): Todo {
     return new Todo({ ...this, completed });
   }
