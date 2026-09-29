@@ -1,0 +1,65 @@
+// Cloudflare Workers（wrangler）の設定（Issue #130）。OpenNext（@opennextjs/cloudflare）で next build の出力を Workers 用に変換し、
+// opennextjs-cloudflare preview（内部は wrangler dev。ローカルの workerd）/ deploy / upload がこのファイルを読む。
+// 形は OpenNext の get-started（https://opennext.js.org/cloudflare/get-started の「3. Create a wrangler configuration file」）に従う。
+// WHY apps/frontend に置く: get-started が「Next.js のアプリのルートディレクトリ」に置くとしている（package.json の scripts の
+//   preview / deploy / upload もここで実行する）。
+// JSONC なのでコメントを書ける（wrangler は wrangler.jsonc を JSONC として読む）。
+{
+  // $schema: エディタの補完・検査用のスキーマ。wrangler のパッケージに同梱されたもの（apps/frontend/node_modules/wrangler）を指す。
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // main: Worker の入口。opennextjs-cloudflare build が .open-next/worker.js に生成する。
+  //   WHY 変えない: get-started が「main と assets は、ビルドの出力を変えない限り変えない」としている。
+  "main": ".open-next/worker.js",
+  // name: Worker の名前（deploy 先の名前、下の services の自己参照の宛先）。
+  "name": "ai-only-template",
+  // compatibility_date: workerd の挙動をどの日付のものに合わせるか。
+  //   WHY 2026-09-20: 入れた wrangler 4.137.0 が使う workerd は 1.20260921.1（lockfile）で、その版の日付より前の最新に近い日付にした。
+  //   この日付で opennextjs-cloudflare build / preview が動くことを確かめた（2026-09-29、Issue #130）。
+  //   workerd の版より新しい日付を書いたときの挙動は未確認。OpenNext は 2024-09-23 以降を要求する（get-started）。
+  "compatibility_date": "2026-09-20",
+  "compatibility_flags": [
+    // nodejs_compat: Node.js の API（node:fs・node:path・process など）を Workers で使えるようにする。OpenNext の必須の設定
+    //   （get-started）。env.ts（apps/shared/env.ts）の node:fs / node:path もこれで読み込める。
+    //   https://developers.cloudflare.com/workers/configuration/compatibility-flags/#nodejs-compatibility-flag
+    "nodejs_compat",
+    // global_fetch_strictly_public: fetch() の宛先の扱いを変えるフラグ（意味は下の公式ドキュメント。この環境では挙動を確かめていない）。
+    //   WHY: get-started の設定例に含まれているので合わせている。サーバ側のコード（Route Handler・backend）は今 fetch() を使っていない
+    //   （apps/frontend/features/todo/api/todo-api.ts の fetch はブラウザから相対パスの /api を呼ぶもの）。
+    //   https://developers.cloudflare.com/workers/configuration/compatibility-flags/#global-fetch-strictly-public
+    "global_fetch_strictly_public"
+  ],
+  // assets: 静的ファイル（/_next/static など）の置き場所。opennextjs-cloudflare build が .open-next/assets に出力する。
+  //   binding の ASSETS は、Worker のコード（OpenNext の worker.js）から静的ファイルを取り出すための名前。
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  // services: Worker が自分自身を呼ぶための Service binding（WORKER_SELF_REFERENCE）。get-started の設定例に含まれるので合わせている
+  //   （OpenNext の中のどの処理が使うかは未確認）。
+  //   service は上の name と同じにする（get-started の「The service should match the "name" of your worker」）。
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "ai-only-template"
+    }
+  ],
+  // vars: Worker に渡す環境変数（平文）。OpenNext の worker が最初のリクエストで process.env に写す
+  //   （@opennextjs/cloudflare 1.20.6 の dist/cli/templates/init.js の populateProcessEnv）。env.ts（apps/shared/env.ts）の
+  //   必須の変数（Env）を置く。
+  // WHY ここに書く: Workers の実行時にはリポジトリ直下の .env を読めない（env.ts は pnpm-workspace.yaml を探して .env を読むが、
+  //   Worker のファイルシステムにはリポジトリのファイルが無い）。必須の変数が欠けると instrumentation の register で止まる。
+  // 注意: opennextjs-cloudflare build は、ビルドした時点のリポジトリ直下と apps/frontend の .env（.env.production・.env.local
+  //   なども）の値を .open-next/cloudflare/next-env.mjs に書き出して Worker に同梱し、vars に無い変数の既定値にする
+  //   （同パッケージの dist/cli/utils/extract-project-env-vars.js。2026-09-29 に実測）。.env に秘密を置いたまま build すると
+  //   Worker に入る。vars から変数を消しても、.env にあればその値で動く。
+  // WHY DATABASE_URL はダミー: Issue #130 は DB 無しで Workers 上の動作（画面・Route Handler・Proxy）を確かめる段階で、
+  //   Postgres には接続しない（接続先が無いので /api/todos の読み取りは失敗する）。本番の接続先（Hyperdrive など）は別 Issue で決め、
+  //   秘密の値は vars ではなく secret（wrangler secret put）で渡す。
+  // 残りの 3 つは .env.example と同じ値（WHY も .env.example）。
+  "vars": {
+    "DATABASE_URL": "postgres://u:p@127.0.0.1:5432/db",
+    "DATABASE_POOL_MAX": "10",
+    "DATABASE_POOL_IDLE_TIMEOUT_MS": "10000",
+    "DATABASE_CONNECTION_TIMEOUT_MS": "5000"
+  }
+}

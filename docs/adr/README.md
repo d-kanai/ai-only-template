@@ -77,6 +77,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-28 | linter / formatter は Biome を使い、ESLint は使わない。pre-commit は lefthook で止める | 採用 | [20260928-biome-instead-of-eslint.md](tech-stack/20260928-biome-instead-of-eslint.md) |
 | 2026-09-28 | Stryker の vitest-runner は pnpm patch で直して使う | 採用 | [20260928-patch-stryker-vitest-runner.md](tech-stack/20260928-patch-stryker-vitest-runner.md) |
 | 2026-09-28 | TypeScript は 7 系（7.0.2）を使う | 採用 | [20260928-typescript-7.md](tech-stack/20260928-typescript-7.md) |
+| 2026-09-29 | Next（apps/frontend）は OpenNext（@opennextjs/cloudflare）で Cloudflare Workers に載せ、wrangler.jsonc を正にして GitHub Actions の wrangler でデプロイする | 採用 | [20260929-cloudflare-workers-via-opennext.md](tech-stack/20260929-cloudflare-workers-via-opennext.md) |
 
 ### quality/
 品質ゲートとテストの方針

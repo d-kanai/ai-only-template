@@ -2,12 +2,15 @@
 // WHY: vitest.config.mts の既定環境は jsdom（コンポーネントテスト用）。このテストはソースを文字列として読むだけで DOM を使わないため、
 //   jsdom の初期化を省き、ブラウザ相当の globals が Node の API と混ざる余地をなくすため node 環境で動かす。
 import {
+  type Dirent,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -313,27 +316,69 @@ function isSourceNonTest(path: string): boolean {
 // 列挙から除くディレクトリ（どの階層にあっても、その中を見ない）。
 //   node_modules: 依存（workspace パッケージ化した段階 2 では apps/*/node_modules/ ができる）。
 //   .next: next build / next dev の生成物（apps/frontend/.next/。数千件の JS）。
+//   .open-next: opennextjs-cloudflare build の生成物（apps/frontend/.open-next/。Issue #130。.gitignore 済み）。Next のバンドルを
+//     Workers 用にまとめ直したもので、process.env の直参照・console・文言を含み、置き場所の規則の外にある。除かないと
+//     build の後に rule-tests が 3 規則（env-direct-access・console-direct-access・frontend-hardcoded-text）と置き場所で落ちる
+//     （2026-09-29 に実測）。.env から書き出した値（cloudflare/next-env.mjs）もここに入る。
+//   .wrangler: wrangler dev（opennextjs-cloudflare preview）が作るローカルの状態（apps/frontend/.wrangler/。バンドルの一時
+//     ファイル・ローカルのストレージ。Issue #130。.gitignore 済み）。
 // WHY 名前を列挙する（"." で始まるディレクトリをまとめて除かない）: まとめて除くと apps/backend/.lib/x.ts のような自前のコードが
 //   検査を素通りする（Issue #68 の reviewer 指摘）。既知の生成物・依存だけを除き、それ以外の "." のディレクトリは通常どおり
 //   検査して、置き場所の規則で違反にする。生成物のディレクトリが増えたらここに足す。
-const EXCLUDED_DIRS = new Set(["node_modules", ".next"]);
+const EXCLUDED_DIRS = new Set([
+  "node_modules",
+  ".next",
+  ".open-next",
+  ".wrangler",
+]);
 
-function isGeneratedOrDependency(path: string): boolean {
-  return path
-    .split("/")
-    .slice(0, -1)
-    .some((segment) => EXCLUDED_DIRS.has(segment));
+type ReadDirectory = (absolutePath: string) => Dirent[];
+
+const readDirectory: ReadDirectory = (absolutePath) =>
+  readdirSync(absolutePath, { withFileTypes: true });
+
+// symlink は先がディレクトリならディレクトリとして扱う（先が無い・たどれない symlink はファイルとして返す）。
+function isDirectoryEntry(absolutePath: string, entry: Dirent): boolean {
+  if (entry.isDirectory()) {
+    return true;
+  }
+  return (
+    entry.isSymbolicLink() &&
+    (statSync(absolutePath, { throwIfNoEntry: false })?.isDirectory() ?? false)
+  );
+}
+
+// dir の下のファイル（再帰。ディレクトリ以外のすべて）を、リポジトリ相対の "/" 区切りのパスで返す。
+// WHY 自前で再帰する（readdirSync の recursive: true を使わない。Issue #130）: recursive: true は symlink の先のディレクトリにも
+//   入り、除外のディレクトリ（EXCLUDED_DIRS）を列挙の後で除くしかない。opennextjs-cloudflare build の .open-next/ と
+//   .next/standalone/ は pnpm の symlink を複製するため、その中を列挙するだけで heap を使い切った（2026-09-29 に実測。
+//   詳細は「ファイルの列挙」のテスト）。除外のディレクトリは中に入る前に飛ばす。
+// WHY 除外しないディレクトリの symlink はたどる: 以前の列挙（recursive: true）と同じ範囲を検査し、symlink で置いたディレクトリの
+//   コードを素通りさせないため。
+// WHY read を引数で受け取る: 除外のディレクトリを「読まない」ことは結果の一覧からは見えない（後で除いても同じ一覧になる）ので、
+//   テストで読んだディレクトリを記録して確かめる。
+function walkFiles(
+  root: string,
+  dir: string,
+  read: ReadDirectory = readDirectory,
+): string[] {
+  const absoluteDir = join(root, dir);
+  if (!existsSync(absoluteDir)) {
+    return [];
+  }
+  return read(absoluteDir).flatMap((entry) => {
+    const path = `${dir}/${entry.name}`;
+    if (!isDirectoryEntry(join(absoluteDir, entry.name), entry)) {
+      return [path];
+    }
+    return EXCLUDED_DIRS.has(entry.name) ? [] : walkFiles(root, path, read);
+  });
 }
 
 // WHY root を引数で受け取る: 本番の検査（リポジトリ直下）と、fixture の一時ディレクトリに置いた架空のツリーの検査で、
 //   列挙 → 抽出 → 正規化 → 判定の同じ経路を通すため。
 function listSourceFiles(root: string, dir: string): string[] {
-  if (!existsSync(join(root, dir))) {
-    return [];
-  }
-  return readdirSync(join(root, dir), { recursive: true, encoding: "utf8" })
-    .map((path) => toPosix(join(dir, path)))
-    .filter((path) => isSourceNonTest(path) && !isGeneratedOrDependency(path));
+  return walkFiles(root, dir).filter(isSourceNonTest);
 }
 
 // dir の直下のファイル（ディレクトリの中は見ない）。dir が "" ならリポジトリ直下。
@@ -981,7 +1026,9 @@ const BACKEND_PLACEMENT = {
 // WHY 置き場所を規則にする: 依存の規則は app/・features/・shared/ と直下のファイル（frontend-root-to-backend）にしかかからない。
 //   apps/frontend/lib/ のような場所のファイルは、backend の container を値で import してもどの規則にもかからず素通りする。
 // WHY 直下は名前で許す: Next の設定（next.config.ts）と規約ファイル（instrumentation.ts・proxy.ts）、その Node.js 用の処理
-//   （instrumentation-node.ts）、Next が生成する型の宣言（next-env.d.ts。.gitignore 済みだが手元にはある）だけが直下に要る。
+//   （instrumentation-node.ts）、Next が生成する型の宣言（next-env.d.ts。.gitignore 済みだが手元にはある）、OpenNext の設定
+//   （open-next.config.ts。Issue #130。opennextjs-cloudflare build が apps/frontend 直下から読み、無ければ作る）だけが直下に要る。
+//   wrangler の設定（wrangler.jsonc）は .jsonc で SOURCE_FILE に当たらないので、ここに載せなくても置き場所の規則にかからない。
 //   proxy.ts（リクエストログ。Issue #80）は Next の規約で app/ と同じ階層（プロジェクトのルート）に置く（Next.js 16.3.6 同梱
 //   node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md の「Convention」）。旧名の middleware.ts
 //   は Next 16 で非推奨なので許さない。中身は薄くし、1 行の組み立ては shared/request-log/ に置く（shared/ は置き場所の規則の中）。
@@ -994,11 +1041,12 @@ const FRONTEND_ROOT_FILES = new Set([
   "apps/frontend/instrumentation-node.ts",
   "apps/frontend/proxy.ts",
   "apps/frontend/next-env.d.ts",
+  "apps/frontend/open-next.config.ts",
 ]);
 
 const FRONTEND_PLACEMENT = {
   id: "frontend-placement",
-  name: "apps/frontend/ のソースファイルは app/・features/・shared/ の下か、直下の next.config.ts・instrumentation.ts・instrumentation-node.ts・proxy.ts・next-env.d.ts だけに置く",
+  name: "apps/frontend/ のソースファイルは app/・features/・shared/ の下か、直下の next.config.ts・instrumentation.ts・instrumentation-node.ts・proxy.ts・next-env.d.ts・open-next.config.ts だけに置く",
   isMisplaced: (file: string) =>
     isUnder(file, FRONTEND_ROOT) &&
     !FRONTEND_SOURCE_DIR.test(file) &&
@@ -1037,13 +1085,7 @@ const SHARED_PLACEMENT = {
 
 // dir の下のすべてのファイル（再帰。ソース以外も含む。依存と生成物のディレクトリの中は除く）。SHARED_PLACEMENT で使う。
 function listAllFiles(root: string, dir: string): string[] {
-  if (!existsSync(join(root, dir))) {
-    return [];
-  }
-  return readdirSync(join(root, dir), { recursive: true, withFileTypes: true })
-    .filter((entry) => entry.isFile())
-    .map((entry) => toPosix(relative(root, join(entry.parentPath, entry.name))))
-    .filter((path) => !isGeneratedOrDependency(path));
+  return walkFiles(root, dir);
 }
 
 // --- 環境変数の直参照（規則 env-direct-access。.claude/rules/env.md の「環境変数」） ---
@@ -1872,7 +1914,12 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
     expect(files).not.toContain("rule-tests/architecture.test.ts");
     expect(files).not.toContain("apps/shared/env.test.ts");
     // next build の生成物（apps/frontend/.next/）は数えない（あれば数千件の JS を検査することになる）。
-    expect(files.filter((file) => file.includes("/.next/"))).toEqual([]);
+    //   opennextjs-cloudflare build・wrangler dev の生成物（.open-next/・.wrangler/。Issue #130）も同じ。
+    expect(
+      files.filter((file) =>
+        /\/(?:\.next|\.open-next|\.wrangler)\//.test(file),
+      ),
+    ).toEqual([]);
   });
 
   it("console の直接の呼び出しの検査は、各ディレクトリ・scripts/・ルート直下の設定ファイルを対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
@@ -1900,7 +1947,11 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
     expect(files).not.toContain("rule-tests/architecture.test.ts");
     expect(files).not.toContain("apps/shared/logger.test.ts");
     expect(files).not.toContain("scripts/hooks/guard-git.test.ts");
-    expect(files.filter((file) => file.includes("/.next/"))).toEqual([]);
+    expect(
+      files.filter((file) =>
+        /\/(?:\.next|\.open-next|\.wrangler)\//.test(file),
+      ),
+    ).toEqual([]);
   });
 
   it("ハードコードの文言の検査は、apps/frontend・apps/backend・apps/shared のソース（辞書 *.messages.ts を含む）を対象にし、テスト・生成物は対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
@@ -1946,7 +1997,9 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
     for (const files of [frontend, backend]) {
       expect(files.filter((file) => TEST_FILE.test(file))).toEqual([]);
       expect(
-        files.filter((file) => /\/(?:\.next|node_modules)\//.test(file)),
+        files.filter((file) =>
+          /\/(?:\.next|\.open-next|\.wrangler|node_modules)\//.test(file),
+        ),
       ).toEqual([]);
     }
   });
@@ -3265,6 +3318,12 @@ const FRONTEND_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     // 許可された名前でも、直下でなければ例外にしない。
     "apps/frontend/lib/next.config.ts",
     "apps/frontend/lib/proxy.ts",
+    // Issue #130: OpenNext の設定も、許すのは直下の open-next.config.ts だけ（別の拡張子・前方一致・直下でないもの・
+    //   ほかの *.config.ts は違反）。
+    "apps/frontend/open-next.config.mjs",
+    "apps/frontend/open-next.config.helper.ts",
+    "apps/frontend/lib/open-next.config.ts",
+    "apps/frontend/foo.config.ts",
   ],
   placed: [
     "apps/frontend/app/page.tsx",
@@ -3276,6 +3335,7 @@ const FRONTEND_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/frontend/instrumentation-node.ts",
     "apps/frontend/proxy.ts",
     "apps/frontend/next-env.d.ts",
+    "apps/frontend/open-next.config.ts",
     // frontend の規則の対象外（apps/backend は BACKEND_PLACEMENT が見る）。
     "apps/backend/lib/x.ts",
     // apps/e2e（E2E の workspace パッケージ @repo/e2e。Issue #84）も frontend の規則の対象外。
@@ -4794,6 +4854,9 @@ const MUST_REJECT_FILES: Record<string, string> = {
   ),
   "apps/frontend/.lib/x.ts": lines("export const x = 1;"),
   "apps/frontend/next.config.mjs": lines("export default {};"),
+  // Issue #130: 直下で許すのは名前を決めた設定ファイル（next.config.ts・open-next.config.ts）だけで、*.config.ts なら何でも
+  //   許すわけではない。
+  "apps/frontend/foo.config.ts": lines("export default {};"),
   // backend-placement: "." で始まるディレクトリ（apps/backend/.lib/）も検査し、4 層の外として違反にする（除外するのは
   //   node_modules と .next だけ）。"@/" で frontend を参照しているので、backend-to-frontend と backend-relative-only にもかかる。
   "apps/backend/.lib/x.ts": lines(
@@ -4925,6 +4988,7 @@ const MUST_REJECT_VIOLATIONS = [
   "frontend-placement: apps/frontend/lib/db.ts",
   "frontend-placement: apps/frontend/.lib/x.ts",
   "frontend-placement: apps/frontend/next.config.mjs",
+  "frontend-placement: apps/frontend/foo.config.ts",
   "backend-placement: apps/backend/.lib/x.ts",
   "backend-to-frontend: apps/backend/.lib/x.ts → apps/frontend/features/todo",
   "backend-relative-only: apps/backend/.lib/x.ts → apps/frontend/features/todo",
@@ -5672,6 +5736,29 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import type { NextConfig } from "next";',
     "export default {} satisfies NextConfig;",
   ),
+  // Issue #130: OpenNext の設定（opennextjs-cloudflare build が apps/frontend 直下から読む）は直下の許可された名前。
+  "apps/frontend/open-next.config.ts": lines(
+    'import { defineCloudflareConfig } from "@opennextjs/cloudflare";',
+    "export default defineCloudflareConfig();",
+  ),
+  // Issue #130: opennextjs-cloudflare build の生成物（apps/frontend/.open-next/）と wrangler dev のローカルの状態
+  //   （apps/frontend/.wrangler/）は自前のコードではない（.gitignore 済み）ので、違反を書いても検査しない。
+  //   実物の .open-next/ には、Next のバンドル（process.env の直参照・console）と .env から書き出した値が入る。
+  "apps/frontend/.open-next/worker.js": lines(
+    "module.exports = process.env;",
+    "console.log(1);",
+    'const m = "削除";',
+    'import "@repo/backend/features/todo/infra/todo-repository.postgres";',
+  ),
+  "apps/frontend/.open-next/cloudflare/next-env.mjs": lines(
+    'export const production = { "DATABASE_URL": "postgres://u:p@127.0.0.1:5432/db" };',
+    "export const x = process.env;",
+  ),
+  "apps/frontend/.wrangler/tmp/bundle/index.js": lines(
+    "module.exports = process.env;",
+    "console.log(1);",
+    'const m = "削除";',
+  ),
   "apps/backend/features/todo/infra/uses-packages.ts": lines(
     'import extra from "@repo/backend-extra/x";',
     'import { eq } from "drizzle-orm";',
@@ -5814,6 +5901,123 @@ const MUST_PASS_FILES: Record<string, string> = {
   "apps/frontend/features/todo/README.md":
     'import { GET } from "@repo/backend/features/todo/infra/todo-repository.postgres";',
 };
+
+// Issue #130: 列挙は除外するディレクトリ（EXCLUDED_DIRS）の中に入らない（列挙した後で除くのではない）。
+// WHY: opennextjs-cloudflare build の apps/frontend/.open-next/ と、そのとき next build が作る apps/frontend/.next/standalone/ には、
+//   pnpm の node_modules の形（.pnpm の中の相対パスの symlink）が複製される。以前の列挙（readdirSync の recursive: true）は
+//   symlink の先のディレクトリにも入り（Node 24.21.0 の lib/fs.js の handleFilePaths が internalModuleStat で symlink をたどる）、
+//   除くのは列挙の後だったため、symlink の組み合わせで列挙が膨らみ、rule-tests が heap を使い切って落ちた（2026-09-29 に実測）。
+// WHY 読んだディレクトリを記録して確かめる（結果の一覧だけを見ない）: 列挙した後で除いても結果の一覧は同じで、違いは
+//   中に入るかどうか（かかる時間と memory）だけ。循環する symlink の fixture は、以前の列挙でも ELOOP（symlink 40 段）で
+//   止まって結果が同じになるか、2 本以上あると止まらなくなり（2^40）、どちらも決定的な失敗にならない（2026-09-29 に実測）。
+describe("ファイルの列挙（walkFiles・listSourceFiles・listAllFiles）", () => {
+  function withTree(
+    files: Record<string, string>,
+    symlinks: Record<string, string>,
+    check: (root: string) => void,
+  ) {
+    const root = mkdtempSync(join(tmpdir(), "architecture-list-test-"));
+    try {
+      for (const [path, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(root, path)), { recursive: true });
+        writeFileSync(join(root, path), content);
+      }
+      for (const [path, target] of Object.entries(symlinks)) {
+        mkdirSync(dirname(join(root, path)), { recursive: true });
+        symlinkSync(target, join(root, path));
+      }
+      check(root);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  const GENERATED_TREE = {
+    "apps/frontend/app/page.tsx": "export default 1;",
+    "apps/frontend/.lib/x.ts": "export const x = 1;",
+    "apps/frontend/.open-next/worker.js": "process.env;",
+    "apps/frontend/.open-next/server-functions/default/index.mjs":
+      "process.env;",
+    "apps/frontend/.wrangler/tmp/index.js": "process.env;",
+    "apps/frontend/.next/standalone/server.js": "process.env;",
+    "apps/frontend/node_modules/pkg/index.js": "process.env;",
+    "apps/frontend/features/todo/node_modules/pkg/index.js": "process.env;",
+  };
+
+  it("除外するディレクトリ（node_modules・.next・.open-next・.wrangler）は、どの階層でも読まない（中に入ってから除くのではない）", () => {
+    withTree(GENERATED_TREE, {}, (root) => {
+      const read: string[] = [];
+      const files = walkFiles(root, FRONTEND_ROOT, (path) => {
+        read.push(toPosix(relative(root, path)));
+        return readDirectory(path);
+      });
+      expect(read.sort()).toEqual([
+        "apps/frontend",
+        "apps/frontend/.lib",
+        "apps/frontend/app",
+        "apps/frontend/features",
+        "apps/frontend/features/todo",
+      ]);
+      expect(files.sort()).toEqual([
+        "apps/frontend/.lib/x.ts",
+        "apps/frontend/app/page.tsx",
+      ]);
+    });
+  });
+
+  it("listSourceFiles・listAllFiles は、除外するディレクトリの中に自分を指す symlink があっても、その外のファイルだけを返す", () => {
+    withTree(
+      {
+        ...GENERATED_TREE,
+        "apps/shared/env.ts": "export const env = 1;",
+        "apps/shared/node_modules/pkg/index.js": "process.env;",
+      },
+      {
+        "apps/frontend/.open-next/self": ".",
+        "apps/frontend/.next/standalone/self": ".",
+        "apps/shared/node_modules/self": ".",
+      },
+      (root) => {
+        expect(listSourceFiles(root, FRONTEND_ROOT).sort()).toEqual([
+          "apps/frontend/.lib/x.ts",
+          "apps/frontend/app/page.tsx",
+        ]);
+        expect(listAllFiles(root, SHARED_ROOT)).toEqual(["apps/shared/env.ts"]);
+      },
+    );
+  });
+
+  // WHY symlink の先も列挙する: 以前の列挙（readdirSync の recursive: true）と同じ範囲を検査し、symlink で置いたディレクトリの
+  //   コードが検査を素通りしないようにする（除外のディレクトリの外で循環すれば ELOOP で止まる。以前の列挙と同じ）。
+  it("除外しないディレクトリの symlink は、先のディレクトリの中も列挙する", () => {
+    withTree(
+      {
+        "apps/frontend/app/page.tsx": "export default 1;",
+        "outside/lib/db.ts": "export const db = 1;",
+        "outside/shared-extra/extra.ts": "export const x = 1;",
+      },
+      {
+        "apps/frontend/lib": "../../outside/lib",
+        "apps/shared/extra": "../../outside/shared-extra",
+      },
+      (root) => {
+        expect(listSourceFiles(root, FRONTEND_ROOT).sort()).toEqual([
+          "apps/frontend/app/page.tsx",
+          "apps/frontend/lib/db.ts",
+        ]);
+        expect(listAllFiles(root, SHARED_ROOT)).toEqual([
+          "apps/shared/extra/extra.ts",
+        ]);
+      },
+    );
+  });
+
+  it("ディレクトリが無ければ空を返す", () => {
+    withTree({}, {}, (root) => {
+      expect(walkFiles(root, FRONTEND_ROOT)).toEqual([]);
+    });
+  });
+});
 
 describe("fixture のツリーを検査したときに検出される違反", () => {
   it("must-reject: 置いた違反がすべて、置いたとおりの規則で検出され、それ以外は検出されない", () => {

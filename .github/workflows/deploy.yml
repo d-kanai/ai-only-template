@@ -1,0 +1,70 @@
+# main への push（PR のマージ）と手動実行で、apps/frontend を OpenNext でビルドし、wrangler で Cloudflare Workers にデプロイする（Issue #130）。
+# デプロイの定義は apps/frontend/wrangler.jsonc（Worker 名・compatibility・assets・vars）が正で、このワークフローは
+#   `pnpm --filter @repo/frontend run deploy`（= opennextjs-cloudflare build && opennextjs-cloudflare deploy）を実行するだけ。
+# WHY Terraform ではなく wrangler: Cloudflare は wrangler の設定ファイルを source of truth と位置づけ、Terraform の例でも
+#   先に wrangler でバンドルするよう書いている（ADR docs/adr/tech-stack/20260929-cloudflare-workers-via-opennext.md）。
+# WHY CI（ci.yml）と別のワークフロー: デプロイだけが Secrets（Cloudflare の API token）を使う。ci.yml は contents: read だけで
+#   Secrets を持たず、fork からの PR でも動く形を保つ。
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  # 手動実行（IaC の apply に相当）。Secrets を入れた直後の初回デプロイや、main を変えずに再デプロイしたいときに使う。
+  workflow_dispatch:
+
+# デプロイは並列に走らせず、古い実行は止めない（途中で止めると Cloudflare 側の状態が分かりにくくなる）。
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+# 読み取りだけにする。デプロイ先は Cloudflare で、リポジトリには書き込まない（最小権限）。
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      # next build が Vercel に匿名テレメトリを送るのを止める（ci.yml と同じ）。
+      NEXT_TELEMETRY_DISABLED: "1"
+      # next build（opennextjs-cloudflare build の中で実行）は apps/shared/env.ts を読み込み、必須の環境変数が無いと失敗する。
+      #   ビルドは DB に接続しないので、値は apps/frontend/wrangler.jsonc の vars と同じダミーでよい。
+      # WHY .env ファイルを作らない（ci.yml の `cp .env.example .env` をしない）: OpenNext は build 時にリポジトリ直下と
+      #   apps/frontend の .env 系ファイルを読み、Worker のバンドル（.open-next/cloudflare/next-env.mjs）に同梱する
+      #   （2026-09-29 実測。docs/work-logs）。環境変数で渡せば同梱されない。本番の値は wrangler.jsonc の vars か
+      #   `wrangler secret` で Worker 側に置く。
+      DATABASE_URL: "postgres://u:p@127.0.0.1:5432/db"
+      DATABASE_POOL_MAX: "10"
+      DATABASE_POOL_IDLE_TIMEOUT_MS: "10000"
+      DATABASE_CONNECTION_TIMEOUT_MS: "5000"
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node の版は .tool-versions が正（ci.yml と同じ読み方）。
+      - name: Read Node.js version from .tool-versions
+        run: echo "NODE_VERSION=$(awk '$1 == "nodejs" { print $2 }' .tool-versions)" >> "$GITHUB_ENV"
+
+      # pnpm の版は package.json の packageManager から取る（ci.yml と同じ）。
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      # --frozen-lockfile: lockfile と package.json がずれていたら失敗させる（ci.yml と同じ）。
+      # GitHub Actions は CI=true を既定で設定するので、lefthook の postinstall はフックを入れない。
+      - run: pnpm install --frozen-lockfile
+
+      # wrangler はリポジトリで版を固定した devDependency（apps/frontend/package.json）を使う。cloudflare/wrangler-action は
+      #   使わない（別の版の wrangler を持ち込まないため）。
+      # 必要な Secrets（リポジトリの Settings → Secrets and variables → Actions）:
+      #   CLOUDFLARE_API_TOKEN: テンプレート「Edit Cloudflare Workers」で作った API token
+      #   CLOUDFLARE_ACCOUNT_ID: Cloudflare のアカウント ID
+      #   （https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/ ）
+      - name: Deploy to Cloudflare Workers
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm --filter @repo/frontend run deploy

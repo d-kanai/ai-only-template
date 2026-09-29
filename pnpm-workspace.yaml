@@ -28,6 +28,16 @@ packages:
 #   パッケージは pnpm が入れるので、実行しなくても JS のラッパー経由でバイナリが使える。任意コードの実行を増やさないため false。
 #   `pnpm db:generate`（drizzle-kit generate）が動くことで確認した（2026-09-28）。
 #
+# workerd: false … Cloudflare Workers のローカル実行環境（Issue #130）。apps/frontend の wrangler（4.137.0）と、
+#   その依存の miniflare / @cloudflare/unenv-preset が workerd 1.20260921.1 を持つ（`pnpm why workerd` で確認）。
+#   strictDepBuilds: true のため、ここに載せないと `pnpm install` が ERR_PNPM_IGNORED_BUILDS で止まる（2026-09-29 実測）。
+#   postinstall（install.js）は esbuild と同じ作り: プラットフォーム別パッケージ（@cloudflare/workerd-linux-64 など、
+#   optionalDependencies）のバイナリが見つからなければ npm / レジストリから取り直し、見つかれば bin/workerd を
+#   ネイティブバイナリへのハードリンクに差し替えるだけ（node_modules/workerd/install.js を読んで確認）。
+#   プラットフォーム別パッケージは pnpm が入れるので、実行しなくても JS のラッパー（bin/workerd）経由で動く。
+#   `node .../workerd/bin/workerd --version` が「workerd 2026-09-21」を返し、`opennextjs-cloudflare preview` で
+#   Worker が動くことで確認した（2026-09-29）。任意コードの実行を増やさないため false。
+#
 # lefthook: true … Git フック管理ツール（.claude/rules/lint.md）。postinstall で `lefthook install -f` を実行し、
 #   .git/hooks/pre-commit を Lefthook のスクリプトに置き換える（-f: 既存フックの退避ファイル .old を上書きし、
 #   core.hooksPath が設定されていても続行する。`lefthook install --help` で確認）。これにより `pnpm install` するだけで
@@ -44,6 +54,7 @@ allowBuilds:
   esbuild: false
   sharp: false
   unrs-resolver: false
+  workerd: false
   lefthook: true
 
 # ---- サプライチェーン保護設定 ----

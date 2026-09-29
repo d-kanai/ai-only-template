@@ -135,6 +135,7 @@ const EXPECTED_SETTINGS: Settings = {
     esbuild: false,
     sharp: false,
     "unrs-resolver": false,
+    workerd: false,
     lefthook: true,
   },
 };
@@ -170,6 +171,7 @@ const VALID_YAML = [
   "  esbuild: false",
   "  sharp: false",
   "  unrs-resolver: false",
+  "  workerd: false",
   "  lefthook: true",
   "",
   "# ---- サプライチェーン保護設定 ----",
@@ -238,6 +240,7 @@ describe("設定の読み取りと判定（must pass）", () => {
         esbuild: false,
         sharp: false,
         "unrs-resolver": false,
+        workerd: false,
         lefthook: true,
       },
       minimumReleaseAge: 7200,
@@ -362,8 +365,8 @@ describe("設定の読み取りと判定（must reject）", () => {
       (yaml: string) =>
         replaceOnce(
           yaml,
-          "allowBuilds:\n  esbuild: false\n  sharp: false\n  unrs-resolver: false\n  lefthook: true\n",
-          "allowBuilds: { esbuild: false, sharp: false, unrs-resolver: false, lefthook: true }\n",
+          "allowBuilds:\n  esbuild: false\n  sharp: false\n  unrs-resolver: false\n  workerd: false\n  lefthook: true\n",
+          "allowBuilds: { esbuild: false, sharp: false, unrs-resolver: false, workerd: false, lefthook: true }\n",
         ),
       ["allowBuilds"],
     ],
@@ -372,7 +375,7 @@ describe("設定の読み取りと判定（must reject）", () => {
       (yaml: string) =>
         replaceOnce(
           yaml,
-          "allowBuilds:\n  esbuild: false\n  sharp: false\n  unrs-resolver: false\n  lefthook: true\n",
+          "allowBuilds:\n  esbuild: false\n  sharp: false\n  unrs-resolver: false\n  workerd: false\n  lefthook: true\n",
           "",
         ),
       ["allowBuilds"],

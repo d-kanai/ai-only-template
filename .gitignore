@@ -17,6 +17,12 @@ node_modules/
 /apps/frontend/.next/
 /out/
 
+# OpenNext / wrangler（Cloudflare Workers。Issue #130）
+# .open-next/: opennextjs-cloudflare build の出力（worker.js と assets。build のたびに作り直す。get-started の「Add .open-next to .gitignore」）。
+# .wrangler/: wrangler dev（opennextjs-cloudflare preview）が作るローカルの状態（バンドルの一時ファイル・ローカルのストレージ）。
+/apps/frontend/.open-next/
+/apps/frontend/.wrangler/
+
 # production
 /build
 
