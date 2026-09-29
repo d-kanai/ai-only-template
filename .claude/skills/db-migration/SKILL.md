@@ -6,7 +6,7 @@ description: Drizzle のスキーマ変更とマイグレーション（schema.t
 # db-migration（Drizzle + Postgres）
 
 テーブルの形は TypeScript で宣言し（codebase-first）、SQL はそこから生成する。WHY: 形の正を 1 か所にし、手書きの SQL とスキーマのずれを無くす。
-層の規則（schema は infra、Repository が Entity と行を変換、`Executor`、トランザクション）は `.claude/rules/backend.md`。
+層の規則（schema は infra、Repository が Entity と行を変換、Repository は `Database` を受け取る、トランザクション）は `.claude/rules/backend.md`。
 
 ## 前提
 - Postgres が起動していること: `pnpm db:up`（`compose.yaml`）。接続先は `.env` の `DATABASE_URL`（無ければ `cp .env.example .env`）。

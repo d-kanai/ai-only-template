@@ -132,6 +132,21 @@ describe("PostgresTodoRepository", () => {
     ).resolves.toBeUndefined();
   });
 
+  test("findByIdOrThrow は id に一致する Todo を返す", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await repository().save(todo);
+
+    await expect(repository().findByIdOrThrow(todo.id)).resolves.toEqual(todo);
+  });
+
+  test("無い id の findByIdOrThrow は、その id を params に持つ DomainError(not_found, todo.notFound) を投げる", async () => {
+    const id = "00000000-0000-4000-8000-000000000000";
+
+    await expect(repository().findByIdOrThrow(id)).rejects.toEqual(
+      new DomainError("not_found", "todo.notFound", { id }),
+    );
+  });
+
   test("uuid の形でない id の findById は、DB のエラーにせず undefined を返す（API で 404 になるように）", async () => {
     await expect(repository().findById("missing")).resolves.toBeUndefined();
   });
@@ -245,17 +260,4 @@ describe("PostgresTodoRepository", () => {
       );
     },
   );
-
-  test("トランザクションの executor を渡すと、その中で読み書きする", async () => {
-    const todo = Todo.create("牛乳を買う");
-
-    await expect(
-      database.db.transaction(async (tx) => {
-        await new PostgresTodoRepository(tx).save(todo);
-        throw new Error("rollback させる");
-      }),
-    ).rejects.toEqual(new Error("rollback させる"));
-
-    await expect(repository().findAll()).resolves.toEqual([]);
-  });
 });

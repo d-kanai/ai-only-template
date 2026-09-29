@@ -1,16 +1,33 @@
 // @vitest-environment node
 import { randomUUID } from "node:crypto";
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { ErrorResponse } from "../../../shared/presentation/http-error";
-import { createInMemoryTodoContainer } from "../infra/container";
+import { UpdateTodoCommand } from "../application/update-todo.command";
+import { Todo } from "../domain/todo";
 import { InMemoryTodoRepository } from "../infra/todo-repository.in-memory";
-import { type UpdateTodoResponse, updateTodoApi } from "./update-todo.api";
+import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
+import {
+  PUT as productionPut,
+  UpdateTodoApi,
+  type UpdateTodoResponse,
+} from "./update-todo.api";
 
+// テストごとに、Todo を 1 件だけ置いた InMemory のリポジトリで組み立てる（本番の PUT は Postgres を使い、
+//   テストの順序で結果が変わるため）。
 async function setup() {
-  const container = createInMemoryTodoContainer();
-  const todo = await container.createTodo.execute({ title: "牛乳を買う" });
-  return { container, todo, PUT: updateTodoApi(container) };
+  const repository = new InMemoryTodoRepository();
+  const todo = Todo.create("牛乳を買う");
+  await repository.save(todo);
+  return {
+    repository,
+    todo,
+    PUT: new UpdateTodoApi(new UpdateTodoCommand(repository)).handle,
+  };
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function context(id: string) {
   return { params: Promise.resolve({ id }) };
@@ -69,7 +86,7 @@ describe("PUT /api/todos/:id", () => {
   });
 
   test("completed だけ送ると title はそのまま（部分更新）", async () => {
-    const { container, todo, PUT } = await setup();
+    const { repository, todo, PUT } = await setup();
 
     const response = await PUT(
       putRequest(todo.id, JSON.stringify({ completed: true })),
@@ -77,14 +94,14 @@ describe("PUT /api/todos/:id", () => {
     );
 
     expect(response.status).toBe(200);
-    await expect(container.getTodo.execute(todo.id)).resolves.toMatchObject({
+    await expect(repository.findById(todo.id)).resolves.toMatchObject({
       title: "牛乳を買う",
       completed: true,
     });
   });
 
   test("title だけ送ると completed はそのまま（部分更新）", async () => {
-    const { container, todo, PUT } = await setup();
+    const { repository, todo, PUT } = await setup();
 
     const response = await PUT(
       putRequest(todo.id, JSON.stringify({ title: "卵を買う" })),
@@ -92,9 +109,33 @@ describe("PUT /api/todos/:id", () => {
     );
 
     expect(response.status).toBe(200);
-    await expect(container.getTodo.execute(todo.id)).resolves.toMatchObject({
+    await expect(repository.findById(todo.id)).resolves.toMatchObject({
       title: "卵を買う",
       completed: false,
+    });
+  });
+
+  // WHY 本番の PUT（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない（Issue #59）
+  //   ことを、Postgres の Repository が呼ばれることで固定する。findById と save をを差し替えるので DB には接続しない。
+  test("本番の PUT は Postgres の Repository に保存する", async () => {
+    const todo = Todo.create("牛乳を買う");
+    vi.spyOn(PostgresTodoRepository.prototype, "findById").mockResolvedValue(
+      todo,
+    );
+    const save = vi
+      .spyOn(PostgresTodoRepository.prototype, "save")
+      .mockResolvedValue();
+
+    const response = await productionPut(
+      putRequest(todo.id, JSON.stringify({ completed: true })),
+      context(todo.id),
+    );
+
+    expect(response.status).toBe(200);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0]?.[0]).toMatchObject({
+      id: todo.id,
+      completed: true,
     });
   });
 
@@ -146,7 +187,7 @@ describe("PUT /api/todos/:id", () => {
     "id が %s なら、%sときも、Repository に問い合わせずに 404 と not_found（todo.notFound と id の params）を返す",
     async (_idLabel, _bodyLabel, id, requestBody) => {
       const { repository, ...spies } = spiedRepository();
-      const PUT = updateTodoApi(createInMemoryTodoContainer(repository));
+      const PUT = new UpdateTodoApi(new UpdateTodoCommand(repository)).handle;
 
       const response = await PUT(putRequest(id, requestBody), context(id));
 
@@ -265,7 +306,7 @@ describe("PUT /api/todos/:id", () => {
   ])(
     "%s なら 400 と validation_error を、理由の key（と params・issues）付きで返し、Todo は変わらない",
     async (_label, body, expected) => {
-      const { container, todo, PUT } = await setup();
+      const { repository, todo, PUT } = await setup();
 
       const response = await PUT(putRequest(todo.id, body), context(todo.id));
 
@@ -273,7 +314,7 @@ describe("PUT /api/todos/:id", () => {
       await expect(response.json()).resolves.toStrictEqual({
         error: expected,
       });
-      await expect(container.getTodo.execute(todo.id)).resolves.toEqual(todo);
+      await expect(repository.findById(todo.id)).resolves.toEqual(todo);
     },
   );
 });

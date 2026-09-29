@@ -1,7 +1,7 @@
 # command は組み立て（container）で一律にトランザクションで包み、query は包まない
 
 - 日付: 2026-09-28
-- 状態: 採用
+- 状態: 置き換え（→ architecture/20260929-constructor-injection-without-container.md）
 - 関連: Issue #57 / PR #60 / `.claude/rules/backend.md` / `apps/backend/todo/infra/container.ts`
 
 ## 背景

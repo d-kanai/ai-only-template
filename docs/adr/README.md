@@ -51,13 +51,14 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 日付 | タイトル | 状態 | ファイル |
 | --- | --- | --- | --- |
 | 2026-09-28 | アプリは常に Postgres を使い、InMemory への切り替えを持たない（InMemory はテスト用だけ） | 採用 | [20260928-always-use-postgres-no-in-memory-switch.md](architecture/20260928-always-use-postgres-no-in-memory-switch.md) |
-| 2026-09-28 | command は組み立て（container）で一律にトランザクションで包み、query は包まない | 採用 | [20260928-commands-always-in-transaction.md](architecture/20260928-commands-always-in-transaction.md) |
+| 2026-09-28 | command は組み立て（container）で一律にトランザクションで包み、query は包まない | 置き換え（→ architecture/20260929-constructor-injection-without-container.md） | [20260928-commands-always-in-transaction.md](architecture/20260928-commands-always-in-transaction.md) |
 | 2026-09-28 | ORM は Drizzle にし、スキーマは TypeScript で宣言して SQL のマイグレーションを生成する（push は使わない） | 採用 | [20260928-drizzle-with-generated-sql-migrations.md](architecture/20260928-drizzle-with-generated-sql-migrations.md) |
 | 2026-09-28 | 環境変数は env.ts の 1 か所で型付きに読み、すべて必須・既定値なしにして、直参照を 2 系統の検査で止める | 採用 | [20260928-env-single-entry-all-required.md](architecture/20260928-env-single-entry-all-required.md) |
 | 2026-09-28 | 画面側は feature 単位・screen 単位で同居させ、API 側は feature 単位の DDD 4 層にし、app/ はルーティングだけにする | 採用 | [20260928-feature-based-directory-and-ddd-backend.md](architecture/20260928-feature-based-directory-and-ddd-backend.md) |
 | 2026-09-28 | ディレクトリを pnpm workspace の apps/frontend（Next）と apps/backend（@repo/backend）に分け、プロセスは Next 1 つのままにする | 採用 | [20260928-monorepo-apps-frontend-backend.md](architecture/20260928-monorepo-apps-frontend-backend.md) |
 | 2026-09-29 | frontend と backend で共通の基盤（env と logger）は、workspace パッケージ apps/shared（@repo/shared）に置く | 採用 | [20260929-apps-shared-package.md](architecture/20260929-apps-shared-package.md) |
 | 2026-09-29 | backend も最初の階層を features/ と shared/ にし、Drizzle の設定とマイグレーションは shared/drizzle/ に置く | 採用 | [20260929-backend-features-and-shared-directories.md](architecture/20260929-backend-features-and-shared-directories.md) |
+| 2026-09-29 | DI コンテナとトランザクションの runner を廃止し、各クラスはコンストラクタ injection にして api ファイルで組み立てる | 採用 | [20260929-constructor-injection-without-container.md](architecture/20260929-constructor-injection-without-container.md) |
 | 2026-09-29 | E2E は apps/e2e の workspace パッケージ @repo/e2e にする | 採用 | [20260929-e2e-as-workspace-package.md](architecture/20260929-e2e-as-workspace-package.md) |
 | 2026-09-29 | 画面の i18n はライブラリを使わずに自前の型付き辞書で行い、URL は変えずに Proxy と root layout でロケールを決め、API のエラーは key と params で返す | 採用 | [20260929-i18n-without-library.md](architecture/20260929-i18n-without-library.md) |
 | 2026-09-29 | サーバ側のログは logger.ts を唯一の出口にし、console の直接の呼び出しを Biome とテストの 2 系統で止める | 採用 | [20260929-logger-single-exit.md](architecture/20260929-logger-single-exit.md) |

@@ -28,8 +28,8 @@ paths:
 | `apps/backend/**/domain` | 純粋な単体テスト | Node |
 | `apps/shared/`（`env.ts`・`logger.ts`） | 純粋な単体テスト（一時ディレクトリの `.env`、`console` の spy） | Node |
 | `apps/backend/**/application` | InMemory リポジトリを渡して検証 | Node |
-| `apps/backend/**/infra` の Postgres の実装（`*.postgres.ts`・`drizzle-transaction-runner.ts`・`database.ts`） | 実 Postgres。`createTestDatabase()` でファイルごとの別スキーマ（`test_<UUID>`）にマイグレーションを当て、各テストの前に `TRUNCATE` | Node |
-| `apps/backend/**/presentation` | 空の InMemory で組み立てた handler（`listTodosApi(createInMemoryTodoContainer())`）に `new Request()`（と `ctx`）を渡し、`Response` を検証。共有の `todoContainer` は使わない | Node |
+| `apps/backend/**/infra` の Postgres の実装（`*.postgres.ts`・`database.ts`） | 実 Postgres。`createTestDatabase()` でファイルごとの別スキーマ（`test_<UUID>`）にマイグレーションを当て、各テストの前に `TRUNCATE` | Node |
+| `apps/backend/**/presentation` | 空の InMemory で組み立てた handler（`new ListTodosApi(new ListTodosQuery(new InMemoryTodoRepository())).handle`）に `new Request()`（と `ctx`）を渡し、`Response` を検証。本番の handler（`export const GET` など）は、Postgres の Repository の prototype を spy して結線だけを確かめる | Node |
 | `apps/frontend/features/**/*.hook.ts` | `renderHook` で状態とイベント | jsdom |
 | `apps/frontend/features/**/*-screen.tsx` | render して操作し、表示を検証 | jsdom |
 | `apps/e2e/*.spec.ts` | Playwright で本番ビルドを起動し、Chromium で操作 | Chromium |
@@ -53,8 +53,8 @@ paths:
 - `cleanupTestSchemas` のテストはテストごとの接頭辞（`test_cleanup_<UUID>_`）で行う（`test_` だと並列の他のファイルのスキーマを消す）。
 
 ## テストダブル
-- backend: InMemory リポジトリを `createTodoContainer` に渡して組み立てる。モックは最小限。WHY: モックは「こう呼ばれるはず」を書き込むので、実装とずれても緑のまま。
-  - Postgres の実装はモックせず実 Postgres で（SQL の組み立て・uuid・commit / rollback は差し替えると検証できない）。
+- backend: InMemory リポジトリを query / command のコンストラクタに渡して組み立てる（Issue #123。`vi.mock` は使わない）。モックは最小限。WHY: モックは「こう呼ばれるはず」を書き込むので、実装とずれても緑のまま。
+  - Postgres の実装はモックせず実 Postgres で（SQL の組み立て・uuid は差し替えると検証できない）。例外は api ファイルの本番の handler の結線の確認だけ（`PostgresTodoRepository.prototype` の spy。Repository の振る舞いは確かめず、Postgres の実装が呼ばれることだけを見る）。
   - InMemory で起こせない失敗の経路だけ、必要な分を差し替える（例: `list-todos.api.test.ts` の 500 は常に reject する `failingRepository` と、`console.error` の `vi.spyOn`）。
 - 画面側の hook / screen: `vi.mock("@/features/todo/api/todo-api")` と `vi.mocked(listTodos).mockResolvedValue(...)`。WHY: 境界の `api/` で切ると HTTP やサーバの状態に依存しない。
 - `api/`: `vi.stubGlobal("fetch", vi.fn<typeof fetch>())` で、送った URL・メソッド・本文と応答の扱いを検証する。

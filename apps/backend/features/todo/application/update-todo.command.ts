@@ -1,4 +1,3 @@
-import { DomainError } from "../../../shared/domain/domain-error";
 import type { Todo } from "../domain/todo";
 import type { TodoRepository } from "../domain/todo-repository";
 
@@ -14,10 +13,8 @@ export class UpdateTodoCommand {
   constructor(private readonly repository: TodoRepository) {}
 
   async execute(input: UpdateTodoInput): Promise<Todo> {
-    const current = await this.repository.findById(input.id);
-    if (current === undefined) {
-      throw new DomainError("not_found", "todo.notFound", { id: input.id });
-    }
+    // 無い id は findByIdOrThrow が not_found の DomainError を投げる（API で 404）。
+    const current = await this.repository.findByIdOrThrow(input.id);
     // WHY 変更をすべて適用してから 1 回だけ save する: title が不変条件違反で例外になったとき、
     //   completed だけが保存される中途半端な状態を作らないため（Todo は不変なので、save するまで保存済みの値は変わらない）。
     let updated = current;

@@ -1,14 +1,28 @@
 // @vitest-environment node
 import { randomUUID } from "node:crypto";
-import { describe, expect, test, vi } from "vitest";
-import { createInMemoryTodoContainer } from "../infra/container";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { GetTodoQuery } from "../application/get-todo.query";
+import { Todo } from "../domain/todo";
 import { InMemoryTodoRepository } from "../infra/todo-repository.in-memory";
-import { type GetTodoResponse, getTodoApi } from "./get-todo.api";
+import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
+import {
+  GetTodoApi,
+  type GetTodoResponse,
+  GET as productionGet,
+} from "./get-todo.api";
 
+// テストごとに空の InMemory のリポジトリで組み立てる（本番の GET は Postgres を使い、テストの順序で結果が変わるため）。
 function setup() {
-  const container = createInMemoryTodoContainer();
-  return { container, GET: getTodoApi(container) };
+  const repository = new InMemoryTodoRepository();
+  return {
+    repository,
+    GET: new GetTodoApi(new GetTodoQuery(repository)).handle,
+  };
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 // Next 16 では Route Handler の第 2 引数の params が Promise で渡される。本番と同じ形で渡す。
 function context(id: string) {
@@ -43,8 +57,9 @@ const NOT_UUID_IDS = [
 
 describe("GET /api/todos/:id", () => {
   test("200 と TodoDto を返す", async () => {
-    const { container, GET } = setup();
-    const todo = await container.createTodo.execute({ title: "牛乳を買う" });
+    const { repository, GET } = setup();
+    const todo = Todo.create("牛乳を買う");
+    await repository.save(todo);
 
     const response = await GET(getRequest(todo.id), context(todo.id));
 
@@ -56,6 +71,21 @@ describe("GET /api/todos/:id", () => {
       completed: false,
       createdAt: todo.createdAt.toISOString(),
     });
+  });
+
+  // WHY 本番の GET（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない（Issue #59）
+  //   ことを、Postgres の Repository が呼ばれることで固定する。findById をを差し替えるので DB には接続しない。
+  test("本番の GET は Postgres の Repository から読む", async () => {
+    const todo = Todo.create("牛乳を買う");
+    const findById = vi
+      .spyOn(PostgresTodoRepository.prototype, "findById")
+      .mockResolvedValue(todo);
+
+    const response = await productionGet(getRequest(todo.id), context(todo.id));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ id: todo.id });
+    expect(findById.mock.calls).toEqual([[todo.id]]);
   });
 
   test("uuid の形だが存在しない id なら 404 と not_found を、todo.notFound と id の params 付きで返す", async () => {
@@ -74,7 +104,7 @@ describe("GET /api/todos/:id", () => {
     "id が %s なら、Repository に問い合わせずに 404 と not_found（todo.notFound と id の params）を返す",
     async (_label, id) => {
       const { repository, ...spies } = spiedRepository();
-      const GET = getTodoApi(createInMemoryTodoContainer(repository));
+      const GET = new GetTodoApi(new GetTodoQuery(repository)).handle;
 
       const response = await GET(getRequest(id), context(id));
 

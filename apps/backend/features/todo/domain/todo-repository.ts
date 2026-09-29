@@ -1,17 +1,42 @@
+import { DomainError } from "../../../shared/domain/domain-error";
 import type { Todo } from "./todo";
 
 // Todo の永続化の窓口（interface）。
 // WHY domain に interface だけを置く: application 層は「保存できる何か」にだけ依存し、
-//   実装（InMemory / DB）は infra 層が持つ（依存性の逆転）。実装の差し替えは infra/container.ts の 1 か所で済む。
-// WHY すべて Promise を返す: 今の実装（InMemory）は同期で済むが、DB に差し替えると非同期になる。
-//   最初から非同期の形にしておき、差し替えで呼び出し側（application 層）を直さずに済むようにする。
+//   実装（Postgres / テスト用の InMemory）は infra 層が持つ（依存性の逆転）。query / command はコンストラクタで
+//   この interface を受け取り、本番は api ファイルが Postgres の実装を、テストは InMemory の実装を渡す（Issue #123）。
+// WHY すべて Promise を返す: InMemory の実装は同期で済むが、DB の実装は非同期になる。同じ形にそろえ、
+//   実装を差し替えても呼び出し側（application 層）を直さずに済むようにする。
 export interface TodoRepository {
   // 並び順は保証しない（並べ替えは用途を知っている application 層が行う）。
   findAll(): Promise<Todo[]>;
   // 見つからないときは undefined。「無いこと」をどう扱うか（404 にするか等）は呼び出し側が決める。
+  // WHY findByIdOrThrow があっても残す: 「無いこと」を失敗ではなく結果として扱いたい呼び出し（存在確認だけしたい用途）
+  //   のため。テストで保存・削除の結果（削除後は undefined）を確かめるのにも使う。
   findById(id: string): Promise<Todo | undefined>;
+  // 見つからないときは DomainError("not_found", "todo.notFound", { id }) を投げる（API では 404）。
+  // WHY interface に持たせる: get / update / delete の 3 つのユースケースが同じ「無ければ not_found」を書いていた
+  //   （Issue #123 の後のユーザー指示、2026-09-29）。例外の code・key・params をここで 1 つに決め、
+  //   ユースケースごとの書き漏れ・書き違い（別の key や params を渡す）を無くす。実装は requireTodo を使う。
+  findByIdOrThrow(id: string): Promise<Todo>;
   // 同じ id があれば上書きする（作成と更新を 1 つにまとめる）。
   save(todo: Todo): Promise<void>;
-  // 存在しない id でも何もしない（存在確認は呼び出し側が findById で行う）。
+  // 存在しない id でも何もしない（存在確認は呼び出し側が findById / findByIdOrThrow で行う）。
   delete(id: string): Promise<void>;
+}
+
+// findByIdOrThrow の共通部分: findById の結果が undefined なら not_found の DomainError を投げ、あればそのまま返す。
+// WHY 関数にして domain に置く（実装ごとに throw を書かない）: Postgres と InMemory の 2 つの実装が同じ例外を投げる
+//   ことを 1 か所で保証する。片方だけ key や params を変えると、テスト（InMemory）と本番（Postgres）で API の応答が
+//   ずれ、テストが本番の振る舞いを表さなくなる。
+// WHY 基底クラス（abstract class TodoRepositoryBase）にしない: 実装に継承を強い、interface を満たすだけのテスト用の
+//   スタブ（オブジェクトリテラル）とも形がそろわなくなる。関数なら各実装が `requireTodo(await this.findById(id), id)`
+//   の 1 行で使え、依存も「infra → 自 feature の domain」（.claude/rules/backend.md の層の許可）の範囲に収まる。
+// WHY domain に置く（infra の共通ファイルにしない）: 「無い Todo を求めたら not_found」は TodoRepository の約束
+//   （上の interface）そのもので、DomainError も domain の型。domain は自 feature と shared の domain だけを参照する。
+export function requireTodo(todo: Todo | undefined, id: string): Todo {
+  if (todo === undefined) {
+    throw new DomainError("not_found", "todo.notFound", { id });
+  }
+  return todo;
 }
