@@ -73,7 +73,8 @@ describe("GET /api/todos", () => {
   });
 
   test("一覧の取得で想定外の例外が起きたら、500 と内部の情報を含まない internal_error を返し、例外をログに残す", async () => {
-    // toErrorResponse が想定外の例外を console.error に出す。テストの出力を汚さないよう抑制し、呼ばれたことだけを確かめる。
+    // toErrorResponse が想定外の例外を logger.error（中で console.error）に出す。テストの出力を汚さないよう抑制し、
+    //   例外の name と message が 1 行に入ったことだけを確かめる（行の形は logger.test.ts で固定している）。
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
@@ -98,6 +99,11 @@ describe("GET /api/todos", () => {
         message: "サーバでエラーが発生しました",
       },
     });
-    expect(consoleError).toHaveBeenCalledWith(cause);
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    const [line] = consoleError.mock.calls[0] as [string];
+    expect(JSON.parse(line)).toMatchObject({
+      level: "error",
+      error: { name: "Error", message: "connection refused: db.internal:5432" },
+    });
   });
 });

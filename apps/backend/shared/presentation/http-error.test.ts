@@ -74,7 +74,8 @@ describe("toErrorResponse", () => {
     expect(body.error.message).not.toContain("パスワード");
   });
 
-  test("想定外の例外は console.error でサーバのログに残す", () => {
+  test("想定外の例外は logger.error で、例外の name と message を含む 1 行の JSON としてサーバのログ（stderr）に残す", () => {
+    // logger（apps/backend/shared/infra/logger.ts）は error を console.error に 1 行の文字列で渡す。
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
@@ -82,6 +83,24 @@ describe("toErrorResponse", () => {
 
     toErrorResponse(error);
 
-    expect(consoleError).toHaveBeenCalledWith(error);
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    const [line] = consoleError.mock.calls[0] as [string];
+    expect(JSON.parse(line)).toEqual({
+      level: "error",
+      timestamp: expect.any(String),
+      message: "想定外の例外",
+      error: { name: "Error", message: "想定外" },
+    });
+  });
+
+  test("DomainError と InvalidRequestError はクライアントの誤りなので、ログに残さない", () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    toErrorResponse(new DomainError("not_found", "見つかりません"));
+    toErrorResponse(new InvalidRequestError("JSON ではありません"));
+
+    expect(consoleError).not.toHaveBeenCalled();
   });
 });

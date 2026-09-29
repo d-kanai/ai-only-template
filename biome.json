@@ -68,12 +68,7 @@
         "noProcessEnv": "error"
       },
       "suspicious": {
-        "noConsole": {
-          "level": "error",
-          "options": {
-            "allow": ["error", "warn"]
-          }
-        },
+        "noConsole": "error",
         "noConstantBinaryExpressions": "error",
         "noEmptyBlockStatements": "error",
         "noLeakedRender": "error",
@@ -100,6 +95,20 @@
         "rules": {
           "style": {
             "noProcessEnv": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "apps/backend/shared/infra/logger.ts",
+        "**/*.test.ts",
+        "**/*.test.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
           }
         }
       }

@@ -6,18 +6,19 @@
 
 ## 決めたこと
 - 出す場所は Proxy（ユーザー判断 2026-09-29）。backend の presentation 層のラッパー（status と所要時間が取れる）は採らず、1 行出れば十分とした。
-- 出力は `console.log(JSON.stringify(line))` の 1 行。ライブラリは入れない。stdout への書き込みは同期で終わるので `event.waitUntil` は使わない。
+- 出力は `logger.info(line)`（`apps/backend/shared/infra/logger.ts`。Issue #85 で `console.log(JSON.stringify(line))` から変えた）の 1 行（stdout）。ライブラリは入れない。stdout への書き込みは同期で終わるので `event.waitUntil` は使わない。
 - 応答ヘッダ `x-request-id` に `requestId` を付け、応答と行を突き合わせられるようにする。
 
 ## 1 行の形（5W1H）
 | 5W1H | フィールド | 取り方 |
 | --- | --- | --- |
+| - | `level` | 常に `"info"`。logger が行の先頭に付ける（Issue #85） |
 | Who | `requestId` | `x-request-id` ヘッダ（空でなければ）、無ければ `crypto.randomUUID()`。応答ヘッダ `x-request-id` にも付ける |
 | Who | `client.ip` / `client.userAgent` | `x-forwarded-for` の先頭（前後の空白を除く）→ `x-real-ip` → `null` / `user-agent` |
 | Who | `user.id` | 認証導入まで常に `null`（枠だけ） |
 | What | `kind` | パスが `/api` か `/api/` で始まれば `"api"`、それ以外は `"page"`（`/apis`・`/api-docs` は page） |
 | What | `method` / `path` / `queryKeys` | メソッド / パス / クエリのキーだけ（出現順、重複は 1 回）。値は出さない（個人情報を避ける） |
-| When | `timestamp` | 受信時刻の ISO 8601（UTC） |
+| When | `timestamp` | 受信時刻の ISO 8601（UTC）。logger は event の `timestamp` をそのまま使い、`level` の次に置く |
 | Where | `host` | `Host` ヘッダ |
 | Why | `referer` | `Referer` ヘッダ |
 | How | `accept` / `contentType` / `requestBytes` | `Accept` / `Content-Type` / `Content-Length`（0 以上の整数のときだけ数値。読めない値は `null`） |
@@ -38,6 +39,7 @@
 
 ## 実測（2026-09-29、`pnpm build && pnpm start -p 3100`、Chromium 141）
 - curl（`-H "Accept: text/html"` で `/?q=secret`、続けて `/api/todos`）。`favicon.ico`（404）は行が出ない。`client.ip` は `127.0.0.1`（next start が `x-forwarded-for` を付ける）。
+  （以下は Issue #80 の時点の行。Issue #85 以降は先頭に `"level":"info"` が付き、`timestamp` が 2 番目に来る。例: `{"level":"info","timestamp":"2026-09-29T02:02:49.774Z","requestId":"d26d2b94-...",...}`）
   ```
   {"requestId":"d26d2b94-cdd9-4d38-a826-c3bee820e1c6","client":{"ip":"127.0.0.1","userAgent":"curl/8.5.0"},"user":{"id":null},"kind":"page","method":"GET","path":"/","queryKeys":["q"],"timestamp":"2026-09-29T02:02:49.774Z","host":"localhost:3100","referer":null,"accept":"text/html","contentType":null,"requestBytes":null}
   {"requestId":"3c79270c-b712-4137-b43a-aa63a3d40de0","client":{"ip":"127.0.0.1","userAgent":"curl/8.5.0"},"user":{"id":null},"kind":"api","method":"GET","path":"/api/todos","queryKeys":[],"timestamp":"2026-09-29T02:02:49.803Z","host":"localhost:3100","referer":null,"accept":"*/*","contentType":null,"requestBytes":null}

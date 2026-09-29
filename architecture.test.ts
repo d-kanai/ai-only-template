@@ -402,6 +402,13 @@ function isFrontendRootFile(path: string): boolean {
 //   「env.ts は backend の shared/infra に置いたままで、frontend の instrumentation-node.ts がそれを読む」。
 const BACKEND_ENV_MODULE = "apps/backend/shared/infra/env";
 
+// サーバ側のログの唯一の出口（Issue #85）。frontend の直下のファイル（proxy.ts のリクエストログ、instrumentation-node.ts の
+//   起動時のエラー）と、backend の presentation（http-error.ts の想定外の例外）が使う。
+// WHY presentation にも許す: presentation の infra は自 feature の container だけ（下の presentationAllows）だが、想定外の例外を
+//   ログに残すのは HTTP の境界（toErrorResponse）の仕事で、ログの出口を container 経由で渡すと全 API の組み立てに logger が入る。
+//   logger は状態を持たず、差し替えずにテストできる（console を spy する）ので、直接 import させる。
+const BACKEND_LOGGER_MODULE = "apps/backend/shared/infra/logger";
+
 // features/<f>/api/ から、同じ feature の api ファイル（backend/<f>/presentation/*.api）への参照か。
 // frontend-to-backend-specifier の例外（Issue #68 の段階 2。オーケストレータの判断）: リポジトリ直下の vitest.global-setup.ts
 //   （テスト基盤）だけは、database.test-support を相対パスで参照してよい。
@@ -444,7 +451,8 @@ const LAYERS_MAY_USE: Record<BackendLayer, ReadonlySet<BackendLayer>> = {
 
 // presentation 固有の絞り込み。
 //   - infra は自 feature の infra/container だけ（「presentation は query / command を infra/container.ts で組み立てた
-//     コンテナからだけ受け取る。Repository の実装を直接 new しない」）。
+//     コンテナからだけ受け取る。Repository の実装を直接 new しない」）。例外はログの出口 backend/shared/infra/logger
+//     （BACKEND_LOGGER_MODULE。Issue #85）。
 //   - feature の domain は import type だけ（「domain（Entity の型の参照のみ）」）。Entity の生成や操作は application を通す。
 //     backend/shared/domain（DomainError）はエラーの変換（instanceof）に値として使うので対象外。
 function presentationAllows(
@@ -453,7 +461,10 @@ function presentationAllows(
   target: BackendLocation,
 ): boolean {
   if (target.layer === "infra") {
-    return ref.to === `apps/backend/${self.feature}/infra/container`;
+    return (
+      ref.to === `apps/backend/${self.feature}/infra/container` ||
+      ref.to === BACKEND_LOGGER_MODULE
+    );
   }
   if (target.layer === "domain" && target.feature !== "shared") {
     return ref.typeOnly;
@@ -563,12 +574,15 @@ const RULES: Rule[] = [
   {
     // 「frontend から backend への参照は app/api（値）と features/*/api（型）だけ」（Issue #68）の例外。
     //   apps/frontend 直下の instrumentation-node.ts は、起動時の検証のために env.ts を読み込む（Issue #59）。
+    //   proxy.ts と instrumentation-node.ts は、ログを logger（BACKEND_LOGGER_MODULE）で出す（Issue #85）。
     // WHY 直下のファイルに規則を置く: 置かないと、next.config.ts などから backend の何を参照しても検査を素通りする。
     id: "frontend-root-to-backend",
-    name: "apps/frontend/ 直下のファイルが apps/backend/ を参照するときは apps/backend/shared/infra/env だけ",
+    name: "apps/frontend/ 直下のファイルが apps/backend/ を参照するときは apps/backend/shared/infra/env と apps/backend/shared/infra/logger だけ",
     appliesTo: isFrontendRootFile,
     isViolation: (ref) =>
-      ownUnder(ref, BACKEND_ROOT) && ref.to !== BACKEND_ENV_MODULE,
+      ownUnder(ref, BACKEND_ROOT) &&
+      ref.to !== BACKEND_ENV_MODULE &&
+      ref.to !== BACKEND_LOGGER_MODULE,
   },
   {
     // 「`features/<feature>/` の `api/` 以外は backend を参照せず、`api/` が re-export した型を使う」
@@ -662,7 +676,7 @@ const RULES: Rule[] = [
     // WHY next も禁止する: api ファイルは Web 標準の Request / Response で書き、Next を起動せずにテストできるようにしているため
     //   （.claude/rules/testing.md の「置き方と環境」）。
     id: "presentation",
-    name: "apps/backend/<f>/presentation/ が参照してよい自前コードは自 feature と apps/backend/shared/ の application/・domain/（feature の domain は型だけ）・presentation/ と自 feature の infra/container だけで、next・react も参照しない",
+    name: "apps/backend/<f>/presentation/ が参照してよい自前コードは自 feature と apps/backend/shared/ の application/・domain/（feature の domain は型だけ）・presentation/ と自 feature の infra/container・apps/backend/shared/infra/logger だけで、next・react も参照しない",
     appliesTo: (from) => backendLayerOf(from)?.layer === "presentation",
     isViolation: violatesBackendLayer,
   },
@@ -863,6 +877,81 @@ function findEnvViolations(root: string): string[] {
   );
 }
 
+// --- console の直接の呼び出し（規則 console-direct-access。.claude/rules/backend.md の「ログ」。Issue #85） ---
+// console を書いてよいのは apps/backend/shared/infra/logger.ts（サーバ側のログの唯一の出口）だけ。ほかは logger を使う。
+//   画面側のクライアントコード（features/ など）は logger も console も使わない（.claude/rules/frontend.md）。
+// WHY Biome の suspicious/noConsole と二重に検査する: env-direct-access と同じ設計。Biome は biome.json の overrides で
+//   対象外を決めるので、overrides の書き換え（対象外のパスを広げる、ルールを off にする）や allow の追加（console.error を
+//   許すなど）で黙って効かなくなる。ここでは対象と例外（logger.ts だけ）をテストとして固定し、どちらか片方が壊れても、
+//   もう片方で止まるようにする。
+// WHY 呼び出し（console.log(...)）だけでなく、console という名前を書いた時点で違反にする: 別名（const c = console）・
+//   分割代入（const { log } = console）・引数に渡す（run(console)）で、呼び出しの形を検査する仕組みをすり抜けられるため。
+//   console という名前のプロパティ・キー（obj.console、{ console: 1 }）も拾うが、多く検出する方向で、失敗したときに出る
+//   「ファイル:行」を見て判断できる（今のリポジトリには無い）。
+// 限界（仕様として受け入れる。下の「console の参照の抽出」のテストで固定している）:
+//   - node:console の import（import { log } from "node:console"、import c from "node:console"）は拾わない（見逃す方向。
+//     console は文字列の中の参照先にしか書かれないため）。Biome の noConsole（2.5.13）も検出しない（2026-09-29 実測）ので、
+//     どちらの検査でも見逃す。レビューで見る。
+//   - テンプレートリテラルの ${} の中の console は、文字列の中とみなして拾わない（見逃す方向。extractImports と同じ）。
+//     これは Biome の noConsole が検出する。
+//   - 逆に、global.console・(console).log・別名・分割代入・引数に渡す console はこちらだけが検出する（Biome の noConsole は
+//     検出しない。2026-09-29 実測）。一覧は docs/logger.md。
+
+// 検査の対象にするディレクトリ。環境変数の直参照の対象（ENV_CHECK_DIRS）に scripts/ を足す。
+// WHY scripts/ を含める: scripts/ の TS / JS（今はテストだけで、ソースは無い）はフックなどから動かすツールになり、
+//   console で出力を書きたくなる場所なので、置いた時点で検査にかける。
+const SCRIPTS_ROOT = "scripts";
+const CONSOLE_CHECK_DIRS = [...ENV_CHECK_DIRS, SCRIPTS_ROOT];
+
+const CONSOLE_DIRECT_ACCESS = {
+  id: "console-direct-access",
+  name: "console を直接書いてよいのは apps/backend/shared/infra/logger.ts だけ（apps/frontend・apps/backend・apps/e2e/・scripts/ とルート直下の設定ファイルが対象。テストは除く）",
+  // console を書いてよいファイル（ログの唯一の出口）。
+  allowedFile: "apps/backend/shared/infra/logger.ts",
+  // 対象のファイルか。CONSOLE_CHECK_DIRS の下か、ルート直下（"/" を含まない）の、テストでない TS / JS。
+  // WHY テストを除く: テストは console を spy して出力を抑えたり、ログに残したことを確かめたりする
+  //   （vi.spyOn(console, "error")）。Biome の overrides でもテストは off にしている。
+  appliesTo: (file: string) =>
+    isSourceNonTest(file) &&
+    (!file.includes("/") ||
+      CONSOLE_CHECK_DIRS.some((dir) => isUnder(file, dir))),
+};
+
+// console という識別子。\b なので globalThis.console / global.console も拾い、consoleLog のような別の識別子や myconsole は
+// 拾わない。console_ のように続けて識別子の文字（\w と $）がある名前も拾わない。
+const CONSOLE_REFERENCE = /\bconsole(?![\w$])/g;
+
+// source の中の console の参照を、書かれた順に行番号（1 始まり）で返す。
+// コメントの中と文字列リテラルの中は拾わない（findProcessEnvAccesses と同じ stripComments / stringRanges を使う）。
+function findConsoleAccesses(source: string): number[] {
+  const code = stripComments(source);
+  const ranges = stringRanges(code);
+  return [...code.matchAll(CONSOLE_REFERENCE)]
+    .filter((match) => !isInsideString(ranges, match.index))
+    .map((match) => code.slice(0, match.index).split("\n").length);
+}
+
+// 環境変数の直参照の対象（listReferencingFiles と同じ列挙）に、scripts/ のソースを足す。
+function listConsoleCheckedFiles(root: string): string[] {
+  return [
+    ...listAllSourceFiles(root),
+    ...listSourceFiles(root, E2E_ROOT),
+    ...listSourceFiles(root, SCRIPTS_ROOT),
+    ...listDirectFiles(root, ""),
+  ].filter(CONSOLE_DIRECT_ACCESS.appliesTo);
+}
+
+// 「ファイル:行」の一覧。logger.ts は除く。
+function findConsoleViolations(root: string): string[] {
+  return listConsoleCheckedFiles(root)
+    .filter((file) => file !== CONSOLE_DIRECT_ACCESS.allowedFile)
+    .flatMap((file) =>
+      findConsoleAccesses(readFileSync(join(root, file), "utf8")).map(
+        (line) => `${file}:${line}`,
+      ),
+    );
+}
+
 // --- apps/backend/package.json の exports（規則 backend-exports。Issue #68 の段階 2） ---
 // exports は、@repo/backend として外（apps/frontend・apps/e2e/・リポジトリ直下の設定ファイル）に公開するファイルの一覧。
 //   ユーザー判断で、全ファイル（"./*"）ではなく、外が使う入口だけを明示する（.claude/rules/backend.md の「import の書き方と公開の範囲（exports）」）。
@@ -998,7 +1087,7 @@ function findViolations(references: Reference[], rule: Rule): string[] {
 //   1 つの参照が複数の規則に違反するときは、規則ごとに 1 行ずつ出す。
 //   置き場所の違反は「backend-placement: ファイル」「frontend-placement: ファイル」の 1 行で出す。
 //   環境変数の直参照は「env-direct-access: ファイル:行」を参照ごとに 1 行で出す（同じファイルの複数の書き方を、
-//   1 つずつ拾えているかまで比べるため）。
+//   1 つずつ拾えているかまで比べるため）。console の直接の呼び出しも「console-direct-access: ファイル:行」で同じく出す。
 //   exports の違反は「backend-exports: ...」の 1 行で出す（findExportsViolations）。
 // WHY 置き場所の規則も参照を取り出すファイル（listReferencingFiles。apps/e2e/ とリポジトリ直下を含む）全体にかける:
 //   置き場所の規則は isMisplaced の中で apps/backend・apps/frontend の下かを見るので、それ以外のファイルは違反にならない。
@@ -1018,6 +1107,9 @@ function collectViolations(root: string): string[] {
     ),
     ...findEnvViolations(root).map(
       (line) => `${ENV_DIRECT_ACCESS.id}: ${line}`,
+    ),
+    ...findConsoleViolations(root).map(
+      (line) => `${CONSOLE_DIRECT_ACCESS.id}: ${line}`,
     ),
     ...findExportsViolations(
       readBackendExports(root),
@@ -1056,6 +1148,11 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
   it(ENV_DIRECT_ACCESS.name, () => {
     // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
     expect(findEnvViolations(repoRoot)).toEqual([]);
+  });
+
+  it(CONSOLE_DIRECT_ACCESS.name, () => {
+    // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
+    expect(findConsoleViolations(repoRoot)).toEqual([]);
   });
 
   it(BACKEND_EXPORTS.name, () => {
@@ -1112,6 +1209,41 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
     expect(files).not.toContain("apps/backend/shared/infra/env.test.ts");
     // next build の生成物（apps/frontend/.next/）は数えない（あれば数千件の JS を検査することになる）。
     expect(files.filter((file) => file.includes("/.next/"))).toEqual([]);
+  });
+
+  it("console の直接の呼び出しの検査は、各ディレクトリ・scripts/・ルート直下の設定ファイルを対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
+    const files = listConsoleCheckedFiles(repoRoot);
+    expect(files).toEqual(
+      expect.arrayContaining([
+        "apps/backend/shared/infra/logger.ts",
+        "apps/backend/shared/infra/database.ts",
+        "apps/backend/shared/presentation/http-error.ts",
+        "apps/backend/todo/presentation/list-todos.api.ts",
+        "apps/backend/drizzle.config.ts",
+        "apps/frontend/proxy.ts",
+        "apps/frontend/instrumentation-node.ts",
+        "apps/frontend/features/todo/api/todo-api.ts",
+        "apps/frontend/app/page.tsx",
+        "apps/e2e/database.ts",
+        "apps/e2e/playwright.config.ts",
+        "apps/e2e/request-log.spec.ts",
+        "vitest.config.mts",
+        "vitest.global-setup.ts",
+        "stryker.config.mjs",
+      ]),
+    );
+    expect(files).not.toContain("architecture.test.ts");
+    expect(files).not.toContain("apps/backend/shared/infra/logger.test.ts");
+    expect(files).not.toContain("scripts/hooks/guard-git.test.ts");
+    expect(files.filter((file) => file.includes("/.next/"))).toEqual([]);
+  });
+
+  it("logger.ts の中の console は拾えている（抽出が壊れて 0 件になり、規則が素通りするのを防ぐ）", () => {
+    expect(
+      findConsoleAccesses(
+        readFileSync(join(repoRoot, CONSOLE_DIRECT_ACCESS.allowedFile), "utf8"),
+      ).length,
+    ).toBeGreaterThan(0);
   });
 
   it("env.ts の中の process.env は拾えている（抽出が壊れて 0 件になり、規則が素通りするのを防ぐ）", () => {
@@ -1285,6 +1417,13 @@ const RULE_EXAMPLES: Record<
         "@repo/backend/shared/infra/env-helper",
         "value",
       ],
+      // logger も前方一致だけが同じ別ファイル・別の場所の logger は許さない（Issue #85）。
+      [
+        "apps/frontend/proxy.ts",
+        "@repo/backend/shared/infra/logger-helper",
+        "value",
+      ],
+      ["apps/frontend/proxy.ts", "@repo/backend/todo/infra/logger", "value"],
     ],
     allowed: [
       [
@@ -1298,6 +1437,13 @@ const RULE_EXAMPLES: Record<
         "value",
       ],
       ["apps/frontend/instrumentation.ts", "./instrumentation-node", "value"],
+      // ログの唯一の出口（Issue #85）。proxy.ts のリクエストログと instrumentation-node.ts の起動時のエラー。
+      ["apps/frontend/proxy.ts", "@repo/backend/shared/infra/logger", "value"],
+      [
+        "apps/frontend/instrumentation-node.ts",
+        "@repo/backend/shared/infra/logger",
+        "value",
+      ],
       ["apps/frontend/next.config.ts", "next", "type"],
       // proxy.ts（リクエストログ。Issue #80）が frontend の shared/ を使うのは、backend の参照ではないので対象外。
       ["apps/frontend/proxy.ts", "@/shared/request-log/request-log", "value"],
@@ -1589,6 +1735,15 @@ const RULE_EXAMPLES: Record<
         "../../shared/infra/container",
         "value",
       ],
+      // infra で使ってよいのは backend/shared/infra/logger だけ。前方一致だけが同じ別ファイル、自 feature の infra の logger、
+      //   backend/shared/infra のほかのファイルは不可（Issue #85）。
+      [
+        "apps/backend/shared/presentation/x.ts",
+        "../infra/logger-helper",
+        "value",
+      ],
+      ["apps/backend/todo/presentation/x.api.ts", "../infra/logger", "value"],
+      ["apps/backend/shared/presentation/x.ts", "../infra/database", "type"],
     ],
     allowed: [
       [
@@ -1616,6 +1771,17 @@ const RULE_EXAMPLES: Record<
       [
         "apps/backend/shared/presentation/http-error.ts",
         "../domain/domain-error",
+        "value",
+      ],
+      // ログの唯一の出口（Issue #85）。http-error.ts が想定外の例外を logger.error で残す。feature の presentation からも使える。
+      [
+        "apps/backend/shared/presentation/http-error.ts",
+        "../infra/logger",
+        "value",
+      ],
+      [
+        "apps/backend/todo/presentation/x.api.ts",
+        "../../shared/infra/logger",
         "value",
       ],
     ],
@@ -2000,6 +2166,121 @@ describe("環境変数の直参照の抽出（findProcessEnvAccesses）", () => 
   });
 });
 
+// console を直接書く規則（CONSOLE_DIRECT_ACCESS）の判定例。ENV_ACCESS_EXAMPLES と同じく [ファイル, ソース] で決まる。
+const CONSOLE_ACCESS_EXAMPLES: {
+  violating: [file: string, source: string][];
+  allowed: [file: string, source: string][];
+} = {
+  violating: [
+    // 書き方（メソッド・?.・[]・空白と改行・globalThis / global 経由・括弧）。
+    ["apps/backend/todo/presentation/x.api.ts", 'console.log("x");'],
+    ["apps/backend/shared/presentation/x.ts", "console.error(error);"],
+    ["apps/backend/shared/infra/database.ts", 'console.warn("retry");'],
+    ["apps/backend/todo/infra/x.ts", 'console?.info("x");'],
+    ["apps/backend/todo/infra/x.ts", 'console["log"]("x");'],
+    ["apps/backend/todo/infra/x.ts", "console\n  .log(1);"],
+    ["apps/frontend/proxy.ts", "globalThis.console.log(line);"],
+    ["apps/frontend/instrumentation-node.ts", "global.console.error(e);"],
+    ["apps/frontend/features/todo/components/x.tsx", "(console).log(1);"],
+    // 呼び出し以外の参照（別名・分割代入・引数に渡す）も、console という名前を書いた時点で違反。
+    ["apps/frontend/app/page.tsx", "const c = console; c.log(1);"],
+    ["apps/frontend/shared/x.ts", "const { log } = console;"],
+    ["apps/e2e/x.ts", "run(console);"],
+    // apps/e2e/・scripts/・ルート直下の設定ファイル、拡張子。
+    ["apps/e2e/request-log.spec.ts", "console.log(line);"],
+    ["scripts/tool.ts", "console.log(1);"],
+    ["scripts/hooks/tool.mjs", "console.log(1);"],
+    ["vitest.config.mts", "console.log(1);"],
+    ["stryker.config.mjs", "console.log(1);"],
+    // logger.ts と名前の前方一致だけが同じ別ファイル・別の場所の logger.ts。
+    ["apps/backend/shared/infra/logger-helper.ts", "console.log(1);"],
+    ["apps/backend/todo/infra/logger.ts", "console.log(1);"],
+  ],
+  allowed: [
+    // 例外の logger.ts。
+    [
+      "apps/backend/shared/infra/logger.ts",
+      "console.log(line); console.warn(line); console.error(line);",
+    ],
+    // コメント・文字列の中。
+    ["apps/backend/todo/infra/x.ts", '// console.log("x") は書かない'],
+    ["apps/backend/todo/infra/x.ts", "/* console.error */ export const a = 1;"],
+    ["apps/backend/todo/infra/x.ts", 'const s = "console.log(1)";'],
+    ["apps/backend/todo/infra/x.ts", "const t = `console.log`;"],
+    // console ではない識別子・プロパティ。
+    [
+      "apps/backend/todo/infra/x.ts",
+      "const consoleLog = read(); consoleLog.x;",
+    ],
+    ["apps/backend/todo/infra/x.ts", "myconsole.log(1); console_.log(2);"],
+    ["apps/backend/todo/infra/x.ts", 'logger.error({ message: "x" });'],
+    // テストと、対象外の場所・種類のファイル。
+    ["apps/backend/todo/infra/x.test.ts", "console.log(1);"],
+    ["apps/frontend/features/todo/components/x.test.tsx", "console.log(1);"],
+    ["scripts/hooks/guard-git.test.ts", "console.log(1);"],
+    ["architecture.test.ts", "console.log(1);"],
+    ["docs/x.ts", "console.log(1);"],
+    ["README.md", "console.log(1);"],
+    ["scripts/tool.sh", "console.log(1);"],
+  ],
+};
+
+function judgeConsoleAccess([file, source]: [string, string]): boolean {
+  return (
+    CONSOLE_DIRECT_ACCESS.appliesTo(file) &&
+    file !== CONSOLE_DIRECT_ACCESS.allowedFile &&
+    findConsoleAccesses(source).length > 0
+  );
+}
+
+describe("console を直接書く規則の判定", () => {
+  it("違反例・許可例はそれぞれ 4 件以上ある", () => {
+    expect(CONSOLE_ACCESS_EXAMPLES.violating.length).toBeGreaterThanOrEqual(4);
+    expect(CONSOLE_ACCESS_EXAMPLES.allowed.length).toBeGreaterThanOrEqual(4);
+  });
+  it.each(CONSOLE_ACCESS_EXAMPLES.violating)(
+    "%s の %j は違反",
+    (...example) => {
+      expect(judgeConsoleAccess(example)).toBe(true);
+    },
+  );
+  it.each(CONSOLE_ACCESS_EXAMPLES.allowed)(
+    "%s の %j は違反ではない",
+    (...example) => {
+      expect(judgeConsoleAccess(example)).toBe(false);
+    },
+  );
+});
+
+describe("console の参照の抽出（findConsoleAccesses）", () => {
+  it("参照ごとに、書かれた行番号を返す（コメントを消しても行はずれない）", () => {
+    const source = [
+      "/*",
+      " * console.log は書かない",
+      " */",
+      "console.log(1); console.error(2);",
+      "// console.warn",
+      'globalThis.console["info"](3);',
+    ].join("\n");
+    expect(findConsoleAccesses(source)).toEqual([4, 4, 6]);
+  });
+
+  it('node:console の import（import { log } from "node:console" / import c from "node:console"）は拾わない（見逃す方向の限界。Biome の noConsole も検出しない）', () => {
+    const source = [
+      'import { log } from "node:console";',
+      'import c from "node:console";',
+      "log(1); c.log(2);",
+    ].join("\n");
+    expect(findConsoleAccesses(source)).toEqual([]);
+  });
+
+  it("テンプレートリテラルの埋め込み式の中の console は拾わない（見逃す方向の限界。Biome の noConsole が検出する）", () => {
+    // WHY テンプレートリテラルで書く: 環境変数の抽出のテストと同じく、noTemplateCurlyInString を避けるため。
+    const source = `const s = \`x: \${console.log(1)}\`;`;
+    expect(findConsoleAccesses(source)).toEqual([]);
+  });
+});
+
 describe("規則ごとの判定", () => {
   // WHY: 規則を足したのに判定の例を足し忘れると、その規則の判定は下の it.each で 1 度も確かめられない（Issue #68 で 3 規則を足した）。
   it("RULES のすべての規則に判定の例があり、RULES に無い規則の例は無い", () => {
@@ -2219,7 +2500,8 @@ function violationsOfFixture(files: Record<string, string>): string[] {
 // 名前の前方一致だけが同じ別ディレクトリ、next / react / react-dom のサブパス）を置く。
 // あわせて、置き場所の規則（BACKEND_PLACEMENT / FRONTEND_PLACEMENT）、環境変数の直参照の規則（ENV_DIRECT_ACCESS）、
 // exports の規則（BACKEND_EXPORTS。fixture の apps/backend/package.json）の違反も置く。
-// 規則は全部で 21（RULES の 17 + 置き場所 2 + 環境変数の直参照 + exports）。Issue #68 で RULES に 3 規則（backend-to-frontend・
+// console の直接の呼び出しの規則（CONSOLE_DIRECT_ACCESS。Issue #85）の違反も置く。
+// 規則は全部で 22（RULES の 17 + 置き場所 2 + 環境変数の直参照 + console + exports）。Issue #68 で RULES に 3 規則（backend-to-frontend・
 // backend-relative-only・frontend-root-to-backend）を足し、段階 2 で frontend-to-backend-specifier と BACKEND_EXPORTS を足した。
 const MUST_REJECT_FILES: Record<string, string> = {
   // screen-to-backend: apps/frontend/features/<f>/ の api/ 以外から backend への参照は、型でも相対でも違反。
@@ -2483,6 +2765,29 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/backend/shared/infra/env-helper.ts": lines(
     "export const e = process.env;",
   ),
+  // console-direct-access（Issue #85）: logger.ts 以外で console を書く。書き方ごとに 1 行ずつ置き、行番号で検出を比べる。
+  //   コメント・文字列の中（6・7 行目）は拾わない。別名に入れる（8 行目）のも違反。
+  "apps/backend/todo/presentation/bad-console.api.ts": lines(
+    'console.log("x");',
+    "console.error(error);",
+    'globalThis.console.warn("w");',
+    'console?.info("i");',
+    'console["debug"]("d");',
+    '// console.log("comment")',
+    'const s = "console.log(string)";',
+    "const c = console;",
+    "( console ).log(1);",
+  ),
+  //   画面側のクライアントコード、apps/e2e/ の spec、scripts/、ルート直下の設定ファイル、logger.ts と名前の前方一致だけが同じ別ファイル。
+  "apps/frontend/features/todo/components/bad-console.tsx": lines(
+    "export const C = () => { console.log(1); return null; };",
+  ),
+  "apps/e2e/bad-console.spec.ts": lines("console.log(line);"),
+  "scripts/bad-console.ts": lines("console.log(1);"),
+  "bad-console.config.mjs": lines("console.log(1);"),
+  "apps/backend/shared/infra/logger-helper.ts": lines(
+    "export const l = () => console.log(1);",
+  ),
   // Issue #68: backend-relative-only。層の規則では許される参照先（自 feature の domain・application、backend/shared）でも、
   //   "@repo/backend/" で書くと違反。import type・re-export・dynamic import・パッケージ名だけの import も同じ。
   //   パッケージ名だけの "@repo/backend" は apps/backend 直下を指し、層に属さないので application の規則にもかかる。
@@ -2640,6 +2945,15 @@ const MUST_REJECT_VIOLATIONS = [
   "env-direct-access: bad.config.mjs:1",
   "env-direct-access: bad.config.cjs:1",
   "env-direct-access: apps/backend/shared/infra/env-helper.ts:1",
+  ...[1, 2, 3, 4, 5, 8, 9].map(
+    (line) =>
+      `console-direct-access: apps/backend/todo/presentation/bad-console.api.ts:${line}`,
+  ),
+  "console-direct-access: apps/frontend/features/todo/components/bad-console.tsx:1",
+  "console-direct-access: apps/e2e/bad-console.spec.ts:1",
+  "console-direct-access: scripts/bad-console.ts:1",
+  "console-direct-access: bad-console.config.mjs:1",
+  "console-direct-access: apps/backend/shared/infra/logger-helper.ts:1",
   ...[
     "apps/backend/todo/presentation/list-todos.api",
     "apps/backend/todo/domain/todo",
@@ -3009,7 +3323,35 @@ const MUST_PASS_FILES: Record<string, string> = {
     "  DomainError,",
     "  type DomainErrorCode,",
     '} from "../domain/domain-error";',
+    // Issue #85: 想定外の例外はログの唯一の出口（backend/shared/infra/logger）で残す。
+    'import { logger } from "../infra/logger";',
+    'logger.error({ message: "x" });',
   ),
+  // console を直接書いてよいのは logger.ts だけ（Issue #85）。
+  "apps/backend/shared/infra/logger.ts": lines(
+    "export const logger = {",
+    "  info: (line: string) => console.log(line),",
+    "  warn: (line: string) => console.warn(line),",
+    "  error: (line: string) => globalThis.console.error(line),",
+    "};",
+  ),
+  // logger.ts 以外の、console に見えるが参照ではないもの（コメント・文字列・別の識別子）。
+  "apps/backend/todo/infra/console-lookalikes.ts": lines(
+    '// console.log("x") は logger から出す',
+    "/* console.error */",
+    'const s = "console.log(1)";',
+    "const t = 'console[\"log\"]';",
+    "const consoleLog = read(); consoleLog.x;",
+    "myconsole.log(1); console_.log(2);",
+  ),
+  // テストの console（出力の抑制や spy）は検査しない。
+  "apps/backend/shared/infra/logger.test.ts": lines(
+    'vi.spyOn(console, "log");',
+  ),
+  "scripts/hooks/tool.test.ts": lines("console.log(1);"),
+  "apps/frontend/features/todo/components/x.test.tsx":
+    lines("console.error(1);"),
+  "scripts/tool.sh": lines("console.log(1)"),
   "apps/backend/shared/presentation/json-body.ts": lines(
     'import { InvalidRequestError } from "./http-error";',
     'import { toErrorResponse } from "./http-error";',
@@ -3165,7 +3507,10 @@ const MUST_PASS_FILES: Record<string, string> = {
   "apps/e2e/todo.test.ts": lines("const p = process.env.PATH;"),
   "architecture.test.ts": lines("const p = process.env.PATH;"),
   "scripts/tool.ts": lines("const p = process.env.PATH;"),
-  "node_modules/pkg/index.js": lines("module.exports = process.env;"),
+  "node_modules/pkg/index.js": lines(
+    "module.exports = process.env;",
+    "console.log(1);",
+  ),
   ".next/server/chunk.js": lines("module.exports = process.env;"),
   // Issue #68: next build の生成物（apps/frontend/.next/）と、workspace パッケージの依存（apps/backend/node_modules/）は
   //   自前のコードではないので、違反を書いても検査しない。
@@ -3206,14 +3551,18 @@ const MUST_PASS_FILES: Record<string, string> = {
     "}",
   ),
   "apps/frontend/instrumentation-node.ts": lines(
+    'import { logger } from "@repo/backend/shared/infra/logger";',
     "export async function verifyEnvAtStartup() {",
     '  await import("@repo/backend/shared/infra/env");',
     "}",
   ),
   // proxy.ts（Next の規約ファイル。リクエストログ。Issue #80）は直下に置き、1 行の組み立てを frontend の shared/ から使う。
+  //   出力はログの唯一の出口（backend/shared/infra/logger。Issue #85）を通す。
   "apps/frontend/proxy.ts": lines(
+    'import { logger } from "@repo/backend/shared/infra/logger";',
     'import { type NextRequest, NextResponse } from "next/server";',
     'import { buildRequestLog } from "@/shared/request-log/request-log";',
+    "logger.info(buildRequestLog());",
   ),
   "apps/frontend/shared/request-log/request-log.ts": lines(
     "export function buildRequestLog() {}",
@@ -3255,6 +3604,7 @@ const MUST_PASS_FILES: Record<string, string> = {
       "./todo/presentation/*.api": "./todo/presentation/*.api.ts",
       "./shared/presentation/http-error": "./shared/presentation/http-error.ts",
       "./shared/infra/env": "./shared/infra/env.ts",
+      "./shared/infra/logger": "./shared/infra/logger.ts",
     },
   }),
   "apps/backend/shared/infra/drizzle-transaction-runner.ts": lines(
