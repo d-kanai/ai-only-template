@@ -55,7 +55,7 @@ describe("DELETE /api/todos/:id", () => {
     await expect(container.listTodos.execute()).resolves.toEqual([]);
   });
 
-  test("uuid の形で無い id なら 404 と not_found を、その id を示す message 付きで返す", async () => {
+  test("uuid の形だが存在しない id なら 404 と not_found を、その id を示す message 付きで返す", async () => {
     const { DELETE } = setup();
     const id = randomUUID();
 

@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { DomainError } from "../../shared/domain/domain-error";
 import { toErrorResponse } from "../../shared/presentation/http-error";
 import {
   parseJsonBody,
   requestBodySchema,
 } from "../../shared/presentation/json-body";
+import { parseUuidParam } from "../../shared/presentation/resource-id";
 import type { Todo } from "../domain/todo";
 import { type TodoContainer, todoContainer } from "../infra/container";
 
@@ -43,14 +43,6 @@ export type UpdateTodoResponse = TodoDto;
 // Next 16 では動的セグメントの params が Promise で渡される（get-todo.api.ts の Context のコメント）。
 type Context = { params: Promise<{ id: string }> };
 
-// 動的セグメントの id が Todo の id の形（uuid）でなければ、無い Todo として 404 にする（get-todo.api.ts の parseTodoId のコメント）。
-function parseTodoId(id: string): string {
-  if (!z.uuid().safeParse(id).success) {
-    throw new DomainError("not_found", `Todo（id: ${id}）が見つかりません`);
-  }
-  return id;
-}
-
 function toTodoDto(todo: Todo): TodoDto {
   return {
     id: todo.id,
@@ -66,7 +58,9 @@ export function updateTodoApi(container: Pick<TodoContainer, "updateTodo">) {
     try {
       // WHY id を本文より先に確かめる: URL が指す Todo が存在しえないなら、本文の誤りを直しても成功しない。
       //   直しても意味の無い 400 ではなく 404 を返す。
-      const id = parseTodoId((await ctx.params).id);
+      const { id: rawId } = await ctx.params;
+      // uuid の形でない id の message は、query / command が無い id に投げる not_found と同じ文言にそろえる。
+      const id = parseUuidParam(rawId, `Todo（id: ${rawId}）が見つかりません`);
       const input = await parseJsonBody(request, updateTodoRequestSchema());
       const todo = await container.updateTodo.execute({ id, ...input });
       const body: UpdateTodoResponse = toTodoDto(todo);

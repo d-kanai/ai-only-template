@@ -11,7 +11,7 @@ paths:
 ## 置き場所（DDD 4 層）
 - ファイルは `apps/backend/<feature>/`（`apps/backend/shared/` を含む）の `domain/` `application/` `presentation/` `infra/` のどれかの下に置く。例外は `apps/backend/` 直下の設定ファイル `<name>.config.ts`（今は `drizzle.config.ts`）と `drizzle/`（生成したマイグレーション）。
   - WHY: 層に属さない場所のファイルにはどの層の規則もかからず、依存の向きの検査を素通りする（規則 `backend-placement`）。
-- `apps/backend/shared/`: feature をまたぐもの。`domain/domain-error.ts`（DomainError: `validation_error` / `not_found`）、`domain/transaction-runner.ts`（TransactionRunner の interface）、`presentation/http-error.ts`（DomainError → HTTP ステータス、`ErrorResponse`・`ErrorIssue`、`InvalidRequestError`）、`presentation/json-body.ts`（`requestBodySchema`・`parseJsonBody`）、`infra/database.ts`（プールと Drizzle の db、`Executor`）、`infra/drizzle-transaction-runner.ts`。
+- `apps/backend/shared/`: feature をまたぐもの。`domain/domain-error.ts`（DomainError: `validation_error` / `not_found`）、`domain/transaction-runner.ts`（TransactionRunner の interface）、`presentation/http-error.ts`（DomainError → HTTP ステータス、`ErrorResponse`・`ErrorIssue`、`InvalidRequestError`）、`presentation/json-body.ts`（`requestBodySchema`・`parseJsonBody`）、`presentation/resource-id.ts`（`parseUuidParam`: 動的セグメントの id が uuid の形でなければ 404）、`infra/database.ts`（プールと Drizzle の db、`Executor`）、`infra/drizzle-transaction-runner.ts`。
 - 環境変数の唯一の入口 `env.ts` とログの唯一の出口 `logger.ts` は、frontend と backend で共通の workspace パッケージ `apps/shared`（`@repo/shared`）にある（Issue #90。`.claude/rules/shared.md`）。backend からは `@repo/shared/env`・`@repo/shared/logger` で使う。
 
 | 層 | 置くもの | 参照してよい先（許可の一覧。無いものは不可） |

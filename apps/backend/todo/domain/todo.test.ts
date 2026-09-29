@@ -91,6 +91,20 @@ describe("Todo#rename", () => {
     expect(original.title).toBe("牛乳を買う");
   });
 
+  test("完了済みの Todo の名前を変えても、完了状態・id・作成日時は変わらない", () => {
+    // rename はタイトルだけを差し替える。{ ...this } の展開で他の値を引き継ぐので、
+    //   completed を未完了に戻す（false 固定にする）ような書き換えを検出するため、完了済みから始める。
+    //   未完了から始めると、false 固定にしても結果が同じで見逃す。
+    const completed = Todo.create("牛乳を買う").changeCompletion(true);
+
+    const renamed = completed.rename("卵を買う");
+
+    expect(renamed.completed).toBe(true);
+    expect(renamed.id).toBe(completed.id);
+    expect(renamed.createdAt).toEqual(completed.createdAt);
+    expect(renamed.title).toBe("卵を買う");
+  });
+
   test.each([
     ["空白だけ", " ", EMPTY_TITLE_MESSAGE],
     ["101 文字", "a".repeat(101), TOO_LONG_TITLE_MESSAGE],
