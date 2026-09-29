@@ -2,10 +2,9 @@
 paths:
   - "**/*.test.ts"
   - "**/*.test.tsx"
-  - "e2e/**"
+  - "apps/e2e/**"
   - "vitest.config.mts"
   - "vitest.global-setup.ts"
-  - "playwright.config.ts"
   - "stryker.config.mjs"
 ---
 
@@ -22,7 +21,7 @@ paths:
 - テストを足す・書き換えたら、そのテストが守るコードを 1 度壊して落ちることを確かめ、元に戻す（条件の反転・戻り値の変更・呼び出しの削除など）。WHY: 検証が弱いと壊しても緑のまま。書き換えで既存の検証が消えることもある。
 
 ## 置き方と環境
-対象と同じディレクトリに `<対象>.test.ts(x)` で置く（`apps/frontend/app/` には置かない）。E2E だけリポジトリ直下の `e2e/<feature>.spec.ts`（画面・API・ルーティングをまたぐため）。
+対象と同じディレクトリに `<対象>.test.ts(x)` で置く（`apps/frontend/app/` には置かない）。E2E だけ workspace パッケージ `@repo/e2e` の `apps/e2e/<feature>.spec.ts`（画面・API・ルーティングをまたぐため）。
 
 | 対象 | 方法 | 環境 |
 | --- | --- | --- |
@@ -32,7 +31,7 @@ paths:
 | `apps/backend/**/presentation` | 空の InMemory で組み立てた handler（`listTodosApi(createInMemoryTodoContainer())`）に `new Request()`（と `ctx`）を渡し、`Response` を検証。共有の `todoContainer` は使わない | Node |
 | `apps/frontend/features/**/*.hook.ts` | `renderHook` で状態とイベント | jsdom |
 | `apps/frontend/features/**/*-screen.tsx` | render して操作し、表示を検証 | jsdom |
-| `e2e/*.spec.ts` | Playwright で本番ビルドを起動し、Chromium で操作 | Chromium |
+| `apps/e2e/*.spec.ts` | Playwright で本番ビルドを起動し、Chromium で操作 | Chromium |
 
 - `apps/backend/` のテストは先頭に `// @vitest-environment node`（既定は jsdom）。WHY: サーバのコードは DOM の無い環境で検証する。
 - 実 Postgres を別スキーマに分ける WHY: Vitest はファイルを並列に、Stryker はさらに複数プロセスで実行する。同じ `public.todos` を使うと互いの `TRUNCATE` でデータが消え、`pnpm dev` や E2E の表も消える。drizzle の migrator には同時実行の排他が無い。
@@ -82,10 +81,12 @@ paths:
 - テストで `@repo/backend/...` から backend の値を import すると、その変異はテストに届かない。backend の振る舞いは backend の中のテスト（相対 import）で確かめる。
 
 ## E2E（Playwright）
-- `pnpm test:e2e`（`playwright test`、設定は `playwright.config.ts`）。`webServer` が `pnpm build && pnpm start -p <E2E_PORT>`（`.env` の `E2E_PORT`。メインの作業ツリーは 3100）で本番ビルドを起動する（ローカルで起動済みならそれを使う）。`pnpm test`（Vitest）には含めない。
-- Postgres で動かす。サーバ（`webServer.env`）とテスト（`e2e/database.ts`）は同じ `env.DATABASE_URL` を使う。前提は `pnpm db:up && pnpm db:migrate`（`webServer.command` では当てない）。
+- `apps/e2e` は workspace パッケージ `@repo/e2e`（Issue #84）。`@playwright/test`・`pg`・`@types/pg`・`"@repo/backend": "workspace:*"` は `apps/e2e/package.json` に置く。
+  - WHY: `apps/frontend`・`apps/backend` と同じ形（依存は使うパッケージの `package.json`）にし、E2E だけが使う Playwright と `pg` をリポジトリ直下から外す。`.env` はリポジトリ直下の 1 つを `env.ts` が上にたどって読むので、カレントディレクトリが `apps/e2e` でも同じ値になる。
+- `pnpm test:e2e`（= `pnpm --filter @repo/e2e test` = `apps/e2e` で `playwright test`。設定は `apps/e2e/playwright.config.ts`）。`webServer` が `pnpm -w build && pnpm -w start -p <E2E_PORT>`（`-w` でリポジトリ直下の script を呼ぶ）（`.env` の `E2E_PORT`。メインの作業ツリーは 3100）で本番ビルドを起動する（ローカルで起動済みならそれを使う）。`pnpm test`（Vitest）には含めない。
+- Postgres で動かす。サーバ（`webServer.env`）とテスト（`apps/e2e/database.ts`）は同じ `env.DATABASE_URL` を使う。前提は `pnpm db:up && pnpm db:migrate`（`webServer.command` では当てない）。
   - ローカルの `reuseExistingServer` で起動済みのサーバを使うときは、そのサーバの環境変数のまま動く（別の DB・古いコードのサーバが残っていないか注意）。
 - 各テストの前に `TRUNCATE todos`（`resetTodos()`）。title に実行時刻を付けるのは補助。WHY: Postgres のデータはサーバを起動し直しても残る。
 - 1 テストで CRUD を一周する（`workers: 1`。1 本の中の順序で状態を担保する）。
-- サーバの stdout を検証するテスト（`e2e/request-log.spec.ts`。リクエストログ）は、webServer ではなくテストの中で `next start -p 0` を子プロセスで起動し、その stdout を読む。WHY: webServer の stdout はテストから読めず（`webServer.stdout: "pipe"` はランナーのプロセスの stdout に流すだけ。テストは別の worker プロセスで動く）、ローカルの `reuseExistingServer` では別のプロセスになる。ポート 0 で空きポートを選ばせ、webServer・並列の worktree と重ならないようにする。本番ビルド（`.next`）は webServer の `pnpm build` が作ったものを使う。
-- Chromium のビルドが合わないとき（クラウド VM）は `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium pnpm test:e2e`。CI は `pnpm exec playwright install --with-deps chromium`、ローカルは `pnpm exec playwright install chromium`。
+- サーバの stdout を検証するテスト（`apps/e2e/request-log.spec.ts`。リクエストログ）は、webServer ではなくテストの中で `next start -p 0` を子プロセスで起動し、その stdout を読む。WHY: webServer の stdout はテストから読めず（`webServer.stdout: "pipe"` はランナーのプロセスの stdout に流すだけ。テストは別の worker プロセスで動く）、ローカルの `reuseExistingServer` では別のプロセスになる。ポート 0 で空きポートを選ばせ、webServer・並列の worktree と重ならないようにする。本番ビルド（`.next`）は webServer の `pnpm build` が作ったものを使う。
+- Chromium のビルドが合わないとき（クラウド VM）は `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium pnpm test:e2e`。CI は `pnpm --filter @repo/e2e exec playwright install --with-deps chromium`、ローカルは `pnpm --filter @repo/e2e exec playwright install chromium`（OS の依存も入れるなら `pnpm --filter @repo/e2e install-browser`）。

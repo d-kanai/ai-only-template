@@ -33,17 +33,17 @@ export type Env = {
 // ここに足してよいのは、ツール（CI・Playwright・Stryker など）が設定するか、ツールの動かし方を切り替えるフラグだけ。
 //   アプリの設定（接続先・上限値など）は必ず Env に足し、必須にする。
 export type ToolEnv = {
-  // CI で動いているか。Playwright の reuseExistingServer を切り替える（playwright.config.ts）。
+  // CI で動いているか。Playwright の reuseExistingServer を切り替える（apps/e2e/playwright.config.ts）。
   // 空でなければ true（Playwright の公式の例 `!process.env.CI` と同じ扱い）。lefthook の postinstall は "0" / "false" を
   //   無効として扱うが、ここではフックの導入には使わないので合わせない。
   CI: boolean;
-  // E2E で使う Chromium の実行ファイル（クラウド VM 用。playwright.config.ts）。空なら未設定と同じ。
+  // E2E で使う Chromium の実行ファイル（クラウド VM 用。apps/e2e/playwright.config.ts）。空なら未設定と同じ。
   PLAYWRIGHT_CHROMIUM_EXECUTABLE: string | undefined;
   // Stryker（mutation testing）の worker の中で動いているか。Stryker が子プロセスに渡す（@stryker-mutator/core 10.0.0 の
   //   child-process-proxy.js）。テスト用スキーマの後始末を止めるのに使う（apps/backend/shared/infra/database.test-support.ts）。
   STRYKER_MUTATOR_WORKER: boolean;
-  // E2E（Playwright）が本番ビルドを起動するポート（1〜65535。playwright.config.ts）。未設定なら undefined で、
-  //   playwright.config.ts が既定の 3100 を使う。ツールの動かし方（E2E のポート）の切り替え。
+  // E2E（Playwright）が本番ビルドを起動するポート（1〜65535。apps/e2e/playwright.config.ts）。未設定なら undefined で、
+  //   apps/e2e/playwright.config.ts が既定の 3100 を使う。ツールの動かし方（E2E のポート）の切り替え。
   // WHY Env（必須）でなくここ: E2E 専用で、アプリ（next start）は使わない。必須にすると本番や既存の .env にテスト用の
   //   変数を要求し、足すまで全コマンドが止まる（Issue #64 の reviewer 指摘）。
   // WHY 任意でも不正な値はエラーにする: 0 や範囲外を黙って既定値にすると、worktree ごとに分けたつもりのポートが
@@ -216,8 +216,9 @@ export function findRepoRoot(start: string): string {
 
 // cwd から探したリポジトリ直下の .env を読む。読み込んだら true、ファイルが無ければ false（loadDotEnvFile と同じ）。
 // WHY リポジトリ直下の .env を 1 つだけ読む（Issue #68 のユーザー判断）: .env は app ごとに置かず、リポジトリ直下に 1 つにする。
-//   vitest / playwright はリポジトリ直下で動くが、workspace パッケージの script（pnpm --filter @repo/frontend build /
-//   pnpm --filter @repo/backend db:migrate など。Issue #68 の段階 2）はパッケージのディレクトリ（apps/frontend・apps/backend）で
+//   vitest はリポジトリ直下で動くが、workspace パッケージの script（pnpm --filter @repo/frontend build /
+//   pnpm --filter @repo/backend db:migrate・pnpm --filter @repo/e2e test（playwright。Issue #84）など。Issue #68 の段階 2）は
+//   パッケージのディレクトリ（apps/frontend・apps/backend・apps/e2e）で
 //   動くため、カレントディレクトリの .env を読むだけでは見つからない。
 // WHY このファイルの場所から探さない（import.meta.dirname を使わない）: Next のビルドでバンドルされると元の場所を指さないため。
 export function loadRepoDotEnv(cwd: string): boolean {

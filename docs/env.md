@@ -8,7 +8,7 @@
 
 ## 必須の環境変数が欠けたときに止まる場所（Issue #59。`.env` から `DATABASE_POOL_MAX` を消して確認）
 - `pnpm build`: ページデータの収集で `/api/todos/[id]` の読み込みが失敗。
-- `pnpm test`: globalSetup。`pnpm test:e2e`: `playwright.config.ts` の読み込み。`pnpm db:migrate`: `drizzle.config.ts` の読み込み。
+- `pnpm test`: globalSetup。`pnpm test:e2e`: `apps/e2e/playwright.config.ts` の読み込み。`pnpm db:migrate`: `drizzle.config.ts` の読み込み。
 - `pnpm start` / `pnpm dev`: Next が「✓ Ready」を出した直後に、欠けた名前を出して exit 1（Ready の表示は `register` の前に出る。`register` はリクエストを受け付ける前に完了する、と Next のドキュメントにある）。
 - いずれも exit 1。
 

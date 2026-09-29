@@ -455,12 +455,13 @@ describe("package.json の実ファイル", () => {
   }));
 
   // WHY: 列挙が漏れる（pnpm-workspace.yaml の読み違い・パターンの書き換え）と、そのパッケージの範囲指定は検査されない。
-  //   今の workspace のパッケージ（リポジトリ直下・apps/backend・apps/frontend）がすべて入っていることを確かめる。
+  //   今の workspace のパッケージ（リポジトリ直下・apps/backend・apps/e2e・apps/frontend）がすべて入っていることを確かめる。
   it("リポジトリ直下と apps/* の package.json をすべて列挙できる", () => {
     expect(manifestPaths).toEqual(
       expect.arrayContaining([
         "package.json",
         "apps/backend/package.json",
+        "apps/e2e/package.json",
         "apps/frontend/package.json",
       ]),
     );
@@ -479,7 +480,7 @@ describe("package.json の実ファイル", () => {
     },
   );
 
-  // WHY: 同じパッケージを複数の package.json に置く（pg / @types/pg はリポジトリ直下の E2E 用と apps/backend の両方）と、
+  // WHY: 同じパッケージを複数の package.json に置く（pg / @types/pg は E2E 用の apps/e2e と apps/backend の両方）と、
   //   片方だけ版を上げたときに、同じ workspace に同じパッケージの 2 つの版が入り、どちらのコードがどちらの版で動くかが
   //   package.json を見ても分からなくなる。版を上げるときに両方を上げ忘れないよう、機械的に止める（.claude/rules/dependencies.md）。
   it("workspace の package.json をまたいで、同じ名前の依存は同じ版で書かれている", () => {

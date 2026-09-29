@@ -34,7 +34,9 @@ export default defineConfig({
     //   WHY 既定（**/*.{test,spec}.?(c|m)[jt]s?(x)）にしない: 置き場所を明示し、apps/frontend/.next/ などの生成物や
     //   想定外の場所のテストを拾わないようにする（Issue #68 で apps/ に移したときに範囲を決め直した）。
     include: ["apps/**/*.test.{ts,tsx}", "*.test.ts", "scripts/**/*.test.ts"],
-    // e2e/**: Playwright の E2E テスト（e2e/*.spec.ts）を Vitest の対象から外す。
+    // apps/e2e/**: Playwright の E2E テスト（apps/e2e/*.spec.ts。workspace パッケージ @repo/e2e。Issue #84 で e2e/ から移した）を
+    //   Vitest の対象から外す。上の include（apps/**/*.test.{ts,tsx}）は *.spec.ts を拾わないが、E2E の置き場所に *.test.ts を
+    //   置いたときや include を既定に戻したときにも拾わないよう、明示して外す。
     //   Vitest の既定 include（**/*.{test,spec}.?(c|m)[jt]s?(x)）は *.spec.ts も拾うため、除外しないと
     //   pnpm test が Playwright の test() を Vitest 上で読み込み、「test() from an async test.describe()」
     //   のエラーで失敗する（2026-09-28 に実測）。E2E は pnpm test:e2e（Playwright）で実行する。
@@ -42,9 +44,9 @@ export default defineConfig({
     //   置き換えるため、結合しないと node_modules 配下のテストまで拾ってしまう。
     //   .stryker-tmp/**: Stryker（pnpm test:mutation）が作る作業用のサンドボックス。Stryker を途中で止めると
     //   .stryker-tmp/sandbox-*/ にリポジトリのコピー（変異を入れたコードとテスト）が残り、そのままだと pnpm test が
-    //   コピーの中のテストまで拾って件数が倍になり、コピーの e2e/（"e2e/**" はルート相対なので効かない）で失敗する
+    //   コピーの中のテストまで拾って件数が倍になり、コピーの E2E（"apps/e2e/**" はルート相対なので効かない）で失敗する
     //   （2026-09-28 に reviewer が実測）。
-    exclude: [...configDefaults.exclude, "e2e/**", ".stryker-tmp/**"],
+    exclude: [...configDefaults.exclude, "apps/e2e/**", ".stryker-tmp/**"],
     // globalSetup: テストファイルを動かす前に 1 回だけ実行する処理（Vitest のプロセスで動く）。
     //   前の実行が残したテスト用のスキーマ（test_<UUID>）を消し、Postgres に接続できなければ分かりやすいエラーで止める
     //   （Issue #57。WHY は vitest.global-setup.ts と .claude/rules/testing.md）。
@@ -62,7 +64,7 @@ export default defineConfig({
       //   含めないもの（ユーザー判断。Issue #45）:
       //   - apps/frontend/app/: ルーティングだけで、テストを置かない方針（.claude/rules/frontend.md の「app/（ルーティングだけ）」）。
       //     仕様は screen と api ファイルのテストで固定し、app/ の結線は E2E（pnpm test:e2e）で確かめる。
-      //   - 設定ファイル（リポジトリ直下の playwright.config.ts など、apps/frontend/next.config.ts、
+      //   - 設定ファイル（リポジトリ直下の vitest.config.mts など、apps/frontend/next.config.ts、
       //     apps/backend/drizzle.config.ts）: ツールに渡す値を並べるだけで、単体テストで検証する振る舞いを持たない。
       //     apps/frontend 直下の Next の規約ファイル instrumentation.ts / instrumentation-node.ts（起動時の環境変数の検証。Issue #59）も
       //     含めない: next start / next dev の起動でだけ動き、プロセスを終える処理なので、起動時に止まることを実測で確かめている
@@ -70,8 +72,8 @@ export default defineConfig({
       //     同じく直下の Next の規約ファイル proxy.ts（リクエストログ。Issue #80）も含めない: next start / next dev の中で
       //     リクエストごとに Next から呼ばれるだけで、NextRequest の値を渡して 1 行を出力する結線しか持たない。1 行の中身は
       //     apps/frontend/shared/request-log/request-log.ts（計測の対象）のテストで固定し、結線（matcher・stdout・応答ヘッダ）は
-      //     E2E（e2e/request-log.spec.ts）で確かめる。include に apps/frontend 直下を入れていないので、exclude は要らない。
-      //   - e2e/: Playwright の E2E テストそのもの（Vitest では実行しない。上の test.exclude）。
+      //     E2E（apps/e2e/request-log.spec.ts）で確かめる。include に apps/frontend 直下を入れていないので、exclude は要らない。
+      //   - apps/e2e/: Playwright の E2E テストとその設定（apps/e2e/playwright.config.ts）。Vitest では実行しない（上の test.exclude）。
       //   - scripts/ のシェルスクリプト（.sh）: include に入れても、@vitest/coverage-v8 が JS として解析しようとして
       //     失敗し、「Failed to parse ... cloud-session-start.sh. Excluding it from coverage.」とエラーを出して結局外す
       //     （2026-09-28 に実測）。テスト（scripts/*.test.ts）が子プロセスで実行する bash の中身は計測されない。

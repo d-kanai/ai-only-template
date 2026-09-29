@@ -13,10 +13,12 @@ import { resetTodos } from "./database";
 //   サーバを使うときは、そのビルドが今のコードのものか注意する（.claude/rules/testing.md の E2E）。
 // WHY ポート 0: OS に空いているポートを選ばせ、webServer（E2E_PORT）・開発サーバ・並列の worktree のサーバと重ならないようにする。
 //   選ばれたポートは next start が出す「Local: http://localhost:<port>」の行から読む。
-// WHY 環境変数を渡さない（親の環境を引き継ぐ）: next start は .env を読み、webServer と同じく e2e/database.ts と同じ DB を使う。
+// WHY 環境変数を渡さない（親の環境を引き継ぐ）: next start は .env を読み、webServer と同じく apps/e2e/database.ts と同じ DB を使う。
 //   コマンドの前に DATABASE_URL を付けて変えたときも、その値を引き継ぐので同じ DB になる。
 
-const frontendDir = resolve(__dirname, "..", "apps", "frontend");
+// WHY __dirname（このファイルのある apps/e2e）から相対でたどる: カレントディレクトリ（pnpm --filter @repo/e2e test では apps/e2e）に
+//   左右されずに apps/frontend を指すため。
+const frontendDir = resolve(__dirname, "..", "frontend");
 
 let server: ChildProcess | undefined;
 let baseURL = "";

@@ -26,7 +26,7 @@ paths:
 ## 環境変数
 - 入口は `apps/backend/shared/infra/env.ts` に一元化する。`process.env` を直接読んでよいのは `env.ts` だけ。ほかは `import { env, toolEnv } from ...` で使う（Issue #59）。
   - `env`（型 `Env`）: アプリの設定。**すべて必須で、コードに既定値を持たない**。今は `DATABASE_URL` / `DATABASE_POOL_MAX` / `DATABASE_POOL_IDLE_TIMEOUT_MS` / `DATABASE_CONNECTION_TIMEOUT_MS`（値の意味と開発用の値は `.env.example`）。
-  - `toolEnv`（型 `ToolEnv`）: 開発ツールの切り替え（任意）。`CI`・`PLAYWRIGHT_CHROMIUM_EXECUTABLE`・`STRYKER_MUTATOR_WORKER`・`E2E_PORT`（ツールの動かし方 = E2E のポート。未設定なら `playwright.config.ts` が 3100 を使う）。ツールが設定する・ツールの動かし方を切り替えるものだけを足す。アプリの設定は必ず `env` に足して必須にする。
+  - `toolEnv`（型 `ToolEnv`）: 開発ツールの切り替え（任意）。`CI`・`PLAYWRIGHT_CHROMIUM_EXECUTABLE`・`STRYKER_MUTATOR_WORKER`・`E2E_PORT`（ツールの動かし方 = E2E のポート。未設定なら `apps/e2e/playwright.config.ts` が 3100 を使う）。ツールが設定する・ツールの動かし方を切り替えるものだけを足す。アプリの設定は必ず `env` に足して必須にする。
     - 任意でも、値があれば検証し、不正なら読み込み時にエラーにする（`E2E_PORT` は 1〜65535 の整数。黙って既定値に戻すと worktree ごとに分けたポートが 3100 に戻るため）。
     - WHY `E2E_PORT` を `env`（必須）にしない: E2E 専用でアプリ（`next start`）は使わない。必須にすると本番や既存の `.env` にテスト用の変数を要求し、足すまで全コマンドが止まる（Issue #64 の reviewer 指摘）。
 - WHY 一元化: 読む場所が散らばると既定値や検証が場所ごとにずれ、要る変数を一覧できない。検証した値だけを配れば、使う側で `string | undefined` を扱わずに済む。
@@ -63,7 +63,7 @@ paths:
 ## 変数を足すとき
 - `env.ts` の `Env` と `PARSERS` に足し（必須、既定値なし）、`.env.example` に開発用の値と WHAT / WHY のコメントを書き、`env.test.ts` に検証のテストを足す。CI・クラウドは `.env.example` をコピーするので、ワークフローやスクリプトは直さなくてよい。
 - worktree ごとに変える値（DB 名・ポートなど、並列の worktree でぶつかるもの）なら、`scripts/worktree-env.sh` の生成規則も足す（`.claude/rules/worktree.md`）。
-- テスト用の接続先（`database.test-support.ts`・`e2e/database.ts`・`drizzle.config.ts`）もアプリと同じ `env.DATABASE_URL` を使う。
+- テスト用の接続先（`database.test-support.ts`・`apps/e2e/database.ts`・`drizzle.config.ts`）もアプリと同じ `env.DATABASE_URL` を使う。
 
 ## compose.yaml（開発用 Postgres）
 - 手元・CI・クラウドで同じ `compose.yaml` を使う。イメージは `mirror.gcr.io/library/postgres:18-alpine`（Docker Hub の匿名 pull のレート制限を避ける。経緯は `docs/cloud-session.md`）。healthcheck は `pg_isready`。

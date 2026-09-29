@@ -1,7 +1,7 @@
 # リクエストログ（Issue #80）
 
 画面アクセスとブラウザからの API route 呼び出し（`/api/**`）を、1 リクエスト = JSON 1 行（NDJSON、stdout）で出す。
-出す場所は edge 層の Next の Proxy（`apps/frontend/proxy.ts`）。1 行の中身は `apps/frontend/shared/request-log/request-log.ts` の純粋関数 `buildRequestLog` が組み立て、`request-log.test.ts` で固定している。結線（matcher・stdout・応答ヘッダ）は `e2e/request-log.spec.ts`。
+出す場所は edge 層の Next の Proxy（`apps/frontend/proxy.ts`）。1 行の中身は `apps/frontend/shared/request-log/request-log.ts` の純粋関数 `buildRequestLog` が組み立て、`request-log.test.ts` で固定している。結線（matcher・stdout・応答ヘッダ）は `apps/e2e/request-log.spec.ts`。
 規則（置き場所・カバレッジ）は `.claude/rules/frontend.md`・`testing.md`・`architecture-check.md`。
 
 ## 決めたこと
@@ -58,7 +58,7 @@
   api  GET  /api/todos/<id>            accept */*                         referer http://localhost:3100/todo/<id>
   api  GET  /api/todos                 accept */*                         referer http://localhost:3100/
   ```
-- E2E（`e2e/request-log.spec.ts`）で同じ並びを検証している。`missing` を外すと、クリック後の行の一覧にプリフェッチの `/todo/<id>`・`/` の page の行が増えて失敗した。
+- E2E（`apps/e2e/request-log.spec.ts`）で同じ並びを検証している。`missing` を外すと、クリック後の行の一覧にプリフェッチの `/todo/<id>`・`/` の page の行が増えて失敗した。
 
 ## 限界
 - matcher の `.*\\..*$`（拡張子付きの静的ファイルの除外）は、パスのどこかにドットがあるリクエストを API も含めて除く（例: `/api/todos/a.b` は proxy が動かず行が出ない）。今の ID は uuid なので当たらない（reviewer が manifest の regexp で確認）。上流の `x-request-id` は長さ・形式を検査せずそのまま使う（Headers が CR / LF を拒否し JSON.stringify がエスケープするので注入は起きない）。`Content-Length` が 2^53 を超えると `Number()` で丸まる。

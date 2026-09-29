@@ -1,12 +1,17 @@
 import { defineConfig, devices } from "@playwright/test";
 import { env, toolEnv } from "@repo/backend/shared/infra/env";
 
-// Playwright（E2E テスト）の設定。最小構成で、Chromium だけで e2e/ のテストを実行する。
-// 実行: pnpm test:e2e（= playwright test）。Next の本番ビルドを webServer で起動し、ブラウザから画面を操作する。
+// Playwright（E2E テスト）の設定。最小構成で、Chromium だけで apps/e2e/ のテスト（*.spec.ts）を実行する。
+// 実行: リポジトリ直下の pnpm test:e2e（= pnpm --filter @repo/e2e test = apps/e2e をカレントディレクトリにした playwright test）。
+//   Next の本番ビルドを webServer で起動し、ブラウザから画面を操作する。
+// WHY apps/e2e を workspace パッケージ @repo/e2e にする（Issue #84）: apps/frontend・apps/backend と同じ形にし、E2E だけが使う
+//   依存（@playwright/test・pg・@types/pg）を apps/e2e/package.json に置いて、リポジトリ直下から外す（.claude/rules/testing.md の「E2E」）。
 // WHY env.ts を "@repo/backend/..." で import する（Issue #68 の段階 2）: frontend と同じく、backend は workspace パッケージの
 //   公開の入口（apps/backend/package.json の exports）からだけ使う（architecture.test.ts の frontend-to-backend-specifier）。
-//   リポジトリ直下の package.json の devDependencies に "@repo/backend": "workspace:*" があるので、Node の解決
-//   （node_modules/@repo/backend → apps/backend）で見つかる。tsconfig の paths には頼らない。
+//   apps/e2e/package.json の devDependencies に "@repo/backend": "workspace:*" があるので、Node の解決
+//   （apps/e2e/node_modules/@repo/backend → apps/backend）で見つかる。tsconfig の paths には頼らない。
+// .env: カレントディレクトリは apps/e2e だが、env.ts はカレントディレクトリから上にたどってリポジトリ直下の .env を 1 つだけ読む
+//   （apps/backend/shared/infra/env.ts の findRepoRoot）。E2E_PORT・PLAYWRIGHT_CHROMIUM_EXECUTABLE・DATABASE_URL もそこから読む。
 
 // E2E 用のサーバのポート（toolEnv.E2E_PORT。.env / 環境変数の E2E_PORT を env.ts が 1〜65535 の整数として検証した値。任意）。
 // WHY 既定が 3100: pnpm dev の既定（3000）と重ならないようにし、開発サーバを起動したままでも E2E を実行できるようにする。
@@ -27,19 +32,25 @@ const baseURL = `http://localhost:${port}`;
 //   CI では未設定にし、playwright install で入れた、版の合ったブラウザを使う。
 const chromiumExecutable = toolEnv.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
 
-// サーバ（next start）とテスト（e2e/database.ts）が使う Postgres の接続先。env.ts が .env / 環境変数から読んで検証した値で、
+// サーバ（next start）とテスト（apps/e2e/database.ts）が使う Postgres の接続先。env.ts が .env / 環境変数から読んで検証した値で、
 // 欠けていれば env.ts の読み込み（この設定ファイルの読み込み）で、サーバを起動する前に失敗する。
 // WHY webServer に明示的に渡す: next start は自分でも .env を読むが、コマンドの前に付けた DATABASE_URL（環境変数）で
-//   E2E の接続先を変えたときに、テスト（e2e/database.ts）とサーバが必ず同じ DB を指すようにする。
+//   E2E の接続先を変えたときに、テスト（apps/e2e/database.ts）とサーバが必ず同じ DB を指すようにする。
 // 前提: Postgres が起動していて（pnpm db:up）、マイグレーションを当ててある（pnpm db:migrate）こと。
 //   webServer の中では当てない（Issue #57 の方針。CI・クラウドのフックは E2E の前に db:migrate を実行する）。
 const databaseUrl = env.DATABASE_URL;
 
 export default defineConfig({
-  // testDir: E2E テストの置き場所。Vitest の単体テスト（対象の隣の *.test.ts(x)）と分けるため、ルート直下の e2e/ に置く。
-  testDir: "e2e",
+  // testDir: E2E テストの置き場所。このファイルのディレクトリ（apps/e2e）からの相対パスで、"." は apps/e2e そのもの。
+  //   WHY 別のパッケージに置く: Vitest の単体テスト（対象の隣の *.test.ts(x)）と分けるため（Vitest は vitest.config.mts の
+  //   exclude で apps/e2e/** を読まない）。apps/e2e/node_modules の中は Playwright がテストを探すときに読み飛ばす
+  //   （playwright 1.63.0 の lib/runner/index.js。node_modules という名前のディレクトリに入らない）。
+  //   testMatch は既定（**/*.@(spec|test).?(c|m)[jt]s?(x)）で、*.spec.ts だけがテストになる（database.ts は補助）。
+  //   outputDir（失敗時のトレースなど）も既定のまま、この package.json のディレクトリの test-results（apps/e2e/test-results。
+  //   .gitignore 済み）になる（同 lib/common/index.js の packageJsonDir）。
+  testDir: ".",
   // fullyParallel / workers: テストを 1 つずつ順番に実行する。
-  //   WHY: webServer の 1 プロセスと 1 つの Postgres を全テストが共有し、各テストの前に todos を空にする（e2e/todo.spec.ts）。
+  //   WHY: webServer の 1 プロセスと 1 つの Postgres を全テストが共有し、各テストの前に todos を空にする（apps/e2e/todo.spec.ts）。
   //   並列に動かすと、別のテストのリセットや作った Todo が混ざり、結果が実行のタイミングで変わるため。
   fullyParallel: false,
   workers: 1,
@@ -71,7 +82,10 @@ export default defineConfig({
     // command: 本番ビルドを作ってから起動する。
     //   WHY dev ではなく build + start: 利用者に届く本番ビルドの挙動を検証するため。dev はページを初回アクセス時に
     //   コンパイルし、本番ビルドとは動き方が異なる。
-    command: `pnpm build && pnpm start -p ${port}`,
+    //   WHY pnpm -w: webServer の command はこの設定ファイルのディレクトリ（apps/e2e）をカレントディレクトリにして動く。
+    //   -w（--workspace-root）でリポジトリ直下の package.json の build / start（= pnpm --filter @repo/frontend build / start）を
+    //   呼ぶ。-p <port> は start の後ろに渡した引数として next start まで届く（pnpm 12.7.0 で実測。Issue #84）。
+    command: `pnpm -w build && pnpm -w start -p ${port}`,
     // url: この URL が応答するまで待ってからテストを始める。
     url: baseURL,
     // reuseExistingServer: ローカルでは既に起動しているサーバがあればそれを使い、CI では必ず新しく起動する。

@@ -4,7 +4,7 @@ import { countTodosWithTitle, resetTodos } from "./database";
 // Todo の CRUD を画面から一周する E2E テスト。API は Postgres（playwright.config.ts の webServer に DATABASE_URL を渡す）で動く。
 // WHY 各テストの前に todos を空にする: データは Postgres に残り、サーバを起動し直しても、前のテスト・前回の実行
 //   （途中で失敗して削除まで届かなかったもの）の Todo が一覧に出る。テストごとに空の状態から始め、結果が実行順や
-//   過去の実行に左右されないようにする（冪等性の主な担保）。接続先は webServer と同じ（e2e/database.ts）。
+//   過去の実行に左右されないようにする（冪等性の主な担保）。接続先は webServer と同じ（apps/e2e/database.ts）。
 // WHY 1 テストで一周する: 1 本の中の操作の順序で状態を担保する（追加 → 完了 → 詳細で変更 → 削除）。
 //   最後に削除まで行い、作ったデータを残さない。
 test.beforeEach(async () => {
