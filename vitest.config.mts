@@ -67,11 +67,15 @@ export default defineConfig({
       //     apps/frontend 直下の Next の規約ファイル instrumentation.ts / instrumentation-node.ts（起動時の環境変数の検証。Issue #59）も
       //     含めない: next start / next dev の起動でだけ動き、プロセスを終える処理なので、起動時に止まることを実測で確かめている
       //     （.claude/rules/env.md の「環境変数」）。検証の中身は env.ts（計測の対象）のテストで固定している。
+      //     同じく直下の Next の規約ファイル proxy.ts（リクエストログ。Issue #80）も含めない: next start / next dev の中で
+      //     リクエストごとに Next から呼ばれるだけで、NextRequest の値を渡して 1 行を出力する結線しか持たない。1 行の中身は
+      //     apps/frontend/shared/request-log/request-log.ts（計測の対象）のテストで固定し、結線（matcher・stdout・応答ヘッダ）は
+      //     E2E（e2e/request-log.spec.ts）で確かめる。include に apps/frontend 直下を入れていないので、exclude は要らない。
       //   - e2e/: Playwright の E2E テストそのもの（Vitest では実行しない。上の test.exclude）。
       //   - scripts/ のシェルスクリプト（.sh）: include に入れても、@vitest/coverage-v8 が JS として解析しようとして
       //     失敗し、「Failed to parse ... cloud-session-start.sh. Excluding it from coverage.」とエラーを出して結局外す
       //     （2026-09-28 に実測）。テスト（scripts/*.test.ts）が子プロセスで実行する bash の中身は計測されない。
-      //   apps/frontend/shared/ はまだ無い（.claude/rules/frontend.md）が、作ったときに自動で対象になるよう入れておく。
+      //   apps/frontend/shared/（feature をまたぐ部品。最初は request-log/。Issue #80）も対象にする。
       //   apps/backend/ は全体を対象にし、直下の drizzle.config.ts だけを下の exclude で外す（apps/backend/ の中は
       //   drizzle.config.ts 以外すべて 4 層の下にある。architecture.test.ts の backend-placement）。
       include: [

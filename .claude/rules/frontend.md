@@ -9,15 +9,16 @@ paths:
 依存の向きの規則は `architecture.test.ts` が検査する（一覧は `.claude/rules/architecture-check.md`）。API 側は `.claude/rules/backend.md`。経緯・採用しなかった案・一次情報は `docs/architecture-decisions.md`。
 
 ## 置き場所
-- ソースは `app/`・`features/`・`shared/` の下か、直下の `next.config.ts`・`instrumentation.ts`・`instrumentation-node.ts`・`next-env.d.ts` だけ（規則 `frontend-placement`）。`src/` は使わない。
+- ソースは `app/`・`features/`・`shared/` の下か、直下の `next.config.ts`・`instrumentation.ts`・`instrumentation-node.ts`・`proxy.ts`・`next-env.d.ts` だけ（規則 `frontend-placement`）。`src/` は使わない。
   - WHY: 依存の規則はこれらの場所にしかかからず、`apps/frontend/lib/db.ts` のような場所から backend の container を import しても素通りしていた（Issue #68 の reviewer 指摘）。
-- `apps/frontend/shared/`（feature をまたぐ部品）はまだ無い。必要になったら作る。`components/` `hooks/` も使うものが出るまで作らない。
+- `apps/frontend/shared/<name>/`: feature をまたぐ部品。今あるのは `request-log/`（リクエストログの 1 行を組み立てる純粋関数）だけ。`components/` `hooks/` は使うものが出るまで作らない。`shared/` は `features/`・`app/`・backend を参照しない（規則 `shared-to-features`・`screen-to-app`・`screen-to-backend`）。
 
 ## app/（ルーティングだけ）
 - 置くもの: Next の規約ファイル（`page.tsx` / `layout.tsx` / `loading.tsx` / `error.tsx` など）と `app/api/**/route.ts` だけ。テストは置かない（仕様は screen と api ファイルのテストで固定し、ルーティングにロジックを置かせない）。
 - `page.tsx` は screen を返すだけ（`return <TodoScreen />`。動的セグメントは `await params` で取り出して props で渡す）。
 - `app/api/**/route.ts` は backend の api ファイルが export する HTTP メソッド名の関数を re-export するだけ（`export { GET } from "@repo/backend/todo/presentation/list-todos.api";`）。同じ URL の複数メソッドはそれぞれ別の api ファイルから re-export する。入力検証やレスポンスの組み立ては書かない。
 - `instrumentation.ts` は Next の規約で `apps/frontend/` 直下に置く（起動時の環境変数の検証。`.claude/rules/env.md`）。直下のファイルが backend を参照してよいのは `instrumentation-node.ts` → `@repo/backend/shared/infra/env` だけ（規則 `frontend-root-to-backend`）。
+- `proxy.ts`（Next の Proxy。旧 `middleware.ts` は使わない）も規約で直下に置く。画面アクセスと `/api/**` の呼び出しを 1 リクエスト 1 行の JSON で stdout に出すだけにし、1 行の中身は `shared/request-log/` の `buildRequestLog`（テストで固定）で組み立てる。認可・リダイレクトなどのロジックは置かない。仕様・実測・限界（status と所要時間は取れない、プリフェッチは matcher で除く）は `docs/request-log.md`。
 - WHY ルーティングを分ける: URL を変えてもコードを動かさずに済む（Next は構成について unopinionated で、`app/` の外にコードを置くのは公式の例の 1 つ）。
 
 ## features/<feature>/
