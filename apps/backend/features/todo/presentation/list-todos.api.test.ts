@@ -28,6 +28,7 @@ function failingRepository(error: Error): TodoRepository {
   return {
     findAll: () => Promise.reject(error),
     findById: () => Promise.reject(error),
+    findByIdOrThrow: () => Promise.reject(error),
     save: () => Promise.reject(error),
     delete: () => Promise.reject(error),
   };

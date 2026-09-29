@@ -1,7 +1,7 @@
 import { asc, eq } from "drizzle-orm";
 import type { Database } from "../../../shared/infra/database";
 import { Todo } from "../domain/todo";
-import type { TodoRepository } from "../domain/todo-repository";
+import { requireTodo, type TodoRepository } from "../domain/todo-repository";
 import { todos } from "./schema";
 
 // id が uuid の形か（8-4-4-4-12 の 16 進。大文字も Postgres は受け付ける）。
@@ -83,6 +83,13 @@ export class PostgresTodoRepository implements TodoRepository {
     const rows = await this.db.select().from(todos).where(eq(todos.id, id));
     const row = rows[0];
     return row === undefined ? undefined : toTodo(row);
+  }
+
+  // WHY findById を通す: uuid の形の検査（isUuid）と行の変換（toTodo）を 1 か所に保ち、形の違う id も「無い」
+  //   = not_found（API で 404）にする。本番の api のテストは prototype の findById を spy して Postgres の実装が
+  //   呼ばれることを確かめているので、ここで findById を呼ぶ形はそのテストとも合う。
+  async findByIdOrThrow(id: string): Promise<Todo> {
+    return requireTodo(await this.findById(id), id);
   }
 
   // WHY upsert（INSERT ... ON CONFLICT DO UPDATE）: TodoRepository の save は「同じ id があれば上書き」を約束している。

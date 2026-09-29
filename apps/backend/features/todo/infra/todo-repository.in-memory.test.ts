@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
+import { DomainError } from "../../../shared/domain/domain-error";
 import { Todo } from "../domain/todo";
 import { InMemoryTodoRepository } from "./todo-repository.in-memory";
 
@@ -24,6 +25,22 @@ describe("InMemoryTodoRepository", () => {
     const repository = new InMemoryTodoRepository();
 
     await expect(repository.findById("missing")).resolves.toBeUndefined();
+  });
+
+  test("findByIdOrThrow は id に一致する Todo を返す", async () => {
+    const repository = new InMemoryTodoRepository();
+    const todo = Todo.create("牛乳を買う");
+    await repository.save(todo);
+
+    await expect(repository.findByIdOrThrow(todo.id)).resolves.toEqual(todo);
+  });
+
+  test("無い id の findByIdOrThrow は、その id を params に持つ DomainError(not_found, todo.notFound) を投げる", async () => {
+    const repository = new InMemoryTodoRepository();
+
+    await expect(repository.findByIdOrThrow("missing")).rejects.toEqual(
+      new DomainError("not_found", "todo.notFound", { id: "missing" }),
+    );
   });
 
   test("同じ id で save すると上書きする", async () => {

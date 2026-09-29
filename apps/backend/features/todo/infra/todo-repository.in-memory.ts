@@ -1,5 +1,5 @@
 import type { Todo } from "../domain/todo";
-import type { TodoRepository } from "../domain/todo-repository";
+import { requireTodo, type TodoRepository } from "../domain/todo-repository";
 
 // TodoRepository の InMemory 実装。プロセスが終わるとデータは消える。
 // テスト専用（本番の永続化は Postgres。todo-repository.postgres.ts を api ファイルが組み立てる）。テストでは
@@ -20,6 +20,12 @@ export class InMemoryTodoRepository implements TodoRepository {
 
   async findById(id: string): Promise<Todo | undefined> {
     return this.todos.get(id);
+  }
+
+  // WHY findById を通す（Map を直接読まない）: Postgres の実装と同じ形にし、テストが findById を spy したときにも
+  //   findByIdOrThrow 経由の問い合わせが記録されるようにする（presentation のテストの「Repository が呼ばれない」）。
+  async findByIdOrThrow(id: string): Promise<Todo> {
+    return requireTodo(await this.findById(id), id);
   }
 
   async save(todo: Todo): Promise<void> {

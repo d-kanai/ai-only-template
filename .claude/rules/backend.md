@@ -80,6 +80,7 @@ paths:
 - スキーマは feature ごとの `infra/schema.ts`（`apps/backend/features/<feature>/infra/schema.ts`。drizzle-kit の設定 `shared/drizzle/drizzle.config.ts` が glob で読む）に `pgTable` で宣言する（codebase-first）。SQL は `pnpm db:generate` で `apps/backend/shared/drizzle/` に生成し、`pnpm db:migrate` で当てる。生成済みの SQL は手で直さない。`drizzle-kit push` は使わない（SQL が残らずレビューも記録もできない）。手順はスキル `db-migration`。
   - schema は infra に置く（テーブルの形は永続化の都合で、domain は知らない）。Entity との変換は Repository の実装が行う。
 - `PostgresTodoRepository` はコンストラクタで `Database`（Drizzle の db）を受け取る。自分ではトランザクションを始めない。
+- Repository の `findById` は無ければ `undefined`、`findByIdOrThrow` は無ければ `DomainError("not_found", "todo.notFound", { id })`（API で 404）。「無ければ not_found」のユースケース（get / update / delete）は `findByIdOrThrow` を呼び、自分で throw を書かない。各実装は domain の `requireTodo(await this.findById(id), id)` を使う。WHY: 例外の code・key・params を 1 か所に決め、ユースケースごと・実装（本番の Postgres とテストの InMemory）ごとのずれを無くす。
 - DB の行から Entity に戻すときは `Todo.reconstruct`（コンストラクタが不変条件で検証する。行の型は Drizzle のスキーマが保証するので Repository では zod で parse しない）、利用者の入力からは `Todo.create` / `rename`。
   - 不変条件を満たさない行が 1 件あると、一覧（findAll）とその id への GET / PUT / DELETE はすべて 500 になり、画面からは直せず消せない（reviewer の実測、Issue #94）。直すのは DB 側（規則を変えたときはスキル `db-migration` でデータを先に移行する。手で入れた行は SQL で直す）。ログの id と理由で行を特定する。
   - 不変条件を満たさない行（規則を変えたのに移行していない・手で入れた行）は、Repository（`toTodo`）が DomainError ではない `Error`（id と違反の理由を message に、元の DomainError を cause に）にして投げ、API は 500。WHY: DomainError のままだと 400 になり、クライアントに直せない誤りを「リクエストの誤り」と伝える。500 なら `toErrorResponse` がログに残す。行を読み飛ばさない（不整合に気づけない）。
@@ -88,7 +89,7 @@ paths:
   - WHY 今は要らない: 今の command は書き込みが 1 文だけ（`save` の `INSERT ... ON CONFLICT DO UPDATE` か `delete`）で、Postgres は 1 文を原子的に実行する（途中まで書かれた状態は残らない）。
   - 複数の書き込みが要る command が出たら、その command にトランザクションを扱う依存をコンストラクタで注入し、command の中で `db.transaction(async (tx) => ...)` の範囲を書く（包む場所を command ごとに明示する）。ただし今の規則では application から `Database`（`apps/backend/shared/infra/database`）と `drizzle-orm` を参照できない（規則 `application`・`core-to-persistence`）ので、依存の形（domain に interface を置くか、規則を変えるか）はその Issue で決める。
   - command の中で遅い処理（外部 API など）をしない（トランザクションを張ったときに接続を 1 本占有する。接続待ちは `DATABASE_CONNECTION_TIMEOUT_MS` でエラーにする）。
-  - 分離レベルは既定の READ COMMITTED（読んでから書くまでの同時更新は後勝ち = lost update を許容。update / delete の command は findById と save / delete が別の文）。防ぐ必要が出たら `SELECT ... FOR UPDATE` か分離レベルを Issue で検討する。
+  - 分離レベルは既定の READ COMMITTED（読んでから書くまでの同時更新は後勝ち = lost update を許容。update / delete の command は findByIdOrThrow と save / delete が別の文）。同じ理由で、PUT の findByIdOrThrow と save（upsert）の間に DELETE が commit されると消した Todo が戻る（トランザクションで包んでいた頃も同じ。Issue #123 の reviewer の指摘。推論で未実測）。防ぐ必要が出たら `SELECT ... FOR UPDATE` か分離レベルを Issue で検討する。
 - 接続とプール（`database.ts`）: `pg.Pool` を `env` の値で作る（変数の一覧は `.claude/rules/env.md`）。アイドル中の接続のエラーは `pool.on("error")` で `logger.error` に出すだけ。プールは `globalThis` に 1 つ（`next dev` の HMR で増やさない）。終了時は `closeDatabase()`。値は開発・CI・E2E 用の暫定で、本番用は Issue #58。
 - テスト: 実 Postgres を使うテストは `createTestDatabase()` でファイルごとに別スキーマを使う（`.claude/rules/testing.md`）。
 

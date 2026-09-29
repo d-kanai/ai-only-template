@@ -33,6 +33,10 @@ describe("ListTodosQuery", () => {
     const repository: TodoRepository = {
       findAll: async () => cached,
       findById: async () => undefined,
+      // 一覧の query は呼ばない。interface を満たすためだけのスタブ。
+      findByIdOrThrow: async () => {
+        throw new Error("unused");
+      },
       save: async () => undefined,
       delete: async () => undefined,
     };
