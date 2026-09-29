@@ -1,10 +1,12 @@
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
+// WHY "@repo/shared/env" で import する（Issue #90）: env.ts は frontend と backend で共通の workspace パッケージ apps/shared
+//   （@repo/shared）にある。apps/backend/package.json の "@repo/shared": "workspace:*" で入る apps/backend/node_modules/@repo/shared
+//   （apps/shared への symlink）と apps/shared/package.json の exports で、Node の解決で見つかる（tsconfig の paths には頼らない。
+//   drizzle-kit は設定ファイルを自前で読み込み、paths を解決する保証がない）。backend の中のほかのファイルは相対パスだけ
+//   （rule-tests/architecture.test.ts の backend-relative-only）。env.ts は Node の組み込み（node:fs / node:path）しか import しない。
+import { env } from "@repo/shared/env";
 import { defineConfig } from "drizzle-kit";
-// WHY 相対パスで import する: drizzle-kit は設定ファイルを自前で読み込み、tsconfig の paths を解決する保証がない。
-//   backend の中の import はすべて相対パスにする規則でもある（rule-tests/architecture.test.ts の backend-relative-only）。
-//   env.ts は Node の組み込み（node:fs / node:path）しか import しないので、相対パスだけで読める（pnpm db:migrate で確認。Issue #59 / #68）。
-import { env } from "./shared/infra/env";
 
 // このファイルの置き場所（apps/backend/）からのパスを、カレントディレクトリからの相対パスにして返す。
 // WHY: drizzle-kit は schema / out をカレントディレクトリからのパスとして解決する（drizzle-kit 0.31.11 の bin.cjs の

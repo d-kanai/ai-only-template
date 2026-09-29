@@ -11,7 +11,7 @@ import pkg from "../package.json";
 //   テスト・ルール検査テスト・e2e・設定ファイルまで型チェックしていた。apps/frontend の next build は apps/frontend と、そこから
 //   import された backend のファイルしか型チェックしない。backend のテストや rule-tests/architecture.test.ts に型エラーを置いても
 //   pnpm build が exit 0 になった（reviewer の実測）。Vitest は型を検査しないので、pnpm test でも止まらない。
-//   そのため、リポジトリ直下の tsconfig（全体）と apps/backend の tsconfig（DOM の型なし）の両方を tsc で検査する。
+//   そのため、リポジトリ直下の tsconfig（全体）と apps/backend・apps/shared の tsconfig（DOM の型なし）を tsc で検査する。
 // WHY 両方の tsconfig を検査する: リポジトリ直下の tsconfig はテストや設定ファイルを含めた全体を見るが、lib に dom を含む
 //   （frontend のテストのため）。apps/backend の tsconfig は DOM の型を入れないので、backend が document などのブラウザの API を
 //   使うと型エラーになる（backend を Next・ブラウザに依存させない方針。.claude/rules/backend.md）。
@@ -20,7 +20,10 @@ import pkg from "../package.json";
 const repoRoot = join(import.meta.dirname, "..");
 
 // pnpm typecheck が検査しなければならない tsconfig（tsc -p に渡すディレクトリ）。
-const REQUIRED_PROJECTS = [".", "apps/backend"];
+// WHY apps/shared も（Issue #90）: apps/shared の tsconfig も DOM の型を入れない（env・logger はサーバ側の基盤で、ブラウザの API を
+//   使うと型エラーにする）。backend が import する env.ts・logger.ts は apps/backend の tsconfig でも検査されるが、apps/shared の
+//   テスト（env.test.ts・logger.test.ts）と、backend が import しないファイルは apps/shared の tsconfig でしか DOM なしで検査されない。
+const REQUIRED_PROJECTS = [".", "apps/backend", "apps/shared"];
 
 // WHY `&&` 以外のつなぎを含むコマンドは丸ごと拒否する（rule-tests/lint.test.ts の runsBiomeCheckWithErrorOnWarnings と同じ考え方）:
 //   `|| true` は失敗を打ち消し、`;` と改行は後ろのコマンドの終了コードになり、`|` はパイプの最後の終了コードになり、
@@ -101,53 +104,66 @@ function runsTypecheckBeforeBuild(yaml: string): boolean {
 }
 
 describe("typecheck の判定（typechecksAllProjects）", () => {
+  // 3 つの tsconfig（リポジトリ直下・apps/backend・apps/shared）をどの順で書いてもよい。
+  const SHARED = "tsc -p apps/shared --noEmit";
   it.each([
-    ["tsc -p . --noEmit && tsc -p apps/backend --noEmit"],
-    ["tsc --noEmit -p apps/backend && tsc --noEmit --project ."],
-    ["pnpm exec tsc -p . --noEmit && pnpm exec tsc -p apps/backend --noEmit"],
-    ["tsc -p . --noEmit --strict && tsc -p apps/backend --noEmit --pretty"],
+    [`tsc -p . --noEmit && tsc -p apps/backend --noEmit && ${SHARED}`],
+    [`tsc --noEmit -p apps/backend && ${SHARED} && tsc --noEmit --project .`],
+    [
+      "pnpm exec tsc -p . --noEmit && pnpm exec tsc -p apps/backend --noEmit && pnpm exec tsc -p apps/shared --noEmit",
+    ],
+    [
+      `tsc -p . --noEmit --strict && tsc -p apps/backend --noEmit --pretty && ${SHARED}`,
+    ],
   ])("%s は許可する", (script) => {
     expect(typechecksAllProjects(script)).toBe(true);
   });
 
   it.each([
-    ["tsc -p . --noEmit", "apps/backend を検査しない"],
-    ["tsc -p apps/backend --noEmit", "リポジトリ直下を検査しない"],
-    ["tsc -p . && tsc -p apps/backend --noEmit", "--noEmit が無い"],
+    [`tsc -p . --noEmit && ${SHARED}`, "apps/backend を検査しない"],
+    [`tsc -p apps/backend --noEmit && ${SHARED}`, "リポジトリ直下を検査しない"],
     [
-      "tsc -p . --noEmit || true && tsc -p apps/backend --noEmit",
+      "tsc -p . --noEmit && tsc -p apps/backend --noEmit",
+      "apps/shared を検査しない（Issue #90）",
+    ],
+    [
+      `tsc -p . && tsc -p apps/backend --noEmit && ${SHARED}`,
+      "--noEmit が無い",
+    ],
+    [
+      `tsc -p . --noEmit || true && tsc -p apps/backend --noEmit && ${SHARED}`,
       "|| true で失敗を打ち消す",
     ],
     [
-      "tsc -p . --noEmit; tsc -p apps/backend --noEmit",
+      `tsc -p . --noEmit; tsc -p apps/backend --noEmit && ${SHARED}`,
       "; で前の失敗を無視する",
     ],
     [
-      "tsc -p . --noEmit && tsc -p apps/backend --noEmit | cat",
+      `tsc -p . --noEmit && tsc -p apps/backend --noEmit && ${SHARED} | cat`,
       "| で終了コードを変える",
     ],
     [
-      "tsc -p . --noEmit --noCheck && tsc -p apps/backend --noEmit",
+      `tsc -p . --noEmit --noCheck && tsc -p apps/backend --noEmit && ${SHARED}`,
       "--noCheck で型チェックを止める",
     ],
     [
-      "tsc -p . --noEmit --strict false && tsc -p apps/backend --noEmit",
+      `tsc -p . --noEmit --strict false && tsc -p apps/backend --noEmit && ${SHARED}`,
       "--strict を false にする",
     ],
     [
-      "tsc -p . --noEmit && tsc -p apps/backend --noEmit --noImplicitAny=false",
+      `tsc -p . --noEmit && tsc -p apps/backend --noEmit --noImplicitAny=false && ${SHARED}`,
       "= で false を渡す",
     ],
     [
-      "echo tsc -p . --noEmit && tsc -p apps/backend --noEmit",
+      `echo tsc -p . --noEmit && tsc -p apps/backend --noEmit && ${SHARED}`,
       "tsc を実行していない",
     ],
     [
-      "tsc -p . -p apps/backend --noEmit",
+      `tsc -p . -p apps/backend --noEmit && ${SHARED}`,
       "-p が 2 つ（tsc は 1 つしか取らない）",
     ],
     [
-      "tsc -p apps/frontend --noEmit && tsc -p apps/backend --noEmit",
+      `tsc -p apps/frontend --noEmit && tsc -p apps/backend --noEmit && ${SHARED}`,
       "別の tsconfig",
     ],
     ["", "空文字"],
@@ -223,7 +239,7 @@ describe("ワークフローの判定（runsTypecheckBeforeBuild）", () => {
 });
 
 describe("型チェックのゲート（実ファイル）", () => {
-  it("package.json の typecheck は、リポジトリ直下と apps/backend の tsconfig を tsc --noEmit で検査する", () => {
+  it("package.json の typecheck は、リポジトリ直下と apps/backend・apps/shared の tsconfig を tsc --noEmit で検査する", () => {
     const scripts: Record<string, string | undefined> = pkg.scripts;
     expect(typechecksAllProjects(scripts.typecheck ?? "")).toBe(true);
   });

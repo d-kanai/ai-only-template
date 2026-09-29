@@ -16,6 +16,8 @@ export default defineConfig({
     //   apps/frontend/tsconfig.json の両方に同じ行き先で書いている（どちらが使われても同じファイルになる）。
     //   frontend から backend を指す "@repo/backend/..." は paths ではなく、workspace パッケージとして Vite の通常の解決
     //   （node_modules/@repo/backend → apps/backend と、apps/backend/package.json の exports）で解決する（Issue #68 の段階 2）。
+    //   frontend と backend で共通の "@repo/shared/..."（env・logger。Issue #90）も同じく、参照元のパッケージの
+    //   node_modules/@repo/shared（apps/shared への symlink）と apps/shared/package.json の exports で解決する。
     //   backend の中は相対パスだけなので paths を使わない（rule-tests/architecture.test.ts の backend-relative-only）。
     //   これがないとテスト対象を "@/..." で import したときに解決に失敗する（apps/frontend/features/ のテストが
     //   "@/features/..." を import しており、解決できなければそれらのテストが失敗することで担保）。
@@ -82,12 +84,14 @@ export default defineConfig({
       //     失敗し、「Failed to parse ... cloud-session-start.sh. Excluding it from coverage.」とエラーを出して結局外す
       //     （2026-09-28 に実測）。テスト（scripts/*.test.ts）が子プロセスで実行する bash の中身は計測されない。
       //   apps/frontend/shared/（feature をまたぐ部品。最初は request-log/。Issue #80）も対象にする。
+      //   apps/shared/（frontend と backend で共通の env.ts・logger.ts。Issue #90 で apps/backend/shared/infra/ から移した）も対象にする。
       //   apps/backend/ は全体を対象にし、直下の drizzle.config.ts だけを下の exclude で外す（apps/backend/ の中は
       //   drizzle.config.ts 以外すべて 4 層の下にある。rule-tests/architecture.test.ts の backend-placement）。
       include: [
         "apps/frontend/features/**/*.{ts,tsx}",
         "apps/frontend/shared/**/*.{ts,tsx}",
         "apps/backend/**/*.{ts,tsx}",
+        "apps/shared/**/*.ts",
         "scripts/**/*.ts",
       ],
       // exclude: include のうち計測から外すもの。

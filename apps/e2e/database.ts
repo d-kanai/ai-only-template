@@ -1,13 +1,13 @@
-import { env } from "@repo/backend/shared/infra/env";
+import { env } from "@repo/shared/env";
 import { Client } from "pg";
 
 // E2E テストが使う Postgres（compose.yaml）への接続と、データのリセット。
 // apps/e2e/*.spec.ts（テストの前のリセット・DB の確認）が使う。
 // 接続先は env.DATABASE_URL（.env / 環境変数から env.ts が読んで検証した値）で、webServer（next start）と同じ DB を指す
 // （playwright.config.ts が同じ env.DATABASE_URL を webServer に渡す）。既定値は持たない（WHY は env.ts）。
-// WHY "@repo/backend/..." で import する（Issue #68 の段階 2）: Playwright はテストと設定を自前の変換で読み込むので、
-//   "@/" の解決（tsconfig の paths）には頼らず、workspace パッケージとして Node の解決（node_modules/@repo/backend と
-//   apps/backend/package.json の exports）で読む。playwright.config.ts と同じ書き方にそろえる。
+// WHY "@repo/shared/..." で import する（Issue #68 の段階 2・Issue #90）: Playwright はテストと設定を自前の変換で読み込むので、
+//   "@/" の解決（tsconfig の paths）には頼らず、workspace パッケージとして Node の解決（node_modules/@repo/shared と
+//   apps/shared/package.json の exports）で読む。playwright.config.ts と同じ書き方にそろえる。
 // WHY pg を apps/e2e/package.json の devDependencies にも置く: pg は apps/backend の依存だが、このファイル（apps/e2e/）からは
 //   apps/backend/node_modules が見えない（pnpm は宣言した依存だけを apps/e2e/node_modules に置く）。E2E が DB を直接確かめる
 //   ための依存として、apps/backend と同じ版を置く（rule-tests/package.test.ts が同じ名前の依存の版がそろっていることを検査する）。

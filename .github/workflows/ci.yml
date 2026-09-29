@@ -83,7 +83,7 @@ jobs:
 
       # .env を .env.example から作る（Issue #59）。
       # WHY: アプリ・テスト・drizzle-kit・Playwright は必須の環境変数（DATABASE_URL など）を .env から読み
-      #   （apps/backend/shared/infra/env.ts）、コードに既定値を持たない。.env はコミットしない（.gitignore）ので、手元と同じく
+      #   （apps/shared/env.ts）、コードに既定値を持たない。.env はコミットしない（.gitignore）ので、手元と同じく
       #   `cp .env.example .env` で作る。値は compose.yaml の開発用 DB に合わせた開発用の値で、秘密ではない。
       # WHY ワークフローの env: に書かない: 値を .env.example の 1 か所にし、手元・クラウド・CI で同じ値を使うため。
       #   ここで作った .env は、以降のステップ（migrate / lint / test / build / E2E）がすべて読む。
@@ -99,11 +99,11 @@ jobs:
       - name: Apply database migrations
         run: pnpm db:migrate
       - run: pnpm lint
-      # 型チェック（tsc -p . --noEmit && tsc -p apps/backend --noEmit。package.json の typecheck）。
+      # 型チェック（tsc -p . --noEmit && tsc -p apps/backend --noEmit && tsc -p apps/shared --noEmit。package.json の typecheck）。
       # WHY: next build（apps/frontend で実行）は apps/frontend と、そこから import された backend のファイルしか型チェックしない
       #   （Issue #68 で monorepo にする前は、next build がリポジトリ直下の tsconfig で全体を型チェックしていた）。
-      #   テスト・ルール検査テスト・e2e・設定ファイルの型エラーと、backend が DOM の型に依存すること（apps/backend の tsconfig は
-      #   DOM の型を持たない）は、ここで止める。Vitest は型を検査しないので pnpm test でも止まらない。
+      #   テスト・ルール検査テスト・e2e・設定ファイルの型エラーと、backend・apps/shared が DOM の型に依存すること（apps/backend・
+      #   apps/shared の tsconfig は DOM の型を持たない）は、ここで止める。Vitest は型を検査しないので pnpm test でも止まらない。
       #   build より前に置き、型エラーを build より先に分かるメッセージで止める（rule-tests/typecheck.test.ts が順序と書き方を検査する）。
       - run: pnpm typecheck
       - run: pnpm test

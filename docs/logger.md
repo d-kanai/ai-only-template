@@ -1,7 +1,7 @@
 # ログ（logger.ts）の経緯と検査の限界（Issue #85）
 
 規則は `.claude/rules/backend.md` の「ログ」（使い方・使ってよい場所）、`lint.md`（`noConsole` と overrides）、`architecture-check.md`（規則 `console-direct-access`）。
-実装は `apps/backend/shared/infra/logger.ts`、仕様は `logger.test.ts`。
+実装は `apps/shared/logger.ts`（Issue #90 で `apps/backend/shared/infra/` から移した）、仕様は `logger.test.ts`。
 
 ## 決めたこと（ユーザー指示 2026-09-29）
 - `proxy.ts` の `console.log(JSON.stringify(log))` のような直接の呼び出しをやめ、サーバ側のログは `logger.info / warn / error(event)` を必ず通す。`console.*` を書いてよいのは `logger.ts` だけ（テストは除く）。
@@ -12,7 +12,7 @@
 - 依存（pino など）は足さない。中は `console.log` / `console.warn` / `console.error`（呼び出し側のテストが `vi.spyOn(console, ...)` で確かめられる）。
 - `Error` は `{ name, message }` にする（`JSON.stringify` のままだと `{}` になる。stack は 1 行が長くなり、内部のパスも含むので出さない）。循環参照・BigInt で `JSON.stringify` が失敗したら、例外にせず `{ level, timestamp, message: "logger: event を JSON にできなかった（循環参照・BigInt など）" }` の 1 行を出す。
 - 置き換えた呼び出し: `apps/frontend/proxy.ts`（リクエストログ。`logger.info`）、`apps/backend/shared/presentation/http-error.ts`（500 の想定外の例外。`logger.error({ message: "想定外の例外", error })`）、`apps/backend/shared/infra/database.ts`（`pool.on("error")`）、`apps/frontend/instrumentation-node.ts`（起動時の環境変数の検証の失敗）。
-  - presentation から `shared/infra/logger` を使えるよう、依存の規則 `presentation` の許可に足した（presentation の infra は自 feature の `container` だけ、の例外）。frontend 直下も `frontend-root-to-backend` の許可に足した。
+  - presentation から `shared/infra/logger` を使えるよう、依存の規則 `presentation` の許可に足した（presentation の infra は自 feature の `container` だけ、の例外）。frontend 直下も `frontend-root-to-backend` の許可に足した（Issue #90 で logger を `apps/shared` に移し、`frontend-root-to-backend` の例外は無くした。presentation の許可は `SHARED_MODULES_BY_LAYER` の logger）。
   - 起動時の検証の失敗は、以前の `console.error(error)`（stack 付きの複数行）から 1 行の JSON になり、欠けた変数の一覧（`env.ts` のメッセージの改行）は `\n` にエスケープされて `message` に入る。
 
 ## 検査の 2 系統と、片方だけが拾う書き方（Biome 2.5.13、2026-09-29 実測）

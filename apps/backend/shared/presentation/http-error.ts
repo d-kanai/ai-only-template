@@ -1,5 +1,5 @@
+import { logger } from "@repo/shared/logger";
 import { DomainError, type DomainErrorCode } from "../domain/domain-error";
-import { logger } from "../infra/logger";
 
 // エラー時のレスポンス本文。全 API で同じ形にする（画面側はこの形だけを見て分岐できる）。
 export type ErrorResponse = {

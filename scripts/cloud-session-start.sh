@@ -529,7 +529,7 @@ start_database() {
 }
 
 # リポジトリ直下の .env が無ければ .env.example からコピーする（Issue #59）。既にあれば触らない。
-# WHY: アプリ・テスト・drizzle-kit は必須の環境変数を .env から読み（apps/backend/shared/infra/env.ts）、既定値を持たない。
+# WHY: アプリ・テスト・drizzle-kit は必須の環境変数を .env から読み（apps/shared/env.ts）、既定値を持たない。
 #   VM はセッションごとに新しいクローンで .env が無いので、そのままだと pnpm db:migrate も pnpm test も欠けた変数の名前を
 #   出して止まる。.env.example の値は compose.yaml の開発用 DB に合わせた開発用の値（秘密ではない）で、手元の
 #   `cp .env.example .env` と同じ状態にする。

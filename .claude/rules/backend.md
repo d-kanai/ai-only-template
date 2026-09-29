@@ -11,29 +11,32 @@ paths:
 ## 置き場所（DDD 4 層）
 - ファイルは `apps/backend/<feature>/`（`apps/backend/shared/` を含む）の `domain/` `application/` `presentation/` `infra/` のどれかの下に置く。例外は `apps/backend/` 直下の設定ファイル `<name>.config.ts`（今は `drizzle.config.ts`）と `drizzle/`（生成したマイグレーション）。
   - WHY: 層に属さない場所のファイルにはどの層の規則もかからず、依存の向きの検査を素通りする（規則 `backend-placement`）。
-- `apps/backend/shared/`: feature をまたぐもの。`domain/domain-error.ts`（DomainError: `validation_error` / `not_found`）、`domain/transaction-runner.ts`（TransactionRunner の interface）、`presentation/http-error.ts`（DomainError → HTTP ステータス、`ErrorResponse`、`InvalidRequestError`）、`presentation/json-body.ts`（`readJsonObject`）、`infra/env.ts`（環境変数の唯一の入口。`.claude/rules/env.md`）、`infra/logger.ts`（ログの唯一の出口。下の「ログ」）、`infra/database.ts`（プールと Drizzle の db、`Executor`）、`infra/drizzle-transaction-runner.ts`。
+- `apps/backend/shared/`: feature をまたぐもの。`domain/domain-error.ts`（DomainError: `validation_error` / `not_found`）、`domain/transaction-runner.ts`（TransactionRunner の interface）、`presentation/http-error.ts`（DomainError → HTTP ステータス、`ErrorResponse`、`InvalidRequestError`）、`presentation/json-body.ts`（`readJsonObject`）、`infra/database.ts`（プールと Drizzle の db、`Executor`）、`infra/drizzle-transaction-runner.ts`。
+- 環境変数の唯一の入口 `env.ts` とログの唯一の出口 `logger.ts` は、frontend と backend で共通の workspace パッケージ `apps/shared`（`@repo/shared`）にある（Issue #90。`.claude/rules/shared.md`）。backend からは `@repo/shared/env`・`@repo/shared/logger` で使う。
 
 | 層 | 置くもの | 参照してよい先（許可の一覧。無いものは不可） |
 | --- | --- | --- |
-| `presentation/` | api ファイル（1 API = 1 ファイル `<verb>-<noun>.api.ts`）。コンテナを受け取って handler を返す関数（`listTodosApi(container)`）、本番用の HTTP メソッド名の定数（`export const GET = listTodosApi(todoContainer)`）、その API のリクエスト / レスポンスの型 | 自 feature と shared の `application`、`domain`（feature の domain は `import type` のみ。shared の domain は値でも可）、`presentation`、自 feature の `infra/container.ts`（コンテナの型と本番用のコンテナだけ）、`shared/infra/logger.ts`。パッケージは `next` / `react` / `react-dom` 以外 |
+| `presentation/` | api ファイル（1 API = 1 ファイル `<verb>-<noun>.api.ts`）。コンテナを受け取って handler を返す関数（`listTodosApi(container)`）、本番用の HTTP メソッド名の定数（`export const GET = listTodosApi(todoContainer)`）、その API のリクエスト / レスポンスの型 | 自 feature と shared の `application`、`domain`（feature の domain は `import type` のみ。shared の domain は値でも可）、`presentation`、自 feature の `infra/container.ts`（コンテナの型と本番用のコンテナだけ）、`@repo/shared/logger`。パッケージは `next` / `react` / `react-dom` 以外 |
 | `application/` | ユースケース 1 つ = 1 ファイル。読むだけは `<verb>-<noun>.query.ts`、状態を変えるものは `<verb>-<noun>.command.ts` | 自 feature と shared の `domain`・`application`。パッケージは `next` / `react` / `react-dom` と DB（`drizzle-orm` とサブパス、`pg`。型だけでも不可）以外 |
 | `domain/` | Entity / Value Object / Repository の interface | 自 feature と shared の `domain` だけ。パッケージは application と同じ制限（`node:crypto` などは可） |
-| `infra/` | Repository の実装、Drizzle のスキーマ `schema.ts`、TransactionRunner の実装、`container.ts`（DI） | 自 feature と shared の `domain`・`application`・`infra`。パッケージは `next` / `react` / `react-dom` 以外 |
+| `infra/` | Repository の実装、Drizzle のスキーマ `schema.ts`、TransactionRunner の実装、`container.ts`（DI） | 自 feature と shared の `domain`・`application`・`infra`、`@repo/shared/env`・`@repo/shared/logger`。パッケージは `next` / `react` / `react-dom` 以外 |
 
 - 向き: `apps/frontend/app/api → presentation → application → domain`。infra は domain の interface を実装する（依存性の逆転）。他 feature・`apps/frontend/`・層に属さない場所は参照しない。
   - WHY 許可の一覧にする: 禁止の一覧だと、書き忘れた参照先が黙って通る。
-- `apps/backend/shared/` が参照してよい自前コードは shared の中だけ（層の許可にも従う）。`next` / `react` / `react-dom` も不可。
+- `apps/backend/shared/` が参照してよい自前コードは shared の中と `apps/shared`（`@repo/shared`）だけ（層の許可にも従う）。`next` / `react` / `react-dom` も不可。
+- `apps/shared` を使ってよい層は、移す前（`backend/shared/infra` にあったとき）と同じ: infra は env・logger、presentation は logger だけ、domain・application は使わない（`rule-tests/architecture.test.ts` の `SHARED_MODULES_BY_LAYER`）。WHY: env・logger は外の世界（環境変数・stdout）に触る基盤で、domain・application から使うと infra を参照させない意味が無くなる。
 - domain は Next・React・DB に依存させない。WHY: ビジネスルールを永続化やフレームワークから切り離し、純粋な単体テストで検証する。
 
 ## import の書き方と公開の範囲（exports）
-- backend の中の import は相対パスだけ（`@/` と `@repo/backend/` は使わない。規則 `backend-relative-only`）。
+- backend の中の import は相対パスだけ（`@/` と `@repo/backend/` は使わない。規則 `backend-relative-only`）。`apps/shared` は別のパッケージなので `@repo/shared/...` だけで書く（相対パスの `../../../shared/env` は違反。`apps/backend/package.json` に `"@repo/shared": "workspace:*"`。Issue #90）。
+  - WHY `apps/shared` へ相対パスを使わない: exports を経由しない参照を許すと、`apps/shared` の公開範囲（exports。規則 `shared-exports`）が意味を持たなくなる（frontend・e2e と同じ扱い）。
   - WHY `@/` 不可: Next（Turbopack）は backend のファイルの `@/` にも frontend の paths を当て、ビルドが失敗する。
   - WHY `@repo/backend/` 不可: 自パッケージ名の参照は `exports` を通り、公開していない内部のファイルを指せなくなる。
 - 外（apps/frontend・apps/e2e/・リポジトリ直下の設定）が使ってよいのは `apps/backend/package.json` の `exports` に書いたファイルだけ。全ファイル（`"./*"`）は公開しない（ユーザー判断）。
-  - 今のキー: `./todo/presentation/*.api`（Route Handler と画面側の型）、`./shared/presentation/http-error`（`ErrorResponse`）、`./shared/infra/env`（起動時の検証・Playwright・E2E・globalSetup）、`./shared/infra/logger`（frontend 直下の `proxy.ts`・`instrumentation-node.ts`）。
+  - 今のキー: `./todo/presentation/*.api`（Route Handler と画面側の型）、`./shared/presentation/http-error`（`ErrorResponse`）。env・logger は Issue #90 で `apps/shared` に移し、キーを消した（`@repo/shared` の exports）。
   - 値はキーのパスに `.ts` を付けた TS のソース（ビルドしない）。feature を足したら `./<feature>/presentation/*.api` を足す。それ以外は 1 ファイルずつ。使わなくなったキーは消す（規則 `backend-exports` が過不足を止める）。
   - テスト基盤（`shared/infra/database.test-support`）は公開しない。`vitest.global-setup.ts` からだけ相対パスで読む（唯一の例外）。
-- 依存（`package.json`）: backend のコードが import するもの（`drizzle-orm` / `pg`、devDependencies に `drizzle-kit` / `@types/pg`）を `apps/backend/package.json` に置く（`.claude/rules/dependencies.md`）。
+- 依存（`package.json`）: backend のコードが import するもの（`drizzle-orm` / `pg` / `@repo/shared`、devDependencies に `drizzle-kit` / `@types/pg`）を `apps/backend/package.json` に置く（`.claude/rules/dependencies.md`）。
 - `apps/backend/tsconfig.json` は Next の plugin・jsx・DOM の型を持たない（backend 単体の型チェック。`Response#json()` は `unknown` なのでテストでは `as` で型を付ける）。`pnpm typecheck` が検査する。
 
 ## presentation（api ファイル）
@@ -70,11 +73,11 @@ paths:
 - 接続とプール（`database.ts`）: `pg.Pool` を `env` の値で作る（変数の一覧は `.claude/rules/env.md`）。アイドル中の接続のエラーは `pool.on("error")` で `logger.error` に出すだけ。プールは `globalThis` に 1 つ（`next dev` の HMR で増やさない）。終了時は `closeDatabase()`。値は開発・CI・E2E 用の暫定で、本番用は Issue #58。
 - テスト: 実 Postgres を使うテストは `createTestDatabase()` でファイルごとに別スキーマを使う（`.claude/rules/testing.md`）。
 
-## ログ（`shared/infra/logger.ts`。Issue #85）
+## ログ（`apps/shared/logger.ts`。Issue #85。Issue #90 で `apps/backend/shared/infra/` から移した）
 - サーバ側のログは必ず `logger.info / warn / error(event)` を通す。`console.*` を書いてよいのは `logger.ts` だけ（テストは除く）。
   - 1 呼び出し = JSON 1 行（NDJSON）。先頭に `level` と `timestamp`（ISO 8601、UTC。event に `timestamp` があればそれ）。info は stdout（`console.log`）、warn / error は stderr（`console.warn` / `console.error`）。`Error` は `{ name, message }` にする（stack は出さない）。JSON にできない event（循環参照・BigInt）は例外にせず、失敗した旨だけの 1 行を出す。
   - WHY 1 か所に集める: 行の形を呼び出し側ごとにずらさない。出力先を変える（ファイル・外部のログ基盤）ときに直すのが `logger.ts` だけで済む。依存（pino など）は足さない。
-  - 使ってよい場所: backend の `presentation`（`http-error.ts` の想定外の例外）・`infra`（`database.ts`）、frontend 直下の `proxy.ts`・`instrumentation-node.ts`（規則 `presentation`・`infra`・`frontend-root-to-backend`）。domain・application は使わない（層の許可に infra が無い）。
+  - 使ってよい場所: backend の `presentation`（`http-error.ts` の想定外の例外）・`infra`（`database.ts`）、frontend 直下の `proxy.ts`・`instrumentation-node.ts`（規則 `presentation`・`infra`・`frontend-to-shared-specifier`）。domain・application は使わない（`SHARED_MODULES_BY_LAYER`）。画面側（`app/`・`features/`・`shared/`）も使わない（規則 `screen-to-shared`）。
   - テストは `vi.spyOn(console, "error")` などで出力を抑え、渡された 1 行を `JSON.parse` して確かめる（`logger.test.ts`・`http-error.test.ts`）。
 - 強制は 2 系統（`env.ts` の `process.env` と同じ設計）: Biome の `suspicious/noConsole`（`allow` なし。`overrides` で `logger.ts` とテストだけ off。`.claude/rules/lint.md`）と、`rule-tests/architecture.test.ts` の規則 `console-direct-access`（`.claude/rules/architecture-check.md`）。どちらか片方だけが拾う書き方と限界は `docs/logger.md`。
 
@@ -83,4 +86,4 @@ paths:
 - api ファイル・query・command は `<verb>-<noun>`（`list-todos`・`get-todo`・`create-todo`・`update-todo`・`delete-todo`）に役割の接尾辞（`.api.ts`・`.query.ts`・`.command.ts`・`.in-memory.ts`・`.postgres.ts`・`.test.ts`）。
 
 ## 後で別プロセスに分けるとき
-`apps/backend` に起動口（`server.ts`）と script を足し、`apps/frontend/app/api/**` を消して Next の `rewrites` で `/api/*` を向ける。frontend の `@repo/backend` は型だけの依存になり、`instrumentation-node.ts` の env の検証は backend のサーバ側に移す（詳細は `docs/architecture-decisions.md`）。
+`apps/backend` に起動口（`server.ts`）と script を足し、`apps/frontend/app/api/**` を消して Next の `rewrites` で `/api/*` を向ける。frontend の `@repo/backend` は型だけの依存になる。env・logger は `apps/shared` にあるので、両方のプロセスがそのまま使える（詳細は `docs/architecture-decisions.md`）。

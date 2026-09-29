@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { env } from "@repo/shared/env";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Client, Pool } from "pg";
 import type { Database } from "./database";
-import { env } from "./env";
 
 // 実 Postgres を使う単体テスト（*.postgres.test.ts など）のための、テスト専用の DB を用意する部品。
 // 本番のコードからは使わない（ファイル名の .test-support が目印）。

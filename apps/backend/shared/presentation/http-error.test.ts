@@ -75,7 +75,7 @@ describe("toErrorResponse", () => {
   });
 
   test("想定外の例外は logger.error で、例外の name と message を含む 1 行の JSON としてサーバのログ（stderr）に残す", () => {
-    // logger（apps/backend/shared/infra/logger.ts）は error を console.error に 1 行の文字列で渡す。
+    // logger（apps/shared/logger.ts。Issue #90 で移した）は error を console.error に 1 行の文字列で渡す。
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);

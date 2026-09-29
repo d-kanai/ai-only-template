@@ -2,6 +2,8 @@
 // 規則と WHY は .claude/rules/env.md の「環境変数」。process.env を直接読むと Biome（style/noProcessEnv）と
 // rule-tests/architecture.test.ts（規則 env-direct-access）で失敗する。process.env に触ってよいのはこのファイルだけ
 // （例外は apps/frontend/instrumentation.ts が Next.js の規約の NEXT_RUNTIME を読む 1 か所だけ）。
+// 置き場所は frontend と backend で共通の workspace パッケージ apps/shared（@repo/shared/env。Issue #90 で apps/backend/shared/infra/
+// から移した。frontend 直下の instrumentation-node.ts・backend・apps/e2e/・vitest.global-setup.ts が使う。.claude/rules/shared.md）。
 //
 // WHY 1 か所にまとめる: 変数ごとに読む場所が散らばると、既定値や検証（数として使えるか）が場所ごとにずれ、
 //   どの変数が必要かを一覧できない。ここで型を付けて検証した値だけを配ると、使う側は string | undefined を扱わずに済む。
