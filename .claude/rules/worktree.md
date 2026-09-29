@@ -7,7 +7,7 @@ paths:
 # worktree ごとの外部リソースの分離（WorktreeCreate / WorktreeRemove フック）
 
 並列の worktree（`claude --worktree`、サブエージェントの `isolation: "worktree"`）が、同じ Postgres のデータベースや E2E のポートを使って互いに干渉しないようにする（Issue #64 のユーザー判断）。
-決定は ADR `docs/adr/20260928-worktree-isolated-external-resources.md`、実測は 2026-09-28 の work-logs（2026-09-29 の「docs/ から移した記録」に担当 D の実測）。仕様は `scripts/worktree-env.test.ts`・`scripts/hooks/worktree-create.test.ts`・`scripts/hooks/worktree-remove.test.ts` で固定している。
+決定は ADR `docs/adr/workflow/20260928-worktree-isolated-external-resources.md`、実測は 2026-09-28 の work-logs（2026-09-29 の「docs/ から移した記録」に担当 D の実測）。仕様は `scripts/worktree-env.test.ts`・`scripts/hooks/worktree-create.test.ts`・`scripts/hooks/worktree-remove.test.ts` で固定している。
 
 ## 設計: 一意な名前 → 導出 → `.env` → 作成
 1. worktree の一意な名前（WorktreeCreate の入力の `name`。例 `agent-a3f2`）を決める（Claude Code が決める）。

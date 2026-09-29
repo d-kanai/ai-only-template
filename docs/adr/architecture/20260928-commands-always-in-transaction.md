@@ -5,7 +5,7 @@
 - 関連: Issue #57 / PR #60 / `.claude/rules/backend.md` / `apps/backend/todo/infra/container.ts`
 
 ## 背景
-Drizzle はトランザクションの `tx` を明示的に渡す方式で、暗黙の伝播が無い（20260928-drizzle-with-generated-sql-migrations.md）。application 層は query（読むだけ）と command（状態を変える）に分かれている（20260928-feature-based-directory-and-ddd-backend.md）。ユーザーの指示は「command は一律トランザクション」（Issue #57 のコメント、PR #60）。
+Drizzle はトランザクションの `tx` を明示的に渡す方式で、暗黙の伝播が無い（architecture/20260928-drizzle-with-generated-sql-migrations.md）。application 層は query（読むだけ）と command（状態を変える）に分かれている（architecture/20260928-feature-based-directory-and-ddd-backend.md）。ユーザーの指示は「command は一律トランザクション」（Issue #57 のコメント、PR #60）。
 
 ## 決定
 - domain（`shared/domain`）に Drizzle に依存しない `TransactionRunner` の interface を置き、infra の実装が `db.transaction()` を使う。

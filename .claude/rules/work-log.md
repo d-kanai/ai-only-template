@@ -10,7 +10,7 @@ paths:
 
 # 作業ログの強制と、フックの記録（Issue #64）
 
-作業ログ（`work-logs/YYYY-MM-DD.md`）の書き方は `.claude/general/work-log.md`（常時読み込み）。このファイルの `paths:` に `work-logs/**` を入れない（ログを書くたびにフックの説明が読み込まれ、書き方は `.claude/general/work-log.md` で足りるため）。ここは、記録漏れを止める仕組み（Stop フック・CI）と、compact・指示ファイルの読み込みを記録するフックの WHAT / WHY / 限界。決定は ADR `docs/adr/20260928-work-log-enforced-by-stop-hook-and-ci.md`、実測は 2026-09-28 の work-logs、公式の仕様と未確認の点は 2026-09-29 の work-logs「docs/ から移した記録」。
+作業ログ（`work-logs/YYYY-MM-DD.md`）の書き方は `.claude/general/work-log.md`（常時読み込み）。このファイルの `paths:` に `work-logs/**` を入れない（ログを書くたびにフックの説明が読み込まれ、書き方は `.claude/general/work-log.md` で足りるため）。ここは、記録漏れを止める仕組み（Stop フック・CI）と、compact・指示ファイルの読み込みを記録するフックの WHAT / WHY / 限界。決定は ADR `docs/adr/workflow/20260928-work-log-enforced-by-stop-hook-and-ci.md`、実測は 2026-09-28 の work-logs、公式の仕様と未確認の点は 2026-09-29 の work-logs「docs/ から移した記録」。
 
 WHY 機械で止める: 調査だけの依頼などでログの追記が漏れた（LEARNINGS.md。ユーザーの指摘）。文章のルールは読み落とされる（CLAUDE.md の原則 7）。
 

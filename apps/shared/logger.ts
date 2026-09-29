@@ -8,7 +8,7 @@
 //   - 行の形（1 呼び出し = JSON 1 行。先頭に level と timestamp）をここで決め、呼び出し側ごとにずれないようにする。
 //   - 出力先を変える（ファイル・外部のログ基盤に送る）ときに、直すのがこのファイルだけで済む。
 // WHY 依存（pino など）を足さない: 今要るのは「1 行の JSON を stdout / stderr に出す」だけで、console で足りる。
-//   ログの収集（ファイルへの保存・転送）は実行環境に任せる（ADR docs/adr/20260929-request-log-in-proxy.md と同じ方針）。
+//   ログの収集（ファイルへの保存・転送）は実行環境に任せる（ADR docs/adr/architecture/20260929-request-log-in-proxy.md と同じ方針）。
 // WHY 中で console.log / console.warn / console.error を使う（process.stdout.write にしない）: 呼び出し側のテストが
 //   vi.spyOn(console, ...) で「ログに残したこと」を確かめられるようにする。
 

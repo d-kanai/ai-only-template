@@ -2,7 +2,7 @@
 # PreToolUse フック（.claude/settings.json の hooks.PreToolUse。matcher は Bash と GitHub MCP の書き込みツール）。
 # 文章で禁止していた git 操作（サブエージェントの commit / push / PR 作成・マージ、main への直接 commit / push、
 # force push、フックの飛ばし、squash / rebase マージ）を、Claude Code がツールを実行する前に拒否する。
-# WHAT / WHY と誤検知の扱いは .claude/rules/git-guard.md、決定は ADR docs/adr/20260928-git-operations-enforced-by-hooks.md。
+# WHAT / WHY と誤検知の扱いは .claude/rules/git-guard.md、決定は ADR docs/adr/workflow/20260928-git-operations-enforced-by-hooks.md。
 #
 # 入力: stdin の JSON（公式 hooks の「PreToolUse input」。tool_name・tool_input・cwd、サブエージェントの中では agent_id・agent_type）。
 # 出力: 拒否するときだけ stdout に

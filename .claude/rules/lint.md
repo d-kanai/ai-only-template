@@ -12,7 +12,7 @@ paths:
 
 ## ツールの選定
 - Biome を使う。ESLint（+ typescript-eslint）は使わない。
-- 理由: typescript-eslint が TypeScript 7 に未対応で、読み込み時点で失敗する（実測は 2026-09-28 の work-logs。決定は ADR `docs/adr/20260928-biome-instead-of-eslint.md`）。本リポジトリは TypeScript 7 を使うため（`.claude/rules/dependencies.md`）、TS の型情報を使う ESLint ルールは動かせない。
+- 理由: typescript-eslint が TypeScript 7 に未対応で、読み込み時点で失敗する（実測は 2026-09-28 の work-logs。決定は ADR `docs/adr/tech-stack/20260928-biome-instead-of-eslint.md`）。本リポジトリは TypeScript 7 を使うため（`.claude/rules/dependencies.md`）、TS の型情報を使う ESLint ルールは動かせない。
 - トレードオフ: プロジェクト固有のカスタムルールは ESLint の方が書きやすい（Biome は GritQL プラグインのみ）が、上記の理由で使えない。
 - 再検討の条件: typescript-eslint が TS 7.1 以降に対応したら（追跡 Issue: https://github.com/typescript-eslint/typescript-eslint/issues/10940 ）、ESLint への移行・併用を Issue で検討する。
 
@@ -91,7 +91,7 @@ Biome の recommended 全体を有効にする（個別に列挙しない）。�
 - `style/noParameterAssign`: 引数への再代入で、呼び出し元の値と関数内の値の対応が追いにくくなるのを防ぐ。
 - `style/noProcessEnv`（既定 severity は info。Issue #59）: 環境変数を `apps/shared/env.ts` 以外で `process.env` から直接読むのを防ぐ（読む場所が散らばると、既定値や検証が場所ごとにずれるため。`.claude/rules/env.md` の「環境変数」）。`env.ts` とテストは `overrides` で off。`apps/frontend/instrumentation.ts` の `process.env.NEXT_RUNTIME`（Next.js の規約の変数）だけは、その行の `biome-ignore` で理由を書いて許している（ファイルごと off にすると、同じファイルの別の直参照も通るため）。`rule-tests/architecture.test.ts` の規則 `env-direct-access` でも同じことを検査している（2 系統にする理由と、分割代入 `const { env } = process` をどちらも拾わない限界は `.claude/rules/env.md`）。
 - `style/useThrowOnlyError`: `Error` 以外を throw するとスタックトレースが失われる（ESLint の no-throw-literal 相当）。
-- `suspicious/noConsole`（`"error"` のみ。`allow` なし。Issue #85）: ログは `apps/shared/logger.ts` を必ず通す（`.claude/rules/backend.md` の「ログ」）。`logger.ts` とテストは `overrides` で off。WHY `allow` を空にする: 以前は `console.error` / `console.warn` を許可していたが、許可した呼び出しが logger を通らない書き方の抜け道になり、行の形（JSON 1 行・level・timestamp）がそろわない。`biome-ignore` のコメントで Biome を黙らせても、`console-direct-access` が拾う（以前の `proxy.ts` は `biome-ignore` を付けて `console.log` を書いていた）。`rule-tests/architecture.test.ts` の規則 `console-direct-access` でも同じことを検査している（2 系統にする理由は ADR `docs/adr/20260929-logger-single-exit.md`）。
+- `suspicious/noConsole`（`"error"` のみ。`allow` なし。Issue #85）: ログは `apps/shared/logger.ts` を必ず通す（`.claude/rules/backend.md` の「ログ」）。`logger.ts` とテストは `overrides` で off。WHY `allow` を空にする: 以前は `console.error` / `console.warn` を許可していたが、許可した呼び出しが logger を通らない書き方の抜け道になり、行の形（JSON 1 行・level・timestamp）がそろわない。`biome-ignore` のコメントで Biome を黙らせても、`console-direct-access` が拾う（以前の `proxy.ts` は `biome-ignore` を付けて `console.log` を書いていた）。`rule-tests/architecture.test.ts` の規則 `console-direct-access` でも同じことを検査している（2 系統にする理由は ADR `docs/adr/architecture/20260929-logger-single-exit.md`）。
 - `suspicious/noConstantBinaryExpressions`: 常に同じ結果になる比較・論理式（書き間違い）を検出する（ESLint の recommended にある no-constant-binary-expression 相当）。
 - `suspicious/noEmptyBlockStatements`: 空のブロック（握りつぶした catch、書きかけの関数など）を防ぐ。意図的に空にする場合はブロック内にコメントで理由を書く（ESLint の recommended にある no-empty 相当）。
 - `suspicious/noLeakedRender`（react domain・recommended 外）: `{count && <X />}` のように `0` などが意図せず描画されるのを防ぐ。

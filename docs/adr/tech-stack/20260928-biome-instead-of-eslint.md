@@ -5,7 +5,7 @@
 - 関連: Issue #26 / PR #33 / `.claude/rules/lint.md` / `biome.json` / `lefthook.yml` / `rule-tests/lint.test.ts`
 
 ## 背景
-linter / formatter を入れて品質を機械的に担保し、違反をコミット前に止めたかった（ユーザーの要望は「ベストプラクティス設定、カスタムルールを入れやすい方」）。TypeScript は 7.0.2（20260928-typescript-7.md）。
+linter / formatter を入れて品質を機械的に担保し、違反をコミット前に止めたかった（ユーザーの要望は「ベストプラクティス設定、カスタムルールを入れやすい方」）。TypeScript は 7.0.2（tech-stack/20260928-typescript-7.md）。
 
 ## 決定
 - Biome を使う。create-next-app@16.3.6 の `--biome` テンプレートを土台に、preset recommended と next / react / test の domain を有効にし、既定の severity が warn / info のルールも失敗にする（`--error-on-warnings` と個別の error 指定）。
@@ -23,5 +23,5 @@ linter / formatter を入れて品質を機械的に担保し、違反をコミ�
 
 ## 影響
 - 良い点: TS 7 のまま lint と format を 1 つのツールで回せる。
-- 悪い点: カスタムルールを JS で書けない。依存の向きのような検査は自前のテストで補う（20260928-dependency-direction-checked-by-own-test.md）。
+- 悪い点: カスタムルールを JS で書けない。依存の向きのような検査は自前のテストで補う（quality/20260928-dependency-direction-checked-by-own-test.md）。
 - 見直す条件: typescript-eslint が TS 7.1 以降に対応したら再検討する（Issue #26）。

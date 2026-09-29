@@ -7,7 +7,7 @@ paths:
 # クラウドセッション（scripts/cloud-session-start.sh）
 
 Claude Code on the web（クラウドセッション）には asdf が無いため、`scripts/cloud-session-start.sh` で `.tool-versions` と同じ Node.js / pnpm を用意し、Postgres を起動する。
-確認・復旧の手順はスキル `cloud-session`。決定は ADR `docs/adr/20260928-cloud-session-setup-script-and-hook.md`、VM の実測（前提・時間・403・レート制限）は 2026-09-28 の work-logs、検証状況（未確認の点）は 2026-09-29 の work-logs「docs/ から移した記録」。仕様は `scripts/cloud-session-start.test.ts` で固定している。
+確認・復旧の手順はスキル `cloud-session`。決定は ADR `docs/adr/workflow/20260928-cloud-session-setup-script-and-hook.md`、VM の実測（前提・時間・403・レート制限）は 2026-09-28 の work-logs、検証状況（未確認の点）は 2026-09-29 の work-logs「docs/ から移した記録」。仕様は `scripts/cloud-session-start.test.ts` で固定している。
 
 ## 前提（公式 https://code.claude.com/docs/en/cloud-environments.md ）
 - セッションごとに新しい VM（Ubuntu 24.04、x86_64）。Node 20 / 21 / 22 が入り 22 が PATH にある。asdf は無い。`CLAUDE_CODE_REMOTE=true` が設定される。

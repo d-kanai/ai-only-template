@@ -14,7 +14,7 @@ import { dirname, join, matchesGlob, posix } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // 指示ファイル（CLAUDE.md / .claude/general / .claude/rules / .claude/skills / .claude/agents）と ADR（docs/adr）の構成を
-//   仕様として固定するテスト（Issue #64。ADR の検査は Issue #96）。
+//   仕様として固定するテスト（Issue #64。ADR の検査は Issue #96、分類ディレクトリは Issue #100）。
 // WHY 機械で検査する: 指示ファイルは「読み込まれているか」、ADR は「決まった形で一覧から辿れるか」を人が見落としやすい。
 //   rules の paths の typo は、そのルールが黙って読み込まれなくなるだけで、何もエラーにならない（CLAUDE.md の原則 7）。
 // ルール検査テスト（.claude/rules/testing.md）なので、判定を関数に切り出し、架空の入力で must pass / must reject を固定してから、
@@ -30,22 +30,27 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 //                     1 件以上一致する（一致しない glob は typo として扱う。そのルールは読み込まれないまま残るため）。
 //   legacy-rules      旧 rules/ ディレクトリが無く、ファイルに rules/code/・rules/general/ への参照が残っていない
 //                     （work-logs/ は過去の記録なので除く。このファイルは例を持つので除く）。
-//   adr-name          docs/adr/ のファイル（README.md を除く）の名前が yyyymmdd-<topic>.md（topic は英小文字・数字の kebab-case）。
+//   ADR は docs/adr/<分類>/<ファイル名>（分類は ADR_CATEGORIES の 4 つ）。ADR への参照（置き換え先・一覧のリンク）は
+//   docs/adr/ からの相対パス「<分類>/<ファイル名>」の 1 通りで書く。
+//   adr-name          分類の直下のファイルの名前が yyyymmdd-<topic>.md（topic は英小文字・数字の kebab-case）。
 //   adr-title         ADR の 1 行目が「# 」の見出し（決定を 1 文で書く）。
-//   adr-meta          ADR の 3〜5 行目が「- 日付: YYYY-MM-DD」（ファイル名の日付と一致）・「- 状態: 採用 | 置き換え（→ <docs/adr に
-//                     あるファイル名>）| 廃止」・「- 関連: <空でない>」。
+//   adr-meta          ADR の 3〜5 行目が「- 日付: YYYY-MM-DD」（ファイル名の日付と一致）・「- 状態: 採用 | 置き換え（→ <分類>/
+//                     <ファイル名>。実在する ADR）| 廃止」・「- 関連: <空でない>」。分類なしのファイル名だけの置き換え先は違反。
 //   adr-sections      ADR に「## 背景」「## 決定」「## 理由」「## 採用しなかった案」「## 影響」がこの順にある（間に別の見出しは可）。
-//   adr-index         ADR が docs/adr/README.md の一覧から `](<ファイル名>)` のリンクで辿れる。
-//   adr-index-state   docs/adr/README.md の一覧の各行（最後の列がリンク）のリンク先が docs/adr にあり、「状態」列が
-//                     その ADR の「- 状態:」の値と一致する（置き換えた決定を一覧で採用中と読み違えないため）。
-//   adr-only          docs/ の直下には adr/ しか無い（Issue #96 で docs/*.md の記録を廃止した。別の記録を足させない）。
+//   adr-index         ADR が docs/adr/README.md の一覧から `](<分類>/<ファイル名>)` のリンクで辿れる。
+//   adr-index-state   docs/adr/README.md の一覧の各行（最後の列がリンク）のリンク先が「<分類>/<ファイル名>」の ADR として実在し、
+//                     「状態」列がその ADR の「- 状態:」の値と一致する（置き換えた決定を一覧で採用中と読み違えないため）。
+//   adr-category      docs/adr/ の下のディレクトリが 4 つの分類（architecture / tech-stack / quality / workflow）のいずれかで、
+//                     分類の下にさらにディレクトリが無い（Issue #100。アーキテクチャでない決定を分けて読めるようにした）。
+//   adr-only          docs/ の直下には adr/ しか無く、docs/adr/ の直下には README.md と分類ディレクトリしか無い（Issue #96 で
+//                     docs/*.md の記録を廃止した。別の記録を足させない。Issue #100 で ADR を分類の下に移した）。
 //                     WHY（adr-*）: ADR は読み込まれない不変の記録で、決定が変わると「置き換え」で次の ADR に辿る。形が崩れると
 //                     日付・状態・理由を取り出せず、一覧に無いと存在しないのと同じになる（Issue #96 で、廃止した docs の orphan-docs を置き換えた）。
 //   skill-frontmatter .claude/skills/*/SKILL.md はフロントマターに name と description を持つ（公式 https://code.claude.com/docs/en/skills 。
 //                     description は起動時に一覧として読まれ、いつ使うかの判断に使われる）。
 //   agent-model       .claude/agents/*.md はフロントマターの model が許可したフル ID（ALLOWED_AGENT_MODELS）のいずれか
 //                     （Issue #78。別名 `opus` / `sonnet` や古い ID は意図しないモデルに解決され、消費と品質が変わる。
-//                     `.claude/general/orchestration.md`、`docs/adr/20260929-save-usage-limit.md`）。
+//                     `.claude/general/orchestration.md`、`docs/adr/workflow/20260929-save-usage-limit.md`）。
 
 const repoRoot = join(import.meta.dirname, "..");
 const SELF = "rule-tests/instructions.test.ts";
@@ -210,7 +215,7 @@ function findSkillViolations(path: string, markdown: string): string[] {
 // --- サブエージェントの model ---
 // WHY フル ID だけを許す: `opus` のような別名は Claude Code の版で解決先が変わり、古い ID はフォールバックや拒否になる。
 //   どのモデルで動くかを定義ファイルの差分で読めるようにし、機械的な作業に軽いモデル（Sonnet）を使う運用
-//   （docs/adr/20260929-save-usage-limit.md）で
+//   （docs/adr/workflow/20260929-save-usage-limit.md）で
 //   意図したモデルだけが使われるようにする。
 const ALLOWED_AGENT_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5"];
 
@@ -249,6 +254,10 @@ function findLegacyReferences(path: string, text: string): string[] {
 //   ADR にテンプレートを貼ることは無い想定。テンプレートは README.md にだけ置き、README.md は検査しない）。
 const ADR_DIR = "docs/adr/";
 const ADR_INDEX = "docs/adr/README.md";
+// 分類（Issue #100 のユーザー判断）。分類ごとに置くものは docs/adr/README.md の一覧に 1 行ずつ書く。
+// WHY 固定の集合にする: 分類は「どれがアーキテクチャの決定か」を読み分けるためのもので、自由に足せると同じ種類の決定が
+//   別の名前の分類に散り、分けた意味が無くなる。分類を足すときは、ここと README.md の説明を同じ変更で直す。
+const ADR_CATEGORIES = ["architecture", "tech-stack", "quality", "workflow"];
 const ADR_REQUIRED_SECTIONS = [
   "## 背景",
   "## 決定",
@@ -258,6 +267,24 @@ const ADR_REQUIRED_SECTIONS = [
 ];
 
 type AdrFile = { path: string; text: string };
+
+// ADR の形式の検査（adr-name ほか）の対象: docs/adr/<4 つの分類のいずれか>/<ファイル>。拡張子や名前は問わない（adr-name が見る）。
+// WHY 分類でない場所のファイルを対象から外す: そこに置いたこと自体を adr-category / adr-only の 1 件で示し、同じファイルに
+//   adr-name や adr-index の違反を重ねない（原因が置き場所 1 つだと読めるようにする）。docs/adr/ の下のファイルは、
+//   この対象・adr-category・adr-only・README.md のどれかに必ず入るので、形式の検査から黙って外れるファイルは無い。
+function isAdrFile(file: string): boolean {
+  const category = file.match(/^docs\/adr\/([^/]+)\/[^/]+$/)?.[1];
+  return category !== undefined && ADR_CATEGORIES.includes(category);
+}
+
+// ADR への参照の形（docs/adr/ からの相対パス「<分類>/<ファイル名>」）。一覧のリンクと「置き換え（→ ...）」はこの形で書く。
+function adrRef(path: string): string {
+  return path.slice(ADR_DIR.length);
+}
+
+function fileName(path: string): string {
+  return path.slice(path.lastIndexOf("/") + 1);
+}
 
 // ファイル名の日付（yyyymmdd）。名前が yyyymmdd-<topic>.md の形でなければ undefined。
 // WHY topic を英小文字・数字の kebab-case に限る: ファイル名は一覧のリンクと「置き換え（→ ...）」の参照先になり、
@@ -272,7 +299,7 @@ function findAdrMetaViolations(
   path: string,
   lines: string[],
   nameDate: string | undefined,
-  adrNames: string[],
+  adrRefs: string[],
 ): string[] {
   const violations: string[] = [];
   const date = lines[2]?.match(/^- 日付: (\d{4})-(\d{2})-(\d{2})$/);
@@ -289,12 +316,14 @@ function findAdrMetaViolations(
   const status = lines[3]?.match(/^- 状態: (?:採用|廃止|置き換え（→ (\S+)）)$/);
   if (!status) {
     violations.push(
-      `adr-meta: ${path} の 4 行目が「- 状態: 採用 | 置き換え（→ <ファイル名>）| 廃止」でない`,
+      `adr-meta: ${path} の 4 行目が「- 状態: 採用 | 置き換え（→ <分類>/<ファイル名>）| 廃止」でない`,
     );
-  } else if (status[1] !== undefined && !adrNames.includes(status[1])) {
+  } else if (status[1] !== undefined && !adrRefs.includes(status[1])) {
     // WHY 置き換え先の実在を見る: 不変の ADR は「置き換え」から次の ADR に辿って最新の決定を知る。参照先が無いと辿れない。
+    // WHY 「<分類>/<ファイル名>」の完全一致にする: 分類なしのファイル名だけ・./ 付き・ADR からの相対（../）を許すと、同じ ADR を
+    //   指す書き方が増え、分類を移したときに古い参照を機械で見つけられなくなる。一覧のリンクと同じ形に揃える。
     violations.push(
-      `adr-meta: ${path} の置き換え先 ${status[1]} が docs/adr に無い`,
+      `adr-meta: ${path} の置き換え先 ${status[1]} が docs/adr に無い（<分類>/<ファイル名> で書く）`,
     );
   }
   if (!/^- 関連: \S/.test(lines[4] ?? "")) {
@@ -327,15 +356,14 @@ function findAdrSectionViolations(path: string, lines: string[]): string[] {
       ];
 }
 
-// adrs は docs/adr/ の README.md 以外のファイル、index は docs/adr/README.md の中身（無ければ undefined）。
+// adrs は ADR（isAdrFile のファイル）、index は docs/adr/README.md の中身（無ければ undefined）。
 function findAdrViolations(
   adrs: AdrFile[],
   index: string | undefined,
 ): string[] {
-  const adrNames = adrs.map(({ path }) => path.slice(ADR_DIR.length));
+  const adrRefs = adrs.map(({ path }) => adrRef(path));
   return adrs.flatMap(({ path, text }) => {
-    const name = path.slice(ADR_DIR.length);
-    const nameDate = adrNameDate(name);
+    const nameDate = adrNameDate(fileName(path));
     const lines = text.split("\n");
     return [
       ...(nameDate === undefined
@@ -346,9 +374,9 @@ function findAdrViolations(
       ...(/^# \S/.test(lines[0] ?? "")
         ? []
         : [`adr-title: ${path} の 1 行目が「# 」の見出しでない`]),
-      ...findAdrMetaViolations(path, lines, nameDate, adrNames),
+      ...findAdrMetaViolations(path, lines, nameDate, adrRefs),
       ...findAdrSectionViolations(path, lines),
-      ...((index ?? "").includes(`](${name})`)
+      ...((index ?? "").includes(`](${adrRef(path)})`)
         ? []
         : [`adr-index: ${path} が ${ADR_INDEX} の一覧に無い`]),
     ];
@@ -361,8 +389,9 @@ function adrStatus(text: string): string {
   return line.startsWith("- 状態: ") ? line.slice("- 状態: ".length) : line;
 }
 
-// README.md の一覧の行（最後の列が `[...](<ファイル名>)` のリンクの行）と、各 ADR の突き合わせ。
-// 読み取りの仕様: `|` で始まり `|` で終わる行を列に分け、最後の列のリンク先をファイル名、その 1 つ前の列を状態とする。
+// README.md の一覧の行（最後の列が `[...](<分類>/<ファイル名>)` のリンクの行）と、各 ADR の突き合わせ。
+// 読み取りの仕様: `|` で始まり `|` で終わる行を列に分け、最後の列のリンク先を ADR への参照、その 1 つ前の列を状態とする。
+//   分類ごとに表が分かれていても、行ごとに読むので同じに扱う。リンク先は adrRef と完全一致で探す（分類なし・./ 付きは無い扱い）。
 //   見出しの行・区切りの行（最後の列にリンクが無い）は読まない。タイトルの列に `|` が混ざっても、後ろから数えるので
 //   状態とファイルの列はずれない。
 // WHY 一覧の状態を ADR と一致させる: 一覧は「今どの決定が生きているか」を読む場所で、ADR を「置き換え」にしても一覧を
@@ -372,8 +401,8 @@ function findAdrIndexStateViolations(
   adrs: AdrFile[],
   index: string | undefined,
 ): string[] {
-  const statusByName = new Map(
-    adrs.map(({ path, text }) => [path.slice(ADR_DIR.length), adrStatus(text)]),
+  const statusByRef = new Map(
+    adrs.map(({ path, text }) => [adrRef(path), adrStatus(text)]),
   );
   return (index ?? "").split("\n").flatMap((line) => {
     const row = line.trim().match(/^\|(.*)\|$/);
@@ -381,7 +410,7 @@ function findAdrIndexStateViolations(
     const cells = (row[1] ?? "").split("|").map((cell) => cell.trim());
     const target = cells.at(-1)?.match(/^\[[^\]]*\]\(([^)]+)\)$/)?.[1];
     if (target === undefined) return [];
-    const expected = statusByName.get(target);
+    const expected = statusByRef.get(target);
     if (expected === undefined) {
       return [
         `adr-index-state: ${ADR_INDEX} の一覧の ${target} が docs/adr に無い`,
@@ -396,9 +425,40 @@ function findAdrIndexStateViolations(
   });
 }
 
-// docs/ の直下に adr/ 以外のファイル・ディレクトリがあれば、その項目（ディレクトリは末尾に /）。
+// docs/adr/ の下のディレクトリのうち、4 つの分類でないもの・分類の下のディレクトリ（ディレクトリごとに 1 項目、末尾に /）。
+// WHY 分類の下にディレクトリを置かせない: ADR への参照を「<分類>/<ファイル名>」の 1 通りにし、一覧・置き換えの検査で
+//   深さの違う書き方を考えずに済むようにする。分類の中をさらに分けたくなったら、分類を見直す（ADR_CATEGORIES）。
+// docs/adr/ の直下のファイルはここでは見ない（adr-only が見る）。
+function findAdrCategoryViolations(files: string[]): string[] {
+  const entries = new Set(
+    files
+      .filter((file) => file.startsWith(ADR_DIR))
+      .flatMap((file) => {
+        const [category = "", child = "", ...deeper] = file
+          .slice(ADR_DIR.length)
+          .split("/");
+        if (child === "") return [];
+        if (!ADR_CATEGORIES.includes(category)) {
+          return [
+            `adr-category: ${ADR_DIR}${category}/ は分類（${ADR_CATEGORIES.join(" / ")}）でない`,
+          ];
+        }
+        return deeper.length > 0
+          ? [
+              `adr-category: ${ADR_DIR}${category}/${child}/ がある（分類の下にディレクトリは置けない）`,
+            ]
+          : [];
+      }),
+  );
+  return [...entries];
+}
+
+// docs/ の直下に adr/ 以外のファイル・ディレクトリがあれば、その項目（ディレクトリは末尾に /）。続けて、docs/adr/ の直下の
+//   README.md 以外のファイル。
 // WHY docs/ を ADR だけにする: Issue #96 で docs/*.md（実測・経緯の記録）を廃止し、決定は ADR、実測は work-logs、
 //   一次情報は規則の WHY に振り分けた。docs/ に別の記録を足せる状態だと、同じ二重管理（最新の規則と記録のずれ）が戻る。
+// WHY docs/adr/ の直下を README.md だけにする: Issue #100 で ADR を分類の下に移した。直下に ADR を置けると、分類の無い ADR が
+//   増えて分類で読み分けられなくなる（直下のファイルは形式の検査の対象にも入らない。isAdrFile）。
 // 限界: 列挙は git ls-files なので、ファイルの無い空のディレクトリは見えない（git でも追跡されないので実害は無い）。
 function findNonAdrDocs(files: string[]): string[] {
   const entries = new Set(
@@ -410,10 +470,22 @@ function findNonAdrDocs(files: string[]): string[] {
         return `docs/${slash < 0 ? rest : rest.slice(0, slash + 1)}`;
       }),
   );
-  return [...entries].map(
-    (entry) =>
-      `adr-only: ${entry} がある（docs/ の直下に置けるのは adr/ だけ）`,
+  const adrRootFiles = files.filter(
+    (file) =>
+      file.startsWith(ADR_DIR) &&
+      file !== ADR_INDEX &&
+      !file.slice(ADR_DIR.length).includes("/"),
   );
+  return [
+    ...[...entries].map(
+      (entry) =>
+        `adr-only: ${entry} がある（docs/ の直下に置けるのは adr/ だけ）`,
+    ),
+    ...adrRootFiles.map(
+      (file) =>
+        `adr-only: ${file} がある（docs/adr/ の直下に置けるのは README.md と分類ディレクトリだけ）`,
+    ),
+  ];
 }
 
 // --- リポジトリ全体 ---
@@ -448,11 +520,9 @@ function inventory(files: string[]): Inventory {
     generalFiles: files.filter((file) =>
       /^\.claude\/general\/[^/]+\.md$/.test(file),
     ),
-    // WHY .md に限らず docs/adr/ の下をすべて数える: `.MD` や `.txt`、サブディレクトリに置いた ADR も adr-name で違反にし、
-    //   形式の検査から黙って外れないようにする。
-    adrs: files.filter(
-      (file) => file.startsWith(ADR_DIR) && file !== ADR_INDEX,
-    ),
+    // WHY .md に限らず分類の直下をすべて数える: `.MD` や `.txt` に置いた ADR も adr-name で違反にし、形式の検査から黙って
+    //   外れないようにする。分類の外・分類の下のディレクトリに置いたものは adr-category / adr-only が拾う（isAdrFile）。
+    adrs: files.filter(isAdrFile),
     skills: files.filter((file) =>
       /^\.claude\/skills\/[^/]+\/SKILL\.md$/.test(file),
     ),
@@ -491,6 +561,7 @@ function collectInstructionViolations(
       found.adrs.map((path) => ({ path, text: read(path) ?? "" })),
       read(ADR_INDEX),
     ),
+    ...findAdrCategoryViolations(found.files),
     ...findNonAdrDocs(found.files),
     ...found.skills.flatMap((path) =>
       findSkillViolations(path, read(path) ?? ""),
@@ -748,23 +819,29 @@ function adrText(
   ].join("\n");
 }
 
-describe("ADR（docs/adr）の形式", () => {
+describe("ADR（docs/adr/<分類>/）の形式", () => {
   const name = "20260929-todo-invariants-always-validated.md";
-  const path = `docs/adr/${name}`;
-  const index = `| 2026-09-29 | [Todo の不変条件](${name}) | 採用 |\n`;
+  const ref = `architecture/${name}`;
+  const path = `docs/adr/${ref}`;
+  const index = `| 2026-09-29 | [Todo の不変条件](${ref}) | 採用 |\n`;
 
   // 1 件の ADR を README の一覧に載せた状態で検査する（adr-index 以外の検査を単独で見るため）。
+  // 置き換え先の候補として、同じ分類（architecture）と別の分類（quality）に 1 件ずつ置く。
   function check(text: string, adrPath = path): string[] {
     const listed = adrPath.slice("docs/adr/".length);
     return findAdrViolations(
       [
         { path: adrPath, text },
         {
-          path: "docs/adr/20260928-old.md",
+          path: "docs/adr/architecture/20260928-old.md",
+          text: adrText({ date: "- 日付: 2026-09-28" }),
+        },
+        {
+          path: "docs/adr/quality/20260928-gate.md",
           text: adrText({ date: "- 日付: 2026-09-28" }),
         },
       ],
-      `${index}| [old](20260928-old.md) |\n| [x](${listed}) |\n`,
+      `${index}| [old](architecture/20260928-old.md) |\n| [gate](quality/20260928-gate.md) |\n| [x](${listed}) |\n`,
     );
   }
 
@@ -772,8 +849,12 @@ describe("ADR（docs/adr）の形式", () => {
     ["テンプレートどおり（採用）", adrText()],
     ["状態が廃止", adrText({ status: "- 状態: 廃止" })],
     [
-      "状態が置き換えで、置き換え先が docs/adr にある",
-      adrText({ status: "- 状態: 置き換え（→ 20260928-old.md）" }),
+      "状態が置き換えで、置き換え先が同じ分類にある",
+      adrText({ status: "- 状態: 置き換え（→ architecture/20260928-old.md）" }),
+    ],
+    [
+      "状態が置き換えで、置き換え先が別の分類にある",
+      adrText({ status: "- 状態: 置き換え（→ quality/20260928-gate.md）" }),
     ],
     [
       "必須の見出しの間に別の見出しがある",
@@ -804,9 +885,9 @@ describe("ADR（docs/adr）の形式", () => {
     "2026929-todo.md",
     "20260929-todo.MD",
     "20260929-todo.txt",
-    "sub/20260929-todo.md",
+    "README.md",
   ])("ファイル名 %s を違反にする（must reject）", (fileName) => {
-    const adrPath = `docs/adr/${fileName}`;
+    const adrPath = `docs/adr/architecture/${fileName}`;
     expect(check(adrText(), adrPath)).toEqual([
       `adr-name: ${adrPath} の名前が yyyymmdd-<topic>.md（topic は英小文字・数字の kebab-case）でない`,
     ]);
@@ -843,18 +924,30 @@ describe("ADR（docs/adr）の形式", () => {
     ["決まった語でない", "- 状態: 採用済み"],
     ["英語", "- 状態: accepted"],
     ["置き換え先が無い", "- 状態: 置き換え"],
-    ["置き換えの括弧が半角", "- 状態: 置き換え(→ 20260928-old.md)"],
+    [
+      "置き換えの括弧が半角",
+      "- 状態: 置き換え(→ architecture/20260928-old.md)",
+    ],
   ])("4 行目の状態が%sなら違反にする（must reject）", (_name, status) => {
     expect(check(adrText({ status }))).toEqual([
-      `adr-meta: ${path} の 4 行目が「- 状態: 採用 | 置き換え（→ <ファイル名>）| 廃止」でない`,
+      `adr-meta: ${path} の 4 行目が「- 状態: 採用 | 置き換え（→ <分類>/<ファイル名>）| 廃止」でない`,
     ]);
   });
 
-  it("置き換え先が docs/adr に無ければ違反にする（must reject）", () => {
+  // WHY 分類なしのファイル名・別の書き方を違反にする: 置き換え先は README の一覧のリンクと同じ「<分類>/<ファイル名>」
+  //   （docs/adr/ からの相対パス）の 1 通りに揃え、分類を移したときに古い参照が残らないようにする。
+  it.each([
+    ["存在しない ADR", "architecture/20260930-missing.md"],
+    ["分類なしのファイル名だけ", "20260928-old.md"],
+    ["分類が違う", "quality/20260928-old.md"],
+    ["./ 付き", "./architecture/20260928-old.md"],
+    ["ADR からの相対パス", "../architecture/20260928-old.md"],
+    ["リポジトリ相対のパス", "docs/adr/architecture/20260928-old.md"],
+  ])("置き換え先が%sなら違反にする（must reject）", (_name, target) => {
     expect(
-      check(adrText({ status: "- 状態: 置き換え（→ 20260930-missing.md）" })),
+      check(adrText({ status: `- 状態: 置き換え（→ ${target}）` })),
     ).toEqual([
-      `adr-meta: ${path} の置き換え先 20260930-missing.md が docs/adr に無い`,
+      `adr-meta: ${path} の置き換え先 ${target} が docs/adr に無い（<分類>/<ファイル名> で書く）`,
     ]);
   });
 
@@ -921,8 +1014,13 @@ describe("ADR（docs/adr）の形式", () => {
   it.each([
     ["README.md が無い", undefined],
     ["一覧にリンクが無い", "| 2026-09-29 | Todo の不変条件 | 採用 |\n"],
-    ["ファイル名が文字としてあるだけ", `- ${name}\n`],
-    ["リンク先が別の名前", "| [x](20260929-todo-invariants.md) |\n"],
+    ["ファイル名が文字としてあるだけ", `- ${ref}\n`],
+    [
+      "リンク先が別の名前",
+      "| [x](architecture/20260929-todo-invariants.md) |\n",
+    ],
+    ["リンク先に分類が無い", `| [x](${name}) |\n`],
+    ["リンク先の分類が違う", `| [x](quality/${name}) |\n`],
   ])("%s なら違反にする（must reject）", (_name, readme) => {
     expect(findAdrViolations([{ path, text: adrText() }], readme)).toEqual([
       `adr-index: ${path} が docs/adr/README.md の一覧に無い`,
@@ -933,15 +1031,15 @@ describe("ADR（docs/adr）の形式", () => {
 describe("ADR の一覧の状態とリンク先（adr-index-state）", () => {
   const adrs = [
     {
-      path: "docs/adr/20260928-old.md",
+      path: "docs/adr/architecture/20260928-old.md",
       text: adrText({
         date: "- 日付: 2026-09-28",
-        status: "- 状態: 置き換え（→ 20260929-new.md）",
+        status: "- 状態: 置き換え（→ workflow/20260929-new.md）",
       }),
     },
-    { path: "docs/adr/20260929-new.md", text: adrText() },
+    { path: "docs/adr/workflow/20260929-new.md", text: adrText() },
     {
-      path: "docs/adr/20260929-gone.md",
+      path: "docs/adr/quality/20260929-gone.md",
       text: adrText({ status: "- 状態: 廃止" }),
     },
   ];
@@ -955,9 +1053,12 @@ describe("ADR の一覧の状態とリンク先（adr-index-state）", () => {
       "# ADR",
       "本文の [リンク](../x.md) は一覧の行ではない",
       header,
-      row("置き換え（→ 20260929-new.md）", "20260928-old.md"),
-      "| 2026-09-29 | A | B を含む | 採用 | [20260929-new.md](20260929-new.md) |",
-      `  ${row("廃止", "20260929-gone.md")}  `,
+      row(
+        "置き換え（→ workflow/20260929-new.md）",
+        "architecture/20260928-old.md",
+      ),
+      "| 2026-09-29 | A | B を含む | 採用 | [20260929-new.md](workflow/20260929-new.md) |",
+      `  ${row("廃止", "quality/20260929-gone.md")}  `,
     ].join("\n");
     expect(findAdrIndexStateViolations(adrs, index)).toEqual([]);
   });
@@ -967,41 +1068,55 @@ describe("ADR の一覧の状態とリンク先（adr-index-state）", () => {
   });
 
   it.each([
-    ["置き換えた ADR を採用のまま", "採用", "置き換え（→ 20260929-new.md）"],
+    [
+      "置き換えた ADR を採用のまま",
+      "採用",
+      "置き換え（→ workflow/20260929-new.md）",
+    ],
     [
       "置き換え先の名前が違う",
-      "置き換え（→ 20260929-other.md）",
-      "置き換え（→ 20260929-new.md）",
+      "置き換え（→ workflow/20260929-other.md）",
+      "置き換え（→ workflow/20260929-new.md）",
     ],
-    ["状態が空", "", "置き換え（→ 20260929-new.md）"],
+    [
+      "置き換え先の分類が無い",
+      "置き換え（→ 20260929-new.md）",
+      "置き換え（→ workflow/20260929-new.md）",
+    ],
+    ["状態が空", "", "置き換え（→ workflow/20260929-new.md）"],
   ])("一覧の状態が%sなら違反にする（must reject）", (_name, listed, actual) => {
     expect(
       findAdrIndexStateViolations(
         adrs,
-        header + row(listed, "20260928-old.md"),
+        header + row(listed, "architecture/20260928-old.md"),
       ),
     ).toEqual([
-      `adr-index-state: docs/adr/README.md の一覧の 20260928-old.md の状態「${listed}」が ADR の「${actual}」と違う`,
+      `adr-index-state: docs/adr/README.md の一覧の architecture/20260928-old.md の状態「${listed}」が ADR の「${actual}」と違う`,
     ]);
   });
 
   it("ADR の状態の行が崩れていれば、その行と比べて違反にする（must reject）", () => {
     const broken = [
       {
-        path: "docs/adr/20260929-x.md",
+        path: "docs/adr/architecture/20260929-x.md",
         text: adrText({ status: "- 状態:採用" }),
       },
     ];
     expect(
-      findAdrIndexStateViolations(broken, row("採用", "20260929-x.md")),
+      findAdrIndexStateViolations(
+        broken,
+        row("採用", "architecture/20260929-x.md"),
+      ),
     ).toEqual([
-      "adr-index-state: docs/adr/README.md の一覧の 20260929-x.md の状態「採用」が ADR の「- 状態:採用」と違う",
+      "adr-index-state: docs/adr/README.md の一覧の architecture/20260929-x.md の状態「採用」が ADR の「- 状態:採用」と違う",
     ]);
   });
 
   it.each([
-    ["存在しない ADR", "20260930-missing.md"],
-    ["./ 付きのパス", "./20260929-new.md"],
+    ["存在しない ADR", "workflow/20260930-missing.md"],
+    ["分類なしのファイル名だけ", "20260929-new.md"],
+    ["分類が違う", "architecture/20260929-new.md"],
+    ["./ 付きのパス", "./workflow/20260929-new.md"],
     ["README.md 自身", "README.md"],
   ])("リンク先が%sなら違反にする（must reject）", (_name, target) => {
     expect(
@@ -1015,18 +1130,96 @@ describe("ADR の一覧の状態とリンク先（adr-index-state）", () => {
   });
 });
 
-describe("docs/ には adr/ だけ（adr-only）", () => {
-  it("docs/adr/ の下のファイルと docs/ の外のファイルだけなら違反にしない（must pass）", () => {
+describe("ADR の分類ディレクトリ（adr-category）", () => {
+  it("4 つの分類の直下のファイルと、分類の外のファイルは違反にしない（must pass。直下のファイルは adr-only が見る）", () => {
+    expect(
+      findAdrCategoryViolations([
+        "README.md",
+        "docs/x.md",
+        "docs/adr/README.md",
+        "docs/adr/x.md",
+        "docs/adr/architecture/20260929-a.md",
+        "docs/adr/tech-stack/20260929-b.md",
+        "docs/adr/quality/20260929-c.md",
+        "docs/adr/workflow/20260929-d.md",
+        "docs/adr/workflow/not-an-adr-name.txt",
+        "apps/docs/adr/misc/x.md",
+      ]),
+    ).toEqual([]);
+  });
+
+  it("4 つ以外の分類（大文字・前方一致・旧案の名前を含む）と、分類の下のディレクトリを 1 項目ずつ違反にする（must reject）", () => {
+    expect(
+      findAdrCategoryViolations([
+        "docs/adr/misc/x.md",
+        "docs/adr/misc/sub/y.md",
+        "docs/adr/Architecture/x.md",
+        "docs/adr/architecture-old/x.md",
+        "docs/adr/design/x.md",
+        "docs/adr/tech/x.md",
+        "docs/adr/architecture/sub/y.md",
+        "docs/adr/quality/a/b/c.md",
+        "docs/adr/quality/a/d.md",
+      ]),
+    ).toEqual([
+      "adr-category: docs/adr/misc/ は分類（architecture / tech-stack / quality / workflow）でない",
+      "adr-category: docs/adr/Architecture/ は分類（architecture / tech-stack / quality / workflow）でない",
+      "adr-category: docs/adr/architecture-old/ は分類（architecture / tech-stack / quality / workflow）でない",
+      "adr-category: docs/adr/design/ は分類（architecture / tech-stack / quality / workflow）でない",
+      "adr-category: docs/adr/tech/ は分類（architecture / tech-stack / quality / workflow）でない",
+      "adr-category: docs/adr/architecture/sub/ がある（分類の下にディレクトリは置けない）",
+      "adr-category: docs/adr/quality/a/ がある（分類の下にディレクトリは置けない）",
+    ]);
+  });
+
+  it("形式の検査（adr-name ほか）の対象は、4 つの分類の直下のファイルだけ", () => {
+    expect(
+      [
+        "docs/adr/README.md",
+        "docs/adr/x.md",
+        "docs/adr/misc/20260929-x.md",
+        "docs/adr/architecture/sub/20260929-x.md",
+        "docs/adr/architecture/20260929-x.md",
+        "docs/adr/tech-stack/x.MD",
+        "docs/adr-old/architecture/20260929-x.md",
+      ].filter(isAdrFile),
+    ).toEqual([
+      "docs/adr/architecture/20260929-x.md",
+      "docs/adr/tech-stack/x.MD",
+    ]);
+  });
+});
+
+describe("docs/ には adr/ だけ、docs/adr/ の直下には README.md と分類だけ（adr-only）", () => {
+  it("docs/adr/ の下のディレクトリのファイル・docs/adr/README.md・docs/ の外のファイルだけなら違反にしない（must pass）", () => {
     expect(
       findNonAdrDocs([
         "README.md",
         "apps/docs/x.md",
         "mydocs/x.md",
         "docs/adr/README.md",
-        "docs/adr/20260929-x.md",
+        "docs/adr/architecture/20260929-x.md",
         "docs/adr/sub/y.md",
       ]),
     ).toEqual([]);
+  });
+
+  // WHY 直下の ADR の例を ADR_DIR で組み立てる: 分類なしの古い参照を `git grep` で「docs/adr/」の直後が日付の参照として見つけるので、意図した
+  //   違反の例をその検出に掛けない（下の fixture も同じ）。
+  it("docs/adr/ の直下の README.md 以外のファイル（ADR・大文字違いの readme・分類名のファイルを含む）を違反にする（must reject）", () => {
+    expect(
+      findNonAdrDocs([
+        `${ADR_DIR}20260929-x.md`,
+        "docs/adr/readme.md",
+        "docs/adr/architecture",
+        "docs/adr/.keep",
+      ]),
+    ).toEqual([
+      `adr-only: ${ADR_DIR}20260929-x.md がある（docs/adr/ の直下に置けるのは README.md と分類ディレクトリだけ）`,
+      "adr-only: docs/adr/readme.md がある（docs/adr/ の直下に置けるのは README.md と分類ディレクトリだけ）",
+      "adr-only: docs/adr/architecture がある（docs/adr/ の直下に置けるのは README.md と分類ディレクトリだけ）",
+      "adr-only: docs/adr/.keep がある（docs/adr/ の直下に置けるのは README.md と分類ディレクトリだけ）",
+    ]);
   });
 
   it("docs/ の直下のファイル・ディレクトリ（adr の前方一致と、adr という名前のファイルを含む）を 1 項目ずつ違反にする（must reject）", () => {
@@ -1087,14 +1280,15 @@ describe("fixture のリポジトリを検査したときに検出される違�
       "```",
       "| 日付 | タイトル | 状態 | ファイル |",
       "| --- | --- | --- | --- |",
-      "| 2026-09-28 | 旧 | 置き換え（→ 20260929-todo.md） | [20260928-old.md](20260928-old.md) |",
-      "| 2026-09-29 | Todo（タイトルに | を含む） | 採用 | [20260929-todo.md](20260929-todo.md) |",
+      "| 2026-09-28 | 旧 | 置き換え（→ architecture/20260929-todo.md） | [20260928-old.md](quality/20260928-old.md) |",
+      "| 2026-09-29 | Todo（タイトルに | を含む） | 採用 | [20260929-todo.md](architecture/20260929-todo.md) |",
       "",
     ].join("\n"),
-    "docs/adr/20260929-todo.md": adrText(),
-    "docs/adr/20260928-old.md": adrText({
+    // 置き換え元と置き換え先を別の分類に置く（置き換えの参照が分類をまたいで辿れることを見る）。
+    "docs/adr/architecture/20260929-todo.md": adrText(),
+    "docs/adr/quality/20260928-old.md": adrText({
       date: "- 日付: 2026-09-28",
-      status: "- 状態: 置き換え（→ 20260929-todo.md）",
+      status: "- 状態: 置き換え（→ architecture/20260929-todo.md）",
     }),
     "work-logs/2026-09-28.md": "rules/code/test.md を書いた（過去の記録）\n",
     ".gitignore": "ignored/\n",
@@ -1130,10 +1324,11 @@ describe("fixture のリポジトリを検査したときに検出される違�
       "docs/adr/README.md": [
         "| 日付 | タイトル | 状態 | ファイル |",
         "| --- | --- | --- | --- |",
-        "| 2026-09-28 | 旧 | 採用 | [20260928-old.md](20260928-old.md) |",
-        "| 2026-09-29 | Todo | 採用 | [20260929-todo.md](20260929-todo.md) |",
-        "| 2026-09-29 | bad | 採用 | [20260929_bad.md](20260929_bad.md) |",
-        "| 2026-09-30 | 消した | 採用 | [20260930-gone.md](20260930-gone.md) |",
+        "| 2026-09-28 | 旧 | 採用 | [20260928-old.md](quality/20260928-old.md) |",
+        "| 2026-09-29 | Todo | 採用 | [20260929-todo.md](architecture/20260929-todo.md) |",
+        "| 2026-09-29 | bad | 採用 | [20260929_bad.md](workflow/20260929_bad.md) |",
+        "| 2026-09-30 | 消した | 採用 | [20260930-gone.md](architecture/20260930-gone.md) |",
+        "| 2026-09-29 | 分類なし | 採用 | [20260929-todo.md](20260929-todo.md) |",
         "",
       ].join("\n"),
       // docs/ の直下に adr/ 以外（ファイル・ディレクトリ・adr の前方一致）を置く。
@@ -1141,12 +1336,17 @@ describe("fixture のリポジトリを検査したときに検出される違�
       "docs/old/a.md": "旧い記録\n",
       "docs/old/b.md": "旧い記録\n",
       "docs/adrx/c.md": "前方一致\n",
-      "docs/adr/20260929_bad.md": adrText(),
-      // 一覧に無く、見出し・メタ・必須の見出しがすべて崩れた ADR。
-      "docs/adr/20260928-broken.md": adrText({
+      // docs/adr/ の直下の ADR・分類でないディレクトリ・分類の下のディレクトリ。形式は正しく一覧にも無いが、
+      //   adr-only / adr-category の 1 件ずつだけになる（形式の検査の対象に入らない）ことを見る。
+      [`${ADR_DIR}20260929-root.md`]: adrText(),
+      "docs/adr/misc/20260929-misc.md": adrText(),
+      "docs/adr/architecture/sub/20260929-sub.md": adrText(),
+      "docs/adr/workflow/20260929_bad.md": adrText(),
+      // 一覧に無く、見出し・メタ・必須の見出しがすべて崩れた ADR。置き換え先は分類なしのファイル名だけ（実在する ADR）。
+      "docs/adr/tech-stack/20260928-broken.md": adrText({
         title: "決定",
         date: "- 日付: 2026-09-29",
-        status: "- 状態: 置き換え（→ 20260930-missing.md）",
+        status: "- 状態: 置き換え（→ 20260929-todo.md）",
         related: "- 関連:",
         sections: ADR_REQUIRED_SECTIONS.filter((h) => h !== "## 影響"),
       }),
@@ -1160,18 +1360,22 @@ describe("fixture のリポジトリを検査したときに検出される違�
       'rules-paths: .claude/rules/typo.md の glob "apps/backnd/**" に一致するファイルが無い',
       "legacy-rules: rules/ がある",
       "legacy-rules: README.md:1",
-      "adr-title: docs/adr/20260928-broken.md の 1 行目が「# 」の見出しでない",
-      "adr-meta: docs/adr/20260928-broken.md の日付 2026-09-29 がファイル名の 20260928 と違う",
-      "adr-meta: docs/adr/20260928-broken.md の置き換え先 20260930-missing.md が docs/adr に無い",
-      "adr-meta: docs/adr/20260928-broken.md の 5 行目が「- 関連: <Issue / PR / 規則>」でない",
-      "adr-sections: docs/adr/20260928-broken.md に「## 影響」が無い",
-      "adr-index: docs/adr/20260928-broken.md が docs/adr/README.md の一覧に無い",
-      "adr-name: docs/adr/20260929_bad.md の名前が yyyymmdd-<topic>.md（topic は英小文字・数字の kebab-case）でない",
-      "adr-index-state: docs/adr/README.md の一覧の 20260928-old.md の状態「採用」が ADR の「置き換え（→ 20260929-todo.md）」と違う",
-      "adr-index-state: docs/adr/README.md の一覧の 20260930-gone.md が docs/adr に無い",
+      "adr-title: docs/adr/tech-stack/20260928-broken.md の 1 行目が「# 」の見出しでない",
+      "adr-meta: docs/adr/tech-stack/20260928-broken.md の日付 2026-09-29 がファイル名の 20260928 と違う",
+      "adr-meta: docs/adr/tech-stack/20260928-broken.md の置き換え先 20260929-todo.md が docs/adr に無い（<分類>/<ファイル名> で書く）",
+      "adr-meta: docs/adr/tech-stack/20260928-broken.md の 5 行目が「- 関連: <Issue / PR / 規則>」でない",
+      "adr-sections: docs/adr/tech-stack/20260928-broken.md に「## 影響」が無い",
+      "adr-index: docs/adr/tech-stack/20260928-broken.md が docs/adr/README.md の一覧に無い",
+      "adr-name: docs/adr/workflow/20260929_bad.md の名前が yyyymmdd-<topic>.md（topic は英小文字・数字の kebab-case）でない",
+      "adr-index-state: docs/adr/README.md の一覧の quality/20260928-old.md の状態「採用」が ADR の「置き換え（→ architecture/20260929-todo.md）」と違う",
+      "adr-index-state: docs/adr/README.md の一覧の architecture/20260930-gone.md が docs/adr に無い",
+      "adr-index-state: docs/adr/README.md の一覧の 20260929-todo.md が docs/adr に無い",
+      "adr-category: docs/adr/architecture/sub/ がある（分類の下にディレクトリは置けない）",
+      "adr-category: docs/adr/misc/ は分類（architecture / tech-stack / quality / workflow）でない",
       "adr-only: docs/README.md がある（docs/ の直下に置けるのは adr/ だけ）",
       "adr-only: docs/adrx/ がある（docs/ の直下に置けるのは adr/ だけ）",
       "adr-only: docs/old/ がある（docs/ の直下に置けるのは adr/ だけ）",
+      `adr-only: ${ADR_DIR}20260929-root.md がある（docs/adr/ の直下に置けるのは README.md と分類ディレクトリだけ）`,
       "skill-frontmatter: .claude/skills/broken/SKILL.md に description が無い",
       'agent-model: .claude/agents/alias.md の model が "sonnet"（許可: claude-opus-5-5 / claude-sonnet-5-5）',
     ]);

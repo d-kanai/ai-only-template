@@ -6,7 +6,7 @@ paths:
 # shared（frontend と backend で共通の基盤。apps/shared）
 
 `apps/shared/` は workspace パッケージ `@repo/shared`（Issue #90）。frontend（直下のサーバ側のファイル）と backend の両方が使う横断的な基盤だけを置く。Node 標準だけを使う TypeScript で、依存（`dependencies`）は持たない。
-規則は `rule-tests/architecture.test.ts` が検査する（一覧は `.claude/rules/architecture-check.md`）。決定は ADR `docs/adr/20260929-apps-shared-package.md`。
+規則は `rule-tests/architecture.test.ts` が検査する（一覧は `.claude/rules/architecture-check.md`）。決定は ADR `docs/adr/architecture/20260929-apps-shared-package.md`。
 
 ## 置いてよいもの
 - `env.ts`（環境変数の唯一の入口。`.claude/rules/env.md`）と `logger.ts`（サーバ側のログの唯一の出口。`.claude/rules/backend.md` の「ログ」）、そのテスト（`env.test.ts`・`logger.test.ts`）、`package.json`・`tsconfig.json` だけ（規則 `shared-placement`。ソース以外のファイルも名前で決める）。

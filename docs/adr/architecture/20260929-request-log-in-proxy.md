@@ -8,7 +8,7 @@
 画面アクセスとブラウザからの API route 呼び出しを、誰が・何を・いつ・どこで・なぜ・どのように呼んだかが分かる 1 行の JSON で残したかった（ユーザーの依頼）。最初の提案は、backend の presentation 層のラッパー（status と所要時間が取れる）だった（2026-09-29 の work-logs「アクセスログ（1 アクセス 1 行の JSON、5W1H）の情報設計を提案した（実装はまだ）」）。
 
 ## 決定
-- 出す場所は Next の Proxy（`apps/frontend/proxy.ts`）。1 行の中身は純粋関数 `buildRequestLog` が組み立て、logger で 1 行（stdout）出す（20260929-logger-single-exit.md）。
+- 出す場所は Next の Proxy（`apps/frontend/proxy.ts`）。1 行の中身は純粋関数 `buildRequestLog` が組み立て、logger で 1 行（stdout）出す（architecture/20260929-logger-single-exit.md）。
 - クエリは値を出さずキーだけ。status と所要時間は出さない。応答ヘッダ `x-request-id` を付け、応答と行を突き合わせられるようにする。
 - 静的ファイルと、next/link のプリフェッチ（`next-router-prefetch` ヘッダ）は matcher で除く。クリックによる遷移は `kind: "page"` のまま。
 

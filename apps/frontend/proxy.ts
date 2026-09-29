@@ -22,7 +22,7 @@ export function proxy(request: NextRequest): NextResponse {
   });
   // WHY logger.info（info は stdout）に同期で 1 行: 出力先は stdout の NDJSON だけにし（ログの収集は実行環境に任せる）、
   //   ライブラリを入れない（Issue #80）。stdout への書き込みは同期で終わるので event.waitUntil は使わない。
-  //   logger が先頭に level（"info"）を付ける。timestamp は log の受信時刻がそのまま使われる（ADR docs/adr/20260929-request-log-in-proxy.md の 1 行の形）。
+  //   logger が先頭に level（"info"）を付ける。timestamp は log の受信時刻がそのまま使われる（ADR docs/adr/architecture/20260929-request-log-in-proxy.md の 1 行の形）。
   logger.info(log);
   // WHY 応答ヘッダに x-request-id: ブラウザの開発者ツールや呼び出し側から、応答と stdout の行を突き合わせられるようにする。
   //   NextResponse.next({ headers }) ではなく、応答を作ってから set する（next-response.md の next()）。

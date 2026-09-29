@@ -5,7 +5,7 @@
 #   frontend は "@repo/backend": "workspace:*" で backend に依存する（node_modules/@repo/backend が apps/backend への symlink になる）。
 #   リポジトリ直下（package.json）も workspace のルートとして 1 つのパッケージになり、ツール（Biome・Vitest・Playwright など）を持つ。
 #   WHY パッケージに分ける: 依存（drizzle-orm / pg は backend、next / react は frontend）と公開する入口（apps/backend/package.json の
-#   exports）をパッケージの単位で分け、後で backend を別プロセスに分けやすくする（ADR docs/adr/20260928-monorepo-apps-frontend-backend.md）。
+#   exports）をパッケージの単位で分け、後で backend を別プロセスに分けやすくする（ADR docs/adr/architecture/20260928-monorepo-apps-frontend-backend.md）。
 #   下の設定（サプライチェーン保護・allowBuilds・patchedDependencies）は workspace 全体に効くので、ここ（ルート）にだけ書く。
 #   rule-tests/package.test.ts はこの packages を読んで、すべての package.json の依存の版を検査する（"<ディレクトリ>/*" の形だけを扱う）。
 packages:

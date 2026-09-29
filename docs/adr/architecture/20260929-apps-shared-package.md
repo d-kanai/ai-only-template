@@ -5,7 +5,7 @@
 - 関連: Issue #90 / PR #92 / `.claude/rules/shared.md` / `apps/shared/package.json`
 
 ## 背景
-環境変数の入口 `env.ts`（20260928-env-single-entry-all-required.md）とログの出口 `logger.ts`（20260929-logger-single-exit.md）は、frontend 直下・backend・E2E・globalSetup が共通で使うのに `apps/backend/shared/infra/` にあった。frontend 直下から backend を参照する例外（規則 `frontend-root-to-backend`）が要っていた。
+環境変数の入口 `env.ts`（architecture/20260928-env-single-entry-all-required.md）とログの出口 `logger.ts`（architecture/20260929-logger-single-exit.md）は、frontend 直下・backend・E2E・globalSetup が共通で使うのに `apps/backend/shared/infra/` にあった。frontend 直下から backend を参照する例外（規則 `frontend-root-to-backend`）が要っていた。
 
 ## 決定
 - `apps/shared`（`@repo/shared`。依存なし、`exports` は `./env`・`./logger` だけ）を作り、`env.ts` と `logger.ts` を移す。
