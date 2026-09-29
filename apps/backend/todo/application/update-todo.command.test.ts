@@ -62,7 +62,10 @@ describe("UpdateTodoCommand", () => {
 
     await expect(
       command.execute({ id: todo.id, title: " ", completed: true }),
-    ).rejects.toMatchObject({ code: "validation_error" });
+    ).rejects.toMatchObject({
+      code: "validation_error",
+      message: "タイトルを入力してください",
+    });
     await expect(repository.findById(todo.id)).resolves.toEqual(todo);
   });
 });

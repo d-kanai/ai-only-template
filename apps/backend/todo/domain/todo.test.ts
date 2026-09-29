@@ -49,7 +49,12 @@ describe("Todo.create", () => {
 
   test("絵文字などのサロゲートペアも 1 文字と数える（100 個まで受け付ける）", () => {
     // "🍎".length は 2 だが、利用者から見れば 1 文字。
+    // String#length（UTF-16 のコード単位の数。zod の .max(100) もこれで数える）なら 200 文字になり弾かれる。
     expect(Todo.create("🍎".repeat(100)).title).toBe("🍎".repeat(100));
+  });
+
+  test("前後の空白は文字数に数えない（空白を除いて 100 文字なら受け付ける）", () => {
+    expect(Todo.create(`  ${"a".repeat(100)}\t`).title).toBe("a".repeat(100));
   });
 
   test.each([
@@ -57,12 +62,21 @@ describe("Todo.create", () => {
     ["空白だけ", "   \t\n", EMPTY_TITLE_MESSAGE],
     ["101 文字", "a".repeat(101), TOO_LONG_TITLE_MESSAGE],
     ["空白を除いて 101 文字", ` ${"a".repeat(101)} `, TOO_LONG_TITLE_MESSAGE],
+    ["絵文字 101 個", "🍎".repeat(101), TOO_LONG_TITLE_MESSAGE],
   ])(
     "タイトルが%sなら validation_error を、理由の message 付きで投げる",
     (_label, title, message) => {
       expectValidationError(() => Todo.create(title), message);
     },
   );
+
+  // 完全コンストラクタ: create はタイトルだけでなく Todo のすべての値（TodoProps）を検証してから作る。
+  test("作成日時が日付として不正（Invalid Date）なら validation_error を投げる", () => {
+    expectValidationError(
+      () => Todo.create("牛乳を買う", new Date("not a date")),
+      "作成日時が不正です",
+    );
+  });
 });
 
 describe("Todo#rename", () => {
@@ -77,10 +91,27 @@ describe("Todo#rename", () => {
     expect(original.title).toBe("牛乳を買う");
   });
 
-  test("作成時と同じ不変条件を守る（空なら validation_error）", () => {
-    const todo = Todo.create("牛乳を買う");
+  test.each([
+    ["空白だけ", " ", EMPTY_TITLE_MESSAGE],
+    ["101 文字", "a".repeat(101), TOO_LONG_TITLE_MESSAGE],
+  ])(
+    "作成時と同じ不変条件を守る（%sなら validation_error）",
+    (_label, title, message) => {
+      const todo = Todo.create("牛乳を買う");
 
-    expectValidationError(() => todo.rename(" "), EMPTY_TITLE_MESSAGE);
+      expectValidationError(() => todo.rename(title), message);
+    },
+  );
+
+  test("今の規則に合わない保存済みの Todo（restore したもの）も、規則を満たすタイトルに変えられる", () => {
+    const legacy = Todo.restore({
+      id: "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e",
+      title: "a".repeat(101),
+      completed: false,
+      createdAt: new Date("2026-09-28T00:00:00.000Z"),
+    });
+
+    expect(legacy.rename("卵を買う").title).toBe("卵を買う");
   });
 });
 
@@ -96,6 +127,22 @@ describe("Todo#changeCompletion", () => {
     expect(completed.id).toBe(original.id);
     expect(completed.title).toBe(original.title);
     expect(original.completed).toBe(false);
+  });
+
+  test("タイトルを検証し直さない（今の規則に合わない保存済みの Todo も完了にできる）", () => {
+    // restore は規則で弾かないので、規則を厳しくした後の既存データがある。完了の切り替えでタイトルを検証し直すと、
+    //   タイトルに触れていない操作が 400 になる。
+    const legacy = Todo.restore({
+      id: "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e",
+      title: "a".repeat(101),
+      completed: false,
+      createdAt: new Date("2026-09-28T00:00:00.000Z"),
+    });
+
+    const completed = legacy.changeCompletion(true);
+
+    expect(completed.completed).toBe(true);
+    expect(completed.title).toBe("a".repeat(101));
   });
 });
 

@@ -15,6 +15,20 @@ describe("InvalidRequestError", () => {
     expect(error).toBeInstanceOf(Error);
     expect(error.message).toBe("title は文字列で指定してください");
     expect(error.name).toBe("InvalidRequestError");
+    expect(error.issues).toBeUndefined();
+  });
+
+  test("項目ごとの誤り（issues）を持てる", () => {
+    const issues = [
+      { path: "title", message: "title は文字列で指定してください" },
+    ];
+
+    const error = new InvalidRequestError(
+      "title は文字列で指定してください",
+      issues,
+    );
+
+    expect(error.issues).toEqual(issues);
   });
 });
 
@@ -58,6 +72,27 @@ describe("toErrorResponse", () => {
       error: {
         code: "validation_error",
         message: "title は文字列で指定してください",
+      },
+    });
+  });
+
+  test("InvalidRequestError に issues があれば、ErrorResponse の error.issues にそのまま入れる", async () => {
+    const issues = [
+      { path: "title", message: "title は文字列で指定してください" },
+      { path: "", message: "定義されていない項目は指定できません（extra）" },
+    ];
+
+    const response = toErrorResponse(
+      new InvalidRequestError("title は文字列で指定してください", issues),
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as ErrorResponse;
+    expect(body).toEqual({
+      error: {
+        code: "validation_error",
+        message: "title は文字列で指定してください",
+        issues,
       },
     });
   });

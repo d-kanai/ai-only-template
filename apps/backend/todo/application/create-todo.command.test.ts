@@ -21,7 +21,10 @@ describe("CreateTodoCommand", () => {
 
     await expect(
       new CreateTodoCommand(repository).execute({ title: "" }),
-    ).rejects.toMatchObject({ code: "validation_error" });
+    ).rejects.toMatchObject({
+      code: "validation_error",
+      message: "タイトルを入力してください",
+    });
     await expect(repository.findAll()).resolves.toEqual([]);
   });
 });

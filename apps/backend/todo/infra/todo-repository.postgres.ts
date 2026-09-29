@@ -15,6 +15,10 @@ function isUuid(id: string): boolean {
 
 type TodoRow = typeof todos.$inferSelect;
 
+// 行 → Entity の変換。
+// WHY zod で parse しない（Issue #88）: 行の型（uuid・text・boolean・timestamptz の NOT NULL）は Drizzle のスキーマ
+//   （schema.ts）と DB の列の定義が保証し、TodoRow の型として届く。restore もタイトルの規則で検査しない
+//   （Todo.restore のコメント）ので、parse し直しても一覧の読み込みが遅くなるだけで守れるものが無い。
 function toTodo(row: TodoRow): Todo {
   return Todo.restore({
     id: row.id,
@@ -47,6 +51,9 @@ export class PostgresTodoRepository implements TodoRepository {
     // WHY uuid の形でない id は問い合わせずに「無い」とする: id 列は uuid 型で、形の違う値（URL の /api/todos/abc など）を
     //   渡すと Postgres が invalid input syntax のエラーを返し、API が 404 ではなく 500 になる。
     //   InMemory と同じく「その id の Todo は無い」として扱う。
+    // WHY presentation も id を z.uuid() で確かめる（Issue #88）のに残す: TodoRepository は「無い id なら undefined」を
+    //   どの文字列にも約束している（InMemory も同じ）。呼び出し元（今は presentation の api だけ）の検査に頼ると、
+    //   検査しない呼び出し元を足したときに 500 になる。Repository の実装が自分の約束を自分で守る防御として残す。
     if (!isUuid(id)) {
       return undefined;
     }
