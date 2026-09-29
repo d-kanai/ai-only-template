@@ -16,12 +16,12 @@ main は常にマージ可能に保つ。main への直接コミット・push �
    - Projects への追加と Status の変更は GitHub 側のワークフローが行う。Projects の API は呼ばない（`github-settings.md`）。
 2. **ブランチ**: main の最新から切る。`git checkout main && git pull && git checkout -b <type>/<Issue番号>-<内容>`（例: `feat/12-branch-rules`）。type は Issue のラベルと同じ。
 3. **実装**: テストから書く（CLAUDE.md の Test Driven）。作業の分担は `.claude/agents/`（worker / worker-light / researcher / reviewer。使い分けは `.claude/general/orchestration.md`）。worker が完了するごとにコミットし、未コミットを長く残さない。
-4. **作業ログ**: `work-logs/<YYYY-MM-DD>.md` に、このタスクでやったこと・根拠・判断を追記する。WHY: CI が PR の差分に `work-logs/*.md` の変更が無いと失敗する（文書だけの PR も例外なし）。
+4. **作業ログ**: `docs/work-logs/<YYYY-MM-DD>.md` に、このタスクでやったこと・根拠・判断を追記する。WHY: CI が PR の差分に `docs/work-logs/*.md` の変更が無いと失敗する（文書だけの PR も例外なし）。
 5. **コミット**: 1 行目にサマリ、本文に 🎯 WHY / 📝 WHAT / 🛠️ 実装経緯 / ✅ 検証内容、末尾に `Co-Authored-By: <モデル名>`（メールアドレスは任意。詳細は CLAUDE.md から読み込むコミットのルール）。
 6. **PR 作成**: `gh pr create --label <type>`。
    - タイトル: コミットメッセージの 1 行目と同じ書き方（何をしたか）。
    - 本文: `.github/PULL_REQUEST_TEMPLATE.md` の 🎯 WHY / 📝 WHAT / 🛠️ 実装経緯 / ✅ 検証内容を埋め、`Closes #<Issue番号>` を入れる。WHY: マージで Issue が自動クローズされ、Projects の Status も進む。
-   - 「実装経緯」に、確認した背景（`git log -p`・関連 Issue / PR・work-logs）と判断を書き、手順 4 で追記した `work-logs/<日付>.md` の項目名（`## ...` の見出し）を列挙する。WHY: PR から作業ログへ辿れるようにする。
+   - 「実装経緯」に、確認した背景（`git log -p`・関連 Issue / PR・`docs/work-logs/`）と判断を書き、手順 4 で追記した `docs/work-logs/<日付>.md` の項目名（`## ...` の見出し）を列挙する。WHY: PR から作業ログへ辿れるようにする。
    - 「検証内容」に、実行したコマンドと結果、fault injection の内容、未確認のことを書く。
 7. **レビュー**: ロジックのある変更は reviewer サブエージェントに差分と観点を絞って検証させる。機械的な変更（改名・文書・参照の更新だけ）と、reviewer が使えないときは、オーケストレータ自身がテスト実行・差分確認で確かめ、その旨を PR の「検証内容」に書く。指摘は同じブランチで直し、1 ラウンド（実装 → 検証 → 指摘の反映）につき push は 1 回にまとめる（push ごとに CI が再実行され、完了の通知で wake が増える）。
 8. **CI は待たない**（ユーザー判断 2026-09-29、Issue #82）: マージ条件の「`ci` が緑」は Ruleset `protect-main` の required status check が守るので、オーケストレータがポーリングで待つ必要はない（ポーリングの完了通知は wake になり消費が増える。ADR `docs/adr/workflow/20260929-save-usage-limit.md`）。

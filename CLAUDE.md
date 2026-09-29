@@ -28,7 +28,7 @@
 - 変更時はコメントとコードの整合性がずれないように注意を払い、コードとコメントの両方を変更する。
 
 ## 6. 変更前の背景確認
-- 実装やルールを修正する前に、該当箇所の commit history（`git log -p -- <path>`）、関連する Issue / PR、`work-logs/` の作業ログ、ADR（`docs/adr/`）を確認し、なぜ今の形になっているかを理解したうえで修正内容を検討する。
+- 実装やルールを修正する前に、該当箇所の commit history（`git log -p -- <path>`）、関連する Issue / PR、`docs/work-logs/` の作業ログ、ADR（`docs/adr/`）を確認し、なぜ今の形になっているかを理解したうえで修正内容を検討する。
 - 狙い: 経緯を知らずに変更して、過去に解決した問題を再発させる（デグレ）のを防ぐ。
 - 確認した背景と、それを踏まえた判断は PR の「実装経緯」に書く。
 
@@ -53,7 +53,7 @@
 | `.claude/rules/*.md` | フロントマターの `paths` に一致するファイルを触ったとき | 規則と WHY |
 | `.claude/skills/<name>/SKILL.md` | 説明は常時、本文は呼び出したとき | 手順 |
 | `docs/adr/` | 読み込まれない（必要なら自分で読む） | ADR（決定の記録。1 決定 1 ファイル、不変。命名 `<分類>/yyyymmdd-<topic>.md`、分類は `architecture`（構造・境界・設計パターン）/ `tech-stack`（言語・ツールの選定）/ `quality`（品質ゲート・テスト方針）/ `workflow`（開発プロセス・環境・エージェント運用）、形式は `rule-tests/instructions.test.ts` が検査する。一覧は `docs/adr/README.md`） |
-| `work-logs/` | 読み込まれない | 日ごとの作業ログ |
+| `docs/work-logs/` | 読み込まれない | 日ごとの作業ログ |
 | `rule-tests/` | 読み込まれない | ルール検査テスト 8 本（`architecture` / `instructions` / `lint` / `package` / `pnpm-workspace` / `settings` / `typecheck` / `work-logs-check` の `*.test.ts`。Issue #86） |
 
 ### .claude/rules（パス依存）

@@ -29,7 +29,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 //   rules-paths       .claude/rules/*.md はフロントマターに paths（1 件以上の glob）を持ち、各 glob がリポジトリのファイルに
 //                     1 件以上一致する（一致しない glob は typo として扱う。そのルールは読み込まれないまま残るため）。
 //   legacy-rules      旧 rules/ ディレクトリが無く、ファイルに rules/code/・rules/general/ への参照が残っていない
-//                     （work-logs/ は過去の記録なので除く。このファイルは例を持つので除く）。
+//                     （docs/work-logs/ は過去の記録なので除く。このファイルは例を持つので除く）。
 //   ADR は docs/adr/<分類>/<ファイル名>（分類は ADR_CATEGORIES の 4 つ）。ADR への参照（置き換え先・一覧のリンク）は
 //   docs/adr/ からの相対パス「<分類>/<ファイル名>」の 1 通りで書く。
 //   adr-name          分類の直下のファイルの名前が yyyymmdd-<topic>.md（topic は英小文字・数字の kebab-case）。
@@ -42,8 +42,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 //                     「状態」列がその ADR の「- 状態:」の値と一致する（置き換えた決定を一覧で採用中と読み違えないため）。
 //   adr-category      docs/adr/ の下のディレクトリが 4 つの分類（architecture / tech-stack / quality / workflow）のいずれかで、
 //                     分類の下にさらにディレクトリが無い（Issue #100。アーキテクチャでない決定を分けて読めるようにした）。
-//   adr-only          docs/ の直下には adr/ しか無く、docs/adr/ の直下には README.md と分類ディレクトリしか無い（Issue #96 で
-//                     docs/*.md の記録を廃止した。別の記録を足させない。Issue #100 で ADR を分類の下に移した）。
+//   adr-only          docs/ の直下には adr/ と work-logs/ しか無く、docs/adr/ の直下には README.md と分類ディレクトリしか無い
+//                     （Issue #96 で docs/*.md の記録を廃止した。別の記録を足させない。Issue #100 で ADR を分類の下に移した。
+//                     Issue #101 で作業ログをリポジトリ直下の work-logs/ から docs/work-logs/ に移した）。
 //                     WHY（adr-*）: ADR は読み込まれない不変の記録で、決定が変わると「置き換え」で次の ADR に辿る。形が崩れると
 //                     日付・状態・理由を取り出せず、一覧に無いと存在しないのと同じになる（Issue #96 で、廃止した docs の orphan-docs を置き換えた）。
 //   skill-frontmatter .claude/skills/*/SKILL.md はフロントマターに name と description を持つ（公式 https://code.claude.com/docs/en/skills 。
@@ -234,8 +235,10 @@ function findAgentModelViolations(path: string, markdown: string): string[] {
 // WHY .claude/rules/ を除く: 新しい置き場所（.claude/rules/general.md のような名前）を旧パスと取り違えないため。
 const LEGACY_REFERENCE = /(?<!\.claude\/)\brules\/(?:code|general)\b/;
 
+const WORK_LOGS_DIR = "docs/work-logs/";
+
 function isLegacyScanTarget(path: string): boolean {
-  return !path.startsWith("work-logs/") && path !== SELF;
+  return !path.startsWith(WORK_LOGS_DIR) && path !== SELF;
 }
 
 function findLegacyReferences(path: string, text: string): string[] {
@@ -453,17 +456,24 @@ function findAdrCategoryViolations(files: string[]): string[] {
   return [...entries];
 }
 
-// docs/ の直下に adr/ 以外のファイル・ディレクトリがあれば、その項目（ディレクトリは末尾に /）。続けて、docs/adr/ の直下の
-//   README.md 以外のファイル。
-// WHY docs/ を ADR だけにする: Issue #96 で docs/*.md（実測・経緯の記録）を廃止し、決定は ADR、実測は work-logs、
+// docs/ の直下に adr/ と work-logs/ 以外のファイル・ディレクトリがあれば、その項目（ディレクトリは末尾に /）。続けて、
+//   docs/adr/ の直下の README.md 以外のファイル。docs/work-logs/ の中の構成は見ない（作業ログの置き方は
+//   .claude/general/work-log.md。CI の check-work-logs-diff.sh はサブディレクトリの .md も数える）。
+// WHY docs/ を ADR と作業ログだけにする: Issue #96 で docs/*.md（実測・経緯の記録）を廃止し、決定は ADR、実測は作業ログ、
 //   一次情報は規則の WHY に振り分けた。docs/ に別の記録を足せる状態だと、同じ二重管理（最新の規則と記録のずれ）が戻る。
+//   Issue #101 で作業ログを docs/work-logs/ に移し、読み込まれない記録を docs/ の 2 つにまとめた（ユーザー指示）。
 // WHY docs/adr/ の直下を README.md だけにする: Issue #100 で ADR を分類の下に移した。直下に ADR を置けると、分類の無い ADR が
 //   増えて分類で読み分けられなくなる（直下のファイルは形式の検査の対象にも入らない。isAdrFile）。
 // 限界: 列挙は git ls-files なので、ファイルの無い空のディレクトリは見えない（git でも追跡されないので実害は無い）。
 function findNonAdrDocs(files: string[]): string[] {
   const entries = new Set(
     files
-      .filter((file) => file.startsWith("docs/") && !file.startsWith(ADR_DIR))
+      .filter(
+        (file) =>
+          file.startsWith("docs/") &&
+          !file.startsWith(ADR_DIR) &&
+          !file.startsWith(WORK_LOGS_DIR),
+      )
       .map((file) => {
         const rest = file.slice("docs/".length);
         const slash = rest.indexOf("/");
@@ -479,7 +489,7 @@ function findNonAdrDocs(files: string[]): string[] {
   return [
     ...[...entries].map(
       (entry) =>
-        `adr-only: ${entry} がある（docs/ の直下に置けるのは adr/ だけ）`,
+        `adr-only: ${entry} がある（docs/ の直下に置けるのは adr/ と work-logs/ だけ）`,
     ),
     ...adrRootFiles.map(
       (file) =>
@@ -783,11 +793,14 @@ describe("旧 rules/ への参照", () => {
     expect(findLegacyReferences("x.ts", line)).toEqual([]);
   });
 
-  it("work-logs/ とこのファイルは検査しない", () => {
-    expect(isLegacyScanTarget("work-logs/2026-09-28.md")).toBe(false);
+  it("docs/work-logs/ とこのファイルは検査しない", () => {
+    expect(isLegacyScanTarget("docs/work-logs/2026-09-28.md")).toBe(false);
     expect(isLegacyScanTarget(SELF)).toBe(false);
     expect(isLegacyScanTarget("README.md")).toBe(true);
-    expect(isLegacyScanTarget("apps/work-logs/x.md")).toBe(true);
+    expect(isLegacyScanTarget("apps/docs/work-logs/x.md")).toBe(true);
+    // Issue #101 で移す前の置き場所は、作業ログとして除外しない（移した後にそこへ書いたファイルは普通のファイルとして検査する）。
+    expect(isLegacyScanTarget("work-logs/2026-09-28.md")).toBe(true);
+    expect(isLegacyScanTarget("docs/adr/README.md")).toBe(true);
   });
 });
 
@@ -1144,6 +1157,9 @@ describe("ADR の分類ディレクトリ（adr-category）", () => {
         "docs/adr/workflow/20260929-d.md",
         "docs/adr/workflow/not-an-adr-name.txt",
         "apps/docs/adr/misc/x.md",
+        // 分類の検査は docs/adr/ の中だけ（作業ログの日付のファイル・サブディレクトリは分類として読まない）。
+        "docs/work-logs/2026-09-29.md",
+        "docs/work-logs/2026/09-29.md",
       ]),
     ).toEqual([]);
   });
@@ -1190,8 +1206,8 @@ describe("ADR の分類ディレクトリ（adr-category）", () => {
   });
 });
 
-describe("docs/ には adr/ だけ、docs/adr/ の直下には README.md と分類だけ（adr-only）", () => {
-  it("docs/adr/ の下のディレクトリのファイル・docs/adr/README.md・docs/ の外のファイルだけなら違反にしない（must pass）", () => {
+describe("docs/ には adr/ と work-logs/ だけ、docs/adr/ の直下には README.md と分類だけ（adr-only）", () => {
+  it("docs/adr/ の下のディレクトリのファイル・docs/adr/README.md・docs/work-logs/ の下のファイル・docs/ の外のファイルだけなら違反にしない（must pass）", () => {
     expect(
       findNonAdrDocs([
         "README.md",
@@ -1200,6 +1216,9 @@ describe("docs/ には adr/ だけ、docs/adr/ の直下には README.md と分�
         "docs/adr/README.md",
         "docs/adr/architecture/20260929-x.md",
         "docs/adr/sub/y.md",
+        "docs/work-logs/2026-09-29.md",
+        "docs/work-logs/2026/09-29.md",
+        "docs/work-logs/README.md",
       ]),
     ).toEqual([]);
   });
@@ -1222,22 +1241,28 @@ describe("docs/ には adr/ だけ、docs/adr/ の直下には README.md と分�
     ]);
   });
 
-  it("docs/ の直下のファイル・ディレクトリ（adr の前方一致と、adr という名前のファイルを含む）を 1 項目ずつ違反にする（must reject）", () => {
+  it("docs/ の直下のファイル・ディレクトリ（adr / work-logs の前方一致と、その名前のファイルを含む）を 1 項目ずつ違反にする（must reject）", () => {
     expect(
       findNonAdrDocs([
         "docs/README.md",
         "docs/adr",
         "docs/adr-old/x.md",
+        "docs/work-logs",
+        "docs/work-logs-old/x.md",
+        "docs/worklogs/x.md",
         "docs/old/a.md",
         "docs/old/b/c.md",
         "docs/.keep",
       ]),
     ).toEqual([
-      "adr-only: docs/README.md がある（docs/ の直下に置けるのは adr/ だけ）",
-      "adr-only: docs/adr がある（docs/ の直下に置けるのは adr/ だけ）",
-      "adr-only: docs/adr-old/ がある（docs/ の直下に置けるのは adr/ だけ）",
-      "adr-only: docs/old/ がある（docs/ の直下に置けるのは adr/ だけ）",
-      "adr-only: docs/.keep がある（docs/ の直下に置けるのは adr/ だけ）",
+      "adr-only: docs/README.md がある（docs/ の直下に置けるのは adr/ と work-logs/ だけ）",
+      "adr-only: docs/adr がある（docs/ の直下に置けるのは adr/ と work-logs/ だけ）",
+      "adr-only: docs/adr-old/ がある（docs/ の直下に置けるのは adr/ と work-logs/ だけ）",
+      "adr-only: docs/work-logs がある（docs/ の直下に置けるのは adr/ と work-logs/ だけ）",
+      "adr-only: docs/work-logs-old/ がある（docs/ の直下に置けるのは adr/ と work-logs/ だけ）",
+      "adr-only: docs/worklogs/ がある（docs/ の直下に置けるのは adr/ と work-logs/ だけ）",
+      "adr-only: docs/old/ がある（docs/ の直下に置けるのは adr/ と work-logs/ だけ）",
+      "adr-only: docs/.keep がある（docs/ の直下に置けるのは adr/ と work-logs/ だけ）",
     ]);
   });
 });
@@ -1290,7 +1315,8 @@ describe("fixture のリポジトリを検査したときに検出される違�
       date: "- 日付: 2026-09-28",
       status: "- 状態: 置き換え（→ architecture/20260929-todo.md）",
     }),
-    "work-logs/2026-09-28.md": "rules/code/test.md を書いた（過去の記録）\n",
+    "docs/work-logs/2026-09-28.md":
+      "rules/code/test.md を書いた（過去の記録）\n",
     ".gitignore": "ignored/\n",
     "ignored/rules/code/x.md": "rules/code/x.md\n",
   };
@@ -1304,7 +1330,7 @@ describe("fixture のリポジトリを検査したときに検出される違�
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("許可される構成では違反 0 件（must pass。.gitignore の中と work-logs/ の旧参照は数えない）", () => {
+  it("許可される構成では違反 0 件（must pass。.gitignore の中と docs/work-logs/ の旧参照は数えない）", () => {
     expect(check(makeRepo("pass", passing))).toEqual([]);
   });
 
@@ -1336,6 +1362,8 @@ describe("fixture のリポジトリを検査したときに検出される違�
       "docs/old/a.md": "旧い記録\n",
       "docs/old/b.md": "旧い記録\n",
       "docs/adrx/c.md": "前方一致\n",
+      // Issue #101 で移す前の置き場所（リポジトリ直下の work-logs/）は作業ログとして扱わない（旧参照も数える）。
+      "work-logs/2026-09-28.md": "rules/code/old.md を書いた\n",
       // docs/adr/ の直下の ADR・分類でないディレクトリ・分類の下のディレクトリ。形式は正しく一覧にも無いが、
       //   adr-only / adr-category の 1 件ずつだけになる（形式の検査の対象に入らない）ことを見る。
       [`${ADR_DIR}20260929-root.md`]: adrText(),
@@ -1360,6 +1388,7 @@ describe("fixture のリポジトリを検査したときに検出される違�
       'rules-paths: .claude/rules/typo.md の glob "apps/backnd/**" に一致するファイルが無い',
       "legacy-rules: rules/ がある",
       "legacy-rules: README.md:1",
+      "legacy-rules: work-logs/2026-09-28.md:1",
       "adr-title: docs/adr/tech-stack/20260928-broken.md の 1 行目が「# 」の見出しでない",
       "adr-meta: docs/adr/tech-stack/20260928-broken.md の日付 2026-09-29 がファイル名の 20260928 と違う",
       "adr-meta: docs/adr/tech-stack/20260928-broken.md の置き換え先 20260929-todo.md が docs/adr に無い（<分類>/<ファイル名> で書く）",
@@ -1372,9 +1401,9 @@ describe("fixture のリポジトリを検査したときに検出される違�
       "adr-index-state: docs/adr/README.md の一覧の 20260929-todo.md が docs/adr に無い",
       "adr-category: docs/adr/architecture/sub/ がある（分類の下にディレクトリは置けない）",
       "adr-category: docs/adr/misc/ は分類（architecture / tech-stack / quality / workflow）でない",
-      "adr-only: docs/README.md がある（docs/ の直下に置けるのは adr/ だけ）",
-      "adr-only: docs/adrx/ がある（docs/ の直下に置けるのは adr/ だけ）",
-      "adr-only: docs/old/ がある（docs/ の直下に置けるのは adr/ だけ）",
+      "adr-only: docs/README.md がある（docs/ の直下に置けるのは adr/ と work-logs/ だけ）",
+      "adr-only: docs/adrx/ がある（docs/ の直下に置けるのは adr/ と work-logs/ だけ）",
+      "adr-only: docs/old/ がある（docs/ の直下に置けるのは adr/ と work-logs/ だけ）",
       `adr-only: ${ADR_DIR}20260929-root.md がある（docs/adr/ の直下に置けるのは README.md と分類ディレクトリだけ）`,
       "skill-frontmatter: .claude/skills/broken/SKILL.md に description が無い",
       'agent-model: .claude/agents/alias.md の model が "sonnet"（許可: claude-opus-5-5 / claude-sonnet-5-5）',
@@ -1407,7 +1436,7 @@ describe("リポジトリの指示ファイル", () => {
     expect(violations.filter((v) => !v.startsWith("adr-only:"))).toEqual([]);
   });
 
-  it("docs/ の直下には adr/ しか無い", () => {
+  it("docs/ の直下には adr/ と work-logs/ しか無い", () => {
     expect(violations.filter((v) => v.startsWith("adr-only:"))).toEqual([]);
   });
 });

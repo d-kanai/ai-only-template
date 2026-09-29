@@ -10,16 +10,16 @@ paths:
 
 # 作業ログの強制と、フックの記録（Issue #64）
 
-作業ログ（`work-logs/YYYY-MM-DD.md`）の書き方は `.claude/general/work-log.md`（常時読み込み）。このファイルの `paths:` に `work-logs/**` を入れない（ログを書くたびにフックの説明が読み込まれ、書き方は `.claude/general/work-log.md` で足りるため）。ここは、記録漏れを止める仕組み（Stop フック・CI）と、compact・指示ファイルの読み込みを記録するフックの WHAT / WHY / 限界。決定は ADR `docs/adr/workflow/20260928-work-log-enforced-by-stop-hook-and-ci.md`、実測は 2026-09-28 の work-logs、公式の仕様と未確認の点は 2026-09-29 の work-logs「docs/ から移した記録」。
+作業ログ（`docs/work-logs/YYYY-MM-DD.md`）の書き方は `.claude/general/work-log.md`（常時読み込み）。このファイルの `paths:` に `docs/work-logs/**` を入れない（ログを書くたびにフックの説明が読み込まれ、書き方は `.claude/general/work-log.md` で足りるため）。ここは、記録漏れを止める仕組み（Stop フック・CI）と、compact・指示ファイルの読み込みを記録するフックの WHAT / WHY / 限界。決定は ADR `docs/adr/workflow/20260928-work-log-enforced-by-stop-hook-and-ci.md`、実測は 2026-09-28 の work-logs、公式の仕様と未確認の点は 2026-09-29 の work-logs「docs/ から移した記録」。
 
 WHY 機械で止める: 調査だけの依頼などでログの追記が漏れた（LEARNINGS.md。ユーザーの指摘）。文章のルールは読み落とされる（CLAUDE.md の原則 7）。
 
 フックの登録は `.claude/settings.json`（Stop → `require-work-log.sh`、PreCompact → `pre-compact.sh`、InstructionsLoaded → `instructions-loaded.sh`）。JSON にコメントを書けないので WHY はここと各スクリプトの先頭に書く。
 
 ## Stop フック `scripts/hooks/require-work-log.sh`
-- WHAT: そのターン（最後の人間の発言以降）にツールを使ったときは、`work-logs/<今日>.md` が次のどちらかなら停止を許可する。
+- WHAT: そのターン（最後の人間の発言以降）にツールを使ったときは、`docs/work-logs/<今日>.md` が次のどちらかなら停止を許可する。
   - 作業ツリーで変わっていて（未追跡・ステージ済みを含む。`git status --porcelain`）、ファイルの更新時刻が起点（最後の人間の発言の `timestamp`）以降。
-  - 起点以降のコミットで変わっている（`git log --since=<起点> -- work-logs/<今日>.md`。ほかのファイルだけのコミットは数えない）。
+  - 起点以降のコミットで変わっている（`git log --since=<起点> -- docs/work-logs/<今日>.md`。ほかのファイルだけのコミットは数えない）。
   - どちらでもなければ `{"decision":"block","reason":...}` で停止を拒否する。Claude は理由を受け取ってログを書き、止まり直す。
 - 順序は「ログを追記 → コミット」: この環境のユーザー側の Stop フック（`~/.claude/stop-hook-git-check.sh`）は未コミットの変更があると止める。コミットした後も通るように、このターンの間のコミットでの変更も「書いた」とみなす。
 - 判定の仕様（`scripts/hooks/require-work-log.test.ts` で固定）:
@@ -41,9 +41,9 @@ WHY 機械で止める: 調査だけの依頼などでログの追記が漏れ�
   - `stop_hook_active` は「Stop フックの block で続けている途中」なら true（公式）なので、ユーザー側の Stop フックだけが block したときの続きでも、このフックは判定しない。両方が同時に block したときに Claude が両方の理由を受け取るかは未確認。
   - Stop はメインのエージェントだけで発火する（サブエージェントは SubagentStop）。worker が書いた変更のログは、オーケストレータのターンで判定される。
 
-## CI `scripts/hooks/check-work-logs-diff.sh`（`ci.yml` の「Check work-logs in PR diff」）
-- WHAT: `git diff --name-only --no-renames --diff-filter=AM origin/<base>...HEAD` に `^work-logs/.*\.md$` が 1 件以上なければ失敗する。PR のときだけ（`if: github.event_name == 'pull_request'`）、準備より前（`pnpm lint` より前）に動く。`actions/checkout` は `fetch-depth: 0`（三点 diff の分岐点を求めるのに base ブランチと履歴が要る）。
-- **例外なし**: 文書だけの PR も work-logs を要求する（Issue #64 のユーザー判断）。
+## CI `scripts/hooks/check-work-logs-diff.sh`（`ci.yml` の「Check docs/work-logs in PR diff」）
+- WHAT: `git diff --name-only --no-renames --diff-filter=AM origin/<base>...HEAD` に `^docs/work-logs/.*\.md$` が 1 件以上なければ失敗する。PR のときだけ（`if: github.event_name == 'pull_request'`）、準備より前（`pnpm lint` より前）に動く。`actions/checkout` は `fetch-depth: 0`（三点 diff の分岐点を求めるのに base ブランチと履歴が要る）。
+- **例外なし**: 文書だけの PR も作業ログを要求する（Issue #64 のユーザー判断）。
 - 検査（ルール検査テスト）: スクリプトの判定は `scripts/hooks/check-work-logs-diff.test.ts`、ci.yml への組み込み（ステップの有無・`if`・`continue-on-error`・`|| true` などの打ち消し・順序・`fetch-depth: 0`）は `rule-tests/work-logs-check.test.ts`。
 - 数えるのは追加・変更（`--diff-filter=AM`）だけ。ログを削除しただけの PR は通さない。
 - `--no-renames`: 名前の変更を常に「削除 + 追加」として扱い、利用者の `diff.renames` の設定に結果が左右されないようにする。限界: そのため、ログの名前を変えただけの PR は「追加」があるので通る（`check-work-logs-diff.test.ts` で固定）。
@@ -52,7 +52,7 @@ WHY 機械で止める: 調査だけの依頼などでログの追記が漏れ�
 ## PreCompact `scripts/hooks/pre-compact.sh`
 - WHAT: compact の直前に `.claude/state/pre-compact.md` へ、日時・trigger（`manual` / `auto`）・ブランチ・HEAD・`git status --short`・stash の件数・直近 5 コミットの 1 行目を上書きで書く。compact は止めない（常に exit 0、出力なし）。
 - WHY: compact の要約で、どのブランチで何を変更中だったか（未コミット・stash）が落ちることがある。compact の後に読めば直前の状態を確かめられる。
-- WHY work-logs/ に書かない: work-logs/ は人が読む記録。自動の dump を入れると、Stop フックの「このターンで今日のログが変わったか」が、ログを書かずに素通りになる。
+- WHY docs/work-logs/ に書かない: docs/work-logs/ は人が読む記録。自動の dump を入れると、Stop フックの「このターンで今日のログが変わったか」が、ログを書かずに素通りになる。
 
 ## InstructionsLoaded `scripts/hooks/instructions-loaded.sh`
 - WHAT: 指示ファイル（CLAUDE.md・`.claude/rules/*.md`・@ import したファイル）が読み込まれるたびに、`.claude/state/instructions-loaded.jsonl` に 1 行 `{"ts","file_path","load_reason","trigger_file_path","memory_type"}` を追記する（入力に無い項目は null）。

@@ -1,7 +1,7 @@
 # ADR（Architecture Decision Record）
 
 決定 1 つにつき 1 ファイルで、「何を・なぜ決めたか」と「採用しなかった案」を残す。Claude Code は自動では読み込まない記録。
-規則の本文（最新）は `.claude/rules/`、日ごとの行動・実測は `work-logs/`、手順はスキル（`.claude/skills/`）。規則を変える前に、該当する ADR で経緯を確かめる（CLAUDE.md の 6）。
+規則の本文（最新）は `.claude/rules/`、日ごとの行動・実測は `docs/work-logs/`、手順はスキル（`.claude/skills/`）。規則を変える前に、該当する ADR で経緯を確かめる（CLAUDE.md の 6）。
 形式は `rule-tests/instructions.test.ts` の `adr-*` が検査する（分類ディレクトリ、ファイル名、1 行目の見出し、メタ 3 行、必須の見出しの順、この一覧へのリンク）。
 
 ## 命名
