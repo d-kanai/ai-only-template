@@ -61,6 +61,7 @@
 - E2E（`e2e/request-log.spec.ts`）で同じ並びを検証している。`missing` を外すと、クリック後の行の一覧にプリフェッチの `/todo/<id>`・`/` の page の行が増えて失敗した。
 
 ## 限界
+- matcher の `.*\\..*$`（拡張子付きの静的ファイルの除外）は、パスのどこかにドットがあるリクエストを API も含めて除く（例: `/api/todos/a.b` は proxy が動かず行が出ない）。今の ID は uuid なので当たらない（reviewer が manifest の regexp で確認）。上流の `x-request-id` は長さ・形式を検査せずそのまま使う（Headers が CR / LF を拒否し JSON.stringify がエスケープするので注入は起きない）。`Content-Length` が 2^53 を超えると `Number()` で丸まる。
 - status と所要時間は取れない: Proxy は応答の前（ルーティングの前）に動く。要るなら backend の presentation 層のラッパー（採らなかった案）か、リバースプロキシのアクセスログを使う。
 - クライアント遷移（リンクのクリック）は、document の読み込みと同じ `kind: "page"` になる。見分けは `accept`（document は `text/html` を含む、クライアント遷移は `*/*`）でできるが、`*/*` は curl など非ブラウザからの画面の取得と同じなので `kind` は分けていない。
 - ブラウザの戻る・進むで Next のルーターのキャッシュが使われると、画面の行は出ない（出るのは画面が呼ぶ API の行だけ）。
