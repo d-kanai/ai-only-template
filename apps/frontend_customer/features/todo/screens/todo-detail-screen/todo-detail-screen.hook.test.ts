@@ -10,7 +10,7 @@ import {
 import { useTodoDetailScreen } from "@/features/todo/screens/todo-detail-screen/todo-detail-screen.hook";
 import { commonMessages } from "@/shared/i18n/common.messages";
 import { formatMessage, LocaleProvider } from "@/shared/i18n/i18n";
-import { JaLocale, tJa } from "@/shared/i18n/i18n.test-support";
+import { JaLocale, tJa } from "@/test-support/i18n";
 
 // HTTP の詳細は todo-api.test.ts で検証済みなので差し替え、hook が API をいつ何で呼び、結果をどう状態に反映するかを見る。
 vi.mock("@/features/todo/api/todo-api");

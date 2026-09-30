@@ -17,7 +17,7 @@ import {
 import { useTodoScreen } from "@/features/todo/screens/todo-screen/todo-screen.hook";
 import { commonMessages } from "@/shared/i18n/common.messages";
 import { formatMessage, LocaleProvider } from "@/shared/i18n/i18n";
-import { JaLocale, tJa } from "@/shared/i18n/i18n.test-support";
+import { JaLocale, tJa } from "@/test-support/i18n";
 
 // hook の関心は「いつ・何で API を呼び、結果をどの状態に反映するか」なので、HTTP の詳細（todo-api.test.ts で検証済み）は差し替える。
 vi.mock("@/features/todo/api/todo-api");

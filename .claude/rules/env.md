@@ -65,7 +65,7 @@ paths:
 ## 変数を足すとき
 - `env.ts` の `Env` と `PARSERS` に足し（必須、既定値なし）、`.env.example` に開発用の値と WHAT / WHY のコメントを書き、`env.test.ts` に検証のテストを足す。CI・クラウドは `.env.example` をコピーするので、ワークフローやスクリプトは直さなくてよい。
 - worktree ごとに変える値（DB 名・ポートなど、並列の worktree でぶつかるもの）なら、`scripts/worktree-env.sh` の生成規則も足す（`.claude/rules/worktree.md`）。
-- テスト用の接続先（`database.test-support.ts`・`apps/e2e/database.ts`・`drizzle.config.ts`）もアプリと同じ `env.DATABASE_URL` を使う。
+- テスト用の接続先（`apps/backend/test-support/database.ts`・`apps/e2e/database.ts`・`drizzle.config.ts`）もアプリと同じ `env.DATABASE_URL` を使う。
 
 ## compose.yaml（開発用 Postgres）
 - 手元・CI・クラウドで同じ `compose.yaml` を使う。イメージは `mirror.gcr.io/library/postgres:18-alpine`（Docker Hub の匿名 pull のレート制限を避ける。経緯は ADR `docs/adr/workflow/20260928-postgres-via-docker-compose-everywhere.md` と 2026-09-28 の work-logs）。healthcheck は `pg_isready`。

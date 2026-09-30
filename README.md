@@ -64,7 +64,7 @@ apps/
 ```
 
 - 画面は SSR を前提にせず、データは hook から `/api/...` を呼んで取る。サーバの処理はすべて `apps/backend/` に置く。
-- frontend（と `apps/e2e/`・リポジトリ直下の設定ファイル）から backend へは `@repo/backend/<path>` でだけ参照する（相対パスは使わない。例外はテスト基盤の `vitest.global-setup.ts` → `database.test-support` だけ）。使えるのは `apps/backend/package.json` の `exports` に書いたファイルだけ。frontend で参照してよいのは `app/api/**`（api ファイルの値）と `features/*/api/`（型だけ）だけ。`apps/shared`（env・logger）は frontend 直下のサーバ側のファイル・backend・`apps/e2e/`・リポジトリ直下から `@repo/shared/<name>` で参照し、画面側（`app/`・`features/`・`shared/`）からは参照しない。backend は frontend を参照せず、backend の中の import は相対パスだけにする（`rule-tests/architecture.test.ts` で検査。`.claude/rules/backend.md` の「import の書き方と公開の範囲（exports）」）。
+- frontend（と `apps/e2e/`・リポジトリ直下の設定ファイル）から backend へは `@repo/backend/<path>` でだけ参照する（相対パスは使わない。例外はテスト基盤の `vitest.global-setup.ts` → `apps/backend/test-support/database` だけ）。使えるのは `apps/backend/package.json` の `exports` に書いたファイルだけ。frontend で参照してよいのは `app/api/**`（api ファイルの値）と `features/*/api/`（型だけ）だけ。`apps/shared`（env・logger）は frontend 直下のサーバ側のファイル・backend・`apps/e2e/`・リポジトリ直下から `@repo/shared/<name>` で参照し、画面側（`app/`・`features/`・`shared/`）からは参照しない。backend は frontend を参照せず、backend の中の import は相対パスだけにする（`rule-tests/architecture.test.ts` で検査。`.claude/rules/backend.md` の「import の書き方と公開の範囲（exports）」）。
 - 画面側からサーバ側へは、各 api ファイル（`apps/backend/features/<feature>/presentation/<name>.api.ts`）の型を `import type` で参照するだけ。型で担保されるのはリクエスト / レスポンスの形で、URL・メソッド・実行時の JSON の形は担保されない。
 - テストは対象の隣に置く（`app/` には置かない）。
 

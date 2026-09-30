@@ -2,8 +2,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { TodoItem } from "@/features/todo/components/todo-item";
 import { LocaleProvider } from "@/shared/i18n/i18n";
-import { JaLocale, tJa } from "@/shared/i18n/i18n.test-support";
 import type { Locale } from "@/shared/i18n/locale";
+import { JaLocale, tJa } from "@/test-support/i18n";
 import { todoItemMessages } from "./todo-item.messages";
 
 // Vitest は globals を無効にしているため、Testing Library の自動 cleanup（グローバルの afterEach に登録する仕組み）が働かない。

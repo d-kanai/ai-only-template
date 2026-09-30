@@ -593,14 +593,16 @@ const SHARED_MODULES_BY_LAYER: Record<BackendLayer, ReadonlySet<string>> = {
 
 // features/<f>/api/ から、同じ feature の api ファイル（backend/features/<f>/presentation/*.api）への参照か。
 // frontend-to-backend-specifier の例外（Issue #68 の段階 2。オーケストレータの判断）: リポジトリ直下の vitest.global-setup.ts
-//   （テスト基盤）だけは、database.test-support を相対パスで参照してよい。
-// WHY: database.test-support はテストのための処理（前の実行が残したテスト用スキーマの後始末）で、パッケージの公開面（exports。
-//   frontend / e2e / 設定が使うアプリの入口だけ、というユーザー判断）に含めない。exports に無いので @repo/backend では
-//   解決できず、相対パスで読むしかない。例外はファイルと参照先の組で絞り、ほかのファイルからの test-support、global-setup から
-//   ほかの backend のファイル（env など）への相対参照は違反のままにする。
+//   （テスト基盤）だけは、apps/backend/test-support/database を相対パスで参照してよい（Issue #181 で
+//   apps/backend/shared/infra/database.test-support から移した）。
+// WHY: test-support/database はテストのための処理（前の実行が残したテスト用スキーマの後始末）で、パッケージの公開面（exports。
+//   frontend / e2e / 設定が使うアプリの入口だけ、というユーザー判断）に含めない（rule-tests/test-support.test.ts が exports に
+//   test-support を載せることを止める）。exports に無いので @repo/backend では解決できず、相対パスで読むしかない。例外はファイルと
+//   参照先の組で絞り、ほかのファイルからの test-support、global-setup からほかの backend のファイル（env など）への相対参照は
+//   違反のままにする。
 const TEST_INFRA_RELATIVE_EXCEPTION = {
   from: "vitest.global-setup.ts",
-  to: "apps/backend/shared/infra/database.test-support",
+  to: "apps/backend/test-support/database",
 };
 
 function isTestInfraRelativeException(ref: Reference): boolean {
@@ -753,7 +755,7 @@ const RULES: Rule[] = [
     // WHY apps/e2e/ とリポジトリ直下も対象にする: apps/e2e/playwright.config.ts・apps/e2e/database.ts・vitest.global-setup.ts も env.ts などを
     //   使う。相対パスを許すと、exports に無いファイルを使っていても気づけない。
     id: "frontend-to-backend-specifier",
-    name: 'apps/frontend_customer/・apps/e2e/・リポジトリ直下のファイルから apps/backend/ への参照は "@repo/backend/..." の書き方だけ（相対パスや "@/../backend/" を使わない。例外は vitest.global-setup.ts → database.test-support の相対パスだけ）',
+    name: 'apps/frontend_customer/・apps/e2e/・リポジトリ直下のファイルから apps/backend/ への参照は "@repo/backend/..." の書き方だけ（相対パスや "@/../backend/" を使わない。例外は vitest.global-setup.ts → test-support/database の相対パスだけ）',
     appliesTo: (from) =>
       isUnder(from, FRONTEND_ROOT) ||
       isUnder(from, E2E_ROOT) ||
@@ -767,7 +769,7 @@ const RULES: Rule[] = [
     // 「frontend（と apps/e2e/・リポジトリ直下の設定ファイル）から apps/shared への参照は "@repo/shared/..." だけ」（Issue #90）。
     // WHY frontend-to-backend-specifier を広げずに別の規則にする: 1 規則 = 1 テストで、失敗したときにどちらのパッケージの境界が
     //   破れたかがテスト名で分かり、fault injection も規則ごとに独立に行える。backend 側だけにある例外
-    //   （vitest.global-setup.ts → database.test-support の相対パス）を apps/shared に持ち込まないためでもある。
+    //   （vitest.global-setup.ts → test-support/database の相対パス）を apps/shared に持ち込まないためでもある。
     // WHY 相対パスを禁止する: frontend-to-backend-specifier と同じく、apps/shared/package.json の exports（公開する入口）を通らずに
     //   apps/shared の中のファイルを指せてしまい、公開の過不足（SHARED_EXPORTS）を検査できなくなる。
     // WHY backend は対象にしない: backend の中の書き方は backend-relative-only が 1 つの規則で見る（backend の中は相対パス、
@@ -1066,6 +1068,12 @@ const RULES: Rule[] = [
 //   （shared/drizzle/app.ts）や別の設定の置き場所にさせないため。依存の規則は backend-to-frontend・backend-relative-only と、
 //   backend/shared の中なので backend-shared がかかる（feature のコードを import せず、schema は glob の文字列で指す）。
 // 決定と採用しなかった案は ADR docs/adr/architecture/20260929-backend-features-and-shared-directories.md。
+// WHY 直下の test-support/ も許す（Issue #181。ユーザー判断「test-support が build に入らないルールは頑張って」）: テストだけが使う
+//   コード（createTestDatabase など）の置き場所で、層のコードではない。層の下（shared/infra/）に置くと本番のコードと見分けが付かず、
+//   .dockerignore の 1 行（**/test-support）でイメージから外せない。層の規則は当てない（どの層でもない）が、本番のコードから
+//   参照しないこと・イメージに入らないことは rule-tests/test-support.test.ts が見る（層のファイルから参照すると層の規則にもかかる）。
+//   直下だけに許し、features/<f>/test-support/ や shared/test-support/ は違反のままにする（置き場所を 1 か所にそろえる）。
+const BACKEND_TEST_SUPPORT_DIR = /^apps\/backend\/test-support\//;
 const BACKEND_LAYER_DIR =
   /^apps\/backend\/(?:features\/[^/]+|shared)\/(?:domain|application|presentation|infra)\//;
 const BACKEND_DRIZZLE_CONFIG =
@@ -1073,10 +1081,11 @@ const BACKEND_DRIZZLE_CONFIG =
 
 const BACKEND_PLACEMENT = {
   id: "backend-placement",
-  name: "apps/backend/ のソースファイルは apps/backend/features/<f>/ か apps/backend/shared/ の domain/・application/・presentation/・infra/ のどれかの下に置く（apps/backend/shared/drizzle/drizzle.config.ts だけ例外）",
+  name: "apps/backend/ のソースファイルは apps/backend/features/<f>/ か apps/backend/shared/ の domain/・application/・presentation/・infra/ のどれかの下か、テストだけが使う apps/backend/test-support/ の下に置く（apps/backend/shared/drizzle/drizzle.config.ts だけ例外）",
   isMisplaced: (file: string) =>
     isUnder(file, BACKEND_ROOT) &&
     !BACKEND_LAYER_DIR.test(file) &&
+    !BACKEND_TEST_SUPPORT_DIR.test(file) &&
     !BACKEND_DRIZZLE_CONFIG.test(file),
 };
 
@@ -1091,8 +1100,10 @@ const BACKEND_PLACEMENT = {
 //   は Next 16 で非推奨なので許さない。中身は薄くし、1 行の組み立ては shared/request-log/ に置く（shared/ は置き場所の規則の中）。
 //   名前を決めずに直下を許すと、層に属さないコードの置き場所になる。直下のファイルが backend を参照するときは
 //   frontend-root-to-backend が見る。
+// WHY test-support/ も許す（Issue #181）: テストだけが使うコード（翻訳の期待値を作る tJa など）の置き場所。backend の
+//   test-support/ と同じく、本番のコードから参照しないこと・イメージに入らないことは rule-tests/test-support.test.ts が見る。
 const FRONTEND_SOURCE_DIR =
-  /^apps\/frontend_customer\/(?:app|features|shared)\//;
+  /^apps\/frontend_customer\/(?:app|features|shared|test-support)\//;
 const FRONTEND_ROOT_FILES = new Set([
   "apps/frontend_customer/next.config.ts",
   "apps/frontend_customer/instrumentation.ts",
@@ -1103,7 +1114,7 @@ const FRONTEND_ROOT_FILES = new Set([
 
 const FRONTEND_PLACEMENT = {
   id: "frontend-placement",
-  name: "apps/frontend_customer/ のソースファイルは app/・features/・shared/ の下か、直下の next.config.ts・instrumentation.ts・instrumentation-node.ts・proxy.ts・next-env.d.ts だけに置く",
+  name: "apps/frontend_customer/ のソースファイルは app/・features/・shared/・test-support/ の下か、直下の next.config.ts・instrumentation.ts・instrumentation-node.ts・proxy.ts・next-env.d.ts だけに置く",
   isMisplaced: (file: string) =>
     isUnder(file, FRONTEND_ROOT) &&
     !FRONTEND_SOURCE_DIR.test(file) &&
@@ -1331,7 +1342,7 @@ function findConsoleViolations(root: string): string[] {
 //   経由するものも拾う。
 // 通すもの: 引数のある new Date(x)（与えた値の解析で、現在時刻ではない）、Date.parse / Date.UTC、型の位置の Date、
 //   DateTime・toDate・myDate のような別の識別子。
-// WHY 対象を apps/frontend_customer・apps/backend・apps/shared のソースにする（テストと *.test-support.* は除く）:
+// WHY 対象を apps/frontend_customer・apps/backend・apps/shared のソースにする（テストとテストの補助 apps/<app>/test-support/ は除く）:
 //   - テストとテストの補助は、期待値や時刻を決めるために Date を作る。本番の振る舞いに入らない。
 //   - apps/e2e/ は別プロセスで動く本番ビルドを外から操作するので now を差し替えられず、現在時刻は一意なタイトルを作るためだけに使う。
 //   - scripts/・リポジトリ直下の設定はアプリのコードではなく、時刻をテストで決める必要が無い。
@@ -1341,8 +1352,11 @@ function findConsoleViolations(root: string): string[] {
 // 限界（多く検出する方向）: Date という名前のメソッドの呼び出し（calendar.Date()）も new の無い Date() として数える（今のリポジトリには無い）。
 const NOW_CHECK_DIRS = [FRONTEND_ROOT, BACKEND_ROOT, SHARED_ROOT];
 
-// テストの補助（apps/backend/shared/infra/database.test-support.ts・apps/frontend_customer/shared/i18n/i18n.test-support.tsx など）。
-const TEST_SUPPORT_FILE = /\.test-support\.(?:[cm]?[jt]s|[jt]sx)$/;
+// テストの補助（apps/backend/test-support/database.ts・apps/frontend_customer/test-support/i18n.tsx など）。アプリの直下の
+//   test-support/ の下だけ（Issue #181 でファイル名の .test-support から置き場所に変えた）。
+// WHY 名前の .test-support を補助として扱わない: 置き場所を test-support/ の 1 か所にそろえ（.dockerignore の **/test-support で
+//   イメージから外れるのはそこだけ）、層の下に *.test-support.ts を置いて現在時刻を読んでも素通りしないようにする。
+const TEST_SUPPORT_FILE = /^apps\/[^/]+\/test-support\//;
 
 const NOW_SINGLE_SOURCE = {
   id: "now-single-source",
@@ -2102,8 +2116,8 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
     for (const excluded of [
       "apps/shared/now.test.ts",
       "apps/backend/features/todo/domain/todo.test.ts",
-      "apps/backend/shared/infra/database.test-support.ts",
-      "apps/frontend_customer/shared/i18n/i18n.test-support.tsx",
+      "apps/backend/test-support/database.ts",
+      "apps/frontend_customer/test-support/i18n.tsx",
       "apps/e2e/todo.spec.ts",
       "vitest.config.mts",
     ]) {
@@ -2196,7 +2210,7 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "apps/shared/env.ts",
         "apps/shared/logger.ts",
         "apps/backend/shared/infra/database.ts",
-        "apps/backend/shared/infra/database.test-support.ts",
+        "apps/backend/test-support/database.ts",
         "apps/backend/features/todo/infra/todo-repository.postgres.ts",
         "apps/backend/shared/drizzle/drizzle.config.ts",
         "apps/frontend_customer/next.config.ts",
@@ -2351,19 +2365,18 @@ const RULE_EXAMPLES: Record<
       ],
       ["apps/e2e/database.ts", "../backend/shared/infra/env", "value"],
       ["apps/e2e/playwright.config.ts", "../backend/shared/infra/env", "value"],
-      // 例外（vitest.global-setup.ts → database.test-support）は、そのファイルとその参照先の組だけ。
+      // 例外（vitest.global-setup.ts → test-support/database）は、そのファイルとその参照先の組だけ。
       //   global-setup からでも env を相対パスで参照するのは違反。別のルート直下のファイルから test-support も違反。
+      //   global-setup からでも test-support のほかのファイル・以前の置き場所（shared/infra/database.test-support）は違反。
       ["vitest.global-setup.ts", "./apps/backend/shared/infra/env", "value"],
+      ["vitest.global-setup.ts", "./apps/backend/test-support/other", "value"],
       [
-        "vitest.config.mts",
+        "vitest.global-setup.ts",
         "./apps/backend/shared/infra/database.test-support",
         "value",
       ],
-      [
-        "apps/e2e/database.ts",
-        "../backend/shared/infra/database.test-support",
-        "value",
-      ],
+      ["vitest.config.mts", "./apps/backend/test-support/database", "value"],
+      ["apps/e2e/database.ts", "../backend/test-support/database", "value"],
     ],
     allowed: [
       [
@@ -2381,10 +2394,10 @@ const RULE_EXAMPLES: Record<
         "@repo/backend/shared/presentation/problem",
         "type",
       ],
-      // 例外: テスト基盤の vitest.global-setup.ts だけは、database.test-support を相対パスで参照してよい。
+      // 例外: テスト基盤の vitest.global-setup.ts だけは、test-support/database を相対パスで参照してよい。
       [
         "vitest.global-setup.ts",
-        "./apps/backend/shared/infra/database.test-support",
+        "./apps/backend/test-support/database",
         "value",
       ],
       // apps/frontend_customer の中の参照（相対パス・"@/"）は backend を指さないので対象外。
@@ -3188,7 +3201,7 @@ const RULE_EXAMPLES: Record<
         "../infra/repository.postgres",
         "value",
       ],
-      //   backend/shared/infra は database だけ。前方一致だけが同じ別ファイル、テスト基盤（database.test-support）は不可。
+      //   backend/shared/infra は database だけ。前方一致だけが同じ別ファイル、テスト基盤（test-support/database。層に属さない）は不可。
       [
         "apps/backend/features/todo/presentation/x.api.ts",
         "../../../shared/infra/database-helper",
@@ -3196,7 +3209,7 @@ const RULE_EXAMPLES: Record<
       ],
       [
         "apps/backend/features/todo/presentation/x.api.ts",
-        "../../../shared/infra/database.test-support",
+        "../../../test-support/database",
         "value",
       ],
       //   backend/shared/presentation は何も組み立てないので、database も Repository の実装の名前のファイルも不可。
@@ -3704,6 +3717,13 @@ const PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/backend/shared/drizzle/sub/drizzle.config.ts",
     "apps/backend/shared/drizzle/sub/x.ts",
     "apps/backend/features/shared/x.ts",
+    // Issue #181: test-support/ は apps/backend の直下だけ。feature・shared の下（層の外）、前方一致・後方一致だけが同じ別ディレクトリ、
+    //   同じ名前のファイルは違反。
+    "apps/backend/features/todo/test-support/x.ts",
+    "apps/backend/shared/test-support/x.ts",
+    "apps/backend/test-support-x/x.ts",
+    "apps/backend/my-test-support/x.ts",
+    "apps/backend/test-support.ts",
   ],
   placed: [
     "apps/backend/features/todo/domain/todo.ts",
@@ -3714,6 +3734,9 @@ const PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/backend/features/shared/domain/x.ts",
     "apps/backend/shared/drizzle/drizzle.config.ts",
     "apps/backend/shared/drizzle/drizzle.config.mts",
+    // Issue #181: テストだけが使うコードの置き場所（直下の test-support/。入れ子も可）。
+    "apps/backend/test-support/database.ts",
+    "apps/backend/test-support/nested/x.mts",
     "apps/frontend_customer/features/todo/lib/x.ts",
     // backend の規則の対象外（apps/e2e は E2E の workspace パッケージ @repo/e2e。Issue #84）。
     "apps/e2e/database.ts",
@@ -3742,12 +3765,19 @@ const FRONTEND_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     // 許可された名前でも、直下でなければ例外にしない。
     "apps/frontend_customer/lib/next.config.ts",
     "apps/frontend_customer/lib/proxy.ts",
+    // Issue #181: test-support/ と前方一致・後方一致だけが同じ別ディレクトリ、同じ名前のファイル。
+    "apps/frontend_customer/test-support-x/i18n.tsx",
+    "apps/frontend_customer/my-test-support/i18n.tsx",
+    "apps/frontend_customer/test-support.tsx",
   ],
   placed: [
     "apps/frontend_customer/app/page.tsx",
     "apps/frontend_customer/app/api/todos/route.ts",
     "apps/frontend_customer/features/todo/lib/x.ts",
     "apps/frontend_customer/shared/ui/button.tsx",
+    // Issue #181: テストだけが使うコードの置き場所。
+    "apps/frontend_customer/test-support/i18n.tsx",
+    "apps/frontend_customer/test-support/nested/x.ts",
     "apps/frontend_customer/next.config.ts",
     "apps/frontend_customer/instrumentation.ts",
     "apps/frontend_customer/instrumentation-node.ts",
@@ -3774,6 +3804,8 @@ const SHARED_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/shared/logger.tsx",
     "apps/shared/now-helper.ts",
     "apps/shared/now.test-support.ts",
+    // Issue #181: backend・frontend の直下で許した test-support/ も、apps/shared では決めた名前の外。
+    "apps/shared/test-support/now.ts",
     "apps/shared/env.js",
     "apps/shared/lib/env.ts",
     // ソース以外（説明・テストだけ・設定）も、決めた名前でなければ違反。
@@ -4184,11 +4216,16 @@ const NOW_ACCESS_EXAMPLES: {
     ["apps/frontend_customer/shared/x.mjs", "Date.now();"],
     ["apps/frontend_customer/app/page.tsx", "new Date();"],
     ["apps/shared/logger.ts", "const t = new Date().toISOString();"],
-    // now.ts と名前が似た別ファイル・別の場所の now.ts・名前に test-support を含むが補助の接尾辞ではないもの。
+    // now.ts と名前が似た別ファイル・別の場所の now.ts・名前に test-support を含むが test-support/ の下ではないもの
+    //   （以前の補助の目印 *.test-support.*、前方一致だけの test-support-x/、アプリの直下ではない test-support/。Issue #181）。
     ["apps/shared/now-helper.ts", "new Date();"],
     ["apps/shared/now.js", "new Date();"],
     ["apps/backend/shared/infra/now.ts", "new Date();"],
     ["apps/backend/shared/infra/test-support-clock.ts", "new Date();"],
+    ["apps/backend/shared/infra/database.test-support.ts", "Date.now();"],
+    ["apps/frontend_customer/shared/i18n/i18n.test-support.tsx", "new Date();"],
+    ["apps/backend/test-support-x/x.ts", "new Date();"],
+    ["apps/backend/features/todo/infra/test-support/x.ts", "new Date();"],
   ],
   allowed: [
     // 例外の now.ts。
@@ -4221,11 +4258,9 @@ const NOW_ACCESS_EXAMPLES: {
     // テスト・テストの補助・対象外の場所（apps/e2e/・scripts/・ルート直下）・TS / JS 以外。
     ["apps/backend/features/todo/domain/todo.test.ts", "new Date();"],
     ["apps/shared/now.test.ts", "Date.now();"],
-    [
-      "apps/backend/shared/infra/database.test-support.ts",
-      "const n = Date.now();",
-    ],
-    ["apps/frontend_customer/shared/i18n/i18n.test-support.tsx", "new Date();"],
+    ["apps/backend/test-support/database.ts", "const n = Date.now();"],
+    ["apps/backend/test-support/nested/x.ts", "new Date();"],
+    ["apps/frontend_customer/test-support/i18n.tsx", "new Date();"],
     ["apps/e2e/todo.spec.ts", "const runId = Date.now();"],
     ["apps/e2e/database.ts", "new Date();"],
     ["scripts/tool.ts", "Date.now();"],
@@ -5540,7 +5575,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   //   実装と backend/shared/infra/database だけ（Issue #123）。schema は不可。
   "apps/backend/features/todo/domain/bad-domain-infra.ts": lines(
     'import type { Database } from "../../../shared/infra/database";',
-    'import type { TestDatabase } from "../../../shared/infra/database.test-support";',
+    'import type { TestDatabase } from "../../../test-support/database";',
   ),
   "apps/backend/shared/domain/bad-shared-domain-infra.ts": lines(
     'import type { Database } from "../infra/database";',
@@ -5554,7 +5589,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
       'import { getDatabase } from "../../../shared/infra/database";',
       'import { todos } from "../infra/schema";',
       'import { PostgresTodoRepository } from "../infra/todo-repository.postgres";',
-      'import { cleanupTestSchemas } from "../../../shared/infra/database.test-support";',
+      'import { cleanupTestSchemas } from "../../../test-support/database";',
     ),
   // core-to-persistence: domain / application から DB のパッケージ（drizzle-orm とそのサブパス、pg）。型だけの参照・re-export・
   //   dynamic import も違反。名前の前方一致だけが同じ別パッケージ（pg-format）は対象外。
@@ -5765,13 +5800,13 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/e2e/bad-relative.ts": lines(
     'import { env } from "../backend/shared/infra/env";',
   ),
-  // 例外（vitest.global-setup.ts → database.test-support の相対パス）は名前まで一致したときだけ。.mts の別ファイルは違反。
+  // 例外（vitest.global-setup.ts → test-support/database の相対パス）は名前まで一致したときだけ。.mts の別ファイルは違反。
   "vitest.global-setup.mts": lines(
-    'import { cleanupTestSchemas } from "./apps/backend/shared/infra/database.test-support";',
+    'import { cleanupTestSchemas } from "./apps/backend/test-support/database";',
   ),
-  // vitest.global-setup.ts でも、test-support 以外（env）を相対パスで参照するのは違反（test-support の相対参照は許される）。
+  // vitest.global-setup.ts でも、test-support/database 以外（env）を相対パスで参照するのは違反（test-support/database の相対参照は許される）。
   "vitest.global-setup.ts": lines(
-    'import { cleanupTestSchemas } from "./apps/backend/shared/infra/database.test-support";',
+    'import { cleanupTestSchemas } from "./apps/backend/test-support/database";',
     'import { env } from "./apps/backend/shared/infra/env";',
   ),
   // backend-exports（Issue #68 の段階 2）: exports の過不足。
@@ -5871,7 +5906,8 @@ const MUST_REJECT_FILES: Record<string, string> = {
   ),
   // now-single-source: now.ts 以外で現在時刻を読む。書き方ごとに 1 行ずつ置き、行番号で検出を比べる（11 行目の引数のある
   //   new Date と 12 行目のコメントは違反ではない）。画面側（.tsx・.mjs）、apps/shared の決めた名前以外のファイル（shared-placement
-  //   にもかかる）、別の場所の now.ts、名前に test-support を含むが補助の接尾辞ではないファイルも置く。
+  //   にもかかる）、別の場所の now.ts、名前に test-support を含むがアプリの直下の test-support/ の下ではないファイル
+  //   （以前の補助の目印 *.test-support.*。Issue #181）も置く。
   "apps/backend/features/todo/domain/bad-now.ts": lines(
     "export const a = new Date();",
     "export const b = Date.now();",
@@ -5899,6 +5935,12 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/backend/shared/infra/test-support-clock.ts": lines(
     "export const n = Date.now();",
   ),
+  "apps/backend/shared/infra/old.test-support.ts": lines(
+    "export const n = Date.now();",
+  ),
+  // backend-placement / frontend-placement（Issue #181）: 直下の test-support/ と前方一致だけが同じ別ディレクトリ。
+  "apps/backend/test-support-x/x.ts": lines("export const x = 1;"),
+  "apps/frontend_customer/test-support-x/x.ts": lines("export const x = 1;"),
 };
 
 const MUST_REJECT_VIOLATIONS = [
@@ -5912,6 +5954,9 @@ const MUST_REJECT_VIOLATIONS = [
   "shared-placement: apps/shared/lib/clock.ts",
   "now-single-source: apps/backend/shared/infra/now.ts:1",
   "now-single-source: apps/backend/shared/infra/test-support-clock.ts:1",
+  "now-single-source: apps/backend/shared/infra/old.test-support.ts:1",
+  "backend-placement: apps/backend/test-support-x/x.ts",
+  "frontend-placement: apps/frontend_customer/test-support-x/x.ts",
   ...[3, 12, 15].map(
     (line) =>
       `presentation-with-problem-response: apps/backend/features/todo/presentation/bad-handle.api.ts:${line}`,
@@ -6269,12 +6314,12 @@ const MUST_REJECT_VIOLATIONS = [
       `app-api: apps/frontend_customer/app/api/todos/bad-route.ts → ${to}`,
   ),
   "domain: apps/backend/features/todo/domain/bad-domain-infra.ts → apps/backend/shared/infra/database",
-  "domain: apps/backend/features/todo/domain/bad-domain-infra.ts → apps/backend/shared/infra/database.test-support",
+  "domain: apps/backend/features/todo/domain/bad-domain-infra.ts → apps/backend/test-support/database",
   "domain: apps/backend/shared/domain/bad-shared-domain-infra.ts → apps/backend/shared/infra/database",
   "application: apps/backend/features/todo/application/bad-application-infra.ts → apps/backend/shared/infra/database",
   ...[
     "apps/backend/features/todo/infra/schema",
-    "apps/backend/shared/infra/database.test-support",
+    "apps/backend/test-support/database",
   ].map(
     (to) =>
       `presentation: apps/backend/features/todo/presentation/bad-presentation-infra.api.ts → ${to}`,
@@ -6311,7 +6356,7 @@ const MUST_REJECT_VIOLATIONS = [
     "apps/frontend_customer/next.config.ts → apps/backend/shared/infra/database",
     "apps/frontend_customer/shared/bad-shared.tsx → apps/backend/features/todo/presentation/list-todos.api",
     "apps/e2e/bad-relative.ts → apps/backend/shared/infra/env",
-    "vitest.global-setup.mts → apps/backend/shared/infra/database.test-support",
+    "vitest.global-setup.mts → apps/backend/test-support/database",
     "vitest.global-setup.ts → apps/backend/shared/infra/env",
   ].map((line) => `frontend-to-backend-specifier: ${line}`),
   // Issue #68 の段階 2: backend-exports。"@repo/backend/..." の参照のうち、fixture の exports のどのキーにも当たらないもの
@@ -6815,13 +6860,13 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { expect, test } from "@playwright/test";',
     'import { resetTodos } from "./database";',
   ),
-  // テスト基盤の vitest.global-setup.ts だけは、database.test-support を相対パスで参照する（exports に含めない例外）。
+  // テスト基盤の vitest.global-setup.ts だけは、test-support/database を相対パスで参照する（exports に含めない例外）。
   "vitest.global-setup.ts": lines(
     'import { env, toolEnv } from "@repo/shared/env";',
     "import {",
     "  cleanupTestSchemas,",
     "  testSchemaPrefix,",
-    '} from "./apps/backend/shared/infra/database.test-support";',
+    '} from "./apps/backend/test-support/database";',
   ),
   // exports（Issue #68 の段階 2）: 外が "@repo/backend/..." で参照するものだけを、キーのパスの .ts で公開する。
   //   すべてのキーが上の参照で使われ、指すファイルがある（パターンは *.api の 5 ファイルに当たる）。
@@ -6833,14 +6878,16 @@ const MUST_PASS_FILES: Record<string, string> = {
       "./shared/presentation/problem": "./shared/presentation/problem.ts",
     },
   }),
-  "apps/backend/shared/infra/database.test-support.ts": lines(
+  // テストだけが使うコード（Issue #181。直下の test-support/）。置き場所の規則で許し、層の規則は当てない（どの層でもない）。
+  //   backend の中なので backend-relative-only（相対パスと @repo/shared）はかかる。
+  "apps/backend/test-support/database.ts": lines(
     'import { randomUUID } from "node:crypto";',
     'import { drizzle } from "drizzle-orm/node-postgres";',
     'import { migrate } from "drizzle-orm/node-postgres/migrator";',
     'import { Pool } from "pg";',
-    'import type { Database } from "./database";',
+    'import type { Database } from "../shared/infra/database";',
     'import { env } from "@repo/shared/env";',
-    // now-single-source: テストの補助（*.test-support.*）は現在時刻を直接読んでもよい。
+    // now-single-source: テストの補助（test-support/ の下）は現在時刻を直接読んでもよい。
     "export const stamp = Date.now();",
   ),
   "apps/backend/features/todo/infra/schema.ts": lines(
@@ -6864,8 +6911,9 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { defineMessages } from "./i18n";',
     'export const commonMessages = defineMessages({ ja: { "todo.notFound": "Todo（id: {id}）が見つかりません" }, en: { "todo.notFound": "Todo (id: {id}) was not found" } });',
   ),
-  "apps/frontend_customer/shared/i18n/i18n.test-support.tsx": lines(
-    'import { commonMessages } from "./common.messages";',
+  "apps/frontend_customer/test-support/i18n.tsx": lines(
+    'import { createTranslator } from "@/shared/i18n/i18n";',
+    'import { commonMessages } from "@/shared/i18n/common.messages";',
     "export const at = new Date();",
   ),
   "apps/frontend_customer/features/todo/components/todo-item.messages.ts":

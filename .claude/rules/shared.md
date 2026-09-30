@@ -31,7 +31,7 @@ paths:
 - アプリのコード（`apps/frontend_customer`・`apps/backend`・`apps/shared` のテスト以外）で現在時刻が要るときは `now()` を呼ぶ。引数の無い `new Date()`・`Date.now()`・`new` の無い `Date()` を書いてよいのは `now.ts` だけ（規則 `now-single-source`。`rule-tests/architecture.test.ts`）。引数のある `new Date(x)`（解析）・`Date.parse`・`Date.UTC` は可。
   - WHY: 時刻を各所で直接読むと、時刻に依存する振る舞い（Entity の作成日時・一覧の並び順・ログの時刻）のテストが実行した瞬間で結果を変え、決定的にならない。出口が 1 つなら、テストは `vi.mock` でそのモジュールを差し替えるだけで時刻を決められる（`.claude/rules/testing.md` の「テストダブル」）。
   - WHY 引数で時刻を受け取る形（`Todo.create(title, createdAt)`・Clock の注入）にしない: 「作ったときの時刻が入る」は Entity の生成ルールで、呼び出し側が時刻を渡せるとルールが呼び出し側に漏れる（ユーザー判断）。
-  - 対象外: テスト・テストの補助（`*.test-support.*`）、`apps/e2e/`（別プロセスの本番ビルドを操作し now を差し替えられない。現在時刻は一意なタイトルを作るためだけ）、`scripts/`・リポジトリ直下の設定。
+  - 対象外: テスト・テストの補助（アプリの直下の `test-support/` の下。Issue #181）、`apps/e2e/`（別プロセスの本番ビルドを操作し now を差し替えられない。現在時刻は一意なタイトルを作るためだけ）、`scripts/`・リポジトリ直下の設定。
 - `apps/shared` の中からは相対パスで読む（`logger.ts` の `import { now } from "./now"`）。
 - 決定は ADR `docs/adr/architecture/20260930-now-single-source.md`、検査の書き方と限界は `.claude/rules/architecture-check.md`。
 

@@ -42,7 +42,7 @@ export type ToolEnv = {
   // E2E で使う Chromium の実行ファイル（クラウド VM 用。apps/e2e/playwright.config.ts）。空なら未設定と同じ。
   PLAYWRIGHT_CHROMIUM_EXECUTABLE: string | undefined;
   // Stryker（mutation testing）の worker の中で動いているか。Stryker が子プロセスに渡す（@stryker-mutator/core 10.0.0 の
-  //   child-process-proxy.js）。テスト用スキーマの後始末を止めるのに使う（apps/backend/shared/infra/database.test-support.ts）。
+  //   child-process-proxy.js）。テスト用スキーマの後始末を止めるのに使う（apps/backend/test-support/database.ts）。
   STRYKER_MUTATOR_WORKER: boolean;
   // E2E（Playwright）が本番ビルドを起動するポート（1〜65535。apps/e2e/playwright.config.ts）。未設定なら undefined で、
   //   apps/e2e/playwright.config.ts が既定の 3100 を使う。ツールの動かし方（E2E のポート）の切り替え。

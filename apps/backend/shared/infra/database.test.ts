@@ -4,13 +4,13 @@ import { env } from "@repo/shared/env";
 import { sql } from "drizzle-orm";
 import type { Pool, PoolConfig } from "pg";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { createTestDatabase } from "../../test-support/database";
 import {
   closeDatabase,
   createDatabase,
   type DatabaseConfig,
   getDatabase,
 } from "./database";
-import { createTestDatabase } from "./database.test-support";
 
 // createDatabase に渡す設定の例。接続先は架空（プールは作るだけなら接続しない）。
 const CONFIG: DatabaseConfig = {

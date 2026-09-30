@@ -60,7 +60,7 @@ export default {
   //   （公式ドキュメントの「Limitations」）。
 
   // mutate: 変異を入れるファイル。vitest.config.mts の coverage.include のうち、TypeScript の実装がある
-  //   apps/frontend_customer/features/ apps/frontend_customer/shared/ apps/backend/ apps/shared/ と同じ範囲にする（カバレッジ 100% で「実行されている」
+  //   apps/frontend_customer/features/ apps/frontend_customer/shared/ apps/frontend_customer/test-support/ apps/backend/ apps/shared/ と同じ範囲にする（カバレッジ 100% で「実行されている」
   //   ことを担保した範囲に対して、「テストが結果を検証している」かを確かめる）。
   //   含めないもの:
   //   - テスト（*.test.ts / *.test.tsx）と型宣言（*.d.ts）: 変異させる対象（実装）ではない。
@@ -89,6 +89,9 @@ export default {
   mutate: [
     "apps/frontend_customer/features/**/*.{ts,tsx}",
     "apps/frontend_customer/shared/**/*.{ts,tsx}",
+    // テストだけが使うコード（Issue #181 で apps/frontend_customer/shared/i18n/ から移した）。apps/backend/test-support/ は
+    //   apps/backend/** に含まれる。
+    "apps/frontend_customer/test-support/**/*.{ts,tsx}",
     "apps/backend/**/*.{ts,tsx}",
     "apps/shared/**/*.ts",
     "!apps/backend/shared/drizzle/*.config.ts",
@@ -125,7 +128,7 @@ export default {
   //     有効にすると約 3.3 分（2026-09-28、ローカル 4 コアで実測。576 変異、3 分 18 秒）。
   //   ロジックの定数は static にしない: 読み込み時に固定される定数（正規表現・変換表・URL・接頭辞など）は、呼び出し時に
   //   評価する関数の中に置く（todo-repository.postgres.ts の isUuid、problem.ts の problemKindOf、todo-api.ts の todosPath、
-  //   database.test-support.ts の testSchemaPrefix）。最上位の定数のままだと、既定の実行では killed になる変異も
+  //   apps/backend/test-support/database.ts の testSchemaPrefix）。最上位の定数のままだと、既定の実行では killed になる変異も
   //   ignoreStatic で数えなくなるため（reviewer 指摘。Issue #55 で 18 件が該当した）。
   //   残る static（数えないもの）: schema.ts の 10 件だけ。ignoreStatic を false にして schema.ts を --mutate した実測で、
   //   表名 "todos" → ""、pgTable に渡す列の定義のオブジェクト → {}、"created_at" → "" の 3 件は Killed、次の 7 件は Survived だった:
