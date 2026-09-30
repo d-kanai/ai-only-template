@@ -43,7 +43,7 @@ function toTodo(row: TodoRow): Todo {
 // TodoRepository の Postgres 実装（Drizzle）。
 // WHY db（Database）をコンストラクタで受け取る: プールは getDatabase が globalThis に 1 つだけ持ち、api ファイルが
 //   `new PostgresTodoRepository(getDatabase().db)` と組み立てる（Issue #123）。テストはテスト用のスキーマの db を渡す。
-// WHY トランザクションを張らない: 今の command は書き込みが 1 文（save の INSERT ... ON CONFLICT か UPDATE、または delete）だけで、
+// WHY トランザクションを張らない: 今の command は書き込みが 1 文（save の INSERT か UPDATE、または delete）だけで、
 //   Postgres は 1 文を原子的に実行する。複数の書き込みが要る command が出たら、その command にトランザクションを扱う依存を
 //   注入する（.claude/rules/backend.md の「永続化（Drizzle + Postgres）」。ADR architecture/20260929-constructor-injection-without-container.md）。
 export class PostgresTodoRepository implements TodoRepository {
@@ -77,7 +77,7 @@ export class PostgresTodoRepository implements TodoRepository {
     return requireTodo(await this.findById(id), id);
   }
 
-  // 新規（origin が undefined）は全列を INSERT、読み込み済みは読み込んだときから変わった列だけを UPDATE する（Issue #165）。
+  // 新規（origin が undefined）は全列を INSERT（2 回目は一意制約違反）、読み込み済みは読み込んだときから変わった列だけを UPDATE する（Issue #165）。
   // WHY 読み込み済みは変わった列だけ: 全列を書くと、同じ Todo を同時に別の列で更新したとき（片方は完了、片方は名前の
   //   変更）に、後から save した方が先の変更を読み込んだときの値に巻き戻す（lost update）。変わった列だけなら両方残る。
   //   同じ列を同時に変えたときは後勝ち。ただし読み込んだときと同じ値に戻す変更は差分が無いので書かれず、他方の更新が
@@ -114,23 +114,16 @@ export class PostgresTodoRepository implements TodoRepository {
     requireTodo(updated === undefined ? undefined : todo, todo.id);
   }
 
-  // WHY 新規も upsert（INSERT ... ON CONFLICT DO UPDATE）にする: 同じ新規のインスタンス（origin が undefined のまま）を
-  //   2 回 save すると、INSERT だけでは主キー違反で失敗する。2 回目は同じ値の上書きになるだけで、既存の行を
-  //   巻き戻す心配は無い（新規の id は randomUUID で、他のリクエストはまだ知らない）。
-  // WHY 上書きするのは title と completed だけ: 作成日時は作った後で変わらない（Todo に変える操作が無い）。
+  // WHY 素の INSERT（ON CONFLICT DO UPDATE で上書きしない）: 同じ新規のインスタンス（origin が undefined のまま）を
+  //   2 回 save する呼び出しは無く（create の command は 1 回だけ save する）、あれば実装ミス。upsert はそれを黙って通し、
+  //   id が衝突した別の行も上書きする。INSERT なら Postgres の一意制約違反（SQLSTATE 23505）→ 500 で気づける。
   private async insert(todo: Todo): Promise<void> {
-    await this.db
-      .insert(todos)
-      .values({
-        id: todo.id,
-        title: todo.title,
-        completed: todo.completed,
-        createdAt: todo.createdAt,
-      })
-      .onConflictDoUpdate({
-        target: todos.id,
-        set: { title: todo.title, completed: todo.completed },
-      });
+    await this.db.insert(todos).values({
+      id: todo.id,
+      title: todo.title,
+      completed: todo.completed,
+      createdAt: todo.createdAt,
+    });
   }
 
   async delete(id: string): Promise<void> {

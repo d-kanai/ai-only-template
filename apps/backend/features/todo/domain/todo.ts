@@ -169,7 +169,7 @@ export class Todo {
   // 状態遷移の共通部分: 変える項目だけを受け取り、他の値と origin を引き継いだ新しい Todo を返す。
   // WHY 遷移メソッドではなくここで origin を引き継ぐ: origin は「読み込んだときの値」で、どの遷移でも変わらない。
   //   遷移メソッドごとに書くと、遷移を足したときに引き継ぎ忘れが起き、読み込んで変えた Todo が新規（全列の
-  //   INSERT ... ON CONFLICT）として保存されて別の列の同時更新を巻き戻す。遷移メソッドは「何を変えるか」だけを書く。
+  //   INSERT）として保存され、一意制約違反になる。遷移メソッドは「何を変えるか」だけを書く。
   // WHY id と createdAt を変えられない型にする: 遷移で変わらない値（id は同一性、作成日時は生成時に決まる）。
   private transition(
     changes: Partial<Omit<TodoProps, "id" | "createdAt">>,

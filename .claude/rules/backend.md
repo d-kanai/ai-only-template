@@ -95,7 +95,7 @@ paths:
   - schema は infra に置く（テーブルの形は永続化の都合で、domain は知らない）。Entity との変換は Repository の実装が行う。
 - `PostgresTodoRepository` はコンストラクタで `Database`（Drizzle の db）を受け取る。自分ではトランザクションを始めない。
 - `save`（Issue #165）: Entity は読み込んだとき（`reconstruct`）の値を `origin` に持ち（新規の `create` は `undefined`。遷移メソッドは引き継ぐ）、Repository がそれと今の値を `changedProps`（`shared/infra/changed-props.ts`）で比べる。
-  - 新規（`origin` が `undefined`）は全列の `INSERT ... ON CONFLICT DO UPDATE`（同じ新規のインスタンスを 2 回 save しても主キー違反にしない）。
+  - 新規（`origin` が `undefined`）は全列の素の `INSERT`。同じ新規のインスタンスを 2 回 save すると一意制約違反（SQLSTATE 23505）→ 500。WHY upsert にしない: 2 回 save する呼び出しは無く（create の command は 1 回だけ）、あれば実装ミス。upsert は黙って通し、id が衝突した別の行も上書きする。InMemory も同じ id があれば Error を投げる。
   - 読み込み済みは変わった列だけを `UPDATE ... WHERE id = ...`（id・作成日時は比べない）。変わった列が無ければ SQL を発行しない。更新した行が 0 なら `requireTodo` で `not_found`。
   - WHY 全列の upsert をやめた: 同じ Todo を同時に別の列で更新すると、後から save した方が先の変更を巻き戻していた（lost update）。
   - WHY 差分を遷移メソッドに記録させず origin との比較で取る: Entity は不変で遷移メソッドは何も記録しない。記録させると遷移メソッドを足すたびに書く必要があり、書き漏れた変更は保存されない。「読み込んだときの値」は Entity の事実として持ち、どの列・どの SQL にするか（永続化の都合）は infra に置く。
@@ -107,7 +107,7 @@ paths:
   - 不変条件を満たさない行（規則を変えたのに移行していない・手で入れた行）は、Repository（`toTodo`）が DomainError ではない `Error`（id と違反の理由を message に、元の DomainError を cause に）にして投げ、API は 500。WHY: DomainError のままだと 400 になり、クライアントに直せない誤りを「リクエストの誤り」と伝える。500 なら `toProblemResponse` がログに残す。行を読み飛ばさない（不整合に気づけない）。
 - id 列は uuid。id の形の検査は presentation の `parseUuidParam`（`z.uuid()` → 404）だけで、Repository は検査しない。uuid の形でない id を Repository に渡すと Postgres の invalid input syntax のエラー（500）になる。WHY: presentation を通った id は必ず uuid の形なので、Repository に来る形の違う id は呼び出し側の実装ミス。「無い」として黙って通す（`delete` なら何もしない）と誤りが隠れる。
 - トランザクション: command を一律に包む仕組み（以前のトランザクションの runner と DI コンテナ）は持たない（Issue #123。ADR `docs/adr/architecture/20260929-constructor-injection-without-container.md`）。command はトランザクションを意識せずに書く。
-  - WHY 今は要らない: 今の command は書き込みが 1 文だけ（`save` の `INSERT ... ON CONFLICT DO UPDATE` か `UPDATE`、または `delete`）で、Postgres は 1 文を原子的に実行する（途中まで書かれた状態は残らない）。
+  - WHY 今は要らない: 今の command は書き込みが 1 文だけ（`save` の `INSERT` か `UPDATE`、または `delete`）で、Postgres は 1 文を原子的に実行する（途中まで書かれた状態は残らない）。
   - 複数の書き込みが要る command が出たら、その command にトランザクションを扱う依存をコンストラクタで注入し、command の中で `db.transaction(async (tx) => ...)` の範囲を書く（包む場所を command ごとに明示する）。ただし今の規則では application から `Database`（`apps/backend/shared/infra/database`）と `drizzle-orm` を参照できない（規則 `application`・`core-to-persistence`）ので、依存の形（domain に interface を置くか、規則を変えるか）はその Issue で決める。
   - command の中で遅い処理（外部 API など）をしない（トランザクションを張ったときに接続を 1 本占有する。接続待ちは `DATABASE_CONNECTION_TIMEOUT_MS` でエラーにする）。
   - 分離レベルは既定の READ COMMITTED（update / delete の command は findByIdOrThrow と save / delete が別の文）。読んでから書くまでの同時更新は、`save` が変わった列だけを書くことで次のようになる（Issue #165。`todo-repository.postgres.test.ts` が実 Postgres で固定）:

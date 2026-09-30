@@ -43,12 +43,16 @@ describe("InMemoryTodoRepository", () => {
     );
   });
 
-  test("同じ id で save すると上書きする", async () => {
+  // WHY 読み込んでから変える: create した Todo（新規）を変えて save し直すと新規の 2 回目（エラー）になる。
+  //   本番の update の command と同じく、findByIdOrThrow で読み込んだ Todo（origin を持つ）を変えて save する。
+  test("読み込んだ Todo を変えて save すると上書きされ、行は増えない", async () => {
     const repository = new InMemoryTodoRepository();
     const todo = Todo.create("牛乳を買う");
     await repository.save(todo);
 
-    const renamed = todo.rename("卵を買う");
+    const renamed = (await repository.findByIdOrThrow(todo.id)).rename(
+      "卵を買う",
+    );
     await repository.save(renamed);
 
     await expect(repository.findAll()).resolves.toEqual([renamed]);
@@ -159,13 +163,18 @@ describe("InMemoryTodoRepository", () => {
     await expect(repository.findAll()).resolves.toEqual([]);
   });
 
-  test("新規の Todo（create したもの）を 2 回 save しても 1 件だけ保持する", async () => {
+  // Postgres の一意制約違反と同じ契約（2 回目はエラー、行は増えない）。
+  test("新規の Todo（create したもの）を 2 回 save すると、2 回目はエラーになり行は 1 件のまま", async () => {
     const repository = new InMemoryTodoRepository();
     const todo = Todo.create("牛乳を買う");
 
     await repository.save(todo);
-    await repository.save(todo);
+    const second = repository.save(todo);
 
+    await expect(second).rejects.toBeInstanceOf(Error);
+    await expect(second).rejects.toMatchObject({
+      message: `todo already exists: ${todo.id}`,
+    });
     await expect(repository.findAll()).resolves.toEqual([todo]);
   });
 
