@@ -84,7 +84,7 @@ export class CreateTodoApi {
 // app/api/todos/route.ts が re-export する Route Handler。本番は常に Postgres で組み立てる。
 // 組み立ての WHY（ここで組み立てる・Repository を api ファイルごとに作ってよい・InMemory に切り替えない）は list-todos.api.ts の GET のコメント。
 // 書き込みの command には、トランザクションを張る PostgresTransactionRunner を Repository と同じ db で渡す（Issue #215）。
-//   WHY 同じ getDatabase().db: command の読み込み（findByIdOrThrow）と書き込みは runner の tx で、Repository の query（findAll /
+//   WHY 同じ getDatabase().db: command の読み込み（findByIdForUpdate）と書き込みは runner の tx で、Repository の query（findAll /
 //   findById）は Repository の db で行う。どちらも同じプールを使う。
 export const POST = new CreateTodoApi(
   new CreateTodoCommand(

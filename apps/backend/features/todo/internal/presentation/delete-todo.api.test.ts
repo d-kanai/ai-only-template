@@ -70,7 +70,7 @@ function spiedRepository() {
   return {
     repository,
     findById: vi.spyOn(repository, "findById"),
-    findByIdOrThrow: vi.spyOn(repository, "findByIdOrThrow"),
+    findByIdForUpdate: vi.spyOn(repository, "findByIdForUpdate"),
     insert: vi.spyOn(repository, "insert"),
     update: vi.spyOn(repository, "update"),
     delete: vi.spyOn(repository, "delete"),
@@ -98,7 +98,7 @@ describe("DELETE /api/todos/:id", () => {
   });
 
   // WHY 本番の DELETE（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない（Issue #59）
-  //   ことを、Postgres の Repository が呼ばれることで固定する。runner の run と findByIdOrThrow と delete を差し替えるので DB には接続しない。
+  //   ことを、Postgres の Repository が呼ばれることで固定する。runner の run と findByIdForUpdate と delete を差し替えるので DB には接続しない。
   test("本番の DELETE は Postgres の runner が張ったトランザクションで、Postgres の Repository から削除する", async () => {
     const todo = Todo.create("牛乳を買う");
     // WHY runner の run を差し替える: 本番の組み立ての PostgresTransactionRunner が DB に接続しないよう、work を呼ぶだけにする。
@@ -108,7 +108,7 @@ describe("DELETE /api/todos/:id", () => {
       .mockImplementation((work) => work(inMemoryTransaction));
     vi.spyOn(
       PostgresTodoRepository.prototype,
-      "findByIdOrThrow",
+      "findByIdForUpdate",
     ).mockResolvedValue(todo);
     const remove = vi
       .spyOn(PostgresTodoRepository.prototype, "delete")
@@ -145,7 +145,7 @@ describe("DELETE /api/todos/:id", () => {
 
       await expectProblem(response, notFoundProblem(id));
       expect(spies.findById).not.toHaveBeenCalled();
-      expect(spies.findByIdOrThrow).not.toHaveBeenCalled();
+      expect(spies.findByIdForUpdate).not.toHaveBeenCalled();
       expect(spies.insert).not.toHaveBeenCalled();
       expect(spies.update).not.toHaveBeenCalled();
       expect(spies.delete).not.toHaveBeenCalled();

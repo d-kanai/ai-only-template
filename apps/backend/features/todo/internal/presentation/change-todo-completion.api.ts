@@ -92,7 +92,7 @@ export class ChangeTodoCompletionApi {
 //   （presentation）だけ（rule-tests/architecture.test.ts の module-expose-only-from-presentation）。command は関数を受け取るだけで、
 //   notification モジュールを知らない。
 // 書き込みの command には、トランザクションを張る PostgresTransactionRunner を Repository と同じ db で渡す（Issue #215）。
-//   WHY 同じ getDatabase().db: command の読み込み（findByIdOrThrow）と書き込みは runner の tx で、Repository の query（findAll /
+//   WHY 同じ getDatabase().db: command の読み込み（findByIdForUpdate）と書き込みは runner の tx で、Repository の query（findAll /
 //   findById）は Repository の db で行う。どちらも同じプールを使う。
 export const PUT = new ChangeTodoCompletionApi(
   new ChangeTodoCompletionCommand(

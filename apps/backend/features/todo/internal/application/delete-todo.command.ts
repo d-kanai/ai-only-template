@@ -13,8 +13,8 @@ export class DeleteTodoCommand {
   async execute(id: string): Promise<void> {
     await this.transactions.run(async (tx) => {
       // WHY 先に存在を確かめる: リポジトリの delete は無い id でも何もしない（TodoRepository の約束）。
-      //   API は「無い id の削除は 404」を仕様にしているので、無ければ findByIdOrThrow が not_found を投げる。
-      await this.repository.findByIdOrThrow(id, tx);
+      //   API は「無い id の削除は 404」を仕様にしているので、無ければ findByIdForUpdate が not_found を投げる。
+      await this.repository.findByIdForUpdate(id, tx);
       await this.repository.delete(id, tx);
     });
   }

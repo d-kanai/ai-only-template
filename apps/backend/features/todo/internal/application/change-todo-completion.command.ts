@@ -30,8 +30,8 @@ export class ChangeTodoCompletionCommand {
 
   async execute(input: ChangeTodoCompletionInput): Promise<Todo> {
     const { current, changed } = await this.transactions.run(async (tx) => {
-      // 無い id は findByIdOrThrow が not_found の DomainError を投げる（API で 404）。
-      const current = await this.repository.findByIdOrThrow(input.id, tx);
+      // 無い id は findByIdForUpdate が not_found の DomainError を投げる（API で 404）。
+      const current = await this.repository.findByIdForUpdate(input.id, tx);
       const changed = current.changeCompletion(input.completed);
       await this.repository.update(changed, tx);
       return { current, changed };
