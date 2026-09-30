@@ -1,14 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { now } from "@repo/shared/now";
 import { z } from "zod";
-import { DomainError } from "../../../shared/domain/domain-error";
-import {
-  type ErrorKey,
-  type ErrorKeyParams,
-  type ErrorParamsArgs,
-  isErrorKey,
-} from "../../../shared/domain/error-key";
 import { keyedIssue, keyedRefine } from "../../../shared/domain/keyed-issue";
+import { validate } from "../../../shared/domain/validate";
 
 // タイトルの上限の文字数（前後の空白を除いたコードポイント数）。
 // WHY export する（Issue #144）: presentation のリクエストのスキーマ（create-todo.api.ts・update-todo.api.ts）が同じ上限を
@@ -23,7 +17,7 @@ export const TODO_TITLE_MAX_LENGTH = 100;
 // WHY タイトル以外（id・完了状態・作成日時）も規則に含める: どの口から来た値も、すべてが規則を満たすことを 1 つの
 //   スキーマで宣言する。create の id は randomUUID で常に満たすが、reconstruct は DB の行（Postgres の uuid 型は
 //   版の桁が 0 の値も受け付ける）を受け取る。create の作成日時（now()）も Date であることを型でしか保証しないので、同じく検証する。
-// WHY 項目ごとにキーを付ける: validate が最初の issue の message（= キー）を DomainError の key にする。
+// WHY 項目ごとにキーを付ける: validate（shared/domain/validate.ts）が最初の issue の message（= キー）を DomainError の key にする。
 //   zod の既定の文言（英語で zod の語彙を含む）を domain の外に出さない。キーの無い issue を作らないよう、検査を持つ
 //   zod のスキーマ・refine にはすべて keyedIssue / keyedRefine を渡す（z.object 自身は、値が型の上でオブジェクトなので
 //   失敗しない）。渡し忘れは validate が DomainError ではない Error（500）にする。
@@ -73,45 +67,6 @@ function todoPropsSchema() {
 // WHY 型をスキーマから導出する: 規則と型を 1 か所で宣言し、項目を足したときのずれを無くす。
 // WHY 入力の型（z.input）にする: コンストラクタは検証する前の値を受け取る（出力の型と同じ形だが、「検証済み」を意味しない）。
 type TodoProps = z.input<ReturnType<typeof todoPropsSchema>>;
-
-// 規則で検証し、違反なら DomainError(validation_error) を投げる。
-// WHY ZodError をそのまま投げない: domain の外（presentation の toProblemResponse）は DomainError だけを見て 400 に変換する。
-//   zod を使っていることを domain の外に漏らさない。
-// WHY key と params は最初の issue: 失敗した safeParse の issues は必ず 1 件以上ある。タイトルの規則は同じ値で 1 つしか
-//   失敗しないので、最初の 1 件がそのまま理由になる。複数の項目が同時に違反するとき（id とタイトルなど）は
-//   スキーマの項目の順で最初のものになる。利用者の入力で違反しうるのはタイトルだけなので、1 件で足りる。
-// WHY export する: keyedIssue / keyedRefine を付けない一時的なスキーマで、キーの無い issue の扱いを直接テストするため。
-export function validate<Schema extends z.ZodType>(
-  schema: Schema,
-  value: z.input<Schema>,
-): z.output<Schema> {
-  const result = schema.safeParse(value);
-  if (!result.success) {
-    // WHY as: zod の issue の params は Record<string, any>（refine の custom の issue だけが持ち、型の検査の issue には
-    //   無い）で、キーとの対応を型で持たない。キーと params の組はスキーマの宣言（keyedIssue / keyedRefine）が型で縛って
-    //   作ったので、ここではそれを DomainError に戻すだけにする。
-    const { message, params } = result.error.issues[0] as {
-      message: string;
-      params?: ErrorKeyParams[ErrorKey];
-    };
-    // WHY キーでない message を DomainError にしない: keyedIssue / keyedRefine を渡し忘れた検査では、message が zod の既定の
-    //   英語の文言になる。それを key として返すと、画面の辞書に無いキーで API の契約（Problem Details の key）を破る。
-    //   利用者の入力の誤り（400）ではなく実装の誤りなので、DomainError ではない Error にして presentation に 500 を返させ、
-    //   ログ（message と cause の ZodError）で開発中に足し忘れに気づけるようにする。
-    if (!isErrorKey(message)) {
-      throw new Error(
-        `zod issue has no ErrorKey (pass keyedIssue / keyedRefine to the schema): ${message}`,
-        { cause: result.error },
-      );
-    }
-    throw new DomainError(
-      "validation_error",
-      message,
-      ...([params] as ErrorParamsArgs<ErrorKey>),
-    );
-  }
-  return result.data;
-}
 
 // Todo の Entity（集約ルート）。
 // WHY 不変（immutable）にする: 変更系のメソッドは新しい Todo を返し、自分は変えない。

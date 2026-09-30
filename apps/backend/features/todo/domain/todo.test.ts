@@ -1,11 +1,9 @@
 // @vitest-environment node
 import { now } from "@repo/shared/now";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { z } from "zod";
 import { DomainError } from "../../../shared/domain/domain-error";
 import type { ErrorKey } from "../../../shared/domain/error-key";
-import { keyedRefine } from "../../../shared/domain/keyed-issue";
-import { TODO_TITLE_MAX_LENGTH, Todo, validate } from "./todo";
+import { TODO_TITLE_MAX_LENGTH, Todo } from "./todo";
 
 // WHY 時計（now）を差し替える: Todo.create は作成日時を now() から自動で入れる（引数では受け取らない）。
 //   テストで決まった時刻にするには、現在時刻の唯一の出口（apps/shared/now.ts）を差し替えるしかない。
@@ -286,39 +284,4 @@ describe("Todo.reconstruct", () => {
       );
     },
   );
-});
-
-describe("validate", () => {
-  test("keyedRefine で付けたキーと params を DomainError の key と params にする", () => {
-    const schema = z
-      .string()
-      .refine(() => false, keyedRefine("todo.title.tooLong", { max: 3 }));
-
-    expectValidationError(() => validate(schema, "abcd"), {
-      key: "todo.title.tooLong",
-      params: { max: 3 },
-    });
-  });
-
-  // keyedIssue / keyedRefine を付け忘れた検査では、issue の message が zod の既定の英語の文言になる。それを ErrorKey として
-  //   返すと、画面の辞書に無いキーとして API の契約を破る。利用者の入力の誤り（400）ではなく実装の誤りなので、
-  //   DomainError ではない Error（presentation が 500 にしてログに出す）にし、開発中に気づけるようにする。
-  test("キーを付け忘れた検査で失敗したら、DomainError ではない Error を zod の文言と ZodError を添えて投げる", () => {
-    const schema = z.string().min(1);
-    const zodMessage = schema.safeParse("").error?.issues[0]?.message;
-
-    try {
-      validate(schema, "");
-    } catch (error) {
-      expect(error).not.toBeInstanceOf(DomainError);
-      expect(error).toEqual(
-        new Error(
-          `zod issue has no ErrorKey (pass keyedIssue / keyedRefine to the schema): ${zodMessage}`,
-        ),
-      );
-      expect((error as Error).cause).toBeInstanceOf(z.ZodError);
-      return;
-    }
-    throw new Error("Error が投げられなかった");
-  });
 });
