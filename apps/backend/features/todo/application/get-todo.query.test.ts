@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
 import { DomainError } from "../../../shared/domain/domain-error";
+import { InMemoryTodoRepository } from "../../../test-support/todo/todo-repository.in-memory";
 import { Todo } from "../domain/todo";
-import { InMemoryTodoRepository } from "../infra/todo-repository.in-memory";
 import { GetTodoQuery } from "./get-todo.query";
 
 describe("GetTodoQuery", () => {

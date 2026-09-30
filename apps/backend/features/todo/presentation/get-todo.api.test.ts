@@ -2,9 +2,9 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { Problem } from "../../../shared/presentation/problem";
+import { InMemoryTodoRepository } from "../../../test-support/todo/todo-repository.in-memory";
 import { GetTodoQuery } from "../application/get-todo.query";
 import { Todo } from "../domain/todo";
-import { InMemoryTodoRepository } from "../infra/todo-repository.in-memory";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 import {
   GetTodoApi,

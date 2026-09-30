@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { InMemoryTodoRepository } from "../../../test-support/todo/todo-repository.in-memory";
 import { ListTodosQuery } from "../application/list-todos.query";
 import { Todo } from "../domain/todo";
 import type { TodoRepository } from "../domain/todo-repository";
-import { InMemoryTodoRepository } from "../infra/todo-repository.in-memory";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 import {
   ListTodosApi,

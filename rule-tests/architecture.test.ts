@@ -78,7 +78,7 @@ const E2E_ROOT = "apps/e2e";
 const SHARED_ROOT = "apps/shared";
 
 // WHY テストを対象外にする: テストは組み立てのために規則の外側を参照する（例: presentation のテストが
-//   infra の InMemory リポジトリを new して query / command のコンストラクタに渡す。.claude/rules/testing.md の「置き方と環境」）。
+//   test-support の InMemory リポジトリを new して query / command のコンストラクタに渡す。.claude/rules/testing.md の「置き方と環境」）。
 //   規則は本番のコードの依存の向きを縛るもので、テストの組み立てまで縛ると正当なテストが書けなくなる。
 // WHY .js / .jsx / .mjs / .cjs と .mts / .cts も対象にする: tsconfig.json が allowJs: true で、include が **/*.ts / **/*.tsx /
 //   **/*.mts を含み、JS のファイルや ESM / CJS を明示した拡張子のファイルも同じビルドに入り、同じ規則の対象になるため。
@@ -6901,9 +6901,14 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { todos } from "./schema";',
     'import { todos as t } from "./schema";',
   ),
-  "apps/backend/features/todo/infra/todo-repository.in-memory.ts": lines(
-    'import type { Todo } from "../domain/todo";',
-    'import type { TodoRepository } from "../domain/todo-repository";',
+  // InMemory の実装（Issue #191 で features/todo/infra/ から test-support/<feature>/ に移した）。test-support は層の規則の外なので、
+  //   feature の domain・infra の schema・backend/shared/infra を値で参照してよい（本番のコードからの参照は test-support.test.ts が止める）。
+  "apps/backend/test-support/todo/todo-repository.in-memory.ts": lines(
+    'import { now } from "@repo/shared/now";',
+    'import { changedProps } from "../../shared/infra/changed-props";',
+    'import { Todo } from "../../features/todo/domain/todo";',
+    'import type { TodoRepository } from "../../features/todo/domain/todo-repository";',
+    'import { todos } from "../../features/todo/infra/schema";',
   ),
   // frontend-hardcoded-text・server-hardcoded-text（Issue #116）: 辞書の日本語、t(...) で描く画面、一覧に無い属性、
   //   空白だけの alt、埋め込み式だけのテンプレート、コメントの日本語、ErrorKey で表すエラー、テストの日本語は通す。
@@ -6949,7 +6954,7 @@ const MUST_PASS_FILES: Record<string, string> = {
   ),
   // テストファイルと TS / JS 以外のファイルは検査しない。
   "apps/backend/features/todo/presentation/list-todos.api.test.ts": lines(
-    'import { InMemoryTodoRepository } from "../infra/todo-repository.in-memory";',
+    'import { InMemoryTodoRepository } from "../../../test-support/todo/todo-repository.in-memory";',
   ),
   "apps/frontend_customer/features/todo/components/todo-item.test.tsx": lines(
     'import { ListTodosApi } from "@repo/backend/features/todo/presentation/list-todos.api";',
