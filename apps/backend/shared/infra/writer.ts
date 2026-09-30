@@ -42,7 +42,7 @@ export type TableWithId = PgTable & { readonly id: PgColumn };
 // WHY 狭い interface にする（drizzle の tx をそのまま渡さない）: tx をそのまま渡すと、Repository が記録もログも通らない
 //   tx.insert(...).values(...) を書けてしまう。書き込みは表と行（と id）だけを受け取る形にし、記録とログを必ず通す。
 export interface Writer {
-  // 読み取りは drizzle の select のまま（同じトランザクションで読む。findByIdOrThrow の LEFT JOIN と FOR UPDATE に使う）。
+  // 読み取りは drizzle の select のまま（同じトランザクションで読む。findByIdForUpdate の LEFT JOIN と FOR UPDATE に使う）。
   // WHY 読み取りは包まない: 読み取りは変更履歴もログも要らず、JOIN・並べ替え・ロックの書き方は drizzle のものが使いやすい。
   readonly select: DrizzleTransaction["select"];
   // 行を 1 文で INSERT し、DB が保存した行（全列）を入れた順に返す。行が空なら何もせず空配列を返す。
@@ -140,7 +140,7 @@ export class PostgresWriter implements Writer {
         .where(eq(table.id, id))
         .for("update");
       // WHY Error（not_found にしない）: Repository は同じトランザクションで行を FOR UPDATE で読んでから update する（command の
-      //   findByIdOrThrow）ので、行が無いのは呼び出し側の実装ミス。英語: 開発者向けのエラー（Issue #116）。
+      //   findByIdForUpdate）ので、行が無いのは呼び出し側の実装ミス。英語: 開発者向けのエラー（Issue #116）。
       if (before === undefined) {
         throw new Error(`${getTableName(table)} has no row to update: ${id}`);
       }

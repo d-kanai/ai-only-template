@@ -9,7 +9,7 @@ import { todoStatusChanges, todos } from "./schema";
 
 type TodoRow = typeof todos.$inferSelect;
 
-// 読み取りに使う接続（query は db、command の findByIdOrThrow は Writer の select。同じ SELECT を組み立てる）。
+// 読み取りに使う接続（query は db、command の findByIdForUpdate は Writer の select。同じ SELECT を組み立てる）。
 type Reader = Pick<Database, "select">;
 
 // 行 → Entity の変換。
@@ -152,7 +152,7 @@ export class PostgresTodoRepository implements TodoRepository {
   }
 
   // command 用: tx の中で、根の行（todos）を FOR UPDATE でロックしてから（1 文目）、findById と同じ SELECT で集約を読む（2 文目）。
-  //   ロックは tx の終わりまで続き、同じ Todo を変える別の command の findByIdOrThrow と DELETE は、この tx が終わるまで待つ。
+  //   ロックは tx の終わりまで続き、同じ Todo を変える別の command の findByIdForUpdate と DELETE は、この tx が終わるまで待つ。
   // WHY ロックと読み込みを別の文にする（読み込みの SELECT に FOR UPDATE OF todos を付けない）: READ COMMITTED で 1 文の
   //   SELECT ... LEFT JOIN ... FOR UPDATE がロックを待つと、ロックが取れた後に todos の行だけを最新の版で読み直し、JOIN した履歴の
   //   行は文の始めのスナップショットのままになる。公式（https://www.postgresql.org/docs/current/transaction-iso.html の Read
@@ -167,10 +167,12 @@ export class PostgresTodoRepository implements TodoRepository {
   // WHY 行の有無はロックの文で見ない（2 文目の結果で not_found にする）: 分岐を 1 つにする。無い id でも 2 文目は空を返すだけ。
   // WHY FOR UPDATE（FOR SHARE / FOR KEY SHARE にしない）: 同じ Todo の 2 つの command が互いに待つ（直列化）。共有ロックだと 2 つとも
   //   読めてしまい、読んだ値を前提にした書き込み（完了の履歴の位置・通知の条件）がずれる。todo-repository.postgres.test.ts が、
-  //   DELETE と別の findByIdOrThrow が待つことで固定する。
+  //   DELETE と別の findByIdForUpdate が待つことで固定する。
   // WHY 根の行だけをロックする（履歴の行はロックしない）: 同じ Todo を変える command は必ず根の行をロックして読むので、根の行だけで
-  //   直列化できる。履歴を足す書き込みも command（findByIdOrThrow の後）だけ。
-  async findByIdOrThrow(id: string, tx: Transaction): Promise<Todo> {
+  //   直列化できる。履歴を足す書き込みも command（findByIdForUpdate の後）だけ。
+  // WHY 名前を ForUpdate で終える: ロックすることを名前で示す（findById はロックしない。Issue #221）。本体に .for( があるメソッドの
+  //   名前は rule-tests/persistence.test.ts の lock-method-name-for-update が縛る。
+  async findByIdForUpdate(id: string, tx: Transaction): Promise<Todo> {
     const writer = writerOf(tx);
     await writer.select().from(todos).where(eq(todos.id, id)).for("update");
     const [todo] = toTodos(await selectTodos(writer, eq(todos.id, id)));
@@ -204,7 +206,7 @@ export class PostgresTodoRepository implements TodoRepository {
   // 読み込んだときから変わった列だけを UPDATE し、読み込んだときより後ろに増えた完了の履歴だけを INSERT する（Issue #165・#188）。
   //   どちらも無ければ Writer は SQL を発行しない（変わった列が空・増えた履歴が空）。
   // WHY 変わった列だけ: 全列を書くと、ロックせずに読んだ Todo（query の値など）で書いたときに、別の列の変更を読み込んだときの値に
-  //   巻き戻す（lost update）。command は findByIdOrThrow で行をロックしてから書くので同時には読まないが、書く列を最小にしておけば
+  //   巻き戻す（lost update）。command は findByIdForUpdate で行をロックしてから書くので同時には読まないが、書く列を最小にしておけば
   //   ロックを外したときにも lost update が戻らない。同じ列は後勝ち（楽観ロックの version 列は入れない。ユーザー判断）。
   // WHY 差分は origin と今の値の比較（changedProps）で取る: Entity の遷移メソッドは何も記録しない（todo.ts の origin）。
   // WHY 比べる列は title と completed だけ: Todo を変える操作（rename・changeCompletion）が変えるのはこの 2 つで、id と作成日時は
@@ -219,7 +221,7 @@ export class PostgresTodoRepository implements TodoRepository {
     const { origin } = todo;
     if (origin === undefined) {
       throw new Error(
-        `update takes a loaded Todo (findByIdOrThrow), but got a new one: ${todo.id}`,
+        `update takes a loaded Todo (findByIdForUpdate), but got a new one: ${todo.id}`,
       );
     }
     const writer = writerOf(tx);

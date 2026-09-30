@@ -92,7 +92,7 @@ function remove(id: string): Promise<void> {
 
 // command と同じく、トランザクションの中で行をロックして読む（トランザクションはすぐ終わるので、ロックもすぐ外れる）。
 function load(id: string): Promise<Todo> {
-  return inTransaction((tx) => repository().findByIdOrThrow(id, tx));
+  return inTransaction((tx) => repository().findByIdForUpdate(id, tx));
 }
 
 // 任意のタイミングで resolve できる Promise（同時に動く 2 つのトランザクションの順序を決める）。
@@ -310,7 +310,7 @@ describe("PostgresTodoRepository", () => {
     expect(todos.map((todo) => todo.title)).toEqual(["小さい id", "大きい id"]);
   });
 
-  // 本番の rename / change-todo-completion の command と同じく、findByIdOrThrow で読み込んだ Todo（origin を持つ）を変えて update する。
+  // 本番の rename / change-todo-completion の command と同じく、findByIdForUpdate で読み込んだ Todo（origin を持つ）を変えて update する。
   test("読み込んだ Todo を変えて update すると上書きされ、行は増えない", async () => {
     const todo = Todo.create("牛乳を買う");
     await insert(todo);
@@ -325,7 +325,7 @@ describe("PostgresTodoRepository", () => {
 
   // ここから下の insert / update の契約のテストは test-support/todo/todo-repository.in-memory.test.ts と同じ契約で、同じテスト名に
   //   そろえる（Issue #165・#215）。DB を直接見る・spy するテストは Postgres だけにあり、そのことをテストの上に書く。
-  // WHY origin で取り違えを止める: insert は新規（Todo.create）、update は読み込み済み（findByIdOrThrow）を受け取る。逆に渡すと、
+  // WHY origin で取り違えを止める: insert は新規（Todo.create）、update は読み込み済み（findByIdForUpdate）を受け取る。逆に渡すと、
   //   insert は読み込み済みの Todo を新規として全列を書き、update は差分の基準（origin）が無い。呼び出し側の誤りとして Error にする。
   test("読み込み済みの Todo（origin がある）を insert すると Error を投げ、何も書かない", async () => {
     const todo = Todo.create("牛乳を買う");
@@ -349,7 +349,7 @@ describe("PostgresTodoRepository", () => {
       inTransaction((tx) => repository().update(todo, tx)),
     ).rejects.toEqual(
       new Error(
-        `update takes a loaded Todo (findByIdOrThrow), but got a new one: ${todo.id}`,
+        `update takes a loaded Todo (findByIdForUpdate), but got a new one: ${todo.id}`,
       ),
     );
     await expect(repository().findAll()).resolves.toEqual([]);
@@ -357,7 +357,7 @@ describe("PostgresTodoRepository", () => {
 
   // WHY 読み込み済みの Todo は変わった列だけを UPDATE する: 全列を書くと、同じ Todo をロックせずに 2 か所で読み（query で読んだ
   //   値など）、別の列を変えて書いたときに、後から書いた方が先の変更を読み込んだときの値に巻き戻す（lost update）。
-  //   command は findByIdOrThrow で行をロックするので同時には読まない（下の「同時に動かすと」のテスト）が、update の契約として
+  //   command は findByIdForUpdate で行をロックするので同時には読まない（下の「同時に動かすと」のテスト）が、update の契約として
   //   変わった列だけを書くことを、ロックせずに読んだ 2 つの Todo（findById）で固定する。
   test("ロックせずに同じ Todo を 2 回読み、片方で完了にして update、もう片方で名前を変えて update すると、両方の変更が残る（別の列の変更を巻き戻さない）", async () => {
     const todo = Todo.create("牛乳を買う");
@@ -422,27 +422,27 @@ describe("PostgresTodoRepository", () => {
     });
   });
 
-  // 同じ Todo を変える 2 つの command（Issue #165 の同時更新。Issue #215 で行ロックに変えた）: 先の command が findByIdOrThrow で
-  //   根の行をロックしている間、後の command の findByIdOrThrow は待ち、先の COMMIT の後の値を読む（直列化）。そのため、
+  // 同じ Todo を変える 2 つの command（Issue #165 の同時更新。Issue #215 で行ロックに変えた）: 先の command が findByIdForUpdate で
+  //   根の行をロックしている間、後の command の findByIdForUpdate は待ち、先の COMMIT の後の値を読む（直列化）。そのため、
   //   別の列の変更は両方残り、同じ列は後勝ちになる（後の command は先の変更を読んだうえで変える）。
   // WHY 2 つのトランザクションを同時に開く: 以前は 2 回読んでから順に save して同時更新を再現したが、今の command は読み込みと
   //   書き込みが同じトランザクションで、読み込みで行をロックする。ロックを待つことを、後の command が先の接続を待っている
   //   （pg_blocking_pids）状態になってから先を進めることで確かめる。ロックが無ければ後の command は待たず、この状態にならない。
-  test("同じ Todo の 2 つの command（findByIdOrThrow → update）を同時に動かすと、後の command は先の COMMIT まで待ってから読み、両方の変更が残る", async () => {
+  test("同じ Todo の 2 つの command（findByIdForUpdate → update）を同時に動かすと、後の command は先の COMMIT まで待ってから読み、両方の変更が残る", async () => {
     const todo = Todo.create("牛乳を買う");
     await insert(todo);
     const firstLocked = deferred<number>();
     const releaseFirst = deferred();
 
     const first = inTransaction(async (tx) => {
-      const a = await repository().findByIdOrThrow(todo.id, tx);
+      const a = await repository().findByIdForUpdate(todo.id, tx);
       firstLocked.resolve(await backendPid(tx));
       await releaseFirst.promise;
       await repository().update(a.changeCompletion(true), tx);
     });
     const firstPid = await firstLocked.promise;
     const second = inTransaction(async (tx) => {
-      const b = await repository().findByIdOrThrow(todo.id, tx);
+      const b = await repository().findByIdForUpdate(todo.id, tx);
       await repository().update(b.rename("x"), tx);
       return b;
     });
@@ -471,12 +471,12 @@ describe("PostgresTodoRepository", () => {
   // WHY 根の行をロックする: 読み込んだ後に別の要求が同じ Todo を消すと、その後の update（完了の履歴の INSERT）が外部キー違反などで
   //   失敗する。ロックすれば DELETE はこのトランザクションの終わりまで待つ。lock_timeout を短くして、待つ（= ロックがある）ことを
   //   55P03（lock_not_available）で確かめる（時間の長さで「待った」を判定しない）。
-  test("findByIdOrThrow で読んだ Todo の行は、そのトランザクションの終わりまで別の接続から DELETE できない（待つ）", async () => {
+  test("findByIdForUpdate で読んだ Todo の行は、そのトランザクションの終わりまで別の接続から DELETE できない（待つ）", async () => {
     const todo = Todo.create("牛乳を買う");
     await insert(todo);
 
     await inTransaction(async (tx) => {
-      await repository().findByIdOrThrow(todo.id, tx);
+      await repository().findByIdForUpdate(todo.id, tx);
       await expect(
         database.db.transaction(async (other) => {
           await other.execute(sql`set local lock_timeout = '50ms'`);
@@ -490,22 +490,22 @@ describe("PostgresTodoRepository", () => {
 
   // WHY ロックを待った後の読み込みで not_found にする: 先の command が消して COMMIT した Todo を、待っていた後の command が読むと、
   //   ロックの文は消えた行を返さず（READ COMMITTED は待った後に行の最新の版を見る）、集約を読む 2 文目も空になる。そのまま
-  //   update / delete に進まず、無い Todo として 404 にする（findByIdOrThrow の契約）。
-  test("findByIdOrThrow がロックを待っている間に、先の command が同じ Todo を delete して COMMIT すると、not_found の DomainError を投げる", async () => {
+  //   update / delete に進まず、無い Todo として 404 にする（findByIdForUpdate の契約）。
+  test("findByIdForUpdate がロックを待っている間に、先の command が同じ Todo を delete して COMMIT すると、not_found の DomainError を投げる", async () => {
     const todo = Todo.create("牛乳を買う");
     await insert(todo);
     const firstLocked = deferred<number>();
     const releaseFirst = deferred();
 
     const first = inTransaction(async (tx) => {
-      await repository().findByIdOrThrow(todo.id, tx);
+      await repository().findByIdForUpdate(todo.id, tx);
       firstLocked.resolve(await backendPid(tx));
       await releaseFirst.promise;
       await repository().delete(todo.id, tx);
     });
     const firstPid = await firstLocked.promise;
     const second = inTransaction((tx) =>
-      repository().findByIdOrThrow(todo.id, tx),
+      repository().findByIdForUpdate(todo.id, tx),
     );
     // WHY finally で先を進め、両方の終わりを待つ: 上の「同時に動かすと」のテストと同じ（失敗しても次のテストに持ち越さない）。
     try {
@@ -528,7 +528,7 @@ describe("PostgresTodoRepository", () => {
     await insert(todo);
 
     const read = await inTransaction(async (tx) => {
-      await repository().findByIdOrThrow(todo.id, tx);
+      await repository().findByIdForUpdate(todo.id, tx);
       return {
         all: await repository().findAll(),
         one: await repository().findById(todo.id),
@@ -559,7 +559,7 @@ describe("PostgresTodoRepository", () => {
     expect(statements).toEqual(["begin", "commit", "begin", "commit"]);
   });
 
-  // WHY Error（not_found にしない）: command は findByIdOrThrow で行をロックしてから update するので、読んだ後に消されることは無い。
+  // WHY Error（not_found にしない）: command は findByIdForUpdate で行をロックしてから update するので、読んだ後に消されることは無い。
   //   ロックせずに読んだ Todo（findById）で消された後に update するのは呼び出し側の誤りで、Writer が Error（500）にする。
   //   以前の upsert は、読み込んだ後に消された Todo を INSERT で戻していた（PUT と DELETE の競合）。
   test("ロックせずに読んだ後に delete された Todo を変えて update すると、Error を投げ、Todo を戻さない", async () => {
@@ -602,7 +602,7 @@ describe("PostgresTodoRepository", () => {
   });
 
   // WHY: 読み込んだ Todo が origin を持たないと、update が差分を取れない（insert に渡すと新規として全列を書く）。
-  test("findById・findByIdOrThrow・findAll が返す Todo は、読み込んだときの値を origin に持つ", async () => {
+  test("findById・findByIdForUpdate・findAll が返す Todo は、読み込んだときの値を origin に持つ", async () => {
     const todo = Todo.create("牛乳を買う").changeCompletion(true);
     await insert(todo);
     const values = {
@@ -731,8 +731,8 @@ describe("PostgresTodoRepository", () => {
 
   // WHY 足した順（position）で返す: 日時が同じ履歴（作成と完了が同じミリ秒）は、日時だけでは順が決まらない。行の物理的な順
   //   （入れた順）に頼らないことを確かめるため、Postgres では position の逆順に行を入れる。
-  // findByIdOrThrow（行ロックの読み込み）も同じ SELECT（並び順）で読む。
-  test("findAll・findById・findByIdOrThrow は完了の履歴を足した順で返す", async () => {
+  // findByIdForUpdate（行ロックの読み込み）も同じ SELECT（並び順）で読む。
+  test("findAll・findById・findByIdForUpdate は完了の履歴を足した順で返す", async () => {
     const createdAt = new Date("2026-09-28T00:00:00.000Z");
     const id = "00000000-0000-4000-8000-000000000001";
     await database.db
@@ -841,7 +841,7 @@ describe("PostgresTodoRepository", () => {
   //   Pool の query で送る（node-postgres/session.js の execute が client.query を呼び、client はコンストラクタで渡した Pool）。
   //   Pool.query は内部で接続を借りて Client の query を呼ぶので、Pool の query の回数が文の数になる（pg 8.23.0）。drizzle が
   //   Pool を通さずに送る形に変わると 0 回になり、このテストは落ちる（数え方の前提が崩れたことに気づける）。
-  // findByIdOrThrow も同じ SELECT（1 文）で読む（トランザクションの接続で送るので、ここでは数えない）。
+  // findByIdForUpdate も同じ SELECT（1 文）で読む（トランザクションの接続で送るので、ここでは数えない）。
   test("一覧 / 詳細の読み出しは SQL 1 文で行う（読み出しの途中で別の要求の変更が片方だけに見えない）", async () => {
     const todo = Todo.create("牛乳を買う").changeCompletion(true);
     await insert(todo);
@@ -1089,7 +1089,7 @@ describe("PostgresTodoRepository", () => {
     const written = await changeLogsWrittenBy(async () => {
       await inTransaction((tx) => repository().insert(todo, tx), actorId);
       await inTransaction(async (tx) => {
-        const loaded = await repository().findByIdOrThrow(todo.id, tx);
+        const loaded = await repository().findByIdForUpdate(todo.id, tx);
         await repository().update(loaded.rename("x"), tx);
       }, actorId);
       await inTransaction((tx) => repository().delete(todo.id, tx), actorId);
@@ -1306,14 +1306,14 @@ describe("PostgresTodoRepository", () => {
     ).resolves.toBeUndefined();
   });
 
-  test("findByIdOrThrow は id に一致する Todo を返す", async () => {
+  test("findByIdForUpdate は id に一致する Todo を返す", async () => {
     const todo = Todo.create("牛乳を買う");
     await insert(todo);
 
     await expect(load(todo.id)).resolves.toEqual(todo);
   });
 
-  test("無い id の findByIdOrThrow は、その id を params に持つ DomainError(not_found, todo.notFound) を投げる", async () => {
+  test("無い id の findByIdForUpdate は、その id を params に持つ DomainError(not_found, todo.notFound) を投げる", async () => {
     const id = "00000000-0000-4000-8000-000000000000";
 
     await expect(load(id)).rejects.toEqual(
@@ -1449,7 +1449,7 @@ describe("PostgresTodoRepository", () => {
   }
 
   test.each(INVALID_ROWS)(
-    "不変条件を満たさない行（%s）の findById・findByIdOrThrow は、DomainError ではない Error を投げる（API で 500 になるように）",
+    "不変条件を満たさない行（%s）の findById・findByIdForUpdate は、DomainError ではない Error を投げる（API で 500 になるように）",
     async (_label, override, cause) => {
       const row = invalidRow(override);
       await database.db.insert(todos).values(row);

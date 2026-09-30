@@ -95,31 +95,31 @@ describe("InMemoryTodoRepository", () => {
     await expect(repository.findById("missing")).resolves.toBeUndefined();
   });
 
-  test("findByIdOrThrow は id に一致する Todo を返す", async () => {
+  test("findByIdForUpdate は id に一致する Todo を返す", async () => {
     const repository = new InMemoryTodoRepository();
     const todo = Todo.create("牛乳を買う");
     await repository.insert(todo, tx);
 
-    await expect(repository.findByIdOrThrow(todo.id, tx)).resolves.toEqual(
+    await expect(repository.findByIdForUpdate(todo.id, tx)).resolves.toEqual(
       todo,
     );
   });
 
-  test("無い id の findByIdOrThrow は、その id を params に持つ DomainError(not_found, todo.notFound) を投げる", async () => {
+  test("無い id の findByIdForUpdate は、その id を params に持つ DomainError(not_found, todo.notFound) を投げる", async () => {
     const repository = new InMemoryTodoRepository();
 
-    await expect(repository.findByIdOrThrow("missing", tx)).rejects.toEqual(
+    await expect(repository.findByIdForUpdate("missing", tx)).rejects.toEqual(
       new DomainError("not_found", "todo.notFound", { id: "missing" }),
     );
   });
 
-  // 本番の rename / change-todo-completion の command と同じく、findByIdOrThrow で読み込んだ Todo（origin を持つ）を変えて update する。
+  // 本番の rename / change-todo-completion の command と同じく、findByIdForUpdate で読み込んだ Todo（origin を持つ）を変えて update する。
   test("読み込んだ Todo を変えて update すると上書きされ、行は増えない", async () => {
     const repository = new InMemoryTodoRepository();
     const todo = Todo.create("牛乳を買う");
     await repository.insert(todo, tx);
 
-    const updated = (await repository.findByIdOrThrow(todo.id, tx))
+    const updated = (await repository.findByIdForUpdate(todo.id, tx))
       .rename("卵を買う")
       .changeCompletion(true);
     await repository.update(updated, tx);
@@ -146,7 +146,7 @@ describe("InMemoryTodoRepository", () => {
     const repository = new InMemoryTodoRepository();
     const todo = Todo.create("牛乳を買う");
     await repository.insert(todo, tx);
-    const loaded = await repository.findByIdOrThrow(todo.id, tx);
+    const loaded = await repository.findByIdForUpdate(todo.id, tx);
 
     await expect(
       repository.insert(loaded.rename("卵を買う"), tx),
@@ -164,7 +164,7 @@ describe("InMemoryTodoRepository", () => {
 
     await expect(repository.update(todo, tx)).rejects.toEqual(
       new Error(
-        `update takes a loaded Todo (findByIdOrThrow), but got a new one: ${todo.id}`,
+        `update takes a loaded Todo (findByIdForUpdate), but got a new one: ${todo.id}`,
       ),
     );
     await expect(repository.findAll()).resolves.toEqual([]);
@@ -274,7 +274,7 @@ describe("InMemoryTodoRepository", () => {
   });
 
   // WHY: 読み込んだ Todo が origin を持たないと、update が差分を取れない（Postgres と結果が変わる）。
-  test("findById・findByIdOrThrow・findAll が返す Todo は、読み込んだときの値を origin に持つ", async () => {
+  test("findById・findByIdForUpdate・findAll が返す Todo は、読み込んだときの値を origin に持つ", async () => {
     const repository = new InMemoryTodoRepository();
     const todo = Todo.create("牛乳を買う").changeCompletion(true);
     await repository.insert(todo, tx);
@@ -288,7 +288,7 @@ describe("InMemoryTodoRepository", () => {
 
     expect((await repository.findById(todo.id))?.origin).toStrictEqual(values);
     expect(
-      (await repository.findByIdOrThrow(todo.id, tx)).origin,
+      (await repository.findByIdForUpdate(todo.id, tx)).origin,
     ).toStrictEqual(values);
     expect((await repository.findAll())[0]?.origin).toStrictEqual(values);
   });
@@ -323,11 +323,11 @@ describe("InMemoryTodoRepository", () => {
     await repository.insert(todo, tx);
 
     const completed = (
-      await repository.findByIdOrThrow(todo.id, tx)
+      await repository.findByIdForUpdate(todo.id, tx)
     ).changeCompletion(true);
     await repository.update(completed, tx);
     const reopened = (
-      await repository.findByIdOrThrow(todo.id, tx)
+      await repository.findByIdForUpdate(todo.id, tx)
     ).changeCompletion(false);
     await repository.update(reopened, tx);
 
@@ -344,7 +344,7 @@ describe("InMemoryTodoRepository", () => {
     const repository = new InMemoryTodoRepository();
     const todo = Todo.create("牛乳を買う");
     await repository.insert(todo, tx);
-    const toggled = (await repository.findByIdOrThrow(todo.id, tx))
+    const toggled = (await repository.findByIdForUpdate(todo.id, tx))
       .changeCompletion(true)
       .changeCompletion(false);
 
@@ -354,7 +354,7 @@ describe("InMemoryTodoRepository", () => {
     expect(toggled.statusChanges).toHaveLength(3);
   });
 
-  test("findAll・findById・findByIdOrThrow は完了の履歴を足した順で返す", async () => {
+  test("findAll・findById・findByIdForUpdate は完了の履歴を足した順で返す", async () => {
     const repository = new InMemoryTodoRepository();
     const createdAt = "2026-09-28T00:00:00.000Z";
     // 作成・完了・未完了を同じ時刻にして、日時ではなく足した順で並ぶことを確かめる。
@@ -372,7 +372,7 @@ describe("InMemoryTodoRepository", () => {
       statusChanges: expected,
     });
     await expect(
-      repository.findByIdOrThrow(todo.id, tx),
+      repository.findByIdForUpdate(todo.id, tx),
     ).resolves.toMatchObject({ statusChanges: expected });
     const all = await repository.findAll();
     expect(all.map((loaded) => loaded.statusChanges)).toStrictEqual([expected]);

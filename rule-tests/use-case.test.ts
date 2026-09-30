@@ -39,7 +39,7 @@ import { afterAll, describe, expect, it } from "vitest";
 //   - command-runs-in-transaction: *.command.ts の execute の定義（行の先頭が `execute(` / `async execute(`。`public` などの修飾子と
 //     型引数も可）の本体（`{ … }`）に、`this.<依存>.run(`（`.` と名前と `(` の間の空白・改行は可）が無い。行は execute の行。
 //     execute の定義が 1 つも無い command は 1 行目を違反にする（確かめられないので安全側）。query（*.query.ts）は対象外。
-//     WHY: command はトランザクションの範囲を決め、読み込み（findByIdOrThrow の行ロック）と書き込みを runner の run が渡した 1 つの
+//     WHY: command はトランザクションの範囲を決め、読み込み（findByIdForUpdate の行ロック）と書き込みを runner の run が渡した 1 つの
 //       トランザクションで行う。run を通さない command は、Repository に渡す tx が無い（型で止まる）か、別の経路で書き込みを
 //       作ってしまう。書き忘れを型より先にここで止め、規則を名前で読めるようにする。
 //     WHY query は対象外: query は 1 文の読み取りでトランザクションを張らない（行ロックも取らない。ADR の決定）。
@@ -244,7 +244,7 @@ describe("command の入力の判定（findUseCaseViolations）: must pass", () 
         "  title: string;",
         "};",
         "async execute(input: RenameTodoInput): Promise<Todo> {",
-        "  const current = await this.repository.findByIdOrThrow(input.id);",
+        "  const current = await this.repository.findByIdForUpdate(input.id);",
         "  return current.rename(input.title);",
         "}",
       ),
@@ -409,7 +409,7 @@ describe("command のトランザクションの判定（findCommandTransactionV
         "",
         "  async execute(input: RenameXInput): Promise<X> {",
         "    return this.transactions.run(async (tx) => {",
-        "      const current = await this.repository.findByIdOrThrow(input.id, tx);",
+        "      const current = await this.repository.findByIdForUpdate(input.id, tx);",
         "      await this.repository.update(current.rename(input.title), tx);",
         "      return current;",
         "    });",
@@ -422,7 +422,7 @@ describe("command のトランザクションの判定（findCommandTransactionV
       source(
         "  public async execute<T>(input: T): Promise<{ id: string }> {",
         "    const { current } = await this.transactions",
-        "      . run (async (tx) => ({ current: await this.repository.findByIdOrThrow(input.id, tx) }));",
+        "      . run (async (tx) => ({ current: await this.repository.findByIdForUpdate(input.id, tx) }));",
         "    this.notify(current.id);",
         "    return current;",
         "  }",
@@ -458,7 +458,7 @@ describe("command のトランザクションの判定（findCommandTransactionV
       source(
         "export class DeleteXCommand {",
         "  async execute(id: string): Promise<void> {",
-        "    await this.repository.findByIdOrThrow(id, tx);",
+        "    await this.repository.findByIdForUpdate(id, tx);",
         "    await this.repository.delete(id, tx);",
         "  }",
         "}",
@@ -573,7 +573,7 @@ describe("command / query の列挙と検査（fixture）", () => {
           "};",
           "async execute(input: RenameXInput) {",
           "  return this.transactions.run(async (tx) => {",
-          "    const current = await this.repository.findByIdOrThrow(input.id, tx);",
+          "    const current = await this.repository.findByIdForUpdate(input.id, tx);",
           "  });",
           "}",
         ),
