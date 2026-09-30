@@ -80,7 +80,8 @@ export class PostgresTodoRepository implements TodoRepository {
   // 新規（origin が undefined）は全列を INSERT、読み込み済みは読み込んだときから変わった列だけを UPDATE する（Issue #165）。
   // WHY 読み込み済みは変わった列だけ: 全列を書くと、同じ Todo を同時に別の列で更新したとき（片方は完了、片方は名前の
   //   変更）に、後から save した方が先の変更を読み込んだときの値に巻き戻す（lost update）。変わった列だけなら両方残る。
-  //   同じ列を同時に変えたときは後勝ち（楽観ロックの version 列は入れない。ユーザー判断）。
+  //   同じ列を同時に変えたときは後勝ち。ただし読み込んだときと同じ値に戻す変更は差分が無いので書かれず、他方の更新が
+  //   残る（楽観ロックの version 列は入れない。ユーザー判断）。
   // WHY 差分は origin と今の値の比較（changedProps）で取る: Entity の遷移メソッドは何も記録しない（todo.ts の origin）。
   async save(todo: Todo): Promise<void> {
     if (todo.origin === undefined) {

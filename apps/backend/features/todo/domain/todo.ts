@@ -99,11 +99,11 @@ export class Todo {
   //   永続化のための付帯情報で、Todo の値ではない。
   readonly #origin: Readonly<TodoProps> | undefined;
 
-  // origin: 引き継ぐ値（rename / changeCompletion は this.#origin、create は undefined）か、"same-as-props"（reconstruct。
-  //   検証した後の props を origin にする）。
+  // origin: 検証した後の props（valid）から origin を決める関数。create は () => undefined、reconstruct は
+  //   (valid) => valid、rename / changeCompletion は () => this.#origin（引き継ぐ）。
   private constructor(
     props: TodoProps,
-    origin: Readonly<TodoProps> | undefined | "same-as-props",
+    origin: (valid: TodoProps) => Readonly<TodoProps> | undefined,
   ) {
     const valid = validate(todoPropsSchema(), props);
     this.id = valid.id;
@@ -112,9 +112,10 @@ export class Todo {
     this.createdAt = valid.createdAt;
     // WHY reconstruct は検証後の値（valid）を origin にする: 引数の値ではなく、今の値と同じ形（title は trim 後）で持つ。
     //   引数のままだと、前後に空白のある行を読んで何も変えずに save しただけで title が「変わった」ことになる。
-    // WHY "same-as-props" でコンストラクタに任せる（reconstruct で先に検証して渡さない）: 検証はコンストラクタの 1 か所だけで
-    //   行う（口ごとに検証を書かない。完全コンストラクタ）。検証後の値はコンストラクタの中でしか得られない。
-    this.#origin = origin === "same-as-props" ? valid : origin;
+    // WHY 値ではなく関数で受け取る: 検証後の値はコンストラクタの中でしか得られない。reconstruct で先に検証して渡すと、
+    //   検証が口ごとに増える（完全コンストラクタはコンストラクタの 1 か所だけで検証する）。関数なら、どの口も同じ形で
+    //   「valid から origin を決める」ことを書け、特別な値（番兵）で分岐せずに済む。
+    this.#origin = origin(valid);
   }
 
   get origin(): Readonly<TodoProps> | undefined {
@@ -135,7 +136,7 @@ export class Todo {
         completed: false,
         createdAt: now(),
       },
-      undefined,
+      () => undefined,
     );
   }
 
@@ -150,7 +151,7 @@ export class Todo {
   // WHY 引数をオブジェクトにする: 同じ型（string / boolean）の引数が並ぶので、順番の取り違えを防ぐ。
   // WHY 検証した後の値を origin にする: Repository の save が、読み込んだときから変わった列だけを書くため（Issue #165）。
   static reconstruct(values: TodoProps): Todo {
-    return new Todo(values, "same-as-props");
+    return new Todo(values, (valid) => valid);
   }
 
   // タイトルだけを変える操作。他の値（id・完了状態・作成日時）と origin は引き継ぐ。
@@ -158,7 +159,7 @@ export class Todo {
   // WHY origin を引き継ぐ: origin は「読み込んだときの値」で、遷移しても変わらない。引き継がないと、読み込んで変えた
   //   Todo が新規（全列の INSERT ... ON CONFLICT）として保存され、別の列の同時更新を巻き戻す。
   rename(title: string): Todo {
-    return new Todo({ ...this.props(), title }, this.#origin);
+    return new Todo({ ...this.props(), title }, () => this.#origin);
   }
 
   // WHY toggle（反転）ではなく値を受け取る: API は「完了にする / 未完了に戻す」を completed の値で指定する。
@@ -166,7 +167,7 @@ export class Todo {
   // completed の規則（boolean であること）も含めて、コンストラクタが全体を検証する。
   // origin は rename と同じく引き継ぐ。
   changeCompletion(completed: boolean): Todo {
-    return new Todo({ ...this.props(), completed }, this.#origin);
+    return new Todo({ ...this.props(), completed }, () => this.#origin);
   }
 
   // 今の値（コンストラクタに渡す props の形）。

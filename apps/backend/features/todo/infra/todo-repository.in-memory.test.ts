@@ -66,8 +66,8 @@ describe("InMemoryTodoRepository", () => {
     await expect(repository.findAll()).resolves.toEqual([]);
   });
 
-  // ここから下の save の 5 つは todo-repository.postgres.test.ts と同じ契約（Issue #165）。InMemory は application の
-  //   テストで Postgres の代わりに使うので、同時更新・削除との競合でも同じ結果になることを同じテスト名で確かめる。
+  // ここから下の save のテストは todo-repository.postgres.test.ts と同じ契約で、同じテスト名にそろえる（Issue #165）。
+  //   InMemory は application のテストで Postgres の代わりに使うので、同時更新・削除との競合でも同じ結果になることを確かめる。
   test("同じ Todo を 2 回読み、片方で完了にして save、もう片方で名前を変えて save すると、両方の変更が残る（別の列の同時更新を巻き戻さない）", async () => {
     const repository = new InMemoryTodoRepository();
     const todo = Todo.create("牛乳を買う");
@@ -82,6 +82,37 @@ describe("InMemoryTodoRepository", () => {
     expect({ title: saved.title, completed: saved.completed }).toEqual({
       title: "x",
       completed: true,
+    });
+  });
+
+  test("同じ Todo を 2 回読み、両方で名前を変えて save すると、後から save した名前が残る（同じ列の同時更新は後勝ち）", async () => {
+    const repository = new InMemoryTodoRepository();
+    const todo = Todo.create("牛乳を買う");
+    await repository.save(todo);
+    const a = await repository.findByIdOrThrow(todo.id);
+    const b = await repository.findByIdOrThrow(todo.id);
+
+    await repository.save(b.rename("y"));
+    await repository.save(a.rename("z"));
+
+    await expect(repository.findByIdOrThrow(todo.id)).resolves.toMatchObject({
+      title: "z",
+    });
+  });
+
+  // 後勝ちの例外: 読み込んだときと同じ値に戻す変更は差分が無いので書かれない（version 列は入れない。ユーザー判断）。
+  test("同じ Todo を 2 回読み、片方が名前を変えて save した後、もう片方が読み込んだときの名前に戻して save しても書かれず、先の変更が残る", async () => {
+    const repository = new InMemoryTodoRepository();
+    const todo = Todo.create("x");
+    await repository.save(todo);
+    const a = await repository.findByIdOrThrow(todo.id);
+    const b = await repository.findByIdOrThrow(todo.id);
+
+    await repository.save(b.rename("y"));
+    await repository.save(a.rename("y").rename("x"));
+
+    await expect(repository.findByIdOrThrow(todo.id)).resolves.toMatchObject({
+      title: "y",
     });
   });
 

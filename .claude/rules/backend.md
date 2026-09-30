@@ -100,7 +100,7 @@ paths:
   - WHY 全列の upsert をやめた: 同じ Todo を同時に別の列で更新すると、後から save した方が先の変更を巻き戻していた（lost update）。
   - WHY 差分を遷移メソッドに記録させず origin との比較で取る: Entity は不変で遷移メソッドは何も記録しない。記録させると遷移メソッドを足すたびに書く必要があり、書き漏れた変更は保存されない。「読み込んだときの値」は Entity の事実として持ち、どの列・どの SQL にするか（永続化の都合）は infra に置く。
   - `origin` は Todo の private フィールド（getter で読む）で、列挙されるプロパティに出さない（値の等価と直列化に混ざらない）。
-  - InMemory も同じ意味にする（読み出しは `Todo.reconstruct` で作り直して origin を持たせ、save は変わった項目だけを反映。`todo-repository.in-memory.test.ts` が同じテスト名で固定）。
+  - InMemory も同じ意味にする（読み出しは `Todo.reconstruct` で作り直して origin を持たせ、save は変わった項目だけを反映）。共通の契約は `todo-repository.postgres.test.ts` と `todo-repository.in-memory.test.ts` が同じテスト名で固定する。DB を直接見る・spy するテスト（SQL を発行しない、変えていない列を書かない）は Postgres だけ。
 - Repository の `findById` は無ければ `undefined`、`findByIdOrThrow` は無ければ `DomainError("not_found", "todo.notFound", { id })`（API で 404）。「無ければ not_found」のユースケース（get / update / delete）は `findByIdOrThrow` を呼び、自分で throw を書かない。各実装は domain の `requireTodo(await this.findById(id), id)` を使う。WHY: 例外の code・key・params を 1 か所に決め、ユースケースごと・実装（本番の Postgres とテストの InMemory）ごとのずれを無くす。
 - DB の行から Entity に戻すときは `Todo.reconstruct`（コンストラクタが不変条件で検証する。行の型は Drizzle のスキーマが保証するので Repository では zod で parse しない）、利用者の入力からは `Todo.create` / `rename`。
   - 不変条件を満たさない行が 1 件あると、一覧（findAll）とその id への GET / PUT / DELETE はすべて 500 になり、画面からは直せず消せない（reviewer の実測、Issue #94）。直すのは DB 側（規則を変えたときはスキル `db-migration` でデータを先に移行する。手で入れた行は SQL で直す）。ログの id と理由で行を特定する。
@@ -112,8 +112,9 @@ paths:
   - command の中で遅い処理（外部 API など）をしない（トランザクションを張ったときに接続を 1 本占有する。接続待ちは `DATABASE_CONNECTION_TIMEOUT_MS` でエラーにする）。
   - 分離レベルは既定の READ COMMITTED（update / delete の command は findByIdOrThrow と save / delete が別の文）。読んでから書くまでの同時更新は、`save` が変わった列だけを書くことで次のようになる（Issue #165。`todo-repository.postgres.test.ts` が実 Postgres で固定）:
     - 別の列の同時更新（片方は完了、片方は名前の変更）は両方残る。
-    - 同じ列の同時更新は後勝ち。楽観ロックの version 列は入れない（ユーザー判断）。防ぐ必要が出たら version 列か `SELECT ... FOR UPDATE` を Issue で検討する。
+    - 同じ列の同時更新は後勝ち。ただし読み込んだときと同じ値に戻す変更は差分が無いので書かれず、他方の更新が残る（その PUT は 200 で、戻した値を返す）。楽観ロックの version 列は入れない（ユーザー判断）。防ぐ必要が出たら version 列か `SELECT ... FOR UPDATE` を Issue で検討する。
     - 読み込んだ後に消された Todo の `save` は、変わった列があれば `not_found`（API で 404）。変わった列が無ければ SQL を発行せず何もしない（戻しもしない）。Issue #165 より前の全列の upsert は、消した Todo を INSERT で戻していた。
+    - update の応答は自分が読み込んで変えた値で、同時更新の他方の変更は含まない（save の後に読み直さない。WHY: SELECT が 1 回増える）。
 - 接続とプール（`database.ts`）: `pg.Pool` を `env` の値で作る（変数の一覧は `.claude/rules/env.md`）。アイドル中の接続のエラーは `pool.on("error")` で `logger.error` に出すだけ。プールは `globalThis` に 1 つ（`next dev` の HMR で増やさない）。終了時は `closeDatabase()`。値は開発・CI・E2E 用の暫定で、本番用は Issue #58。
 - テスト: 実 Postgres を使うテストは `createTestDatabase()` でファイルごとに別スキーマを使う（`.claude/rules/testing.md`）。
 

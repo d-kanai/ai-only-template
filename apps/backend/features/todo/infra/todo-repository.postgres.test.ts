@@ -136,7 +136,8 @@ describe("PostgresTodoRepository", () => {
     await expect(repository().findAll()).resolves.toEqual([updated]);
   });
 
-  // ここから下の save の 5 つは todo-repository.in-memory.test.ts と同じ契約（Issue #165）。
+  // ここから下の save のテストは todo-repository.in-memory.test.ts と同じ契約で、同じテスト名にそろえる（Issue #165）。
+  //   DB を直接見る・spy するテストは Postgres だけにあり、そのことをテストの上に書く。
   // WHY 読み込み済みの Todo は変わった列だけを UPDATE する: 全列を書くと、同じ Todo を同時に別の列で更新したときに
   //   後から save した方が、先に save された別の列を読み込んだときの値に巻き戻す（lost update）。
   // 2 つの Repository（a・b）は同じ db（プール）を使う。同時に動く 2 つのリクエストを、読み込みと save の順を決めて再現する。
@@ -158,16 +159,60 @@ describe("PostgresTodoRepository", () => {
     });
   });
 
-  test("読み込んだ Todo を変えずに save しても、その間に別の save が書いた値を巻き戻さない（SQL を発行しない）", async () => {
+  test("同じ Todo を 2 回読み、両方で名前を変えて save すると、後から save した名前が残る（同じ列の同時更新は後勝ち）", async () => {
     const todo = Todo.create("牛乳を買う");
     await repository().save(todo);
     const a = await repository().findByIdOrThrow(todo.id);
     const b = await repository().findByIdOrThrow(todo.id);
+
+    await repository().save(b.rename("y"));
+    await repository().save(a.rename("z"));
+
+    await expect(repository().findByIdOrThrow(todo.id)).resolves.toMatchObject({
+      title: "z",
+    });
+  });
+
+  // 後勝ちの例外: 読み込んだときと同じ値に戻す変更は差分が無いので書かれない（version 列は入れない。ユーザー判断）。
+  test("同じ Todo を 2 回読み、片方が名前を変えて save した後、もう片方が読み込んだときの名前に戻して save しても書かれず、先の変更が残る", async () => {
+    const todo = Todo.create("x");
+    await repository().save(todo);
+    const a = await repository().findByIdOrThrow(todo.id);
+    const b = await repository().findByIdOrThrow(todo.id);
+
+    await repository().save(b.rename("y"));
+    await repository().save(a.rename("y").rename("x"));
+
+    await expect(repository().findByIdOrThrow(todo.id)).resolves.toMatchObject({
+      title: "y",
+    });
+  });
+
+  test("読み込んだ Todo を変えずに save しても、その間に別の save が書いた値を巻き戻さない", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await repository().save(todo);
+    const a = await repository().findByIdOrThrow(todo.id);
+    const b = await repository().findByIdOrThrow(todo.id);
+
     await repository().save(a.rename("卵を買う").changeCompletion(true));
+    await repository().save(b);
+
+    const saved = await repository().findByIdOrThrow(todo.id);
+    expect({ title: saved.title, completed: saved.completed }).toEqual({
+      title: "卵を買う",
+      completed: true,
+    });
+  });
+
+  // db の insert / update を spy するので Postgres だけ（InMemory には SQL が無い）。
+  test("読み込んだ Todo を変えずに save すると、SQL（INSERT・UPDATE）を発行しない", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await repository().save(todo);
+    const loaded = await repository().findByIdOrThrow(todo.id);
     const update = vi.spyOn(database.db, "update");
     const insert = vi.spyOn(database.db, "insert");
 
-    await repository().save(b);
+    await repository().save(loaded);
     const calls = {
       update: update.mock.calls.length,
       insert: insert.mock.calls.length,
@@ -177,11 +222,6 @@ describe("PostgresTodoRepository", () => {
     insert.mockRestore();
 
     expect(calls).toEqual({ update: 0, insert: 0 });
-    const saved = await repository().findByIdOrThrow(todo.id);
-    expect({ title: saved.title, completed: saved.completed }).toEqual({
-      title: "卵を買う",
-      completed: true,
-    });
   });
 
   // WHY not_found にする: 以前の upsert は、読み込んだ後に消された Todo を INSERT で戻していた（PUT と DELETE の競合）。
@@ -240,6 +280,7 @@ describe("PostgresTodoRepository", () => {
     expect((await repository().findAll())[0]?.origin).toStrictEqual(values);
   });
 
+  // DB の行を直接書き換えて確かめるので Postgres だけ。
   // 変わった列だけを UPDATE し、変えていない列（作成日時）は書かない。作成日時を DB だけで変えておき、save で
   //   読み込んだときの値に戻らないことで確かめる（全列を書く実装では戻る）。
   test("読み込んだ Todo の save は変わった列だけを書き、他の列（作成日時を含む）は DB の値のまま残す", async () => {
