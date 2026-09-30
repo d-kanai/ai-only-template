@@ -3,10 +3,10 @@ import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import { resetTodos } from "./database";
 
-// リクエストログ（apps/frontend_customer/proxy.ts。Issue #80）が、本番ビルドの next start の stdout に 1 リクエスト = JSON 1 行で出ることを
+// リクエストログ（apps/frontend_customer/proxy.ts）が、本番ビルドの next start の stdout に 1 リクエスト = JSON 1 行で出ることを
 // 確かめる E2E テスト。1 行の中身の決め方は apps/frontend_customer/shared/request-log/request-log.test.ts で固定しているので、ここでは
 // proxy.ts の結線（規約の場所で呼ばれる・matcher・logger 経由で stdout への 1 行・応答ヘッダ x-request-id）だけを見る。
-// 行の先頭の level / timestamp は logger（apps/shared/logger.ts。Issue #85・#90）が付ける（形は logger.test.ts で固定）。
+// 行の先頭の level / timestamp は logger（apps/shared/logger.ts）が付ける（形は logger.test.ts で固定）。
 // WHY playwright.config.ts の webServer を使わず、このテストの中で next start を子プロセスで起動する:
 //   webServer の stdout はテストから読めない（Playwright 1.63.0 の webServer.stdout は "pipe" にしてもランナーのプロセスの
 //   stdout に流すだけ。types/test.d.ts の説明。テストは別の worker プロセスで動く）。ローカルの reuseExistingServer では、起動済みのサーバ（別のプロセス）を使うので stdout を取る手段がない。
@@ -50,7 +50,7 @@ function loggedRequests(): LoggedRequest[] {
 
 test.beforeAll(async () => {
   // WHY next の JS を node で直接起動する（pnpm start を通さない）: pnpm を挟むと子プロセスが増え、kill で next が残りうる。
-  // WHY env コマンドで TZ=UTC を付ける: サーバは UTC でなければ起動しない（apps/frontend_customer/instrumentation-node.ts。Issue #116）。
+  // WHY env コマンドで TZ=UTC を付ける: サーバは UTC でなければ起動しない（apps/frontend_customer/instrumentation-node.ts）。
   //   pnpm start を通さないので package.json の TZ=UTC が付かない。env は TZ を足して node に exec する（プロセスは増えず、kill が
   //   next に届く）。spawn の env オプションで足すと process.env を直接読むことになり、env.ts 以外での直参照の禁止
   //   （Biome の noProcessEnv と rule-tests/architecture.test.ts の env-direct-access）に当たる。

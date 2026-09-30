@@ -5,11 +5,10 @@ import {
   type ErrorParamsArgs,
 } from "./error-key";
 
-// ドメインのルール違反を表す例外。
 // WHY Error を継承した専用クラスにする: presentation 層で「想定したルール違反（400 / 404）」と
 //   「想定外の例外（500）」を instanceof で見分けるため。ただの Error だと区別できない。
 // WHY code を持たせる: HTTP のステータスは機械可読な code で決める（problem.ts の対応表）。
-// WHY 文言ではなく key と params を持たせる（Issue #116）: 画面に出す文言は画面側が key を辞書で翻訳して決める。
+// WHY 文言ではなく key と params を持たせる: 画面に出す文言は画面側が key を辞書で翻訳して決める。
 //   domain は自然言語を持たず「何が起きたか」（key）と、文言に埋め込む値（params）だけを表す。
 //   key と params の組はキーごとに型で縛る（error-key.ts の ErrorKeyParams）。
 // WHY domain に置く: domain 層は HTTP を知らない。「何が起きたか」だけを表し、

@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// PreCompact フック（scripts/hooks/pre-compact.sh）の仕様。Issue #64。
+// PreCompact フック（scripts/hooks/pre-compact.sh）の仕様。
 // compact の前に、作業状態（日時・trigger・ブランチ・HEAD・git status --short・stash の件数・直近 5 コミットの 1 行目）を
 // <リポジトリ直下>/.claude/state/pre-compact.md に上書きで書く。docs/work-logs/ には書かない（WHY は .claude/rules/work-log.md）。
 
@@ -111,7 +111,7 @@ describe("pre-compact.sh（PreCompact フック）", () => {
     expect(
       commitLines.map((line) => line.replace(/^- [0-9a-f]+ /, "")),
     ).toEqual(["commit-6", "commit-5", "commit-4", "commit-3", "commit-2"]);
-    // 日時の行（ローカル時刻と UTC からのずれ。例: 2026-09-28 21:30:00 +0000）。
+    // 日時の行（ローカル時刻と UTC からのずれ。例: YYYY-MM-DD hh:mm:ss +0000）。
     const dateLine = lines.find((line) => line.startsWith("- date: "));
     expect(dateLine).toMatch(
       /^- date: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4}$/,

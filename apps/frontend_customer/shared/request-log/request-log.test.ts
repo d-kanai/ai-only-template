@@ -5,7 +5,7 @@ import {
   type RequestLogInput,
 } from "@/shared/request-log/request-log";
 
-// リクエストログ（1 リクエスト = JSON 1 行、5W1H）の 1 行の中身を固定する仕様（Issue #80）。
+// リクエストログ（1 リクエスト = JSON 1 行、5W1H）の 1 行の中身を固定する仕様。
 // proxy.ts（Next の規約ファイル。カバレッジの対象外）は、この関数に NextRequest の値を渡して出力するだけにしている。
 // WHY 受信時刻と requestId の生成を引数で受け取る: 時刻と乱数をテストから固定し、出力を toEqual で丸ごと比べるため。
 

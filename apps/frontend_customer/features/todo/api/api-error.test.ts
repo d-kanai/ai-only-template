@@ -306,7 +306,7 @@ describe("backend の ErrorKey と共通の辞書の対応（型）", () => {
   });
 
   // WHY 過不足なく一致させる: 共通の辞書に置くのは、どの画面でも出る API のエラー（ErrorKey）と画面側だけのエラー（error.*）だけ。
-  //   画面・部品に固有の文言（「削除」など）は、その隣の *.messages.ts に置く（Issue #125）。ここに混ざると、どの画面の文言かが
+  //   画面・部品に固有の文言（「削除」など）は、その隣の *.messages.ts に置く。ここに混ざると、どの画面の文言かが
   //   ファイルの場所から分からなくなる。backend から消えた ErrorKey が残ることも止める。
   test("共通の辞書のキーは、ErrorKey と error.unknown・error.unexpected だけ（画面固有の文言を置かない）", () => {
     expectTypeOf<MessageKey<CommonMessages>>().toEqualTypeOf<

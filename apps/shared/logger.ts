@@ -1,8 +1,8 @@
-// サーバ側のログの唯一の出口（Issue #85。環境変数の唯一の入口 env.ts と同じ位置づけ）。
+// サーバ側のログの唯一の出口（環境変数の唯一の入口 env.ts と同じ位置づけ）。
 // console.* を直接書いてよいのはこのファイルだけ（テストは除く）。Biome の suspicious/noConsole（biome.json の overrides）と
 // rule-tests/architecture.test.ts の規則 console-direct-access の 2 系統で強制している（.claude/rules/backend.md・lint.md）。
-// 置き場所は frontend と backend で共通の workspace パッケージ apps/shared（@repo/shared/logger。Issue #90 で apps/backend/shared/infra/
-// から移した。frontend 直下の proxy.ts・instrumentation-node.ts と backend が使う。.claude/rules/shared.md）。
+// 置き場所は frontend と backend で共通の workspace パッケージ apps/shared（@repo/shared/logger。frontend 直下の proxy.ts・
+// instrumentation-node.ts と backend が使う。.claude/rules/shared.md）。
 //
 // WHY 1 か所に集める:
 //   - 行の形（1 呼び出し = JSON 1 行。先頭に level と timestamp）をここで決め、呼び出し側ごとにずれないようにする。

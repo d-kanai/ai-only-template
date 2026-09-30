@@ -1,4 +1,4 @@
-# Cloud Run 用のコンテナイメージ（Issue #137）。1 つの Dockerfile から 2 つのイメージを --target で作り分ける:
+# Cloud Run 用のコンテナイメージ。1 つの Dockerfile から 2 つのイメージを --target で作り分ける:
 #   - runtime: Cloud Run のサービス（Next.js の画面と API）。docker build --target runtime .
 #   - migrate: Cloud Run のジョブ（pnpm db:migrate で Cloud SQL にマイグレーションを当てる）。docker build --target migrate .
 # ステージ: deps（依存の取得とインストール）→ build（next build）→ runtime（standalone だけを載せる）/ deps → migrate。
@@ -72,9 +72,9 @@ RUN cp .env.example .env && pnpm build && rm .env
 FROM deps AS migrate
 # WHY USER node にせず root のままにするか: pnpm 12.7.0 は pnpm install で node_modules/.pnpm-workspace-state-v1.json を
 #   root だけが読める権限（0600）で作る。node で pnpm db:migrate を実行すると、この状態を読めずに依存を入れ直そうとし、
-#   「ERR_PNPM_PACKAGE_MANAGER_REMOVE_MODULES_DIR ... Permission denied」で失敗した（2026-09-30 実測）。
-#   採らなかった案: chown -R node:node /repo は、所有者を変えた全ファイルを新しいレイヤーに書き直すので、node_modules の分だけ
-#   イメージが大きくなる（大きさは未計測）。そのファイルだけ chmod a+r すると node でも動いたが（同日実測）、pnpm の内部の
+#   「ERR_PNPM_PACKAGE_MANAGER_REMOVE_MODULES_DIR ... Permission denied」で失敗する。
+#   WHY 権限を変えて node で動かさないか: chown -R node:node /repo は、所有者を変えた全ファイルを新しいレイヤーに書き直すので、
+#   node_modules の分だけイメージが大きくなる（大きさは未計測）。そのファイルだけ chmod a+r すれば node でも動くが、pnpm の内部の
 #   ファイル名と権限の作り方に頼り、pnpm の更新で実行時に壊れうる。
 #   root で動かしても、ジョブは DB にマイグレーションを当てて終わるだけで、外からのリクエストを受けない。
 # WHY pnpm db:migrate（リポジトリ直下の script）: 手元・CI・クラウドセッションと同じ入口（db-migration スキル）にする。

@@ -59,7 +59,7 @@ export function useTodoDetailScreen(todoId: string) {
     return () => {
       ignore = true;
       // 世代は「呼び出し時と違うか」だけを見るので、進める向き（+= / -=）は問わない。
-      // Stryker disable next-line AssignmentOperator: -= にしても毎回別の値になり、判定が変わらない（等価な変異。Issue #55）
+      // Stryker disable next-line AssignmentOperator: -= にしても毎回別の値になり、判定が変わらない（等価な変異）
       todoGenerationRef.current += 1;
     };
   }, [todoId]);
@@ -102,8 +102,8 @@ export function useTodoDetailScreen(todoId: string) {
     await update({ completed: !todo.completed });
   }, [todo, update]);
 
-  // 失敗を、フォーム全体の文言（error。role="alert" で出す）と、入力の下に出す項目ごとの文言（fieldErrors）に分ける（Issue #144）。
-  // WHY 項目は "title" だけ: この画面のtitle のフォームが描く入力は title だけ。ほかの項目の誤りは error に出る（api-error.ts の
+  // 失敗を、フォーム全体の文言（error。role="alert" で出す）と、入力の下に出す項目ごとの文言（fieldErrors）に分ける。
+  // WHY 項目は "title" だけ: この画面の title のフォームが描く入力は title だけ。ほかの項目の誤りは error に出る（api-error.ts の
   //   toErrorMessages）。
   const errorMessages: ErrorMessages<"title"> =
     failure === null

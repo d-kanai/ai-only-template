@@ -1,4 +1,4 @@
-// エラーの種類を表す安定したキーと、キーごとの params の形（Issue #116。設計 (a)）。
+// エラーの種類を表す安定したキーと、キーごとの params の形。
 // WHY 自然言語の文言ではなくキーで表す: 文言を決めるのは画面（言語・言い回し）の仕事で、domain / API は「何が起きたか」だけを
 //   機械可読に返す。画面側（apps/frontend_customer）はキーを辞書で翻訳する。言語を足しても backend は変わらない。
 // WHY domain に置く: DomainError（domain）が使うため。presentation の Problem（problem.ts）も同じ型を使い、problem.ts から

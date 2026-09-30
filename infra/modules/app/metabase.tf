@@ -1,16 +1,17 @@
-# Metabase（OSS）on Cloud Run。BI を Data Studio と両方試す（Issue #137 のユーザー判断）。
+# Metabase（OSS）on Cloud Run。BI は Data Studio と Metabase の両方を用意し、使い勝手を見て後で 1 つにする
+#   （ADR docs/adr/tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md）。
 # WHY Metabase: Claude が公式の MCP（/api/metabase-mcp、v0.60 以降）で質問とダッシュボードまで作れる。Data Studio には
-#   レポートを作る API も MCP も無い（2026-09-29 の work-logs）。
+#   レポートを作る API も MCP も無い。
 # イメージは Terraform が管理する（アプリと違い、GitHub Actions では入れ替えない）。版を上げるときは local.metabase_image を変えて apply。
 
 locals {
-  # WHY v0.63.18.2: 安定版（-beta でない）の最新のうち、公開から 5 日以上たったもの（Docker Hub の tag_last_pushed が
-  #   2026-09-24。v0.63.18.3〜.5 は 2026-09-28〜29 で 5 日たっていない。確認は 2026-09-30、hub.docker.com の tags API）。
-  #   同じタグの digest は sha256:ca6d63cbedfd0a66a3c0239ac79a9df5f7ef3f2455027ab97e3bb26cbf281999（確認時点）。
+  # WHY v0.63.18.2: 安定版（-beta でない）の最新のうち、公開から 5 日以上たったもの（.claude/rules/dependencies.md の
+  #   「版の決め方」の 5 日ルール。公開日は hub.docker.com の tags API の tag_last_pushed）。
+  #   同じタグの digest は sha256:ca6d63cbedfd0a66a3c0239ac79a9df5f7ef3f2455027ab97e3bb26cbf281999。
   metabase_image = "metabase/metabase:v0.63.18.2"
 
-  # WHY 2.25.4: 公開から 5 日以上たった最新（2026-08-27。2.26.0 は 2026-09-28 で 5 日たっていない。確認は 2026-09-30、
-  #   gcr.io の tags/list と GitHub の CHANGELOG.md）。
+  # WHY 2.25.4: 公開から 5 日以上たった最新（.claude/rules/dependencies.md の「版の決め方」の 5 日ルール。
+  #   公開日は gcr.io の tags/list と GitHub の CHANGELOG.md）。
   cloud_sql_proxy_image = "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.25.4"
 
   # Auth Proxy のヘルスチェックのポート（/startup を startup_probe で見る）。
@@ -140,7 +141,7 @@ resource "google_cloud_run_v2_service" "metabase" {
         limits = {
           # WHY 1 vCPU: 1 未満の CPU は「同時実行数 1・第 1 世代の実行環境」などの条件がつく
           #   （https://cloud.google.com/run/docs/configuring/services/cpu）。サイドカー単位で条件が効くかを確かめていないので、
-          #   条件の無い 1 にした。cpu_idle なので、リクエストを処理していないときは課金されない。
+          #   条件の無い 1 にする。cpu_idle なので、リクエストを処理していないときは課金されない。
           cpu    = "1"
           memory = "512Mi"
         }

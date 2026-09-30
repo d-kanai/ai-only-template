@@ -1,9 +1,9 @@
-# mutation testing（Stryker）を main ブランチで毎日実行し、レポートを artifact に保存する（Issue #52）。
+# mutation testing（Stryker）を main ブランチで毎日実行し、レポートを artifact に保存する。
 # 設定は stryker.config.mjs、位置づけと運用は .claude/rules/testing.md の「mutation testing（Stryker）」。
-# WHY PR ごとではなく日次: ユーザー判断（Issue #52）。PR の CI（ci.yml）には入れないので、実行時間（ローカル 4 コアで
-#   約 3.5 分、2026-09-28 実測。変異の数はコードの量に応じて増える）が PR のマージを待たせない。
+# WHY PR ごとではなく日次（ADR docs/adr/quality/20260928-mutation-testing-daily-with-score-100.md）: PR の CI（ci.yml）には
+#   入れないので、実行時間（4 コアで数分。変異の数はコードの量に応じて増える）が PR のマージを待たせない。
 # score が 100 を下回る（survived が 1 件でもある）と stryker run が非 0 で終わり、このジョブが失敗する
-#   （stryker.config.mjs の thresholds.break: 100。ユーザー判断、Issue #55）。等価な変異は理由付きの disable で除外する前提
+#   （stryker.config.mjs の thresholds.break: 100）。等価な変異は理由付きの disable で除外する前提
 #   （.claude/rules/testing.md の「mutation testing（Stryker）」）。失敗してもレポートは下の upload で残す（if: always()）。
 name: Mutation
 
@@ -12,7 +12,7 @@ on:
     # 毎日 UTC 23:55 = 08:55 JST。cron は UTC で解釈される。
     # WHY 09:00 JST（UTC 00:00）ではなく 5 分前: GitHub の schedule は負荷の高い時間帯に遅れて始まることがあり、
     #   混雑がひどいとキューから落とされる（実行されない）こともある。毎時 0 分は混みやすいと明記されている
-    #   （GitHub Docs「Events that trigger workflows」の schedule）。ユーザー希望の朝 09:00 に近いまま、0 分を避けて 5 分前にした（Issue #52）。
+    #   （GitHub Docs「Events that trigger workflows」の schedule）。朝 09:00 JST に近いまま、0 分を避けて 5 分前にする。
     #   それでも時刻どおりの実行は保証されない。
     # schedule は既定ブランチ（main）の最新コミットで動く。
     - cron: "55 23 * * *"
@@ -26,7 +26,7 @@ permissions:
 jobs:
   mutation:
     runs-on: ubuntu-latest
-    # WHY 30 分: ローカル（4 コア）の実測は `pnpm test:mutation` 全体で約 3.5 分（572 変異、201 秒。2026-09-28、Issue #55 時点）。
+    # WHY 30 分: `pnpm test:mutation` 全体は 4 コアで約 3.5 分（約 570 変異）かかる。
     #   ubuntu-latest も 4 コアなので同程度の見込みで、コードが増えても余裕のある上限にする。
     #   変異がテストを無限ループさせたときなどに、既定の 360 分まで止まらないようにするため。
     timeout-minutes: 30
@@ -55,7 +55,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       # 開発用の PostgreSQL を compose.yaml で起動する（ci.yml と同じ手順。WHY の詳細は ci.yml のコメント）。
-      # WHY 用意するか: 単体テスト（pnpm test）に実 Postgres を使うテスト（*.postgres.test.ts など。Issue #57）があり、
+      # WHY 用意するか: 単体テスト（pnpm test）に実 Postgres を使うテスト（*.postgres.test.ts など）があり、
       #   Stryker はそれを実行する。Postgres が無いと、Vitest の globalSetup（vitest.global-setup.ts）が接続できないエラーで止めるので、
       #   最初のテスト実行（dry run）から失敗する（pnpm test で確認。Stryker 経由では未確認）。
       # -d: バックグラウンドで起動する。--wait: healthcheck（pg_isready）が healthy になるまで待つ。--wait-timeout 120: 待つ上限（秒）。
@@ -66,7 +66,7 @@ jobs:
       - name: Check Postgres connection
         run: docker compose exec -T db psql -U app -d app -c 'select 1'
 
-      # .env を .env.example から作る（ci.yml と同じ。WHY は ci.yml のコメント。Issue #59）。
+      # .env を .env.example から作る（ci.yml と同じ。WHY は ci.yml のコメント）。
       # Stryker はリポジトリのファイルをサンドボックス（.stryker-tmp/sandbox-*）にコピーして動かす。.env も .gitignore に関係なく
       #   コピーされる（@stryker-mutator/core 10.0.0 の dist/src/fs/project-reader.js が除外するのは ALWAYS_IGNORE の
       #   node_modules・.git・*.tsbuildinfo・/stryker.log・.next・.nuxt・.svelte-kit と、作業用ディレクトリ・レポートの出力先・

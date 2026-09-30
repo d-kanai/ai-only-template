@@ -8,7 +8,6 @@ export type UpdateTodoInput = {
   completed?: boolean;
 };
 
-// Todo の title / completed を更新して保存する（command: 状態を変える）。
 export class UpdateTodoCommand {
   constructor(private readonly repository: TodoRepository) {}
 

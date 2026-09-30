@@ -3,7 +3,7 @@
 import { createContext, type ReactNode, use, useMemo } from "react";
 import { DEFAULT_LOCALE, type Locale } from "./locale";
 
-// 画面の i18n の仕組み（Issue #116 で作り、Issue #125 で 1 ファイルにまとめた）。ライブラリは使わない
+// 画面の i18n の仕組み。ライブラリは使わない
 //   （ADR docs/adr/architecture/20260929-i18n-without-library.md と 20260929-messages-colocated-per-screen.md）。
 // 辞書は 1 つにまとめず、画面・部品ごとに隣の <name>.messages.ts に defineMessages({ ja, en }) で置く（colocation）。
 //   共通（API のエラー ErrorKey と error.*）だけが shared/i18n/common.messages.ts にある。
@@ -14,9 +14,8 @@ import { DEFAULT_LOCALE, type Locale } from "./locale";
 //   app/layout.tsx（Server Component）がこのファイルから使うのは LocaleProvider だけ（ロケールの文字列だけを渡す）。
 //   ほかの関数（defineMessages・formatMessage など）は Client Component の画面・hook・api/ からだけ呼ぶ。
 //   Server Component から呼ぶと、"use client" のファイルの export はクライアントの参照になって呼べない。
-// WHY 型・関数・Provider を 1 ファイルにする（Issue #125 のユーザー判断）: 以前は messages.ts（型と置換）・use-t.ts（hook）・
-//   locale-provider.tsx（context）に分けていたが、どれも「辞書を引いて文言にする」1 つの仕組みで、ファイルを行き来しないと
-//   読めなかった。ロケールの判定（locale.ts）と日時の表示（format.ts）は、Proxy（Edge）やテストから React なしで使うので分ける。
+// WHY 型・関数・Provider を 1 ファイルにする: どれも「辞書を引いて文言にする」1 つの仕組みで、ファイルに分けると行き来しないと
+//   読めない。ロケールの判定（locale.ts）と日時の表示（format.ts）は、Proxy（Edge）やテストから React なしで使うので分ける。
 
 // --- 型 ---
 
@@ -72,7 +71,7 @@ export type RuntimeParams = Readonly<Record<string, string | number>>;
 
 // 空白だけ（空文字を含む）の文言か。空白を 1 文字ずつ取り除いて "" になれば true。
 // WHY: 文言を書き忘れた辞書（"" や " "）は、画面に何も出ないのに型もテストも通ってしまうため、型で止める。
-// WHY 全角の空白（U+3000）と \r も空白に数える（Issue #125 の reviewer 指摘）: 日本語の入力では全角の空白だけの文言を書きうる。
+// WHY 全角の空白（U+3000）と \r も空白に数える: 日本語の入力では全角の空白だけの文言を書きうる。
 //   \r は Windows の改行（\r\n）を貼り付けたときに混ざる。どちらも画面には何も出ない。
 type IsBlank<S extends string> = S extends ""
   ? true
@@ -87,7 +86,7 @@ type IsBlank<S extends string> = S extends ""
 
 // 文字列 S の 1 文字ずつの union（"ab" → "a" | "b"）。
 // WHY 集めた文字を Acc で渡す（Head | CharsOf<Rest> にしない）: 末尾再帰の形にしないと、63 文字で TypeScript の
-//   再帰の深さの上限（TS2589「Type instantiation is excessively deep」）に当たる（実測）。
+//   再帰の深さの上限（TS2589「Type instantiation is excessively deep」）に当たる。
 type CharsOf<
   S extends string,
   Acc = never,
@@ -109,7 +108,7 @@ type IsPlaceholderName<S extends string> =
     : false;
 
 // 文言の {...} のうち、名前が \w+ でないもの（"{a-b}"・"{}"・"{ max }"）があるか。
-// WHY 型で止める（Issue #125 の reviewer 指摘）: PlaceholderNames は { と } の間の任意の文字列を名前として取り出すが、
+// WHY 型で止める: PlaceholderNames は { と } の間の任意の文字列を名前として取り出すが、
 //   実行時の置換（formatMessage）は \w+ だけを置き換える。"{a-b}" は型では params の a-b を要求するのに、実行時には
 //   置き換わらずに {a-b} のまま画面に出る。型と実行時の名前の規則を 1 つにそろえるため、\w+ 以外の {...} を書けなくする。
 //   PlaceholderNames と同じく先頭から 1 つずつ見る（{ の後の最初の } までを 1 つの {...} とする）。対にならない { や } は
@@ -122,7 +121,7 @@ type HasInvalidPlaceholder<S extends string> =
     : false;
 
 // 辞書に書けない文言か: 文字列リテラルの型でない（string）、空白だけ、名前が \w+ でない {...} を含む。
-// WHY string を止める（Issue #125 の reviewer 指摘）: as const の無い変数（const s: string）を渡すと、const の型引数でも
+// WHY string を止める: as const の無い変数（const s: string）を渡すと、const の型引数でも
 //   型は string のままになり、空かどうかも placeholder の名前も型で分からない（PlaceholderNames<string> は never なので、
 //   t は params を受け取らない型になる）。検査をすり抜けるので、文言は文字列リテラルで書かせる。
 type IsInvalidText<S extends string> = string extends S

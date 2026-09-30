@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Claude Code の WorktreeRemove フック（Issue #64。設計と WHY は .claude/rules/worktree.md）。
+# Claude Code の WorktreeRemove フック（設計と WHY は .claude/rules/worktree.md）。
 # worktree-create.sh が作った worktree（<メイン>/.claude/worktrees/<name>）の DB を drop し、共有フックを修復する。
 #
 # 入力（stdin の JSON）: worktree_path（WorktreeCreate が返したパス）、cwd。出力: なし（JSON の出力は捨てられる。公式
@@ -7,7 +7,7 @@
 # 終了コード: 常に 0。WHY: 0 以外だと、ディレクトリが残っている場合に worktree の削除そのものが失敗する（公式）。
 #   DB の削除に失敗しても worktree の削除は止めない（残った DB は次の worktree-create.sh が孤立として消す）。
 # WHY worktree のディレクトリは消さない: このフックの役割は worktree の外にあるリソース（DB）の後始末だけ。
-# 注意: この発火は実測で確認できていない（Issue #64 のコメント。isolation: worktree のサブエージェントの終了で発火しなかった）。
+# 注意: このフックが発火することは確かめられていない（isolation: worktree のサブエージェントの終了では発火しない）。
 #   後始末の本命は worktree-create.sh の孤立した DB の掃除で、こちらは発火したときに早めに消すだけ。
 #
 # 確認:

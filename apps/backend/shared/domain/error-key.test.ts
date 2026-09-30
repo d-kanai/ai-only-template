@@ -9,7 +9,7 @@ import {
 } from "./error-key";
 
 // describeErrorKey は Error#message（ログ・スタックトレースに出る開発者向けの文字列）を作る。
-//   画面に出す文言ではない（画面はキーと params を辞書で翻訳する。Issue #116）。
+//   画面に出す文言ではない（画面はキーと params を辞書で翻訳する）。
 describe("describeErrorKey", () => {
   test("params が無ければ、キーだけを返す", () => {
     expect(describeErrorKey("todo.title.empty")).toBe("todo.title.empty");

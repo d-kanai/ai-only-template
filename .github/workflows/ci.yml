@@ -35,8 +35,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      # PR の差分に作業ログ（docs/work-logs/*.md）の変更が無ければ失敗させる（Issue #64。置き場所は Issue #101。.claude/rules/work-log.md）。
-      # WHY: 調査だけの依頼などで作業ログの追記が漏れた。文書だけの PR も例外にしない（ユーザー判断）。
+      # PR の差分に作業ログ（docs/work-logs/*.md）の変更が無ければ失敗させる（.claude/rules/work-log.md）。
+      # WHY: 調査だけの依頼などは実装という区切りが無く、作業ログの追記が漏れやすい。文書だけの PR も例外にしない
+      #   （ADR docs/adr/workflow/20260928-work-log-enforced-by-stop-hook-and-ci.md）。
       # WHY pull_request のときだけ: main への push では github.base_ref が空で、比べる base が無い。
       # WHY 最初に置く: Node も Postgres も要らない検査なので、準備（install・Postgres の起動）より先に、原因の分かる
       #   メッセージで止める。rule-tests/work-logs-check.test.ts が「pnpm lint より前」「if・continue-on-error・失敗を打ち消す書き方が無い」を検査する。
@@ -60,7 +61,7 @@ jobs:
       # --frozen-lockfile: lockfile と package.json がずれていたら更新せず失敗させる（.claude/rules/dependencies.md）。
       - run: pnpm install --frozen-lockfile
 
-      # 開発用の PostgreSQL を compose.yaml で起動する（Issue #51）。
+      # 開発用の PostgreSQL を compose.yaml で起動する。
       # WHY GitHub Actions の services: を使わないか: 手元・クラウドセッションと同じ compose.yaml を使い、
       #   イメージ・ユーザー・ポート・healthcheck の定義を 1 か所にする（services: に書くと CI だけ別の定義になる）。
       #   ubuntu-latest のランナーには Docker と Compose プラグインが入っている。
@@ -75,13 +76,13 @@ jobs:
         run: docker compose up -d --wait --wait-timeout 120
 
       # 起動した Postgres に psql で接続できることを確かめる（compose.yaml の POSTGRES_USER / POSTGRES_DB と同じ app / app）。
-      # -T: TTY を割り当てない。GitHub Actions のステップには TTY が無い。Compose v5.1.1 では -T なしでも
-      #   TTY の無い環境で動いた（2026-09-28 実測）が、既定は TTY を割り当てる動作なので、自動判定に頼らず明示する。
+      # -T: TTY を割り当てない。GitHub Actions のステップには TTY が無い。Compose v5.1.1 は -T なしでも
+      #   TTY の無い環境で動くが、既定は TTY を割り当てる動作なので、自動判定に頼らず明示する。
       # psql はコンテナ内のものを使う（ランナーに psql が入っているかに依存しない）。
       - name: Check Postgres connection
         run: docker compose exec -T db psql -U app -d app -c 'select 1'
 
-      # .env を .env.example から作る（Issue #59）。
+      # .env を .env.example から作る。
       # WHY: アプリ・テスト・drizzle-kit・Playwright は必須の環境変数（DATABASE_URL など）を .env から読み
       #   （apps/shared/env.ts）、コードに既定値を持たない。.env はコミットしない（.gitignore）ので、手元と同じく
       #   `cp .env.example .env` で作る。値は compose.yaml の開発用 DB に合わせた開発用の値で、秘密ではない。
@@ -90,7 +91,7 @@ jobs:
       - name: Create .env from .env.example
         run: cp .env.example .env
 
-      # apps/backend/shared/drizzle/ のマイグレーションを Postgres に当てる（drizzle-kit migrate。Issue #57）。
+      # apps/backend/shared/drizzle/ のマイグレーションを Postgres に当てる（drizzle-kit migrate）。
       # WHY ここで当てるか: E2E（pnpm test:e2e）の next start は Postgres の todos 表を使うが、webServer の中では
       #   マイグレーションを当てない方針（apps/e2e/playwright.config.ts）。E2E より前に 1 回だけ当てておく。
       #   単体テスト（pnpm test）は、テストごとに別のスキーマを作ってそこに当てる（apps/backend/shared/infra/database.test-support.ts）ので、
@@ -100,8 +101,7 @@ jobs:
         run: pnpm db:migrate
       - run: pnpm lint
       # 型チェック（tsc -p . --noEmit && tsc -p apps/backend --noEmit && tsc -p apps/shared --noEmit。package.json の typecheck）。
-      # WHY: next build（apps/frontend_customer で実行）は apps/frontend_customer と、そこから import された backend のファイルしか型チェックしない
-      #   （Issue #68 で monorepo にする前は、next build がリポジトリ直下の tsconfig で全体を型チェックしていた）。
+      # WHY: next build（apps/frontend_customer で実行）は apps/frontend_customer と、そこから import された backend のファイルしか型チェックしない。
       #   テスト・ルール検査テスト・e2e・設定ファイルの型エラーと、backend・apps/shared が DOM の型に依存すること（apps/backend・
       #   apps/shared の tsconfig は DOM の型を持たない）は、ここで止める。Vitest は型を検査しないので pnpm test でも止まらない。
       #   build より前に置き、型エラーを build より先に分かるメッセージで止める（rule-tests/typecheck.test.ts が順序と書き方を検査する）。
@@ -111,7 +111,7 @@ jobs:
 
       # E2E テスト（Playwright）に使う Chromium を入れる。
       # pnpm --filter @repo/e2e exec: Playwright は E2E の workspace パッケージ @repo/e2e（apps/e2e/package.json）の依存で、
-      #   リポジトリ直下には無い（Issue #84）。apps/e2e をカレントディレクトリにして、その node_modules/.bin/playwright
+      #   リポジトリ直下には無い。apps/e2e をカレントディレクトリにして、その node_modules/.bin/playwright
       #   （@playwright/test と同じ版）を動かす。
       # chromium: apps/e2e/playwright.config.ts のプロジェクトは Chromium だけなので、他のブラウザは入れない
       #   （版は @playwright/test が要求するビルド。本体と headless shell の両方が入る。--dry-run で確認）。

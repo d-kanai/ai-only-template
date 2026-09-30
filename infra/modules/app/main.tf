@@ -50,8 +50,8 @@ resource "google_artifact_registry_repository" "app" {
   format        = "DOCKER"
   description   = "${var.name_prefix} の runtime / migrate イメージ（GitHub Actions が push する）"
 
-  # 古いイメージを消す。WHY: main への push ごとにイメージが増え（migrate イメージは約 385MB。2026-09-30 の
-  #   work-logs）、保存量に課金される。Cloud Run はデプロイ時にイメージを取り込むので、デプロイ済みのリビジョンは
+  # 古いイメージを消す。WHY: main への push ごとにイメージが増え（migrate イメージは約 385MB）、
+  #   保存量に課金される。Cloud Run はデプロイ時にイメージを取り込むので、デプロイ済みのリビジョンは
   #   Artifact Registry からイメージを消しても動く（https://cloud.google.com/run/docs/deploying 「The container image is
   #   imported by Cloud Run when deployed, so after the deployment, you can delete the image from Artifact Registry」）。
   # false: 下のポリシーを実際に適用する（true だと消す対象をログに出すだけ）。

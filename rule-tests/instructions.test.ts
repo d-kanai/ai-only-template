@@ -14,7 +14,7 @@ import { dirname, join, matchesGlob, posix } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // 指示ファイル（CLAUDE.md / .claude/general / .claude/rules / .claude/skills / .claude/agents）と ADR（docs/adr）の構成を
-//   仕様として固定するテスト（Issue #64。ADR の検査は Issue #96、分類ディレクトリは Issue #100）。
+//   仕様として固定するテスト。
 // WHY 機械で検査する: 指示ファイルは「読み込まれているか」、ADR は「決まった形で一覧から辿れるか」を人が見落としやすい。
 //   rules の paths の typo は、そのルールが黙って読み込まれなくなるだけで、何もエラーにならない（CLAUDE.md の原則 7）。
 // ルール検査テスト（.claude/rules/testing.md）なので、判定を関数に切り出し、架空の入力で must pass / must reject を固定してから、
@@ -41,16 +41,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 //   adr-index-state   docs/adr/README.md の一覧の各行（最後の列がリンク）のリンク先が「<分類>/<ファイル名>」の ADR として実在し、
 //                     「状態」列がその ADR の「- 状態:」の値と一致する（置き換えた決定を一覧で採用中と読み違えないため）。
 //   adr-category      docs/adr/ の下のディレクトリが 4 つの分類（architecture / tech-stack / quality / workflow）のいずれかで、
-//                     分類の下にさらにディレクトリが無い（Issue #100。アーキテクチャでない決定を分けて読めるようにした）。
+//                     分類の下にさらにディレクトリが無い（アーキテクチャでない決定を分けて読めるようにする）。
 //   adr-only          docs/ の直下には adr/ と work-logs/ しか無く、docs/adr/ の直下には README.md と分類ディレクトリしか無い
-//                     （Issue #96 で docs/*.md の記録を廃止した。別の記録を足させない。Issue #100 で ADR を分類の下に移した。
-//                     Issue #101 で作業ログをリポジトリ直下の work-logs/ から docs/work-logs/ に移した）。
+//                     （別の記録を足させない。WHY は findNonAdrDocs の上）。
 //                     WHY（adr-*）: ADR は読み込まれない不変の記録で、決定が変わると「置き換え」で次の ADR に辿る。形が崩れると
-//                     日付・状態・理由を取り出せず、一覧に無いと存在しないのと同じになる（Issue #96 で、廃止した docs の orphan-docs を置き換えた）。
+//                     日付・状態・理由を取り出せず、一覧に無いと存在しないのと同じになる。
 //   skill-frontmatter .claude/skills/*/SKILL.md はフロントマターに name と description を持つ（公式 https://code.claude.com/docs/en/skills 。
 //                     description は起動時に一覧として読まれ、いつ使うかの判断に使われる）。
 //   agent-model       .claude/agents/*.md はフロントマターの model が許可したフル ID（ALLOWED_AGENT_MODELS）のいずれか
-//                     （Issue #78。別名 `opus` / `sonnet` や古い ID は意図しないモデルに解決され、消費と品質が変わる。
+//                     （別名 `opus` / `sonnet` や古い ID は意図しないモデルに解決され、消費と品質が変わる。
 //                     `.claude/general/orchestration.md`、`docs/adr/workflow/20260929-save-usage-limit.md`）。
 
 const repoRoot = join(import.meta.dirname, "..");
@@ -257,7 +256,7 @@ function findLegacyReferences(path: string, text: string): string[] {
 //   ADR にテンプレートを貼ることは無い想定。テンプレートは README.md にだけ置き、README.md は検査しない）。
 const ADR_DIR = "docs/adr/";
 const ADR_INDEX = "docs/adr/README.md";
-// 分類（Issue #100 のユーザー判断）。分類ごとに置くものは docs/adr/README.md の一覧に 1 行ずつ書く。
+// 分類。分類ごとに置くものは docs/adr/README.md の一覧に 1 行ずつ書く。
 // WHY 固定の集合にする: 分類は「どれがアーキテクチャの決定か」を読み分けるためのもので、自由に足せると同じ種類の決定が
 //   別の名前の分類に散り、分けた意味が無くなる。分類を足すときは、ここと README.md の説明を同じ変更で直す。
 const ADR_CATEGORIES = ["architecture", "tech-stack", "quality", "workflow"];
@@ -459,10 +458,10 @@ function findAdrCategoryViolations(files: string[]): string[] {
 // docs/ の直下に adr/ と work-logs/ 以外のファイル・ディレクトリがあれば、その項目（ディレクトリは末尾に /）。続けて、
 //   docs/adr/ の直下の README.md 以外のファイル。docs/work-logs/ の中の構成は見ない（作業ログの置き方は
 //   .claude/general/work-log.md。CI の check-work-logs-diff.sh はサブディレクトリの .md も数える）。
-// WHY docs/ を ADR と作業ログだけにする: Issue #96 で docs/*.md（実測・経緯の記録）を廃止し、決定は ADR、実測は作業ログ、
-//   一次情報は規則の WHY に振り分けた。docs/ に別の記録を足せる状態だと、同じ二重管理（最新の規則と記録のずれ）が戻る。
-//   Issue #101 で作業ログを docs/work-logs/ に移し、読み込まれない記録を docs/ の 2 つにまとめた（ユーザー指示）。
-// WHY docs/adr/ の直下を README.md だけにする: Issue #100 で ADR を分類の下に移した。直下に ADR を置けると、分類の無い ADR が
+// WHY docs/ を ADR と作業ログだけにする: 決定は ADR、日付付きの確認結果・経緯は作業ログ、一次情報は規則の WHY に置き、読み込まれない記録を
+//   docs/ の 2 つにまとめる。docs/ に別の記録を足せる状態だと、最新の規則と記録の二重管理（ずれ）が起きる
+//   （docs/adr/workflow/20260929-replace-docs-with-adr.md）。
+// WHY docs/adr/ の直下を README.md だけにする: 直下に ADR を置けると、分類の無い ADR が
 //   増えて分類で読み分けられなくなる（直下のファイルは形式の検査の対象にも入らない。isAdrFile）。
 // 限界: 列挙は git ls-files なので、ファイルの無い空のディレクトリは見えない（git でも追跡されないので実害は無い）。
 function findNonAdrDocs(files: string[]): string[] {
@@ -798,7 +797,7 @@ describe("旧 rules/ への参照", () => {
     expect(isLegacyScanTarget(SELF)).toBe(false);
     expect(isLegacyScanTarget("README.md")).toBe(true);
     expect(isLegacyScanTarget("apps/docs/work-logs/x.md")).toBe(true);
-    // Issue #101 で移す前の置き場所は、作業ログとして除外しない（移した後にそこへ書いたファイルは普通のファイルとして検査する）。
+    // 除外する作業ログは docs/work-logs/ だけ。リポジトリ直下の work-logs/ に書いたファイルは普通のファイルとして検査する。
     expect(isLegacyScanTarget("work-logs/2026-09-28.md")).toBe(true);
     expect(isLegacyScanTarget("docs/adr/README.md")).toBe(true);
   });
@@ -1362,7 +1361,7 @@ describe("fixture のリポジトリを検査したときに検出される違�
       "docs/old/a.md": "旧い記録\n",
       "docs/old/b.md": "旧い記録\n",
       "docs/adrx/c.md": "前方一致\n",
-      // Issue #101 で移す前の置き場所（リポジトリ直下の work-logs/）は作業ログとして扱わない（旧参照も数える）。
+      // リポジトリ直下の work-logs/ は作業ログとして扱わない（旧参照も数える）。
       "work-logs/2026-09-28.md": "rules/code/old.md を書いた\n",
       // docs/adr/ の直下の ADR・分類でないディレクトリ・分類の下のディレクトリ。形式は正しく一覧にも無いが、
       //   adr-only / adr-category の 1 件ずつだけになる（形式の検査の対象に入らない）ことを見る。
@@ -1428,8 +1427,8 @@ describe("リポジトリの指示ファイル", () => {
     ).toBeGreaterThan(0);
   });
 
-  // WHY adr-only だけを別のテストにする: Issue #96 で旧 docs/*.md の削除と、この検査の追加を並行して進めたため、削除が
-  //   終わるまで adr-only だけが失敗する。1 つのテストにまとめると、その間ほかの検査の違反が失敗に紛れて見えなくなる。
+  // WHY adr-only だけを別のテストにする: docs/ に記録を足した違反（adr-only）と、指示ファイル・ADR の形式の違反を別の失敗として
+  //   読めるようにする。1 つのテストにまとめると、片方の違反がもう片方の失敗に紛れて見えにくくなる。
   const violations = collectInstructionViolations(repoRoot, found);
 
   it("CLAUDE.md・.claude/general・.claude/rules・スキル・エージェント・ADR に違反が無く、旧 rules/ も残っていない", () => {

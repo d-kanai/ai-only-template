@@ -1,6 +1,6 @@
 #!/bin/bash
 # PreToolUse フック（.claude/settings.json の hooks.PreToolUse。matcher は Bash と GitHub MCP の書き込みツール）。
-# 文章で禁止していた git 操作（サブエージェントの commit / push / PR 作成・マージ、main への直接 commit / push、
+# 文章で禁止している git 操作（サブエージェントの commit / push / PR 作成・マージ、main への直接 commit / push、
 # force push、フックの飛ばし、squash / rebase マージ）を、Claude Code がツールを実行する前に拒否する。
 # WHAT / WHY と誤検知の扱いは .claude/rules/git-guard.md、決定は ADR docs/adr/workflow/20260928-git-operations-enforced-by-hooks.md。
 #
@@ -319,7 +319,7 @@ function decide(input) {
   const toolInput = input.tool_input || {};
   const cwd = input.cwd || process.cwd();
   // WHY agent_id と agent_type のどちらかがあればサブエージェントとみなす: 公式では agent_id はサブエージェントの中だけ、
-  //   agent_type は --agent で起動したメインにも付く。Issue #64 の実測ではサブエージェントで agent_type に型名が入った。
+  //   agent_type は --agent で起動したメインにも付く。サブエージェントの入力では agent_type にも型名が入る。
   //   片方しか来なくても止める側に倒す（--agent でメインを起動すると、メインもサブエージェント扱いになる。このリポジトリでは使わない）。
   const isSubagent = Boolean(input.agent_id) || Boolean(input.agent_type);
 

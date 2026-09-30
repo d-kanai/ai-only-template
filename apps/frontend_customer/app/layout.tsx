@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 // props の型は Next 16 のグローバル型 LayoutProps<"/"> ではなく明示的に書く。
 // LayoutProps は next build / next dev が .next/types に生成する型で、ビルド前（clone 直後の tsc やエディタ、Vitest）には存在せず型エラーになるため。
 //
-// ロケール（Issue #116）: proxy.ts が Cookie / Accept-Language から決めてリクエストヘッダ x-locale に載せた値を読み、
+// ロケール: proxy.ts が Cookie / Accept-Language から決めてリクエストヘッダ x-locale に載せた値を読み、
 //   <html lang> と LocaleProvider（画面の t と日付の書式が使う）に渡す。URL のパスは変えない（app/[lang] にしない）。
 //   決定と採用しなかった案は ADR docs/adr/architecture/20260929-i18n-without-library.md。
 // WHY ここ（root layout）で読む: 全画面で同じ値を 1 か所で決め、<html lang> もサーバの HTML で正しい言語にする。

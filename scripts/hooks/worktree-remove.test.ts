@@ -14,10 +14,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// WorktreeRemove フック scripts/hooks/worktree-remove.sh の仕様（Issue #64。.claude/rules/worktree.md）。
+// WorktreeRemove フック scripts/hooks/worktree-remove.sh の仕様（.claude/rules/worktree.md）。
 // 公式（https://code.claude.com/docs/en/hooks.md の WorktreeRemove）: stdin に JSON（worktree_path / cwd など）が渡る。
 //   0 以外で終わると、ディレクトリが残っていれば削除が失敗する。JSON の出力は捨てられる。
-// 発火は実測で確認できていない（Issue #64 のコメント）ので、後始末の本命は worktree-create.sh の孤立した DB の掃除で、
+// 発火することは確かめられていない（worktree-remove.sh の注意）ので、後始末の本命は worktree-create.sh の孤立した DB の掃除で、
 //   こちらは発火したときに早めに消すだけ。
 const repoRoot = resolve(__dirname, "..", "..");
 const hookPath = join(repoRoot, "scripts", "hooks", "worktree-remove.sh");

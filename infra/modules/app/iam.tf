@@ -52,7 +52,7 @@ resource "google_secret_manager_secret_iam_member" "metabase_encryption_key" {
 # roles/mcp.toolUser: リモート MCP のツールを呼ぶ。roles/cloudsql.studioUser: SQL の実行（cloudsql.instances.executeSql）。
 #   roles/cloudsql.viewer: インスタンス・ユーザーの一覧と取得（list_instances など）。roles/cloudsql.instanceUser: IAM データベース
 #   認証でログインする（cloudsql.instances.login）。
-# 出典: https://docs.cloud.google.com/sql/docs/postgres/use-cloudsql-mcp の「Required roles」（2026-09-30 確認）。
+# 出典: https://docs.cloud.google.com/sql/docs/postgres/use-cloudsql-mcp の「Required roles」。
 #   実際に MCP から SQL を実行できるかは未確認（初回の apply の後に確かめる。.claude/skills/deploy/SKILL.md）。
 locals {
   sql_iam_user_roles = {

@@ -1,23 +1,22 @@
-# 開発用の PostgreSQL を Docker Compose で起動する（Issue #51）。
+# 開発用の PostgreSQL を Docker Compose で起動する。
 # 同じこのファイルを 3 つの環境で使う:
 #   - 手元: `pnpm db:up`（Docker Desktop などの docker compose。Podman なら `podman compose up -d --wait`）
 #   - GitHub Actions: .github/workflows/ci.yml の「Start Postgres」ステップ
 #   - Claude Code のクラウドセッション: SessionStart フック（scripts/cloud-session-start.sh）が dockerd を起動してから up する
 # WHY ファイル名が compose.yaml か: Compose Specification の推奨名で、docker compose / podman compose のどちらも
 #   カレントディレクトリのこの名前を自動で読む（-f の指定が要らない）。
-# アプリは DATABASE_URL（.env.example）でこの DB に接続する。表はマイグレーション（pnpm db:migrate。apps/backend/shared/drizzle/）で作る（Issue #57）。
+# アプリは DATABASE_URL（.env.example）でこの DB に接続する。表はマイグレーション（pnpm db:migrate。apps/backend/shared/drizzle/）で作る。
 
 services:
   # サービス名 db: `docker compose exec db psql ...`（package.json の db:psql）で使う名前。
   db:
     # PostgreSQL 18 の Alpine 版（Docker 公式イメージ postgres を、Google の Docker Hub ミラーから取る）。
     # WHY mirror.gcr.io から取るか: Docker Hub の匿名 pull は出口 IP ごとに 100 回/時のレート制限がある。
-    #   クラウド VM は出口 IP を他と共有しており、2026-09-28 に残り 0 回（ratelimit-remaining: 0）で pull が 429 になった。
-    #   mirror.gcr.io は Docker Hub の公開イメージのミラーで、匿名で manifest を取得でき（200）、pull もできた。
+    #   クラウド VM は出口 IP を他と共有しており、残り回数が 0（ratelimit-remaining: 0）になると pull が 429 で失敗する。
+    #   mirror.gcr.io は Docker Hub の公開イメージのミラーで、匿名で manifest を取得・pull できる。
     #   GitHub Actions・手元でも同じイメージ名を使うので、どの環境でも Docker Hub のレート制限を避けられる。
     #   中身は Docker Hub の library/postgres と同じ（ミラーのため）。
-    # WHY 18: 2026-09-28 時点の最新メジャー（mirror.gcr.io のタグ一覧に 18-alpine があり、19-alpine は無い）。
-    #   この VM で pull・起動・psql 接続まで動いた（PostgreSQL 18.6）。
+    # WHY 18: mirror.gcr.io にある最新のメジャー（タグ一覧に 18-alpine があり、19-alpine は無い）。
     # WHY alpine: Debian 版より小さく、毎セッション pull するクラウドでの待ち時間が短い。
     # WHY ダイジェストで固定しないか: 18 系のパッチ（セキュリティ修正）は自動で取り込みたい。メジャー版はタグで固定しているので、
     #   データの互換性が崩れる更新（メジャーアップ）は起きない。
@@ -26,7 +25,7 @@ services:
       # 初回起動時に作るスーパーユーザー・パスワード・データベース（公式イメージの環境変数）。
       # WHY 固定値を直書きするか: ローカル・CI・クラウドの開発用 DB で、外部に公開しないので秘密ではない。
       #   3 環境で同じ値にし、.env.example の DATABASE_URL（postgresql://app:app@localhost:5432/app）とそろえる。
-      #   本番の接続情報はここに書かない（本番の DB は別途決める）。
+      #   本番の接続情報はここに書かない（本番の DB は Cloud SQL。infra/）。
       POSTGRES_USER: app
       POSTGRES_PASSWORD: app
       POSTGRES_DB: app
@@ -42,7 +41,7 @@ services:
       #   compose が自分のホスト側の環境変数で展開してしまうため、値を直書きしている。
       test: ["CMD", "pg_isready", "-U", "app", "-d", "app"]
       # 2 秒ごとに確認し、15 回（約 30 秒）続けて失敗したら unhealthy にする（--wait も失敗で返る）。
-      # 実測では起動から 3 秒で pg_isready が通った（2026-09-28）。30 秒通らなければ起動に失敗しているとみなす。
+      # 普段は起動から数秒で pg_isready が通るので、30 秒通らなければ起動に失敗しているとみなす。
       interval: 2s
       retries: 15
     volumes:
