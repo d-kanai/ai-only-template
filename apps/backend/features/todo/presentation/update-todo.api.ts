@@ -4,7 +4,7 @@ import {
   parseJsonBody,
   requestBodySchema,
 } from "../../../shared/presentation/json-body";
-import { toProblemResponse } from "../../../shared/presentation/problem";
+import { withProblemResponse } from "../../../shared/presentation/problem";
 import { parseUuidParam } from "../../../shared/presentation/resource-id";
 import { UpdateTodoCommand } from "../application/update-todo.command";
 import type { Todo } from "../domain/todo";
@@ -54,17 +54,15 @@ function toResponse(todo: Todo): UpdateTodoResponse {
 }
 
 // PUT /api/todos/:id の Route Handler を持つクラス。コンストラクタで command を受け取り、handle を Route Handler として export する
-//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにするは list-todos.api.ts の ListTodosApi のコメント）。
+//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包むは
+//   list-todos.api.ts の ListTodosApi のコメント）。
 export class UpdateTodoApi {
   constructor(
     private readonly updateTodo: Pick<UpdateTodoCommand, "execute">,
   ) {}
 
-  readonly handle = async (
-    request: Request,
-    ctx: Context,
-  ): Promise<Response> => {
-    try {
+  readonly handle = withProblemResponse(
+    async (request: Request, ctx: Context): Promise<Response> => {
       // WHY id を本文より先に確かめる: URL が指す Todo が存在しえないなら、本文の誤りを直しても成功しない。
       //   直しても意味の無い 400 ではなく 404 を返す。
       const { id: rawId } = await ctx.params;
@@ -75,10 +73,8 @@ export class UpdateTodoApi {
       const todo = await this.updateTodo.execute({ id, ...input });
       const body: UpdateTodoResponse = toResponse(todo);
       return Response.json(body);
-    } catch (error) {
-      return toProblemResponse(error, request);
-    }
-  };
+    },
+  );
 }
 
 // app/api/todos/[id]/route.ts が re-export する Route Handler。本番は常に Postgres で組み立てる。

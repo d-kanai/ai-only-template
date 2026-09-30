@@ -5,7 +5,7 @@ paths:
 
 # 依存の向きの検査（rule-tests/architecture.test.ts）
 
-`rule-tests/architecture.test.ts`（`pnpm test` に含まれ、CI の `ci` ジョブで止まる）が、ディレクトリ構成の規則（`.claude/rules/backend.md`・`.claude/rules/frontend.md`・`.claude/rules/shared.md`）と環境変数の直参照の禁止（`.claude/rules/env.md`）、`console` の直接の呼び出しの禁止（`.claude/rules/backend.md` の「ログ」）、画面と、サーバ側（backend・shared）のハードコードの文言の禁止（Issue #116 の i18n）、画面・部品の辞書の置き場所（Issue #125）を 1 規則 = 1 テストで検査する。
+`rule-tests/architecture.test.ts`（`pnpm test` に含まれ、CI の `ci` ジョブで止まる）が、ディレクトリ構成の規則（`.claude/rules/backend.md`・`.claude/rules/frontend.md`・`.claude/rules/shared.md`）と環境変数の直参照の禁止（`.claude/rules/env.md`）、`console` の直接の呼び出しの禁止（`.claude/rules/backend.md` の「ログ」）、画面と、サーバ側（backend・shared）のハードコードの文言の禁止（Issue #116 の i18n）、画面・部品の辞書の置き場所（Issue #125）、api の `handle` を `withProblemResponse` で包むこと（Issue #141）を 1 規則 = 1 テストで検査する。
 ルール検査テストなので、must pass / must reject と fault injection が必須（`.claude/rules/testing.md`、手順はスキル `rule-check-test`）。
 
 ## 対象と抽出
@@ -13,10 +13,10 @@ paths:
   - WHY テストを除く: テストは組み立てのために規則の外を参照する（presentation のテストが InMemory のリポジトリを使うなど）。
 - import / re-export / dynamic import を正規表現で抜き出す（依存は足さない）。コメントと文字列の中の import 風の文字列は除く。``import(`x`)``（`${}` 無し）と第 2 引数つきの `import("x", { with: ... })` も拾う。
 - 参照先の正規化: `@/x` → `apps/frontend_customer/x`（backend のファイルに書いても frontend の paths が当たるため）、`@repo/backend/x` → `apps/backend/x`、`@repo/shared/x` → `apps/shared/x`（`@repo/backend-extra`・`@repo/shared-extra` は別パッケージ）、相対パスはリポジトリ相対、それ以外はパッケージ。`@/`・`@repo/backend/`・`@repo/shared/` の後ろの `..` も解決する。
-- ハードコードの文言だけは構文木で見る（JSX のテキスト・属性・文字列リテラルの範囲を正規表現では正しく切り出せないため）。TypeScript 7.0.2 は JS のパーサ（`ts.createSourceFile`）を持たないので、同梱の tsgo を `typescript/unstable/sync` の API で起動し、仮想のファイルシステムに置いたソースの構文木を `forEachChild` の再帰でたどる（依存は足さない。`parseSourceFiles`）。
+- ハードコードの文言と `handle` の包み方だけは構文木で見る（JSX のテキスト・属性・文字列リテラルの範囲を正規表現では正しく切り出せないため）。TypeScript 7.0.2 は JS のパーサ（`ts.createSourceFile`）を持たないので、同梱の tsgo を `typescript/unstable/sync` の API で起動し、仮想のファイルシステムに置いたソースの構文木を `forEachChild` の再帰でたどる（依存は足さない。`parseSourceFiles`）。
 - 違反は「ファイル → 参照先」（環境変数・console・ハードコードの文言は「ファイル:行」）の一覧で出す。
 
-## 規則（全部で 30 = 依存の 21 `RULES` + 置き場所 3 + 環境変数 1 + console 1 + exports 2 + ハードコードの文言 2）
+## 規則（全部で 31 = 依存の 21 `RULES` + 置き場所 3 + 環境変数 1 + console 1 + exports 2 + ハードコードの文言 2 + `handle` の包み方 1）
 - `frontend-to-backend-specifier`: `apps/frontend_customer/`・`apps/e2e/`・リポジトリ直下から `apps/backend/` へは `@repo/backend/...` だけ。相対パスと `@/../backend/...` は、参照先が許される場所でも違反。例外は `vitest.global-setup.ts` → `apps/backend/shared/infra/database.test-support` の相対参照だけ（`TEST_INFRA_RELATIVE_EXCEPTION`。ファイルと参照先の組で絞る）。
 - `frontend-to-shared-specifier`（Issue #90）: `apps/frontend_customer/`・`apps/e2e/`・リポジトリ直下から `apps/shared/` へは `@repo/shared/...` だけ。相対パスと `@/../shared/...` は違反（例外なし）。`frontend-to-backend-specifier` を広げずに別の規則にしたのは、失敗したときにどちらの境界かが分かり、fault injection も独立にできるため。backend は対象外（backend の中の書き方は `backend-relative-only` が見る）。
 - `backend-exports`: (1) 外の `@repo/backend/<path>` はすべて exports のキーに当たる（Node と同じく完全一致を優先し、次に `*` の前が最も長いパターン）、(2) 各キーは外から 1 か所以上で参照される、(3) キーは `./` で始まり、値はキーのパス + `.ts`、(4) キーが指すファイルがある（パターンなら 1 つ以上）。本番の検査では、exports を 1 件以上読めることと外の参照を取り出せていることも確かめる（読み込みや列挙が壊れて素通りしないため）。
@@ -39,6 +39,8 @@ paths:
 
 - `frontend-hardcoded-text`（Issue #116）: `apps/frontend_customer/` のテスト以外のソース（辞書 `apps/frontend_customer/**/*.messages.ts` は `defineMessages(...)` の呼び出しの引数の中だけを除き、引数の外（トップレベルの `const label = "削除"`、ほかの関数の引数、`createElement` の日本語）は同じ検査。呼び出しは名前 `defineMessages` だけで見る。Issue #125 で `shared/i18n/messages/` の直下から変え、reviewer の指摘でファイルごとの除外をやめた。`.messages.tsx`・`*-messages.ts`・`*.messages.helper.ts` と旧置き場所の `messages/ja.ts` は引数の中も除かない）で、(1) JSX のテキストに空白以外の文字がある（英語も）、(2) 利用者に見える属性（`VISIBLE_TEXT_ATTRIBUTES`: `aria-label`・`aria-description`・`placeholder`・`title`・`alt`・`label`）の値が文字列リテラル・テンプレートリテラル（`"x"`・`{"x"}`・``{`x ${y}`}``）で空白以外の文字を持つ、(3) どこであれ文字列リテラル・テンプレートリテラル（型の位置、エスケープを解釈した値も）に日本語（`\p{Script=Hiragana}`・`Katakana`・`Han`）がある、のどれかを違反にする。通すもの: `{t("...")}`・`aria-label={t("x", { title })}`、一覧に無い属性（`className` など）、空白だけの値（`alt=""`）と埋め込み式だけのテンプレート、JSX ではない ASCII の文字列（`layout.tsx` の `metadata.title`）、コメント（構文木に現れない）。1 つの値が (2) と (3) の両方に当たっても 1 件。判定の例は `HARDCODED_TEXT_EXAMPLES`。
 - `server-hardcoded-text`（Issue #116。もとの名前は `backend-hardcoded-text`。`apps/shared` を対象に加えて改名）: `apps/backend/` と `apps/shared/` のテスト以外のソースで、上の (3) だけを違反にする（例外なし。エラーは `ErrorKey` と params で表す）。英語は止めない（Problem Details の `detail` の英語は `apps/backend/shared/presentation/problem-detail.en.ts` の 1 か所に書く規約で、この規則では検査しない。Issue #126）。ログのメッセージ・開発者向けのエラー（`database.test-support.ts` のようなテスト以外の補助、`apps/shared/env.ts` のエラー、`logger.ts` のメッセージも）も対象で、運用者向けの文言は英語で書く。JSX のテキストと属性は見ない（ASCII の文字列は ErrorKey・ログ・SQL など文言でないものが大半のため）。
+
+- `presentation-with-problem-response`（Issue #141）: `apps/backend/` の下の `presentation/` の下（入れ子も）の `*.api.<拡張子>`（8 つの拡張子。テストは除く）で、クラス（宣言・式、入れ子の関数の中も）の `handle` という名前のメンバー（識別子か文字列リテラルの名前。`static` も）は、初期化子が `withProblemResponse(...)` の呼び出し（呼び出す関数が識別子 `withProblemResponse`。型引数つきも可）のプロパティでなければ違反（「ファイル:行」）。違反の例: try / catch を手書きした handler、素の `async`、`withProblemResponse` を import だけして使わない、別の関数で包む（`wrap(withProblemResponse(...))` も）、`problem.withProblemResponse(...)`、呼び出さずに代入、初期化子なし（コンストラクタで代入）、メソッド・getter の `handle`。WHY: Next の Route Handler には共通の catch が無く、包み忘れると Problem Details ではない素の 500 が漏れる（`.claude/rules/backend.md` の presentation）。判定の例は `PROBLEM_RESPONSE_EXAMPLES`（許可例に本物の 5 本を読み込んで入れる）。限界（見逃す）: クラスの外の Route Handler（`export async function GET`・オブジェクトリテラルの `handle`）、`handle` 以外の名前、計算されたプロパティ名、コンストラクタの引数プロパティ、同じ名前の別の関数をファイルの中で定義して呼ぶもの（import 元は見ない）。
 
 ## テストの持ち方
 - 規則ごとに判定の例（`RULE_EXAMPLES`。違反になる例・ならない例を架空の参照で 3 件以上ずつ）。今のコードに違反が無いことだけでは、規則が緩すぎても気づけない。`RULES` のすべての規則に例があることもテストで確かめる。exports は `resolveExportKey`・`findExportsViolations` に当たる例・当たらない例・違反の例を持つ。
