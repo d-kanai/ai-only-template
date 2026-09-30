@@ -8,6 +8,8 @@
 #   イメージを取りに行き、Docker Hub の匿名 pull のレート制限（compose.yaml のコメント）に当たりうる。
 #   使う機能（RUN --mount=type=cache）は BuildKit に組み込みの Dockerfile フロントエンドで使える。
 # ビルドの前提: リポジトリ直下をコンテキストにする（docker build . ）。コンテキストから外すものは .dockerignore。
+#   テストだけが使うコード（apps/*/test-support/）とテスト（*.test.ts / *.test.tsx）も外し、どのステージにも入れない（Issue #181。
+#   WHY と検査は .dockerignore のコメント）。
 # 秘密はイメージに入れない: 接続先などの環境変数（.env.example の DATABASE_* など）は、実行時に Cloud Run のサービス・ジョブが渡す。
 #   .env は .dockerignore でコンテキストから外し、build ステージで一時的に作るものも同じ RUN の中で消す。
 

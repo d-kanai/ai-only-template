@@ -5,9 +5,10 @@ import {
   type MessageKey,
   type Messages,
   type TranslateArgs,
-} from "./i18n";
+} from "@/shared/i18n/i18n";
 
-// テスト専用（本番のコードからは使わない。ファイル名の .test-support が目印。apps/backend/shared/infra/database.test-support.ts と同じ）。
+// テスト専用（本番のコードからは使わない。test-support/ に置くのが目印で、本番のコードからの import は rule-tests/test-support.test.ts が止め、
+// Docker のイメージには入らない（.dockerignore の **/test-support）。apps/backend/test-support/database.ts と同じ）。
 // 画面・components のテストは、本番の app/layout.tsx と同じく LocaleProvider で包んで描き、期待する文言は
 // その画面・部品の辞書のキーの翻訳結果（tJa）と比べる。
 // WHY 文言を直書きせずキーの翻訳結果と比べる: テストが見るのは「どのキーの文言を出すか」。言い回しを辞書で変えても

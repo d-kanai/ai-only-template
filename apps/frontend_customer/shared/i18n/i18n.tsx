@@ -196,7 +196,7 @@ export function formatMessage<M extends Messages>(
   );
 }
 
-// 辞書とロケールを固定した型付きの t を作る。画面では useT(messages) から使い、テストでは i18n.test-support.tsx の tJa が使う。
+// 辞書とロケールを固定した型付きの t を作る。画面では useT(messages) から使い、テストでは apps/frontend_customer/test-support/i18n.tsx の tJa が使う。
 export function createTranslator<M extends Messages>(
   messages: M,
   locale: Locale,

@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 // テストダブルの方針（.claude/rules/testing.md の「テストダブル」。Issue #166 / #177、ユーザー判断 2026-09-30）を、
@@ -33,9 +33,13 @@ import { afterAll, describe, expect, it } from "vitest";
 //       WHY 無しで差し替えられる抜け道になる。
 //     WHY 文字列リテラルだけ許す: `vi.mock(import("@repo/shared/now"))` やテンプレートリテラルは今使っておらず、
 //       書き方を 1 つにしておけば判定が単純で見逃しが無い（安全側で違反）。
-//   - db-tests-in-infra-only: database.test-support（実 Postgres。createTestDatabase）を import する（`from` / `import "…"` /
-//     `import("…")`。`import type` も）のは、apps/backend/**/infra/ の直下のテストと vitest.global-setup.ts だけ。
-//     application / presentation / domain のテスト・frontend のテストからの import は違反。
+//   - db-tests-in-infra-only: apps/backend/test-support/database（実 Postgres。createTestDatabase。Issue #181 で
+//     apps/backend/shared/infra/database.test-support から移した）を import する（`from` / `import "…"` / `import("…")`。
+//     `import type` も）のは、apps/backend/**/infra/ の直下のテスト、apps/backend/test-support/ の直下のテスト（test-support 自身のテスト）、
+//     vitest.global-setup.ts だけ。application / presentation / domain のテスト・frontend のテストからの import は違反。
+//     参照先は書き方によらず解決して比べる（相対パスは参照元のディレクトリから、`@repo/backend/…` は apps/backend/、`@/…` は
+//     apps/frontend_customer/。拡張子は除く）。WHY: 書き方（`../../../test-support/database`・`@repo/backend/test-support/database`・
+//     `./database`）の文字列で比べると、置き場所が同じでも書き方を変えるだけで素通りする。
 //     WHY: DB ありのテストは infra に分け、ユースケースと HTTP のテストは DB に接続しない（ユーザー判断 2026-09-30）。
 //     WHY import type も違反: 型だけでも DB の準備を前提にしたテストの形が application / presentation に入り込む入口になる。
 // 検査の対象: apps/ の下のテストファイル（*.test.ts / *.test.tsx）と、リポジトリ直下の vitest.global-setup.ts。
@@ -45,7 +49,8 @@ import { afterAll, describe, expect, it } from "vitest";
 //   ブロックコメント（`/* vi.mock("x") */`）の中も違反と数える（安全側）。`vi` を別名で import する・`vi["mock"]` と書く・
 //   require で読むのは見ない。
 // 判定の粒度の限界:
-//   - database.test-support を `vi.importActual(…)` / `require(…)` / テンプレートリテラルの `import(`…`)` で読む書き方は見ない。
+//   - test-support/database を `vi.importActual(…)` / `require(…)` / テンプレートリテラルの `import(`…`)` で読む書き方、
+//     ディレクトリの index（`test-support/database/index`）、tsconfig の paths の別名は見ない。
 //   - `const m = vi.mock; m(…)` / `vi.mock.call(…)` / `vi?.mock(` / `vi.mock?.(` のような呼び方は見ない。
 //   - 同じ行に呼び出しが 2 つあると、直前の 1 つの `// WHY モック:` で両方とも通る（WHY は行単位で見る）。
 // WHY 文字列で判定する（AST にしない）: 見るのは `vi.mock(` の第 1 引数と import の参照先の文字列だけで、行単位の正規表現で足りる。
@@ -102,27 +107,52 @@ function findViMockViolations(
   );
 }
 
-// database.test-support を import してよいファイルか。
+// 実 Postgres のテスト用の DB を用意するモジュール（リポジトリ相対、拡張子なし）。
+const TEST_DATABASE_MODULE = "apps/backend/test-support/database";
+
+// test-support/database を import してよいファイルか。
 // WHY infra の直下のテストだけ: 実 Postgres のテストは Repository（*.postgres.ts）と database.ts の隣に置く（testing.md の表）。
 //   features/<f>/infra と shared/infra の 2 か所だけを許し、infra の下の入れ子、名前が infra の feature の別の層
 //   （features/infra/application/）、別の層の下の infra/（features/x/application/infra/）は通さない。
+// WHY apps/backend/test-support/ の直下のテストも許す: test-support/database.ts 自身のテスト（database.test.ts）が、テスト用の
+//   スキーマの作成と後始末を実 Postgres で確かめる。
 function mayImportTestDatabase(path: string): boolean {
   return (
     path === "vitest.global-setup.ts" ||
-    /^apps\/backend\/(?:features\/[^/]+|shared)\/infra\/[^/]+\.test\.tsx?$/.test(
+    /^apps\/backend\/(?:(?:features\/[^/]+|shared)\/infra|test-support)\/[^/]+\.test\.tsx?$/.test(
       path,
     )
   );
 }
 
-function findTestDatabaseImportViolations(code: string): TestDoubleViolation[] {
+// 参照先をリポジトリ相対のパス（拡張子なし）にする。自前のコードでない参照（パッケージ）は undefined。
+// WHY `@/` も解決する: frontend の paths（`@/*` → apps/frontend_customer/*）で `@/../backend/…` と書けば backend を指せる。
+function resolveSpecifier(from: string, specifier: string): string | undefined {
+  const aliases: [string, string][] = [
+    ["@repo/backend/", "apps/backend"],
+    ["@/", "apps/frontend_customer"],
+  ];
+  const alias = aliases.find(([prefix]) => specifier.startsWith(prefix));
+  const resolved = specifier.startsWith(".")
+    ? posix.join(posix.dirname(from), specifier)
+    : alias === undefined
+      ? undefined
+      : posix.join(alias[1], specifier.slice(alias[0].length));
+  return resolved?.replace(/\.[cm]?[jt]sx?$/, "");
+}
+
+function findTestDatabaseImportViolations(
+  path: string,
+  code: string,
+): TestDoubleViolation[] {
   // `from "…"`（import / import type / export … from）、`import "…"`、`import("…")` の参照先。
   const specifiers = code.matchAll(
     /(?:\bfrom|\bimport)\s*\(?\s*(["'])([^"'\n]+)\1/g,
   );
   return [...specifiers].flatMap((match) =>
-    // WHY 前後を区切る: `my-database.test-support` や `database.test-support-x` は別のモジュール。拡張子付きも同じもの。
-    /(?:^|\/)database\.test-support(?:\.[cm]?[jt]sx?)?$/.test(match[2] ?? "")
+    // WHY 解決したパスの完全一致で比べる: `database-x`・`test-support/database/x`・別の場所の `test-support/database` は別のモジュール。
+    //   拡張子付きも同じもの。
+    resolveSpecifier(path, match[2] ?? "") === TEST_DATABASE_MODULE
       ? [
           {
             rule: "db-tests-in-infra-only" as const,
@@ -145,7 +175,7 @@ function findTestDoubleViolations(
       : []),
     ...(mayImportTestDatabase(path)
       ? []
-      : findTestDatabaseImportViolations(code)),
+      : findTestDatabaseImportViolations(path, code)),
   ];
   return violations.sort((a, b) => a.line - b.line);
 }
@@ -172,7 +202,7 @@ function walk(root: string, dir: string): string[] {
 
 // 検査の対象: apps/ の下の *.test.ts / *.test.tsx と、リポジトリ直下の vitest.global-setup.ts（あれば）。名前順。
 // WHY root を引数で受け取る: 本番（リポジトリ直下）と fixture（一時ディレクトリ）で同じ列挙を通すため。
-// WHY vitest.global-setup.ts を含める: database.test-support を import してよい唯一のテスト以外のファイルで、
+// WHY vitest.global-setup.ts を含める: test-support/database を import してよい唯一のテスト以外のファイルで、
 //   列挙に入れておかないと fixture と実リポジトリで「許可」が効いていることを確かめられない。
 function listTestDoubleTargets(root: string): string[] {
   const tests = walk(root, "apps").filter((path) => /\.test\.tsx?$/.test(path));
@@ -203,7 +233,7 @@ const PRESENTATION_TEST = "apps/backend/features/x/presentation/x.api.test.ts";
 const INFRA_TEST =
   "apps/backend/features/x/infra/x-repository.postgres.test.ts";
 const SHARED_INFRA_TEST = "apps/backend/shared/infra/database.test.ts";
-const TEST_SUPPORT = "../../../shared/infra/database.test-support";
+const TEST_SUPPORT = "../../../test-support/database";
 
 describe("テストダブルの判定（findTestDoubleViolations）: must pass", () => {
   it.each([
@@ -287,7 +317,7 @@ describe("テストダブルの判定（findTestDoubleViolations）: must pass",
       source('vi.mock("./y");'),
     ],
     [
-      "features/<f>/infra のテストから database.test-support を import",
+      "features/<f>/infra のテストから test-support/database を import",
       INFRA_TEST,
       source(
         "import {",
@@ -297,29 +327,47 @@ describe("テストダブルの判定（findTestDoubleViolations）: must pass",
       ),
     ],
     [
-      "shared/infra のテストから ./database.test-support を import",
+      "shared/infra のテストから ../../test-support/database を import",
       SHARED_INFRA_TEST,
-      source('import { createTestDatabase } from "./database.test-support";'),
-    ],
-    [
-      "vitest.global-setup.ts から database.test-support を import",
-      "vitest.global-setup.ts",
       source(
-        'import { cleanupTestSchemas } from "./apps/backend/shared/infra/database.test-support";',
+        'import { createTestDatabase } from "../../test-support/database";',
       ),
     ],
     [
-      "application のテストのコメントの中の database.test-support の import",
+      "infra のテストから @repo/backend/test-support/database（拡張子付き）を import",
+      INFRA_TEST,
+      source(
+        'import { createTestDatabase } from "@repo/backend/test-support/database.ts";',
+      ),
+    ],
+    [
+      "test-support 自身のテストから ./database を import",
+      "apps/backend/test-support/database.test.ts",
+      source('import { createTestDatabase } from "./database";'),
+    ],
+    [
+      "vitest.global-setup.ts から test-support/database を import",
+      "vitest.global-setup.ts",
+      source(
+        'import { cleanupTestSchemas } from "./apps/backend/test-support/database";',
+      ),
+    ],
+    [
+      "application のテストのコメントの中の test-support/database の import",
       APPLICATION_TEST,
       source(`// import { createTestDatabase } from "${TEST_SUPPORT}";`),
     ],
     [
-      "application のテストから名前の一部が同じ別のモジュール（database / my-database.test-support / database.test-support-x）",
+      "application のテストから名前・場所の一部が同じ別のモジュール（shared/infra/database・database-x・database/x・別の場所の test-support/database・パッケージ・以前の置き場所）",
       APPLICATION_TEST,
       source(
         'import { getDatabase } from "../../../shared/infra/database";',
-        'import { a } from "./my-database.test-support";',
-        'import { b } from "../../../shared/infra/database.test-support-x";',
+        'import { a } from "../../../test-support/database-x";',
+        'import { b } from "../../../test-support/database/x";',
+        'import { c } from "./test-support/database";',
+        'import { d } from "test-support/database";',
+        'import { e } from "@repo/backend-extra/test-support/database";',
+        'import { f } from "../../../shared/infra/database.test-support";',
       ),
     ],
   ])("%s は違反なし", (_name, path, text) => {
@@ -446,7 +494,7 @@ describe("テストダブルの判定（findTestDoubleViolations）: must reject
       [{ rule: "vi-mock-only-now", line: 3 }],
     ],
     [
-      "application のテストから database.test-support を import（値）",
+      "application のテストから test-support/database を import（値）",
       APPLICATION_TEST,
       source(`import { createTestDatabase } from "${TEST_SUPPORT}";`),
       [{ rule: "db-tests-in-infra-only", line: 1 }],
@@ -493,11 +541,29 @@ describe("テストダブルの判定（findTestDoubleViolations）: must reject
       [{ rule: "db-tests-in-infra-only", line: 4 }],
     ],
     [
-      "frontend のテストから import",
+      "application のテストから @repo/backend/test-support/database を import",
+      APPLICATION_TEST,
+      source(
+        'import { createTestDatabase } from "@repo/backend/test-support/database";',
+      ),
+      [{ rule: "db-tests-in-infra-only", line: 1 }],
+    ],
+    [
+      "frontend のテストから相対パスと @/../backend/ で import",
       "apps/frontend_customer/features/x/x.hook.test.ts",
       source(
-        'import { createTestDatabase } from "../../../backend/shared/infra/database.test-support";',
+        'import { createTestDatabase } from "../../../backend/test-support/database";',
+        'import { a } from "@/../backend/test-support/database";',
       ),
+      [
+        { rule: "db-tests-in-infra-only", line: 1 },
+        { rule: "db-tests-in-infra-only", line: 2 },
+      ],
+    ],
+    [
+      "test-support の下の入れ子のテストから import（test-support の直下だけ）",
+      "apps/backend/test-support/nested/x.test.ts",
+      source('import { createTestDatabase } from "../database";'),
       [{ rule: "db-tests-in-infra-only", line: 1 }],
     ],
     [
@@ -522,7 +588,7 @@ describe("テストダブルの判定（findTestDoubleViolations）: must reject
       "vitest.global-setup.ts と名前だけ違う別のファイル（.mts）から import",
       "vitest.global-setup.mts",
       source(
-        'import { cleanupTestSchemas } from "./apps/backend/shared/infra/database.test-support";',
+        'import { cleanupTestSchemas } from "./apps/backend/test-support/database";',
       ),
       [{ rule: "db-tests-in-infra-only", line: 1 }],
     ],
@@ -584,20 +650,23 @@ describe("テストファイルの列挙と検査（fixture）", () => {
         'vi.mock("@repo/shared/now", { spy: true });',
       ),
       [SHARED_INFRA_TEST]: source(
-        'import { createTestDatabase } from "./database.test-support";',
+        'import { createTestDatabase } from "../../test-support/database";',
+      ),
+      "apps/backend/test-support/database.test.ts": source(
+        'import { createTestDatabase } from "./database";',
       ),
       "apps/backend/features/x/domain/y.test.ts": source(
         "",
         'vi.doMock("@repo/shared/now");',
       ),
       "vitest.global-setup.ts": source(
-        'import { cleanupTestSchemas } from "./apps/backend/shared/infra/database.test-support";',
+        'import { cleanupTestSchemas } from "./apps/backend/test-support/database";',
       ),
       "apps/frontend_customer/features/x/x.hook.test.ts": source(
         'vi.mock("@/features/x/api/x-api");',
       ),
       "apps/frontend_customer/features/x/x-screen.test.tsx": source(
-        'import { a } from "../../../backend/shared/infra/database.test-support";',
+        'import { a } from "../../../backend/test-support/database";',
       ),
       "apps/shared/logger.test.ts": source('vi.mock("./now");'),
       // 対象外: テストでないファイル（backend のソース・テスト基盤・spec）、node_modules と . で始まるディレクトリの中。
@@ -605,8 +674,7 @@ describe("テストファイルの列挙と検査（fixture）", () => {
         'vi.mock("./y");',
         importTestSupport,
       ),
-      "apps/backend/shared/infra/database.test-support.ts":
-        source('vi.mock("pg");'),
+      "apps/backend/test-support/database.ts": source('vi.mock("pg");'),
       "apps/e2e/x.spec.ts": source('vi.mock("./y");'),
       "apps/backend/node_modules/x/x.test.ts": source('vi.mock("./y");'),
       "apps/frontend_customer/.next/x.test.ts": source(importTestSupport),
@@ -622,6 +690,7 @@ describe("テストファイルの列挙と検査（fixture）", () => {
         "apps/backend/features/x/infra/x-repository.postgres.test.ts",
         "apps/backend/features/x/presentation/x.api.test.ts",
         "apps/backend/shared/infra/database.test.ts",
+        "apps/backend/test-support/database.test.ts",
         "apps/frontend_customer/features/x/x-screen.test.tsx",
         "apps/frontend_customer/features/x/x.hook.test.ts",
         "apps/shared/logger.test.ts",
@@ -648,7 +717,7 @@ describe("テストファイルの列挙と検査（fixture）", () => {
 });
 
 describe("テストダブル（実ファイル）", () => {
-  it("backend のテストの vi.mock は @repo/shared/now だけ、database.test-support の import は infra のテストと global-setup だけ", () => {
+  it("backend のテストの vi.mock は @repo/shared/now だけ、test-support/database の import は infra のテスト・test-support のテスト・global-setup だけ", () => {
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     const files = listTestDoubleTargets(repoRoot);
     expect(files).toContain("apps/backend/features/todo/domain/todo.test.ts");
@@ -656,6 +725,7 @@ describe("テストダブル（実ファイル）", () => {
       "apps/backend/features/todo/infra/todo-repository.postgres.test.ts",
     );
     expect(files).toContain("vitest.global-setup.ts");
+    expect(files).toContain("apps/backend/test-support/database.test.ts");
     expect(collectTestDoubleViolations(repoRoot)).toEqual([]);
   });
 });

@@ -136,6 +136,28 @@ jobs:
           cache-from: type=gha,scope=runtime
           cache-to: type=gha,scope=runtime,mode=max
 
+      # push した runtime のイメージに test-support（テストだけが使うコード。apps/*/test-support/。Issue #181）が入っていないことを確かめる。
+      # WHY: .dockerignore の **/test-support を消す・! で戻すなどの変更で漏れたときに、main へのデプロイで止める（migrate と service の
+      #   入れ替えより前）。.dockerignore の行とパターンは rule-tests/test-support.test.ts が PR の CI で見る。ここはビルドの結果で見る。
+      # docker pull: build-push-action の push: true はイメージをランナーの docker に残さず、load: true は push と同時に使えないので、
+      #   Artifact Registry から取る（上の configure-docker の資格情報を使う）。
+      # docker run --user root --entrypoint sh: runtime の CMD（node server.js）ではなくシェルで find を実行する。root にするのは、
+      #   USER node のままだと読めないディレクトリで find が失敗し、見落とすか誤って止まるため。
+      # find / -path /proc -prune -o -path "*test-support*" -print: パスのどこかに test-support を含むファイル・ディレクトリを列挙する
+      #   （/proc はコンテナのプロセスの情報でイメージのファイルではないので入らない）。
+      # found="$(...)": 出力を先に受け取る。docker run や find が失敗したときは、run の既定のシェル（bash -e）でこのステップが失敗する
+      #   （パイプで grep につなぐと、失敗しても「見つからなかった」と区別できない）。1 行でもあれば ::error:: を出して失敗する。
+      - if: steps.config.outputs.ready == 'true'
+        name: Verify runtime image has no test-support
+        run: |
+          docker pull "$IMAGE"
+          found="$(docker run --rm --user root --entrypoint sh "$IMAGE" -c 'find / -path /proc -prune -o -path "*test-support*" -print')"
+          if [ -n "$found" ]; then
+            echo "$found"
+            echo "::error::test-support がイメージに含まれている（.dockerignore の **/test-support を確かめる）"
+            exit 1
+          fi
+
       # マイグレーションのイメージ（Dockerfile の migrate ステージ。`pnpm db:migrate` を実行する）。
       - if: steps.config.outputs.ready == 'true'
         name: Build and push migrate image

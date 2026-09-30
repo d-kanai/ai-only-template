@@ -10,7 +10,7 @@ import {
 } from "@/features/todo/api/api-error";
 import { commonMessages } from "@/shared/i18n/common.messages";
 import type { MessageKey, MessageParams } from "@/shared/i18n/i18n";
-import { tJa } from "@/shared/i18n/i18n.test-support";
+import { tJa } from "@/test-support/i18n";
 
 type CommonMessages = typeof commonMessages;
 

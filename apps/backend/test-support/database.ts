@@ -4,10 +4,11 @@ import { env } from "@repo/shared/env";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Client, Pool } from "pg";
-import type { Database } from "./database";
+import type { Database } from "../shared/infra/database";
 
 // 実 Postgres を使う単体テスト（*.postgres.test.ts など）のための、テスト専用の DB を用意する部品。
-// 本番のコードからは使わない（ファイル名の .test-support が目印）。
+// 本番のコードからは使わない。test-support/ に置くのが目印で、本番のコードからの import は rule-tests/test-support.test.ts が止め、
+// Docker のイメージには入らない（.dockerignore の **/test-support。deploy.yml が push したイメージで確かめる）。
 //
 // WHY テストファイルごとに別のスキーマを作る: Vitest はテストファイルを並列に実行する（Stryker はさらに複数の
 //   プロセスで同じテストを並行して実行する）。全員が public.todos を使うと、あるファイルの TRUNCATE が別のファイルの
@@ -55,7 +56,8 @@ export async function createTestDatabase(): Promise<TestDatabase> {
   return {
     db,
     url,
-    // migrationsFolder: apps/backend/shared/drizzle/（このファイルから ../drizzle。Issue #98 で apps/backend 直下の drizzle/ から移した）。
+    // migrationsFolder: apps/backend/shared/drizzle/（このファイルから ../shared/drizzle。Issue #98 で apps/backend 直下の drizzle/ から移し、
+    //   Issue #181 でこのファイルを apps/backend/shared/infra/ から apps/backend/test-support/ に移した）。
     //   WHY このファイルの場所から決める: カレントディレクトリからのパス（"drizzle"）だと、ディレクトリを apps/backend に
     //   移したとき（Issue #68）や、テストをリポジトリ直下以外から動かしたときに見つからない。このファイルは Vitest だけが
     //   読み込み（Next のバンドルには入らない）、import.meta.dirname は元のファイルの場所を指す。
@@ -63,7 +65,7 @@ export async function createTestDatabase(): Promise<TestDatabase> {
     //   pnpm db:migrate の記録と混ざり、「当て済み」と判断されてテスト用のスキーマに表が作られない。
     migrate: () =>
       migrate(db, {
-        migrationsFolder: join(import.meta.dirname, "..", "drizzle"),
+        migrationsFolder: join(import.meta.dirname, "..", "shared", "drizzle"),
         migrationsSchema: schema,
       }),
     close: async () => {

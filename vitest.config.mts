@@ -92,11 +92,15 @@ export default defineConfig({
       //   apps/frontend_customer/shared/（feature をまたぐ部品。最初は request-log/。Issue #80）も対象にする。
       //   apps/shared/（frontend と backend で共通の env.ts・logger.ts。Issue #90 で apps/backend/shared/infra/ から移した）も対象にする。
       //   apps/backend/ は全体を対象にし、shared/drizzle/ の drizzle.config.ts だけを下の exclude で外す（apps/backend/ の
-      //   ソースは drizzle.config.ts 以外すべて features/<f>/ か shared/ の 4 層の下にある。rule-tests/architecture.test.ts の
+      //   ソースは drizzle.config.ts 以外すべて features/<f>/ か shared/ の 4 層の下か test-support/ にある。rule-tests/architecture.test.ts の
       //   backend-placement。Issue #98 で apps/backend 直下から shared/drizzle/ に移した）。
+      //   テストだけが使うコード（apps/backend/test-support/・apps/frontend_customer/test-support/。Issue #181）も対象にする。
+      //   WHY: テストの前提を作るコード（テスト用の DB・翻訳の期待値）も仕様で、分岐が通らないまま残すとテストの前提が崩れても気づけない。
+      //   apps/backend/test-support/ は apps/backend/ の全体に含まれるので、frontend の分だけを足す。
       include: [
         "apps/frontend_customer/features/**/*.{ts,tsx}",
         "apps/frontend_customer/shared/**/*.{ts,tsx}",
+        "apps/frontend_customer/test-support/**/*.{ts,tsx}",
         "apps/backend/**/*.{ts,tsx}",
         "apps/shared/**/*.ts",
         "scripts/**/*.ts",

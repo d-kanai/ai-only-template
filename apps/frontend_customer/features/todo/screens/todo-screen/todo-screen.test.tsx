@@ -17,7 +17,7 @@ import {
 import { todoItemMessages } from "@/features/todo/components/todo-item.messages";
 import { commonMessages } from "@/shared/i18n/common.messages";
 import { LocaleProvider } from "@/shared/i18n/i18n";
-import { JaLocale, tJa } from "@/shared/i18n/i18n.test-support";
+import { JaLocale, tJa } from "@/test-support/i18n";
 import { todoScreenMessages } from "./todo-screen.messages";
 
 // 画面は「hook の状態を描き、操作を hook に渡す」ことを検証する。API は差し替え、操作の結果として呼ばれたかで見る。

@@ -20,6 +20,21 @@
 #   コード（依存の install スクリプトなど）が deployer のサービスアカウントのトークンを読めてしまう。auth の README が
 #   .dockerignore への追加を求めている。
 gha-creds-*.json
+# テストだけが使うコード（apps/backend/test-support/・apps/frontend_customer/test-support/。Issue #181）。
+# WHY: テスト用の DB の準備（createTestDatabase）や翻訳の期待値（tJa）などのテストだけが使うコードと、テスト用の endpoint
+#   （置くなら app/api/test-support/ の下。パスの要素が test-support なので同じ行で外れる）をイメージに入れない。
+#   本番では /api/test-support/* が 404 になる。
+#   この行があること・test-support/ のすべてのファイルがこれで外れることは rule-tests/test-support.test.ts が、push した runtime の
+#   イメージに test-support が無いことは .github/workflows/deploy.yml が確かめる。
+# 書き方: **/ を付け、パスのどこにある test-support ディレクトリも外す（下の行を ! で戻さない）。
+**/test-support
+# テスト（*.test.ts / *.test.tsx。Issue #181）。
+# WHY: 上の **/test-support で外したコードをテストが import している。テストがコンテキストに残ると、next build の型チェック
+#   （apps/frontend_customer/tsconfig.json の include は **/*.ts・**/*.tsx でテストも含む）が「Cannot find module '@/test-support/i18n'」
+#   で失敗する（2026-09-30 に docker build で実測）。テストはイメージに要らない。test-support を import するテストがこれで外れることは
+#   rule-tests/test-support.test.ts が確かめる。
+**/*.test.ts
+**/*.test.tsx
 # テスト・mutation testing・E2E の実行結果（.gitignore と同じもの）。
 .stryker-tmp
 reports

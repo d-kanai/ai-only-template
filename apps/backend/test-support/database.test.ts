@@ -9,7 +9,7 @@ import {
   cleanupTestSchemas,
   createTestDatabase,
   testSchemaPrefix,
-} from "./database.test-support";
+} from "./database";
 
 // 実 Postgres（compose.yaml）に対して実行する。
 describe("createTestDatabase", () => {
