@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Claude Code の WorktreeCreate フック（設計と WHY は .claude/rules/worktree.md）。
+# Claude Code の WorktreeCreate フック（Issue #64。設計と WHY は .claude/rules/worktree.md）。
 # claude --worktree や、サブエージェントの isolation: "worktree" で worktree を作るときに Claude Code が呼ぶ。
 # フックを設定すると Claude Code は自分では git worktree を作らない（公式 https://code.claude.com/docs/en/hooks.md の
 # 「WorktreeCreate」: "Configuring a WorktreeCreate hook replaces that default git behavior"）ので、ここで作る。
@@ -119,7 +119,7 @@ live_worktree_db_names() {
 }
 
 # 2. 孤立した DB を drop する。
-# WHY ここで掃除する: WorktreeRemove フックが発火するとは限らない（worktree-remove.sh の注意）。消し忘れを次の作成で拾う。
+# WHY ここで掃除する: WorktreeRemove フックの発火は実測で確認できなかった（Issue #64 のコメント）。消し忘れを次の作成で拾う。
 # WHY app_wt_[a-z0-9_]+ の形だけを消す: 列挙の結果を SQL に埋め込むので、想定外の名前（記号入り）は触らない。
 cleanup_orphan_databases() {
   if is_dry_run; then

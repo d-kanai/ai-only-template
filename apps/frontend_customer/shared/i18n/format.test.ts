@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { formatDateTime } from "@/shared/i18n/format";
 
-// UTC の 9/28 0:00 は日本時間（UTC+9）で 9/28 9:00。
+// 2026-09-28T00:00:00Z は日本時間（UTC+9）で 2026-09-28 09:00。
 const createdAt = "2026-09-28T00:00:00.000Z";
 
 describe("formatDateTime（日時をロケールとタイムゾーンで表示する）", () => {

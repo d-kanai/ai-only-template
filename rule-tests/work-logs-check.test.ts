@@ -5,8 +5,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// 作業ログの CI の検査が ci.yml に効く形で入っていることを、仕様として固定するルール検査テスト。
-// WHY: 作業ログ（docs/work-logs/YYYY-MM-DD.md）の追記漏れを PR 単位で止める（文書だけの PR も例外なし）。
+// 作業ログの CI の検査（Issue #64）が ci.yml に効く形で入っていることを、仕様として固定するルール検査テスト。
+// WHY: 作業ログ（docs/work-logs/YYYY-MM-DD.md）の追記漏れを PR 単位で止める（ユーザー判断。文書だけの PR も例外なし）。
 //   ステップが消える・失敗を打ち消す書き方になる・push でも動いて main の CI を壊す・履歴が浅くて差分を取れない、
 //   のどれでも検査は黙って効かなくなるか、関係のない失敗になる。
 // 検査すること（checksLogsInPullRequests）:

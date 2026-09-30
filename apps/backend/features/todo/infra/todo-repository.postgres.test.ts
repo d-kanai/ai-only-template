@@ -204,7 +204,7 @@ describe("PostgresTodoRepository", () => {
     await expect(repository().findAll()).resolves.toEqual([kept]);
   });
 
-  // DB の行が Todo の不変条件を満たさない（手で入れた行・規則を変えたのに移行していない行）ときの扱い。
+  // DB の行が Todo の不変条件を満たさない（手で入れた行・規則を変えたのに移行していない行）ときの扱い（Issue #94）。
   // WHY DomainError ではなく Error を投げる（= API は 500）: DomainError(validation_error) は presentation で 400 になり、
   //   「リクエストを直せば通る」とクライアントに伝える。DB のデータの不整合はクライアントには直せないサーバ側の誤り。
   //   toEqual は Error の name・message・cause を比べるので、DomainError のまま投げる実装はこのテストで落ちる。
@@ -239,7 +239,7 @@ describe("PostgresTodoRepository", () => {
   }
 
   // WHY message は英語: ログ（toProblemResponse の logger.error）に出る開発者向けの文字列で、apps/backend の非テストコードには
-  //   自然言語の日本語を置かない。cause の DomainError の message はキーと params（describeErrorKey）。
+  //   自然言語の日本語を置かない（Issue #116）。cause の DomainError の message はキーと params（describeErrorKey）。
   function corruptedRowError(id: string, cause: DomainError): Error {
     return new Error(
       `stored Todo (id: ${id}) violates the invariants: ${cause.message}`,

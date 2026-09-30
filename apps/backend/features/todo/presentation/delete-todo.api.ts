@@ -10,8 +10,9 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 // Next 16 では動的セグメントの params が Promise で渡される（get-todo.api.ts の Context のコメント）。
 type Context = { params: Promise<{ id: string }> };
 
-// WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包む:
-//   list-todos.api.ts の ListTodosApi のコメント。
+// DELETE /api/todos/:id の Route Handler を持つクラス。コンストラクタで command を受け取り、handle を Route Handler として export する
+//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包むは
+//   list-todos.api.ts の ListTodosApi のコメント）。
 export class DeleteTodoApi {
   constructor(
     private readonly deleteTodo: Pick<DeleteTodoCommand, "execute">,

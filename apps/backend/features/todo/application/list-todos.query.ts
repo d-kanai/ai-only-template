@@ -1,6 +1,7 @@
 import type { Todo } from "../domain/todo";
 import type { TodoRepository } from "../domain/todo-repository";
 
+// Todo の一覧を作成日時の昇順で返す（query: 読むだけで状態を変えない）。
 // WHY 並べ替えをここで行う: 「一覧は作成日時の昇順」は API の仕様で、リポジトリの実装（Map の挿入順、DB の既定順）に
 //   任せると実装を差し替えたときに順序が変わりうる。用途を知っている application 層で明示的に決める。
 export class ListTodosQuery {

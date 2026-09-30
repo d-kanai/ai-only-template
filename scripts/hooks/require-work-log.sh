@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Claude Code の Stop フック（.claude/settings.json の hooks.Stop から呼ぶ）。
+# Claude Code の Stop フック（.claude/settings.json の hooks.Stop から呼ぶ）。Issue #64。
 #
 # WHAT: このターン（最後の人間の発言以降）にツールを使ったのに、その日の作業ログ docs/work-logs/<今日>.md が
 #   作業ツリー（未追跡・ステージ済みを含む）でも、このターンの間のコミット（最後の人間の発言の timestamp 以降）でも
 #   変わっていなければ、
 #   {"decision":"block","reason":...} を stdout に出して停止を拒否する（Claude はログを書いてから止まり直す）。
-# WHY: 調査だけの依頼などは実装という区切りが無く、作業ログの追記が漏れやすい（LEARNINGS.md）。文章のルールではなく
+# WHY: 調査だけの依頼などで作業ログの追記が漏れた（LEARNINGS.md、Issue #64 のユーザー判断）。文章のルールではなく
 #   フックで止める（CLAUDE.md の「7. 機械的な強制を優先」）。
 # 詳細（判定の限界・タイムゾーン・ユーザー側の Stop フックとの順序）: .claude/rules/work-log.md、決定は ADR docs/adr/workflow/20260928-work-log-enforced-by-stop-hook-and-ci.md。
 #
@@ -32,13 +32,13 @@ input=$(cat)
 #   （git が壊れているなど）で上限（8 回）までループする。1 回目の block で Claude はログを書く機会を得ているので、2 回目は見ない。
 # 依存（jq など）は足さない（Claude Code は node で動くので node はある。実行環境の前提は .claude/rules/work-log.md）。
 # 人間のターン: type が "user" で、isMeta でなく、message.content が文字列か、配列で tool_result を含まないもの。
-#   WHY tool_result を除く: ツールの結果も type "user" の行として記録される（実セッションの transcript で確かめられる）。
+#   WHY tool_result を除く: ツールの結果も type "user" の行として記録される（2026-09-28 に実セッションの transcript で確認）。
 #   WHY isMeta を除く: Stop フックのフィードバックや他セッションからのメッセージは isMeta: true の user 行で、人間の発言ではない。
 #   さらに、自動の wake（文字列、配列なら text 要素の連結が、先頭の空白を除いて <task-notification> / [SYSTEM NOTIFICATION /
 #   Stop hook feedback: で始まる user 行）も除き、その前の本当の人間のターンを起点にする。
 #   WHY: バックグラウンドの完了通知などは isMeta の無い文字列の user 行として記録される（実 transcript で確認）。人間のターンと
 #   数えると、CI の結果を 1 回読むだけの wake のターンで、起点がその通知になり、人間のターンの中で済ませたログのコミットを
-#   見落として止めてしまう。見分けは文字列の先頭だけ（限界は .claude/rules/work-log.md）。
+#   見落として止めていた（Issue #64 のオーケストレータの実測）。見分けは文字列の先頭だけ（限界は .claude/rules/work-log.md）。
 # 数えるのは type が "assistant" の行の message.content にある type "tool_use" の要素。
 # JSON として読めない行は飛ばす（transcript は非同期に書かれ、最後の行が途中で切れていることがある）。
 parsed=$(
@@ -124,7 +124,7 @@ if ! root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null); then
 fi
 
 # 日付はローカルのタイムゾーン（date +%F）。docs/work-logs/ のファイル名を付けるときと同じ規則にする（限界は .claude/rules/work-log.md）。
-# 置き場所は docs/work-logs/ だけ（リポジトリ直下の work-logs/ のログでは通さない）。
+# 置き場所は Issue #101 でリポジトリ直下の work-logs/ から docs/work-logs/ に移した（旧い置き場所のログでは通さない）。
 log="docs/work-logs/$(date +%F).md"
 
 # 起点は最後の人間のターンの時刻。timestamp が取れないときだけ今日の 0 時にフォールバックする
@@ -137,7 +137,7 @@ fi
 # 作業ツリーでの変更（未追跡・ステージ済みを含む）で、ファイルの更新時刻が起点以降のもの。
 # pathspec はリポジトリ直下からのパスなので -C "$root" で実行する。
 # WHY 更新時刻も見る: git status は「HEAD と違うか」しか見ないので、前のターンで書いて未コミットのまま残ったログがあると、
-#   以後のターンはログを書かずに通ってしまう。
+#   以後のターンはログを書かずに通っていた（reviewer 指摘）。
 # stat は GNU（Linux: -c %Y）と BSD（macOS: -f %m）で書き方が違うので両方を試す。ファイルが無ければ（削除した変更など）空。
 if [ -n "$(git -C "$root" status --porcelain -- "$log")" ]; then
   mtime=$(stat -c %Y "$root/$log" 2>/dev/null || stat -f %m "$root/$log" 2>/dev/null)
@@ -150,7 +150,7 @@ fi
 # WHY コミットも見る: この環境のユーザー側の Stop フックは未コミットの変更があると止めるので、ログはコミットしてから止まる。
 #   作業ツリーだけを見ると、コミットした後に必ずこのフックで止まってしまう。
 # WHY 今日の 0 時ではなくターンの開始: 今日の 0 時以降にすると、その日に 1 度でもログがコミットされれば（main の取り込みを含む）
-#   以後のターンがすべて素通りする。
+#   以後のターンがすべて素通りした（Issue #64 の実測で当日 66 件。2026-09-28 の work-logs）。
 if [ -n "$(git -C "$root" log --since="$since" --format=%H -- "$log")" ]; then
   exit 0
 fi

@@ -1,4 +1,4 @@
-// 画面の表示言語（ロケール）の一覧と、リクエストからロケールを決める純粋関数。
+// 画面の表示言語（ロケール）の一覧と、リクエストからロケールを決める純粋関数（Issue #116）。
 // 流れ: proxy.ts が negotiateLocale でロケールを決めてリクエストヘッダ x-locale に載せ → app/layout.tsx が
 //   localeFromHeader で読み → LocaleProvider（i18n.tsx）で画面に配る。URL のパスは変えない（ADR
 //   docs/adr/architecture/20260929-i18n-without-library.md）。
@@ -12,7 +12,7 @@ export const SUPPORTED_LOCALES = ["ja", "en"] as const;
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
 
 // Cookie も Accept-Language も対応するロケールを示さないとき、Proxy を通らないとき（テスト・matcher の外）の言語。
-// WHY ja: 利用者の中心が日本語のため。
+// WHY ja: 既存の画面の言語で、利用者の中心が日本語のため（Issue #116 のユーザー判断）。
 export const DEFAULT_LOCALE: Locale = "ja";
 
 // ロケールを載せるリクエストヘッダ（proxy.ts が書き、app/layout.tsx が読む）。

@@ -1,9 +1,9 @@
-// 環境変数の唯一の入口。アプリ・テスト・ツールの設定ファイルは、process.env を直接読まずにここの env / toolEnv を使う。
+// 環境変数の唯一の入口（Issue #59）。アプリ・テスト・ツールの設定ファイルは、process.env を直接読まずにここの env / toolEnv を使う。
 // 規則と WHY は .claude/rules/env.md の「環境変数」。process.env を直接読むと Biome（style/noProcessEnv）と
 // rule-tests/architecture.test.ts（規則 env-direct-access）で失敗する。process.env に触ってよいのはこのファイルだけ
 // （例外は apps/frontend_customer/instrumentation.ts が Next.js の規約の NEXT_RUNTIME を読む 1 か所だけ）。
-// 置き場所は frontend と backend で共通の workspace パッケージ apps/shared（@repo/shared/env。frontend 直下の
-// instrumentation-node.ts・backend・apps/e2e/・vitest.global-setup.ts が使う。.claude/rules/shared.md）。
+// 置き場所は frontend と backend で共通の workspace パッケージ apps/shared（@repo/shared/env。Issue #90 で apps/backend/shared/infra/
+// から移した。frontend 直下の instrumentation-node.ts・backend・apps/e2e/・vitest.global-setup.ts が使う。.claude/rules/shared.md）。
 //
 // WHY 1 か所にまとめる: 変数ごとに読む場所が散らばると、既定値や検証（数として使えるか）が場所ごとにずれ、
 //   どの変数が必要かを一覧できない。ここで型を付けて検証した値だけを配ると、使う側は string | undefined を扱わずに済む。
@@ -47,7 +47,7 @@ export type ToolEnv = {
   // E2E（Playwright）が本番ビルドを起動するポート（1〜65535。apps/e2e/playwright.config.ts）。未設定なら undefined で、
   //   apps/e2e/playwright.config.ts が既定の 3100 を使う。ツールの動かし方（E2E のポート）の切り替え。
   // WHY Env（必須）でなくここ: E2E 専用で、アプリ（next start）は使わない。必須にすると本番や既存の .env にテスト用の
-  //   変数を要求し、足すまで全コマンドが止まる。
+  //   変数を要求し、足すまで全コマンドが止まる（Issue #64 の reviewer 指摘）。
   // WHY 任意でも不正な値はエラーにする: 0 や範囲外を黙って既定値にすると、worktree ごとに分けたつもりのポートが
   //   3100 に戻り、reuseExistingServer で別の worktree のサーバを検証してしまう（.claude/rules/worktree.md）。
   E2E_PORT: number | undefined;
@@ -182,8 +182,8 @@ export function readToolEnv(source: EnvSource): ToolEnv {
 
 // path の .env を process.env に読み込む。読み込んだら true、ファイルが無ければ false。
 // WHY Node の process.loadEnvFile を使う（dotenv などを足さない）: Node 20.12 / 21.7 以降に標準である。依存を増やさない。
-// WHY 環境変数を優先する: process.loadEnvFile は、すでに process.env にある変数をファイルの値で上書きしない（Node 24.21.0）。
-//   CI やコマンドの前に付けた値（DATABASE_URL=... pnpm db:migrate）が .env より優先される。
+// WHY 環境変数を優先する: process.loadEnvFile は、すでに process.env にある変数をファイルの値で上書きしない（2026-09-28、
+//   Node 24.21.0 で実測）。CI やコマンドの前に付けた値（DATABASE_URL=... pnpm db:migrate）が .env より優先される。
 // WHY ファイルが無いとき（ENOENT）だけ握りつぶす: .env を置かずに環境変数だけで渡す動かし方（本番など）を許すため。
 //   必須の変数が足りなければ、この後の readEnv が名前を挙げて止める。それ以外のエラー（読めない、形式が壊れているなど）は、
 //   黙って進むと原因が分からなくなるので投げる。
@@ -200,9 +200,9 @@ export function loadDotEnvFile(path: string): boolean {
 }
 
 // start から上に向かって pnpm-workspace.yaml のあるディレクトリ（リポジトリ直下）を探す。見つからなければ start を返す。
-// WHY pnpm-workspace.yaml を目印にする: リポジトリ直下にだけあり、apps/frontend_customer・apps/backend には無い。
+// WHY pnpm-workspace.yaml を目印にする: リポジトリ直下にだけあり、apps/frontend_customer・apps/backend には無い（Issue #68）。
 //   .git は worktree ではファイルになり、git の無いコピー（Stryker のサンドボックスなど）には無いので使わない。
-// WHY 見つからなければ start を返す: リポジトリの外（.env と環境変数だけを置いた実行環境など）でも、
+// WHY 見つからなければ start を返す: リポジトリの外（.env と環境変数だけを置いた実行環境など）でも、以前と同じく
 //   カレントディレクトリの .env を読めるようにする。
 export function findRepoRoot(start: string): string {
   let dir = start;
@@ -217,9 +217,9 @@ export function findRepoRoot(start: string): string {
 }
 
 // cwd から探したリポジトリ直下の .env を読む。読み込んだら true、ファイルが無ければ false（loadDotEnvFile と同じ）。
-// WHY リポジトリ直下の .env を 1 つだけ読む: .env は app ごとに置かず、リポジトリ直下に 1 つにする。
+// WHY リポジトリ直下の .env を 1 つだけ読む（Issue #68 のユーザー判断）: .env は app ごとに置かず、リポジトリ直下に 1 つにする。
 //   vitest はリポジトリ直下で動くが、workspace パッケージの script（pnpm --filter @repo/frontend-customer build /
-//   pnpm --filter @repo/backend db:migrate・pnpm --filter @repo/e2e test（playwright）など）は
+//   pnpm --filter @repo/backend db:migrate・pnpm --filter @repo/e2e test（playwright。Issue #84）など。Issue #68 の段階 2）は
 //   パッケージのディレクトリ（apps/frontend_customer・apps/backend・apps/e2e）で
 //   動くため、カレントディレクトリの .env を読むだけでは見つからない。
 // WHY このファイルの場所から探さない（import.meta.dirname を使わない）: Next のビルドでバンドルされると元の場所を指さないため。

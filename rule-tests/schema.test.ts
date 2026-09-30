@@ -13,8 +13,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// DB の列の型の既定（.claude/rules/backend.md の「列の型」。決定は ADR docs/adr/quality/20260930-db-column-types-default-text-and-integer.md）を、
-// Drizzle のスキーマ（apps/backend/**/infra/schema.ts）で機械的に検査するテスト。
+// DB の列の型の既定（.claude/rules/backend.md の「列の型」。決定は ADR docs/adr/quality/20260930-db-column-types-default-text-and-integer.md、
+// Issue #145）を、Drizzle のスキーマ（apps/backend/**/infra/schema.ts）で機械的に検査するテスト。
 // WHY 検査する: 「文字列は text、長さは domain が持つ」は文章だけだと、varchar(255) を書き慣れた人や AI が既定のように書き、
 //   domain（zod）と DB の 2 か所に上限ができてずれる。DB の制約違反は 500 になり、domain の 400（errors[] 付き）に負ける。
 // 違反にするもの（規則 → 例外を認める WHY の見出し）:

@@ -21,7 +21,7 @@ const repoRoot = resolve(__dirname, "..");
 const scriptPath = join(repoRoot, "scripts", "cloud-session-start.sh");
 
 // スクリプトに CLAUDE_PROJECT_DIR として渡すリポジトリの代わり。本物の .tool-versions と .env.example だけをコピーする。
-// WHY 本物のリポジトリを渡さない: スクリプトは .env が無ければ .env.example からコピーする。本物のリポジトリを
+// WHY 本物のリポジトリを渡さない: スクリプトは .env が無ければ .env.example からコピーする（Issue #59）。本物のリポジトリを
 //   渡すと、テストがリポジトリの .env を作ったり、手元の .env の有無で結果が変わったりする。
 // WHY パスだけをモジュールの読み込み時に決める: 期待値（ログの行）を describe の中で文字列として組み立てるため、
 //   beforeEach より前に場所が決まっている必要がある。ディレクトリそのものはテストごとに beforeEach で作り、afterEach で消す
@@ -585,7 +585,7 @@ describe("scripts/cloud-session-start.sh", () => {
         expect(call, label).toContain("--connect-timeout 15");
         expect(call, label).toContain(`--max-time ${maxTime}`);
         // --max-time は接続を含む全体の上限なので実際の最悪値は max-time の和だが、
-        // スクリプトのコメントの見積もりに合わせて、接続タイムアウトも足した保守的な値で上限を確かめる。
+        // 既存の考え方に合わせて接続タイムアウトも足した保守的な値で上限を確かめる。
         worstCase += 15 + maxTime;
       }
       expect(worstCase).toBeLessThanOrEqual(400);
@@ -650,7 +650,7 @@ describe("scripts/cloud-session-start.sh", () => {
     });
   });
 
-  // クラウドのネットワークポリシーで nodejs.org が 403 になるときの経路。
+  // クラウドのネットワークポリシーで nodejs.org が 403 になる（2026-09-28 実測）ときの経路。
   // nodejs.org のフィクスチャを置かないことで、偽の curl が 22 で失敗する = 403 と同じ扱いになる。
   describe("npm レジストリへのフォールバック（nodejs.org に届かない）", () => {
     const nodeDirIn = () => join(home, ".local", `node-${nodeVersion}`);
@@ -934,7 +934,7 @@ describe("scripts/cloud-session-start.sh", () => {
       rmSync(dockerReady);
       const result = runScript([], remoteEnv());
       expect(result.status).toBe(0);
-      // 既定のソケット・データ置き場で使うので、引数なしで起動する（WHY は cloud-session-start.sh の ensure_docker_daemon のコメント）
+      // 既定のソケット・データ置き場で使うので、引数なしで起動する（2026-09-28 の work-logs の VM の実測）
       expect(logLines(dockerdLog)).toEqual(["dockerd "]);
       expect(readFileSync(join(tmp, "dockerd.log"), "utf8")).toContain(
         "fake dockerd started",
@@ -1025,7 +1025,7 @@ describe("scripts/cloud-session-start.sh", () => {
       expect(result.stdout).not.toContain("docker compose");
     });
 
-    // .env は Docker の段より前に用意する。Docker が使えなくても、pnpm test / pnpm dev などは
+    // .env は Docker の段より前に用意する（Issue #59 の reviewer 指摘）。Docker が使えなくても、pnpm test / pnpm dev などは
     //   .env が無いと必須の変数が欠けて止まるため。
     it("docker が無くても .env は .env.example から作る（Docker の段より前に用意する）", () => {
       placeInstalledNodeAndPnpm();

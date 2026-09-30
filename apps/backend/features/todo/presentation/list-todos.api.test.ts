@@ -54,7 +54,7 @@ describe("GET /api/todos", () => {
   });
 
   // WHY 本番の GET（モジュールの最下部で組み立てたもの）を確かめる: 環境変数などで InMemory に切り替える分岐を持たない
-  //   ことを、Postgres の Repository が呼ばれることで固定する。findAll を差し替えるので DB には接続しない。
+  //   （Issue #59）ことを、Postgres の Repository が呼ばれることで固定する。findAll を差し替えるので DB には接続しない。
   test("本番の GET は Postgres の Repository で組み立てている", async () => {
     const findAll = vi
       .spyOn(PostgresTodoRepository.prototype, "findAll")

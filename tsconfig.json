@@ -1,4 +1,4 @@
-// リポジトリ直下の tsconfig。Vitest（vitest.config.mts の resolve.tsconfigPaths）の paths の解決と、
+// リポジトリ直下の tsconfig（Issue #68）。Vitest（vitest.config.mts の resolve.tsconfigPaths）の paths の解決と、
 // リポジトリ全体の型チェック（pnpm exec tsc -p . --noEmit。rule-tests/ のルール検査テスト・apps/e2e/・scripts/ も含む）に使う。
 // Next のビルドは apps/frontend_customer/tsconfig.json、backend 単体の型チェックは apps/backend/tsconfig.json を使う。
 // compilerOptions は apps/frontend_customer/tsconfig.json（create-next-app@16.3.6 の生成物がベース）に合わせている。
@@ -19,7 +19,7 @@
     "jsx": "react-jsx",
     // paths: "@/*" は frontend の中の参照（apps/frontend_customer/*）。apps/frontend_customer/tsconfig.json と同じ行き先にする
     //   （どちらの tsconfig で解決しても同じファイルになるように）。
-    //   "@repo/backend/..." は paths に書かない。apps/backend は workspace パッケージ @repo/backend で、
+    //   "@repo/backend/..." は paths に書かない（Issue #68 の段階 2）。apps/backend は workspace パッケージ @repo/backend で、
     //   node_modules/@repo/backend（apps/backend への symlink）と apps/backend/package.json の exports で解決する
     //   （moduleResolution: bundler は exports を読む）。paths に書くと exports を通らずに backend の中のどのファイルも
     //   指せてしまい、公開の範囲（exports）を型チェックで確かめられなくなる。

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { keyedIssue, keyedRefine } from "./keyed-issue";
 
 // keyedIssue / keyedRefine は zod のスキーマ・refine に ErrorKey（と params）を付ける口。domain の validate（todo.ts）と
-//   presentation の toProblemError（json-body.ts）が、issue の message（= キー）と params を取り出して誤りにする。
+//   presentation の toProblemError（json-body.ts）が、issue の message（= キー）と params を取り出して誤りにする（Issue #144）。
 describe("keyedIssue / keyedRefine", () => {
   test("keyedIssue は params の無いキーを zod の error にする", () => {
     expect(keyedIssue("todo.title.empty")).toEqual({
@@ -20,7 +20,7 @@ describe("keyedIssue / keyedRefine", () => {
   });
 
   // WHY 実際の zod の issue で確かめる: 取り出す側（validate・toProblemError）は issue の message と params を読む。
-  //   zod が error を message に、refine の params を issue の params にそのまま載せることを固定する（zod 4.6.5 の挙動）。
+  //   zod が error を message に、refine の params を issue の params にそのまま載せることを固定する（zod 4.6.5 の実測）。
   test("zod は keyedIssue のキーを issue の message に、keyedRefine の params を issue の params に載せる", () => {
     const schema = z
       .string()

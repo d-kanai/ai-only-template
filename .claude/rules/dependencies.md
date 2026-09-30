@@ -45,7 +45,7 @@ npm パッケージの版は `package.json` と `pnpm-lock.yaml` の両方で固
 - `@types/node`: `.tool-versions` の Node メジャー（24）に合わせた 24.x の最新。WHY: 実行環境より新しい Node の API の型が使えると、実行時に無い API を呼ぶコードが型チェックを通る。Node の LTS を上げるときに一緒に上げる。
 
 ## pnpm patch
-- 依存の不具合を上流の修正を待たずに直すときだけ使う。条件（すべて）: 上流の不具合で設定や使い方では避けられない / 修正が数行 / 上流の Issue・PR を確認し `patchedDependencies` のコメントにリンク（無い・確認できないならその旨と理由。上流の Issue の URL は一次情報として書いてよい。このリポジトリの Issue 番号とは別）/ 当てる前に不具合を再現し、当てて直ることを実測する。
+- 依存の不具合を上流の修正を待たずに直すときだけ使う。条件（すべて）: 上流の不具合で設定や使い方では避けられない / 修正が数行 / 上流の Issue・PR を確認し `patchedDependencies` のコメントにリンク（無い・確認できないならその旨と理由）/ 当てる前に不具合を再現し、当てて直ることを実測する。
 - パッチは `patches/<pkg>@<版>.patch`、対応は `pnpm-workspace.yaml` の `patchedDependencies`。何を・なぜ直したかは `pnpm-workspace.yaml` と、そのパッケージを使う設定ファイルのコメントに書く。`patches/`・`pnpm-workspace.yaml`・`pnpm-lock.yaml` は同じコミットに入れる（lockfile にパッチのハッシュが入る）。
 - 上流が直した版が出たら、その版に上げてパッチを消す（キーは版まで固定なので、版を上げるたびに要否を見直す）。
 - 現在のパッチ: `@stryker-mutator/vitest-runner@10.0.0`（Issue #52）: テスト名の連結を ` > ` にする（Vitest 5.0.1 との組み合わせの不具合）。上流の Issue / PR の有無は未確認（GitHub の Issue 検索がこの環境から 403）。詳細は `stryker.config.mjs` と ADR `docs/adr/tech-stack/20260928-patch-stryker-vitest-runner.md`。

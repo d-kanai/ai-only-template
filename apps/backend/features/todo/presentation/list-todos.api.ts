@@ -8,8 +8,8 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 
 // WHY DTO をこのファイルで定義する: 1 API = 1 ファイルで、その API の契約（リクエスト / レスポンスの形）を
 //   同じファイルで読めるようにするため。画面側は `import type` でこの型を参照し、形のずれを型チェックで検出する。
-//   同じ形の Response を他の *.api.ts にも書く（共通の dto.ts も共通の DTO 型の別名も作らず、domain の Todo を各 API の
-//   Response に直接写す）。
+//   同じ形の Response を他の *.api.ts にも書く（共通の dto.ts を作らないのはユーザー判断。Issue #139 で共通の DTO 型の別名もやめ、
+//   domain の Todo を各 API の Response に直接写す）。
 export type ListTodosResponse = {
   todos: {
     id: string;
@@ -29,12 +29,12 @@ function toResponseItem(todo: Todo): ListTodosResponse["todos"][number] {
   };
 }
 
-// WHY クラスにする: application の query / command と同じ「コンストラクタで依存を受け取る」形に
+// GET /api/todos の Route Handler を持つクラス。コンストラクタで query を受け取り、handle を Route Handler として export する。
+// WHY クラスにする（Issue #123。ユーザー判断）: application の query / command と同じ「コンストラクタで依存を受け取る」形に
 //   そろえる。テストでは空の InMemory のリポジトリで組み立てた query を渡し
 //   （`new ListTodosApi(new ListTodosQuery(new InMemoryTodoRepository())).handle`）、本番（下の GET）では Postgres で組み立てた
 //   query を渡す。handler の中身は同じものをテストする。差し替えはコンストラクタ injection だけで行い、vi.mock は使わない
-//   （差し替えたものが型で縛られ、query の形が変わればテストがコンパイルエラーになる。
-//   ADR docs/adr/architecture/20260929-constructor-injection-without-container.md）。
+//   （差し替えたものが型で縛られ、query の形が変わればテストがコンパイルエラーになる）。
 // WHY 型を Pick<ListTodosQuery, "execute"> にする: handler が使うのは execute だけなので、その形だけを約束する
 //   （テストで execute だけを持つ偽物も渡せる）。
 export class ListTodosApi {
@@ -43,9 +43,10 @@ export class ListTodosApi {
   // WHY アロー関数のプロパティにする: Route Handler として `export const GET = new ListTodosApi(...).handle` のように
   //   インスタンスから取り出して渡すと、メソッドでは this が外れて this.listTodos を読めない。アロー関数は作ったときの
   //   this（インスタンス）を持ち続ける（withProblemResponse で包んでも、中のアロー関数の this は変わらない）。
-  // WHY withProblemResponse で包む: handler が投げた例外（DomainError・InvalidRequestError・想定外の例外）を
+  // WHY withProblemResponse で包む（Issue #141）: handler が投げた例外（DomainError・InvalidRequestError・想定外の例外）を
   //   Problem Details の Response に変換する。Next の Route Handler には共通の catch が無く、包み忘れると Next の素の 500 が
   //   漏れるので、規則 presentation-with-problem-response（rule-tests/architecture.test.ts）が包み忘れを止める。
+  //   以前は各 api が try / catch で toProblemResponse を手書きしていた（problem.ts の withProblemResponse のコメント）。
   readonly handle = withProblemResponse(
     // WHY 使わない request を引数に書く: withProblemResponse が第 1 引数の request を Problem の instance に使うので、handler の
     //   形（(request) => Promise<Response>）を Route Handler と同じにそろえる。
@@ -58,12 +59,12 @@ export class ListTodosApi {
 }
 
 // app/api/todos/route.ts が re-export する Route Handler。本番は常に Postgres で組み立てる。
-// WHY ここ（api ファイルの最下部）で組み立てる（DI コンテナを置かない）: この API が何（query と Repository の実装）で動くかを、
-//   このファイルだけで読める。
+// WHY ここ（api ファイルの最下部）で組み立てる: Issue #123 で DI コンテナ（infra/container.ts）を廃止し、組み立てを使う場所に
+//   置いた。この API が何（query と Repository の実装）で動くかを、このファイルだけで読める。
 // WHY api ファイルごとに new PostgresTodoRepository(getDatabase().db) してよい: プールは getDatabase が globalThis に 1 つだけ
 //   持つので（database.ts）、Repository を 5 つ作っても接続のプールは 1 つのまま。Repository は db を持つだけで状態を持たない。
-// WHY DATABASE_URL が無いときに InMemory へ切り替えない: 設定漏れでも黙って InMemory で動き、データが保存されないまま
-//   気づけない（ADR docs/adr/architecture/20260928-always-use-postgres-no-in-memory-switch.md）。環境変数はすべて必須にし（apps/shared/env.ts）、InMemory はテストだけで使う（規則 presentation が
+// WHY DATABASE_URL が無いときに InMemory へ切り替えない（Issue #59）: 設定漏れでも黙って InMemory で動き、データが保存されない
+//   まま気づけなかった。環境変数はすべて必須にし（apps/shared/env.ts）、InMemory はテストだけで使う（規則 presentation が
 //   本番の api ファイルからの参照を止める）。
 // WHY 読み込んだ時点で組み立ててよい: プールを作るだけで、接続は最初のクエリまで張らない（node-postgres の Pool）。
 //   `next build` がこのモジュールを読み込んでも DB には接続しない。必須の環境変数が欠けていれば、env.ts の読み込みで止まる。

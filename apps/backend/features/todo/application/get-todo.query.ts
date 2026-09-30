@@ -1,6 +1,7 @@
 import type { Todo } from "../domain/todo";
 import type { TodoRepository } from "../domain/todo-repository";
 
+// id で Todo を 1 件返す（query: 読むだけで状態を変えない）。
 export class GetTodoQuery {
   constructor(private readonly repository: TodoRepository) {}
 

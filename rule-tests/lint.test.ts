@@ -21,7 +21,7 @@ const ERROR_ON_WARNINGS = "--error-on-warnings";
 
 // WHY コマンド文字列を「含むか」ではなく、`&&` で区切ったコマンドごとに `biome check` とその引数として読む:
 //   `biome check . && echo --error-on-warnings` のように、別のコマンドの引数に置かれたフラグや、`biome lint` / `biome format` に
-//   付いたフラグを「付いている」と誤判定しないため。
+//   付いたフラグを「付いている」と誤判定しないため（Issue #50）。
 // 許す起動の仕方は `biome ...`（package.json の scripts。node_modules/.bin が PATH に入る）と `pnpm exec biome ...`（lefthook）だけ。
 //   npx などは pnpm のみを使う方針（.claude/rules/env.md）から外れるので、許可しない。
 // WHY `&&` 以外のつなぎ（`||` / `;` / 改行 / `|` / 単独の `&`）を含むコマンドは丸ごと拒否する:
@@ -34,7 +34,7 @@ const COMMAND_CHAIN = "&&";
 const UNSAFE_CHAIN = /[|;&\n]/;
 
 // WHY warn を効かなくするフラグを拒否する: `--diagnostic-level=error` は warn 以下の診断を出さず、`--only` / `--skip` は
-//   実行するルールを絞るため、`--error-on-warnings` が付いていても warn の違反で終了コード 0 になる。
+//   実行するルールを絞るため、`--error-on-warnings` が付いていても warn の違反で終了コード 0 になる（Issue #50 の reviewer が実測）。
 //   `--flag=value` と `--flag value` の両方の書き方を拒否する。
 const WARNING_SUPPRESSING_FLAGS = ["--diagnostic-level", "--only", "--skip"];
 
@@ -77,7 +77,7 @@ describe("biome check（pnpm lint と同じ引数）", () => {
   beforeAll(() => {
     // WHY: 違反ファイルをリポジトリ内に置くと、テストが途中で落ちたときに作業ツリーへ残り、
     //   `pnpm lint` や git の差分を汚す。OS の一時ディレクトリに置いて afterAll で消す。
-    //   リポジトリ外のファイルでも、cwd（リポジトリ直下）の biome.json が適用される。
+    //   リポジトリ外のファイルでも、cwd（リポジトリ直下）の biome.json が適用されることを確認済み。
     dir = mkdtempSync(join(tmpdir(), "lint-test-"));
   });
 
@@ -143,10 +143,10 @@ describe("biome check（pnpm lint と同じ引数）", () => {
     expect(output).toContain(rule);
   });
 
-  // style/noProcessEnv: process.env を読んでよいのは apps/shared/env.ts とテストだけ
+  // style/noProcessEnv（Issue #59）: process.env を読んでよいのは apps/shared/env.ts とテストだけ
   //   （.claude/rules/env.md の「環境変数」）。既定 severity が info なので、biome.json で error にしている。
   // WHY 一時ディレクトリに置いたファイルで must-reject を確かめる: overrides の includes はリポジトリ直下からの相対パスで
-  //   照合され、リポジトリの外のファイルは env.ts と同じ名前（.../apps/shared/env.ts）でも一致しない。
+  //   照合され、リポジトリの外のファイルは env.ts と同じ名前（.../apps/shared/env.ts）でも一致しない（2026-09-28 実測）。
   //   そのため「env.ts という名前なら何でも許す」ような緩い overrides になっていないことも、同じ仕組みで確かめられる。
   it.each([
     ["env.ts 以外のファイル", "config.ts"],
@@ -190,7 +190,7 @@ describe("biome check（pnpm lint と同じ引数）", () => {
     expect(result.status, result.stdout + result.stderr).toBe(0);
   });
 
-  // suspicious/noConsole: console を書いてよいのは apps/shared/logger.ts（ログの唯一の出口）と
+  // suspicious/noConsole（Issue #85）: console を書いてよいのは apps/shared/logger.ts（ログの唯一の出口）と
   //   テストだけ（.claude/rules/backend.md の「ログ」）。allow は空にし、console.error / console.warn も違反にする。
   // WHY noProcessEnv と同じく一時ディレクトリのファイルで must-reject を確かめる: overrides の includes はリポジトリ直下からの
   //   相対パスで照合されるので、リポジトリの外の logger.ts という名前のファイルが通らないことで、「logger.ts という名前なら

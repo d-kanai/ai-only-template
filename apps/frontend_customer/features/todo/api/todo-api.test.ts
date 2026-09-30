@@ -150,7 +150,7 @@ const notFoundProblem = {
 
 // WHY 失敗の検証は rejects.toEqual(new ApiError(...)) で書く（rejects.toThrow("文字列") を使わない）:
 //   Vitest 5.0.1 の rejects.toThrow("文字列") は、reject された値が undefined だと文字列を照合せずに通る
-//   （toError が undefined を返す変異が mutation testing で生き残る）。
+//   （2026-09-28 実測。Issue #55 の mutation testing で、toError が undefined を返す変異が生き残って判明）。
 //   toEqual なら undefined や別のクラスの例外（判定の書き間違いで投げた TypeError など）では失敗する。
 //   status・type・key・params は toEqual でも比べるが、Error の独自プロパティを比べるかは Vitest の実装に依るので、
 //   toMatchObject でも明示する。
@@ -412,7 +412,7 @@ describe("エラー時", () => {
         errors: [validTitleError, { ...validTitleError, params: ["title"] }],
       },
     ],
-    // key が error の中にあり、type・status が無い本文は Problem Details とみなさない。
+    // 以前の契約（Issue #126 の前）の本文。key が error の中にあり、type・status が無いので Problem Details とみなさない。
     [
       "以前の形（{ error: { code, key, params } }）",
       {

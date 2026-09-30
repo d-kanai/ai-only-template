@@ -16,7 +16,7 @@ const repoRoot = join(import.meta.dirname, "..");
 // WHY yaml パーサを依存に加えない: 検査したいのはトップレベルのキーと、その 1 段下のキー（allowBuilds の中身）だけで、
 //   行単位の読み取りで足りる（依存を増やすとサプライチェーンの対象も増える）。
 // WHY `pnpm config list --json` で pnpm 自身の解釈を読まない: pnpm は環境変数（pnpm_config_minimum_release_age=1 など）を
-//   pnpm-workspace.yaml より優先する（pnpm 12.7.0）。検査したいのはリポジトリにコミットされたファイルの
+//   pnpm-workspace.yaml より優先する（2026-09-28、pnpm 12.7.0 で実測）。検査したいのはリポジトリにコミットされたファイルの
 //   中身なので、実行環境の影響を受けないファイルの読み取りにする。
 // 読み取りの仕様（下の must reject / must pass で固定する）:
 //   - `#` で始まる行（コメントアウトした設定を含む）は読まない。値の後ろの ` # ...` もコメントとして捨てる。
@@ -29,8 +29,8 @@ const repoRoot = join(import.meta.dirname, "..");
 //   - トップレベルのキーの重複は YAML の仕様で不正なので、例外にする。
 // 限界: pnpm 自身が読めない YAML（タブのインデント、`minimumReleaseAge: 07200`、allowBuilds の値が空の子の下の孫）は、
 //   ここでは「違反なし」になりうる。いずれも pnpm 12.7.0 の `pnpm config get` が「Failed to parse pnpm-workspace.yaml」で
-//   止まるので、install も止まり実害はない。
-//   逆に `minimumReleaseAge: "7200"`（クォートした文字列）と値の後ろの空白（`7200 `）は、pnpm は 7200 と読むが、
+//   止まる（2026-09-28 実測）ので、install も止まり実害はない。
+//   逆に `minimumReleaseAge: "7200"`（クォートした文字列）と値の後ろの空白（`7200 `）は、pnpm は 7200 と読む（同じ実測）が、
 //   ここでは安全側に倒して違反にする（must reject で固定）。
 type Scalar = string | number | boolean;
 type Settings = Record<string, Scalar | Record<string, Scalar>>;
@@ -117,7 +117,7 @@ function readTopLevelSettings(yaml: string): Settings {
 // WHY 各値（検査する設定と、その値にしている理由）:
 //   - minimumReleaseAge: 7200（5 日）: 悪意あるリリースは公開から数日以内に検知・削除されることが多く、1 日では短い。
 //     一方、開発機の safe-chain と同じ 14 日に揃えると Next.js などの更新に 2 週間遅れで追随することになるため、
-//     5 日にする。pnpm 側の設定は safe-chain の有無（クラウドセッション・CI）に
+//     ユーザーの判断で 5 日にした（Issue #32）。pnpm 側の設定は safe-chain の有無（クラウドセッション・CI）に
 //     関係なく効く防御なので、値が意図せず下がっていないことをテストで担保する。
 //   - minimumReleaseAgeStrict: true: 非 strict だと条件を満たす版がないときに古い版へ黙ってフォールバックし、
 //     lockfile の内容が意図しない版に変わりうる。失敗させて人間・AI に気づかせる。

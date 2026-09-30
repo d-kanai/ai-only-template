@@ -30,12 +30,12 @@ export type {
 };
 
 // 画面が扱う「Todo 1 件」の型。
-// WHY 一覧 API の契約から導出する: backend に共通の DTO 型の別名を持たせず、画面側の 1 か所（ここ）で決める。
+// WHY 一覧 API の契約から導出する: backend に共通の DTO 型の別名を持たせず、画面側の 1 か所（ここ）で決める（Issue #139）。
 export type Todo = ListTodosResponse["todos"][number];
 
 // 一覧・作成の URL。
 // WHY 関数の中に置く（モジュールの最上位の定数にしない）: 最上位の式は読み込み時にだけ評価される static な変異になり、
-//   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に評価すれば、変異をテストで検出できる。
+//   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に評価すれば、変異をテストで検出できる（Issue #55）。
 function todosPath(): string {
   return "/api/todos";
 }
@@ -64,20 +64,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 //   errors（省略か、項目ごとの誤りの配列。isProblemError）。
 // WHY detail・title・instance を見ない: 画面はこれらを使わない（detail は開発者向けの英語で契約外、title は type と 1 対 1）。
 //   使わない値の検査は、崩れていても画面が壊れないのに失敗を error.unknown に変えるだけになる。
-// WHY type と status も確かめる: key だけだと、ほかの形の本文（偶然 key を持つ JSON など）も Problem Details とみなしてしまう。
-//   RFC 9457 の標準のメンバーを持つことで backend の応答と見分ける。
+// WHY type と status も確かめる: key だけだと、ほかの形の本文（以前の { error: { key } } の形は key が入れ子なので外れるが、
+//   偶然 key を持つ JSON など）も Problem Details とみなしてしまう。RFC 9457 の標準のメンバーを持つことで backend の応答と見分ける。
 //   type が "/problems/..." のどれかまでは確かめない（ApiError の type は文字列のまま持つ。api-error.ts）。
 // WHY `"key" in value` で絞り込まない: 無いプロパティは undefined として読めるので、in の検査は判定の結果を変えない。
-//   結果を変えない検査は mutation testing で消しても落ちない（等価な変異）ため、Record として読んで型だけで判定する。
+//   結果を変えない検査は mutation testing で消しても落ちない（等価な変異）ため、Record として読んで型だけで判定する（Issue #55）。
 // WHY key が共通の辞書（shared/i18n/common.messages.ts）のキーかまで確かめる: 版の違う backend が辞書に無いキーを返すと、
 //   翻訳できない（formatMessage が辞書を引けない）。その応答は Problem Details とみなさず、HTTP ステータスだけを伝える（toError）。
 //   実行時に確かめられるのは「共通の辞書のキー」までで、ErrorKey（サーバのエラーのキー）かどうかは確かめない。error.unknown・
 //   error.unexpected が返っても、その文言が出るだけで壊れない。画面ごとの辞書のキー（"delete" など）は共通の辞書に無いので通さない。
 // WHY params は省略か、配列でないオブジェクト: 値の型（string / number）までは確かめない。置換は String() で文字列にするので壊れない。
-//   配列は Object.hasOwn で名前を引けず {id} が置き換わらないまま画面に出るので、Problem Details とみなさない。
+//   配列は Object.hasOwn で名前を引けず {id} が置き換わらないまま画面に出るので、Problem Details とみなさない（reviewer 指摘、Issue #126）。
 // WHY 型の述語を Problem にする: 上の検査は Problem のすべてのメンバーを確かめるわけではない（type は和のどれか、key は ErrorKey か
 //   までは見ない）が、読むのは type・key・params だけで、読む値はどれも検査済みの形（文字列・辞書のキー・オブジェクト）。
-// WHY errors（項目ごとの誤り）は省略か配列で、要素が 1 件でも崩れていれば本文全体を Problem Details とみなさない:
+// WHY errors（項目ごとの誤り）は省略か配列で、要素が 1 件でも崩れていれば本文全体を Problem Details とみなさない（Issue #144）:
 //   崩れた要素だけを捨てると、捨てた誤り（本文全体の誤りなど）が画面に出ないまま、残りの誤りだけで「その項目だけを直せばよい」
 //   ように見える。本文の key・params が崩れているときと同じく、HTTP ステータス（error.unknown）で失敗だけを確かに伝える。
 //   画面と API は同じリポジトリで同時に変えるので、崩れた要素は版のずれか不具合で、通常の応答では起きない。
@@ -126,9 +126,9 @@ function isParams(value: unknown): boolean {
 //   読む（Fetch の仕様）。backend の応答かは本文の形（isProblem）で決め、判定の根拠を 1 つにする。
 async function toError(response: Response): Promise<ApiError> {
   // 本文が JSON として読めない場合は Problem Details ではないので、undefined（形の判定で必ず外れる値）として扱う。
-  // WHY 例外を握りつぶすのを response.json() だけにする: 形の判定まで try の中に入れると、
+  // WHY 例外を握りつぶすのを response.json() だけにする: 以前は形の判定まで try の中に入れていたため、
   //   判定の書き間違い（null のプロパティを読むなど）で投げた TypeError も「JSON でない」扱いになり、
-  //   ステータスの表示に化けて気づけない（mutation testing でも判定の変異が生き残る）。
+  //   ステータスの表示に化けて気づけなかった（Issue #55 の mutation testing で、判定の変異が生き残って判明）。
   const body: unknown = await response.json().catch(() => undefined);
   return isProblem(body)
     ? new ApiError({

@@ -14,10 +14,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// InstructionsLoaded フック（scripts/hooks/instructions-loaded.sh）の仕様。
+// InstructionsLoaded フック（scripts/hooks/instructions-loaded.sh）の仕様。Issue #64。
 // CLAUDE.md / .claude/rules/*.md が読み込まれるたびに、<リポジトリ直下>/.claude/state/instructions-loaded.jsonl に
 // 1 行（ts・file_path・load_reason・trigger_file_path・memory_type）を追記する。
-// WHY: 実際にどの指示ファイルが、いつ・何をきっかけに読まれたかを後から確かめるため。
+// WHY: 実際にどの指示ファイルが、いつ・何をきっかけに読まれたかを後から確かめるため（Issue #64 の完了条件）。
 
 const scriptPath = resolve(import.meta.dirname, "instructions-loaded.sh");
 
