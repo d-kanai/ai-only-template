@@ -11,7 +11,7 @@ paths:
 ## 置き場所（DDD 4 層）
 - `apps/backend/` の直下は `features/` と `shared/` と `test-support/` と `api-journeys/` だけ（ほかは `package.json`・`tsconfig.json`）。ファイルは `apps/backend/features/<feature>/internal/` か `apps/backend/shared/` の `domain/` `application/` `presentation/` `infra/` のどれかの下に置く。例外は `apps/backend/shared/drizzle/`（drizzle-kit の設定 `drizzle.config.ts` と、生成したマイグレーションの `*.sql`・`meta/`。ソースは `drizzle.config.ts` だけ）。
   - WHY: 層に属さない場所のファイルにはどの層の規則もかからず、依存の向きの検査を素通りする（規則 `backend-placement`）。
-- feature の直下は `expose/`（他のモジュールへ公開する入口。Issue #208 の段階 B で追加）と `internal/`（4 層。feature の中だけで使う実装）だけにする（Issue #208。モジュラーモノリス）。`internal/` を挟まない `features/<feature>/<層>/`（Issue #208 より前の置き場所）と `internal/` の直下のファイルは `backend-placement` の違反。`expose/` の規則は段階 B で書く。
+- feature の直下は `expose/`（他のモジュールへ公開する入口）と `internal/`（4 層。feature の中だけで使う実装）だけにする（Issue #208。モジュラーモノリス）。`internal/` を挟まない `features/<feature>/<層>/`（Issue #208 より前の置き場所）と `internal/` の直下のファイルは `backend-placement` の違反。`expose/` は直下のファイルだけ（`expose/<name>.ts`。下にディレクトリを作らない。深くしたくなったら規則を変える）。境界の規則は下の「モジュールの境界（expose / internal）」。
 - `apps/backend/test-support/`（Issue #181）: テストだけが使うコード（`database.ts` の `createTestDatabase`・`cleanupTestSchemas`。実 Postgres のテスト用スキーマ。Repository の InMemory の実装 `<feature>/<名前>-repository.in-memory.ts`。Issue #191）。層に属さず（feature の domain・infra の schema・shared/infra を値で参照してよい）層の規則はかからないが、本番のコードから参照しない（exports にも載せない）・Docker のイメージに入らない（`.dockerignore` の `**/test-support`。test-support を import するテストも `**/*.test.ts`・`**/*.test.tsx` で外す。残すと next build の型チェックが解決できずに失敗する）。検査は `rule-tests/test-support.test.ts`（`.dockerignore` の行とパターン、本番のコードの import、exports、`*.in-memory.*` は `apps/backend/test-support/` の下だけ）と、`.github/workflows/deploy.yml` の push した runtime と migrate のイメージの `find`（コンテキスト全体が入るのは migrate）。
   - WHY 直下に分ける（ユーザー判断「test-support が build に入らないルールは頑張って」）: 層の下（以前の `shared/infra/database.test-support.ts`）だと本番のコードと同じ場所で、ファイル名の目印だけでは import もイメージへの混入も止まらない。1 か所のディレクトリにすれば、`.dockerignore` の 1 行で外せ、検査も場所で書ける。
   - WHY `features/` と `shared/`（Issue #98。ユーザー判断）: frontend（`apps/frontend_customer/features/`・`shared/`）と同じ構成にし、feature を足すときの置き場所をそろえる。Drizzle は `shared/drizzle/`（`shared/infra/drizzle/` のように深くしない）に置き、直下の例外を無くす。決定と採用しなかった案は ADR `docs/adr/architecture/20260929-backend-features-and-shared-directories.md`。
@@ -33,8 +33,26 @@ paths:
 - `apps/shared` を使ってよい層: env は infra だけ、logger は presentation・infra、now はすべての層（`rule-tests/architecture.test.ts` の `SHARED_MODULES_BY_LAYER`）。WHY env・logger を domain・application に許さない: 外の世界（環境変数・stdout）に触る基盤で、domain・application から使うと infra を参照させない意味が無くなる。WHY now は許す: 現在時刻の Date を返すだけで環境変数・出力・DB に触らず、Entity の生成ルール（作成日時）は domain に置くため（`.claude/rules/shared.md` の「now」）。
 - domain は Next・React・DB に依存させない。WHY: ビジネスルールを永続化やフレームワークから切り離し、純粋な単体テストで検証する。
 
+## モジュールの境界（expose / internal。Issue #208）
+backend の feature を 1 つのモジュールとし、他のモジュールとは `expose/` を通してだけつながる（モジュラーモノリス）。決定と採用しなかった案は ADR `docs/adr/architecture/20260930-modular-monolith-expose-internal.md`。
+- 規則（`rule-tests/architecture.test.ts`。対象は `apps/backend/features/**` から出る参照だけ）:
+  - `module-internal`: 他のモジュールの `internal/` を参照しない（値・型だけ・re-export・dynamic import のどれも。どの層からでも、`expose/` からでも）。
+    - WHY: `internal/` はモジュールの中身で、他のモジュールが依存すると中身を変えるたびに壊れ、境界が無くなる。公開するものは `expose/` のファイルで決める。
+  - `module-expose-only-from-presentation`: 他のモジュールの `expose/` を参照してよいのは、自モジュールの `internal/presentation/`（組み立ての場所）だけ。application・domain・infra・`expose/` からは違反。
+    - WHY: 他のモジュールの機能は api ファイルの組み立てで取り出し、application の command / query にはコンストラクタで関数として渡す（Issue #123 のコンストラクタ注入）。application が他のモジュールを import すると、ユースケースのテストで差し替えられず、モジュール間の依存がコードのあちこちに散る。
+  - `expose-imports`: `expose/` が参照してよい自前コードは、自モジュールの `internal/`（どの層も）・`expose/` と、`@repo/shared/logger`・`@repo/shared/now`（presentation と同じ）だけ。`apps/backend/shared/`・`@repo/shared/env`・他のモジュール・`next` / `react` / `react-dom` は違反。
+    - WHY: `expose/` は 4 層のどれにも属さず層の規則がかからないので、許可の一覧をここで持つ。`expose/` は組み立てて呼ぶだけの薄い入口にし、DB や設定を使う処理は `internal/` の層に置いて層の規則をかける。要るようになったら規則を変える。
+  - 層の規則との関係: feature の presentation の許可に「他のモジュールの `expose/`」を足した。application・domain・infra から他のモジュールの `expose/`・`internal/` を参照すると、層の規則（参照先が自 feature の層でない）とモジュールの規則の両方にかかる（重ねて検出する）。自モジュールの `expose/` を `internal/` から参照するのは層の規則で違反（`expose/` が `internal/` を使うので循環する）。
+  - 限界（見逃す）: `apps/backend/features/` の外（`apps/backend/test-support/`・`apps/backend/api-journeys/` のテスト、frontend の `app/api`）から `internal/` への参照はこの規則の対象外（test-support は InMemory の実装のために internal を使い、app/api は exports 経由で internal/presentation の api ファイルを指す。exports と `app-api` が見る）。テスト（`*.test.ts`）も対象外（列挙がテストを除く）。
+- 呼び出しの形（Todo の完了で notification に通知する。`features/todo/internal/application/change-todo-completion.command.ts`）:
+  - command はコンストラクタで関数（`NotifyTodoCompleted = (message: string) => void`）を受け取り、api ファイル（`change-todo-completion.api.ts`）の組み立てが notification の `expose/notify.ts` の `notify` を渡す。command は notification を import しない。テストは記録する関数を渡す。
+  - `notify(message)` は同期の `void`。中で command を実行し、Promise は `.catch` で受けて `logger.error({ message: "notification failed", error })` を出す（呼び出し側は await しない = fire-and-forget）。WHY: Promise を expose の外に出すと、呼び出し側が受け取らなかった reject が未処理になり、Node 24 は未処理の reject でプロセスを終了する。通知の失敗で完了（保存済み）は取り消さない。
+  - 通知は保存の後、未完了 → 完了に変わったときだけ（`!current.completed && changed.completed`）。WHY: PUT は冪等で、同じ要求を 2 回送っても通知は 1 回。保存に失敗した Todo の完了は知らせない。未完了に戻すときは知らせない。
+  - 本文は id だけの英語（`Todo completed: <id>`）。title などの利用者の値を入れない（ログに値を出さない方針。通知は今はログの 1 行 `{ message: "notification", notification: <本文> }` に出るだけ）。
+  - 本番の組み立てが `notify` を渡していることは、api のテスト（本番の `PUT` で完了にするとログに通知の 1 行が出る）が固定する。API ジャーニーは記録する関数を渡し、完了の step で通知が 1 件だけであることを確かめる。
+
 ## import の書き方と公開の範囲（exports）
-- backend の中の import は相対パスだけ（`@/` と `@repo/backend/` は使わない。規則 `backend-relative-only`）。`apps/shared` は別のパッケージなので `@repo/shared/...` だけで書く（相対パスの `../../../shared/env` は違反。`apps/backend/package.json` に `"@repo/shared": "workspace:*"`。Issue #90）。
+- backend の中の import は相対パスだけ（`@/` と `@repo/backend/` は使わない。規則 `backend-relative-only`）。`apps/shared` は別のパッケージなので `@repo/shared/...` だけで書く（`features/<feature>/internal/<層>/` からの相対パスの `../../../../../shared/env` は違反。`apps/backend/package.json` に `"@repo/shared": "workspace:*"`。Issue #90）。
   - WHY `apps/shared` へ相対パスを使わない: exports を経由しない参照を許すと、`apps/shared` の公開範囲（exports。規則 `shared-exports`）が意味を持たなくなる（frontend・e2e と同じ扱い）。
   - WHY `@/` 不可: Next（Turbopack）は backend のファイルの `@/` にも frontend の paths を当て、ビルドが失敗する。
   - WHY `@repo/backend/` 不可: 自パッケージ名の参照は `exports` を通り、公開していない内部のファイルを指せなくなる。
@@ -165,7 +183,7 @@ paths:
 - サーバ側のログは必ず `logger.info / warn / error(event)` を通す。`console.*` を書いてよいのは `logger.ts` だけ（テストは除く）。
   - 1 呼び出し = JSON 1 行（NDJSON）。先頭に `level` と `timestamp`（ISO 8601、UTC。event に `timestamp` があればそれ）。info は stdout（`console.log`）、warn / error は stderr（`console.warn` / `console.error`）。`Error` は `{ name, message }` にする（stack は出さない）。JSON にできない event（循環参照・BigInt）は例外にせず、失敗した旨だけの 1 行を出す。
   - WHY 1 か所に集める: 行の形を呼び出し側ごとにずらさない。出力先を変える（ファイル・外部のログ基盤）ときに直すのが `logger.ts` だけで済む。依存（pino など）は足さない。
-  - 使ってよい場所: backend の `presentation`（`problem.ts` の想定外の例外）・`infra`（`database.ts`・`write.ts`）、frontend 直下の `proxy.ts`・`instrumentation-node.ts`（規則 `presentation`・`infra`・`frontend-to-shared-specifier`）。domain・application は使わない（`SHARED_MODULES_BY_LAYER`）。画面側（`app/`・`features/`・`shared/`）も使わない（規則 `screen-to-shared`）。
+  - 使ってよい場所: backend の `presentation`（`problem.ts` の想定外の例外）・`infra`（`database.ts`・`write.ts`・notification の `notification-sender.log.ts`）・モジュールの `expose/`（notification の `notify.ts` の送信の失敗。Issue #208）、frontend 直下の `proxy.ts`・`instrumentation-node.ts`（規則 `presentation`・`infra`・`expose-imports`・`frontend-to-shared-specifier`）。domain・application は使わない（`SHARED_MODULES_BY_LAYER`）。画面側（`app/`・`features/`・`shared/`）も使わない（規則 `screen-to-shared`）。
   - テストは `vi.spyOn(console, "error")` などで出力を抑え、渡された 1 行を `JSON.parse` して確かめる（`logger.test.ts`・`problem.test.ts`）。
 - Repository の書き込みのログ（Issue #205。`shared/infra/write.ts` の `writeInTransaction` が出す。上の「書き込みの入口」）: どの行も `table`（表名）・`rowId`・`operation`（`insert` / `update` / `delete`）を持つ。
   - 前: info `repository write start`。後: info `repository write done`（`durationMs` と `changes`（書いた行ごとの `tableName`・`rowId`・`operation`））。失敗: warn `repository write failed`（`durationMs` と `error`）で、同じ例外を投げ直す。DB のエラー（DrizzleQueryError）は message を出さず、`error` を元の pg のエラー（cause）の `{ name }` だけにし、SQLSTATE を `sqlState`、制約の名前を `constraint` に出す。WHY: DrizzleQueryError の message は SQL とパラメータの値を含み、pg のエラーの message もデータ例外（SQLSTATE 22 系。22P02 の `invalid input syntax for type uuid: "<入力>"` など）は入力値を含む。

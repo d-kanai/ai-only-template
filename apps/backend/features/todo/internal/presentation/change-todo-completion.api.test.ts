@@ -22,10 +22,14 @@ async function setup() {
     repository,
     todo,
     PUT: new ChangeTodoCompletionApi(
-      new ChangeTodoCompletionCommand(repository),
+      new ChangeTodoCompletionCommand(repository, ignoreNotification),
     ).handle,
   };
 }
+
+// 完了の通知の口の偽物（何もしない）。通知の条件と本文は command のテスト（change-todo-completion.command.test.ts）が固定し、
+//   ここでは HTTP の契約だけを見る。本番の組み立てが notification の expose を渡すことは下の「本番の PUT」のテストで見る。
+const ignoreNotification = (): void => undefined;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -145,6 +149,8 @@ describe("PUT /api/todos/:id/completion", () => {
     const save = vi
       .spyOn(PostgresTodoRepository.prototype, "save")
       .mockResolvedValue();
+    // 完了にすると通知のログが 1 行出る（下のテストで確かめる）。ここではテストの出力に出さないためだけに差し替える。
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
 
     const response = await productionPut(
       putRequest(todo.id, JSON.stringify({ completed: true })),
@@ -156,6 +162,31 @@ describe("PUT /api/todos/:id/completion", () => {
     expect(save.mock.calls[0]?.[0]).toMatchObject({
       id: todo.id,
       completed: true,
+    });
+  });
+
+  // WHY 本番の PUT の通知をログの行で確かめる: 組み立てで渡す関数（notification の expose の notify）は api ファイルの中の
+  //   値で、外から差し替えも参照もできない。notify は通知をログ（console.log の JSON 1 行）に出すので、本番の PUT で完了にした
+  //   後にその行が出れば、notification の expose につながっていることが分かる。findById と save を差し替えるので DB には接続しない。
+  test("本番の PUT は、未完了の Todo を完了にすると notification の expose で Todo completed: <id> を通知する（ログの 1 行）", async () => {
+    const todo = Todo.create("牛乳を買う");
+    vi.spyOn(PostgresTodoRepository.prototype, "findById").mockResolvedValue(
+      todo,
+    );
+    vi.spyOn(PostgresTodoRepository.prototype, "save").mockResolvedValue();
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const response = await productionPut(
+      putRequest(todo.id, JSON.stringify({ completed: true })),
+      context(todo.id),
+    );
+
+    expect(response.status).toBe(200);
+    await vi.waitFor(() => expect(log).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toMatchObject({
+      level: "info",
+      message: "notification",
+      notification: `Todo completed: ${todo.id}`,
     });
   });
 
@@ -191,7 +222,7 @@ describe("PUT /api/todos/:id/completion", () => {
     async (_idLabel, _bodyLabel, id, requestBody) => {
       const { repository, ...spies } = spiedRepository();
       const PUT = new ChangeTodoCompletionApi(
-        new ChangeTodoCompletionCommand(repository),
+        new ChangeTodoCompletionCommand(repository, ignoreNotification),
       ).handle;
 
       const response = await PUT(putRequest(id, requestBody), context(id));

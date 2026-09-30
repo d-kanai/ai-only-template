@@ -660,7 +660,7 @@ describe("CLAUDE.md の行数と @ import の抽出", () => {
 
 describe(".claude/rules のフロントマター", () => {
   const files = [
-    "apps/backend/features/todo/domain/todo.ts",
+    "apps/backend/features/todo/internal/domain/todo.ts",
     "biome.json",
     "lint.test.ts",
   ];

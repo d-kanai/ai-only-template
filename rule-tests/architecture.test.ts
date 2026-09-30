@@ -45,7 +45,9 @@ import { describe, expect, it } from "vitest";
 // （.claude/rules/env.md の「環境変数」。規則 env-direct-access）、現在時刻を apps/shared/now.ts の外で読むことの禁止
 // （規則 now-single-source）、画面と backend のハードコードの文言の禁止（Issue #116 の i18n。
 // 規則 frontend-hardcoded-text・server-hardcoded-text。これだけは正規表現ではなく構文木で見る。WHY は該当の節）、画面・部品の辞書
-// （*.messages.ts）を同じディレクトリのファイルだけが参照すること（Issue #125。規則 messages-colocation）。
+// （*.messages.ts）を同じディレクトリのファイルだけが参照すること（Issue #125。規則 messages-colocation）、backend のモジュールの境界
+// （Issue #208。他のモジュールの internal/ を参照しない・他のモジュールの expose/ は presentation からだけ・expose/ が参照してよい先。
+// 規則 module-internal・module-expose-only-from-presentation・expose-imports）。
 //
 // WHY 自前のテストにする（Biome の noRestrictedImports を使わない）:
 //   「features/<f>/api/ から backend へは import type だけ許す」を表現できない。Biome 2.5.13 の noRestrictedImports は
@@ -496,9 +498,10 @@ type BackendLayer = "domain" | "application" | "presentation" | "infra";
 // WHY feature の名前ではなく "features/<f>/internal" で持つ（Issue #98・#208）: backend も frontend と同じく最初の階層を features/ と shared/ に
 //   したので、features/shared/（shared という名前の feature）と backend/shared/ は別の場所になった。名前だけで持つと、
 //   features/shared/ を backend/shared/ と取り違え、別 feature を「feature をまたぐもの」として許してしまう。
-// WHY feature の 4 層は features/<f>/internal/ の下（Issue #208）: feature の直下を、他のモジュールへ公開する入口（expose/。段階 B で
-//   追加）と feature の中だけで使う実装（internal/）に分けるため（モジュラーモノリス）。4 層は internal/ の中だけに置き、
+// WHY feature の 4 層は features/<f>/internal/ の下（Issue #208）: feature の直下を、他のモジュールへ公開する入口（expose/）と
+//   feature の中だけで使う実装（internal/）に分けるため（モジュラーモノリス）。4 層は internal/ の中だけに置き、
 //   features/<f>/<層>/（Issue #208 より前の置き場所）は層に属さない（置き場所の規則 BACKEND_PLACEMENT が違反にする）。
+//   expose/ も層に属さない（層の規則の代わりに expose-imports がかかる）。
 type BackendLocation = { scope: string; layer: BackendLayer };
 
 const BACKEND_SHARED_SCOPE = "shared";
@@ -516,6 +519,56 @@ function backendLayerOf(path: string): BackendLocation | undefined {
   return match === null
     ? undefined
     : { scope: match[1] ?? "", layer: (match[2] ?? "") as BackendLayer };
+}
+
+// backend のモジュール（Issue #208。モジュラーモノリス。1 つの feature = 1 つのモジュール）。
+// "apps/backend/features/todo/..." → "todo"。features/ の下でなければ undefined（backend/shared・test-support・api-journeys は
+//   モジュールではない）。
+function backendModuleOf(path: string): string | undefined {
+  return /^apps\/backend\/features\/([^/]+)\//.exec(path)?.[1];
+}
+
+// 参照先が、あるモジュールの part（"internal" か "expose"）の下（part のディレクトリそのもの = index も含む）なら、そのモジュール名。
+// "apps/backend/features/notification/expose/notify" と "expose" → "notification"
+// WHY 前方一致の境界を付ける（part の直後は "/" か末尾）: internal-x・exposed のような別ディレクトリを取り違えない。
+function backendModulePartOf(
+  path: string,
+  part: "internal" | "expose",
+): string | undefined {
+  return new RegExp(`^apps/backend/features/([^/]+)/${part}(?:/|$)`).exec(
+    path,
+  )?.[1];
+}
+
+// 参照先が、参照元とは別のモジュールの part の下か。
+function isOtherModulePart(
+  ref: Reference,
+  part: "internal" | "expose",
+): boolean {
+  const target = backendModulePartOf(ref.to, part);
+  return (
+    ref.own && target !== undefined && target !== backendModuleOf(ref.from)
+  );
+}
+
+// モジュールの公開の入口（features/<f>/expose/ の下のファイル）か。
+function isExposeFile(path: string): boolean {
+  return /^apps\/backend\/features\/[^/]+\/expose\//.test(path);
+}
+
+// expose が参照してよい自前コード: 自モジュールの internal/ と expose/ の中と、presentation と同じ apps/shared のモジュール
+//   （SHARED_MODULES_BY_LAYER.presentation。logger・now）。
+// WHY 自モジュールの internal はどの層でも許す: expose は presentation の api ファイルと同じ組み立ての場所で、application の
+//   command と infra の実装を組み立てて呼ぶ。
+// WHY backend/shared と apps/shared の env を許さない: expose は薄い入口（組み立てて呼ぶだけ）にし、DB の接続や設定の読み込みの
+//   ような処理は internal の層に置いて層の規則をかける。要るようになったら、この許可を規則の変更として広げる。
+function exposeMayUse(ref: Reference): boolean {
+  const moduleName = backendModuleOf(ref.from);
+  return (
+    isUnder(ref.to, `apps/backend/features/${moduleName}/internal`) ||
+    isUnder(ref.to, `apps/backend/features/${moduleName}/expose`) ||
+    SHARED_MODULES_BY_LAYER.presentation.has(ref.to)
+  );
 }
 
 // "next/link" → "next"、"@scope/pkg/sub" → "@scope/pkg"
@@ -696,6 +749,17 @@ function backendMayUse(ref: Reference): boolean {
   if (isUnder(ref.to, SHARED_ROOT)) {
     return SHARED_MODULES_BY_LAYER[self.layer].has(ref.to);
   }
+  // Issue #208: feature の presentation（組み立ての場所）は、他のモジュールの公開の入口（expose）を使える。expose は層に属さない
+  //   ので、ここで先に許す。ほかの層・backend/shared・自モジュールの expose は下の層の判定で違反になる（参照先が層に属さない）。
+  //   境界の意味（他のモジュールは expose だけ・expose は presentation から）は module-internal と
+  //   module-expose-only-from-presentation の規則が名前付きで見る。
+  if (
+    self.layer === "presentation" &&
+    self.scope !== BACKEND_SHARED_SCOPE &&
+    isOtherModulePart(ref, "expose")
+  ) {
+    return true;
+  }
   const target = backendLayerOf(ref.to);
   if (target === undefined) {
     return false;
@@ -738,7 +802,10 @@ type RuleId =
   | "app"
   | "app-api"
   | "shared-self-contained"
-  | "messages-colocation";
+  | "messages-colocation"
+  | "module-internal"
+  | "module-expose-only-from-presentation"
+  | "expose-imports";
 
 type Rule = {
   id: RuleId;
@@ -806,7 +873,7 @@ const RULES: Rule[] = [
     //   入口だけにする（ユーザー判断）。自パッケージ名の参照は exports を通るので、公開していない内部のファイルを
     //   指せなくなる。相対パスなら exports に関係なく解決する。
     // WHY 参照先ではなく書き方（specifier）で判定する: "@repo/backend/x" と "../x" は同じファイルを指し、参照先では区別できない。
-    // WHY apps/shared へは "@repo/shared/..." だけ（Issue #90。相対パスの "../../../shared/env" も違反）: apps/shared は別の
+    // WHY apps/shared へは "@repo/shared/..." だけ（Issue #90。features/<f>/internal/<層>/ からの相対パスの "../../../../../shared/env" も違反）: apps/shared は別の
     //   workspace パッケージで、backend の中ではない。apps/backend/package.json に "@repo/shared": "workspace:*" を置き、
     //   exports（apps/shared/package.json）を通して使う。exports を経由しない参照を許すと、apps/shared の公開範囲（exports。
     //   SHARED_EXPORTS）が意味を持たなくなる（frontend・e2e の frontend-to-shared-specifier と同じ扱い。オーケストレータの判断）。
@@ -1051,10 +1118,60 @@ const RULES: Rule[] = [
             isUnder(ref.from, FRONTEND_ROOT)
           ))),
   },
+  {
+    // 「他のモジュールの internal/ は参照しない」（Issue #208。モジュラーモノリス。.claude/rules/backend.md の「モジュールの境界」）。
+    //   backend の feature を 1 つのモジュールとし、直下を公開の入口 expose/ と中身 internal/ に分ける。
+    // WHY: internal はモジュールの中身で、他のモジュールが依存すると、中身を変えるたびに他のモジュールが壊れ、境界が無くなる。
+    //   他のモジュールが使えるのは expose/ だけにし、公開するものをディレクトリで決める。
+    // WHY 型だけ・re-export も違反: 型でも中身の形に依存し、re-export は中継のファイルで境界をすり抜ける入口になる。
+    // WHY 参照元を apps/backend/features/ の下に限る: frontend の app/api は exports を通して internal/presentation の api ファイルを
+    //   指し（app-api・backend-exports が見る）、apps/backend/test-support/ は InMemory の実装のために internal を直接使う。
+    //   backend/shared から feature への参照は backend-shared が止める。
+    // WHY 層の規則と重ねて検出する: 層の規則（domain / application / presentation / infra）も別 feature の層を許さないが、
+    //   expose/ のファイルは層に属さないので層の規則がかからない。境界の違反を名前付きの 1 つの規則でも見る。
+    id: "module-internal",
+    name: "apps/backend/features/<a>/ の下のファイルは、他のモジュール（apps/backend/features/<b>/、b ≠ a）の internal/ を参照しない（型だけ・re-export も）",
+    appliesTo: (from) => backendModuleOf(from) !== undefined,
+    isViolation: (ref) => isOtherModulePart(ref, "internal"),
+  },
+  {
+    // 「他のモジュールの expose/ を参照してよいのは、自モジュールの internal/presentation/ だけ」（Issue #208）。
+    // WHY: presentation は api ファイルが本番の handler を組み立てる場所で、他のモジュールの機能もそこで取り出して、application の
+    //   command / query にコンストラクタで関数として渡す（Issue #123 のコンストラクタ注入）。application・domain・infra が他の
+    //   モジュールを直接 import すると、ユースケースのテストで差し替えられず、モジュール間の依存がコードのあちこちに散らばる。
+    // WHY expose から他のモジュールの expose も違反（expose-imports と重ねて検出する）: モジュール間の呼び出しの鎖が expose の中に
+    //   隠れ、組み立ての場所（presentation）で見えなくなる。
+    // 自モジュールの expose を internal から使うのは、この規則ではなく層の規則が止める（参照先が層に属さない。循環になる）。
+    id: "module-expose-only-from-presentation",
+    name: "他のモジュールの apps/backend/features/<b>/expose/ を参照してよいのは、apps/backend/features/<a>/internal/presentation/ の下のファイルだけ（application・domain・infra・expose からは不可）",
+    appliesTo: (from) => {
+      const moduleName = backendModuleOf(from);
+      return (
+        moduleName !== undefined &&
+        !isUnder(
+          from,
+          `apps/backend/features/${moduleName}/internal/presentation`,
+        )
+      );
+    },
+    isViolation: (ref) => isOtherModulePart(ref, "expose"),
+  },
+  {
+    // 「expose/ が参照してよいのは、自モジュールの internal/・expose/ と apps/shared の logger・now だけ」（Issue #208）。
+    //   パッケージは next / react / react-dom 以外（層の規則と同じ）。
+    // WHY: expose は他のモジュールへの公開の入口で、自モジュールの command と infra を組み立てて呼ぶだけの薄い層にする。
+    //   expose/ は 4 層のどれにも属さないので、層の規則（許可の一覧）がかからない。ここで許可の一覧を持たないと、expose から
+    //   何を参照しても素通りする。許可の範囲と WHY は exposeMayUse。
+    id: "expose-imports",
+    name: "apps/backend/features/<f>/expose/ が参照してよい自前コードは、自モジュールの internal/・expose/ と apps/shared/ の logger・now だけで、next・react も参照しない",
+    appliesTo: isExposeFile,
+    isViolation: (ref) => usesFramework(ref) || (ref.own && !exposeMayUse(ref)),
+  },
 ];
 
 // backend のソースファイルは、apps/backend/features/<f>/internal/ か apps/backend/shared/ の 4 層（domain / application / presentation /
-// infra）のどれかの下に置く。例外は drizzle-kit の設定 apps/backend/shared/drizzle/drizzle.config.<拡張子> だけ。
+// infra）のどれかの下か、モジュールの公開の入口 apps/backend/features/<f>/expose/ の直下（Issue #208）に置く。例外は drizzle-kit の設定
+// apps/backend/shared/drizzle/drizzle.config.<拡張子> だけ。
 // （テストファイル・package.json・tsconfig.json・生成したマイグレーションの *.sql / meta/*.json はソースではないので、この規則は見ない。
 //   列挙は listReferencingFiles のソースだけ。）
 // WHY 置き場所そのものを規則にする: 層に属さない場所（backend/features/todo/lib/ や backend/features/todo/ 直下）のファイルは、
@@ -1064,8 +1181,8 @@ const RULES: Rule[] = [
 //   同じ構成にし、feature を足すときの置き場所をそろえる。以前は feature（todo/）が apps/backend 直下に shared/ と並び、直下に
 //   何を置いても「feature」として層の規則にかかっていた。今は features/ を挟まない apps/backend/<x>/<層>/ は違反（層に属さない）。
 //   features/ 直下のファイル（features/x.ts）も層に属さないので違反。
-// WHY feature の 4 層を internal/ の下に限る（Issue #208）: feature の直下は、他のモジュールへ公開する入口（expose/。段階 B で
-//   追加）と中だけで使う実装（internal/）の 2 つに分ける。internal/ を挟まない features/<f>/<層>/（Issue #208 より前の置き場所）を許すと、
+// WHY feature の 4 層を internal/ の下に限る（Issue #208）: feature の直下は、他のモジュールへ公開する入口（expose/）と中だけで
+//   使う実装（internal/）の 2 つに分ける。internal/ を挟まない features/<f>/<層>/（Issue #208 より前の置き場所）を許すと、
 //   公開の入口と内部の実装の区別がディレクトリで付かなくなるので違反にする。
 // WHY backend/shared/ も同じに扱う（直下を許さない）: backend/shared/ も domain / presentation の層に分けて置いており
 //   （.claude/rules/backend.md の「置き場所（DDD 4 層）」）、直下を許すと同じ抜け道になるため。
@@ -1082,6 +1199,10 @@ const RULES: Rule[] = [
 //   参照しないこと・イメージに入らないことは rule-tests/test-support.test.ts が見る（層のファイルから参照すると層の規則にもかかる）。
 //   直下だけに許し、features/<f>/test-support/ や shared/test-support/ は違反のままにする（置き場所を 1 か所にそろえる）。
 const BACKEND_TEST_SUPPORT_DIR = /^apps\/backend\/test-support\//;
+// Issue #208: モジュールの公開の入口。features/<f>/expose/ の直下のファイルだけ（下にディレクトリを作らない）。
+// WHY 直下だけ: expose は他のモジュールへ公開するものの一覧で、1 階層で見渡せるようにする（中身は internal/ に置く）。
+//   深くしたくなったら、この規則を変える。
+const BACKEND_EXPOSE_FILE = /^apps\/backend\/features\/[^/]+\/expose\/[^/]+$/;
 const BACKEND_LAYER_DIR =
   /^apps\/backend\/(?:features\/[^/]+\/internal|shared)\/(?:domain|application|presentation|infra)\//;
 const BACKEND_DRIZZLE_CONFIG =
@@ -1089,10 +1210,11 @@ const BACKEND_DRIZZLE_CONFIG =
 
 const BACKEND_PLACEMENT = {
   id: "backend-placement",
-  name: "apps/backend/ のソースファイルは apps/backend/features/<f>/internal/ か apps/backend/shared/ の domain/・application/・presentation/・infra/ のどれかの下か、テストだけが使う apps/backend/test-support/ の下に置く（apps/backend/shared/drizzle/drizzle.config.ts だけ例外）",
+  name: "apps/backend/ のソースファイルは apps/backend/features/<f>/internal/ か apps/backend/shared/ の domain/・application/・presentation/・infra/ のどれかの下か、モジュールの公開の入口 apps/backend/features/<f>/expose/ の直下か、テストだけが使う apps/backend/test-support/ の下に置く（apps/backend/shared/drizzle/drizzle.config.ts だけ例外）",
   isMisplaced: (file: string) =>
     isUnder(file, BACKEND_ROOT) &&
     !BACKEND_LAYER_DIR.test(file) &&
+    !BACKEND_EXPOSE_FILE.test(file) &&
     !BACKEND_TEST_SUPPORT_DIR.test(file) &&
     !BACKEND_DRIZZLE_CONFIG.test(file),
 };
@@ -2092,6 +2214,20 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
     });
   }
 
+  // WHY 本物の expose の参照が取り出せていることを見る（Issue #208）: モジュールの境界の規則（module-internal・
+  //   module-expose-only-from-presentation・expose-imports）は、expose/ の下のファイルと、expose を使う presentation の参照を
+  //   取り出せていなければ、違反も 0 件で常に緑になる。
+  it("モジュールの境界の規則は、本物の expose（notification の notify.ts）の参照と、それを使う todo の presentation の参照を取り出せている（列挙が壊れて素通りするのを防ぐ）", () => {
+    expect(references.map((ref) => `${ref.from} → ${ref.to}`)).toEqual(
+      expect.arrayContaining([
+        "apps/backend/features/todo/internal/presentation/change-todo-completion.api.ts → apps/backend/features/notification/expose/notify",
+        "apps/backend/features/notification/expose/notify.ts → apps/backend/features/notification/internal/application/send-notification.command",
+        "apps/backend/features/notification/expose/notify.ts → apps/backend/features/notification/internal/infra/notification-sender.log",
+        "apps/backend/features/notification/expose/notify.ts → apps/shared/logger",
+      ]),
+    );
+  });
+
   it(ENV_DIRECT_ACCESS.name, () => {
     // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
     expect(findEnvViolations(repoRoot)).toEqual([]);
@@ -2201,6 +2337,8 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "apps/frontend_customer/instrumentation-node.ts",
         "apps/frontend_customer/proxy.ts",
         "apps/backend/features/todo/internal/domain/todo.ts",
+        "apps/backend/features/notification/expose/notify.ts",
+        "apps/backend/features/notification/internal/infra/notification-sender.log.ts",
         "apps/backend/shared/drizzle/drizzle.config.ts",
         "apps/backend/shared/infra/database.ts",
         "apps/backend/shared/presentation/problem.ts",
@@ -2302,6 +2440,7 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "apps/backend/shared/domain/domain-error.ts",
         "apps/backend/shared/presentation/problem.ts",
         "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
+        "apps/backend/features/notification/expose/notify.ts",
         "apps/backend/shared/drizzle/drizzle.config.ts",
         "apps/shared/env.ts",
         "apps/shared/logger.ts",
@@ -3077,6 +3216,13 @@ const RULE_EXAMPLES: Record<
   },
   application: {
     violating: [
+      // Issue #208: 他のモジュールの expose（層に属さない）。application には関数をコンストラクタで渡す
+      //   （module-expose-only-from-presentation と重ねて検出する）。
+      [
+        "apps/backend/features/todo/internal/application/x.ts",
+        "../../../notification/expose/notify",
+        "value",
+      ],
       // Issue #98: "../../../shared/..." は features/shared/（別の feature）を指す（domain の例と同じ。backend/shared は
       //   "../../../../shared/..."）。
       [
@@ -3167,6 +3313,23 @@ const RULE_EXAMPLES: Record<
   },
   presentation: {
     violating: [
+      // Issue #208: 自モジュールの expose は presentation からでも不可（expose は自モジュールの internal を使うので循環する）。
+      //   backend/shared の presentation から feature の expose も不可。expose の前方一致だけの別ディレクトリも層に属さない。
+      [
+        "apps/backend/features/todo/internal/presentation/x.api.ts",
+        "../../expose/x",
+        "value",
+      ],
+      [
+        "apps/backend/shared/presentation/x.ts",
+        "../../features/notification/expose/notify",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/presentation/x.api.ts",
+        "../../../notification/expose-x/notify",
+        "value",
+      ],
       // reviewer の指摘（Issue #98）: feature の名前が shared でも、自 feature の domain は型だけ（backend/shared の
       //   domain と名前で取り違えない）。
       [
@@ -3422,6 +3585,17 @@ const RULE_EXAMPLES: Record<
         "apps/backend/features/todo/internal/presentation/x.api.ts",
         "../../../../../shared/logger",
         "value",
+      ],
+      // Issue #208: 組み立ての場所として、他のモジュールの公開の入口（expose）を値でも型でも使える。
+      [
+        "apps/backend/features/todo/internal/presentation/change-todo-completion.api.ts",
+        "../../../notification/expose/notify",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/presentation/nested/x.api.ts",
+        "../../../../notification/expose/notify",
+        "type",
       ],
     ],
   },
@@ -3743,6 +3917,269 @@ const RULE_EXAMPLES: Record<
       ],
     ],
   },
+  // Issue #208: モジュール（backend の feature）の境界。
+  "module-internal": {
+    violating: [
+      // 値・型・re-export のどれでも、どの層からでも、expose からでも。
+      [
+        "apps/backend/features/todo/internal/application/x.ts",
+        "../../../notification/internal/application/send-notification.command",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/domain/x.ts",
+        "../../../notification/internal/domain/notification-sender",
+        "type",
+      ],
+      [
+        "apps/backend/features/todo/internal/presentation/x.api.ts",
+        "../../../notification/internal/infra/notification-sender.log",
+        "re-export",
+      ],
+      [
+        "apps/backend/features/notification/expose/notify.ts",
+        "../../todo/internal/domain/todo",
+        "type",
+      ],
+      // internal/ そのもの（ディレクトリの index）も中身。
+      [
+        "apps/backend/features/notification/expose/notify.ts",
+        "../../todo/internal",
+        "value",
+      ],
+      // モジュールは名前が完全に一致するものだけが自分（todo と todo-extra は別）。features/shared/ も 1 つのモジュール。
+      [
+        "apps/backend/features/todo/internal/domain/x.ts",
+        "../../../todo-extra/internal/domain/y",
+        "type",
+      ],
+      [
+        "apps/backend/features/todo/internal/infra/x.ts",
+        "../../../shared/internal/domain/x",
+        "value",
+      ],
+    ],
+    allowed: [
+      // 自モジュールの internal（expose からも）。
+      [
+        "apps/backend/features/notification/expose/notify.ts",
+        "../internal/application/send-notification.command",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/presentation/x.api.ts",
+        "../application/x",
+        "value",
+      ],
+      // 他のモジュールの expose は、この規則ではなく module-expose-only-from-presentation が見る。
+      [
+        "apps/backend/features/todo/internal/presentation/x.api.ts",
+        "../../../notification/expose/notify",
+        "value",
+      ],
+      // 前方一致だけが同じ別ディレクトリ（internal-x）は internal ではない（置き場所・層の規則が見る）。
+      [
+        "apps/backend/features/todo/internal/application/x.ts",
+        "../../../notification/internal-x/y",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/domain/x.ts",
+        "../../../../shared/domain/domain-error",
+        "value",
+      ],
+      // 参照元が apps/backend/features/ の外なら対象外（test-support は InMemory の実装のために internal を使う。backend/shared は
+      //   backend-shared、frontend の app/api は exports と app-api が見る）。
+      [
+        "apps/backend/test-support/todo/x.ts",
+        "../../features/todo/internal/domain/todo",
+        "value",
+      ],
+      [
+        "apps/backend/shared/infra/x.ts",
+        "../../features/todo/internal/infra/schema",
+        "value",
+      ],
+      [
+        "apps/frontend_customer/app/api/todos/route.ts",
+        "@repo/backend/features/todo/internal/presentation/list-todos.api",
+        "value",
+      ],
+    ],
+  },
+  "module-expose-only-from-presentation": {
+    violating: [
+      // presentation 以外の層から他のモジュールの expose（値・型・re-export）。
+      [
+        "apps/backend/features/todo/internal/application/x.command.ts",
+        "../../../notification/expose/notify",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/domain/x.ts",
+        "../../../notification/expose/notify",
+        "type",
+      ],
+      [
+        "apps/backend/features/todo/internal/infra/x.ts",
+        "../../../notification/expose/notify",
+        "re-export",
+      ],
+      // expose から他のモジュールの expose（expose-imports と重ねて検出する）。
+      [
+        "apps/backend/features/notification/expose/x.ts",
+        "../../todo/expose/y",
+        "value",
+      ],
+      // expose/ そのもの（ディレクトリの index）も expose。
+      [
+        "apps/backend/features/todo/internal/application/x.ts",
+        "../../../notification/expose",
+        "value",
+      ],
+      // presentation の前方一致だけが同じ別ディレクトリ（presentationx）は presentation ではない。
+      [
+        "apps/backend/features/todo/internal/presentationx/x.ts",
+        "../../../notification/expose/notify",
+        "value",
+      ],
+    ],
+    allowed: [
+      [
+        "apps/backend/features/todo/internal/presentation/change-todo-completion.api.ts",
+        "../../../notification/expose/notify",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/presentation/nested/x.api.ts",
+        "../../../../notification/expose/notify",
+        "type",
+      ],
+      // 自モジュールの expose の中の参照。
+      [
+        "apps/backend/features/notification/expose/notify.ts",
+        "./message",
+        "type",
+      ],
+      // 自モジュールの expose を internal から使うのは、この規則ではなく層の規則が止める（参照先が層に属さない）。
+      [
+        "apps/backend/features/todo/internal/application/x.ts",
+        "../../expose/x",
+        "value",
+      ],
+      // expose の前方一致だけが同じ別ディレクトリ（exposed）は expose ではない（層の規則が止める）。
+      [
+        "apps/backend/features/todo/internal/application/x.ts",
+        "../../../notification/exposed/x",
+        "value",
+      ],
+      // 参照元が apps/backend/features/ の外なら対象外（backend/shared は backend-shared が止める）。
+      [
+        "apps/backend/shared/presentation/x.ts",
+        "../../features/notification/expose/notify",
+        "value",
+      ],
+    ],
+  },
+  "expose-imports": {
+    violating: [
+      // 他のモジュールの expose と internal。
+      [
+        "apps/backend/features/notification/expose/x.ts",
+        "../../todo/expose/y",
+        "value",
+      ],
+      [
+        "apps/backend/features/notification/expose/x.ts",
+        "../../todo/internal/domain/todo",
+        "type",
+      ],
+      // backend/shared（組み立ての部品は internal の presentation / infra に置き、expose は薄くする）。
+      [
+        "apps/backend/features/notification/expose/x.ts",
+        "../../../shared/infra/database",
+        "value",
+      ],
+      // apps/shared の env（presentation と同じく logger・now だけ）。
+      [
+        "apps/backend/features/notification/expose/x.ts",
+        "@repo/shared/env",
+        "value",
+      ],
+      // フレームワークと画面側。
+      [
+        "apps/backend/features/notification/expose/x.ts",
+        "next/server",
+        "value",
+      ],
+      ["apps/backend/features/notification/expose/x.ts", "react", "type"],
+      [
+        "apps/backend/features/notification/expose/x.ts",
+        "@/features/todo",
+        "value",
+      ],
+      // 自モジュールでも internal/・expose/ の外（前方一致だけの internal-x も）。
+      [
+        "apps/backend/features/notification/expose/x.ts",
+        "../lib/y",
+        "re-export",
+      ],
+      [
+        "apps/backend/features/notification/expose/x.ts",
+        "../internal-x/application/y",
+        "value",
+      ],
+    ],
+    allowed: [
+      [
+        "apps/backend/features/notification/expose/notify.ts",
+        "../internal/application/send-notification.command",
+        "value",
+      ],
+      [
+        "apps/backend/features/notification/expose/notify.ts",
+        "../internal/infra/notification-sender.log",
+        "value",
+      ],
+      [
+        "apps/backend/features/notification/expose/notify.ts",
+        "../internal/domain/notification-sender",
+        "type",
+      ],
+      [
+        "apps/backend/features/notification/expose/notify.ts",
+        "@repo/shared/logger",
+        "value",
+      ],
+      [
+        "apps/backend/features/notification/expose/notify.ts",
+        "@repo/shared/now",
+        "value",
+      ],
+      [
+        "apps/backend/features/notification/expose/notify.ts",
+        "./message",
+        "re-export",
+      ],
+      // フレームワーク以外のパッケージ（層の規則と同じ）。
+      [
+        "apps/backend/features/notification/expose/notify.ts",
+        "node:crypto",
+        "value",
+      ],
+      // 参照元が expose/ の外なら対象外（層の規則が見る）。
+      [
+        "apps/backend/features/notification/internal/infra/x.ts",
+        "@repo/shared/env",
+        "value",
+      ],
+      [
+        "apps/backend/features/notification/expose-x/x.ts",
+        "next/server",
+        "value",
+      ],
+    ],
+  },
   "app-api": {
     violating: [
       [
@@ -3815,6 +4252,13 @@ const PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/backend/features/todo/internal/lib/x.ts",
     "apps/backend/features/todo/internal-x/domain/x.ts",
     "apps/backend/features/todo/internal/domainx/x.ts",
+    // Issue #208: expose/ は features/<f>/ の直下だけで、置けるのは expose/ の直下のファイルだけ。expose/ の下のディレクトリ、
+    //   前方一致だけが同じ別ディレクトリ（expose-x）、internal/ の下や backend/shared/ の下の expose/ は違反。
+    "apps/backend/features/notification/expose/nested/x.ts",
+    "apps/backend/features/notification/expose-x/x.ts",
+    "apps/backend/features/notification/internal/expose/x.ts",
+    "apps/backend/shared/expose/x.ts",
+    "apps/backend/features/expose/x.ts",
     // Issue #98: 直下に置けるのは features/ と shared/ だけ。features/ 直下のファイルと、features/ を挟まない feature
     //   （Issue #98 より前の置き場所 apps/backend/todo/）は違反。
     "apps/backend/features/x.ts",
@@ -3849,6 +4293,9 @@ const PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/backend/shared/presentation/problem.ts",
     "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
     "apps/backend/features/todo/internal/presentation/nested/x.api.ts",
+    // Issue #208: 他のモジュールへ公開する入口（features/<f>/expose/ の直下のファイル。8 つの拡張子のどれでも）。
+    "apps/backend/features/notification/expose/notify.ts",
+    "apps/backend/features/todo/expose/x.mts",
     // feature の名前が shared でも、features/ の下なら feature（backend/shared ではない）。
     "apps/backend/features/shared/internal/domain/x.ts",
     "apps/backend/shared/drizzle/drizzle.config.ts",
@@ -5505,10 +5952,11 @@ function violationsOfFixture(files: Record<string, string>): string[] {
 // apps/shared の許可 SHARED_MODULES_BY_LAYER）の違反も置く。
 // ハードコードの文言の規則（FRONTEND_HARDCODED_TEXT・SERVER_HARDCODED_TEXT。Issue #116）と、辞書の置き場所の規則
 // （messages-colocation。Issue #125）の違反も置く。
-// 規則は全部で 32（RULES の 21 + 置き場所 3 + 環境変数の直参照 + console + 現在時刻の読み取り + exports 2 + ハードコードの文言 2 + handle を withProblemResponse で包む 1）。Issue #68 で RULES に 3 規則（backend-to-frontend・
+// 規則は全部で 35（RULES の 24 + 置き場所 3 + 環境変数の直参照 + console + 現在時刻の読み取り + exports 2 + ハードコードの文言 2 + handle を withProblemResponse で包む 1）。Issue #68 で RULES に 3 規則（backend-to-frontend・
 // backend-relative-only・frontend-root-to-backend）を足し、段階 2 で frontend-to-backend-specifier と BACKEND_EXPORTS を足した。
 // Issue #90 で frontend-to-shared-specifier・screen-to-shared・shared-self-contained・SHARED_PLACEMENT・SHARED_EXPORTS を足した。
 // Issue #141 で presentation-with-problem-response（PRESENTATION_WITH_PROBLEM_RESPONSE）を足した。
+// Issue #208 で module-internal・module-expose-only-from-presentation・expose-imports（モジュールの境界）を足した。
 const MUST_REJECT_FILES: Record<string, string> = {
   // presentation-with-problem-response（Issue #141）: handle を withProblemResponse で包まない（try / catch の手書き、素の async、
   //   import だけして使わない、別の関数で包む）。.mts と入れ子のディレクトリ・backend/shared/presentation も対象。
@@ -5698,6 +6146,44 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import { x } from "@/shared/x";',
   ),
   "apps/backend/features/todo/lib/x.ts": lines("export const x = 1;"),
+  // Issue #208 モジュールの境界。application・domain・infra から他のモジュールの expose（値・型の re-export・dynamic import）。
+  //   参照先が層に属さないので層の規則にもかかる（重ねて検出する）。
+  "apps/backend/features/todo/internal/application/bad-module-expose.command.ts":
+    lines('import { notify } from "../../../notification/expose/notify";'),
+  "apps/backend/features/todo/internal/domain/bad-module-expose.ts": lines(
+    'export type { Notify } from "../../../notification/expose/notify";',
+  ),
+  "apps/backend/features/todo/internal/infra/bad-module-expose.ts": lines(
+    'const n = import("../../../notification/expose/notify");',
+  ),
+  // presentation から自モジュールの expose（層の規則 presentation だけにかかる。module-expose-only-from-presentation は他のモジュールだけ）。
+  "apps/backend/features/todo/internal/presentation/bad-own-expose.api.ts":
+    lines('import { x } from "../../expose/x";'),
+  // module-internal: 他のモジュールの internal（型だけでも）。
+  "apps/backend/features/todo/internal/application/bad-module-internal.command.ts":
+    lines(
+      'import type { NotificationSender } from "../../../notification/internal/domain/notification-sender";',
+      'import { SendNotificationCommand } from "../../../notification/internal/application/send-notification.command";',
+    ),
+  // expose-imports: 他のモジュールの internal / expose、backend/shared、apps/shared の env、フレームワーク、自モジュールの
+  //   internal/・expose/ の外。自モジュールの internal は通る（最後の行。apps/shared の logger・now は must-pass の notify.ts で見る。
+  //   この fixture の apps/shared の exports には logger が無く、shared-exports にかかるため）。
+  "apps/backend/features/notification/expose/bad-expose.ts": lines(
+    'import type { Todo } from "../../todo/internal/domain/todo";',
+    'import { x } from "../../todo/expose/x";',
+    'import { getDatabase } from "../../../shared/infra/database";',
+    'import { env } from "@repo/shared/env";',
+    'import { NextResponse } from "next/server";',
+    'export { y } from "../lib/y";',
+    'import { SendNotificationCommand } from "../internal/application/send-notification.command";',
+  ),
+  // backend-placement: expose/ の下のディレクトリと、expose の前方一致だけの別ディレクトリ。
+  "apps/backend/features/notification/expose/nested/x.ts": lines(
+    "export const x = 1;",
+  ),
+  "apps/backend/features/notification/expose-x/x.ts": lines(
+    "export const x = 1;",
+  ),
   "apps/backend/x.ts": lines("export const x = 1;"),
   //   Issue #98: features/ 直下のファイル、features/ を挟まない feature（以前の置き場所）、shared/drizzle/ のアプリのコード。
   "apps/backend/features/x.ts": lines("export const x = 1;"),
@@ -6473,6 +6959,56 @@ const MUST_REJECT_VIOLATIONS = [
   "backend-shared: apps/backend/shared/domain/bad-shared-screen.ts → apps/frontend_customer/shared/x",
   "backend-placement: apps/backend/features/todo/p-root.ts",
   "backend-placement: apps/backend/features/todo/lib/x.ts",
+  // Issue #208 モジュールの境界。
+  "backend-placement: apps/backend/features/notification/expose/nested/x.ts",
+  "backend-placement: apps/backend/features/notification/expose-x/x.ts",
+  ...[
+    "application: apps/backend/features/todo/internal/application/bad-module-expose.command.ts",
+    "domain: apps/backend/features/todo/internal/domain/bad-module-expose.ts",
+    "infra: apps/backend/features/todo/internal/infra/bad-module-expose.ts",
+  ].flatMap((line) => {
+    const [rule, from] = line.split(": ");
+    const to = "apps/backend/features/notification/expose/notify";
+    return [
+      `${rule}: ${from} → ${to}`,
+      `module-expose-only-from-presentation: ${from} → ${to}`,
+    ];
+  }),
+  "presentation: apps/backend/features/todo/internal/presentation/bad-own-expose.api.ts → apps/backend/features/todo/expose/x",
+  ...[
+    "apps/backend/features/notification/internal/domain/notification-sender",
+    "apps/backend/features/notification/internal/application/send-notification.command",
+  ].flatMap((to) => [
+    `application: apps/backend/features/todo/internal/application/bad-module-internal.command.ts → ${to}`,
+    `module-internal: apps/backend/features/todo/internal/application/bad-module-internal.command.ts → ${to}`,
+  ]),
+  ...[
+    "apps/backend/features/todo/internal/domain/todo",
+    "apps/backend/features/todo/expose/x",
+    "apps/backend/shared/infra/database",
+    "apps/shared/env",
+    "next/server",
+    "apps/backend/features/notification/lib/y",
+  ].map(
+    (to) =>
+      `expose-imports: apps/backend/features/notification/expose/bad-expose.ts → ${to}`,
+  ),
+  "module-internal: apps/backend/features/notification/expose/bad-expose.ts → apps/backend/features/todo/internal/domain/todo",
+  "module-expose-only-from-presentation: apps/backend/features/notification/expose/bad-expose.ts → apps/backend/features/todo/expose/x",
+  // 他 feature の internal への参照（上の層の規則の fixture）は、module-internal にも重ねてかかる。
+  ...[
+    "domain: apps/backend/features/todo/internal/domain/bad-domain.ts → apps/backend/features/other/internal/domain/other",
+    "presentation: apps/backend/features/todo/internal/presentation/bad-presentation.api.ts → apps/backend/features/other/internal/infra/other-repository.in-memory",
+    "infra: apps/backend/features/todo/internal/infra/bad-infra.ts → apps/backend/features/other/internal/domain/other",
+    "infra: apps/backend/features/todo/internal/infra/bad-infra.ts → apps/backend/features/other/internal/application/other.query",
+    "infra: apps/backend/features/todo/internal/infra/bad-infra.ts → apps/backend/features/other/internal/infra/other-repository.postgres",
+    "application: apps/backend/features/todo/internal/application/bad-application-2.ts → apps/backend/features/other/internal/domain/other",
+    "application: apps/backend/features/todo/internal/application/bad-application-2.ts → apps/backend/features/other/internal/application/other.query",
+    "presentation: apps/backend/features/todo/internal/presentation/bad-presentation-2.api.ts → apps/backend/features/other/internal/infra/other-repository.postgres",
+    "presentation: apps/backend/features/todo/internal/presentation/bad-presentation-2.api.ts → apps/backend/features/other/internal/application/other.query",
+    "presentation: apps/backend/features/todo/internal/presentation/bad-presentation-2.api.ts → apps/backend/features/other/internal/domain/other",
+    "presentation: apps/backend/features/todo/internal/presentation/bad-presentation-2.api.ts → apps/backend/features/other/internal/domain/other-constants",
+  ].map((line) => `module-internal: ${line.slice(line.indexOf(": ") + 2)}`),
   "backend-placement: apps/backend/x.ts",
   "backend-placement: apps/backend/shared/bad-root.ts",
   "backend-placement: apps/backend/features/x.ts",
@@ -6892,6 +7428,31 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { DeleteTodoCommand } from "../application/delete-todo.command";',
     'const lazy = import("../infra/todo-repository.postgres");',
   ),
+  // Issue #208 モジュールの境界: 公開の入口（expose）から自モジュールの internal（値・型）・expose の中・apps/shared の
+  //   logger / now・Node の組み込み、組み立ての場所（presentation）から他のモジュールの expose（値・型）。
+  "apps/backend/features/notification/expose/notify.ts": lines(
+    'import { logger } from "@repo/shared/logger";',
+    'import { now } from "@repo/shared/now";',
+    'import { randomUUID } from "node:crypto";',
+    'import { SendNotificationCommand } from "../internal/application/send-notification.command";',
+    'import { LogNotificationSender } from "../internal/infra/notification-sender.log";',
+    'import type { NotificationSender } from "../internal/domain/notification-sender";',
+    'export type { Message } from "./message";',
+  ),
+  "apps/backend/features/notification/expose/message.ts": lines(
+    "export type Message = string;",
+  ),
+  "apps/backend/features/notification/internal/infra/notification-sender.log.ts":
+    lines(
+      'import { logger } from "@repo/shared/logger";',
+      'import type { NotificationSender } from "../domain/notification-sender";',
+    ),
+  "apps/backend/features/todo/internal/presentation/change-todo-completion.api.ts":
+    lines(
+      'import { notify } from "../../../notification/expose/notify";',
+      'import type { Message } from "../../../notification/expose/message";',
+      'import { ChangeTodoCompletionCommand } from "../application/change-todo-completion.command";',
+    ),
   // Issue #57: 永続化（Drizzle + Postgres）。backend の infra からパッケージ（drizzle-orm / pg）への参照、
   //   自 feature の infra → backend/shared/infra。
   "apps/backend/shared/infra/database.ts": lines(

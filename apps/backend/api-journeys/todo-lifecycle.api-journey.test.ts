@@ -80,6 +80,12 @@ import {
 // WHY 共通の補助にしない: API ジャーニーは今 1 ファイルだけ。ファイルが増えて同じ準備が重なったら test-support/ に切り出す。
 let database: TestDatabase;
 let handlers: ReturnType<typeof api>;
+// 完了の通知の口に渡されたメッセージ（呼ばれた順）。
+// WHY 本番の notify（notification の expose）ではなく記録する関数を渡す: notify はログに出すだけで、ジャーニーから結果を
+//   読めない（vi は使えないので console も見られない）。記録すれば「完了の step で通知が 1 件」を Then で確かめられる。
+//   notify につながっていることは change-todo-completion.api.test.ts の「本番の PUT」のテストが見る。
+// WHY 変数を空にし直さない: シナリオ「作成から完了・削除まで」だけが完了にする。ほかのシナリオは完了にせず、通知を見ない。
+const notifications: string[] = [];
 
 beforeAll(async () => {
   database = await createTestDatabase();
@@ -103,7 +109,9 @@ function api() {
     getTodo: new GetTodoApi(new GetTodoQuery(repository)).handle,
     putTitle: new RenameTodoApi(new RenameTodoCommand(repository)).handle,
     putCompletion: new ChangeTodoCompletionApi(
-      new ChangeTodoCompletionCommand(repository),
+      new ChangeTodoCompletionCommand(repository, (message) => {
+        notifications.push(message);
+      }),
     ).handle,
     deleteTodo: new DeleteTodoApi(new DeleteTodoCommand(repository)).handle,
   };
@@ -535,6 +543,11 @@ describeFeature(feature, ({ Background, Scenario }) => {
         ).toStrictEqual(logEntries(expectedLogs));
       },
     );
+
+    // 作成・改名では通知せず、未完了 → 完了に変わった 1 件目の分だけ（id だけの英語。Issue #208）。
+    And("1 件目の完了の通知が 1 件だけ送られる", () => {
+      expect(notifications).toStrictEqual([`Todo completed: ${milk.id}`]);
+    });
 
     When("1 件目の詳細を取得する", async () => {
       response = await handlers.getTodo(

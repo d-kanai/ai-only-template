@@ -6,6 +6,7 @@ import {
 } from "../../../../shared/presentation/json-body";
 import { withProblemResponse } from "../../../../shared/presentation/problem";
 import { parseUuidParam } from "../../../../shared/presentation/resource-id";
+import { notify } from "../../../notification/expose/notify";
 import { ChangeTodoCompletionCommand } from "../application/change-todo-completion.command";
 import type { Todo } from "../domain/todo";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
@@ -85,6 +86,13 @@ export class ChangeTodoCompletionApi {
 
 // app/api/todos/[id]/completion/route.ts が re-export する Route Handler。本番は常に Postgres で組み立てる。
 // 組み立ての WHY（ここで組み立てる・Repository を api ファイルごとに作ってよい・InMemory に切り替えない）は list-todos.api.ts の GET のコメント。
+// 完了の通知は notification モジュールの公開の入口（expose/notify.ts）を渡す（Issue #208）。
+// WHY ここで import して渡す（command が直接 import しない）: 他のモジュールの expose を import してよいのは組み立ての場所
+//   （presentation）だけ（rule-tests/architecture.test.ts の module-expose-only-from-presentation）。command は関数を受け取るだけで、
+//   notification モジュールを知らない。
 export const PUT = new ChangeTodoCompletionApi(
-  new ChangeTodoCompletionCommand(new PostgresTodoRepository(getDatabase().db)),
+  new ChangeTodoCompletionCommand(
+    new PostgresTodoRepository(getDatabase().db),
+    notify,
+  ),
 ).handle;
