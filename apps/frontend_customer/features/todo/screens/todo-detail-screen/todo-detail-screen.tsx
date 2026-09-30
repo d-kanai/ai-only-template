@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useId } from "react";
 import { useT } from "@/shared/i18n/i18n";
 import { useTodoDetailScreen } from "./todo-detail-screen.hook";
 import { todoDetailScreenMessages } from "./todo-detail-screen.messages";
@@ -25,9 +26,13 @@ export function TodoDetailScreen({ todoId }: TodoDetailScreenProps) {
     setTitle,
     isLoading,
     error,
+    fieldErrors,
     saveTitle,
     toggleCompleted,
   } = useTodoDetailScreen(todoId);
+  // 項目のエラーの要素の id（入力の aria-describedby から指す）。
+  // WHY useId: 固定の文字列の id は、同じ画面を 2 つ描くと重複する（Biome の useUniqueElementIds も固定の id を違反にする）。
+  const titleErrorId = useId();
 
   return (
     <main>
@@ -67,8 +72,22 @@ export function TodoDetailScreen({ todoId }: TodoDetailScreenProps) {
                 // htmlFor + id で結び付けると固定 id が必要になるため、label で input を包んで名前を付ける。
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
+                // 項目のエラー（400 の errors の #/title）を入力の説明として結び付け、入力が誤りであることを伝える。
+                aria-invalid={fieldErrors.title !== undefined}
+                aria-describedby={
+                  fieldErrors.title === undefined ? undefined : titleErrorId
+                }
               />
             </label>
+            {fieldErrors.title === undefined ? null : (
+              <p
+                // label の外に置く: label の中の文字はすべて入力の名前（accessible name）になり、名前にエラーの文言が混ざる。
+                // role="alert" を付けない: フォーム全体のエラー（上の alert）と分け、入力の説明として読ませる。
+                id={titleErrorId}
+              >
+                {fieldErrors.title}
+              </p>
+            )}
             <button type="submit">{t("save")}</button>
           </form>
           <label>

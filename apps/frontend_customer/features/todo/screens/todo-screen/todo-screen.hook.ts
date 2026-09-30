@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { toErrorMessage } from "@/features/todo/api/api-error";
+import {
+  type ErrorMessages,
+  toErrorMessages,
+} from "@/features/todo/api/api-error";
 import {
   createTodo,
   deleteTodo,
@@ -10,7 +13,7 @@ import {
 import { useLocale } from "@/shared/i18n/i18n";
 
 // 失敗の理由（catch で受けた値）を包んで state に持つ。null（失敗なし）と、reject された値そのものが null / undefined の場合を区別するため。
-// WHY 文言ではなく理由を持ち、描画のときに翻訳する（toErrorMessage）: ロケールが変わっても表示中のエラーがそのロケールで出る。
+// WHY 文言ではなく理由を持ち、描画のときに翻訳する（toErrorMessages）: ロケールが変わっても表示中のエラーがそのロケールで出る。
 //   翻訳に使う locale を useCallback の依存に入れずに済み、コールバックが作り直されない（下の依存配列の Stryker のコメントの前提）。
 type Failure = { reason: unknown };
 
@@ -21,7 +24,7 @@ export function useTodoScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const locale = useLocale();
   // todo-api は失敗時に ApiError を投げるが、fetch 自体の失敗（ネットワーク断）なども含め、catch には何が来るか型で保証されない。
-  // 画面には翻訳した文字列だけを渡す（ApiError 以外は固定の文言。api-error.ts の toErrorMessage）。
+  // 画面には翻訳した文字列だけを渡す（ApiError 以外は固定の文言。api-error.ts の toErrorMessages）。
   const [failure, setFailure] = useState<Failure | null>(null);
   const [newTitle, setNewTitle] = useState("");
   // 一覧の GET の連番。最後に送った GET の応答だけを反映する。
@@ -122,10 +125,19 @@ export function useTodoScreen() {
     [mutateAndReload],
   );
 
+  // 失敗を、フォーム全体の文言（error。role="alert" で出す）と、入力の下に出す項目ごとの文言（fieldErrors）に分ける（Issue #144）。
+  // WHY 項目は "title" だけ: この画面の追加のフォームが描く入力は title だけ。ほかの項目の誤りは error に出る（api-error.ts の
+  //   toErrorMessages）。
+  const errorMessages: ErrorMessages<"title"> =
+    failure === null
+      ? { form: null, fields: {} }
+      : toErrorMessages(failure.reason, locale, ["title"]);
+
   return {
     todos,
     isLoading,
-    error: failure === null ? null : toErrorMessage(failure.reason, locale),
+    error: errorMessages.form,
+    fieldErrors: errorMessages.fields,
     newTitle,
     setNewTitle,
     addTodo,

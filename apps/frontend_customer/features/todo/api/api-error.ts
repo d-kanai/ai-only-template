@@ -22,6 +22,16 @@ type TranslatedKey<K extends MessageKey<typeof commonMessages>> = K;
 //   サーバが返しうるキーと error.unknown に絞る。
 export type ApiErrorKey = TranslatedKey<ErrorKey | "error.unknown">;
 
+// 400 の項目ごとの誤り 1 件（Problem Details の拡張メンバー errors の要素。apps/backend/shared/presentation/problem.ts の ProblemError）。
+// pointer は誤りのある項目を指す JSON Pointer（RFC 6901）の URI の fragment の形（"#/title"。本文全体は "#"）。
+// WHY key を ErrorKey に絞る（error.unknown を含めない）: 項目ごとの誤りはサーバが返すものだけで、画面側だけのキーは入らない。
+// WHY detail を持たない: ApiError と同じく、開発者向けの英語で画面に出さない（契約外）。
+export type ApiFieldError = {
+  pointer: string;
+  key: TranslatedKey<ErrorKey>;
+  params: RuntimeParams;
+};
+
 // ApiError を作るときの値。
 export type ApiErrorInit = {
   // HTTP の応答のステータス（本文の status ではない。todo-api.ts の toError）。
@@ -30,6 +40,13 @@ export type ApiErrorInit = {
   //   本文が Problem Details でない失敗（error.unknown）では分からないので省く。
   type?: string;
   key: ApiErrorKey;
+  params?: RuntimeParams;
+  // 400 の項目ごとの誤り（本文の errors）。本文に無ければ省く。
+  errors?: readonly ApiFieldErrorInit[];
+};
+
+// errors の要素を渡すときの形。params は本文と同じく省略できる（ApiError が空のオブジェクトにする）。
+type ApiFieldErrorInit = Omit<ApiFieldError, "params"> & {
   params?: RuntimeParams;
 };
 
@@ -48,14 +65,23 @@ export class ApiError extends Error {
   readonly type: string | undefined;
   readonly key: ApiErrorKey;
   readonly params: RuntimeParams;
+  readonly errors: readonly ApiFieldError[];
 
-  constructor({ status, type, key, params = {} }: ApiErrorInit) {
+  // WHY errors の要素を作り直す（渡された配列をそのまま持たない）: todo-api.ts は本文の errors（detail を含む JSON）を
+  //   そのまま渡す。pointer・key・params だけを取り出して detail を持たず、params の省略を空のオブジェクトにそろえる
+  //   （本文の params と同じ扱い）。
+  constructor({ status, type, key, params = {}, errors = [] }: ApiErrorInit) {
     super(key);
     this.name = "ApiError";
     this.status = status;
     this.type = type;
     this.key = key;
     this.params = params;
+    this.errors = errors.map((error) => ({
+      pointer: error.pointer,
+      key: error.key,
+      params: error.params ?? {},
+    }));
   }
 }
 
@@ -67,4 +93,51 @@ export function toErrorMessage(reason: unknown, locale: Locale): string {
   return reason instanceof ApiError
     ? formatMessage(commonMessages, locale, reason.key, reason.params)
     : formatMessage(commonMessages, locale, "error.unexpected");
+}
+
+// 失敗の理由を、フォーム全体に出す文言（form）と、入力の下に出す項目ごとの文言（fields）に分けて、画面のロケールで翻訳する。
+// fields には、その画面が入力を描く項目の名前（リクエストの本文の最上位のキー。"title" など）を渡す。
+// - errors の無い失敗（404・500・JSON でない応答・fetch の失敗）: form に toErrorMessage の文言、fields は空。
+// - errors のある失敗（400 の形・値の誤り）: pointer が "#/<項目名>" の誤りはその項目の文言に、それ以外
+//   （本文全体の "#"、描いていない項目、入れ子の位置）は form に出す。
+// WHY 項目の文言があるときに本文の key（全体の文言）を重ねない: 本文の key は errors の最初の 1 件と同じ（problem.ts の
+//   Problem の key）で、両方を出すと同じ文言が入力の下とフォームの上に 2 回出る。form には項目に結び付かない誤りだけを出す。
+// WHY 項目に結び付かない誤りを捨てない: 画面に入力の無い項目の誤りを捨てると、何も表示されないまま送信に失敗したように見える。
+// WHY pointer を "#/" + 項目名と完全一致で比べる（JSON Pointer を解析しない）: 画面の入力は本文の最上位の項目だけで、
+//   項目名は英字の識別子（~ や / を含まず、RFC 6901 のエスケープが要らない）。入れ子の位置（"#/title/0"）は項目の入力に
+//   結び付けず form に出す。
+// WHY 項目ごと・form とも最初の 1 件だけ: 入力の下とフォームの上には文言を 1 つずつ出す。backend の errors は zod の issue の
+//   順で本文の key は最初の 1 件（apps/backend/shared/presentation/json-body.ts）。今の画面が送る本文（項目 1 つ）では、
+//   同じ項目の誤りも、本文全体の誤り（"#" の notObject と unknownKeys は同時に起きない）も 1 件までしか返らない。
+// WHY F を型引数にする: 呼び出し側（hook）が渡した項目名だけを fields のキーにし、画面が fieldErrors.title を型で読めるようにする。
+export type ErrorMessages<F extends string> = {
+  form: string | null;
+  fields: Partial<Record<F, string>>;
+};
+
+export function toErrorMessages<F extends string>(
+  reason: unknown,
+  locale: Locale,
+  fields: readonly F[],
+): ErrorMessages<F> {
+  if (!(reason instanceof ApiError) || reason.errors.length === 0) {
+    return { form: toErrorMessage(reason, locale), fields: {} };
+  }
+  const fieldMessages: Partial<Record<F, string>> = {};
+  const formMessages: string[] = [];
+  for (const error of reason.errors) {
+    const message = formatMessage(
+      commonMessages,
+      locale,
+      error.key,
+      error.params,
+    );
+    const field = fields.find((name) => error.pointer === `#/${name}`);
+    if (field === undefined) {
+      formMessages.push(message);
+    } else {
+      fieldMessages[field] ??= message;
+    }
+  }
+  return { form: formMessages[0] ?? null, fields: fieldMessages };
 }

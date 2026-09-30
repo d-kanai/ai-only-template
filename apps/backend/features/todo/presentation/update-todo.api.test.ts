@@ -142,6 +142,30 @@ describe("PUT /api/todos/:id", () => {
     });
   });
 
+  // presentation は domain より厳しくしない（Issue #144）。domain が通す境界の値（前後の空白を除いて 1 文字・100 文字、
+  //   絵文字は 1 文字と数える）を presentation も通し、domain と同じく trim した値で保存する。
+  test.each([
+    ["1 文字", " a ", "a"],
+    ["100 文字", ` ${"a".repeat(100)}\t`, "a".repeat(100)],
+    ["絵文字 100 個", ` ${"🍎".repeat(100)} `, "🍎".repeat(100)],
+  ])(
+    "title が前後の空白を除いて %s なら更新できる",
+    async (_label, title, saved) => {
+      const { repository, todo, PUT } = await setup();
+
+      const response = await PUT(
+        putRequest(todo.id, JSON.stringify({ title })),
+        context(todo.id),
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ title: saved });
+      await expect(repository.findById(todo.id)).resolves.toMatchObject({
+        title: saved,
+      });
+    },
+  );
+
   // WHY 本番の PUT（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない（Issue #59）
   //   ことを、Postgres の Repository が呼ばれることで固定する。findById と save をを差し替えるので DB には接続しない。
   test("本番の PUT は Postgres の Repository に保存する", async () => {
@@ -223,7 +247,7 @@ describe("PUT /api/todos/:id", () => {
   );
 
   // 本文は RFC 9457 の Problem Details で、本文全体を toStrictEqual で検証する（WHY は create-todo.api.test.ts と同じ）。
-  //   errors はリクエストの形（presentation の zod スキーマ）の誤りだけに付く。
+  //   errors は presentation の zod スキーマの誤り（形と、domain と同じキーで重ねた必須・長さ。Issue #144）に付く。
   test.each<[string, string, ProblemBody]>([
     [
       "JSON でない",
@@ -324,10 +348,65 @@ describe("PUT /api/todos/:id", () => {
         ],
       },
     ],
+    // WHY 誤りを同時に置く: presentation は誤りを項目ごとにまとめて返す（Issue #144）。
+    [
+      "title が長すぎ、completed が boolean でなく、定義されていない項目もある",
+      JSON.stringify({ title: "a".repeat(101), completed: 1, extra: true }),
+      {
+        detail: "Title must be at most 100 characters.",
+        key: "todo.title.tooLong",
+        params: { max: 100 },
+        errors: [
+          {
+            pointer: "#/title",
+            key: "todo.title.tooLong",
+            params: { max: 100 },
+            detail: "Title must be at most 100 characters.",
+          },
+          {
+            pointer: "#/completed",
+            key: "request.field.notBoolean",
+            params: { path: "completed" },
+            detail: "completed must be a boolean.",
+          },
+          {
+            pointer: "#",
+            key: "request.body.unknownKeys",
+            params: { keys: "extra" },
+            detail: "Request body has unknown fields: extra.",
+          },
+        ],
+      },
+    ],
     [
       "title が空",
       JSON.stringify({ title: "" }),
-      { detail: "Title must not be empty.", key: "todo.title.empty" },
+      {
+        detail: "Title must not be empty.",
+        key: "todo.title.empty",
+        errors: [
+          {
+            pointer: "#/title",
+            key: "todo.title.empty",
+            detail: "Title must not be empty.",
+          },
+        ],
+      },
+    ],
+    [
+      "title が空白だけ",
+      JSON.stringify({ title: " \t " }),
+      {
+        detail: "Title must not be empty.",
+        key: "todo.title.empty",
+        errors: [
+          {
+            pointer: "#/title",
+            key: "todo.title.empty",
+            detail: "Title must not be empty.",
+          },
+        ],
+      },
     ],
     [
       "title が 101 文字",
@@ -336,6 +415,31 @@ describe("PUT /api/todos/:id", () => {
         detail: "Title must be at most 100 characters.",
         key: "todo.title.tooLong",
         params: { max: 100 },
+        errors: [
+          {
+            pointer: "#/title",
+            key: "todo.title.tooLong",
+            params: { max: 100 },
+            detail: "Title must be at most 100 characters.",
+          },
+        ],
+      },
+    ],
+    [
+      "title が絵文字 101 個",
+      JSON.stringify({ title: "🍎".repeat(101) }),
+      {
+        detail: "Title must be at most 100 characters.",
+        key: "todo.title.tooLong",
+        params: { max: 100 },
+        errors: [
+          {
+            pointer: "#/title",
+            key: "todo.title.tooLong",
+            params: { max: 100 },
+            detail: "Title must be at most 100 characters.",
+          },
+        ],
       },
     ],
   ])(

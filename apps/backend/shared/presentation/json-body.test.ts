@@ -2,6 +2,7 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import type { ErrorKey } from "../domain/error-key";
+import { keyedIssue, keyedRefine } from "../domain/keyed-issue";
 import { parseJsonBody, requestBodySchema } from "./json-body";
 import { InvalidRequestError, type ProblemErrorInput } from "./problem";
 
@@ -202,6 +203,86 @@ describe("parseJsonBody", () => {
             pointer: "#/name",
             key: "request.field.notString",
             params: { path: "name" },
+          },
+          {
+            pointer: "#",
+            key: "request.body.unknownKeys",
+            params: { keys: "extra" },
+          },
+        ],
+      },
+    );
+  });
+
+  // Issue #144: presentation のスキーマは、形の検査に加えて domain と同じ規則（必須・長さ）を、domain と同じキーで重ねる
+  //   （keyedIssue / keyedRefine。.claude/rules/backend.md の presentation）。キーの付いた issue は、そのキーと params を
+  //   そのまま errors に載せる（項目ごとの誤りを 1 回の応答でまとめて返すため）。
+  function keyedBodySchema() {
+    return requestBodySchema({
+      name: z
+        .string()
+        .refine((name) => name !== "", keyedIssue("todo.title.empty"))
+        .refine(
+          (name) => name.length <= 3,
+          keyedRefine("todo.title.tooLong", { max: 3 }),
+        ),
+      done: z.boolean().optional(),
+    });
+  }
+
+  test("keyedIssue を付けた検査の誤りは、そのキーにし、params を持たない", async () => {
+    await expectInvalidRequest(
+      parseJsonBody(
+        postRequest(JSON.stringify({ name: "" })),
+        keyedBodySchema(),
+      ),
+      {
+        key: "todo.title.empty",
+        params: undefined,
+        errors: [{ pointer: "#/name", key: "todo.title.empty" }],
+      },
+    );
+  });
+
+  test("keyedRefine を付けた検査の誤りは、そのキーと params にする", async () => {
+    await expectInvalidRequest(
+      parseJsonBody(
+        postRequest(JSON.stringify({ name: "abcd" })),
+        keyedBodySchema(),
+      ),
+      {
+        key: "todo.title.tooLong",
+        params: { max: 3 },
+        errors: [
+          {
+            pointer: "#/name",
+            key: "todo.title.tooLong",
+            params: { max: 3 },
+          },
+        ],
+      },
+    );
+  });
+
+  test("キーの付いた誤りと形の誤りが同時にあれば、errors は項目ごとにすべてを順に持つ", async () => {
+    await expectInvalidRequest(
+      parseJsonBody(
+        postRequest(JSON.stringify({ name: "abcd", done: 1, extra: true })),
+        keyedBodySchema(),
+      ),
+      {
+        key: "todo.title.tooLong",
+        params: { max: 3 },
+        errors: [
+          {
+            pointer: "#/name",
+            key: "todo.title.tooLong",
+            params: { max: 3 },
+          },
+          {
+            pointer: "#/done",
+            key: "request.field.notBoolean",
+            params: { path: "done" },
           },
           {
             pointer: "#",

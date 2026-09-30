@@ -401,6 +401,131 @@ describe("title の保存", () => {
   });
 });
 
+// 400 の項目ごとの誤り（ApiError の errors）。入力の下に出す文言（fieldErrors）と、フォーム全体の文言（error）に分ける
+//   （分け方の細部は api-error.test.ts の toErrorMessages で固定）。
+describe("項目ごとのエラー", () => {
+  async function saveWithFailure(reason: unknown) {
+    vi.mocked(getTodo).mockResolvedValue(milk);
+    vi.mocked(updateTodo).mockRejectedValue(reason);
+    const view = await renderLoaded();
+    act(() => view.result.current.setTitle("豆乳を買う"));
+    await act(() => view.result.current.saveTitle());
+    return view;
+  }
+
+  test("エラーが無いときは、fieldErrors は空", async () => {
+    vi.mocked(getTodo).mockResolvedValue(milk);
+
+    const { result } = await renderLoaded();
+
+    expect(result.current.fieldErrors).toStrictEqual({});
+  });
+
+  // WHY 全体の文言を出さない: 本文の key は errors の最初の 1 件と同じで、両方を出すと同じ文言が 2 回出る。
+  test("空タイトルの 400（#/title）は、title の項目の文言になり、フォーム全体の error は null", async () => {
+    const { result } = await saveWithFailure(
+      new ApiError({
+        status: 400,
+        type: "/problems/validation-error",
+        key: "todo.title.empty",
+        errors: [{ pointer: "#/title", key: "todo.title.empty" }],
+      }),
+    );
+
+    expect(result.current.fieldErrors).toStrictEqual({
+      title: tJa(commonMessages, "todo.title.empty"),
+    });
+    expect(result.current.error).toBeNull();
+    expect(result.current.title).toBe("豆乳を買う");
+  });
+
+  test("title の型の誤り（#/title）と未知の項目（#）の 2 件は、title の項目の文言とフォーム全体の文言に分ける", async () => {
+    const { result } = await saveWithFailure(
+      new ApiError({
+        status: 400,
+        type: "/problems/validation-error",
+        key: "request.field.notString",
+        params: { path: "title" },
+        errors: [
+          {
+            pointer: "#/title",
+            key: "request.field.notString",
+            params: { path: "title" },
+          },
+          {
+            pointer: "#",
+            key: "request.body.unknownKeys",
+            params: { keys: "extra" },
+          },
+        ],
+      }),
+    );
+
+    expect(result.current.fieldErrors).toStrictEqual({
+      title: tJa(commonMessages, "request.field.notString", { path: "title" }),
+    });
+    expect(result.current.error).toBe(
+      tJa(commonMessages, "request.body.unknownKeys", { keys: "extra" }),
+    );
+  });
+
+  test("errors の無い 404 は、フォーム全体の文言だけで、fieldErrors は空", async () => {
+    const { result } = await saveWithFailure(
+      new ApiError({
+        status: 404,
+        type: "/problems/not-found",
+        key: "todo.notFound",
+        params: { id: "todo-1" },
+      }),
+    );
+
+    expect(result.current.error).toBe(
+      tJa(commonMessages, "todo.notFound", { id: "todo-1" }),
+    );
+    expect(result.current.fieldErrors).toStrictEqual({});
+  });
+
+  test("項目のエラーは、次の操作が成功すると消える", async () => {
+    const { result } = await saveWithFailure(
+      new ApiError({
+        status: 400,
+        type: "/problems/validation-error",
+        key: "todo.title.empty",
+        errors: [{ pointer: "#/title", key: "todo.title.empty" }],
+      }),
+    );
+    vi.mocked(updateTodo).mockResolvedValue({ ...milk, title: "豆乳を買う" });
+
+    await act(() => result.current.saveTitle());
+
+    expect(result.current.fieldErrors).toStrictEqual({});
+    expect(result.current.error).toBeNull();
+  });
+
+  test("LocaleProvider のロケールが en なら、項目の文言は英語になる", async () => {
+    vi.mocked(getTodo).mockResolvedValue(milk);
+    vi.mocked(updateTodo).mockRejectedValue(
+      new ApiError({
+        status: 400,
+        type: "/problems/validation-error",
+        key: "todo.title.empty",
+        errors: [{ pointer: "#/title", key: "todo.title.empty" }],
+      }),
+    );
+    const { result } = renderHook(() => useTodoDetailScreen("todo-1"), {
+      wrapper: ({ children }) =>
+        createElement(LocaleProvider, { locale: "en", children }),
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(() => result.current.saveTitle());
+
+    expect(result.current.fieldErrors).toStrictEqual({
+      title: formatMessage(commonMessages, "en", "todo.title.empty"),
+    });
+  });
+});
+
 describe("完了の切り替え", () => {
   test("現在の completed を反転して更新し、更新後の Todo を反映する", async () => {
     const completedMilk = { ...milk, completed: true };

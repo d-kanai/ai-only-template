@@ -60,7 +60,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 // 本文が backend の Problem Details（RFC 9457。apps/backend/shared/presentation/problem.ts）かを確かめる。
-// 見るもの: 標準のメンバーの type（文字列）と status（数値）、拡張メンバーの key（共通の辞書のキー）と params（省略かオブジェクト）。
+// 見るもの: 標準のメンバーの type（文字列）と status（数値）、拡張メンバーの key（共通の辞書のキー）と params（省略かオブジェクト）と
+//   errors（省略か、項目ごとの誤りの配列。isProblemError）。
 // WHY detail・title・instance を見ない: 画面はこれらを使わない（detail は開発者向けの英語で契約外、title は type と 1 対 1）。
 //   使わない値の検査は、崩れていても画面が壊れないのに失敗を error.unknown に変えるだけになる。
 // WHY type と status も確かめる: key だけだと、ほかの形の本文（以前の { error: { key } } の形は key が入れ子なので外れるが、
@@ -76,16 +77,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 //   配列は Object.hasOwn で名前を引けず {id} が置き換わらないまま画面に出るので、Problem Details とみなさない（reviewer 指摘、Issue #126）。
 // WHY 型の述語を Problem にする: 上の検査は Problem のすべてのメンバーを確かめるわけではない（type は和のどれか、key は ErrorKey か
 //   までは見ない）が、読むのは type・key・params だけで、読む値はどれも検査済みの形（文字列・辞書のキー・オブジェクト）。
+// WHY errors（項目ごとの誤り）は省略か配列で、要素が 1 件でも崩れていれば本文全体を Problem Details とみなさない（Issue #144）:
+//   崩れた要素だけを捨てると、捨てた誤り（本文全体の誤りなど）が画面に出ないまま、残りの誤りだけで「その項目だけを直せばよい」
+//   ように見える。本文の key・params が崩れているときと同じく、HTTP ステータス（error.unknown）で失敗だけを確かに伝える。
+//   画面と API は同じリポジトリで同時に変えるので、崩れた要素は版のずれか不具合で、通常の応答では起きない。
+//   要素の detail は本文の detail と同じ理由で見ない。
 function isProblem(value: unknown): value is Problem {
   return (
     isRecord(value) &&
     typeof value.type === "string" &&
     typeof value.status === "number" &&
-    typeof value.key === "string" &&
-    isMessageKey(commonMessages, value.key) &&
-    (value.params === undefined ||
-      (isRecord(value.params) && !Array.isArray(value.params)))
+    isTranslatableKey(value.key) &&
+    isParams(value.params) &&
+    (value.errors === undefined ||
+      (Array.isArray(value.errors) && value.errors.every(isProblemError)))
   );
+}
+
+// errors の要素 1 件: pointer（文字列）、key（共通の辞書のキー）、params（省略かオブジェクト）。本文の key・params と同じ検査。
+// WHY pointer の中身（"#" で始まるか）までは確かめない: 画面は "#/<項目名>" と完全一致で比べ、一致しない pointer は
+//   フォーム全体の文言にする（api-error.ts の toErrorMessages）ので、形が違っても文言は失われない。
+function isProblemError(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.pointer === "string" &&
+    isTranslatableKey(value.key) &&
+    isParams(value.params)
+  );
+}
+
+// 共通の辞書（shared/i18n/common.messages.ts）のキーの文字列か（isProblem の key の WHY）。
+function isTranslatableKey(value: unknown): boolean {
+  return typeof value === "string" && isMessageKey(commonMessages, value);
+}
+
+// params は省略か、配列でないオブジェクト（isProblem の params の WHY）。
+function isParams(value: unknown): boolean {
+  return value === undefined || (isRecord(value) && !Array.isArray(value));
 }
 
 // backend は失敗時に Problem Details（key と params）を返す契約なので、それを ApiError に載せる。文言は画面が辞書で決める（api-error.ts）。
@@ -108,6 +136,7 @@ async function toError(response: Response): Promise<ApiError> {
         type: body.type,
         key: body.key,
         params: body.params,
+        errors: body.errors,
       })
     : new ApiError({
         status: response.status,

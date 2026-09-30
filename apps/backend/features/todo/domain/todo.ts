@@ -6,37 +6,20 @@ import {
   type ErrorKeyParams,
   type ErrorParamsArgs,
   isErrorKey,
-  type ParamlessErrorKey,
 } from "../../../shared/domain/error-key";
+import { keyedIssue, keyedRefine } from "../../../shared/domain/keyed-issue";
 
-// zod のスキーマ・refine の引数（{ error } / { error, params }）を、ErrorKey（と params）から作る（Issue #116）。
-// WHY error にキーを入れる: zod は error の文字列を issue の message にする。validate がそれを DomainError の key に戻す。
-//   domain は自然言語の文言を持たない（画面がキーを辞書で翻訳する）。
-// WHY この関数を通す（{ error: "todo.title.empty" } と直接書かない）: zod の error は任意の文字列を受け付けるので、
-//   キーの打ち間違いを型で止めるため。
-// WHY 2 つに分ける（keyedIssue は params の無いキーだけ、keyedRefine は params の要るキーだけ）: 型の検査（z.string など）の
-//   issue は params を運ばず、refine の issue（code: "custom"）だけが params をそのまま載せる（zod 4.6.5 の $ZodCustomParams。
-//   実測）。1 つの関数で両方を受け付けると、params の要るキーを型の検査に付けても型は通り、実行時に params が落ちる
-//   （Issue #116 の reviewer の実測）。keyedIssue は params の無いキーしか受け付けないので、型の検査にも refine にも使える。
-//   params の要るキーは keyedRefine でしか作れないので、refine に付ける。
-// 残る穴: keyedRefine の結果を型の検査に渡すことは型では止められない（zod の型の検査の引数は、変数・関数の戻り値の
-//   余分なプロパティ（params）を拒まない）。keyedRefine は refine の引数にだけ書く。
-// WHY params を zod の params で運ぶ（キーと params を JSON にして error に詰めない）: 文字列に詰めて戻すより、
-//   文字列の組み立て・解析の誤りが入らない。
-// WHY export する: validate の変換（キーの無い issue を 500 にする）を、keyedIssue を付けない一時的なスキーマで直接
-//   テストするため（todo.test.ts）。
-export function keyedIssue<K extends ParamlessErrorKey>(key: K) {
-  return { error: key };
-}
+// タイトルの上限の文字数（前後の空白を除いたコードポイント数）。
+// WHY export する（Issue #144）: presentation のリクエストのスキーマ（create-todo.api.ts・update-todo.api.ts）が同じ上限を
+//   同じキー（todo.title.tooLong）で重ね、項目ごとの誤り（Problem の errors）として返す。数値を 2 か所に書くと片方だけ
+//   直してずれ、presentation が domain より厳しく（domain が通す値を弾く）なりうるので、この定数を参照させる。
+// WHY UPPER_SNAKE_CASE: presentation が feature の domain から値で import してよいのは、この形の名前の定数だけ
+//   （規則 presentation。rule-tests/architecture.test.ts）。Entity や関数を値で使わせない。
+// WHY 100 文字: 一覧で 1 行に収まる程度の上限。上限を設けないと巨大な文字列でメモリと画面が埋まる。
+export const TODO_TITLE_MAX_LENGTH = 100;
 
-export function keyedRefine<K extends Exclude<ErrorKey, ParamlessErrorKey>>(
-  key: K,
-  params: ErrorKeyParams[K],
-) {
-  return { error: key, params };
-}
-
-// タイトルの不変条件: 前後の空白を除いて 1〜100 文字。規則はこのスキーマ 1 か所に宣言する（Issue #88）。
+// タイトルの不変条件: 前後の空白を除いて 1〜TODO_TITLE_MAX_LENGTH 文字。Todo の規則はこのスキーマ 1 か所に宣言する（Issue #88）。
+//   presentation は同じ規則を同じキーで重ねてよいが、これより厳しくしない（Issue #144。.claude/rules/backend.md）。
 // WHY trim してから数え、trim した値を保持する: 空白だけのタイトルを「空」とみなし、
 //   前後の空白の有無だけが違う Todo が混ざらないようにする。z.string().trim() は値を置き換える（後の refine も parse の結果も
 //   trim 後の値）。
@@ -44,17 +27,16 @@ export function keyedRefine<K extends Exclude<ErrorKey, ParamlessErrorKey>>(
 //   数え、絵文字（サロゲートペア）を 2 と数える。利用者の感覚の「文字数」に近いコードポイント数で数える。
 // WHY refine を 2 つに分ける: 空と長すぎでキーを変える（どちらも API の Problem Details の key として画面が翻訳する契約）。
 //   zod は同じスキーマの refine をすべて実行するが、同じ値で両方が失敗することは無い（0 文字と 101 文字以上は両立しない）。
-// WHY 100 文字: 一覧で 1 行に収まる程度の上限。上限を設けないと巨大な文字列でメモリと画面が埋まる。
 // WHY 関数にする（スキーマを最上位の定数にしない）: 最上位の式は読み込み時にだけ評価される static な変異になり、
-//   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に作れば、上限や message の変異を
-//   テストで検出できる（Issue #55）。
+//   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に作れば、比較や message の変異を
+//   テストで検出できる（Issue #55）。上限の値そのもの（TODO_TITLE_MAX_LENGTH）は最上位の定数なので、todo.test.ts が値と
+//   境界（100 は通し 101 は弾く）で固定する。
 // WHY branded 型（TodoTitle）にしない: Todo のコンストラクタは private で、どの口（create / reconstruct / rename /
 //   changeCompletion）もコンストラクタの検証（todoPropsSchema）を通る。Todo 型そのものが「不変条件を満たす値」で
 //   あることを表しているので、title だけに brand を付けても守れるものが増えない。
 // WHY todoPropsSchema の中でだけ使う: 口ごとに一部の項目だけを検証すると、どの口を通ったかで守られる規則が変わる
 //   （Issue #94 で撤回した分け方）。規則はいつも全体で当てる。
 function todoTitleSchema() {
-  const maxLength = 100;
   // WHY 文字列でないときのキーも付ける: todoPropsSchema の「zod の既定の文言を domain の外に出さない」に
   //   そろえる。この経路を通るのは型を as で偽ったときだけ（presentation は z.string で弾き、DB の列は NOT NULL text）。
   return z
@@ -65,9 +47,9 @@ function todoTitleSchema() {
       keyedIssue("todo.title.empty"),
     )
     .refine(
-      (title) => Array.from(title).length <= maxLength,
+      (title) => Array.from(title).length <= TODO_TITLE_MAX_LENGTH,
       // 画面の文言に上限の文字数を埋め込めるよう、params で渡す（上限を変えても画面の辞書を直さずに済む）。
-      keyedRefine("todo.title.tooLong", { max: maxLength }),
+      keyedRefine("todo.title.tooLong", { max: TODO_TITLE_MAX_LENGTH }),
     );
 }
 

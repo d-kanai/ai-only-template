@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { keyedIssue, keyedRefine } from "../../../shared/domain/keyed-issue";
 import { getDatabase } from "../../../shared/infra/database";
 import {
   parseJsonBody,
@@ -7,21 +8,34 @@ import {
 import { withProblemResponse } from "../../../shared/presentation/problem";
 import { parseUuidParam } from "../../../shared/presentation/resource-id";
 import { UpdateTodoCommand } from "../application/update-todo.command";
-import type { Todo } from "../domain/todo";
+import { TODO_TITLE_MAX_LENGTH, type Todo } from "../domain/todo";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 
 // PUT /api/todos/:id: Todo の title / completed を更新する。無ければ 404。
 
-// リクエスト本文の「形」（項目の型。未知の項目は拒否）。
+// リクエスト本文の「形」（項目の型。未知の項目は拒否）に、title の必須・長さを domain と同じ規則で重ねる（Issue #144）。
 // 部分更新: 送った項目だけを更新する（PUT だが PATCH 相当の意味にしている。CRUD の雛形として動詞を減らすため）。
-// WHY title の空・長さは見ない: 不変条件は domain（Todo#rename）が持つ（create-todo.api.ts の createTodoRequestSchema のコメント）。
+// WHY title の空・長さも見る・domain と同じキーと定数にする: create-todo.api.ts の createTodoRequestSchema のコメント。
+//   不変条件の正は domain（Todo#rename が常に完全に検証する）。
 // WHY どちらも無い本文（{}）を弾かない: 部分更新で「何も変えない」は矛盾しない要求で、契約（HTTP 契約）でも
 //   400 の条件にしていないため、そのまま 200 で現在の Todo を返す。
 // WHY 未知の項目を拒否する: 項目名の打ち間違い（{ complete: true }）が「何も変えない」200 に化けるのを防ぐ（json-body.ts の requestBodySchema）。
 function updateTodoRequestSchema() {
   return requestBodySchema({
-    // 型が違うときのキー（request.field.notString / notBoolean）は json-body.ts の toProblemError が決める（ここに error は書かない）。
-    title: z.string().optional(),
+    // 型が違うときのキー（request.field.notString / notBoolean）は json-body.ts の toProblemError が決める（z.string などに error は書かない）。
+    // trim してからコードポイント数（Array.from）で数える: todo.ts の todoTitleSchema と同じ（WHY はそちら）。
+    title: z
+      .string()
+      .trim()
+      .refine(
+        (title) => Array.from(title).length >= 1,
+        keyedIssue("todo.title.empty"),
+      )
+      .refine(
+        (title) => Array.from(title).length <= TODO_TITLE_MAX_LENGTH,
+        keyedRefine("todo.title.tooLong", { max: TODO_TITLE_MAX_LENGTH }),
+      )
+      .optional(),
     completed: z.boolean().optional(),
   });
 }

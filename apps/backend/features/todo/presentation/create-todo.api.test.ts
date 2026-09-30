@@ -74,6 +74,16 @@ describe("POST /api/todos", () => {
     expect(save.mock.calls[0]?.[0]).toMatchObject({ title: "牛乳を買う" });
   });
 
+  // presentation は domain より厳しくしない（Issue #144）。domain が通す境界の値（1 文字・前後の空白付き）を presentation も通す。
+  test("title の前後の空白を除いて 1 文字なら作れる", async () => {
+    const { POST } = setup();
+
+    const response = await POST(postRequest(JSON.stringify({ title: " a " })));
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({ title: "a" });
+  });
+
   test("title の前後の空白を除いて 100 文字（絵文字は 1 文字と数える）なら作れる", async () => {
     const { POST } = setup();
     const title = "🍎".repeat(100);
@@ -88,8 +98,8 @@ describe("POST /api/todos", () => {
 
   // 本文は RFC 9457 の Problem Details（problem.ts）。type・status・key・params・errors は画面との契約で、detail は英語の文言を
   //   固定する（problem-detail.en.ts）ので、本文全体を検証する。
-  // errors: リクエストの形（presentation の zod スキーマ）の誤りだけに付く。JSON として読めない誤りと、
-  //   値の規則（domain の不変条件）の誤りには付かない（problem.ts の Problem のコメント）。
+  // errors: presentation の zod スキーマの誤り（形と、domain と同じキーで重ねた必須・長さ。Issue #144）に付く。
+  //   JSON として読めない誤りには付かない（problem.ts の Problem のコメント）。
   // WHY toStrictEqual: toEqual は undefined のプロパティと無いプロパティを同じとみなす。params・errors の無い誤りで
   //   本文にそのキーが出ないこと（JSON は undefined を出さないので、出ていれば値がある）も確かめる。
   test.each<[string, string, ProblemBody]>([
@@ -167,15 +177,83 @@ describe("POST /api/todos", () => {
         ],
       },
     ],
+    // WHY 形の誤りを 2 つ同時に置く: presentation は誤りを項目ごとにまとめて返す（1 つ直すたびに次の誤りが出る往復を無くす。
+    //   Issue #144）。
+    [
+      "title が文字列でなく、定義されていない項目もある",
+      JSON.stringify({ title: 1, extra: true }),
+      {
+        detail: "title must be a string.",
+        key: "request.field.notString",
+        params: { path: "title" },
+        errors: [
+          {
+            pointer: "#/title",
+            key: "request.field.notString",
+            params: { path: "title" },
+            detail: "title must be a string.",
+          },
+          {
+            pointer: "#",
+            key: "request.body.unknownKeys",
+            params: { keys: "extra" },
+            detail: "Request body has unknown fields: extra.",
+          },
+        ],
+      },
+    ],
+    [
+      "title が長すぎ、定義されていない項目もある",
+      JSON.stringify({ title: "a".repeat(101), extra: true }),
+      {
+        detail: "Title must be at most 100 characters.",
+        key: "todo.title.tooLong",
+        params: { max: 100 },
+        errors: [
+          {
+            pointer: "#/title",
+            key: "todo.title.tooLong",
+            params: { max: 100 },
+            detail: "Title must be at most 100 characters.",
+          },
+          {
+            pointer: "#",
+            key: "request.body.unknownKeys",
+            params: { keys: "extra" },
+            detail: "Request body has unknown fields: extra.",
+          },
+        ],
+      },
+    ],
     [
       "title が空",
       JSON.stringify({ title: "" }),
-      { detail: "Title must not be empty.", key: "todo.title.empty" },
+      {
+        detail: "Title must not be empty.",
+        key: "todo.title.empty",
+        errors: [
+          {
+            pointer: "#/title",
+            key: "todo.title.empty",
+            detail: "Title must not be empty.",
+          },
+        ],
+      },
     ],
     [
       "title が空白だけ",
       JSON.stringify({ title: "  " }),
-      { detail: "Title must not be empty.", key: "todo.title.empty" },
+      {
+        detail: "Title must not be empty.",
+        key: "todo.title.empty",
+        errors: [
+          {
+            pointer: "#/title",
+            key: "todo.title.empty",
+            detail: "Title must not be empty.",
+          },
+        ],
+      },
     ],
     [
       "title が 101 文字",
@@ -184,6 +262,14 @@ describe("POST /api/todos", () => {
         detail: "Title must be at most 100 characters.",
         key: "todo.title.tooLong",
         params: { max: 100 },
+        errors: [
+          {
+            pointer: "#/title",
+            key: "todo.title.tooLong",
+            params: { max: 100 },
+            detail: "Title must be at most 100 characters.",
+          },
+        ],
       },
     ],
     [
@@ -193,6 +279,14 @@ describe("POST /api/todos", () => {
         detail: "Title must be at most 100 characters.",
         key: "todo.title.tooLong",
         params: { max: 100 },
+        errors: [
+          {
+            pointer: "#/title",
+            key: "todo.title.tooLong",
+            params: { max: 100 },
+            detail: "Title must be at most 100 characters.",
+          },
+        ],
       },
     ],
   ])(

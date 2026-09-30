@@ -74,10 +74,11 @@ export type Problem = {
   key: ErrorKey;
   // 文言に埋め込む値（上限の文字数・id など）。params の無いキーでは本文にキーごと出さない。
   params?: ErrorParams;
-  // リクエストの形（presentation の zod スキーマ）の誤りのときだけ付く、項目ごとの誤りの一覧（Issue #88）。
-  // WHY 形の誤りだけ: 値の規則（domain の不変条件。タイトルの長さなど）の誤りは DomainError の key 1 つで、
-  //   domain はリクエストの項目名を知らない（domain にリクエストの都合を持ち込まない）。JSON として読めない誤りも
-  //   項目が無いので付けない。
+  // presentation の zod スキーマ（リクエストの形と、domain と同じキーで重ねた必須・長さ。Issue #144）の誤りのときだけ付く、
+  //   項目ごとの誤りの一覧（Issue #88）。
+  // WHY presentation の誤りだけ: domain の不変条件の誤り（DomainError）は key 1 つで、domain はリクエストの項目名を知らない
+  //   （domain にリクエストの都合を持ち込まない）。項目ごとに返したい値の規則は presentation のスキーマで重ねる
+  //   （.claude/rules/backend.md の presentation）。JSON として読めない誤りも項目が無いので付けない。
   // WHY 省略可能にする（空配列にしない）: 誤りが項目に結び付かないとき（404・500・JSON でない）は一覧自体が無い。
   errors?: ProblemError[];
 };
@@ -90,7 +91,7 @@ export type InvalidRequestArgs<K extends ErrorKey> = [
   errors?: ProblemErrorInput[],
 ];
 
-// リクエストの形の誤り（JSON でない、項目の型が違う、未知の項目があるなど）を表す例外。
+// リクエストの誤り（JSON でない、項目の型が違う、未知の項目がある、presentation で重ねた必須・長さの違反など）を表す例外。
 // WHY DomainError と分ける: 形の誤りは HTTP の入力の問題で、ドメインのルール違反ではない。
 //   domain 層にリクエストの都合を持ち込まないよう、presentation 層の中で閉じた例外にする。
 //   クライアントから見れば「入力が不正」で同じなので、レスポンスは /problems/validation-error・400 にそろえる。
