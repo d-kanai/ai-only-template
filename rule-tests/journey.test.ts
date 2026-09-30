@@ -18,15 +18,22 @@ import { afterAll, describe, expect, it } from "vitest";
 //   置き場所と形を、ファイルの一覧とソースで機械的に検査するテスト。
 // ジャーニーテスト = 実 Postgres の上で、複数の API の handler（XxxApi.handle）を業務ユースケースに沿って順に呼ぶテスト。
 // 違反にするもの:
-//   - journey-placement: apps/backend/journeys/ の下には、直下の *.journey.test.ts だけを置く。サブディレクトリの中のファイル・
-//     テスト以外のファイル（補助の .ts・.md も）・名前に .journey の無いテスト（x.test.ts）・.tsx は違反。apps/ の下のほかの場所
-//     （features/x/journeys/ など）に *.journey.test.* を置くのも違反。
+//   - journey-placement: apps/backend/journeys/ の下には、直下の *.journey.test.ts と *.feature（Gherkin。Issue #200）だけを置く。
+//     サブディレクトリの中のファイル・テスト以外のファイル（補助の .ts・.md・.feature.md も）・名前に .journey の無いテスト
+//     （x.test.ts）・.tsx は違反。apps/ の下のほかの場所（features/x/journeys/ など）に *.journey.test.* を置くのも違反。
 //     WHY 置き場所を 1 か所にする: ジャーニーは feature をまたぐ業務の流れを置く場所で、features/<f>/ の下では feature をまたげない。
 //       直下のジャーニーだけにすると、test-support/database の import の例外（rule-tests/test-doubles.test.ts の db-tests-in-infra-only）も
 //       この 1 か所に絞れる。共通の補助が要るようになったら apps/backend/test-support/ に置く（journeys/ に置かない）。
 //     WHY テスト以外のソースも止める（architecture.test.ts の backend-placement でも止まるが、ここでも見る）: .md など
 //       ソースでないファイルは backend-placement の対象外で、journeys/ を別の用途の置き場所にさせないため。
-//   以下はジャーニー（apps/backend/journeys/ の直下の *.journey.test.ts）の中身の規則:
+//   - journey-feature-pair（Issue #200）: apps/backend/journeys/ の直下の <name>.feature には、同じ場所に
+//     <name>.feature.journey.test.ts（step の実装）が要り、<name>.feature.journey.test.ts には <name>.feature が要る。片方だけ・
+//     名前の違う組（a.feature と b.feature.journey.test.ts）は、対の無いほうのファイルを違反にする。
+//     WHY: .feature だけでは何も実行されず（Vitest の include は *.test.ts）、書いた流れが検査されないまま残る。step のファイルだけ
+//       だと loadFeature が読むファイルが無い。対の名前にそろえると、どの .feature をどのテストが実行するかがファイル名で分かる。
+//     限界: step のファイルが loadFeature に渡すパスが対の .feature かは見ない（別の .feature を読んでも通る）。.feature の中身
+//       （シナリオの数・step の書き方）も見ない（step の不足は vitest-cucumber が読み込み時に失敗にする）。
+//   以下はジャーニー（apps/backend/journeys/ の直下の *.journey.test.ts。*.feature.journey.test.ts も同じ）の中身の規則:
 //   - journey-no-in-memory: *.in-memory（InMemory の Repository）を import しない（`import type` も・`import()` も・`export … from` も）。
 //     WHY: ジャーニーは本番と同じ部品（Postgres の Repository）で API のつながりを確かめる。InMemory で組むと単体テストと同じになる。
 //     WHY import type も違反: 型だけでも InMemory で組み立てる形の入口になる。ジャーニーに InMemory の型が要る場面は無い。
@@ -71,11 +78,15 @@ import { afterAll, describe, expect, it } from "vitest";
 //   - DB の読み取り: `db.select(` があるかだけを見て、結果を検証しているか（`toStrictEqual` で行全体と比べているか）は見ない。
 //     実行の順ではなくソースの順で見るので、変更系と次の変更系の間に置いた補助の関数の定義の中の `db.select(` も数える。
 //   - 「業務ユースケースに沿っているか」「DB の行を期待の行全体と比べているか」は見ない（reviewer が見る）。
+//   - .feature の step（*.feature.journey.test.ts）: step の関数の中の呼び出しもソースの順で見る。変更系の step（When）の後に、
+//     DB を読む step（Then / And）をソースで後ろに書けば通る。step の関数を .feature と違う順に書くと、実行の順（.feature の順）と
+//     検査の順（ソースの順）がずれる。
 // WHY 文字列で判定する（AST にしない）: 見るのはパスと import の参照先と名前・呼び出しの形だけで、正規表現で足りる
 //   （rule-tests/test-doubles.test.ts と同じ）。
 
 type JourneyRuleId =
   | "journey-placement"
+  | "journey-feature-pair"
   | "journey-no-in-memory"
   | "journey-no-vi"
   | "journey-handler-naming"
@@ -88,15 +99,27 @@ type JourneyViolation = { rule: JourneyRuleId; line?: number };
 
 const JOURNEYS_DIR = "apps/backend/journeys/";
 
-// ジャーニーのファイルか（apps/backend/journeys/ の直下の *.journey.test.ts）。
+// ジャーニーのファイルか（apps/backend/journeys/ の直下の *.journey.test.ts。.feature の step の *.feature.journey.test.ts も含む）。
 function isJourneyFile(path: string): boolean {
   return /^apps\/backend\/journeys\/[^/]+\.journey\.test\.ts$/.test(path);
+}
+
+// Gherkin のファイルか（apps/backend/journeys/ の直下の *.feature。Issue #200）。
+function isFeatureFile(path: string): boolean {
+  return /^apps\/backend\/journeys\/[^/]+\.feature$/.test(path);
+}
+
+// .feature の step を書いたジャーニーか（apps/backend/journeys/ の直下の *.feature.journey.test.ts。Issue #200）。
+function isFeatureJourneyFile(path: string): boolean {
+  return /^apps\/backend\/journeys\/[^/]+\.feature\.journey\.test\.ts$/.test(
+    path,
+  );
 }
 
 // path（リポジトリ相対、/ 区切り）が置き場所の規則に違反するか。
 function isMisplacedJourneyFile(path: string): boolean {
   if (path.startsWith(JOURNEYS_DIR)) {
-    return !isJourneyFile(path);
+    return !isJourneyFile(path) && !isFeatureFile(path);
   }
   // WHY 拡張子を広く取る: .tsx・.js などで journeys/ の外に置いても、置き場所の違反として見つける。
   return /\.journey\.test\.[cm]?[jt]sx?$/.test(path);
@@ -345,6 +368,24 @@ function findJourneyViolations(
   return isJourneyFile(path) ? findJourneyContentViolations(path, source) : [];
 }
 
+// .feature と step の対の違反（journey-feature-pair）。files は同じ列挙（listJourneyTargets）の結果。
+// <name>.feature には <name>.feature.journey.test.ts が、<name>.feature.journey.test.ts には <name>.feature が要る。
+//   どちらでもないファイル（普通のジャーニー・サブディレクトリの .feature など置き場所の違反）は見ない。
+function findFeaturePairViolations(
+  path: string,
+  files: ReadonlySet<string>,
+): JourneyViolation[] {
+  const stepsSuffix = ".journey.test.ts";
+  const pair = isFeatureFile(path)
+    ? `${path}${stepsSuffix}`
+    : isFeatureJourneyFile(path)
+      ? path.slice(0, -stepsSuffix.length)
+      : undefined;
+  return pair === undefined || files.has(pair)
+    ? []
+    : [{ rule: "journey-feature-pair" }];
+}
+
 // root の下の dir を再帰的にたどり、ファイルのリポジトリ相対パス（/ 区切り）を返す。
 // WHY node_modules と . で始まるディレクトリ（.next など）に入らない: 依存やビルド結果は検査の対象ではなく、たどると遅い
 //   （rule-tests/test-doubles.test.ts の walk と同じ）。
@@ -380,10 +421,14 @@ function listJourneyTargets(root: string): string[] {
 
 // 違反を「<規則>: <パス>」か「<規則>: <パス>:<行>」で返す。
 function collectJourneyViolations(root: string): string[] {
-  return listJourneyTargets(root).flatMap((path) =>
-    findJourneyViolations(path, readFileSync(join(root, path), "utf8")).map(
-      ({ rule, line }) =>
-        line === undefined ? `${rule}: ${path}` : `${rule}: ${path}:${line}`,
+  const paths = listJourneyTargets(root);
+  const files = new Set(paths);
+  return paths.flatMap((path) =>
+    [
+      ...findJourneyViolations(path, readFileSync(join(root, path), "utf8")),
+      ...findFeaturePairViolations(path, files),
+    ].map(({ rule, line }) =>
+      line === undefined ? `${rule}: ${path}` : `${rule}: ${path}:${line}`,
     ),
   );
 }
@@ -394,6 +439,8 @@ const repoRoot = join(import.meta.dirname, "..");
 const source = (...lines: string[]) => lines.join("\n");
 
 const JOURNEY = "apps/backend/journeys/x.journey.test.ts";
+const FEATURE = "apps/backend/journeys/x.feature";
+const FEATURE_JOURNEY = "apps/backend/journeys/x.feature.journey.test.ts";
 const CREATE_API = "../features/x/presentation/create-x.api";
 const LIST_API = "../features/x/presentation/list-x.api";
 // ジャーニーの必須の import（実 DB と 2 つの api）。must reject の例は、これに違反を 1 つ足すか、どれかを欠く。
@@ -415,6 +462,14 @@ describe("ジャーニーの置き場所（isMisplacedJourneyFile）", () => {
   it.each([
     ["apps/backend/journeys/ の直下の *.journey.test.ts", JOURNEY],
     [
+      "apps/backend/journeys/ の直下の *.feature（Gherkin。Issue #200）",
+      FEATURE,
+    ],
+    [
+      "apps/backend/journeys/ の直下の *.feature.journey.test.ts（.feature の step）",
+      FEATURE_JOURNEY,
+    ],
+    [
       "apps/backend/ の層の下の普通のテスト",
       "apps/backend/features/x/presentation/x.api.test.ts",
     ],
@@ -435,6 +490,16 @@ describe("ジャーニーの置き場所（isMisplacedJourneyFile）", () => {
       "journeys/ のサブディレクトリの中のジャーニー",
       "apps/backend/journeys/todo/x.journey.test.ts",
     ],
+    [
+      "journeys/ のサブディレクトリの中の .feature",
+      "apps/backend/journeys/todo/x.feature",
+    ],
+    [
+      "journeys/ の .feature の後ろに拡張子を足したもの（.feature.md）",
+      "apps/backend/journeys/x.feature.md",
+    ],
+    ["journeys/ の .features", "apps/backend/journeys/x.features"],
+    ["journeys/ の大文字の .FEATURE", "apps/backend/journeys/x.FEATURE"],
     [
       "journeys/ の .tsx のジャーニー",
       "apps/backend/journeys/x.journey.test.tsx",
@@ -880,6 +945,63 @@ describe("ジャーニーの中身（findJourneyViolations）: must reject", () 
   });
 });
 
+describe("Gherkin の .feature と step の対（findFeaturePairViolations）", () => {
+  // files: 同じディレクトリにあるファイルの一覧（listJourneyTargets の結果に当たる）。
+  it.each<[string, string, string[]]>([
+    [
+      ".feature と同じ名前の step（.feature.journey.test.ts）がある",
+      FEATURE,
+      [FEATURE, FEATURE_JOURNEY],
+    ],
+    [
+      ".feature.journey.test.ts と同じ名前の .feature がある",
+      FEATURE_JOURNEY,
+      [FEATURE, FEATURE_JOURNEY],
+    ],
+    ["普通のジャーニー（.feature と対にしない）", JOURNEY, [JOURNEY]],
+    [
+      "対象外のファイル（置き場所の違反は journey-placement が見る）",
+      "apps/backend/journeys/nested/x.feature",
+      ["apps/backend/journeys/nested/x.feature"],
+    ],
+  ])("%s は違反なし", (_name, path, files) => {
+    expect(findFeaturePairViolations(path, new Set(files))).toEqual([]);
+  });
+
+  it.each<[string, string, string[]]>([
+    [".feature だけで step が無い", FEATURE, [FEATURE]],
+    [
+      ".feature.journey.test.ts だけで .feature が無い",
+      FEATURE_JOURNEY,
+      [FEATURE_JOURNEY],
+    ],
+    [
+      ".feature の名前と step の名前が違う（.feature 側）",
+      FEATURE,
+      [FEATURE, "apps/backend/journeys/y.feature.journey.test.ts"],
+    ],
+    [
+      ".feature の名前と step の名前が違う（step 側）",
+      FEATURE_JOURNEY,
+      ["apps/backend/journeys/y.feature", FEATURE_JOURNEY],
+    ],
+    [
+      "step が名前に .feature の無い普通のジャーニー（x.journey.test.ts）",
+      FEATURE,
+      [FEATURE, JOURNEY],
+    ],
+    [
+      "対の .feature がサブディレクトリにある",
+      FEATURE_JOURNEY,
+      ["apps/backend/journeys/nested/x.feature", FEATURE_JOURNEY],
+    ],
+  ])("%s は違反", (_name, path, files) => {
+    expect(findFeaturePairViolations(path, new Set(files))).toEqual([
+      { rule: "journey-feature-pair" },
+    ]);
+  });
+});
+
 // --- 列挙 → 読み取り → 判定を通した fixture テスト ---
 // WHY: 判定が正しくても、対象の列挙（journeys/ の下と *.journey.test.* の見つけ方）が漏れれば見逃す。一時ディレクトリに架空の
 //   ツリーを置き、本番と同じ collectJourneyViolations に通して、違反の集合を丸ごと比較する（見逃しも余分な検出も失敗にする）。
@@ -923,6 +1045,21 @@ describe("ジャーニーの列挙と検査（fixture）", () => {
       ),
       "apps/backend/journeys/x.test.ts": source(...REQUIRED_IMPORTS),
       "apps/backend/journeys/helper.ts": "export const a = 1;\n",
+      // Gherkin（Issue #200）: 対になった .feature と step（中身の規則も当たる）、片方だけ、名前の違う対、サブディレクトリの .feature。
+      [FEATURE]: "Feature: x\n",
+      [FEATURE_JOURNEY]: source(
+        ...REQUIRED_IMPORTS,
+        'import { vi } from "vitest";',
+      ),
+      "apps/backend/journeys/only-feature.feature": "Feature: y\n",
+      "apps/backend/journeys/only-steps.feature.journey.test.ts": source(
+        ...REQUIRED_IMPORTS,
+      ),
+      "apps/backend/journeys/a.feature": "Feature: a\n",
+      "apps/backend/journeys/b.feature.journey.test.ts": source(
+        ...REQUIRED_IMPORTS,
+      ),
+      "apps/backend/journeys/nested/z.feature": "Feature: z\n",
       "apps/backend/journeys/nested/y.journey.test.ts": source(
         ...REQUIRED_IMPORTS,
       ),
@@ -943,23 +1080,36 @@ describe("ジャーニーの列挙と検査（fixture）", () => {
     }).toEqual({
       files: [
         "apps/backend/features/x/journeys/x.journey.test.ts",
+        "apps/backend/journeys/a.feature",
+        "apps/backend/journeys/b.feature.journey.test.ts",
         "apps/backend/journeys/helper.ts",
         "apps/backend/journeys/mock.journey.test.ts",
         "apps/backend/journeys/nested/y.journey.test.ts",
+        "apps/backend/journeys/nested/z.feature",
         "apps/backend/journeys/no-db-check.journey.test.ts",
+        "apps/backend/journeys/only-feature.feature",
+        "apps/backend/journeys/only-steps.feature.journey.test.ts",
         "apps/backend/journeys/single-api.journey.test.ts",
+        "apps/backend/journeys/x.feature",
+        "apps/backend/journeys/x.feature.journey.test.ts",
         "apps/backend/journeys/x.journey.test.ts",
         "apps/backend/journeys/x.test.ts",
       ],
       violations: [
         "journey-placement: apps/backend/features/x/journeys/x.journey.test.ts",
+        "journey-feature-pair: apps/backend/journeys/a.feature",
+        "journey-feature-pair: apps/backend/journeys/b.feature.journey.test.ts",
         "journey-placement: apps/backend/journeys/helper.ts",
         "journey-no-vi: apps/backend/journeys/mock.journey.test.ts:4",
         "journey-placement: apps/backend/journeys/nested/y.journey.test.ts",
+        "journey-placement: apps/backend/journeys/nested/z.feature",
         "journey-handler-naming: apps/backend/journeys/no-db-check.journey.test.ts:6",
         "journey-asserts-db-after-mutation: apps/backend/journeys/no-db-check.journey.test.ts:10",
+        "journey-feature-pair: apps/backend/journeys/only-feature.feature",
+        "journey-feature-pair: apps/backend/journeys/only-steps.feature.journey.test.ts",
         "journey-no-in-memory: apps/backend/journeys/single-api.journey.test.ts:3",
         "journey-uses-multiple-apis: apps/backend/journeys/single-api.journey.test.ts",
+        "journey-no-vi: apps/backend/journeys/x.feature.journey.test.ts:4",
         "journey-placement: apps/backend/journeys/x.test.ts",
       ],
     });
@@ -975,10 +1125,14 @@ describe("ジャーニーの列挙と検査（fixture）", () => {
 });
 
 describe("ジャーニー（実ファイル）", () => {
-  it("apps/backend/journeys/ には *.journey.test.ts だけがあり、各ジャーニーは InMemory と vi を使わず、実 DB と 2 つ以上の API を使い、変更系の API の後に DB を読む", () => {
+  it("apps/backend/journeys/ には *.journey.test.ts と対になった *.feature だけがあり、各ジャーニーは InMemory と vi を使わず、実 DB と 2 つ以上の API を使い、変更系の API の後に DB を読む", () => {
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
-    expect(listJourneyTargets(repoRoot)).toContain(
-      "apps/backend/journeys/todo-lifecycle.journey.test.ts",
+    expect(listJourneyTargets(repoRoot)).toEqual(
+      expect.arrayContaining([
+        "apps/backend/journeys/todo-lifecycle.journey.test.ts",
+        "apps/backend/journeys/todo-lifecycle.feature",
+        "apps/backend/journeys/todo-lifecycle.feature.journey.test.ts",
+      ]),
     );
     expect(collectJourneyViolations(repoRoot)).toEqual([]);
   });

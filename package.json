@@ -22,6 +22,7 @@
     "db:migrate": "pnpm --filter @repo/backend --fail-if-no-match db:migrate"
   },
   "devDependencies": {
+    "@amiceli/vitest-cucumber": "8.0.0",
     "@biomejs/biome": "2.5.13",
     "@repo/shared": "workspace:*",
     "@stryker-mutator/core": "10.0.0",

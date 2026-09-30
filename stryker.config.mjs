@@ -33,12 +33,15 @@ export default {
   //   スペース区切りのまま（devDependencies の vitest は 4.1.11）。
 
   vitest: {
-    // configFile: pnpm test と同じ vitest.config.mts（jsdom、tsconfigPaths、apps/e2e/** の除外）でテストを動かす。
-    //   既定でも vitest.config.* を探すが、どの設定で動くかを明示する。
+    // configFile: pnpm test と同じ vitest.config.mts（jsdom、tsconfigPaths、apps/e2e/** の除外）を継承した
+    //   vitest.stryker.config.mts でテストを動かす（Issue #200）。既定でも vitest.config.* を探すが、どの設定で動くかを明示する。
+    //   WHY 継承した別の設定にする: vitest.config.mts との違いは、Gherkin の .feature の step を書いたジャーニー
+    //   （apps/backend/journeys/*.feature.journey.test.ts）を除くことだけ。step 1 つが Vitest の test 1 つになり、Stryker が変異を通る
+    //   test だけに絞ると、前提の step 抜きで後の step が失敗して killed と数えられうる（詳細は vitest.stryker.config.mts）。
     //   Vitest の coverage（100% のしきい値）は Stryker の実行では効かない。vitest-runner が coverage.enabled: false を
     //   強制し、Stryker 自身の perTest カバレッジ分析を使うため（公式 https://stryker-mutator.io/docs/stryker-js/vitest-runner/
     //   の「Non overridable options」）。vitest.config.mts の coverage.enabled も既定の false のまま。
-    configFile: "vitest.config.mts",
+    configFile: "vitest.stryker.config.mts",
   },
 
   // tsconfigFile: 実在しないパスを指定して、Stryker の tsconfig の書き換え（TSConfigPreprocessor）を空振りさせる。

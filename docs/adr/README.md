@@ -99,6 +99,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-28 | ルール検査テストは must pass と must reject の両方を持ち、fault injection で効くことを確かめる | 採用 | [20260928-rule-check-tests-must-pass-and-must-reject.md](quality/20260928-rule-check-tests-must-pass-and-must-reject.md) |
 | 2026-09-30 | DB の列の型は text / integer / timestamptz などの既定に従い、長さ・精度は意味があるときだけ書き、既定から外れる列はテストで止める | 採用 | [20260930-db-column-types-default-text-and-integer.md](quality/20260930-db-column-types-default-text-and-integer.md) |
 | 2026-09-30 | backend に、実 Postgres で複数の API を業務の流れの順に呼ぶジャーニーテストを足し、単体・ジャーニー・E2E の 3 段にする | 採用 | [20260930-backend-journey-tests.md](quality/20260930-backend-journey-tests.md) |
+| 2026-09-30 | ジャーニーテストを Gherkin の .feature でも書けるようにし、vitest-cucumber で Vitest の中で実行する（試行） | 採用 | [20260930-gherkin-journeys-with-vitest-cucumber.md](quality/20260930-gherkin-journeys-with-vitest-cucumber.md) |
 
 ### workflow/
 開発プロセス・環境・AI エージェントの運用
