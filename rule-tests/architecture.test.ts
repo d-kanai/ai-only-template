@@ -2,12 +2,15 @@
 // WHY: vitest.config.mts の既定環境は jsdom（コンポーネントテスト用）。このテストはソースを文字列として読むだけで DOM を使わないため、
 //   jsdom の初期化を省き、ブラウザ相当の globals が Node の API と混ざる余地をなくすため node 環境で動かす。
 import {
+  type Dirent,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -361,30 +364,67 @@ function isSourceNonTest(path: string): boolean {
   return SOURCE_FILE.test(path) && !TEST_FILE.test(path);
 }
 
-// 列挙から除くディレクトリ（どの階層にあっても、その中を見ない）。
-//   node_modules: 依存（workspace パッケージ化した段階 2 では apps/*/node_modules/ ができる）。
-//   .next: next build / next dev の生成物（apps/frontend_customer/.next/。数千件の JS）。
+// 列挙から除くディレクトリ（どの階層にあっても、その中に入らない。walkFiles が中に入る前に飛ばす。Issue #142）。
+//   node_modules: 依存（workspace パッケージ化した段階 2 では apps/*/node_modules/ ができる）。pnpm の相対パスの symlink を含む。
+//   .next: next build / next dev の生成物（apps/frontend_customer/.next/。数千件の JS）。next build の .next/standalone/ には
+//     pnpm の node_modules の形（相対パスの symlink）が複製され、循環する symlink を含みうる（Issue #130 / #142）。
 // WHY 名前を列挙する（"." で始まるディレクトリをまとめて除かない）: まとめて除くと apps/backend/.lib/x.ts のような自前のコードが
 //   検査を素通りする（Issue #68 の reviewer 指摘）。既知の生成物・依存だけを除き、それ以外の "." のディレクトリは通常どおり
 //   検査して、置き場所の規則で違反にする。生成物のディレクトリが増えたらここに足す。
 const EXCLUDED_DIRS = new Set(["node_modules", ".next"]);
 
-function isGeneratedOrDependency(path: string): boolean {
-  return path
-    .split("/")
-    .slice(0, -1)
-    .some((segment) => EXCLUDED_DIRS.has(segment));
+type ReadDirectory = (absolutePath: string) => Dirent[];
+
+const readDirectory: ReadDirectory = (absolutePath) =>
+  readdirSync(absolutePath, { withFileTypes: true });
+
+// symlink は先がディレクトリならディレクトリとして扱う（先が無い symlink はファイルとして返す）。
+// WHY 循環しても無限には再帰しない: 循環する symlink をたどり続けると、パスに含まれる symlink が 40 段を超えたところで
+//   statSync が ELOOP を投げ、列挙が例外で止まる（throwIfNoEntry: false が握りつぶすのは ENOENT だけ。reviewer の実測
+//   2026-09-29、Issue #142 の「ファイルの列挙」のテストで固定）。以前の列挙（readdirSync の recursive: true）は ELOOP を黙って
+//   握りつぶし、途中までの一覧を返していた。
+function isDirectoryEntry(absolutePath: string, entry: Dirent): boolean {
+  if (entry.isDirectory()) {
+    return true;
+  }
+  return (
+    entry.isSymbolicLink() &&
+    (statSync(absolutePath, { throwIfNoEntry: false })?.isDirectory() ?? false)
+  );
+}
+
+// dir の下のファイル（再帰。ディレクトリ以外のすべて）を、リポジトリ相対の "/" 区切りのパスで返す。dir は "" 以外。
+// WHY 自前で再帰する（readdirSync の recursive: true を使わない。Issue #130 / #142）: recursive: true は symlink の先の
+//   ディレクトリにも入り（Node 24.21.0）、除外のディレクトリ（EXCLUDED_DIRS）を列挙の後で除くしかない。next build の
+//   .next/standalone/ は pnpm の symlink を複製するため、その中を列挙するだけで heap を使い切った（#130 で 463 秒かけて OOM、
+//   #137 で手元の node_modules/node_modules の自己参照 symlink が複製されて SIGABRT。詳細は「ファイルの列挙」のテスト）。
+//   除外のディレクトリは中に入る前に飛ばす（EXCLUDED_DIRS に足すだけでは直らない）。
+// WHY 除外しないディレクトリの symlink はたどる: 以前の列挙（recursive: true）と同じ範囲を検査し、symlink で置いたディレクトリの
+//   コードを素通りさせないため。
+// WHY read を引数で受け取る: 除外のディレクトリを「読まない」ことは結果の一覧からは見えない（後で除いても同じ一覧になる）ので、
+//   テストで読んだディレクトリを記録して確かめる。
+function walkFiles(
+  root: string,
+  dir: string,
+  read: ReadDirectory = readDirectory,
+): string[] {
+  const absoluteDir = join(root, dir);
+  if (!existsSync(absoluteDir)) {
+    return [];
+  }
+  return read(absoluteDir).flatMap((entry) => {
+    const path = `${dir}/${entry.name}`;
+    if (!isDirectoryEntry(join(absoluteDir, entry.name), entry)) {
+      return [path];
+    }
+    return EXCLUDED_DIRS.has(entry.name) ? [] : walkFiles(root, path, read);
+  });
 }
 
 // WHY root を引数で受け取る: 本番の検査（リポジトリ直下）と、fixture の一時ディレクトリに置いた架空のツリーの検査で、
 //   列挙 → 抽出 → 正規化 → 判定の同じ経路を通すため。
 function listSourceFiles(root: string, dir: string): string[] {
-  if (!existsSync(join(root, dir))) {
-    return [];
-  }
-  return readdirSync(join(root, dir), { recursive: true, encoding: "utf8" })
-    .map((path) => toPosix(join(dir, path)))
-    .filter((path) => isSourceNonTest(path) && !isGeneratedOrDependency(path));
+  return walkFiles(root, dir).filter(isSourceNonTest);
 }
 
 // dir の直下のファイル（ディレクトリの中は見ない）。dir が "" ならリポジトリ直下。
@@ -1093,14 +1133,12 @@ const SHARED_PLACEMENT = {
 };
 
 // dir の下のすべてのファイル（再帰。ソース以外も含む。依存と生成物のディレクトリの中は除く）。SHARED_PLACEMENT で使う。
+// 以前（Issue #142 より前）との差: 以前は通常ファイル（Dirent の isFile()）だけを返し、ファイルを指す symlink は数えなかった。
+//   今は walkFiles と同じくディレクトリ以外をすべて返すので、ファイルへの symlink（と先の無い symlink）も返す。
+// WHY 差を許す: apps/shared/ に symlink で置いたファイルも「置いたもの」であり、一覧（SHARED_FILES）の外なら違反にするのが
+//   置き場所の規則の意図に合う（今の apps/shared/ に symlink は無く、本番の結果は変わらない）。
 function listAllFiles(root: string, dir: string): string[] {
-  if (!existsSync(join(root, dir))) {
-    return [];
-  }
-  return readdirSync(join(root, dir), { recursive: true, withFileTypes: true })
-    .filter((entry) => entry.isFile())
-    .map((entry) => toPosix(relative(root, join(entry.parentPath, entry.name))))
-    .filter((path) => !isGeneratedOrDependency(path));
+  return walkFiles(root, dir);
 }
 
 // --- 環境変数の直参照（規則 env-direct-access。.claude/rules/env.md の「環境変数」） ---
@@ -6489,6 +6527,183 @@ const MUST_PASS_FILES: Record<string, string> = {
   "apps/frontend_customer/features/todo/README.md":
     'import { GET } from "@repo/backend/features/todo/infra/todo-repository.postgres";',
 };
+
+// Issue #130 / #142: 列挙は除外するディレクトリ（EXCLUDED_DIRS）の中に入らない（列挙した後で除くのではない）。
+// WHY: next build が作る apps/frontend_customer/.next/standalone/ には、pnpm の node_modules の形（.pnpm の中の相対パスの
+//   symlink）が複製される。以前の列挙（readdirSync の recursive: true）は symlink の先のディレクトリにも入り（Node 24.21.0 の
+//   lib/fs.js の handleFilePaths が internalModuleStat で symlink をたどる）、除くのは列挙の後だったため、symlink の組み合わせで
+//   列挙が膨らみ、rule-tests が heap を使い切って落ちた（#130 で 463 秒かけて OOM、#137 で手元の node_modules/node_modules の
+//   自己参照 symlink が standalone に複製されて SIGABRT。2026-09-29 に実測）。
+// WHY 読んだディレクトリを記録して確かめる（結果の一覧だけを見ない）: 列挙した後で除いても結果の一覧は同じで、違いは
+//   中に入るかどうか（かかる時間と memory）だけ。循環する symlink の fixture は、以前の列挙でも ELOOP（symlink 40 段）で
+//   止まって結果が同じになるか、2 本以上あると止まらなくなり（2^40）、どちらも決定的な失敗にならない（2026-09-29 に実測）。
+describe("ファイルの列挙（walkFiles・listSourceFiles・listAllFiles）", () => {
+  function withTree(
+    files: Record<string, string>,
+    symlinks: Record<string, string>,
+    check: (root: string) => void,
+  ) {
+    const root = mkdtempSync(join(tmpdir(), "architecture-list-test-"));
+    try {
+      for (const [path, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(root, path)), { recursive: true });
+        writeFileSync(join(root, path), content);
+      }
+      for (const [path, target] of Object.entries(symlinks)) {
+        mkdirSync(dirname(join(root, path)), { recursive: true });
+        symlinkSync(target, join(root, path));
+      }
+      check(root);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  function walkRecordingReads(root: string, dir: string) {
+    const read: string[] = [];
+    const files = walkFiles(root, dir, (path) => {
+      read.push(toPosix(relative(root, path)));
+      return readDirectory(path);
+    });
+    return { read: read.sort(), files: files.sort() };
+  }
+
+  const GENERATED_TREE = {
+    "apps/frontend_customer/app/page.tsx": "export default 1;",
+    "apps/frontend_customer/.lib/x.ts": "export const x = 1;",
+    "apps/frontend_customer/.next/standalone/server.js": "process.env;",
+    "apps/frontend_customer/.next/server/chunk.js": "process.env;",
+    "apps/frontend_customer/node_modules/pkg/index.js": "process.env;",
+    "apps/frontend_customer/features/todo/node_modules/pkg/index.js":
+      "process.env;",
+  };
+
+  it("除外するディレクトリ（node_modules・.next）は、どの階層でも読まない（中に入ってから除くのではない）", () => {
+    withTree(GENERATED_TREE, {}, (root) => {
+      expect(walkRecordingReads(root, FRONTEND_ROOT)).toEqual({
+        read: [
+          "apps/frontend_customer",
+          "apps/frontend_customer/.lib",
+          "apps/frontend_customer/app",
+          "apps/frontend_customer/features",
+          "apps/frontend_customer/features/todo",
+        ],
+        files: [
+          "apps/frontend_customer/.lib/x.ts",
+          "apps/frontend_customer/app/page.tsx",
+        ],
+      });
+    });
+  });
+
+  // Issue #142 の再現の形: .next/standalone/ に複製された pnpm の相対 symlink が循環する（2 本あると以前の列挙は 2^40 で
+  //   止まらない）。除外のディレクトリの中なので、読まずに完走する。中に入ってから除くと statSync が ELOOP を投げて失敗する。
+  it("除外するディレクトリの中に循環する symlink（.next/standalone/node_modules/x -> ../..）があっても、中に入らずに完走する", () => {
+    withTree(
+      GENERATED_TREE,
+      {
+        "apps/frontend_customer/.next/standalone/node_modules/x": "../..",
+        "apps/frontend_customer/.next/standalone/node_modules/y": "../..",
+        "apps/frontend_customer/node_modules/node_modules": "..",
+      },
+      (root) => {
+        expect(walkRecordingReads(root, FRONTEND_ROOT)).toEqual({
+          read: [
+            "apps/frontend_customer",
+            "apps/frontend_customer/.lib",
+            "apps/frontend_customer/app",
+            "apps/frontend_customer/features",
+            "apps/frontend_customer/features/todo",
+          ],
+          files: [
+            "apps/frontend_customer/.lib/x.ts",
+            "apps/frontend_customer/app/page.tsx",
+          ],
+        });
+      },
+    );
+  });
+
+  it("listSourceFiles・listAllFiles は、除外するディレクトリの中に自分を指す symlink があっても、その外のファイルだけを返す", () => {
+    withTree(
+      {
+        ...GENERATED_TREE,
+        "apps/shared/env.ts": "export const env = 1;",
+        "apps/shared/node_modules/pkg/index.js": "process.env;",
+      },
+      {
+        "apps/frontend_customer/.next/standalone/self": ".",
+        "apps/shared/node_modules/self": ".",
+      },
+      (root) => {
+        expect(listSourceFiles(root, FRONTEND_ROOT).sort()).toEqual([
+          "apps/frontend_customer/.lib/x.ts",
+          "apps/frontend_customer/app/page.tsx",
+        ]);
+        expect(listAllFiles(root, SHARED_ROOT)).toEqual(["apps/shared/env.ts"]);
+      },
+    );
+  });
+
+  // WHY symlink の先も列挙する: 以前の列挙（readdirSync の recursive: true）と同じ範囲を検査し、symlink で置いたディレクトリの
+  //   コードが検査を素通りしないようにする。
+  // listAllFiles の挙動の差: 以前は通常ファイル（entry.isFile()）だけを返し、ファイルを指す symlink は数えなかった。今は
+  //   ディレクトリ以外をすべて返すので、ファイルへの symlink（と先の無い symlink）も返す（置き場所の規則で違反にできる）。
+  it("除外しないディレクトリの symlink は、先のディレクトリの中も列挙し、ファイルへの symlink もファイルとして返す", () => {
+    withTree(
+      {
+        "apps/frontend_customer/app/page.tsx": "export default 1;",
+        "outside/lib/db.ts": "export const db = 1;",
+        "outside/shared-extra/extra.ts": "export const x = 1;",
+        "outside/note.md": "x",
+      },
+      {
+        "apps/frontend_customer/lib": "../../outside/lib",
+        "apps/shared/extra": "../../outside/shared-extra",
+        "apps/shared/note.md": "../../outside/note.md",
+        "apps/shared/dangling.ts": "../../outside/missing.ts",
+      },
+      (root) => {
+        expect(listSourceFiles(root, FRONTEND_ROOT).sort()).toEqual([
+          "apps/frontend_customer/app/page.tsx",
+          "apps/frontend_customer/lib/db.ts",
+        ]);
+        expect(listAllFiles(root, SHARED_ROOT).sort()).toEqual([
+          "apps/shared/dangling.ts",
+          "apps/shared/extra/extra.ts",
+          "apps/shared/note.md",
+        ]);
+      },
+    );
+  });
+
+  // WHY 例外で止まることを固定する: 除外の外で循環すると、statSync が ELOOP（symlink 40 段）を投げて列挙が失敗する（無限には
+  //   再帰しない）。以前の列挙（readdirSync の recursive: true）は ELOOP を黙って握りつぶし、途中までの一覧を返していた
+  //   （検査が一部だけで緑になりうる）。今は音を立てて失敗する。
+  it("除外の外に置いた循環する symlink（apps/backend/loop -> ..）は、ELOOP の例外で止まる（無限に回らない）", () => {
+    withTree(
+      { "apps/backend/features/todo/domain/todo.ts": "export const x = 1;" },
+      { "apps/backend/loop": ".." },
+      (root) => {
+        let thrown: unknown;
+        try {
+          walkFiles(root, BACKEND_ROOT);
+        } catch (error) {
+          thrown = error;
+        }
+        expect(thrown).toMatchObject({ code: "ELOOP", syscall: "stat" });
+      },
+    );
+  });
+
+  it("ディレクトリが無ければ空を返す", () => {
+    withTree({}, {}, (root) => {
+      expect(walkFiles(root, FRONTEND_ROOT)).toEqual([]);
+      expect(listSourceFiles(root, FRONTEND_ROOT)).toEqual([]);
+      expect(listAllFiles(root, SHARED_ROOT)).toEqual([]);
+    });
+  });
+});
 
 describe("fixture のツリーを検査したときに検出される違反", () => {
   it("must-reject: 置いた違反がすべて、置いたとおりの規則で検出され、それ以外は検出されない", () => {
