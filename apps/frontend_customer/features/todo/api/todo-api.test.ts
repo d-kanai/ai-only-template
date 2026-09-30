@@ -120,6 +120,24 @@ function problemResponse(body: unknown, status: number): Response {
   });
 }
 
+// 項目ごとの誤り（errors）を持ちうる 400 の本文。errors は各テストで足す。
+const validationProblem = {
+  type: "/problems/validation-error",
+  title: "Validation error",
+  status: 400,
+  detail: "title must be a string.",
+  instance: "/api/todos",
+  key: "request.field.notString",
+  params: { path: "title" },
+};
+
+const validTitleError = {
+  pointer: "#/title",
+  key: "request.field.notString",
+  params: { path: "title" },
+  detail: "title must be a string.",
+};
+
 const notFoundProblem = {
   type: "/problems/not-found",
   title: "Not found",
@@ -190,6 +208,74 @@ describe("エラー時", () => {
     });
   });
 
+  // 400 の項目ごとの誤り（拡張メンバー errors。apps/backend/shared/presentation/problem.ts の ProblemError）。
+  //   detail は読まない（ApiError のコンストラクタが落とす）。params の無い要素は空の params にする。
+  test("Problem Details に errors があれば、各要素の pointer・key・params を持つ ApiError を投げる", async () => {
+    fetchMock.mockResolvedValue(
+      problemResponse(
+        {
+          ...validationProblem,
+          errors: [
+            {
+              pointer: "#/title",
+              key: "request.field.notString",
+              params: { path: "title" },
+              detail: "title must be a string.",
+            },
+            {
+              pointer: "#",
+              key: "request.body.notObject",
+              detail: "Request body must be a JSON object.",
+            },
+          ],
+        },
+        400,
+      ),
+    );
+
+    const reason = await createTodo({ title: "" }).catch(
+      (error: unknown) => error,
+    );
+
+    expect(reason).toBeInstanceOf(ApiError);
+    expect((reason as ApiError).errors).toStrictEqual([
+      {
+        pointer: "#/title",
+        key: "request.field.notString",
+        params: { path: "title" },
+      },
+      { pointer: "#", key: "request.body.notObject", params: {} },
+    ]);
+    expect(reason).toMatchObject({
+      status: 400,
+      type: "/problems/validation-error",
+      key: "request.field.notString",
+      params: { path: "title" },
+    });
+  });
+
+  test.each([
+    ["errors が無い", undefined],
+    ["errors が空の配列", []],
+  ])(
+    "Problem Details の %s なら、項目ごとの誤りが空の ApiError を投げる",
+    async (_label, errors) => {
+      fetchMock.mockResolvedValue(
+        problemResponse({ ...validationProblem, errors }, 400),
+      );
+
+      const reason = await createTodo({ title: "" }).catch(
+        (error: unknown) => error,
+      );
+
+      expect(reason).toMatchObject({
+        status: 400,
+        key: "request.field.notString",
+      });
+      expect((reason as ApiError).errors).toStrictEqual([]);
+    },
+  );
+
   // RFC 9457 の 3.1.2 節: 本文の status は参考（advisory）で、途中の中継（プロキシ・キャッシュ）がステータスを変えることがある。
   //   画面が受け取った HTTP の応答のステータスを正とし、本文が読めない失敗（error.unknown）と同じ値の取り方にそろえる。
   test("ApiError の status は HTTP の応答のステータスにする（本文の status は使わない）", async () => {
@@ -247,6 +333,85 @@ describe("エラー時", () => {
     ["type が文字列でない", { ...notFoundProblem, type: 404 }],
     ["status が無い", { ...notFoundProblem, status: undefined }],
     ["status が数値でない", { ...notFoundProblem, status: "404" }],
+    // errors（項目ごとの誤り）の形が崩れた本文。1 件でも崩れていれば、本文全体を Problem Details とみなさない
+    //   （todo-api.ts の isProblem の WHY）。正しい要素（validTitleError）と並べ、崩れた 1 件だけで外れることを見る。
+    ["errors がオブジェクト", { ...notFoundProblem, errors: validTitleError }],
+    ["errors が null", { ...notFoundProblem, errors: null }],
+    ["errors が文字列", { ...notFoundProblem, errors: "#/title" }],
+    [
+      "errors の要素が null",
+      { ...notFoundProblem, errors: [validTitleError, null] },
+    ],
+    [
+      "errors の要素が文字列",
+      { ...notFoundProblem, errors: [validTitleError, "#/title"] },
+    ],
+    [
+      "errors の要素の pointer が無い",
+      {
+        ...notFoundProblem,
+        errors: [validTitleError, { ...validTitleError, pointer: undefined }],
+      },
+    ],
+    [
+      "errors の要素の pointer が文字列でない",
+      {
+        ...notFoundProblem,
+        errors: [validTitleError, { ...validTitleError, pointer: ["#/title"] }],
+      },
+    ],
+    [
+      "errors の要素の key が無い",
+      {
+        ...notFoundProblem,
+        errors: [validTitleError, { ...validTitleError, key: undefined }],
+      },
+    ],
+    [
+      "errors の要素の key が辞書のキー 1 つの配列",
+      {
+        ...notFoundProblem,
+        errors: [
+          validTitleError,
+          { ...validTitleError, key: ["todo.title.empty"] },
+        ],
+      },
+    ],
+    [
+      "errors の要素の key が辞書に無い",
+      {
+        ...notFoundProblem,
+        errors: [validTitleError, { ...validTitleError, key: "todo.nope" }],
+      },
+    ],
+    [
+      "errors の要素の key が Object.prototype の名前",
+      {
+        ...notFoundProblem,
+        errors: [validTitleError, { ...validTitleError, key: "toString" }],
+      },
+    ],
+    [
+      "errors の要素の params がオブジェクトでない",
+      {
+        ...notFoundProblem,
+        errors: [validTitleError, { ...validTitleError, params: "title" }],
+      },
+    ],
+    [
+      "errors の要素の params が null",
+      {
+        ...notFoundProblem,
+        errors: [validTitleError, { ...validTitleError, params: null }],
+      },
+    ],
+    [
+      "errors の要素の params が配列",
+      {
+        ...notFoundProblem,
+        errors: [validTitleError, { ...validTitleError, params: ["title"] }],
+      },
+    ],
     // 以前の契約（Issue #126 の前）の本文。key が error の中にあり、type・status が無いので Problem Details とみなさない。
     [
       "以前の形（{ error: { code, key, params } }）",

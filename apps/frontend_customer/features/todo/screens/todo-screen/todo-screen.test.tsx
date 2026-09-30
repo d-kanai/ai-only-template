@@ -192,3 +192,114 @@ test("削除ボタンを押すと、その Todo が削除され一覧から消�
   );
   expect(deleteTodo).toHaveBeenCalledWith("todo-1");
 });
+
+// 400 の項目ごとの誤り（ApiError の errors）は、その入力の直下に出し、aria-describedby と aria-invalid で入力と結び付ける。
+// WHY role="alert" はフォーム全体の文言だけ: 項目の文言は入力の説明（accessible description）として読まれる。
+async function submitTitleWithFailure(reason: unknown) {
+  vi.mocked(listTodos).mockResolvedValue({ todos: [] });
+  vi.mocked(createTodo).mockRejectedValue(reason);
+  render(<TodoScreen />, { wrapper: JaLocale });
+  await screen.findByRole("list");
+  fireEvent.change(
+    screen.getByRole("textbox", {
+      name: tJa(todoScreenMessages, "form.newTitle"),
+    }),
+    { target: { value: "牛乳を買う" } },
+  );
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: tJa(todoScreenMessages, "form.submit"),
+    }),
+  );
+}
+
+test("エラーが無いときは、title の入力は invalid でなく、説明も無い", async () => {
+  vi.mocked(listTodos).mockResolvedValue({ todos: [] });
+  render(<TodoScreen />, { wrapper: JaLocale });
+  await screen.findByRole("list");
+
+  const input = screen.getByRole("textbox", {
+    name: tJa(todoScreenMessages, "form.newTitle"),
+    description: "",
+  });
+  expect(input.getAttribute("aria-invalid")).toBe("false");
+  expect(input.getAttribute("aria-describedby")).toBeNull();
+});
+
+test("空タイトルの 400（#/title）は、title の入力の説明として直下に出し、alert は出さない", async () => {
+  const message = tJa(commonMessages, "todo.title.empty");
+  await submitTitleWithFailure(
+    new ApiError({
+      status: 400,
+      type: "/problems/validation-error",
+      key: "todo.title.empty",
+      errors: [{ pointer: "#/title", key: "todo.title.empty" }],
+    }),
+  );
+
+  const input = await screen.findByRole("textbox", {
+    name: tJa(todoScreenMessages, "form.newTitle"),
+    description: message,
+  });
+  expect(input.getAttribute("aria-invalid")).toBe("true");
+  // 直下: 説明の要素は、入力を包む label の次の兄弟。
+  // WHY label の中に置かない: label の中の文字はすべて入力の名前（accessible name）になり、名前にエラーの文言が混ざる。
+  expect(input.closest("label")?.nextElementSibling?.textContent).toBe(message);
+  expect(screen.getAllByText(message)).toHaveLength(1);
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("title の型の誤り（#/title）と未知の項目（#）の 2 件は、title の入力の下に 1 件、未知の項目は alert に出す", async () => {
+  await submitTitleWithFailure(
+    new ApiError({
+      status: 400,
+      type: "/problems/validation-error",
+      key: "request.field.notString",
+      params: { path: "title" },
+      errors: [
+        {
+          pointer: "#/title",
+          key: "request.field.notString",
+          params: { path: "title" },
+        },
+        {
+          pointer: "#",
+          key: "request.body.unknownKeys",
+          params: { keys: "extra" },
+        },
+      ],
+    }),
+  );
+
+  expect(
+    await screen.findByRole("textbox", {
+      name: tJa(todoScreenMessages, "form.newTitle"),
+      description: tJa(commonMessages, "request.field.notString", {
+        path: "title",
+      }),
+    }),
+  ).toBeDefined();
+  expect(screen.getByRole("alert").textContent).toBe(
+    tJa(commonMessages, "request.body.unknownKeys", { keys: "extra" }),
+  );
+});
+
+test("errors の無い 404 は、alert に全体の文言だけを出し、title の入力は invalid にしない", async () => {
+  await submitTitleWithFailure(
+    new ApiError({
+      status: 404,
+      type: "/problems/not-found",
+      key: "todo.notFound",
+      params: { id: "todo-1" },
+    }),
+  );
+
+  expect((await screen.findByRole("alert")).textContent).toBe(
+    tJa(commonMessages, "todo.notFound", { id: "todo-1" }),
+  );
+  const input = screen.getByRole("textbox", {
+    name: tJa(todoScreenMessages, "form.newTitle"),
+    description: "",
+  });
+  expect(input.getAttribute("aria-invalid")).toBe("false");
+});

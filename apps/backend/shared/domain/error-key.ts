@@ -36,7 +36,7 @@ export type ErrorKey = keyof ErrorKeyParams;
 
 // params を持たないキー（ErrorKeyParams の値が Record<string, never>）。
 // WHY 分ける: zod の型の検査（z.string など）の issue は params を運ばない（refine の custom の issue だけが載せる。zod 4.6.5）。
-//   型の検査に付けられるキーをこれに限り、params の要るキーを付けて実行時に params が落ちるのを型で止める（todo.ts の keyedIssue）。
+//   型の検査に付けられるキーをこれに限り、params の要るキーを付けて実行時に params が落ちるのを型で止める（shared/domain/keyed-issue.ts の keyedIssue）。
 export type ParamlessErrorKey = {
   [K in ErrorKey]: ErrorKeyParams[K] extends Record<string, never> ? K : never;
 }[ErrorKey];

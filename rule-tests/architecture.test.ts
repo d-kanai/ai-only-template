@@ -91,6 +91,11 @@ type ImportStatement = {
   // WHY 省略できる形にする: re-export を見る規則は messages-colocation だけで、import の例（抽出・正規化の仕様のテスト）の
   //   形を変えずに足すため。
   reExport?: boolean;
+  // 定数だけの値の import か（Issue #144）。`import { A_B, type C } from "x"` のように、名前の並び（{}）だけで、inline の type の
+  //   付かない名前が 1 つ以上あり、そのすべての元の名前（as の前）が UPPER_SNAKE_CASE のときだけ true を持つ（isConstantsOnly）。
+  //   規則 presentation が、自 feature の domain の定数（TODO_TITLE_MAX_LENGTH）だけを値で import させるのに使う。
+  // WHY 省略できる形にする: reExport と同じ（この印を見る規則は presentation だけ）。
+  constantsOnly?: boolean;
 };
 
 type Reference = {
@@ -107,6 +112,8 @@ type Reference = {
   typeOnly: boolean;
   // re-export（export ... from）か（ImportStatement の reExport をそのまま持つ）。
   reExport?: boolean;
+  // 定数だけの値の import か（ImportStatement の constantsOnly をそのまま持つ）。
+  constantsOnly?: boolean;
 };
 
 // 文字列リテラルかコメントのどちらかに一致する正規表現。左から順に一致を探すので、先に始まった方が優先される。
@@ -167,6 +174,32 @@ function isInlineTypeOnly(clause: string): boolean {
   return names.length > 0 && names.every((name) => /^type\s/.test(name));
 }
 
+// 定数の名前の形（UPPER_SNAKE_CASE）。英大文字で始まり、英大文字・数字・_ だけ。
+const CONSTANT_NAME = /^[A-Z][A-Z0-9_]*$/;
+
+// `{ A_B, type C, D as e }` のように、名前の並びだけで、値の名前（inline の type の付かない名前）が 1 つ以上あり、
+//   そのすべての元の名前（as の前）が定数の形か。
+// WHY 元の名前で見る: 参照先が export している名前が規則の対象で、手元の別名（as の後ろ）は何でも付けられる。
+// WHY default import・`* as` が混じるものは定数だけにしない: 名前（手元の束縛）から、参照先の何を使うかが分からない。
+// 限界（仕様として受け入れる）: 名前が定数の形でも、中身が定数（プリミティブの値）かは見ない。UPPER_SNAKE_CASE で関数や
+//   オブジェクトを export すれば通る（見逃す方向）。名前の規約（.claude/rules/backend.md）とレビューで止める。
+function isConstantsOnly(clause: string): boolean {
+  const braces = /^\{([\s\S]*)\}$/.exec(clause.trim());
+  if (braces === null) {
+    return false;
+  }
+  const valueNames = (braces[1] ?? "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name !== "" && !/^type\s/.test(name));
+  return (
+    valueNames.length > 0 &&
+    valueNames.every((name) =>
+      CONSTANT_NAME.test(name.split(/\s+as\s+/)[0] ?? ""),
+    )
+  );
+}
+
 type Located = ImportStatement & { index: number };
 
 function findFromStatements(code: string): Located[] {
@@ -176,6 +209,11 @@ function findFromStatements(code: string): Located[] {
     typeOnly: match[2] !== undefined || isInlineTypeOnly(match[3] ?? ""),
     // WHY import のときは reExport を持たせない（false も入れない）: ImportStatement の reExport の WHY と同じ。
     ...(match[1] === "export" && { reExport: true }),
+    // WHY import の値の参照だけ: re-export は presentation から domain の値を外へ出すので定数でも許さない。import type は
+    //   型だけの参照（typeOnly）で足りる。
+    ...(match[1] === "import" &&
+      match[2] === undefined &&
+      isConstantsOnly(match[3] ?? "") && { constantsOnly: true }),
   }));
 }
 
@@ -276,9 +314,9 @@ const WORKSPACE_PACKAGES = [
 //   backend への参照を検査する規則（frontend-to-backend-specifier など）を素通りする。
 function toReference(
   from: string,
-  { specifier, typeOnly, reExport }: ImportStatement,
+  { specifier, typeOnly, reExport, constantsOnly }: ImportStatement,
 ): Reference {
-  const own = { from, specifier, own: true, typeOnly, reExport };
+  const own = { from, specifier, own: true, typeOnly, reExport, constantsOnly };
   if (specifier.startsWith("@/")) {
     return {
       ...own,
@@ -308,7 +346,15 @@ function toReference(
       .replace(CODE_EXTENSION, "");
     return { ...own, to };
   }
-  return { from, specifier, to: specifier, own: false, typeOnly, reExport };
+  return {
+    from,
+    specifier,
+    to: specifier,
+    own: false,
+    typeOnly,
+    reExport,
+    constantsOnly,
+  };
 }
 
 function isSourceNonTest(path: string): boolean {
@@ -564,8 +610,11 @@ function isOwnPostgresRepository(
 //     backend/shared/infra/database だけ（Issue #123。api ファイルがモジュールの最下部で本番の handler を組み立てる）。
 //     backend/shared/presentation（problem など）は何も組み立てないので infra を参照しない。
 //     ログの出口 apps/shared/logger は backend の外なので、ここではなく SHARED_MODULES_BY_LAYER で許す（Issue #90）。
-//   - feature の domain は import type だけ（「domain（Entity の型の参照のみ）」）。Entity の生成や操作は application を通す。
-//     backend/shared/domain（DomainError）はエラーの変換（instanceof）に値として使うので対象外。
+//   - feature の domain は import type と、定数（UPPER_SNAKE_CASE の名前）だけの値の import だけ（「domain（Entity の型の参照と
+//     定数のみ）」）。Entity の生成や操作は application を通す。
+//     WHY 定数を許す（Issue #144。ユーザー判断）: リクエストのスキーマが domain と同じ規則（title の上限の文字数）を重ねるとき、
+//     数値を 2 か所に書かずに domain の定数（TODO_TITLE_MAX_LENGTH）を参照させる。関数・Entity は値で使わせない。
+//     backend/shared/domain（DomainError・keyedIssue）はエラーの変換（instanceof）とキーの付与に値として使うので対象外。
 function presentationAllows(
   ref: Reference,
   self: BackendLocation,
@@ -578,7 +627,7 @@ function presentationAllows(
     );
   }
   if (target.layer === "domain" && target.scope !== BACKEND_SHARED_SCOPE) {
-    return ref.typeOnly;
+    return ref.typeOnly || ref.constantsOnly === true;
   }
   return true;
 }
@@ -834,14 +883,14 @@ const RULES: Rule[] = [
     isViolation: violatesBackendLayer,
   },
   {
-    // 「presentation の依存してよい先: application、domain（Entity の型の参照のみ）、自 feature の infra の Postgres の
+    // 「presentation の依存してよい先: application、domain（Entity の型の参照と定数のみ。定数は Issue #144）、自 feature の infra の Postgres の
     //   Repository の実装と backend/shared/infra/database（api ファイルが本番の handler を組み立てる。Issue #123）、
     //   backend/shared、apps/shared の logger（Issue #85・#90）」
     //   同じ presentation の中の参照（api ファイル間の re-export など）は許す。
     // WHY next も禁止する: api ファイルは Web 標準の Request / Response で書き、Next を起動せずにテストできるようにしているため
     //   （.claude/rules/testing.md の「置き方と環境」）。
     id: "presentation",
-    name: "apps/backend/features/<f>/presentation/ が参照してよい自前コードは自 feature と apps/backend/shared/ の application/・domain/（feature の domain は型だけ）・presentation/ と自 feature の infra/*-repository.postgres・apps/backend/shared/infra/database・apps/shared/logger だけで、next・react も参照しない",
+    name: "apps/backend/features/<f>/presentation/ が参照してよい自前コードは自 feature と apps/backend/shared/ の application/・domain/（feature の domain は型と UPPER_SNAKE_CASE の定数だけ）・presentation/ と自 feature の infra/*-repository.postgres・apps/backend/shared/infra/database・apps/shared/logger だけで、next・react も参照しない",
     appliesTo: (from) => backendLayerOf(from)?.layer === "presentation",
     isViolation: violatesBackendLayer,
   },
@@ -2107,12 +2156,13 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
 // --- 規則ごとの判定の仕様 ---
 // 上の「依存の向き」のテストは今のコードに違反が無いことしか確かめないため、規則そのものが緩すぎても（常に違反なしと
 // 判定しても）通ってしまう。規則ごとに「違反になる例」「ならない例」を架空の参照で固定し、規則の判定が仕様どおりかを確かめる。
-// 例は [参照元のファイル, import に書く specifier, 値の参照か型だけの参照か re-export（export ... from。値の参照）か]。
+// 例は [参照元のファイル, import に書く specifier, 値の参照か型だけの参照か re-export（export ... from。値の参照）か
+//   定数だけの値の import（import { TODO_TITLE_MAX_LENGTH } from ... のように、値の名前がすべて UPPER_SNAKE_CASE。Issue #144）か]。
 
 type Example = [
   from: string,
   specifier: string,
-  kind: "value" | "type" | "re-export",
+  kind: "value" | "type" | "re-export" | "constant",
 ];
 
 const RULE_EXAMPLES: Record<
@@ -2534,6 +2584,12 @@ const RULE_EXAMPLES: Record<
         "@repo/backend/features/todo/presentation/list-todos.api",
         "value",
       ],
+      // Issue #144: 定数だけの import も値の参照（型だけではない）。定数の緩和は backend の presentation → 自 feature の domain だけ。
+      [
+        "apps/frontend_customer/features/todo/api/todo-api.ts",
+        "@repo/backend/features/todo/presentation/list-todos.api",
+        "constant",
+      ],
       [
         "apps/frontend_customer/features/todo/api/todo-api.ts",
         "@repo/backend/features/todo/domain/todo",
@@ -2866,6 +2922,23 @@ const RULE_EXAMPLES: Record<
         "../domain/todo",
         "value",
       ],
+      // Issue #144: 定数だけの値の import を許すのは、自 feature の domain からだけ。他 feature の domain、backend/shared の
+      //   presentation から feature の domain、domain 以外の層（infra の schema）からは不可。
+      [
+        "apps/backend/features/todo/presentation/x.api.ts",
+        "../../other/domain/other",
+        "constant",
+      ],
+      [
+        "apps/backend/shared/presentation/x.ts",
+        "../../features/todo/domain/todo",
+        "constant",
+      ],
+      [
+        "apps/backend/features/todo/presentation/x.api.ts",
+        "../infra/schema",
+        "constant",
+      ],
       [
         "apps/backend/features/todo/presentation/x.api.ts",
         "../../other/infra/other-repository.postgres",
@@ -3028,6 +3101,18 @@ const RULE_EXAMPLES: Record<
         "apps/backend/features/todo/presentation/x.api.ts",
         "../domain/todo",
         "type",
+      ],
+      // Issue #144: 自 feature の domain の定数（UPPER_SNAKE_CASE の名前だけ）は値で import できる（リクエストのスキーマが
+      //   domain と同じ上限 TODO_TITLE_MAX_LENGTH を参照する）。feature の名前が shared でも同じ。
+      [
+        "apps/backend/features/todo/presentation/x.api.ts",
+        "../domain/todo",
+        "constant",
+      ],
+      [
+        "apps/backend/features/shared/presentation/x.api.ts",
+        "../domain/x",
+        "constant",
       ],
       [
         "apps/backend/shared/presentation/problem.ts",
@@ -3393,6 +3478,7 @@ function judge(id: RuleId, [from, specifier, kind]: Example): boolean {
     specifier,
     typeOnly: kind === "type",
     reExport: kind === "re-export",
+    constantsOnly: kind === "constant",
   });
   return rule.appliesTo(ref.from) && rule.isViolation(ref);
 }
@@ -4994,6 +5080,14 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import { Todo } from "../domain/todo";',
     'import { TodoFactory, type TodoId } from "../domain/todo-factory";',
     'export { Todo as Entity } from "../domain/todo-entity";',
+    // Issue #144: 自 feature の domain から値で import してよいのは定数（UPPER_SNAKE_CASE）だけ。関数、定数と値の混在、
+    //   定数の re-export、定数の名前の別名を付けた関数、名前で中身が分からない default / * as は違反。
+    'import { keyedIssue } from "../domain/todo-keyed";',
+    'import { TODO_MAX, Todo } from "../domain/todo-mixed";',
+    'export { TODO_MAX } from "../domain/todo-constants";',
+    'import { maxLength as TODO_MAX } from "../domain/todo-alias";',
+    'import TODO_DEFAULT from "../domain/todo-default";',
+    'import * as TODO from "../domain/todo-namespace";',
     'import { NextResponse } from "next/server";',
     'import { cache } from "react";',
     'export type { ListTodosResponse } from "@/features/todo/api/todo-api";',
@@ -5023,6 +5117,8 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import "../../features/todo/infra/todo-repository.in-memory";',
     // Issue #123: backend/shared/presentation は database も参照しない（presentation の規則だけにかかる）。
     'import type { Database } from "../infra/database";',
+    // Issue #144: 定数だけの import でも、backend/shared から feature の domain は不可（backend-shared と presentation の両方）。
+    'import { TODO_MAX } from "../../features/todo/domain/todo-constants";',
   ),
   // application: 他 feature の domain / application、画面側の shared/。
   "apps/backend/features/todo/application/bad-application-2.ts": lines(
@@ -5036,6 +5132,8 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import type { OtherQuery } from "../../other/application/other.query";',
     'import type { Other } from "../../other/domain/other";',
     'import { x } from "@/shared/x";',
+    // Issue #144: 定数だけの import でも、他 feature の domain は不可。
+    'import { OTHER_MAX } from "../../other/domain/other-constants";',
   ),
   // domain / backend-shared: backend/shared から画面側の shared/。
   "apps/backend/shared/domain/bad-shared-screen.ts": lines(
@@ -5688,6 +5786,12 @@ const MUST_REJECT_VIOLATIONS = [
     "apps/backend/features/todo/domain/todo",
     "apps/backend/features/todo/domain/todo-factory",
     "apps/backend/features/todo/domain/todo-entity",
+    "apps/backend/features/todo/domain/todo-keyed",
+    "apps/backend/features/todo/domain/todo-mixed",
+    "apps/backend/features/todo/domain/todo-constants",
+    "apps/backend/features/todo/domain/todo-alias",
+    "apps/backend/features/todo/domain/todo-default",
+    "apps/backend/features/todo/domain/todo-namespace",
     "next/server",
     "react",
     "apps/frontend_customer/features/todo/api/todo-api",
@@ -5716,6 +5820,7 @@ const MUST_REJECT_VIOLATIONS = [
     "apps/frontend_customer/features/todo",
     "apps/frontend_customer/app/page",
     "apps/backend/features/todo/infra/todo-repository.in-memory",
+    "apps/backend/features/todo/domain/todo-constants",
   ].map(
     (to) =>
       `backend-shared: apps/backend/shared/presentation/bad-backend-shared.ts → ${to}`,
@@ -5728,6 +5833,7 @@ const MUST_REJECT_VIOLATIONS = [
     "apps/frontend_customer/app/page",
     "apps/backend/features/todo/infra/todo-repository.in-memory",
     "apps/backend/shared/infra/database",
+    "apps/backend/features/todo/domain/todo-constants",
   ].map(
     (to) =>
       `presentation: apps/backend/shared/presentation/bad-backend-shared.ts → ${to}`,
@@ -5745,6 +5851,7 @@ const MUST_REJECT_VIOLATIONS = [
     "apps/backend/features/other/application/other.query",
     "apps/backend/features/other/domain/other",
     "apps/frontend_customer/shared/x",
+    "apps/backend/features/other/domain/other-constants",
   ].map(
     (to) =>
       `presentation: apps/backend/features/todo/presentation/bad-presentation-2.api.ts → ${to}`,
@@ -6116,6 +6223,13 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { DomainError } from "../../../shared/domain/domain-error";',
     'export type { Todo } from "../domain/todo";',
     'import { type Todo as T } from "../domain/todo";',
+    // Issue #144: 自 feature の domain の定数（UPPER_SNAKE_CASE）は値で import できる。型との混在・複数行・別名も可。
+    'import { TODO_TITLE_MAX_LENGTH } from "../domain/todo";',
+    'import { type Todo as U, TODO_TITLE_MAX_LENGTH as MAX } from "../domain/todo";',
+    "import {",
+    "  TODO_A,",
+    "  TODO_B_2,",
+    '} from "../domain/todo";',
   ),
   "apps/backend/features/todo/presentation/reexport.api.ts": lines(
     'import type { GetTodoResponse } from "./get-todo.api";',
@@ -6407,7 +6521,7 @@ describe("参照の抽出（extractImports）", () => {
       'export type { B } from "b";',
       'export { GET } from "c";',
       'export * from "d";',
-      'import { E } from "e";',
+      'import { Entity } from "e";',
     ].join("\n");
     // WHY import に reExport が無いことも toEqual で見る: toEqual は undefined のプロパティを無いものと同じに扱うが、
     //   reExport: true が付けば一致しない（import を re-export と取り違えると、同じディレクトリの辞書の import まで違反になる）。
@@ -6423,7 +6537,7 @@ describe("参照の抽出（extractImports）", () => {
   it("inline の type は、すべての名前に付いているときだけ型だけの参照になる", () => {
     const source = [
       'import { type A, type B } from "all-type";',
-      'import { type A, B } from "mixed";',
+      'import { type A, Value } from "mixed";',
       'import Default, { type A } from "with-default";',
       'import {} from "empty";',
     ].join("\n");
@@ -6432,6 +6546,63 @@ describe("参照の抽出（extractImports）", () => {
       { specifier: "mixed", typeOnly: false },
       { specifier: "with-default", typeOnly: false },
       { specifier: "empty", typeOnly: false },
+    ]);
+  });
+
+  // Issue #144: presentation が自 feature の domain から値で import してよいのは定数だけ（規則 presentation）。import の名前が
+  //   すべて UPPER_SNAKE_CASE（/^[A-Z][A-Z0-9_]*$/。inline の type の名前は数えない）のときだけ定数だけの印を持つ。
+  // WHY as の前の名前（元の export 名）で見る: 参照先で何を export しているかが規則の対象で、手元の別名は関係ない。
+  // WHY re-export・default・* as・{} は印を持たない: re-export は presentation から domain の値を外へ出す。default と * as は
+  //   名前で中身が分からない（モジュール全体・任意の値）。{} は名前が無い。
+  it("名前がすべて UPPER_SNAKE_CASE の定数の import だけが、定数だけの印を持つ", () => {
+    const source = [
+      'import { TODO_TITLE_MAX_LENGTH } from "constant";',
+      'import { MAX_2, A } from "constants";',
+      'import { type Todo, TODO_TITLE_MAX_LENGTH } from "constant-and-type";',
+      'import { TODO_TITLE_MAX_LENGTH as max } from "constant-alias";',
+      "import {",
+      "  TODO_A,",
+      "  TODO_B,",
+      '} from "multi-line";',
+      'import { Todo } from "pascal";',
+      'import { keyedIssue } from "camel";',
+      'import { TODO_MAX, Todo } from "mixed";',
+      'import { max as TODO_MAX } from "alias-to-constant";',
+      'import { Todo_MAX } from "not-upper";',
+      'import { _TODO } from "underscore-first";',
+      'import { TODO$ } from "dollar";',
+      'import TODO_DEFAULT from "default";',
+      'import * as TODO from "namespace";',
+      'import TODO_D, { TODO_E } from "default-and-named";',
+      'import {} from "empty";',
+      'import { type TODO_T } from "type-only-inline";',
+      'import type { TODO_T } from "type-only";',
+      'export { TODO_MAX } from "re-export";',
+      'import "side-effect";',
+      'const m = import("dynamic");',
+    ].join("\n");
+    expect(extractImports(source)).toEqual([
+      { specifier: "constant", typeOnly: false, constantsOnly: true },
+      { specifier: "constants", typeOnly: false, constantsOnly: true },
+      { specifier: "constant-and-type", typeOnly: false, constantsOnly: true },
+      { specifier: "constant-alias", typeOnly: false, constantsOnly: true },
+      { specifier: "multi-line", typeOnly: false, constantsOnly: true },
+      { specifier: "pascal", typeOnly: false },
+      { specifier: "camel", typeOnly: false },
+      { specifier: "mixed", typeOnly: false },
+      { specifier: "alias-to-constant", typeOnly: false },
+      { specifier: "not-upper", typeOnly: false },
+      { specifier: "underscore-first", typeOnly: false },
+      { specifier: "dollar", typeOnly: false },
+      { specifier: "default", typeOnly: false },
+      { specifier: "namespace", typeOnly: false },
+      { specifier: "default-and-named", typeOnly: false },
+      { specifier: "empty", typeOnly: false },
+      { specifier: "type-only-inline", typeOnly: true },
+      { specifier: "type-only", typeOnly: true },
+      { specifier: "re-export", typeOnly: false, reExport: true },
+      { specifier: "side-effect", typeOnly: false },
+      { specifier: "dynamic", typeOnly: false },
     ]);
   });
 

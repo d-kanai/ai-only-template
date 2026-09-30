@@ -3,7 +3,8 @@ import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { DomainError } from "../../../shared/domain/domain-error";
 import type { ErrorKey } from "../../../shared/domain/error-key";
-import { keyedIssue, keyedRefine, Todo, validate } from "./todo";
+import { keyedRefine } from "../../../shared/domain/keyed-issue";
+import { TODO_TITLE_MAX_LENGTH, Todo, validate } from "./todo";
 
 // key と params は API の Problem Details（problem.ts）の拡張メンバーとして画面に渡る（画面が翻訳するクライアントとの契約。Issue #116）ので、両方を検証する。
 // WHY toEqual に params: undefined を含める: params の無いキーで params が {} などになっていないことも確かめる
@@ -61,6 +62,16 @@ describe("Todo.create", () => {
   test("タイトルは 1 文字と 100 文字を受け付ける", () => {
     expect(Todo.create("a").title).toBe("a");
     expect(Todo.create("a".repeat(100)).title).toBe("a".repeat(100));
+  });
+
+  // WHY 定数の値を固定する: presentation のリクエストのスキーマ（create-todo.api.ts・update-todo.api.ts）がこの定数を参照して
+  //   同じ上限を重ねる（Issue #144）。値を変えると画面の文言（params.max）と API の契約が変わるので、変えるときはここも直す。
+  test("タイトルの上限の文字数 TODO_TITLE_MAX_LENGTH は 100 で、それを超えると validation_error になる", () => {
+    expect(TODO_TITLE_MAX_LENGTH).toBe(100);
+    expectValidationError(
+      () => Todo.create("a".repeat(TODO_TITLE_MAX_LENGTH + 1)),
+      TOO_LONG_TITLE,
+    );
   });
 
   test("絵文字などのサロゲートペアも 1 文字と数える（100 個まで受け付ける）", () => {
@@ -240,35 +251,6 @@ describe("Todo.reconstruct", () => {
       );
     },
   );
-});
-
-// keyedIssue / keyedRefine はスキーマに ErrorKey（と params）を付ける口。validate が issue から DomainError に戻す。
-describe("keyedIssue / keyedRefine", () => {
-  test("keyedIssue は params の無いキーを zod の error にする", () => {
-    expect(keyedIssue("todo.title.empty")).toEqual({
-      error: "todo.title.empty",
-    });
-  });
-
-  test("keyedRefine はキーを zod の error に、params を zod の params にする", () => {
-    expect(keyedRefine("todo.title.tooLong", { max: 100 })).toEqual({
-      error: "todo.title.tooLong",
-      params: { max: 100 },
-    });
-  });
-
-  // WHY 型で止める: 型の検査（z.string など）の issue は params を運ばない（zod 4.6.5。refine の custom の issue だけが
-  //   params を載せる）。params の要るキーを型の検査に付けると、型は通っても実行時に params が落ち、画面の文言の
-  //   埋め込み（{max}）が欠ける。
-  test("params の要るキーは keyedIssue に渡せない（型の検査に付けると params が落ちる）", () => {
-    // @ts-expect-error todo.title.tooLong は params を持つので keyedIssue では付けられない（refine に keyedRefine で付ける）
-    z.string(keyedIssue("todo.title.tooLong", { max: 100 }));
-  });
-
-  test("keyedRefine は params の要るキーだけを受け付ける（params の無いキーは keyedIssue で付ける）", () => {
-    // @ts-expect-error todo.title.empty は params を持たない
-    keyedRefine("todo.title.empty", {});
-  });
 });
 
 describe("validate", () => {

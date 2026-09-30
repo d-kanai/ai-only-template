@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { keyedIssue, keyedRefine } from "../../../shared/domain/keyed-issue";
 import { getDatabase } from "../../../shared/infra/database";
 import {
   parseJsonBody,
@@ -6,20 +7,33 @@ import {
 } from "../../../shared/presentation/json-body";
 import { withProblemResponse } from "../../../shared/presentation/problem";
 import { CreateTodoCommand } from "../application/create-todo.command";
-import type { Todo } from "../domain/todo";
+import { TODO_TITLE_MAX_LENGTH, type Todo } from "../domain/todo";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 
 // POST /api/todos: Todo を作る。201 と作った Todo を返す。
 
-// リクエスト本文の「形」（項目の有無と型。未知の項目は拒否）。
-// WHY 形だけを見て、空・長さは見ない: タイトルの中身の規則（trim 後 1〜100 文字）は Todo の不変条件として
-//   domain（Todo.create の zod スキーマ）が持つ。ここにも書くと規則が 2 か所になり、片方だけ直してずれる。
-//   domain の DomainError(validation_error) も toProblemResponse で同じ 400 になるので、クライアントから見た結果は同じ。
+// リクエスト本文の「形」（項目の有無と型。未知の項目は拒否）に、title の必須・長さを domain と同じ規則で重ねる（Issue #144）。
+// WHY 必須・長さも見る: 形の誤りと一緒に、項目ごとの誤り（Problem の errors。pointer が #/title）として 1 回の応答で
+//   まとめて返すため。domain の DomainError(validation_error) は key 1 つで、どの項目の誤りかを持たない。
+// WHY domain と同じキー・同じ数え方・同じ上限（TODO_TITLE_MAX_LENGTH）にする: presentation は domain より厳しくしない
+//   （domain が通す値を弾かない）。上限の数値は domain の定数を参照し、2 か所に書かない。規則の正は domain で、domain は
+//   ここを通った値も含めて常に完全に検証する（todo.ts の todoTitleSchema。.claude/rules/backend.md の presentation）。
 // WHY 関数にする: スキーマを最上位の定数にすると static な変異になり mutation testing で数えない（json-body.ts の requestBodySchema）。
 function createTodoRequestSchema() {
   return requestBodySchema({
-    // 型が違う・無いときのキー（request.field.notString）は json-body.ts の toProblemError が決める（ここに error は書かない）。
-    title: z.string(),
+    // 型が違う・無いときのキー（request.field.notString）は json-body.ts の toProblemError が決める（z.string に error は書かない）。
+    // trim してからコードポイント数（Array.from）で数える: todo.ts の todoTitleSchema と同じ（WHY はそちら）。
+    title: z
+      .string()
+      .trim()
+      .refine(
+        (title) => Array.from(title).length >= 1,
+        keyedIssue("todo.title.empty"),
+      )
+      .refine(
+        (title) => Array.from(title).length <= TODO_TITLE_MAX_LENGTH,
+        keyedRefine("todo.title.tooLong", { max: TODO_TITLE_MAX_LENGTH }),
+      ),
   });
 }
 

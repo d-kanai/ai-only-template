@@ -68,7 +68,8 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-29 | リポジトリ全体を検査するルール検査テストは、apps/ ではなくリポジトリ直下の rule-tests/ にまとめる | 採用 | [20260929-rule-tests-directory.md](architecture/20260929-rule-tests-directory.md) |
 | 2026-09-29 | Todo の不変条件は、どの口を通ってもコンストラクタで常に全フィールドを検証する（restore は reconstruct に改名） | 採用 | [20260929-todo-invariants-always-validated.md](architecture/20260929-todo-invariants-always-validated.md) |
 | 2026-09-29 | DB の行から Todo を組み立てる restore は検証せず、口ごとに検証の範囲を分ける | 置き換え（→ architecture/20260929-todo-invariants-always-validated.md） | [20260929-todo-restore-skips-validation.md](architecture/20260929-todo-restore-skips-validation.md) |
-| 2026-09-29 | backend の入力検証と不変条件は zod で書く（presentation は形、domain は値の規則） | 採用 | [20260929-zod-for-backend-validation.md](architecture/20260929-zod-for-backend-validation.md) |
+| 2026-09-29 | backend の入力検証と不変条件は zod で書く（presentation は形、domain は値の規則） | 置き換え（→ architecture/20260930-presentation-overlaps-domain-validation.md） | [20260929-zod-for-backend-validation.md](architecture/20260929-zod-for-backend-validation.md) |
+| 2026-09-30 | presentation の入力検証は domain の規則を重ねてよい（presentation ⊆ domain）。domain は常に完全で、presentation は domain より厳しくしない | 採用 | [20260930-presentation-overlaps-domain-validation.md](architecture/20260930-presentation-overlaps-domain-validation.md) |
 
 ### tech-stack/
 言語・ツール・ライブラリの選定

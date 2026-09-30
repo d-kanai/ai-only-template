@@ -1,7 +1,7 @@
 # backend の入力検証と不変条件は zod で書く（presentation は形、domain は値の規則）
 
 - 日付: 2026-09-29
-- 状態: 採用
+- 状態: 置き換え（→ architecture/20260930-presentation-overlaps-domain-validation.md）
 - 関連: Issue #88 / PR #93 / `.claude/rules/backend.md` / `.claude/rules/dependencies.md`
 
 ## 背景

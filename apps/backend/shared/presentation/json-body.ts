@@ -1,19 +1,22 @@
 import { z } from "zod";
-import type { ErrorKey } from "../domain/error-key";
+import { type ErrorKey, isErrorKey } from "../domain/error-key";
 import {
   type InvalidRequestArgs,
   InvalidRequestError,
   type ProblemErrorInput,
 } from "./problem";
 
-// リクエスト本文のスキーマの土台。各 API は項目ごとの型だけを渡す（error は書かない）。
+// リクエスト本文のスキーマの土台。各 API は項目ごとの型を渡し（型の検査の error は書かない）、必要なら domain と同じ規則
+//   （必須・長さ）を domain と同じキーで重ねる（keyedIssue / keyedRefine。Issue #144）。
 //   例: requestBodySchema({ title: z.string() })
 // WHY 未知のキーを拒否する（z.strictObject）: 部分更新（PUT /api/todos/:id）で項目名を打ち間違えた本文
 //   （{ complete: true }）を z.object のように黙って捨てると、「何も変えない」200 になり誤りに気づけない。
 //   画面と API は同じリポジトリで同時に変えるので、古いクライアントが知らない項目を送ってくる互換性の心配も無い。
 // WHY error（文言）をどこにも書かない（Issue #116）: 誤りは ErrorKey と params で返し、文言は画面が翻訳する。
-//   キーは zod の issue の種類（code・expected）と path から toProblemError が 1 か所で決める。各 api ファイルや
-//   ここで zod の error にキーを書くと、同じ対応（文字列の項目 → request.field.notString）を項目ごとに書くことになる。
+//   形の誤りのキーは zod の issue の種類（code・expected）と path から toProblemError が 1 か所で決める。各 api ファイルや
+//   ここで zod の型の検査の error にキーを書くと、同じ対応（文字列の項目 → request.field.notString）を項目ごとに書くことになる。
+//   domain と同じ規則を重ねる検査（refine）だけは、keyedIssue / keyedRefine で domain と同じキーを付ける（toProblemError が
+//   そのキーを使う）。
 //   オブジェクトの判定（配列・null・文字列を弾く）も zod に任せる（以前の手書きの typeof の判定は Issue #88 で消した）。
 // WHY 関数にする（スキーマを最上位の定数にしない）: 最上位の式は読み込み時にだけ評価される static な変異になり、
 //   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に作れば、条件の変異を
@@ -26,7 +29,9 @@ export function requestBodySchema<Shape extends z.ZodRawShape>(shape: Shape) {
 // WHY 以前の readJsonObject（オブジェクトかだけを確かめて Record<string, unknown> を返す）を zod に統合した:
 //   形の検査を 1 回の safeParse にまとめ、結果の型をスキーマから導出する（as や項目ごとの typeof を書かない）。
 //   JSON として読めるかだけは zod の前の段階（request.json()）なので、ここで InvalidRequestError にする。
-// WHY 形だけを見る: 値の中身の規則（title の長さなど）は domain の不変条件（.claude/rules/backend.md の「presentation」）。
+// WHY 値の中身の規則を持つかはスキーマ次第: 形（JSON・オブジェクト・未知の項目・型）は必ずここで見る。必須・長さは各 api の
+//   スキーマが domain と同じキー・同じ定数で重ねてよい（domain より厳しくしない。domain は常に完全に検証する。Issue #144。
+//   .claude/rules/backend.md の「presentation」）。重ねると、項目ごとの誤りを 1 回の応答（errors）でまとめて返せる。
 export async function parseJsonBody<Schema extends z.ZodType>(
   request: Request,
   schema: Schema,
@@ -56,10 +61,13 @@ export async function parseJsonBody<Schema extends z.ZodType>(
 
 // zod の issue 1 件を、クライアントに返す { pointer, key, params }（Problem の errors の要素。detail は problem.ts が足す）にする。
 //   zod の issue から ErrorKey を決める対応はここだけに書く。
+//   - message が ErrorKey（keyedIssue / keyedRefine で付けた。Issue #144）→ そのキー（params は refine の params）
 //   - unrecognized_keys（z.strictObject の未知の項目）→ request.body.unknownKeys（params.keys は項目名を ", " で連結）
 //   - invalid_type で path が空（本文全体がオブジェクトでない。配列・null・文字列・数値）→ request.body.notObject
 //   - invalid_type で文字列を期待した項目（無い・null・数値など）→ request.field.notString（params.path）
 //   - invalid_type で真偽値を期待した項目 → request.field.notBoolean（params.path）
+// WHY キーの付いた issue を最初に見る: スキーマの宣言でキーを付けた検査は、その宣言がキーを決める（domain の validate と同じ
+//   取り出し方）。型の検査の issue の message は zod の既定の英語で、ErrorKey にはならない（error を書かないので）。
 // WHY 対応の無い issue は例外（InvalidRequestError ではない Error = 500）にする: キーの集合（error-key.ts）は画面の辞書と
 //   共有する閉じた集合で、無理に近いキーに寄せると画面が誤った文言を出す。数値の項目などを足したときに、キーと対応を
 //   足し忘れたことをテスト（API は 500）で気づかせる。今の API のスキーマ（文字列・真偽値・strictObject）では起きない。
@@ -69,6 +77,12 @@ export async function parseJsonBody<Schema extends z.ZodType>(
 function toProblemError(issue: z.core.$ZodIssue): ProblemErrorInput {
   const pointer = toPointer(issue.path);
   const path = issue.path.join(".");
+  if (isErrorKey(issue.message)) {
+    // WHY as: zod の issue の params は refine の custom の issue だけが持ち（Record<string, any>）、キーとの対応を型で持たない。
+    //   キーと params の組は keyedIssue / keyedRefine が型で縛って作ったので、ここではそのまま返す（todo.ts の validate と同じ）。
+    const { params } = issue as { params?: ProblemErrorInput["params"] };
+    return { pointer, key: issue.message, params };
+  }
   if (issue.code === "unrecognized_keys") {
     return {
       pointer,
