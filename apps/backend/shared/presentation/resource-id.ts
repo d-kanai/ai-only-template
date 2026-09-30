@@ -4,11 +4,10 @@ import type { ErrorKey, ErrorParamsArgs } from "../domain/error-key";
 
 // 動的セグメント（/api/<resource>/:id）の id が uuid の形でなければ、無いリソースとして DomainError(not_found) を投げる。
 // 形が合えば同じ値を返す。
-// WHY 404 にする（400 にしない）: /api/todos/abc は「その id のリソースは無い」と同じ意味で、Repository が
-//   uuid の形でない id を「無い」として扱っていた契約を保つ。
-// WHY presentation で確かめる: id は URL から来るリクエストの「形」で、リソースの id は randomUUID（v4）で作る。
-//   形の違う id を query / command に渡さない。Postgres の Repository の isUuid は防御として残している
-//   （todo-repository.postgres.ts のコメント）。
+// WHY 404 にする（400 にしない）: /api/todos/abc は「その id のリソースは無い」と同じ意味（無い uuid の id と同じ応答）。
+// WHY presentation で確かめる（ここが唯一の検査）: id は URL から来るリクエストの「形」で、リソースの id は randomUUID（v4）で
+//   作る。形の違う id を query / command / Repository に渡さない。Repository は形を検査せず、uuid の形でない id は
+//   Postgres のエラー（500）になる（todo-repository.postgres.ts のコメント）。
 // WHY z.uuid()（RFC 9562 の形）: id は randomUUID で作るのでこの形に必ず合う。Postgres の uuid 型はより広い形
 //   （版の桁が 0 など）も受け付けるが、そうした id のリソースはこのアプリでは作られない。
 // WHY キーと params（notFoundKey・params）を呼び出し側が渡す: 「何が見つからないか」（todo.notFound など）は feature ごとに違い、

@@ -158,17 +158,28 @@ describe("PostgresTodoRepository", () => {
     );
   });
 
-  test("uuid の形でない id の findById は、DB のエラーにせず undefined を返す（API で 404 になるように）", async () => {
-    await expect(repository().findById("missing")).resolves.toBeUndefined();
-  });
+  // WHY uuid の形でない id を「無い」（undefined）にしない: 利用者の入力は presentation の parseUuidParam が先に 404 にする
+  //   ので、ここに uuid の形でない id が来るのは呼び出し側の実装ミスだけ。「無い」で通すと誤りが隠れる。Postgres の
+  //   uuid 型のエラー（SQLSTATE 22P02 invalid_text_representation）をそのまま投げ、API は 500 でログに残す。
+  test.each([
+    ["uuid でない文字列", "missing"],
+    ["uuid の前に余分な文字", "x8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e"],
+    ["uuid の後に余分な文字", "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4ex"],
+  ])(
+    "uuid の形でない id（%s）の findById は Postgres の invalid input syntax のエラーで reject する",
+    async (_label, id) => {
+      const result = repository().findById(id);
 
-  test("uuid の前後に余分な文字が付いた id も、DB のエラーにせず undefined を返す", async () => {
-    const todo = Todo.create("牛乳を買う");
-    await repository().save(todo);
-
-    await expect(repository().findById(`x${todo.id}`)).resolves.toBeUndefined();
-    await expect(repository().findById(`${todo.id}x`)).resolves.toBeUndefined();
-  });
+      // drizzle は失敗したクエリを DrizzleQueryError に包み、Postgres のエラー（pg の DatabaseError。SQLSTATE は code）を cause に入れる。
+      await expect(result).rejects.toBeInstanceOf(Error);
+      await expect(result).rejects.toMatchObject({
+        cause: {
+          code: "22P02",
+          message: `invalid input syntax for type uuid: "${id}"`,
+        },
+      });
+    },
+  );
 
   // Postgres の uuid 型は大文字の 16 進も同じ値として受け付けるので、形の検査でも大文字を弾かない（/i）。
   test("大文字で書いた uuid でも、同じ Todo を取り出せて削除できる", async () => {
@@ -194,13 +205,29 @@ describe("PostgresTodoRepository", () => {
     await expect(repository().findAll()).resolves.toEqual([kept]);
   });
 
-  test("無い id・uuid の形でない id の delete は何もしない（エラーにしない）", async () => {
+  test("無い id の delete は何もしない（エラーにしない）", async () => {
     const kept = Todo.create("卵を買う");
     await repository().save(kept);
 
     await repository().delete("00000000-0000-4000-8000-000000000000");
-    await repository().delete("missing");
 
+    await expect(repository().findAll()).resolves.toEqual([kept]);
+  });
+
+  // WHY findById と同じ: 「無い」として黙って何もしないと、消したつもりで消えていない実装ミスが隠れる。
+  test("uuid の形でない id の delete は Postgres の invalid input syntax のエラーで reject し、何も消さない", async () => {
+    const kept = Todo.create("卵を買う");
+    await repository().save(kept);
+
+    const result = repository().delete("missing");
+
+    await expect(result).rejects.toBeInstanceOf(Error);
+    await expect(result).rejects.toMatchObject({
+      cause: {
+        code: "22P02",
+        message: 'invalid input syntax for type uuid: "missing"',
+      },
+    });
     await expect(repository().findAll()).resolves.toEqual([kept]);
   });
 
