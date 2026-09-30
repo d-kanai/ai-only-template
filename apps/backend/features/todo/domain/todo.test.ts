@@ -176,7 +176,10 @@ describe("Todo#rename", () => {
 });
 
 describe("Todo#changeCompletion", () => {
-  test("完了 / 未完了を切り替えた Todo を返し、元の Todo は変えない", () => {
+  test("完了 / 未完了を切り替えた Todo を返し、元の Todo は変えない（作成日時は変わらない）", () => {
+    // WHY 作成時だけ別の時刻にする: changeCompletion が now() を読み直す書き換えでは、作成日時が既定の NOW に変わって落ちる。
+    const createdAt = new Date("2026-09-27T00:00:00.000Z");
+    vi.mocked(now).mockReturnValueOnce(createdAt);
     const original = Todo.create("牛乳を買う");
 
     const completed = original.changeCompletion(true);
@@ -186,6 +189,8 @@ describe("Todo#changeCompletion", () => {
     expect(reopened.completed).toBe(false);
     expect(completed.id).toBe(original.id);
     expect(completed.title).toBe(original.title);
+    expect(completed.createdAt).toEqual(createdAt);
+    expect(reopened.createdAt).toEqual(createdAt);
     expect(original.completed).toBe(false);
   });
 
