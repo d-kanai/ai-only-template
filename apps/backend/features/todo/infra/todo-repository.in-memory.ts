@@ -24,7 +24,9 @@ export class InMemoryTodoRepository implements TodoRepository {
     return Array.from(this.todos.values(), load).sort(
       (a, b) =>
         a.createdAt.getTime() - b.createdAt.getTime() ||
-        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+        // id は Map のキーなので同じ値は無く、等しい場合は起きない。
+        // Stryker disable next-line EqualityOperator: id は一意なので、< を <= にしても同じ順になる（等価な変異）。
+        (a.id < b.id ? -1 : 1),
     );
   }
 

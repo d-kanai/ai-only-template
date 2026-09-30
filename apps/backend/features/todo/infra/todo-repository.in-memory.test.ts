@@ -61,14 +61,23 @@ describe("InMemoryTodoRepository", () => {
     const createdAt = "2026-09-28T09:00:00.000Z";
     const a = createTodoAt("a", createdAt);
     const b = createTodoAt("b", createdAt);
-    // id は randomUUID で決まるので、大きい方を先に保存して、保存順ではなく id の順に並ぶことを確かめる。
+    // id は randomUUID で決まるので、大小を見てから両方の順で保存し、どちらでも id の順に並ぶことを確かめる
+    //   （片方の順だけだと、常に -1 を返す比較でも保存順のまま通ってしまう）。
     const [smaller, larger] = a.id < b.id ? [a, b] : [b, a];
     await repository.save(larger);
     await repository.save(smaller);
+    const reversed = new InMemoryTodoRepository();
+    await reversed.save(smaller);
+    await reversed.save(larger);
 
     const todos = await repository.findAll();
+    const todosReversed = await reversed.findAll();
 
     expect(todos.map((todo) => todo.id)).toEqual([smaller.id, larger.id]);
+    expect(todosReversed.map((todo) => todo.id)).toEqual([
+      smaller.id,
+      larger.id,
+    ]);
   });
 
   test("無い id の findById は undefined を返す", async () => {
