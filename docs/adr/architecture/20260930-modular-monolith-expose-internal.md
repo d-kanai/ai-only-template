@@ -10,7 +10,7 @@ Todo を完了にしたときに通知を送る（notification を足す）こ�
 
 ## 決定
 - backend の feature（`apps/backend/features/<f>/`）を 1 つのモジュールとする（モジュラーモノリス）。直下は `expose/`（他のモジュールへ公開する入口。直下のファイルだけ）と `internal/`（4 層。中だけで使う実装）だけにする。
-- 他のモジュールは `expose/` だけを使い、`internal/` は参照しない（規則 `module-internal`）。他のモジュールの `expose/` を参照してよいのは自モジュールの `internal/presentation/`（組み立ての場所）だけ（規則 `module-expose-only-from-presentation`）。`expose/` が参照してよいのは自モジュールの `internal/`・`expose/` と `@repo/shared/logger`・`@repo/shared/now` だけ（規則 `expose-imports`）。
+- 他のモジュールは `expose/` だけを使い、`internal/` は参照しない（規則 `module-internal`）。他のモジュールの `expose/` を参照してよいのは自モジュールの `internal/presentation/`（組み立ての場所）だけ（規則 `module-expose-only-from-presentation`）。`expose/` はモジュールの公開 API の組み立ての場所（presentation と同じ役割）で、参照してよいのは自モジュールの `internal/`・`expose/`、`apps/backend/shared/`（組み立てに使う `shared/infra/database` など）、`@repo/shared/env`・`@repo/shared/logger`・`@repo/shared/now` だけ（規則 `expose-imports`）。
 - application は他のモジュールを知らない。api ファイルが他のモジュールの `expose/` の関数を import し、command のコンストラクタに関数として渡す（Todo の完了では `ChangeTodoCompletionCommand` が `(message: string) => void` を受け取り、`change-todo-completion.api.ts` が notification の `notify` を渡す）。
 - 呼び出しは fire-and-forget。`notify` は同期の `void` を返し、中の Promise は `.catch` で受けて失敗を error のログ 1 行にする。通知は保存の後、未完了 → 完了に変わったときだけで、本文は id だけの英語（`Todo completed: <id>`）。
 

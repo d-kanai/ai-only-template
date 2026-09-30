@@ -556,18 +556,22 @@ function isExposeFile(path: string): boolean {
   return /^apps\/backend\/features\/[^/]+\/expose\//.test(path);
 }
 
-// expose が参照してよい自前コード: 自モジュールの internal/ と expose/ の中と、presentation と同じ apps/shared のモジュール
-//   （SHARED_MODULES_BY_LAYER.presentation。logger・now）。
-// WHY 自モジュールの internal はどの層でも許す: expose は presentation の api ファイルと同じ組み立ての場所で、application の
-//   command と infra の実装を組み立てて呼ぶ。
-// WHY backend/shared と apps/shared の env を許さない: expose は薄い入口（組み立てて呼ぶだけ）にし、DB の接続や設定の読み込みの
-//   ような処理は internal の層に置いて層の規則をかける。要るようになったら、この許可を規則の変更として広げる。
+// expose が参照してよい自前コード: 自モジュールの internal/ と expose/ の中、apps/backend/shared/ の全体、apps/shared の
+//   presentation が使えるモジュール（SHARED_MODULES_BY_LAYER.presentation。logger・now）と env。
+// WHY 自モジュールの internal はどの層でも許す: expose はモジュールの公開 API の組み立ての場所（presentation の api ファイルと
+//   同じ役割）で、application の command と infra の実装を組み立てて呼ぶ。
+// WHY backend/shared と env を許す（Issue #208 のオーケストレータの判断）: 組み立てには、api ファイルと同じく
+//   `new PostgresTodoRepository(getDatabase().db)` のように backend/shared/infra/database が要る（将来 todo の expose が
+//   internal を組み立てるとき）。env も組み立ての設定として許す。
+// 禁止のまま: 他のモジュールの expose / internal、自モジュールの internal/・expose/ の外の features、test-support、画面側。
 function exposeMayUse(ref: Reference): boolean {
   const moduleName = backendModuleOf(ref.from);
   return (
     isUnder(ref.to, `apps/backend/features/${moduleName}/internal`) ||
     isUnder(ref.to, `apps/backend/features/${moduleName}/expose`) ||
-    SHARED_MODULES_BY_LAYER.presentation.has(ref.to)
+    isUnder(ref.to, "apps/backend/shared") ||
+    SHARED_MODULES_BY_LAYER.presentation.has(ref.to) ||
+    ref.to === SHARED_ENV_MODULE
   );
 }
 
@@ -1157,13 +1161,13 @@ const RULES: Rule[] = [
     isViolation: (ref) => isOtherModulePart(ref, "expose"),
   },
   {
-    // 「expose/ が参照してよいのは、自モジュールの internal/・expose/ と apps/shared の logger・now だけ」（Issue #208）。
-    //   パッケージは next / react / react-dom 以外（層の規則と同じ）。
-    // WHY: expose は他のモジュールへの公開の入口で、自モジュールの command と infra を組み立てて呼ぶだけの薄い層にする。
+    // 「expose/ が参照してよいのは、自モジュールの internal/・expose/、apps/backend/shared/、apps/shared の env・logger・now だけ」
+    //   （Issue #208）。パッケージは next / react / react-dom 以外（層の規則と同じ）。
+    // WHY: expose は他のモジュールへの公開の入口で、presentation と同じく自モジュールの command と infra を組み立てて呼ぶ。
     //   expose/ は 4 層のどれにも属さないので、層の規則（許可の一覧）がかからない。ここで許可の一覧を持たないと、expose から
     //   何を参照しても素通りする。許可の範囲と WHY は exposeMayUse。
     id: "expose-imports",
-    name: "apps/backend/features/<f>/expose/ が参照してよい自前コードは、自モジュールの internal/・expose/ と apps/shared/ の logger・now だけで、next・react も参照しない",
+    name: "apps/backend/features/<f>/expose/ が参照してよい自前コードは、自モジュールの internal/・expose/、apps/backend/shared/、apps/shared/ の env・logger・now だけで（他のモジュールは不可）、next・react も参照しない",
     appliesTo: isExposeFile,
     isViolation: (ref) => usesFramework(ref) || (ref.own && !exposeMayUse(ref)),
   },
@@ -4094,16 +4098,15 @@ const RULE_EXAMPLES: Record<
         "../../todo/internal/domain/todo",
         "type",
       ],
-      // backend/shared（組み立ての部品は internal の presentation / infra に置き、expose は薄くする）。
+      // テストだけが使うコード（test-support）と、backend/shared の前方一致だけの別ディレクトリ（shared-x）。
       [
         "apps/backend/features/notification/expose/x.ts",
-        "../../../shared/infra/database",
+        "../../../test-support/database",
         "value",
       ],
-      // apps/shared の env（presentation と同じく logger・now だけ）。
       [
         "apps/backend/features/notification/expose/x.ts",
-        "@repo/shared/env",
+        "../../../shared-x/infra/y",
         "value",
       ],
       // フレームワークと画面側。
@@ -4154,6 +4157,22 @@ const RULE_EXAMPLES: Record<
       [
         "apps/backend/features/notification/expose/notify.ts",
         "@repo/shared/now",
+        "value",
+      ],
+      // 組み立ての場所として、backend/shared（database など。どの層も）と apps/shared の env も使える。
+      [
+        "apps/backend/features/notification/expose/notify.ts",
+        "../../../shared/infra/database",
+        "value",
+      ],
+      [
+        "apps/backend/features/notification/expose/notify.ts",
+        "../../../shared/domain/domain-error",
+        "type",
+      ],
+      [
+        "apps/backend/features/notification/expose/notify.ts",
+        "@repo/shared/env",
         "value",
       ],
       [
@@ -6165,9 +6184,9 @@ const MUST_REJECT_FILES: Record<string, string> = {
       'import type { NotificationSender } from "../../../notification/internal/domain/notification-sender";',
       'import { SendNotificationCommand } from "../../../notification/internal/application/send-notification.command";',
     ),
-  // expose-imports: 他のモジュールの internal / expose、backend/shared、apps/shared の env、フレームワーク、自モジュールの
-  //   internal/・expose/ の外。自モジュールの internal は通る（最後の行。apps/shared の logger・now は must-pass の notify.ts で見る。
-  //   この fixture の apps/shared の exports には logger が無く、shared-exports にかかるため）。
+  // expose-imports: 他のモジュールの internal / expose、フレームワーク、自モジュールの internal/・expose/ の外。backend/shared と
+  //   apps/shared の env、自モジュールの internal は通る（3・4 行目と最後の行。apps/shared の logger・now は must-pass の notify.ts で
+  //   見る。この fixture の apps/shared の exports には logger が無く、shared-exports にかかるため）。
   "apps/backend/features/notification/expose/bad-expose.ts": lines(
     'import type { Todo } from "../../todo/internal/domain/todo";',
     'import { x } from "../../todo/expose/x";',
@@ -6985,8 +7004,6 @@ const MUST_REJECT_VIOLATIONS = [
   ...[
     "apps/backend/features/todo/internal/domain/todo",
     "apps/backend/features/todo/expose/x",
-    "apps/backend/shared/infra/database",
-    "apps/shared/env",
     "next/server",
     "apps/backend/features/notification/lib/y",
   ].map(
@@ -7428,8 +7445,8 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { DeleteTodoCommand } from "../application/delete-todo.command";',
     'const lazy = import("../infra/todo-repository.postgres");',
   ),
-  // Issue #208 モジュールの境界: 公開の入口（expose）から自モジュールの internal（値・型）・expose の中・apps/shared の
-  //   logger / now・Node の組み込み、組み立ての場所（presentation）から他のモジュールの expose（値・型）。
+  // Issue #208 モジュールの境界: 公開の入口（expose）から自モジュールの internal（値・型）・expose の中・backend/shared・
+  //   apps/shared の env / logger / now・Node の組み込み、組み立ての場所（presentation）から他のモジュールの expose（値・型）。
   "apps/backend/features/notification/expose/notify.ts": lines(
     'import { logger } from "@repo/shared/logger";',
     'import { now } from "@repo/shared/now";',
@@ -7437,6 +7454,8 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { SendNotificationCommand } from "../internal/application/send-notification.command";',
     'import { LogNotificationSender } from "../internal/infra/notification-sender.log";',
     'import type { NotificationSender } from "../internal/domain/notification-sender";',
+    'import { getDatabase } from "../../../shared/infra/database";',
+    'import { env } from "@repo/shared/env";',
     'export type { Message } from "./message";',
   ),
   "apps/backend/features/notification/expose/message.ts": lines(

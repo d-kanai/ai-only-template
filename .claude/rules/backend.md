@@ -40,8 +40,8 @@ backend の feature を 1 つのモジュールとし、他のモジュールと
     - WHY: `internal/` はモジュールの中身で、他のモジュールが依存すると中身を変えるたびに壊れ、境界が無くなる。公開するものは `expose/` のファイルで決める。
   - `module-expose-only-from-presentation`: 他のモジュールの `expose/` を参照してよいのは、自モジュールの `internal/presentation/`（組み立ての場所）だけ。application・domain・infra・`expose/` からは違反。
     - WHY: 他のモジュールの機能は api ファイルの組み立てで取り出し、application の command / query にはコンストラクタで関数として渡す（Issue #123 のコンストラクタ注入）。application が他のモジュールを import すると、ユースケースのテストで差し替えられず、モジュール間の依存がコードのあちこちに散る。
-  - `expose-imports`: `expose/` が参照してよい自前コードは、自モジュールの `internal/`（どの層も）・`expose/` と、`@repo/shared/logger`・`@repo/shared/now`（presentation と同じ）だけ。`apps/backend/shared/`・`@repo/shared/env`・他のモジュール・`next` / `react` / `react-dom` は違反。
-    - WHY: `expose/` は 4 層のどれにも属さず層の規則がかからないので、許可の一覧をここで持つ。`expose/` は組み立てて呼ぶだけの薄い入口にし、DB や設定を使う処理は `internal/` の層に置いて層の規則をかける。要るようになったら規則を変える。
+  - `expose-imports`: `expose/` が参照してよい自前コードは、自モジュールの `internal/`（どの層も）・`expose/`、`apps/backend/shared/`（どの層も）、`@repo/shared/env`・`@repo/shared/logger`・`@repo/shared/now` だけ。他のモジュール（`expose/`・`internal/`）、自モジュールの `internal/`・`expose/` の外、`apps/backend/test-support/`、画面側、`next` / `react` / `react-dom` は違反。
+    - WHY: `expose/` は 4 層のどれにも属さず層の規則がかからないので、許可の一覧をここで持つ。`expose/` はモジュールの公開 API の組み立ての場所（presentation の api ファイルと同じ役割）で、`new PostgresTodoRepository(getDatabase().db)` のように internal を組み立てるときに `shared/infra/database` が要るため、backend/shared と env も許す（Issue #208 のオーケストレータの判断）。
   - 層の規則との関係: feature の presentation の許可に「他のモジュールの `expose/`」を足した。application・domain・infra から他のモジュールの `expose/`・`internal/` を参照すると、層の規則（参照先が自 feature の層でない）とモジュールの規則の両方にかかる（重ねて検出する）。自モジュールの `expose/` を `internal/` から参照するのは層の規則で違反（`expose/` が `internal/` を使うので循環する）。
   - 限界（見逃す）: `apps/backend/features/` の外（`apps/backend/test-support/`・`apps/backend/api-journeys/` のテスト、frontend の `app/api`）から `internal/` への参照はこの規則の対象外（test-support は InMemory の実装のために internal を使い、app/api は exports 経由で internal/presentation の api ファイルを指す。exports と `app-api` が見る）。テスト（`*.test.ts`）も対象外（列挙がテストを除く）。
 - 呼び出しの形（Todo の完了で notification に通知する。`features/todo/internal/application/change-todo-completion.command.ts`）:
