@@ -38,6 +38,15 @@ import { afterAll, describe, expect, it } from "vitest";
 //     import / import type / 副作用だけの import / dynamic import() / export … from のどれも違反。
 //   - exports-test-support: apps/*/package.json の exports のキーか値（条件付きの入れ子も）に `test-support` を含む。
 //     WHY: exports に載せると、別のパッケージから `@repo/<pkg>/...` で本番のコードに読み込める入口になる。
+//   - deploy-verifies-images: .github/workflows/deploy.yml に、push したイメージに test-support が無いことを確かめるステップ
+//     （`Verify runtime image has no test-support`・`Verify migrate image has no test-support`）が無い、そのステップに
+//     `if: steps.config.outputs.ready == 'true'` が無い、`run:` に find のパターン `-path "*test-support*"` が無いもの。
+//     WHY パターンまで見る: `test-support` の文字だけだと、find を消してもエラーの文言（`::error::test-support が…`）で通る。
+//     WHY: この検査（(a)〜(d)）はリポジトリのファイルを見るだけで、ビルドした結果（イメージ）は deploy のステップだけが見る。
+//     ステップを消す・名前だけ残して run を変えると、イメージへの混入が黙って通る。WHY if も: 他のステップと同じ条件でないと、
+//     Variables の無いリポジトリで失敗するか、条件を変えたときに黙ってスキップされる。
+//     限界: ステップは「行頭が `- key:` の行」で区切り、コメントの行（`#` で始まる）は除いて読む。パターンのほか（find の結果を
+//     判定に使っているか・対象のイメージ）は見ない（手元のイメージで exit 0 / 混入で exit 1 を実測した。Issue #181 の work-logs）。
 // 検査の対象の列挙が 0 件（test-support/ のファイル・本番のソース・apps/*/package.json）なら、実ファイルのテストで失敗させる
 //   （列挙が壊れて 0 件になると違反も 0 件になり、常に緑になるため）。
 //
@@ -52,8 +61,8 @@ import { afterAll, describe, expect, it } from "vitest";
 // import の抽出の限界: コメントは除いてから探す。文字列の中の `from "x"` のような文字列は import と数える（多く検出する側）。
 //   `require("x")`・テンプレートリテラルの `import(`x`)`・tsconfig の paths や package.json の imports（`#x`）で test-support を
 //   別名にした参照は見ない（今のリポジトリの paths は `@/*` だけ）。symlink は列挙でたどらない。
-// ほかの保証: deploy.yml が、push した runtime のイメージに test-support のパスが無いことを find で確かめる（.dockerignore の変更で
-//   漏れたときに main へのデプロイで止める）。architecture.test.ts の backend-placement / frontend-placement が、apps/backend と
+// ほかの保証: deploy.yml が、push した runtime と migrate のイメージに test-support のパスが無いことを find で確かめる（.dockerignore の
+//   変更で漏れたときに main へのデプロイで止める。コンテキスト全体が入るのは migrate）。architecture.test.ts の backend-placement / frontend-placement が、apps/backend と
 //   apps/frontend_customer の直下に test-support/ を置くことを許す。
 
 type RuleId =
@@ -296,6 +305,79 @@ function collectViolations(root: string): Record<RuleId, string[]> {
       );
     }),
   };
+}
+
+// --- (e) deploy.yml のイメージの検査のステップ ---
+
+const DEPLOY_WORKFLOW = ".github/workflows/deploy.yml";
+const VERIFY_STEP_NAMES = [
+  "Verify runtime image has no test-support",
+  "Verify migrate image has no test-support",
+];
+const DEPLOY_READY_CONDITION = "if: steps.config.outputs.ready == 'true'";
+const FIND_PATTERN = '-path "*test-support*"';
+
+// 行頭の `- ` を除いたキーの行（`- if: x` → `if: x`）。
+const stepLine = (line: string) => line.trim().replace(/^-\s+/, "");
+const indentOf = (line: string) => line.length - line.trimStart().length;
+
+// ワークフローのステップ（`- key:` で始まるリストの要素）ごとの行。コメントの行と空行は除く。
+function readSteps(yaml: string): string[][] {
+  const lines = yaml
+    .split("\n")
+    .filter((line) => line.trim() !== "" && !line.trim().startsWith("#"));
+  const steps: string[][] = [];
+  let current: { indent: number; lines: string[] } | undefined;
+  for (const line of lines) {
+    const startsStep = /^\s*-\s+[\w-]+:/.test(line);
+    if (
+      current !== undefined &&
+      (indentOf(line) < current.indent ||
+        (startsStep && indentOf(line) === current.indent))
+    ) {
+      steps.push(current.lines);
+      current = undefined;
+    }
+    if (current === undefined && startsStep) {
+      current = { indent: indentOf(line), lines: [] };
+    }
+    current?.lines.push(line);
+  }
+  if (current !== undefined) steps.push(current.lines);
+  return steps;
+}
+
+// ステップの run の中身（`run:` の行の後ろと、それより深い行）。run が無ければ undefined。
+function runOf(step: string[]): string | undefined {
+  const index = step.findIndex((line) => /^run:/.test(stepLine(line)));
+  if (index === -1) return undefined;
+  const runLine = step[index] ?? "";
+  const keyIndent =
+    indentOf(runLine) + (runLine.trim().startsWith("-") ? 2 : 0);
+  // run の後ろで、run のキーより深い行が続くところまで（次のキー・次のステップの前まで）。
+  const rest = step.slice(index + 1);
+  const end = rest.findIndex((line) => indentOf(line) <= keyIndent);
+  const body = end === -1 ? rest : rest.slice(0, end);
+  return [stepLine(runLine).slice("run:".length), ...body].join("\n");
+}
+
+// 決めた名前のステップごとに、無い・if が無い・run に find のパターンが無いものを返す。
+function findDeployVerifyViolations(yaml: string): string[] {
+  const steps = readSteps(yaml);
+  return VERIFY_STEP_NAMES.flatMap((name) => {
+    const step = steps.find((lines) =>
+      lines.some((line) => stepLine(line) === `name: ${name}`),
+    );
+    if (step === undefined) return [`${name}: ステップが無い`];
+    return [
+      ...(step.some((line) => stepLine(line) === DEPLOY_READY_CONDITION)
+        ? []
+        : [`${name}: ${DEPLOY_READY_CONDITION} が無い`]),
+      ...(runOf(step)?.includes(FIND_PATTERN)
+        ? []
+        : [`${name}: run に ${FIND_PATTERN} が無い`]),
+    ];
+  });
 }
 
 // テストの入力を行の配列で書き、1 行目を 1 として違反の行番号を読みやすくする。
@@ -839,6 +921,169 @@ describe("列挙と検査（fixture）", () => {
   });
 });
 
+describe("deploy.yml のイメージの検査のステップ（findDeployVerifyViolations）", () => {
+  const step = (
+    name: string,
+    run: string[],
+    condition = DEPLOY_READY_CONDITION,
+  ) =>
+    [
+      `      - ${condition}`,
+      `        name: ${name}`,
+      "        run: |",
+      ...run.map((line) => `          ${line}`),
+    ].join("\n");
+  const verify = (image: string) => [
+    `docker pull "$${image}"`,
+    `found="$(docker run --rm "$${image}" -c 'find / -path "*test-support*" -print')"`,
+  ];
+  const runtime = step(
+    "Verify runtime image has no test-support",
+    verify("IMAGE"),
+  );
+  const migrate = step(
+    "Verify migrate image has no test-support",
+    verify("MIGRATE_IMAGE"),
+  );
+  const workflow = (...steps: string[]) =>
+    lines("jobs:", "  deploy:", "    steps:", ...steps);
+
+  it.each([
+    ["2 つのステップがある", workflow(runtime, migrate)],
+    [
+      "間に別のステップ・コメントがある",
+      workflow(
+        runtime,
+        "      # マイグレーションのイメージ",
+        "      - if: steps.config.outputs.ready == 'true'",
+        "        name: Build and push migrate image",
+        "        uses: docker/build-push-action@v7",
+        migrate,
+      ),
+    ],
+    [
+      "run が 1 行（| を使わない）",
+      workflow(
+        runtime,
+        lines(
+          "      - name: Verify migrate image has no test-support",
+          "        if: steps.config.outputs.ready == 'true'",
+          '        run: find / -path "*test-support*" -print',
+        ),
+      ),
+    ],
+  ])("%s は違反なし", (_name, yaml) => {
+    expect(findDeployVerifyViolations(yaml)).toEqual([]);
+  });
+
+  it.each<[string, string, string[]]>([
+    [
+      "ステップが無い",
+      workflow(),
+      [
+        "Verify runtime image has no test-support: ステップが無い",
+        "Verify migrate image has no test-support: ステップが無い",
+      ],
+    ],
+    [
+      "migrate のステップが無い",
+      workflow(runtime),
+      ["Verify migrate image has no test-support: ステップが無い"],
+    ],
+    [
+      "コメントアウトしたステップ",
+      workflow(
+        runtime,
+        migrate
+          .split("\n")
+          .map((line) => `      # ${line.trim()}`)
+          .join("\n"),
+      ),
+      ["Verify migrate image has no test-support: ステップが無い"],
+    ],
+    [
+      "名前だけ残して run に find のパターンが無い（エラーの文言にだけ test-support）",
+      workflow(
+        runtime,
+        step("Verify migrate image has no test-support", [
+          'echo "::error::test-support"',
+        ]),
+      ),
+      [
+        'Verify migrate image has no test-support: run に -path "*test-support*" が無い',
+      ],
+    ],
+    [
+      "run が無い（名前だけ）",
+      workflow(
+        runtime,
+        lines(
+          "      - if: steps.config.outputs.ready == 'true'",
+          "        name: Verify migrate image has no test-support",
+        ),
+      ),
+      [
+        'Verify migrate image has no test-support: run に -path "*test-support*" が無い',
+      ],
+    ],
+    [
+      "test-support が run の外（次のステップ）にだけある",
+      workflow(
+        runtime,
+        step("Verify migrate image has no test-support", ["true"]),
+        lines("      - name: Other", "        run: echo test-support"),
+      ),
+      [
+        'Verify migrate image has no test-support: run に -path "*test-support*" が無い',
+      ],
+    ],
+    [
+      "test-support が run のコメントにだけある",
+      workflow(
+        runtime,
+        step("Verify migrate image has no test-support", [
+          "# test-support",
+          "true",
+        ]),
+      ),
+      [
+        'Verify migrate image has no test-support: run に -path "*test-support*" が無い',
+      ],
+    ],
+    [
+      "if が無い・別の条件",
+      workflow(
+        step(
+          "Verify runtime image has no test-support",
+          verify("IMAGE"),
+          "if: always()",
+        ),
+        lines(
+          "      - name: Verify migrate image has no test-support",
+          '        run: find / -path "*test-support*" -print',
+        ),
+      ),
+      [
+        "Verify runtime image has no test-support: if: steps.config.outputs.ready == 'true' が無い",
+        "Verify migrate image has no test-support: if: steps.config.outputs.ready == 'true' が無い",
+      ],
+    ],
+    [
+      "名前の前方一致だけ（別の名前）",
+      workflow(
+        runtime,
+        step(
+          "Verify migrate image has no test-support files",
+          verify("MIGRATE_IMAGE"),
+        ),
+      ),
+      ["Verify migrate image has no test-support: ステップが無い"],
+    ],
+  ])("%s は違反", (_name, yaml, expected) => {
+    expect(findDeployVerifyViolations(yaml)).toEqual(expected);
+  });
+});
+
 describe("test-support（実ファイル）", () => {
   // WHY 規則ごとに it を分ける: fault injection（.dockerignore の行を消す・本番に import を足す）で、どの規則が効いたかを分けて見る。
   const violations = collectViolations(repoRoot);
@@ -866,6 +1111,13 @@ describe("test-support（実ファイル）", () => {
     expect(files).toContain("apps/backend/shared/infra/database.ts");
     expect(files).toContain("apps/frontend_customer/shared/i18n/i18n.tsx");
     expect(violations["production-imports-test-support"]).toEqual([]);
+  });
+
+  it("deploy-verifies-images: deploy.yml が runtime と migrate のイメージに test-support が無いことを確かめる", () => {
+    const yaml = readFileSync(join(repoRoot, DEPLOY_WORKFLOW), "utf8");
+    // WHY ステップの区切りが働いていることを先に確かめる: 区切りが壊れて 1 つの塊になると、別のステップの run の test-support で通る。
+    expect(readSteps(yaml).length).toBeGreaterThan(8);
+    expect(findDeployVerifyViolations(yaml)).toEqual([]);
   });
 
   it("exports-test-support: apps/*/package.json の exports に test-support が無い", () => {

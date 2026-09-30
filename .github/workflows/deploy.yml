@@ -137,24 +137,27 @@ jobs:
           cache-to: type=gha,scope=runtime,mode=max
 
       # push した runtime のイメージに test-support（テストだけが使うコード。apps/*/test-support/。Issue #181）が入っていないことを確かめる。
-      # WHY: .dockerignore の **/test-support を消す・! で戻すなどの変更で漏れたときに、main へのデプロイで止める（migrate と service の
-      #   入れ替えより前）。.dockerignore の行とパターンは rule-tests/test-support.test.ts が PR の CI で見る。ここはビルドの結果で見る。
+      # WHY: runtime に入るのは next build の standalone（トレースしたファイル）だけで、test-support が入りうるのは、app/ のルートとして
+      #   置いたもの（app/api/test-support/*）と本番のコードから import されたものだけ。そこを main へのデプロイ（migrate と service の
+      #   入れ替えより前）で止める。コンテキスト全体（COPY . .）が入るのは migrate のイメージで、下の「Verify migrate image」が見る。
+      #   .dockerignore の行とパターン・本番のコードの import は rule-tests/test-support.test.ts が PR の CI で見る。ここはビルドの結果で見る。
       # docker pull: build-push-action の push: true はイメージをランナーの docker に残さず、load: true は push と同時に使えないので、
       #   Artifact Registry から取る（上の configure-docker の資格情報を使う）。
-      # docker run --user root --entrypoint sh: runtime の CMD（node server.js）ではなくシェルで find を実行する。root にするのは、
-      #   USER node のままだと読めないディレクトリで find が失敗し、見落とすか誤って止まるため。
-      # find / -path /proc -prune -o -path "*test-support*" -print: パスのどこかに test-support を含むファイル・ディレクトリを列挙する
-      #   （/proc はコンテナのプロセスの情報でイメージのファイルではないので入らない）。
+      # docker run --user root --entrypoint sh: イメージの CMD ではなくシェルで find を実行する。root にするのは、USER node のままだと
+      #   読めないディレクトリで find が失敗するため。
+      # find / -path /proc -prune -o -path /sys -prune -o -path "*test-support*" -print: パスのどこかに test-support を含むファイル・
+      #   ディレクトリを列挙する（/proc・/sys はコンテナの実行時の情報でイメージのファイルではないので入らない）。
       # found="$(...)": 出力を先に受け取る。docker run や find が失敗したときは、run の既定のシェル（bash -e）でこのステップが失敗する
       #   （パイプで grep につなぐと、失敗しても「見つからなかった」と区別できない）。1 行でもあれば ::error:: を出して失敗する。
+      # rule-tests/test-support.test.ts がこのステップ（名前・if・run の test-support）があることを確かめる。
       - if: steps.config.outputs.ready == 'true'
         name: Verify runtime image has no test-support
         run: |
           docker pull "$IMAGE"
-          found="$(docker run --rm --user root --entrypoint sh "$IMAGE" -c 'find / -path /proc -prune -o -path "*test-support*" -print')"
+          found="$(docker run --rm --user root --entrypoint sh "$IMAGE" -c 'find / -path /proc -prune -o -path /sys -prune -o -path "*test-support*" -print')"
           if [ -n "$found" ]; then
             echo "$found"
-            echo "::error::test-support がイメージに含まれている（.dockerignore の **/test-support を確かめる）"
+            echo "::error::test-support が runtime のイメージに含まれている（app/api/test-support/ と本番のコードの import を確かめる）"
             exit 1
           fi
 
@@ -169,6 +172,22 @@ jobs:
           tags: ${{ env.MIGRATE_IMAGE }}
           cache-from: type=gha,scope=migrate
           cache-to: type=gha,scope=migrate,mode=max
+
+      # push した migrate のイメージに test-support が入っていないことを確かめる（Issue #181）。
+      # WHY: migrate は deps ステージ（COPY . . でビルドのコンテキスト全体）から作るので、.dockerignore の **/test-support を消す・
+      #   ! で戻すなどの変更で漏れると、ここに入る（runtime は standalone だけなので入らない）。migrate ジョブのイメージを入れ替える前に止める。
+      # 書き方（docker pull・--user root・find・found）は上の「Verify runtime image」と同じ。
+      # rule-tests/test-support.test.ts がこのステップ（名前・if・run の test-support）があることを確かめる。
+      - if: steps.config.outputs.ready == 'true'
+        name: Verify migrate image has no test-support
+        run: |
+          docker pull "$MIGRATE_IMAGE"
+          found="$(docker run --rm --user root --entrypoint sh "$MIGRATE_IMAGE" -c 'find / -path /proc -prune -o -path /sys -prune -o -path "*test-support*" -print')"
+          if [ -n "$found" ]; then
+            echo "$found"
+            echo "::error::test-support が migrate のイメージに含まれている（.dockerignore の **/test-support を確かめる）"
+            exit 1
+          fi
 
       # migrate ジョブのイメージを今回のものにする。WHY service より先: 新しいコードが使う表・列を、新しいリビジョンが
       #   リクエストを受ける前に作っておく（マイグレーションは古いコードとも動く形で書く前提）。
