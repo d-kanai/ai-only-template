@@ -17,12 +17,12 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 //   まとめて返すため。domain の DomainError(validation_error) は key 1 つで、どの項目の誤りかを持たない。
 // WHY domain と同じキー・同じ数え方・同じ上限（TODO_TITLE_MAX_LENGTH）にする: presentation は domain より厳しくしない
 //   （domain が通す値を弾かない）。上限の数値は domain の定数を参照し、2 か所に書かない。規則の正は domain で、domain は
-//   ここを通った値も含めて常に完全に検証する（todo.ts の todoTitleSchema。.claude/rules/backend.md の presentation）。
+//   ここを通った値も含めて常に完全に検証する（todo.ts の todoPropsSchema。.claude/rules/backend.md の presentation）。
 // WHY 関数にする: スキーマを最上位の定数にすると static な変異になり mutation testing で数えない（json-body.ts の requestBodySchema）。
 function createTodoRequestSchema() {
   return requestBodySchema({
     // 型が違う・無いときのキー（request.field.notString）は json-body.ts の toProblemError が決める（z.string に error は書かない）。
-    // trim してからコードポイント数（Array.from）で数える: todo.ts の todoTitleSchema と同じ（WHY はそちら）。
+    // trim してからコードポイント数（Array.from）で数える: todo.ts の todoPropsSchema の title と同じ（WHY はそちら）。
     title: z
       .string()
       .trim()

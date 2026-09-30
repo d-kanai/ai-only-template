@@ -23,7 +23,7 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 function updateTodoRequestSchema() {
   return requestBodySchema({
     // 型が違うときのキー（request.field.notString / notBoolean）は json-body.ts の toProblemError が決める（z.string などに error は書かない）。
-    // trim してからコードポイント数（Array.from）で数える: todo.ts の todoTitleSchema と同じ（WHY はそちら）。
+    // trim してからコードポイント数（Array.from）で数える: todo.ts の todoPropsSchema の title と同じ（WHY はそちら）。
     title: z
       .string()
       .trim()
