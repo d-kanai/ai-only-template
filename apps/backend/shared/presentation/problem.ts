@@ -173,7 +173,8 @@ function problemResponse(
   });
 }
 
-// presentation の各 API が catch した例外を Problem Details の Response に変換する。変換の規則をここ 1 か所に集める。
+// presentation の各 API の handle が投げた例外（withProblemResponse が捕まえたもの）を Problem Details の Response に変換する。
+//   変換の規則をここ 1 か所に集める。
 // WHY request を受け取る: instance（この発生を指す URI 参照）にリクエストのパスを入れるため。
 export function toProblemResponse(error: unknown, request: Request): Response {
   if (error instanceof DomainError) {
@@ -207,4 +208,32 @@ export function toProblemResponse(error: unknown, request: Request): Response {
     undefined,
     undefined,
   );
+}
+
+// presentation の各 api の handle（Route Handler）を包み、handler が投げた例外を toProblemResponse で Problem Details の
+//   Response にする（Issue #141）。各 api は `readonly handle = withProblemResponse(async (request[, ctx]) => { ... })` と書く。
+// WHY 包む関数にする: 以前は 5 本の api が同じ try { ... } catch (error) { return toProblemResponse(error, request); } を
+//   手書きしていた。Next の Route Handler には共通の catch が無い（Proxy は handler の例外を捕まえず、instrumentation の
+//   onRequestError は記録するだけ）ので、1 本でも書き忘れると Problem Details ではない Next の素の 500 がクライアントに漏れる。
+//   書き忘れは規則 presentation-with-problem-response（rule-tests/architecture.test.ts）が止める。
+// WHY handle の意味（Route Handler そのもの）と形（アロー関数のプロパティ）は変えない: 戻り値は handler と同じ引数の関数なので、
+//   `export const GET = new ListTodosApi(...).handle` の組み立ても、テストの `.handle(request)` もそのまま使える。
+//   包む対象はアロー関数のままなので、中の this はインスタンスを指し続ける。
+// WHY Args を型引数にして引数をそのまま透過する: (request) と (request, ctx: { params: Promise<...> }) の両方の handler を
+//   同じ関数で包み、ctx の型（動的セグメントの名前）を呼び出し側に残すため。先頭は Request に固定する（instance に使う）。
+// WHY parseJsonBody や await ctx.params を共通化しない（ユーザー判断）: 本文の有無・動的セグメントの有無と、id と本文を
+//   確かめる順番（update-todo.api.ts は id を先に見て 404 を優先する）が api ごとに違い、handler の中に書いた方が
+//   その api の処理を 1 か所で読める。ここは例外の変換だけを受け持つ。
+// WHY handler の呼び出しを try の中に置く（handler(...args).catch(...) にしない）: async でない handler が同期で throw
+//   しても、同じく Problem Details にするため。
+export function withProblemResponse<Args extends [Request, ...unknown[]]>(
+  handler: (...args: Args) => Promise<Response>,
+): (...args: Args) => Promise<Response> {
+  return async (...args) => {
+    try {
+      return await handler(...args);
+    } catch (error) {
+      return toProblemResponse(error, args[0]);
+    }
+  };
 }

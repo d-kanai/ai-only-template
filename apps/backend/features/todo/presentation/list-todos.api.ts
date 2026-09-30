@@ -1,5 +1,5 @@
 import { getDatabase } from "../../../shared/infra/database";
-import { toProblemResponse } from "../../../shared/presentation/problem";
+import { withProblemResponse } from "../../../shared/presentation/problem";
 import { ListTodosQuery } from "../application/list-todos.query";
 import type { Todo } from "../domain/todo";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
@@ -42,16 +42,20 @@ export class ListTodosApi {
 
   // WHY アロー関数のプロパティにする: Route Handler として `export const GET = new ListTodosApi(...).handle` のように
   //   インスタンスから取り出して渡すと、メソッドでは this が外れて this.listTodos を読めない。アロー関数は作ったときの
-  //   this（インスタンス）を持ち続ける。
-  readonly handle = async (request: Request): Promise<Response> => {
-    try {
+  //   this（インスタンス）を持ち続ける（withProblemResponse で包んでも、中のアロー関数の this は変わらない）。
+  // WHY withProblemResponse で包む（Issue #141）: handler が投げた例外（DomainError・InvalidRequestError・想定外の例外）を
+  //   Problem Details の Response に変換する。Next の Route Handler には共通の catch が無く、包み忘れると Next の素の 500 が
+  //   漏れるので、規則 presentation-with-problem-response（rule-tests/architecture.test.ts）が包み忘れを止める。
+  //   以前は各 api が try / catch で toProblemResponse を手書きしていた（problem.ts の withProblemResponse のコメント）。
+  readonly handle = withProblemResponse(
+    // WHY 使わない request を引数に書く: withProblemResponse が第 1 引数の request を Problem の instance に使うので、handler の
+    //   形（(request) => Promise<Response>）を Route Handler と同じにそろえる。
+    async (_request: Request): Promise<Response> => {
       const todos = await this.listTodos.execute();
       const body: ListTodosResponse = { todos: todos.map(toResponseItem) };
       return Response.json(body);
-    } catch (error) {
-      return toProblemResponse(error, request);
-    }
-  };
+    },
+  );
 }
 
 // app/api/todos/route.ts が re-export する Route Handler。本番は常に Postgres で組み立てる。
