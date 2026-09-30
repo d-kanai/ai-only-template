@@ -1,0 +1,177 @@
+# frontend-customer を Cloud Run にデプロイする（Issue #137）。環境は stg / prod の 2 つで、GCP のプロジェクトが別。
+#   - main への push（PR のマージ）: stg に自動でデプロイする。
+#   - 手動実行（Actions の「Run workflow」で main と環境を選ぶ）: 選んだ環境にデプロイする。prod はこれでしか出さない。
+#   WHY prod を自動にしない: stg で動きを確かめてから、人が出すタイミングを決める（ADR docs/adr/tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md）。
+# 流れ: WIF で GCP に認証 → runtime / migrate の 2 イメージを build して Artifact Registry に push → migrate ジョブのイメージを
+#   入れ替えて実行（成功を待つ）→ service のイメージを入れ替える → トラフィックを最新のリビジョンに向ける。
+# 器（service / job / DB / 権限）は Terraform（infra/envs/<環境> → infra/modules/app）が作る。このワークフローはイメージだけを
+#   入れ替える（WHY は infra/modules/app/main.tf）。
+# 名前（service / job）は infra/modules/app/main.tf の locals（name_prefix の既定）と同じ。GitHub の Variables（vars.*）は
+#   GitHub Environment（stg / prod）ごとに `terraform output github_variables` の値を入れる（infra/README.md の手順 4）。
+# 手順・ロールバックは .claude/skills/deploy/SKILL.md。
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  # 手動のデプロイ。prod へのデプロイと、stg の出し直しに使う。main 以外のブランチを選ぶと、下の job の if でスキップされる。
+  workflow_dispatch:
+    inputs:
+      # デプロイ先の GitHub Environment（= GCP のプロジェクト）。job の environment と concurrency の group に使う。
+      # WHY choice: 自由入力だと typo の Environment（Variables が無い）を GitHub が新しく作り、何もせずに終わる。
+      # WHY 既定 stg: 「Run workflow」をそのまま押したときに prod に出ないようにする。
+      environment:
+        description: デプロイ先の環境
+        type: choice
+        options: [stg, prod]
+        default: stg
+        required: true
+
+# 同じ環境へのデプロイを 1 本ずつ順に実行する（stg と prod は別の group なので並行してよい）。
+# group: push には inputs が無い（空）ので stg になる（job の environment と同じ式）。WHY workflow の concurrency で environment の
+#   名前を直接使わない: concurrency で使える context は github / inputs / vars だけ
+#   （https://docs.github.com/en/actions/reference/workflows-and-actions/contexts の表、2026-09-30 確認）。
+# WHY cancel-in-progress: false: 途中で止めると、マイグレーションを当てたのにアプリが古いまま、のような中途半端な状態が残る。
+#   後から来た実行は、前の実行が終わるまで待つ（GitHub は待っている実行を最新の 1 つだけ残す）。
+concurrency:
+  group: deploy-${{ inputs.environment || 'stg' }}
+  cancel-in-progress: false
+
+# contents: read: checkout だけ。id-token: write: GitHub の OIDC トークンを発行し、WIF で GCP のトークンに交換する（鍵ファイルを使わない）。
+permissions:
+  contents: read
+  id-token: write
+
+# 名前（infra/modules/app/main.tf の locals と同じ。環境によらず同じ名前で、違うのはプロジェクトだけ）。
+# WHY ここに GCP_* の vars を書かない: Environment の Variables は、job が environment を宣言して runner で動き始めてから読める
+#   （contexts の vars の注記「Configuration variables at the environment level are automatically available after their
+#   environment is declared by the runner」）。workflow の env では Environment の値にならないおそれがあるので、ステップで読む。
+env:
+  SERVICE: frontend-customer
+  MIGRATE_JOB: frontend-customer-migrate
+
+jobs:
+  deploy:
+    # WHY main に限る: workflow_dispatch は任意のブランチを選べるので、条件が無いと main にマージしていない（レビューと CI を
+    #   通っていない）コードを出せる。人の注意に頼らず、ワークフローの条件で止める（CLAUDE.md の原則 7）。
+    #   push のトリガーは main だけなので、push では常に満たす。WIF の条件（infra/modules/app/github_wif.tf の ref）でも
+    #   main 以外のトークンを拒否する（こちらはブランチ側でワークフローを書き換えても外せない）。
+    # WHY Variables の有無をここで見ない: job の if は environment の宣言より前に評価されるので、Environment の Variables
+    #   （vars.GCP_WIF_PROVIDER）が見えない（上の env の WHY）。有無は最初のステップ（config）で見る。
+    if: github.ref == 'refs/heads/main'
+    # デプロイ先の GitHub Environment。push は stg、手動実行は選んだ環境（inputs.environment）。
+    # WHY Environment を使う: vars.GCP_* が Environment ごとの値（= 環境ごとの GCP プロジェクト）になり、prod には required reviewers
+    #   （承認してから動く）を付けられる。WIF の条件も Environment の名前を見る（infra/modules/app/github_wif.tf）。
+    environment: ${{ inputs.environment || 'stg' }}
+    runs-on: ubuntu-latest
+    steps:
+      # Environment の Variables を読み、以降のステップの環境変数にする。Variables が無ければ ready=false にして、以降のステップを
+      #   すべてスキップする（ジョブは緑のまま、ログに notice を出す）。
+      # WHY 失敗にしない: GCP の準備（infra/README.md の初回手順）をする前のリポジトリ（テンプレートから作った直後など）で、
+      #   main への push のたびに赤くならないようにする。
+      # WHY vars を env 経由で渡す: run の中に ${{ }} を直接書くと、値がシェルのスクリプトとして解釈される。
+      - name: Read environment variables
+        id: config
+        env:
+          GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          GCP_AR_REPO: ${{ vars.GCP_AR_REPO }}
+          SHA: ${{ github.sha }}
+          ENVIRONMENT: ${{ inputs.environment || 'stg' }}
+        run: |
+          if [ -z "$GCP_WIF_PROVIDER" ]; then
+            echo "::notice::GitHub Environment '$ENVIRONMENT' に Variables（GCP_WIF_PROVIDER など）が無いので、デプロイをスキップする（infra/README.md の手順 4）。"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "REGION=$GCP_REGION"
+            # イメージのタグは git の sha。WHY: どのコミットのイメージがどのリビジョンで動いているかを 1 対 1 で辿れる（latest は使わない）。
+            echo "IMAGE=$GCP_AR_REPO/frontend-customer:$SHA"
+            echo "MIGRATE_IMAGE=$GCP_AR_REPO/frontend-customer-migrate:$SHA"
+          } >> "$GITHUB_ENV"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - if: steps.config.outputs.ready == 'true'
+        uses: actions/checkout@v4
+
+      # WIF で deployer のサービスアカウントになりすます（infra/modules/app/github_wif.tf）。以降の gcloud / docker はこの資格情報を使う。
+      - if: steps.config.outputs.ready == 'true'
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+          # 以降の gcloud が使うプロジェクト（auth が CLOUDSDK_CORE_PROJECT などの環境変数に書き出す）。WHY 明示する: 省くと auth は
+          #   サービスアカウントのメールなどから推測する（WIF の provider の名前にはプロジェクト番号しか無く、ID を取り出せない。
+          #   auth の README の project_id の注意）。推測に頼らず terraform output の値（GCP_PROJECT_ID）を使う。
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      # gcloud を入れる（version を省くと action の既定の "latest"。WHY 固定しない: 使うのは run / auth の基本のコマンドだけで、
+      #   引数が版で変わりにくい）。
+      - if: steps.config.outputs.ready == 'true'
+        uses: google-github-actions/setup-gcloud@v3
+
+      # docker が Artifact Registry に push するときに gcloud の資格情報を使うようにする（~/.docker/config.json の credHelpers）。
+      - if: steps.config.outputs.ready == 'true'
+        name: Configure docker for Artifact Registry
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      # BuildKit のビルダーを作る。WHY: Dockerfile の RUN --mount=type=cache と、下の GitHub Actions のキャッシュ（type=gha）は
+      #   docker-container ドライバの BuildKit が要る。
+      - if: steps.config.outputs.ready == 'true'
+        uses: docker/setup-buildx-action@v4
+
+      # アプリのイメージ（Dockerfile の runtime ステージ。next の standalone を node で起動）。
+      # cache: ステージのレイヤーを GitHub Actions のキャッシュに置き、次の実行で依存の install などを飛ばす。
+      #   scope をイメージごとに分ける（同じ scope に 2 つを書くと、後の書き込みで先のキャッシュの参照が上書きされる）。
+      #   mode=max: 最終ステージ以外（deps / build）のレイヤーもキャッシュする。
+      - if: steps.config.outputs.ready == 'true'
+        name: Build and push runtime image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: runtime
+          push: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha,scope=runtime
+          cache-to: type=gha,scope=runtime,mode=max
+
+      # マイグレーションのイメージ（Dockerfile の migrate ステージ。`pnpm db:migrate` を実行する）。
+      - if: steps.config.outputs.ready == 'true'
+        name: Build and push migrate image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: migrate
+          push: true
+          tags: ${{ env.MIGRATE_IMAGE }}
+          cache-from: type=gha,scope=migrate
+          cache-to: type=gha,scope=migrate,mode=max
+
+      # migrate ジョブのイメージを今回のものにする。WHY service より先: 新しいコードが使う表・列を、新しいリビジョンが
+      #   リクエストを受ける前に作っておく（マイグレーションは古いコードとも動く形で書く前提）。
+      - if: steps.config.outputs.ready == 'true'
+        name: Update migrate job image
+        run: gcloud run jobs update "$MIGRATE_JOB" --image "$MIGRATE_IMAGE" --region "$REGION" --quiet
+
+      # マイグレーションを実行し、終わるまで待つ（--wait）。失敗したらこのステップが赤になり、以降（service のデプロイ）は
+      #   実行されない。WHY: スキーマが古いまま新しいコードを出さない。
+      - if: steps.config.outputs.ready == 'true'
+        name: Run migrations
+        run: gcloud run jobs execute "$MIGRATE_JOB" --region "$REGION" --wait
+
+      # service のイメージを入れ替える（新しいリビジョンを作り、準備ができたらトラフィックを 100% 移す）。
+      # 環境変数・Secret・スケールなどの設定は Terraform のまま（--image だけを変える）。
+      - if: steps.config.outputs.ready == 'true'
+        name: Deploy service
+        run: gcloud run deploy "$SERVICE" --image "$IMAGE" --region "$REGION" --quiet
+
+      # トラフィックを 100% 最新のリビジョン（LATEST）に向ける。
+      # WHY: ロールバックで `update-traffic --to-revisions` を使うと、以後のデプロイもそのトラフィックの配分を引き継ぎ、
+      #   新しいリビジョンはできるがトラフィックが流れない（deploy は緑のまま）。公式 https://cloud.google.com/run/docs/rollouts-rollbacks-traffic-migration
+      #   「Lifecycle of traffic splits」: "If you split traffic between multiple revisions or assigned traffic to a previous revision,
+      #   all subsequent deployments use that traffic split pattern going forward."（2026-09-30 確認）。
+      #   配分が LATEST 100% のときは何も変わらない。
+      - if: steps.config.outputs.ready == 'true'
+        name: Route traffic to latest revision
+        run: gcloud run services update-traffic "$SERVICE" --to-latest --region "$REGION" --quiet

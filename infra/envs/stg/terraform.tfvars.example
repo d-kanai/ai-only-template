@@ -1,0 +1,15 @@
+# stg 環境の入力の例。`cp terraform.tfvars.example terraform.tfvars` でコピーして値を書く（terraform.tfvars は .gitignore 済み。
+#   コミットしない。プロジェクト ID・メールアドレスを含むため）。
+# 変数の一覧と既定値は variables.tf、意味と WHY は infra/modules/app/variables.tf。書かない変数は既定値になる。
+
+# 必須: stg の GCP プロジェクト ID（stg と prod は別のプロジェクト）。
+project_id = "<stg のプロジェクト ID>"
+
+# 推奨: リポジトリの数値の id（WIF の条件に加わる。gh api repos/<owner>/<repo> --jq .id）。
+# github_repository_id = 123456789
+
+# Cloud SQL の MCP を使う Google アカウント（infra/README.md の手順 9）。
+# sql_iam_users = ["you@example.com"]
+
+# stg の作り直しを試すときだけ（false で apply してから destroy）。
+# deletion_protection = false
