@@ -69,6 +69,8 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-29 | Todo の不変条件は、どの口を通ってもコンストラクタで常に全フィールドを検証する（restore は reconstruct に改名） | 採用 | [20260929-todo-invariants-always-validated.md](architecture/20260929-todo-invariants-always-validated.md) |
 | 2026-09-29 | DB の行から Todo を組み立てる restore は検証せず、口ごとに検証の範囲を分ける | 置き換え（→ architecture/20260929-todo-invariants-always-validated.md） | [20260929-todo-restore-skips-validation.md](architecture/20260929-todo-restore-skips-validation.md) |
 | 2026-09-29 | backend の入力検証と不変条件は zod で書く（presentation は形、domain は値の規則） | 置き換え（→ architecture/20260930-presentation-overlaps-domain-validation.md） | [20260929-zod-for-backend-validation.md](architecture/20260929-zod-for-backend-validation.md) |
+| 2026-09-30 | 全モデルの変更履歴（監査）は汎用の change_logs 表に、Repository が本体と同じトランザクションで書く | 採用 | [20260930-change-logs-written-by-repository.md](architecture/20260930-change-logs-written-by-repository.md) |
+| 2026-09-30 | 集約の読み出しは、insert のみの子表を必ず全件 JOIN で読む（最新だけ・一部だけを読まない） | 採用 | [20260930-aggregate-loads-all-children.md](architecture/20260930-aggregate-loads-all-children.md) |
 | 2026-09-30 | 現在時刻は apps/shared/now.ts の now() だけから取り、Entity の作成日時は引数で受け取らずに生成時に自動で入れる | 採用 | [20260930-now-single-source.md](architecture/20260930-now-single-source.md) |
 | 2026-09-30 | 1 ユースケース = 1 API = 1 command にし、複数の項目を任意で受けて command の中で分岐する部分更新 API は作らない | 採用 | [20260930-one-api-per-use-case.md](architecture/20260930-one-api-per-use-case.md) |
 | 2026-09-30 | presentation の入力検証は domain の規則を重ねてよい（presentation ⊆ domain）。domain は常に完全で、presentation は domain より厳しくしない | 採用 | [20260930-presentation-overlaps-domain-validation.md](architecture/20260930-presentation-overlaps-domain-validation.md) |

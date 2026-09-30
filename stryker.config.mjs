@@ -130,7 +130,9 @@ export default {
   //   評価する関数の中に置く（todo-repository.postgres.ts の isUuid、problem.ts の problemKindOf、todo-api.ts の todosPath、
   //   apps/backend/test-support/database.ts の testSchemaPrefix）。最上位の定数のままだと、既定の実行では killed になる変異も
   //   ignoreStatic で数えなくなるため（reviewer 指摘。Issue #55 で 18 件が該当した）。
-  //   残る static（数えないもの）: schema.ts の 10 件だけ。ignoreStatic を false にして schema.ts を --mutate した実測で、
+  //   残る static（数えないもの）: features/todo/infra/schema.ts の 10 件（下の実測）と、Issue #188 / #189 で加わった
+  //   todo_status_changes の宣言・shared/infra/schema.ts（change_logs）・shared/domain/change-operation.ts（操作の一覧の定数）。
+  //   後者の件数と等価の確認は未実施（.claude/rules/testing.md）。ignoreStatic を false にして schema.ts を --mutate した実測で、
   //   表名 "todos" → ""、pgTable に渡す列の定義のオブジェクト → {}、"created_at" → "" の 3 件は Killed、次の 7 件は Survived だった:
   //   - uuid("id") / text("title") / boolean("completed") の列名 → "": drizzle は空の列名をキー名で補う
   //     （drizzle-orm 0.45.3 の column-builder.js の setName は、名前が "" のときだけキー名を入れる）。キー名が列名と同じ

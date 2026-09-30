@@ -1,4 +1,10 @@
 import { asc, eq, type SQL } from "drizzle-orm";
+import {
+  deleteEntry,
+  insertEntry,
+  recordChange,
+  updateEntries,
+} from "../../../shared/infra/change-log";
 import { changedProps } from "../../../shared/infra/changed-props";
 import type { Database } from "../../../shared/infra/database";
 import { Todo, type TodoStatusChange } from "../domain/todo";
@@ -6,6 +12,7 @@ import { requireTodo, type TodoRepository } from "../domain/todo-repository";
 import { todoStatusChanges, todos } from "./schema";
 
 type TodoRow = typeof todos.$inferSelect;
+type TodoStatusChangeRow = typeof todoStatusChanges.$inferSelect;
 
 // save が書き込みに使う接続（db そのものか、db.transaction の tx）。select は読み込み済みの save が todos の行の有無を
 //   確かめる（updateOrLock）のに使う。
@@ -79,14 +86,21 @@ function toTodos(
 // TodoRepository の Postgres 実装（Drizzle）。
 // WHY db（Database）をコンストラクタで受け取る: プールは getDatabase が globalThis に 1 つだけ持ち、api ファイルが
 //   `new PostgresTodoRepository(getDatabase().db)` と組み立てる（Issue #123）。テストはテスト用のスキーマの db を渡す。
-// WHY save はトランザクションを張る（Issue #188）: Todo（集約）は todos の行と完了の履歴（todo_status_changes の行）の 2 つの表に
-//   またがり、1 つの Todo の保存が 2 文になる。片方だけ書かれると、履歴の最後の completed と todos.completed がずれた読めない
-//   Todo が残る。集約を 1 単位で保存するのは Repository の責務なので、command ではなく save の中で張る。
-//   findAll / findById / delete は 1 文の読み取り（下の select）・削除（cascade）なので張らない。command をまたぐトランザクションが
-//   要るようになったら、その command にトランザクションを扱う依存を注入する（.claude/rules/backend.md の「永続化（Drizzle + Postgres）」。
+// WHY save と delete はトランザクションを張る（Issue #188・#189）: Todo（集約）は todos の行と完了の履歴（todo_status_changes の行）の
+//   2 つの表にまたがり、1 つの Todo の保存が 2 文になる。片方だけ書かれると、履歴の最後の completed と todos.completed がずれた
+//   読めない Todo が残る。さらに、書き込むたびに変更履歴（change_logs）を同じトランザクションで書く（Issue #189。記録だけ・
+//   本体だけが残らない）。集約を 1 単位で保存するのは Repository の責務なので、command ではなく save / delete の中で張る。
+//   findAll / findById は 1 文の読み取り（下の select）なので張らない。command をまたぐトランザクションが要るようになったら、
+//   その command にトランザクションを扱う依存を注入する（.claude/rules/backend.md の「永続化（Drizzle + Postgres）」。
 //   ADR architecture/20260929-constructor-injection-without-container.md）。
+// WHY actorId（変更した利用者の id）をコンストラクタで受け取る（既定は null）: 変更履歴の actor_id に入れる。ログインが無い今は
+//   本番の組み立て（api ファイルの `new PostgresTodoRepository(getDatabase().db)`）が渡さず、常に null。ログインが入ったら、
+//   要求ごとに利用者の id を渡して組み立てる（ADR architecture/20260930-change-logs-written-by-repository.md）。
 export class PostgresTodoRepository implements TodoRepository {
-  constructor(private readonly db: Database) {}
+  constructor(
+    private readonly db: Database,
+    private readonly actorId: string | null = null,
+  ) {}
 
   // WHY 作成日時の昇順で返す: TodoRepository は順序を約束しない（並べ替えは ListTodosQuery が行う）が、
   //   DB は ORDER BY が無いと返す順が決まらない。毎回同じ順で返すため、並び順をここで決める（select の ORDER BY）。
@@ -151,14 +165,22 @@ export class PostgresTodoRepository implements TodoRepository {
   // WHY 差分は origin と今の値の比較（changedProps）で取る: Entity の遷移メソッドは何も記録しない（todo.ts の origin）。
   // 完了の履歴（Issue #188）は insert のみ: 新規は全件を、読み込み済みは読み込んだときより後ろに増えた分だけを INSERT する
   //   （既存の履歴の行は UPDATE / DELETE しない）。todos の行と同じトランザクションで書く（クラスのコメント）。
+  // 変更履歴（Issue #189）: 書いた行ごとに 1 件（todos の insert / update、完了の履歴の insert）を、同じトランザクションの最後に
+  //   recordChange の 1 文で書く。insert の記録は DB が返した行（returning）の全列、update は変わった列の前後。
   async save(todo: Todo): Promise<void> {
     const { origin } = todo;
     if (origin === undefined) {
-      // 原子性（履歴の INSERT が失敗したら todos の INSERT も戻る）は、テスト用のスキーマに一時的な CHECK 制約を張って
-      //   履歴の INSERT を失敗させるテスト（todo-repository.postgres.test.ts）が固定する。
+      // 原子性（履歴・変更履歴の INSERT が失敗したら todos の INSERT も戻る。COMMIT が失敗したら変更履歴も残らない）は、
+      //   テスト用のスキーマに一時的な CHECK 制約・遅延制約を張って失敗させるテスト（todo-repository.postgres.test.ts）が固定する。
       await this.db.transaction(async (tx) => {
-        await this.insert(tx, todo);
-        await this.appendStatusChanges(tx, todo, 0);
+        const inserted = await this.insert(tx, todo);
+        const appended = await this.appendStatusChanges(tx, todo, 0);
+        await recordChange(tx, [
+          insertEntry(todos, inserted, this.actorId),
+          ...appended.map((row) =>
+            insertEntry(todoStatusChanges, row, this.actorId),
+          ),
+        ]);
       });
       return;
     }
@@ -183,7 +205,14 @@ export class PostgresTodoRepository implements TodoRepository {
     }
     await this.db.transaction(async (tx) => {
       await this.updateOrLock(tx, todo, changed);
-      await this.appendStatusChanges(tx, todo, appendedFrom);
+      const appended = await this.appendStatusChanges(tx, todo, appendedFrom);
+      // 変わった列が無ければ（完了の履歴だけが増えた）todos の update の記録は無い（updateEntries が空配列を返す）。
+      await recordChange(tx, [
+        ...updateEntries(todos, todo.id, origin, changed, this.actorId),
+        ...appended.map((row) =>
+          insertEntry(todoStatusChanges, row, this.actorId),
+        ),
+      ]);
     });
   }
 
@@ -227,13 +256,19 @@ export class PostgresTodoRepository implements TodoRepository {
   // WHY 素の INSERT（ON CONFLICT DO UPDATE で上書きしない）: 同じ新規のインスタンス（origin が undefined のまま）を
   //   2 回 save する呼び出しは無く（create の command は 1 回だけ save する）、あれば実装ミス。upsert はそれを黙って通し、
   //   id が衝突した別の行も上書きする。INSERT なら Postgres の一意制約違反（SQLSTATE 23505）→ 500 で気づける。
-  private async insert(writer: Writer, todo: Todo): Promise<void> {
-    await writer.insert(todos).values({
-      id: todo.id,
-      title: todo.title,
-      completed: todo.completed,
-      createdAt: todo.createdAt,
-    });
+  // WHY 入れた行を returning で返す: 変更履歴（insert の記録）に DB が保存した値のとおりの全列を書く。
+  private async insert(writer: Writer, todo: Todo): Promise<TodoRow> {
+    const [inserted] = await writer
+      .insert(todos)
+      .values({
+        id: todo.id,
+        title: todo.title,
+        completed: todo.completed,
+        createdAt: todo.createdAt,
+      })
+      .returning();
+    // WHY as: 1 行の values の INSERT は、成功すれば必ず 1 行を返す（失敗なら例外）。
+    return inserted as TodoRow;
   }
 
   // 完了の履歴のうち from 番目（0 始まり）から後ろを INSERT する。position は Todo.statusChanges の添字。
@@ -241,28 +276,46 @@ export class PostgresTodoRepository implements TodoRepository {
   //   読み込んで両方が完了状態を変えると、どちらも同じ position に足そうとする。後の save を失敗させ、同じトランザクションの
   //   todos の UPDATE も戻す（schema.ts の一意制約のコメント）。
   // 増えた履歴が無ければ何もしない（drizzle-orm の insert は空の values を受け付けない）。
+  // 入れた行（DB が作った id を含む全列）を返す（変更履歴の insert の記録に使う。増えた履歴が無ければ空配列）。
   private async appendStatusChanges(
     writer: Writer,
     todo: Todo,
     from: number,
-  ): Promise<void> {
+  ): Promise<TodoStatusChangeRow[]> {
     const appended = todo.statusChanges.slice(from);
     if (appended.length === 0) {
-      return;
+      return [];
     }
-    await writer.insert(todoStatusChanges).values(
-      appended.map(({ completed, changedAt }, index) => ({
-        todoId: todo.id,
-        position: from + index,
-        completed,
-        changedAt,
-      })),
-    );
+    return writer
+      .insert(todoStatusChanges)
+      .values(
+        appended.map(({ completed, changedAt }, index) => ({
+          todoId: todo.id,
+          position: from + index,
+          completed,
+          changedAt,
+        })),
+      )
+      .returning();
   }
 
+  // 消した todos の行を変更履歴（delete の記録。消す前の全列）に書く。無い id なら何も消さず、何も記録しない。
+  // WHY 消した行を returning で受け取る（先に SELECT しない）: 1 文で消した行の値が分かり、SELECT と DELETE の間に別の要求が
+  //   変えた値を記録する取り違えも起きない。
+  // WHY 完了の履歴（on delete cascade で消える todo_status_changes の行）を 1 件ずつ記録しない: 親の todos の delete の記録 1 件で、
+  //   その Todo の履歴が消えたことが分かる。cascade で消えた行は Repository の SQL に現れず、記録するには先に読む文が要る。
   async delete(id: string): Promise<void> {
     // WHY id の形を検査しない: findById と同じ。「無い」として黙って何もしないと、消したつもりで消えていない実装ミスが隠れる。
     // 完了の履歴（todo_status_changes）は外部キーの on delete cascade で消える（履歴の表に DELETE を書かない）。
-    await this.db.delete(todos).where(eq(todos.id, id));
+    await this.db.transaction(async (tx) => {
+      const deleted = await tx
+        .delete(todos)
+        .where(eq(todos.id, id))
+        .returning();
+      await recordChange(
+        tx,
+        deleted.map((row) => deleteEntry(todos, row, this.actorId)),
+      );
+    });
   }
 }
