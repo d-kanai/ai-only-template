@@ -17,8 +17,8 @@
 #   setup script（--install-only）に寄せ、フックは「既存のインストールを見つけて PATH を通し pnpm install する」
 #   だけの速い経路にする。setup script を設定していない環境でも動くよう、フックは未インストールなら自分で入れる。
 #
-# WHY Node を npm レジストリからも取れるようにするか: 2026-09-28 のクラウドセッションで、nodejs.org への CONNECT が
-#   プロキシに 403 で拒否された（環境のネットワークポリシーで未許可）。一方 registry.npmjs.org はプロキシを通らず
+# WHY Node を npm レジストリからも取れるようにするか: クラウドセッションでは、nodejs.org への CONNECT が
+#   プロキシに 403 で拒否されることがある（環境のネットワークポリシーで未許可のとき）。一方 registry.npmjs.org はプロキシを通らず
 #   直接届く（no_proxy に含まれる）。npm レジストリには Node 公式バイナリをそのまま同梱した node-linux-<arch>
 #   （node-bin-gen、provenance 付き）があるので、nodejs.org で取れなければそちらに切り替える。環境設定で nodejs.org を
 #   許可すれば第一候補の nodejs.org で取れる。どちらの経路でも、検証に通らなければ展開しない。
@@ -114,11 +114,11 @@ node_platform() {
 # WHY curl にタイムアウトを付ける: 通信が止まったまま待ち続けると、フックは 600 秒で打ち切られ（公式 cloud-environments
 #   ドキュメント）、「失敗しても warn を出して exit 0 で続ける」設計が守れなくなるので、自分で先に諦める。
 #   --connect-timeout 15: 接続確立に 15 秒かかるならネットワーク不通・遮断とみなす（通常は 1 秒未満で終わる）。
-#     クラウドで nodejs.org がプロキシに 403 で拒否されるときは、curl -f が待たずにすぐ失敗する（2026-09-28 実測）。
+#     クラウドで nodejs.org がプロキシに 403 で拒否されるときは、curl -f が待たずにすぐ失敗する。
 #   --max-time（呼び出し側で指定）: 1 回の取得の上限。数十 MB の tarball は 60 秒、それ以外（SHASUMS256.txt、
 #     レジストリのメタデータ、1 MB の pnpm tarball）は 20 秒。
-#     2026-09-28 のクラウド VM での実測: レジストリの node-linux-x64（52 MB）は取得・検証・展開まで 3.1 秒、
-#     @pnpm/exe.linux-x64（25 MB）の取得は 0.2 秒。nodejs.org の .tar.xz はローカルで取得・展開まで約 5 秒。
+#     クラウド VM では、レジストリの node-linux-x64（52 MB）は取得・検証・展開まで約 3 秒、
+#     @pnpm/exe.linux-x64（25 MB）の取得は 1 秒未満。nodejs.org の .tar.xz は手元で取得・展開まで約 5 秒。
 #     60 秒かかるなら止まっているとみなせる。
 #   最悪ケース（nodejs.org の 2 回がどちらも上限まで粘った末に失敗し、レジストリにフォールバックして Node 2 回・
 #     pnpm 4 回を取得）の合計は、接続タイムアウトも足した保守的な見積もりで
@@ -126,7 +126,7 @@ node_platform() {
 #     + (15 + 20) + (15 + 60)           … レジストリの node-linux-<arch> のメタデータ + tarball
 #     + (15 + 20) + (15 + 20)           … pnpm のメタデータ + tarball
 #     + (15 + 20) + (15 + 60) = 400 秒  … @pnpm/exe.<platform> のメタデータ + tarball
-#     で、フックの 600 秒から pnpm install（クラウドで実測 10 秒）の時間を引いても余裕がある。
+#     で、フックの 600 秒から pnpm install（クラウドで約 10 秒）の時間を引いても余裕がある。
 #     実際には --max-time が接続を含む 1 回の取得全体の上限なので、最悪でも max-time の和の 280 秒で終わる。
 #   setup script の約 5 分はキャッシュされるかどうかの目安で、超えても失敗はしない（キャッシュされないだけ）ため、
 #   上限はフックの 600 秒に合わせている。
@@ -158,7 +158,7 @@ sha512_integrity_of() {
 # レジストリの版メタデータ（JSON）から "<key>":"<文字列>" の値を取り出す。
 # WHY jq を使わない: クラウド VM に jq があるかは未確認で、無ければフォールバックそのものが動かなくなるため。
 #   レジストリのメタデータは空白なしの 1 行 JSON で、dist.integrity / dist.tarball のキーはそれぞれ 1 回だけ出る
-#   （2026-09-28 に node-linux-x64 / pnpm / @pnpm/exe.linux-x64 の版メタデータで確認）。念のため空白も許し、最初の一致を使う。
+#   （node-linux-x64 / pnpm / @pnpm/exe.linux-x64 の版メタデータがこの形）。念のため空白も許し、最初の一致を使う。
 json_string_field() {
   local key="$1" file="$2"
   grep -o "\"${key}\" *: *\"[^\"]*\"" "$file" | head -n 1 | sed 's/^.*: *"\(.*\)"$/\1/'
@@ -425,10 +425,10 @@ install_dependencies() {
 
 # docker のデーモンが使えるようにする。動いていなければ dockerd をバックグラウンドで起動し、docker info が通るまで待つ。
 # WHY フックで起動するか: クラウド VM には docker CLI・dockerd・containerd・Compose プラグインが入っているが、
-#   デーモンは起動していない（2026-09-28 実測。docker info が失敗する）。VM はセッションごとに新しく、
+#   デーモンは起動していない（docker info が失敗する）。VM はセッションごとに新しく、
 #   セッション中に起動したプロセスは次のセッションに残らないので、毎セッション起動する。
 # WHY 既定のソケット（/var/run/docker.sock）・データ置き場（/var/lib/docker）のまま起動するか: root で dockerd を
-#   引数なしで起動すると、約 1 秒で /var/run/docker.sock で待ち受けた（2026-09-28 実測）。既定のままなら
+#   引数なしで起動すると、約 1 秒で /var/run/docker.sock で待ち受ける。既定のままなら
 #   DOCKER_HOST を CLAUDE_ENV_FILE に書き出す必要がなく、以降の Bash の docker / docker compose もそのまま動く。
 # WHY setsid nohup で切り離すか: dockerd はフックが終わった後もセッション中ずっと動いている必要がある。フックの
 #   プロセスグループやセッションが終わるときのシグナルで一緒に止まらないよう、別セッションにする。
@@ -436,7 +436,7 @@ install_dependencies() {
 # WHY 標準入出力をすべて付け替えるか: バックグラウンドの dockerd がフックの stdout / stderr を握ったままだと、
 #   フックの呼び出し側が出力の終わりを待ち続けうる（spawnSync のテストでも同じ）。出力はログファイルに残し、
 #   起動に失敗したときに読めるようにする。ログは ${TMPDIR:-/tmp}/dockerd.log（テストで一時ディレクトリに差し替えるため TMPDIR に従う）。
-# WHY 待つのは 30 秒か: 実測では 1 秒程度で使えるようになる。30 秒かかるなら起動に失敗しているとみなし、
+# WHY 待つのは 30 秒か: 普段は 1 秒程度で使えるようになる。30 秒かかるなら起動に失敗しているとみなし、
 #   フックの 600 秒打ち切りに近づく前に諦める。CLOUD_SESSION_START_DOCKER_WAIT_SECONDS はテストで待ち時間を
 #   縮めるための差し替え口。
 # 失敗したら warn を出して失敗を返す（呼び出し側で Postgres の起動を飛ばす）。
@@ -479,28 +479,28 @@ ensure_docker_daemon() {
 
 # compose.yaml の Postgres のイメージを取得してから起動し、healthcheck が通る（healthy になる）まで待つ。
 # WHY pull を分けて再試行するか: イメージの取得はネットワークに左右される唯一の段で、一時的な失敗（レート制限・
-#   通信の切断）で Postgres が起動しないのを減らすため。2026-09-28 のクラウド VM では Docker Hub の匿名 pull が
-#   429（出口 IP の残り回数 0）で失敗し、直後の再試行では通った。イメージは compose.yaml で mirror.gcr.io に
+#   通信の切断）で Postgres が起動しないのを減らすため。クラウド VM では Docker Hub の匿名 pull が
+#   429（出口 IP の残り回数 0）で失敗し、少し後の再試行で通ることがある。イメージは compose.yaml で mirror.gcr.io に
 #   しているが、ミラーでも一時的な失敗はありうるので再試行は残す。
 #   最大 3 回、間隔は 2 秒・4 秒（倍々）。最後の失敗の後は待たない。取得済みのイメージなら pull は数秒で終わる。
 # WHY pull を timeout 45 で囲むか: curl の --max-time と同じく、通信が止まったまま待ち続けてフックの 600 秒打ち切りに
 #   達し「失敗しても warn を出して exit 0 で続ける」設計が崩れるのを防ぐため。docker compose pull 自体には全体の
-#   上限を指定するオプションが無い。45 秒は実測（mirror.gcr.io から 18-alpine の初回 pull が 10.5 秒、2026-09-28）の
+#   上限を指定するオプションが無い。45 秒は mirror.gcr.io から 18-alpine を初めて pull する時間（約 10 秒）の
 #   4 倍強で、45 秒かかるなら止まっているとみなす。
-#   値はフック全体の最悪ケースを 600 秒に収めるように決めた（.claude/rules/cloud-session.md の「時間の上限」）:
+#   値はフック全体の最悪ケースを 600 秒に収めるように決める（.claude/rules/cloud-session.md の「時間の上限」）:
 #     Node / pnpm の取得（curl の --max-time の和）280 + デーモン待ち 30 + pull 45 × 3 + 再試行の間隔 6
-#     + up の --wait-timeout 120 = 571 秒。残り約 30 秒が pnpm install（実測 10 秒）などの分。
+#     + up の --wait-timeout 120 = 571 秒。残り約 30 秒が pnpm install（約 10 秒）などの分。
 #   pull を 240 秒にすると Docker の段だけで 30 + 720 + 6 + 120 = 876 秒になり、600 秒を超える。
 #   timeout で打ち切られた pull は失敗として扱い、次の再試行に回る。
 # WHY --wait: コンテナの起動だけでなく healthcheck（pg_isready）が通るまで待つ。フックが終わった時点で
 #   psql やアプリから接続できる状態にするため。
 # WHY --wait-timeout 120: healthcheck は約 30 秒（2 秒 × 15 回）で unhealthy になり --wait は失敗で返るが、
 #   コンテナの作成・起動そのものが止まった場合にも上限を設け、フックの 600 秒打ち切りに近づく前に諦める。
-#   pull は up の前に済ませているので、この 120 秒に pull の時間は含まれない。実測では 3 秒で healthy になった。
+#   pull は up の前に済ませているので、この 120 秒に pull の時間は含まれない。普段は数秒で healthy になる。
 # WHY 出力を stderr に回すか: SessionStart フックの stdout は Claude のコンテキストに入るため、pull の進捗などで
 #   埋めない（pnpm install と同じ）。
-# イメージの pull は毎セッション行う（約 10 秒、2026-09-28 実測）。setup script（--install-only）で pull して
-#   環境キャッシュに残す案は、キャッシュに /var/lib/docker が含まれるかを確かめていないため入れていない。
+# イメージの pull は毎セッション行う（約 10 秒）。setup script（--install-only）で pull して環境キャッシュに
+#   残さないのは、キャッシュに /var/lib/docker が含まれるかが未確認のため。
 start_database() {
   local project_dir="$1"
   if is_dry_run; then
@@ -528,7 +528,7 @@ start_database() {
   fi
 }
 
-# リポジトリ直下の .env が無ければ .env.example からコピーする（Issue #59）。既にあれば触らない。
+# リポジトリ直下の .env が無ければ .env.example からコピーする。既にあれば触らない。
 # WHY: アプリ・テスト・drizzle-kit は必須の環境変数を .env から読み（apps/shared/env.ts）、既定値を持たない。
 #   VM はセッションごとに新しいクローンで .env が無いので、そのままだと pnpm db:migrate も pnpm test も欠けた変数の名前を
 #   出して止まる。.env.example の値は compose.yaml の開発用 DB に合わせた開発用の値（秘密ではない）で、手元の
@@ -537,7 +537,7 @@ start_database() {
 # WHY .env.example も無いときは warn だけで続ける: 環境変数だけで値が渡されている場合もあり、その場合は pnpm db:migrate が通る。
 #   足りなければ env.ts が欠けた名前を出し、下の migrate の warn になる。
 # WHY Docker の段より前に呼ぶ（main）: docker が無い・pull や up が失敗したときも、pnpm test / pnpm dev などは .env が無いと
-#   必須の変数が欠けて止まる。.env の用意は Docker に依存しないので、Docker の結果に関係なく行う（Issue #59 の reviewer 指摘）。
+#   必須の変数が欠けて止まる。.env の用意は Docker に依存しないので、Docker の結果に関係なく行う。
 ensure_dotenv() {
   local project_dir="$1"
   if [ -f "$project_dir/.env" ]; then
@@ -557,16 +557,16 @@ ensure_dotenv() {
   fi
 }
 
-# 起動した Postgres に apps/backend/shared/drizzle/ のマイグレーションを当てる（pnpm db:migrate = drizzle-kit migrate。Issue #57）。
+# 起動した Postgres に apps/backend/shared/drizzle/ のマイグレーションを当てる（pnpm db:migrate = drizzle-kit migrate）。
 # WHY フックで当てるか: VM はセッションごとに新しく、Postgres もデータの無い状態で起動する。表が無いままだと、
 #   pnpm dev / pnpm test:e2e が「relation "todos" does not exist」で失敗する。
 #   当て済みのものは飛ばす（drizzle.__drizzle_migrations に記録がある）ので、何度実行しても同じ結果になる。
 # 接続先（DATABASE_URL）は apps/backend/shared/drizzle/drizzle.config.ts が env.ts 経由で .env から読む（.env は main で Docker の段より前に
 #   ensure_dotenv が用意済み）。スクリプトは接続先を持たず、DATABASE_URL を差し込まない（既定値を 1 か所 = .env.example に
-#   するため。Issue #59）。フックの環境に DATABASE_URL があれば、そのまま引き継がれて .env より優先される。
-# WHY timeout 15: 実測は約 1 秒（2026-09-28、表 1 つ）。15 秒かかるなら止まっているとみなす。フック全体の最悪ケースを
+#   するため）。フックの環境に DATABASE_URL があれば、そのまま引き継がれて .env より優先される。
+# WHY timeout 15: 表 1 つなら約 1 秒で終わる。15 秒かかるなら止まっているとみなす。フック全体の最悪ケースを
 #   600 秒に収めるための見積もりは .claude/rules/cloud-session.md の「時間の上限」（571 + 15 = 586 秒）。
-# WHY Node / pnpm の導入に失敗していても試すか: VM 既定の pnpm でも packageManager の版を取って動く（2026-09-28 の work-logs の VM の実測）。
+# WHY Node / pnpm の導入に失敗していても試すか: VM 既定の pnpm でも packageManager の版を取って動く。
 #   失敗しても warn を出すだけで、セッションは続けられる。
 # 出力は stderr に回す（stdout は Claude のコンテキストに入るため。start_database と同じ）。
 migrate_database() {

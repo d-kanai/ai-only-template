@@ -42,7 +42,7 @@ export function useTodoScreen() {
   // （ArrayDeclaration）は、それぞれの依存配列の行だけ数えない（disable next-line）。
   // WHY: reloadTodos は依存が無い useCallback なので作り直されず、それを依存に持つ effect・mutateAndReload（と、
   //   mutateAndReload を依存に持つ toggleTodo・removeTodo）も作り直されない。依存配列を [] や別の定数に変えても
-  //   挙動が変わらない（等価な変異。Issue #55）。依存配列の直前にコメントを置くため、配列を別の行に書いている。
+  //   挙動が変わらない（等価な変異）。依存配列の直前にコメントを置くため、配列を別の行に書いている。
   const reloadTodos = useCallback(
     async (): Promise<boolean> => {
       latestListRequestRef.current += 1;
@@ -113,7 +113,7 @@ export function useTodoScreen() {
     async (id: string, completed: boolean) => {
       await mutateAndReload(() => updateTodo(id, { completed }));
     },
-    // Stryker disable next-line ArrayDeclaration: mutateAndReload は作り直されないので [] でも同じ（等価な変異。Issue #55）
+    // Stryker disable next-line ArrayDeclaration: mutateAndReload は作り直されないので [] でも同じ（等価な変異）
     [mutateAndReload],
   );
 
@@ -121,11 +121,11 @@ export function useTodoScreen() {
     async (id: string) => {
       await mutateAndReload(() => deleteTodo(id));
     },
-    // Stryker disable next-line ArrayDeclaration: mutateAndReload は作り直されないので [] でも同じ（等価な変異。Issue #55）
+    // Stryker disable next-line ArrayDeclaration: mutateAndReload は作り直されないので [] でも同じ（等価な変異）
     [mutateAndReload],
   );
 
-  // 失敗を、フォーム全体の文言（error。role="alert" で出す）と、入力の下に出す項目ごとの文言（fieldErrors）に分ける（Issue #144）。
+  // 失敗を、フォーム全体の文言（error。role="alert" で出す）と、入力の下に出す項目ごとの文言（fieldErrors）に分ける。
   // WHY 項目は "title" だけ: この画面の追加のフォームが描く入力は title だけ。ほかの項目の誤りは error に出る（api-error.ts の
   //   toErrorMessages）。
   const errorMessages: ErrorMessages<"title"> =

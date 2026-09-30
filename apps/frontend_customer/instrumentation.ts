@@ -7,8 +7,8 @@
 export async function register(): Promise<void> {
   // WHY Node.js runtime のときだけ読み込む: register は Edge runtime 向けにもビルドされる（同ドキュメントの
   //   「Importing runtime-specific code」）。分岐が無いと、Edge 向けのビルドに env.ts の process.loadEnvFile や
-  //   process.exit が入り、next build が「A Node.js API is used (...) which is not supported in the Edge Runtime」の警告を出した
-  //   （2026-09-28 実測）。このアプリは Edge で動くコードを持たないので、Edge では何もしない。
+  //   process.exit が入り、next build が「A Node.js API is used (...) which is not supported in the Edge Runtime」の警告を出す。
+  //   このアプリは Edge で動くコードを持たないので、Edge では何もしない。
   // WHY ここだけ process.env を直接読む: NEXT_RUNTIME は Next.js がビルド時に値を埋め込む規約の変数で、この形で書くと
   //   Edge 向けのビルドから import が消える（同ドキュメントの例と同じ書き方）。env.ts 経由にすると、判定の前に env.ts を
   //   読み込むことになり分岐の意味がない。例外はこの NEXT_RUNTIME だけ（rule-tests/architecture.test.ts の env-direct-access も同じ）。

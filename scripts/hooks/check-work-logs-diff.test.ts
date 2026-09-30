@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// CI の PR で作業ログの追記を必須にするスクリプト（scripts/hooks/check-work-logs-diff.sh <base-ref>）の仕様。Issue #64。
+// CI の PR で作業ログの追記を必須にするスクリプト（scripts/hooks/check-work-logs-diff.sh <base-ref>）の仕様。
 // `git diff --name-only <base-ref>...HEAD` に docs/work-logs/ の .md が 1 件以上あれば exit 0、無ければ理由を出して exit 1。
 // CI の ci.yml に組み込まれていることは rule-tests/work-logs-check.test.ts が検査する。
 
@@ -163,8 +163,8 @@ describe("check-work-logs-diff.sh", () => {
       expect(run(["main"]).status).toBe(1);
     });
 
-    // WHY 旧い置き場所を must reject に置く: Issue #101 で work-logs/ を docs/ の下に移した。旧い置き場所のログを数えると、
-    //   リポジトリ直下に作り直した旧いディレクトリに書く誤りを CI が見逃す。
+    // WHY リポジトリ直下の work-logs/ を must reject に置く: 置き場所は docs/work-logs/ だけ。直下の work-logs/ のログを数えると、
+    //   リポジトリ直下に work-logs/ を作って書く誤りを CI が見逃す。
     it("旧い置き場所（リポジトリ直下の work-logs/）の .md だけなら 1 で終わる", () => {
       commitFiles({ "work-logs/2026-09-28.md": "# 28\n" });
       expect(run(["main"]).status).toBe(1);

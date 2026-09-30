@@ -1,10 +1,9 @@
 import { DomainError } from "../../../shared/domain/domain-error";
 import type { Todo } from "./todo";
 
-// Todo の永続化の窓口（interface）。
 // WHY domain に interface だけを置く: application 層は「保存できる何か」にだけ依存し、
 //   実装（Postgres / テスト用の InMemory）は infra 層が持つ（依存性の逆転）。query / command はコンストラクタで
-//   この interface を受け取り、本番は api ファイルが Postgres の実装を、テストは InMemory の実装を渡す（Issue #123）。
+//   この interface を受け取り、本番は api ファイルが Postgres の実装を、テストは InMemory の実装を渡す。
 // WHY すべて Promise を返す: InMemory の実装は同期で済むが、DB の実装は非同期になる。同じ形にそろえ、
 //   実装を差し替えても呼び出し側（application 層）を直さずに済むようにする。
 export interface TodoRepository {
@@ -15,8 +14,8 @@ export interface TodoRepository {
   //   のため。テストで保存・削除の結果（削除後は undefined）を確かめるのにも使う。
   findById(id: string): Promise<Todo | undefined>;
   // 見つからないときは DomainError("not_found", "todo.notFound", { id }) を投げる（API では 404）。
-  // WHY interface に持たせる: get / update / delete の 3 つのユースケースが同じ「無ければ not_found」を書いていた
-  //   （Issue #123 の後のユーザー指示、2026-09-29）。例外の code・key・params をここで 1 つに決め、
+  // WHY interface に持たせる: get / update / delete の 3 つのユースケースが同じ「無ければ not_found」を使う。
+  //   例外の code・key・params をここで 1 つに決め、
   //   ユースケースごとの書き漏れ・書き違い（別の key や params を渡す）を無くす。実装は requireTodo を使う。
   findByIdOrThrow(id: string): Promise<Todo>;
   // 同じ id があれば上書きする（作成と更新を 1 つにまとめる）。
@@ -25,7 +24,7 @@ export interface TodoRepository {
   delete(id: string): Promise<void>;
 }
 
-// findByIdOrThrow の共通部分: findById の結果が undefined なら not_found の DomainError を投げ、あればそのまま返す。
+// findByIdOrThrow の共通部分。
 // WHY 関数にして domain に置く（実装ごとに throw を書かない）: Postgres と InMemory の 2 つの実装が同じ例外を投げる
 //   ことを 1 か所で保証する。片方だけ key や params を変えると、テスト（InMemory）と本番（Postgres）で API の応答が
 //   ずれ、テストが本番の振る舞いを表さなくなる。

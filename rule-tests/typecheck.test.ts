@@ -6,11 +6,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import pkg from "../package.json";
 
-// 型チェックのゲート（pnpm typecheck と CI の ci ジョブ）が効いていることを、仕様として固定するテスト（Issue #68 の reviewer 指摘）。
-// WHY このゲートが要る: monorepo 化（Issue #68）の前は、next build がリポジトリ直下の tsconfig（include が **/*.ts）で、
-//   テスト・ルール検査テスト・e2e・設定ファイルまで型チェックしていた。apps/frontend_customer の next build は apps/frontend_customer と、そこから
-//   import された backend のファイルしか型チェックしない。backend のテストや rule-tests/architecture.test.ts に型エラーを置いても
-//   pnpm build が exit 0 になった（reviewer の実測）。Vitest は型を検査しないので、pnpm test でも止まらない。
+// 型チェックのゲート（pnpm typecheck と CI の ci ジョブ）が効いていることを、仕様として固定するテスト。
+// WHY このゲートが要る: apps/frontend_customer の next build は apps/frontend_customer と、そこから import された backend の
+//   ファイルしか型チェックしない。backend のテストや rule-tests/architecture.test.ts に型エラーがあっても pnpm build は exit 0 になる。
+//   Vitest は型を検査しないので、pnpm test でも止まらない。
 //   そのため、リポジトリ直下の tsconfig（全体）と apps/backend・apps/shared の tsconfig（DOM の型なし）を tsc で検査する。
 // WHY 両方の tsconfig を検査する: リポジトリ直下の tsconfig はテストや設定ファイルを含めた全体を見るが、lib に dom を含む
 //   （frontend のテストのため）。apps/backend の tsconfig は DOM の型を入れないので、backend が document などのブラウザの API を
@@ -20,7 +19,7 @@ import pkg from "../package.json";
 const repoRoot = join(import.meta.dirname, "..");
 
 // pnpm typecheck が検査しなければならない tsconfig（tsc -p に渡すディレクトリ）。
-// WHY apps/shared も（Issue #90）: apps/shared の tsconfig も DOM の型を入れない（env・logger はサーバ側の基盤で、ブラウザの API を
+// WHY apps/shared も: apps/shared の tsconfig も DOM の型を入れない（env・logger はサーバ側の基盤で、ブラウザの API を
 //   使うと型エラーにする）。backend が import する env.ts・logger.ts は apps/backend の tsconfig でも検査されるが、apps/shared の
 //   テスト（env.test.ts・logger.test.ts）と、backend が import しないファイルは apps/shared の tsconfig でしか DOM なしで検査されない。
 const REQUIRED_PROJECTS = [".", "apps/backend", "apps/shared"];
@@ -60,7 +59,6 @@ function typecheckedProject(segment: string): string | undefined {
   return args[(projectFlags[0]?.index ?? 0) + 1];
 }
 
-// script が REQUIRED_PROJECTS のすべてを tsc --noEmit で検査するか。
 function typechecksAllProjects(script: string): boolean {
   const segments = script.split(COMMAND_CHAIN);
   if (segments.some((segment) => UNSAFE_CHAIN.test(segment))) return false;
@@ -124,7 +122,7 @@ describe("typecheck の判定（typechecksAllProjects）", () => {
     [`tsc -p apps/backend --noEmit && ${SHARED}`, "リポジトリ直下を検査しない"],
     [
       "tsc -p . --noEmit && tsc -p apps/backend --noEmit",
-      "apps/shared を検査しない（Issue #90）",
+      "apps/shared を検査しない",
     ],
     [
       `tsc -p . && tsc -p apps/backend --noEmit && ${SHARED}`,

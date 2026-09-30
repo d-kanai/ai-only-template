@@ -1,4 +1,4 @@
-// apps/backend の tsconfig（Issue #68）。backend 単体の型チェック（pnpm exec tsc -p apps/backend --noEmit）に使う。
+// apps/backend の tsconfig。backend 単体の型チェック（pnpm exec tsc -p apps/backend --noEmit）に使う。
 // WHY frontend と分ける: backend は Next / React に依存しない pure な TypeScript にする（後で別プロセスに分けやすくする）。
 //   Next の plugin・jsx・DOM の型（lib の dom）を入れず、ブラウザや React の API を使うと型エラーになるようにする。
 //   DOM の型が無いので、Request / Response などは @types/node の型になる（Response#json() は unknown を返す）。

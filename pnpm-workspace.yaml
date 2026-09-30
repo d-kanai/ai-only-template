@@ -1,6 +1,6 @@
 # pnpm の設定ファイル。pnpm workspace（モノレポ）の範囲（packages）と、workspace 全体に効く pnpm の設定を書く。
 #
-# packages: workspace に含めるパッケージのディレクトリ（Issue #68 の段階 2）。
+# packages: workspace に含めるパッケージのディレクトリ。
 #   apps/frontend_customer（@repo/frontend-customer、Next.js）と apps/backend（@repo/backend、pure な TypeScript）を workspace パッケージにし、
 #   frontend は "@repo/backend": "workspace:*" で backend に依存する（node_modules/@repo/backend が apps/backend への symlink になる）。
 #   リポジトリ直下（package.json）も workspace のルートとして 1 つのパッケージになり、ツール（Biome・Vitest・Playwright など）を持つ。
@@ -14,32 +14,32 @@ packages:
 # allowBuilds: 依存パッケージのインストール時ビルドスクリプト（postinstall 等）の実行可否をパッケージごとに指定する。
 #   false は「実行しない」。ビルドスクリプトは任意コードを実行できるため、許可するパッケージを明示的に絞る。
 #
-# 下記 2 つを false にしているのは、create-next-app@16.3.6（pnpm 12.7.0）が生成した pnpm-workspace.yaml を
-# そのまま流用しているため（根拠は create-next-app の出力。値の妥当性を本リポジトリで個別に検証したわけではない）。
-#   - sharp: Next.js の画像最適化で使うネイティブモジュール。2026-09-28 時点、ビルドスクリプトなしで
-#     プリビルドバイナリ（@img/sharp-darwin-arm64 など）がインストールされることを node_modules で確認済み。
+# 下記 2 つの false は、create-next-app@16.3.6（pnpm 12.7.0）が生成する pnpm-workspace.yaml の値に合わせている
+# （根拠は create-next-app の出力。値の妥当性を本リポジトリで個別に検証したわけではない）。
+#   - sharp: Next.js の画像最適化で使うネイティブモジュール。ビルドスクリプトなしでも
+#     プリビルドバイナリ（@img/sharp-darwin-arm64 など）がインストールされる（node_modules で確かめられる）。
 #   - unrs-resolver: 現状の依存（ESLint なし）ではインストールされない。create-next-app の出力に合わせて残している。
 #
 # esbuild: false … drizzle-kit（0.31.11）が esbuild 0.18.20 / 0.25.12 を、drizzle-kit と vite が使う tsx（4.23.15）が
-#   esbuild 0.28.2 を依存に持つ（Issue #57 で drizzle-kit を追加して入った。`pnpm why esbuild` で確認）。
+#   esbuild 0.28.2 を依存に持つ（`pnpm why esbuild` で分かる）。
 #   postinstall（install.js）の中身は、プラットフォーム別パッケージ（@esbuild/linux-x64 など、optionalDependencies）の
 #   バイナリが見つからなければ npm / レジストリから取り直し、見つかれば bin/esbuild をネイティブバイナリへの
 #   ハードリンクに差し替える（起動の高速化）だけ（node_modules/esbuild/install.js を読んで確認）。プラットフォーム別
 #   パッケージは pnpm が入れるので、実行しなくても JS のラッパー経由でバイナリが使える。任意コードの実行を増やさないため false。
-#   `pnpm db:generate`（drizzle-kit generate）が動くことで確認した（2026-09-28）。
+#   false でも `pnpm db:generate`（drizzle-kit generate）は動く。
 #
 # lefthook: true … Git フック管理ツール（.claude/rules/lint.md）。postinstall で `lefthook install -f` を実行し、
 #   .git/hooks/pre-commit を Lefthook のスクリプトに置き換える（-f: 既存フックの退避ファイル .old を上書きし、
 #   core.hooksPath が設定されていても続行する。`lefthook install --help` で確認）。これにより `pnpm install` するだけで
 #   pre-commit の Biome 検査が有効になり、人間・AI どちらもフックの入れ忘れがなくなる。
-#   postinstall の中身は node_modules/lefthook/postinstall.js（lefthook@2.1.12）を読んで確認した: 環境変数 CI が有効
+#   postinstall の中身（node_modules/lefthook/postinstall.js、lefthook@2.1.12）: 環境変数 CI が有効
 #   （"0" / "false" 以外）で LEFTHOOK が有効でなければ何もせず終了し、それ以外はプラットフォーム別パッケージ
 #   （lefthook-darwin-arm64 など）に同梱されたバイナリで `lefthook install -f` を実行するだけ。ネットワークアクセスはしない。
-#   許可にしたのは、Lefthook 公式ドキュメント（docs/installation/node.md）が pnpm 利用時に lefthook の postinstall の実行を
+#   許可にするのは、Lefthook 公式ドキュメント（docs/installation/node.md）が pnpm 利用時に lefthook の postinstall の実行を
 #   許可するよう案内しているため。package.json の prepare スクリプトで `lefthook install` を呼ぶ方法もあるが、
 #   公式の案内に合わせ、フックの導入経路を postinstall の 1 本にしている。
 #   @biomejs/biome と各プラットフォーム別パッケージ（@biomejs/cli-* / lefthook-*）はビルドスクリプトを持たないため載せていない
-#   （npm レジストリのメタデータで scripts が null であることを確認）。
+#   （npm レジストリのメタデータの scripts が null）。
 allowBuilds:
   esbuild: false
   sharp: false
@@ -51,15 +51,15 @@ allowBuilds:
 
 # minimumReleaseAge: 公開から指定時間（分単位。7200 = 5 日）経っていないバージョンは、推移的依存も含めてインストールしない。
 #   悪意あるリリースは公開後しばらくして検知・削除されることが多く、その期間を待ってから取り込むため。
-#   5 日にした理由（Issue #32、ユーザーの判断）:
+#   5 日にする理由（ADR docs/adr/quality/20260928-pnpm-minimum-release-age-5-days.md）:
 #   - 開発機の safe-chain は最小パッケージ年齢 14 日（~/.aikido/config.json）。これに揃えると Next.js などの更新に
-#     2 週間遅れで追随することになるため、揃えずに 5 日にした。pnpm 11 以降の既定（1440 = 1 日）よりは長くする。
+#     2 週間遅れで追随することになるため、揃えずに 5 日にする。pnpm 11 以降の既定（1440 = 1 日）よりは長くする。
 #   - safe-chain は開発機のシェル関数経由の実行にしか効かない（クラウドセッション・CI・shim 直叩きでは効かない）。
 #     pnpm 側の設定は実行経路に依存せず lockfile の解決・install のたびに効くため、こちらを全環境共通の防御とする。
 #   既定値のままだと非 strict（条件を満たす版がないと古い版にフォールバック）になるため、
 #   下の minimumReleaseAgeStrict と合わせて明示している。値は rule-tests/pnpm-workspace.test.ts で検査している。
 #   対象外: package.json の packageManager（pnpm 本体）の解決。lockfile 先頭の pnpm@12.7.0 / @pnpm/exe.* は
-#   2026-09-25 公開（5 日未満）でも拒否されなかった（2026-09-28 実測。公式仕様は未確認）。pnpm 本体の版は
+#   公開から 5 日未満でも拒否されない（公式仕様は未確認）。pnpm 本体の版は
 #   .claude/rules/env.md のとおり .tool-versions と packageManager で明示的に固定しているので、勝手に新しい版が入ることはない。
 minimumReleaseAge: 7200
 
@@ -72,11 +72,10 @@ minimumReleaseAgeStrict: true
 trustPolicy: no-downgrade
 
 # trustPolicyIgnoreAfter: 公開から指定時間（分単位。525600 = 1 年）以上経った版は trustPolicy の検査対象外にする。
-#   導入時（2026-09-28、PR #14）の lockfile で undici-types@6.21.0（2024-11-13 公開、@types/node の依存）と
-#   why-is-node-running@3.2.2（2025-01-08 公開、vitest の依存）が trust downgrade と判定され、
-#   ERR_PNPM_TRUST_DOWNGRADE で install が失敗した。古い版は provenance 付きで公開する仕組みが整う前のものが多く、
+#   古い版は provenance 付きで公開する仕組みが整う前のものが多く、trust downgrade と判定されて
+#   ERR_PNPM_TRUST_DOWNGRADE で install が失敗する（例: undici-types@6.21.0、why-is-node-running@3.2.2）。
 #   公式ドキュメントもこの用途に trustPolicyIgnoreAfter を案内している。
-#   パッケージごとの個別除外（trustPolicyExclude）ではなく、期間で一律にした。
+#   パッケージごとの個別除外（trustPolicyExclude）ではなく、期間で一律にする。
 trustPolicyIgnoreAfter: 525600
 
 # blockExoticSubdeps: 推移的依存が git リポジトリや直接 URL の tarball から取得されるのを禁止する（直接依存のみ許可）。
@@ -100,11 +99,9 @@ savePrefix: ''
 #   値はパッチファイルのパス。pnpm install のたびに node_modules の中身へ当てられ、lockfile にもパッチのハッシュが入る
 #   （パッチを変えると --frozen-lockfile が lockfile とのずれで失敗するので、パッチと lockfile は同じコミットで直す）。
 #   使ってよい条件・外す条件・確認方法は .claude/rules/dependencies.md の「pnpm patch」。
-#   - @stryker-mutator/vitest-runner@10.0.0（Issue #52）: テスト名の連結をスペースから " > " に直す（dist の 2 ファイル各 1 行）。
+#   - @stryker-mutator/vitest-runner@10.0.0: テスト名の連結をスペースから " > " に直す（dist の 2 ファイル各 1 行）。
 #     Vitest 5.0.1 の testNamePattern はフルネームを " > " 区切りで照合するため、直さないと describe の中のテストが
-#     変異ごとの実行で skip され、mutation score が実際より低く出る（2026-09-28 実測で 26.82% → 85.68%。詳細は
-#     stryker.config.mjs のコメント）。版を上げるとキーの版と合わなくなるので、上げるときに patch の要否を見直す。
-#     上流の Issue / PR の有無は未確認（この環境から GitHub の Issue 検索が 403）。2026-09-28 時点で上流の master の
-#     packages/vitest-runner/src/test-helpers.ts もスペース区切りのまま（raw.githubusercontent.com で確認）。
+#     変異ごとの実行で skip され、mutation score が実際より低く出る（詳細は stryker.config.mjs のコメント）。
+#     版を上げるとキーの版と合わなくなるので、上げるときに patch の要否を見直す。上流の Issue / PR の有無は未確認。
 patchedDependencies:
   '@stryker-mutator/vitest-runner@10.0.0': patches/@stryker-mutator__vitest-runner@10.0.0.patch

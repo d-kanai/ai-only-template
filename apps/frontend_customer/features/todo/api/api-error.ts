@@ -7,7 +7,7 @@ import {
 } from "@/shared/i18n/i18n";
 import type { Locale } from "@/shared/i18n/locale";
 
-// API の失敗を表す例外と、失敗を画面の文言にする関数（Issue #116）。
+// API の失敗を表す例外と、失敗を画面の文言にする関数。
 // WHY todo-api.ts と別のファイルにする: 画面・hook のテストは vi.mock("@/features/todo/api/todo-api") でファイルごと自動モックする。
 //   同じファイルに置くと ApiError のコンストラクタもモックされ、テストで key を持つ ApiError を作れない。
 
@@ -51,7 +51,7 @@ type ApiFieldErrorInit = Omit<ApiFieldError, "params"> & {
 };
 
 // API が失敗したときに todo-api.ts が投げる例外。画面は key と params を辞書で翻訳して表示する（toErrorMessage）。
-// WHY status と type を持つ（Issue #126）: 画面が文言以外で失敗の種類を見分けられるようにする（404 なら一覧へ戻す、など）。
+// WHY status と type を持つ: 画面が文言以外で失敗の種類を見分けられるようにする（404 なら一覧へ戻す、など）。
 //   type は文字列のまま持つ（backend の ProblemType の和にしない）: サーバの JSON から来る値で、実行時に和のどれかとは
 //   確かめない（todo-api.ts の isProblem）。
 // WHY Problem Details の detail を持たない: detail は開発者向けの英語で、画面には出さない（契約外。画面の文言は key の翻訳）。

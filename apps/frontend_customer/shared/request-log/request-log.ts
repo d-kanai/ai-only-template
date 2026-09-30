@@ -1,9 +1,10 @@
-// リクエストログ（1 リクエスト = JSON 1 行、5W1H）の 1 行を組み立てる純粋関数（Issue #80）。
+// リクエストログ（1 リクエスト = JSON 1 行、5W1H）の 1 行を組み立てる純粋関数。
 // 出力するのは apps/frontend_customer/proxy.ts（Next の規約ファイル）。ここは受け取った値から 1 行の中身を決めるだけで、
 // 時刻の取得・乱数・出力をしない。WHY: 仕様（各項目の取り方）をテストで丸ごと固定し、proxy.ts を薄く保つため。
-// 仕様の表は Issue #80、決定は ADR docs/adr/architecture/20260929-request-log-in-proxy.md、限界（status と所要時間が取れない、RSC のリクエストの扱い）は .claude/rules/frontend.md。
+// 各項目の仕様は下の RequestLog の各フィールドのコメント（5W1H）、決定は ADR docs/adr/architecture/20260929-request-log-in-proxy.md、
+// 限界（status と所要時間が取れない、RSC のリクエストの扱い）は .claude/rules/frontend.md。
 
-// 1 行の JSON の形。フィールド名は Issue #80 の表のとおり（5W1H）。
+// 1 行の JSON の形。フィールドを 5W1H（Who / What / When / Where / Why / How）で分ける。
 // WHY ヘッダ由来の項目を null にする（省略しない）: どの行も同じキーを持たせ、集計側で「無かった」と「出し忘れ」を区別するため。
 export type RequestLog = {
   // Who: リクエストの相関 ID（上流の x-request-id か、無ければ生成した値。応答ヘッダ x-request-id にも付ける）

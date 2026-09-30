@@ -1,6 +1,6 @@
 import type { ErrorKey, ErrorKeyParams } from "../domain/error-key";
 
-// Problem Details（RFC 9457）の detail に入れる、開発者向けの英語の文（Issue #126。ユーザー判断）。
+// Problem Details（RFC 9457）の detail に入れる、開発者向けの英語の文。
 // WHY 英語だけ・翻訳しない: detail は curl やログで API を読む開発者のためのもので、画面には出さない。画面に出す文言は
 //   画面（apps/frontend_customer）の辞書が key と params から翻訳する。backend に ja / en の辞書を持つと、画面の辞書と二重管理になる
 //   （採用しなかった案。ADR docs/adr/architecture/20260929-error-response-rfc9457.md）。
@@ -37,7 +37,6 @@ function detailMessages(): DetailMessages {
   };
 }
 
-// key と params から detail の英語の文を作る。
 // WHY 引数の params を実行時の形（Record<string, string | number>）で受け取る: 呼び出し元（problem.ts）は DomainError・
 //   InvalidRequestError の key と params を渡す。その組はそれぞれのコンストラクタがキーごとの型（ErrorParamsArgs）で縛って
 //   作っているが、errors の各要素（ProblemErrorInput）は key と params の対応を型に持たない。ここでキーごとの型を

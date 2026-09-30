@@ -3,14 +3,11 @@ import { logger } from "@repo/shared/logger";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool, type PoolConfig } from "pg";
 
-// Postgres への接続（node-postgres のプール）と、それを使う Drizzle の db を作る。
 // 設定は env.ts の env（.env / 環境変数を検証した値）から取る。ここには既定値を置かない（WHY は env.ts）。
-// 開発・CI・E2E 用の値は .env.example にあり、本番用の最終的な値（接続数・タイムアウト・TLS など）は Issue #58 で決める。
+// 開発・CI・E2E 用の値は .env.example、本番（Cloud Run）の値は infra/modules/app/run.tf が渡す。
 
-// Drizzle の db（プール全体）。Repository の実装がコンストラクタで受け取り、読み書きに使う。
-// WHY トランザクションの型（以前の Transaction と、db との和の型）を置かない: Issue #123 で「command を一律にトランザクションで包む」
-//   仕組みを廃止し、Repository は db だけを受け取る。複数の書き込みが要る command が出たら、そのときに型を足す
-//   （.claude/rules/backend.md の「永続化（Drizzle + Postgres）」）。
+// WHY トランザクションの型（db との和の型）を置かない: 今の command は書き込みが 1 文だけで、Repository は db だけを受け取る。
+//   複数の書き込みが要る command が出たら、そのときに型を足す（.claude/rules/backend.md の「永続化（Drizzle + Postgres）」）。
 export type Database = NodePgDatabase;
 
 export type DatabaseConfig = {
@@ -35,7 +32,7 @@ export function createDatabase(
   //   'error' イベントを出す。リスナーが無いと Node の EventEmitter の規則で例外になり、プロセスが落ちる
   //   （node-postgres の Pool のドキュメント）。切れた接続はプールから捨てられ、次のクエリは新しい接続を作るので、
   //   ログに残して続ける。
-  // WHY 英語の文言: ログは開発者が読むもので、apps/backend の非テストコードには自然言語の日本語を置かない（Issue #116）。
+  // WHY 英語の文言: ログは開発者が読むもので、apps/backend の非テストコードには自然言語の日本語を置かない。
   pool.on("error", (error) => {
     logger.error({ message: "idle Postgres connection error", error });
   });
@@ -60,7 +57,6 @@ export function getDatabase(): DatabaseHandle {
   return holder.__appDatabase;
 }
 
-// プールを閉じる（接続をすべて切る）。テストの後始末や、プロセスを終える前に使う。
 export async function closeDatabase(): Promise<void> {
   const database = holder.__appDatabase;
   if (database === undefined) {

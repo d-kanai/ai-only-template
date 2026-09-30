@@ -11,7 +11,7 @@ import {
 
 describe("InvalidRequestError", () => {
   // name はログやスタックトレースの先頭に出る。Error のままだと想定外の例外と見分けられない。
-  // message は開発者向け（キーと params の JSON）。画面は key と params を翻訳する（Issue #116）。
+  // message は開発者向け（キーと params の JSON）。画面は key と params を翻訳する。
   test("key を持ち、message はキー、name は InvalidRequestError になる（params と errors は無い）", () => {
     const error = new InvalidRequestError("request.body.notJson");
 
@@ -115,7 +115,7 @@ describe("toProblemResponse", () => {
   });
 
   // instance はクエリを含まない URL のパス（new URL(request.url).pathname）。
-  // WHY パスだけ: リクエストログと同じ方針でクエリの値は出さない（Issue #85）。パスの id は params と detail にも出る。
+  // WHY パスだけ: リクエストログと同じ方針でクエリの値は出さない。パスの id は params と detail にも出る。
   test("DomainError の not_found は 404 の /problems/not-found になり、instance はリクエストのパス（クエリを除く）", async () => {
     const response = toProblemResponse(
       new DomainError("not_found", "todo.notFound", { id: "abc" }),
@@ -217,7 +217,7 @@ describe("toProblemResponse", () => {
   });
 
   test("想定外の例外は logger.error で、例外の name と message を含む 1 行の JSON としてサーバのログ（stderr）に残す", () => {
-    // logger（apps/shared/logger.ts。Issue #90 で移した）は error を console.error に 1 行の文字列で渡す。
+    // logger（apps/shared/logger.ts）は error を console.error に 1 行の文字列で渡す。
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
@@ -254,7 +254,7 @@ describe("toProblemResponse", () => {
 });
 
 // withProblemResponse: handler を包み、handler が投げた例外（reject も同期の throw も）を toProblemResponse で Problem Details の
-//   Response にする（Issue #141）。変換の規則は上の toProblemResponse のテストが固定しているので、ここでは「包んだ handler が
+//   Response にする。変換の規則は上の toProblemResponse のテストが固定しているので、ここでは「包んだ handler が
 //   どの経路の例外でも toProblemResponse を通ること」と「引数・戻り値を素通しすること」を確かめる。
 describe("withProblemResponse", () => {
   afterEach(() => {

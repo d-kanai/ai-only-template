@@ -12,7 +12,7 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 
 // POST /api/todos: Todo を作る。201 と作った Todo を返す。
 
-// リクエスト本文の「形」（項目の有無と型。未知の項目は拒否）に、title の必須・長さを domain と同じ規則で重ねる（Issue #144）。
+// リクエスト本文の「形」（項目の有無と型。未知の項目は拒否）に、title の必須・長さを domain と同じ規則で重ねる。
 // WHY 必須・長さも見る: 形の誤りと一緒に、項目ごとの誤り（Problem の errors。pointer が #/title）として 1 回の応答で
 //   まとめて返すため。domain の DomainError(validation_error) は key 1 つで、どの項目の誤りかを持たない。
 // WHY domain と同じキー・同じ数え方・同じ上限（TODO_TITLE_MAX_LENGTH）にする: presentation は domain より厳しくしない
@@ -43,8 +43,8 @@ export type CreateTodoRequest = z.infer<
 >;
 
 // 同じ形の Response を各 *.api.ts に書く。
-//   WHY: 1 API = 1 ファイルで契約をそのファイルだけで読めるようにする。共通の dto.ts を作らない（ユーザー判断）。
-//   Issue #139 で共通の DTO 型の別名もやめ、domain の Todo を各 API の Response に直接写す。
+//   WHY: 1 API = 1 ファイルで契約をそのファイルだけで読めるようにする。共通の dto.ts も共通の DTO 型の別名も作らず、
+//   domain の Todo を各 API の Response に直接写す。
 export type CreateTodoResponse = {
   id: string;
   title: string;
@@ -62,9 +62,8 @@ function toResponse(todo: Todo): CreateTodoResponse {
   };
 }
 
-// POST /api/todos の Route Handler を持つクラス。コンストラクタで command を受け取り、handle を Route Handler として export する
-//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包むは
-//   list-todos.api.ts の ListTodosApi のコメント）。
+// WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包む:
+//   list-todos.api.ts の ListTodosApi のコメント。
 export class CreateTodoApi {
   constructor(
     private readonly createTodo: Pick<CreateTodoCommand, "execute">,

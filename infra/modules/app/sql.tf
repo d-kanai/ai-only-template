@@ -47,11 +47,10 @@ resource "google_sql_database_instance" "main" {
   deletion_protection = var.deletion_protection
 
   settings {
-    # WHY ENTERPRISE を明示: PostgreSQL 16 以降は、指定しないと Enterprise Plus（高価で db-f1-micro を使えない）になる
-    #   （2026-09-30 の work-logs）。
+    # WHY ENTERPRISE を明示: PostgreSQL 16 以降は、指定しないと Enterprise Plus（高価で db-f1-micro を使えない）になる。
     edition = "ENTERPRISE"
-    # WHY db-f1-micro（共有コア、RAM 0.6GB、max_connections 25）: 試用の段階で最も安い（#129 のコメントの料金比較で月 約 $12）。
-    #   SLA の対象外。接続数の配分は下の「接続数の予算」と docs/adr/tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md。
+    # WHY db-f1-micro（共有コア、RAM 0.6GB、max_connections 25）: 試用の段階で最も安い（月 約 $12）。
+    #   SLA の対象外。料金の比較と接続数の配分は docs/adr/tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md と下の「接続数の予算」。
     #   足りなくなったら db-g1-small（+約 $18/月）か専用コアにする（環境ごとに variables.tf の sql_tier で変える）。
     #   tier を変えると max_connections も変わるので、下の予算を見直す。
     # 接続数の予算（max_connections 25 のうち、PostgreSQL の既定で 3 はスーパーユーザー用に予約）:
@@ -72,7 +71,7 @@ resource "google_sql_database_instance" "main" {
     backup_configuration {
       enabled = true
       # WHY PITR（ポイントインタイムリカバリ）を使わない: WAL の保存に追加の容量と料金がかかる。試用の段階では日次のバックアップ
-      #   （最大 1 日分の損失）で足りるとした。
+      #   （最大 1 日分の損失）で足りる。
       point_in_time_recovery_enabled = false
       # バックアップの開始時刻（UTC）。18:00 UTC = 03:00 JST（利用の少ない時間）。
       start_time = "18:00"
@@ -163,7 +162,7 @@ resource "google_sql_user" "iam" {
 #   パスワードだけを Secret にすると、アプリ側に URL を組み立てるコードと環境変数（ホスト・DB 名など）が増える。
 # 形: postgresql://<user>:<password>@/<db>?host=/cloudsql/<接続名>。host にディレクトリを渡すと pg（node-postgres）は
 #   Unix ソケット（/cloudsql/<接続名>/.s.PGSQL.5432）に接続する。Cloud Run の組み込みの Cloud SQL 接続（run.tf の
-#   cloud_sql_instance のボリューム）がそのソケットを置く（2026-09-30 の work-logs で pg と drizzle-kit の接続を模擬して確認）。
+#   cloud_sql_instance のボリューム）がそのソケットを置く（pg も drizzle-kit もこの形の URL でソケットに接続する）。
 resource "google_secret_manager_secret" "database_url" {
   secret_id = "database-url"
   replication {

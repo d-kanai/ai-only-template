@@ -214,7 +214,7 @@ describe("parseJsonBody", () => {
     );
   });
 
-  // Issue #144: presentation のスキーマは、形の検査に加えて domain と同じ規則（必須・長さ）を、domain と同じキーで重ねる
+  // presentation のスキーマは、形の検査に加えて domain と同じ規則（必須・長さ）を、domain と同じキーで重ねる
   //   （keyedIssue / keyedRefine。.claude/rules/backend.md の presentation）。キーの付いた issue は、そのキーと params を
   //   そのまま errors に載せる（項目ごとの誤りを 1 回の応答でまとめて返すため）。
   function keyedBodySchema() {

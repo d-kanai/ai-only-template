@@ -23,7 +23,7 @@ afterEach(() => {
   vi.mocked(now).mockReset();
 });
 
-// key と params は API の Problem Details（problem.ts）の拡張メンバーとして画面に渡る（画面が翻訳するクライアントとの契約。Issue #116）ので、両方を検証する。
+// key と params は API の Problem Details（problem.ts）の拡張メンバーとして画面に渡る（画面が翻訳するクライアントとの契約）ので、両方を検証する。
 // WHY toEqual に params: undefined を含める: params の無いキーで params が {} などになっていないことも確かめる
 //   （toEqual は undefined のプロパティと無いプロパティを同じに扱うが、{} とは区別する）。
 function expectValidationError(
@@ -93,7 +93,7 @@ describe("Todo.create", () => {
   });
 
   // WHY 定数の値を固定する: presentation のリクエストのスキーマ（create-todo.api.ts・update-todo.api.ts）がこの定数を参照して
-  //   同じ上限を重ねる（Issue #144）。値を変えると画面の文言（params.max）と API の契約が変わるので、変えるときはここも直す。
+  //   同じ上限を重ねる。値を変えると画面の文言（params.max）と API の契約が変わるので、変えるときはここも直す。
   test("タイトルの上限の文字数 TODO_TITLE_MAX_LENGTH は 100 で、それを超えると validation_error になる", () => {
     expect(TODO_TITLE_MAX_LENGTH).toBe(100);
     expectValidationError(
@@ -252,7 +252,7 @@ describe("Todo.reconstruct", () => {
     expect(todo.title).toBe("牛乳を買う");
   });
 
-  // Issue #94: 保存済みの値も今の不変条件で検査する（Todo 型 = 不変条件を満たす値）。規則を厳しくしたときは、
+  // 保存済みの値も今の不変条件で検査する（Todo 型 = 不変条件を満たす値）。規則を厳しくしたときは、
   //   既存のデータを移行（スキル db-migration）してから規則を変える。
   test.each([
     ["タイトルが空文字", { title: "" }, EMPTY_TITLE],

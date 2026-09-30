@@ -3,7 +3,7 @@
 //
 // scripts/hooks/subagent-stop.sh（SubagentStop フック）の仕様。サブエージェントの終了時に、
 // - 共有の Git フック（.git/hooks/pre-commit・commit-msg）が worktree の lefthook を指していたら、メインの作業ツリーで
-//   lefthook install を実行して直す（LEARNINGS.md の Issue #26 / #34 / #50 で手作業で直した事故）
+//   lefthook install を実行して直す（LEARNINGS.md）
 // - pnpm-lock.yaml に未コミットの変更があれば警告する
 // を確かめる。結果は {"systemMessage": "..."} で返し、止めない（block しない）。
 import { spawnSync } from "node:child_process";

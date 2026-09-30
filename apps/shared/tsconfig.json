@@ -1,4 +1,4 @@
-// apps/shared の tsconfig（Issue #90）。apps/shared 単体の型チェック（pnpm exec tsc -p apps/shared --noEmit。pnpm typecheck に含む）に使う。
+// apps/shared の tsconfig。apps/shared 単体の型チェック（pnpm exec tsc -p apps/shared --noEmit。pnpm typecheck に含む）に使う。
 // apps/shared は frontend と backend で共通の基盤（環境変数の入口 env.ts・ログの出口 logger.ts）で、サーバ側（Node.js）でだけ動く。
 // WHY apps/backend/tsconfig.json と同じ方針（DOM の型なし・Next の plugin なし・jsx なし）: env.ts・logger.ts は Node の API
 //   （process・node:fs・console）だけを使う pure な TypeScript にし、ブラウザや React の API を使うと型エラーになるようにする。

@@ -4,7 +4,7 @@ import { DomainError } from "./domain-error";
 
 describe("DomainError", () => {
   // name はログやスタックトレースの先頭に出る。Error のままだと想定外の例外と見分けられない（domain-error.ts の WHY）。
-  // message は開発者向け（キーと params の JSON）。自然言語は持たない（画面が key と params を翻訳する。Issue #116）。
+  // message は開発者向け（キーと params の JSON）。自然言語は持たない（画面が key と params を翻訳する）。
   test("code・key・params を持ち、message はキーと params の JSON、name は DomainError になる", () => {
     const error = new DomainError("not_found", "todo.notFound", { id: "abc" });
 

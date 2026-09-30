@@ -1,6 +1,6 @@
 import type { Locale } from "./locale";
 
-// 日時（ISO 8601 の文字列。API の createdAt）を、ロケールの書式とタイムゾーンで表示用の文字列にする（Issue #116）。
+// 日時（ISO 8601 の文字列。API の createdAt）を、ロケールの書式とタイムゾーンで表示用の文字列にする。
 // WHY Intl.DateTimeFormat（ライブラリや Temporal を使わない）: Node とブラウザの標準で、ロケールごとの書式を持つ。
 //   Temporal は Node 24 で未実装・Safari が未対応（ADR docs/adr/architecture/20260929-i18n-without-library.md）。
 // WHY timeZone を引数にする（関数の中で実行環境のタイムゾーンを読まない）: 画面では利用者のブラウザのタイムゾーン、

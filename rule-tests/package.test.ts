@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // 依存の版は package.json 上でも完全固定する（.claude/rules/dependencies.md）。
-// 対象は pnpm workspace のすべての package.json（リポジトリ直下と、pnpm-workspace.yaml の packages に当たる apps/* など。Issue #68）。
+// 対象は pnpm workspace のすべての package.json（リポジトリ直下と、pnpm-workspace.yaml の packages に当たる apps/* など）。
 // lockfile だけに頼ると、`pnpm update` や lockfile の再生成で範囲内の別の版に解決し直されうるため、
 // package.json 側でも範囲指定（^ ~ >= など）を禁止し、このテストで機械的に担保する。
 //
@@ -37,7 +37,7 @@ function isPinnedVersion(spec: string): boolean {
   return EXACT_VERSION.test(spec);
 }
 
-// workspace の中のパッケージ（@repo/backend など）への依存の書き方。完全固定の例外として、この 1 通りだけを許す（Issue #68）。
+// workspace の中のパッケージ（@repo/backend など）への依存の書き方。完全固定の例外として、この 1 通りだけを許す。
 // WHY 例外にする: workspace: は npm レジストリの版ではなく、同じリポジトリの中のパッケージ（apps/backend）に symlink する。
 //   入る中身は常にリポジトリの中のソースそのもので、「範囲内の別の版が入る」ことが起きないので、完全固定の狙いは満たす。
 // WHY "workspace:*" だけ（workspace:^ / workspace:~ / workspace:1.2.3 を拒否する）: 書き方を 1 通りにするため。
@@ -78,7 +78,7 @@ function findNonPinnedVersions(manifest: Manifest): Dependency[] {
 type Occurrence = { path: string; field: DependencyField; spec: string };
 type Inconsistency = { name: string; occurrences: Occurrence[] };
 
-// workspace の package.json をまたいで、同じ名前の依存が 2 通り以上の版で書かれているものを返す（Issue #68 の段階 2）。
+// workspace の package.json をまたいで、同じ名前の依存が 2 通り以上の版で書かれているものを返す。
 //   dependencies と devDependencies を区別せずに比べる（同じ package.json の中でのずれも検出する）。
 //   occurrences は、その依存が出てくる場所を manifests の順・フィールドの順に並べたもの（ずれていない場所も含める。
 //   失敗時に、どこをそろえればよいかが出力に出るように）。

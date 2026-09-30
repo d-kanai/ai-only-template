@@ -26,6 +26,9 @@
 - WHAT のコメントは基本不要。コードが自己説明するようにリファクタリングで近づける。
 - ただし、ツール設定や YAML など、リファクタリングでは self-explanatory にできないものは、WHY と同様に WHAT も積極的に書く。
 - 変更時はコメントとコードの整合性がずれないように注意を払い、コードとコメントの両方を変更する。
+- コメントは今のコードの WHY だけを書く。経緯（Issue / PR 番号、日付、以前は〜、から移した、誰が判断・指摘・実測したか）は書かず、`git log -p`、PR の実装経緯、`docs/work-logs/` に残す。WHY: 経緯はコードが変わっても書き換えられず、今の実装と食い違ったまま残る（`rule-tests/comments.test.ts` で検査）。
+- 過去の不具合や実測が今の形の理由なら、事実だけを WHY にする（「Z にする。WHY: Y だと X になる」）。設定ファイルで WHAT を書く例外のときも、経緯は書かない。
+- 一次情報（公式の URL、RFC の節、公式の引用、読んだソースの版とファイル）と、ADR / `.claude/rules` への参照は残す。
 
 ## 6. 変更前の背景確認
 - 実装やルールを修正する前に、該当箇所の commit history（`git log -p -- <path>`）、関連する Issue / PR、`docs/work-logs/` の作業ログ、ADR（`docs/adr/`）を確認し、なぜ今の形になっているかを理解したうえで修正内容を検討する。
@@ -54,7 +57,7 @@
 | `.claude/skills/<name>/SKILL.md` | 説明は常時、本文は呼び出したとき | 手順 |
 | `docs/adr/` | 読み込まれない（必要なら自分で読む） | ADR（決定の記録。1 決定 1 ファイル、不変。命名 `<分類>/yyyymmdd-<topic>.md`、分類は `architecture`（構造・境界・設計パターン）/ `tech-stack`（言語・ツールの選定）/ `quality`（品質ゲート・テスト方針）/ `workflow`（開発プロセス・環境・エージェント運用）、形式は `rule-tests/instructions.test.ts` が検査する。一覧は `docs/adr/README.md`） |
 | `docs/work-logs/` | 読み込まれない | 日ごとの作業ログ |
-| `rule-tests/` | 読み込まれない | ルール検査テスト 9 本（`architecture` / `instructions` / `lint` / `package` / `pnpm-workspace` / `schema` / `settings` / `typecheck` / `work-logs-check` の `*.test.ts`。Issue #86、`schema` は Issue #145） |
+| `rule-tests/` | 読み込まれない | ルール検査テスト 10 本（`architecture` / `comments` / `instructions` / `lint` / `package` / `pnpm-workspace` / `schema` / `settings` / `typecheck` / `work-logs-check` の `*.test.ts`。Issue #86、`schema` は Issue #145、`comments` は Issue #150） |
 
 ### .claude/rules（パス依存）
 | ファイル | 触ったときに読まれる主なファイル | 内容 |

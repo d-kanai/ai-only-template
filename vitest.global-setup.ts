@@ -10,7 +10,7 @@ import {
 // env.ts を読み込むので、.env が無い・必須の変数が欠けているときも、テストファイルを動かす前にここで欠けた名前を出して止まる。
 // WHY ここ（テストの前）で消すか: テストファイルはまだ 1 つも動いていないので、消してよいのは前の実行の残りだけになる。
 //   同じ理由で、Stryker の worker の中では消さない（他の worker が並行して動いているため。WHY は cleanupTestSchemas）。
-// WHY env は "@repo/shared/env" で import する（Issue #68 の段階 2・Issue #90）: env.ts は frontend と backend で共通の workspace
+// WHY env は "@repo/shared/env" で import する: env.ts は frontend と backend で共通の workspace
 //   パッケージ apps/shared にあり、リポジトリ直下のファイルも公開の入口（apps/shared/package.json の exports）からだけ使う
 //   （rule-tests/architecture.test.ts の frontend-to-shared-specifier）。
 // WHY database.test-support だけは相対パスで import する: テストのための処理で、パッケージの公開面（exports）に含めない

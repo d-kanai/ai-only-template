@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# worktree 用の .env の内容を stdout に出す（Issue #64。設計は .claude/rules/worktree.md）。
+# worktree 用の .env の内容を stdout に出す（設計は .claude/rules/worktree.md）。
 #
 # 使い方:
 #   bash scripts/worktree-env.sh <worktree の名前> [.env.example のパス]   # 既定はこのリポジトリの .env.example
@@ -10,7 +10,7 @@
 # WHY: 並列の worktree が同じ外部リソース（Postgres のデータベース、E2E のポートなど）を使うと、テストの TRUNCATE や
 #   マイグレーション、起動済みのサーバが互いに干渉する。値の入口は apps/shared/env.ts の 1 か所（.env）なので、
 #   worktree ごとの .env に別の値を書けば、コードを変えずに分離できる。InMemory / WASM の DB には置き換えない
-#   （テストは本物のリソースで行う。Issue #64 のユーザー判断）。
+#   （テストは本物のリソースで行う。ADR docs/adr/workflow/20260928-worktree-isolated-external-resources.md）。
 # WHY 決定的（同じ名前 → 同じ値）: 乱数や空きの探索にすると、同じ worktree で作り直したときに値が変わり、作ったデータベースを
 #   見失う（孤立する）。名前から計算できれば、後始末（scripts/hooks/worktree-create.sh の孤立したデータベースの削除、
 #   worktree-remove.sh）も名前だけで対象を決められる。

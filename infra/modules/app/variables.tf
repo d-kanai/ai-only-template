@@ -1,4 +1,5 @@
-# module の入力。project_id と github_environment だけが必須で、ほかは既定値のままで Issue #137 の構成になる。
+# module の入力。project_id と github_environment だけが必須で、ほかは既定値のままで
+#   docs/adr/tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md の構成になる。
 # 値は呼び出す側（infra/envs/<環境>/main.tf）が渡す。環境ごとの差（stg / prod）はここの変数だけで表す（リソースの定義は共通）。
 
 # GCP のプロジェクト ID（プロジェクト番号ではない）。Billing を紐づけ済みのプロジェクト。
@@ -9,7 +10,7 @@ variable "project_id" {
 
 # リージョン。Cloud Run・Cloud SQL・Artifact Registry をすべて同じ場所に置く。
 # WHY asia-northeast1（東京）: 利用者が日本にいる前提で遅延が小さく、Cloud Run と Cloud SQL を同じリージョンにすると
-#   リージョン間の通信（遅延と egress 料金）が無い（Issue #137 の決定）。
+#   リージョン間の通信（遅延と egress 料金）が無い。
 variable "region" {
   type        = string
   description = "Cloud Run / Cloud SQL / Artifact Registry のリージョン"
@@ -73,7 +74,7 @@ variable "bootstrap_image" {
 
 # Metabase の最小インスタンス数（0 か 1）。
 # WHY 既定 0: 使わないときは課金されない（試用の段階）。代わりに、最初のアクセスで JVM の起動（1〜2 分）を待つ。
-#   常時使うようになったら 1 にする（常時起動の目安は #129 のコメントの料金比較で月 約 $19）。
+#   常時使うようになったら 1 にする（常時起動すると月 約 $19 増える。料金の目安は docs/adr/tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md）。
 variable "metabase_min_instances" {
   type        = number
   description = "Metabase の Cloud Run の最小インスタンス数（0 か 1）"

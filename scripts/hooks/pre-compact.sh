@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Claude Code の PreCompact フック（.claude/settings.json の hooks.PreCompact から呼ぶ）。Issue #64。
+# Claude Code の PreCompact フック（.claude/settings.json の hooks.PreCompact から呼ぶ）。
 #
 # WHAT: compact（/compact か自動）の直前に、作業状態を <リポジトリ直下>/.claude/state/pre-compact.md に上書きで書く。
 #   書くもの: 日時・trigger（manual / auto）・ブランチ・HEAD・git status --short・git stash list の件数・直近 5 コミットの 1 行目。

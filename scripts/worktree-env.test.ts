@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-// worktree 用の .env を .env.example から導く scripts/worktree-env.sh の仕様（Issue #64。.claude/rules/worktree.md）。
+// worktree 用の .env を .env.example から導く scripts/worktree-env.sh の仕様（.claude/rules/worktree.md）。
 const repoRoot = resolve(__dirname, "..");
 const scriptPath = join(repoRoot, "scripts", "worktree-env.sh");
 
