@@ -9,10 +9,10 @@ import { Activity, type ActivityProps, createElement, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ApiError } from "@/features/todo/api/api-error";
 import {
+  changeTodoCompletion,
   createTodo,
   deleteTodo,
   listTodos,
-  updateTodo,
 } from "@/features/todo/api/todo-api";
 import { useTodoScreen } from "@/features/todo/screens/todo-screen/todo-screen.hook";
 import { commonMessages } from "@/shared/i18n/common.messages";
@@ -324,7 +324,10 @@ describe("追加", () => {
         .mockReturnValueOnce(staleReload.promise)
         .mockResolvedValueOnce({ todos: [{ ...milk, completed: true }] });
       vi.mocked(createTodo).mockResolvedValue(milk);
-      vi.mocked(updateTodo).mockResolvedValue({ ...milk, completed: true });
+      vi.mocked(changeTodoCompletion).mockResolvedValue({
+        ...milk,
+        completed: true,
+      });
       const { result } = await renderLoaded();
 
       act(() => result.current.setNewTitle("牛乳を買う"));
@@ -499,12 +502,12 @@ describe("完了の切り替え", () => {
     vi.mocked(listTodos)
       .mockResolvedValueOnce({ todos: [milk] })
       .mockResolvedValueOnce({ todos: [completedMilk] });
-    vi.mocked(updateTodo).mockResolvedValue(completedMilk);
+    vi.mocked(changeTodoCompletion).mockResolvedValue(completedMilk);
     const { result } = await renderLoaded();
 
     await act(() => result.current.toggleTodo("todo-1", true));
 
-    expect(updateTodo).toHaveBeenCalledWith("todo-1", { completed: true });
+    expect(changeTodoCompletion).toHaveBeenCalledWith("todo-1", true);
     expect(listTodos).toHaveBeenCalledTimes(2);
     expect(result.current.todos).toEqual([completedMilk]);
   });

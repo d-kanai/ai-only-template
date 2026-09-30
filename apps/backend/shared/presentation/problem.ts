@@ -223,7 +223,7 @@ export function toProblemResponse(error: unknown, request: Request): Response {
 // WHY Args を型引数にして引数をそのまま透過する: (request) と (request, ctx: { params: Promise<...> }) の両方の handler を
 //   同じ関数で包み、ctx の型（動的セグメントの名前）を呼び出し側に残すため。先頭は Request に固定する（instance に使う）。
 // WHY parseJsonBody や await ctx.params を共通化しない（ユーザー判断）: 本文の有無・動的セグメントの有無と、id と本文を
-//   確かめる順番（update-todo.api.ts は id を先に見て 404 を優先する）が api ごとに違い、handler の中に書いた方が
+//   確かめる順番（rename-todo.api.ts・change-todo-completion.api.ts は id を先に見て 404 を優先する）が api ごとに違い、handler の中に書いた方が
 //   その api の処理を 1 か所で読める。ここは例外の変換だけを受け持つ。
 // WHY handler の呼び出しを try の中に置く（handler(...args).catch(...) にしない）: async でない handler が同期で throw
 //   しても、同じく Problem Details にするため。

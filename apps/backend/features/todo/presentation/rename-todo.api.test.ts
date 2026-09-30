@@ -2,15 +2,15 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { Problem } from "../../../shared/presentation/problem";
-import { UpdateTodoCommand } from "../application/update-todo.command";
+import { RenameTodoCommand } from "../application/rename-todo.command";
 import { Todo } from "../domain/todo";
 import { InMemoryTodoRepository } from "../infra/todo-repository.in-memory";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 import {
   PUT as productionPut,
-  UpdateTodoApi,
-  type UpdateTodoResponse,
-} from "./update-todo.api";
+  RenameTodoApi,
+  type RenameTodoResponse,
+} from "./rename-todo.api";
 
 // テストごとに、Todo を 1 件だけ置いた InMemory のリポジトリで組み立てる（本番の PUT は Postgres を使い、
 //   テストの順序で結果が変わるため）。
@@ -21,7 +21,7 @@ async function setup() {
   return {
     repository,
     todo,
-    PUT: new UpdateTodoApi(new UpdateTodoCommand(repository)).handle,
+    PUT: new RenameTodoApi(new RenameTodoCommand(repository)).handle,
   };
 }
 
@@ -37,7 +37,7 @@ function notFoundProblem(id: string): Problem {
     title: "Not found",
     status: 404,
     detail: `Todo ${id} was not found.`,
-    instance: `/api/todos/${id}`,
+    instance: `/api/todos/${id}/title`,
     key: "todo.notFound",
     params: { id },
   };
@@ -61,18 +61,18 @@ function context(id: string) {
 }
 
 function putRequest(id: string, body: string): Request {
-  return new Request(`http://localhost/api/todos/${id}`, {
+  return new Request(`http://localhost/api/todos/${id}/title`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body,
   });
 }
 
-// 問い合わせを記録するリポジトリ。uuid の形でない id で、presentation が query / command に渡す前に
+// 問い合わせを記録するリポジトリ。uuid の形でない id で、presentation が command に渡す前に
 //   404 にしていること（parseUuidParam）を、Repository が呼ばれないことで確かめる。
-// WHY spy で確かめる（その id の Todo を置いて「あっても 404」を見ない）: Issue #94 から Todo は常に不変条件
-//   （id は uuid の形）を満たすので、uuid の形でない id の Todo は作れない。空のリポジトリで 404 を見るだけだと、
-//   id をそのまま渡しても「無い」の 404 になり、presentation の検査を外しても通ってしまう。
+// WHY spy で確かめる（その id の Todo を置いて「あっても 404」を見ない）: Todo は常に不変条件（id は uuid の形）を
+//   満たすので、uuid の形でない id の Todo は作れない。空のリポジトリで 404 を見るだけだと、id をそのまま渡しても
+//   「無い」の 404 になり、presentation の検査を外しても通ってしまう。
 function spiedRepository() {
   const repository = new InMemoryTodoRepository();
   return {
@@ -90,44 +90,8 @@ const NOT_UUID_IDS = [
   ["版の桁が 0", "8d0f4f39-6f0b-0a39-9d53-0a3f8b1c2d4e"],
 ] as const;
 
-describe("PUT /api/todos/:id", () => {
-  test("title と completed を更新し、200 と更新後の Todo（UpdateTodoResponse）を返す", async () => {
-    const { todo, PUT } = await setup();
-
-    const response = await PUT(
-      putRequest(
-        todo.id,
-        JSON.stringify({ title: "卵を買う", completed: true }),
-      ),
-      context(todo.id),
-    );
-
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as UpdateTodoResponse;
-    expect(body).toEqual({
-      id: todo.id,
-      title: "卵を買う",
-      completed: true,
-      createdAt: todo.createdAt.toISOString(),
-    });
-  });
-
-  test("completed だけ送ると title はそのまま（部分更新）", async () => {
-    const { repository, todo, PUT } = await setup();
-
-    const response = await PUT(
-      putRequest(todo.id, JSON.stringify({ completed: true })),
-      context(todo.id),
-    );
-
-    expect(response.status).toBe(200);
-    await expect(repository.findById(todo.id)).resolves.toMatchObject({
-      title: "牛乳を買う",
-      completed: true,
-    });
-  });
-
-  test("title だけ送ると completed はそのまま（部分更新）", async () => {
+describe("PUT /api/todos/:id/title", () => {
+  test("title を変え、200 と変えた後の Todo（RenameTodoResponse）を返す。completed はそのまま", async () => {
     const { repository, todo, PUT } = await setup();
 
     const response = await PUT(
@@ -136,6 +100,13 @@ describe("PUT /api/todos/:id", () => {
     );
 
     expect(response.status).toBe(200);
+    const body = (await response.json()) as RenameTodoResponse;
+    expect(body).toEqual({
+      id: todo.id,
+      title: "卵を買う",
+      completed: false,
+      createdAt: todo.createdAt.toISOString(),
+    });
     await expect(repository.findById(todo.id)).resolves.toMatchObject({
       title: "卵を買う",
       completed: false,
@@ -149,7 +120,7 @@ describe("PUT /api/todos/:id", () => {
     ["100 文字", ` ${"a".repeat(100)}\t`, "a".repeat(100)],
     ["絵文字 100 個", ` ${"🍎".repeat(100)} `, "🍎".repeat(100)],
   ])(
-    "title が前後の空白を除いて %s なら更新できる",
+    "title が前後の空白を除いて %s なら変えられる",
     async (_label, title, saved) => {
       const { repository, todo, PUT } = await setup();
 
@@ -167,7 +138,7 @@ describe("PUT /api/todos/:id", () => {
   );
 
   // WHY 本番の PUT（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない（Issue #59）
-  //   ことを、Postgres の Repository が呼ばれることで固定する。findById と save をを差し替えるので DB には接続しない。
+  //   ことを、Postgres の Repository が呼ばれることで固定する。findById と save を差し替えるので DB には接続しない。
   test("本番の PUT は Postgres の Repository に保存する", async () => {
     const todo = Todo.create("牛乳を買う");
     vi.spyOn(PostgresTodoRepository.prototype, "findById").mockResolvedValue(
@@ -178,7 +149,7 @@ describe("PUT /api/todos/:id", () => {
       .mockResolvedValue();
 
     const response = await productionPut(
-      putRequest(todo.id, JSON.stringify({ completed: true })),
+      putRequest(todo.id, JSON.stringify({ title: "卵を買う" })),
       context(todo.id),
     );
 
@@ -186,21 +157,7 @@ describe("PUT /api/todos/:id", () => {
     expect(save).toHaveBeenCalledTimes(1);
     expect(save.mock.calls[0]?.[0]).toMatchObject({
       id: todo.id,
-      completed: true,
-    });
-  });
-
-  test("本文が空のオブジェクト（{}）なら何も変えず、200 と今の Todo（UpdateTodoResponse）を返す", async () => {
-    const { todo, PUT } = await setup();
-
-    const response = await PUT(putRequest(todo.id, "{}"), context(todo.id));
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      id: todo.id,
-      title: "牛乳を買う",
-      completed: false,
-      createdAt: todo.createdAt.toISOString(),
+      title: "卵を買う",
     });
   });
 
@@ -209,7 +166,7 @@ describe("PUT /api/todos/:id", () => {
     const id = randomUUID();
 
     const response = await PUT(
-      putRequest(id, JSON.stringify({ completed: true })),
+      putRequest(id, JSON.stringify({ title: "卵を買う" })),
       context(id),
     );
 
@@ -221,9 +178,9 @@ describe("PUT /api/todos/:id", () => {
   test.each(
     NOT_UUID_IDS.flatMap(([idLabel, id]) =>
       [
-        ["本文が正しい", JSON.stringify({ completed: true })],
-        ["本文が JSON でない", "{completed:"],
-        ["本文の形が違う", JSON.stringify({ completed: "true" })],
+        ["本文が正しい", JSON.stringify({ title: "卵を買う" })],
+        ["本文が JSON でない", "{title:"],
+        ["本文の形が違う", JSON.stringify({ title: 1 })],
       ].map(([bodyLabel, requestBody]) => [
         idLabel,
         bodyLabel,
@@ -235,7 +192,7 @@ describe("PUT /api/todos/:id", () => {
     "id が %s なら、%sときも、Repository に問い合わせずに 404 の /problems/not-found（todo.notFound と id の params）を返す",
     async (_idLabel, _bodyLabel, id, requestBody) => {
       const { repository, ...spies } = spiedRepository();
-      const PUT = new UpdateTodoApi(new UpdateTodoCommand(repository)).handle;
+      const PUT = new RenameTodoApi(new RenameTodoCommand(repository)).handle;
 
       const response = await PUT(putRequest(id, requestBody), context(id));
 
@@ -251,7 +208,7 @@ describe("PUT /api/todos/:id", () => {
   test.each<[string, string, ProblemBody]>([
     [
       "JSON でない",
-      "{completed:",
+      "{title:",
       {
         detail: "Request body must be valid JSON.",
         key: "request.body.notJson",
@@ -268,6 +225,24 @@ describe("PUT /api/todos/:id", () => {
             pointer: "#",
             key: "request.body.notObject",
             detail: "Request body must be a JSON object.",
+          },
+        ],
+      },
+    ],
+    [
+      // WHY 欠落を 400 にする: この API は名前の変更だけを受け持つので title は必須。任意にすると「何も変えない」200 になる。
+      "title が無い",
+      "{}",
+      {
+        detail: "title must be a string.",
+        key: "request.field.notString",
+        params: { path: "title" },
+        errors: [
+          {
+            pointer: "#/title",
+            key: "request.field.notString",
+            params: { path: "title" },
+            detail: "title must be a string.",
           },
         ],
       },
@@ -290,68 +265,27 @@ describe("PUT /api/todos/:id", () => {
       },
     ],
     [
-      "completed が boolean でない",
-      JSON.stringify({ completed: "true" }),
+      // WHY 未知のキーを拒否する: completed をこの API に送る誤り（完了は /completion）を黙って捨てず、400 で知らせる。
+      "定義されていない項目がある（completed はこの API では受け付けない）",
+      JSON.stringify({ title: "卵を買う", completed: true }),
       {
-        detail: "completed must be a boolean.",
-        key: "request.field.notBoolean",
-        params: { path: "completed" },
-        errors: [
-          {
-            pointer: "#/completed",
-            key: "request.field.notBoolean",
-            params: { path: "completed" },
-            detail: "completed must be a boolean.",
-          },
-        ],
-      },
-    ],
-    [
-      "title と completed の両方の型が違う",
-      JSON.stringify({ title: 1, completed: 1 }),
-      {
-        detail: "title must be a string.",
-        key: "request.field.notString",
-        params: { path: "title" },
-        errors: [
-          {
-            pointer: "#/title",
-            key: "request.field.notString",
-            params: { path: "title" },
-            detail: "title must be a string.",
-          },
-          {
-            pointer: "#/completed",
-            key: "request.field.notBoolean",
-            params: { path: "completed" },
-            detail: "completed must be a boolean.",
-          },
-        ],
-      },
-    ],
-    [
-      // WHY 未知のキーを拒否する: 部分更新なので、項目名を打ち間違えた本文（{ complete: true }）を黙って捨てると
-      //   「何も変えない」200 になり、誤りに気づけない。
-      "定義されていない項目がある（項目名の打ち間違い）",
-      JSON.stringify({ complete: true }),
-      {
-        detail: "Request body has unknown fields: complete.",
+        detail: "Request body has unknown fields: completed.",
         key: "request.body.unknownKeys",
-        params: { keys: "complete" },
+        params: { keys: "completed" },
         errors: [
           {
             pointer: "#",
             key: "request.body.unknownKeys",
-            params: { keys: "complete" },
-            detail: "Request body has unknown fields: complete.",
+            params: { keys: "completed" },
+            detail: "Request body has unknown fields: completed.",
           },
         ],
       },
     ],
     // WHY 誤りを同時に置く: presentation は誤りを項目ごとにまとめて返す（Issue #144）。
     [
-      "title が長すぎ、completed が boolean でなく、定義されていない項目もある",
-      JSON.stringify({ title: "a".repeat(101), completed: 1, extra: true }),
+      "title が長すぎ、定義されていない項目もある",
+      JSON.stringify({ title: "a".repeat(101), extra: true }),
       {
         detail: "Title must be at most 100 characters.",
         key: "todo.title.tooLong",
@@ -362,12 +296,6 @@ describe("PUT /api/todos/:id", () => {
             key: "todo.title.tooLong",
             params: { max: 100 },
             detail: "Title must be at most 100 characters.",
-          },
-          {
-            pointer: "#/completed",
-            key: "request.field.notBoolean",
-            params: { path: "completed" },
-            detail: "completed must be a boolean.",
           },
           {
             pointer: "#",
@@ -453,7 +381,7 @@ describe("PUT /api/todos/:id", () => {
         type: "/problems/validation-error",
         title: "Validation error",
         status: 400,
-        instance: `/api/todos/${todo.id}`,
+        instance: `/api/todos/${todo.id}/title`,
         ...expected,
       });
       await expect(repository.findById(todo.id)).resolves.toEqual(todo);

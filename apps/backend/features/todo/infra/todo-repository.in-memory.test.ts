@@ -44,7 +44,7 @@ describe("InMemoryTodoRepository", () => {
   });
 
   // WHY 読み込んでから変える: create した Todo（新規）を変えて save し直すと新規の 2 回目（エラー）になる。
-  //   本番の update の command と同じく、findByIdOrThrow で読み込んだ Todo（origin を持つ）を変えて save する。
+  //   本番の rename / change-todo-completion の command と同じく、findByIdOrThrow で読み込んだ Todo（origin を持つ）を変えて save する。
   test("読み込んだ Todo を変えて save すると上書きされ、行は増えない", async () => {
     const repository = new InMemoryTodoRepository();
     const todo = Todo.create("牛乳を買う");

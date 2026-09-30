@@ -4,11 +4,11 @@ import {
   toErrorMessages,
 } from "@/features/todo/api/api-error";
 import {
+  changeTodoCompletion,
   createTodo,
   deleteTodo,
   listTodos,
   type Todo,
-  updateTodo,
 } from "@/features/todo/api/todo-api";
 import { useLocale } from "@/shared/i18n/i18n";
 
@@ -111,7 +111,7 @@ export function useTodoScreen() {
 
   const toggleTodo = useCallback(
     async (id: string, completed: boolean) => {
-      await mutateAndReload(() => updateTodo(id, { completed }));
+      await mutateAndReload(() => changeTodoCompletion(id, completed));
     },
     // Stryker disable next-line ArrayDeclaration: mutateAndReload は作り直されないので [] でも同じ（等価な変異。Issue #55）
     [mutateAndReload],

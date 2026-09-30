@@ -9,8 +9,8 @@ import {
 // リクエスト本文のスキーマの土台。各 API は項目ごとの型を渡し（型の検査の error は書かない）、必要なら domain と同じ規則
 //   （必須・長さ）を domain と同じキーで重ねる（keyedIssue / keyedRefine。Issue #144）。
 //   例: requestBodySchema({ title: z.string() })
-// WHY 未知のキーを拒否する（z.strictObject）: 部分更新（PUT /api/todos/:id）で項目名を打ち間違えた本文
-//   （{ complete: true }）を z.object のように黙って捨てると、「何も変えない」200 になり誤りに気づけない。
+// WHY 未知のキーを拒否する（z.strictObject）: 項目名を打ち間違えた本文（{ complete: true }）や、別の API の項目
+//   （PUT /api/todos/:id/title に completed）を z.object のように黙って捨てると、送った変更が反映されないまま成功し、誤りに気づけない。
 //   画面と API は同じリポジトリで同時に変えるので、古いクライアントが知らない項目を送ってくる互換性の心配も無い。
 // WHY error（文言）をどこにも書かない（Issue #116）: 誤りは ErrorKey と params で返し、文言は画面が翻訳する。
 //   形の誤りのキーは zod の issue の種類（code・expected）と path から toProblemError が 1 か所で決める。各 api ファイルや

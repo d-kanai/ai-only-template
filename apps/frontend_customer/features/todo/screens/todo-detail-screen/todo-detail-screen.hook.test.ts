@@ -2,7 +2,11 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ApiError } from "@/features/todo/api/api-error";
-import { getTodo, updateTodo } from "@/features/todo/api/todo-api";
+import {
+  changeTodoCompletion,
+  getTodo,
+  renameTodo,
+} from "@/features/todo/api/todo-api";
 import { useTodoDetailScreen } from "@/features/todo/screens/todo-detail-screen/todo-detail-screen.hook";
 import { commonMessages } from "@/shared/i18n/common.messages";
 import { formatMessage, LocaleProvider } from "@/shared/i18n/i18n";
@@ -264,7 +268,7 @@ describe("todoId が変わった後に届いた前の Todo の更新結果", () 
     vi.mocked(getTodo).mockImplementation(async (id) =>
       id === "todo-1" ? milk : bread,
     );
-    vi.mocked(updateTodo).mockReturnValue(putResponse.promise);
+    vi.mocked(renameTodo).mockReturnValue(putResponse.promise);
     const { result, rerender } = renderWithTodoId("todo-1");
     await waitFor(() => expect(result.current.todo).toEqual(milk));
 
@@ -289,7 +293,7 @@ describe("todoId が変わった後に届いた前の Todo の更新結果", () 
     vi.mocked(getTodo).mockImplementation(async (id) =>
       id === "todo-1" ? milk : bread,
     );
-    vi.mocked(updateTodo).mockReturnValue(putResponse.promise);
+    vi.mocked(changeTodoCompletion).mockReturnValue(putResponse.promise);
     const { result, rerender } = renderWithTodoId("todo-1");
     await waitFor(() => expect(result.current.todo).toEqual(milk));
 
@@ -312,7 +316,7 @@ describe("todoId が変わった後に届いた前の Todo の更新結果", () 
     vi.mocked(getTodo).mockImplementation(async (id) =>
       id === "todo-1" ? milk : bread,
     );
-    vi.mocked(updateTodo).mockReturnValue(
+    vi.mocked(changeTodoCompletion).mockReturnValue(
       putResponse.promise.then(() => {
         throw new Error("更新に失敗しました");
       }),
@@ -340,7 +344,10 @@ describe("todoId が変わった後の更新", () => {
     vi.mocked(getTodo).mockImplementation(async (id) =>
       id === "todo-1" ? milk : bread,
     );
-    vi.mocked(updateTodo).mockResolvedValue({ ...bread, completed: true });
+    vi.mocked(changeTodoCompletion).mockResolvedValue({
+      ...bread,
+      completed: true,
+    });
     const { result, rerender } = renderWithTodoId("todo-1");
     await waitFor(() => expect(result.current.todo).toEqual(milk));
     rerender({ todoId: "todo-2" });
@@ -348,7 +355,7 @@ describe("todoId が変わった後の更新", () => {
 
     await act(() => result.current.toggleCompleted());
 
-    expect(updateTodo).toHaveBeenCalledWith("todo-2", { completed: true });
+    expect(changeTodoCompletion).toHaveBeenCalledWith("todo-2", true);
     expect(result.current.todo).toEqual({ ...bread, completed: true });
   });
 });
@@ -357,13 +364,14 @@ describe("title の保存", () => {
   test("編集した title（前後の空白は除く）で更新し、更新後の Todo を反映する", async () => {
     const renamed = { ...milk, title: "豆乳を買う" };
     vi.mocked(getTodo).mockResolvedValue(milk);
-    vi.mocked(updateTodo).mockResolvedValue(renamed);
+    vi.mocked(renameTodo).mockResolvedValue(renamed);
     const { result } = await renderLoaded();
 
     act(() => result.current.setTitle("  豆乳を買う  "));
     await act(() => result.current.saveTitle());
 
-    expect(updateTodo).toHaveBeenCalledWith("todo-1", { title: "豆乳を買う" });
+    expect(renameTodo).toHaveBeenCalledWith("todo-1", "豆乳を買う");
+    expect(changeTodoCompletion).not.toHaveBeenCalled();
     expect(result.current.todo).toEqual(renamed);
     expect(result.current.title).toBe("豆乳を買う");
   });
@@ -375,12 +383,12 @@ describe("title の保存", () => {
     act(() => result.current.setTitle("   "));
     await act(() => result.current.saveTitle());
 
-    expect(updateTodo).not.toHaveBeenCalled();
+    expect(renameTodo).not.toHaveBeenCalled();
   });
 
   test("更新に失敗すると error に message が入り、編集中の title は残る", async () => {
     vi.mocked(getTodo).mockResolvedValue(milk);
-    vi.mocked(updateTodo).mockRejectedValue(
+    vi.mocked(renameTodo).mockRejectedValue(
       new ApiError({
         status: 400,
         type: "/problems/validation-error",
@@ -406,7 +414,7 @@ describe("title の保存", () => {
 describe("項目ごとのエラー", () => {
   async function saveWithFailure(reason: unknown) {
     vi.mocked(getTodo).mockResolvedValue(milk);
-    vi.mocked(updateTodo).mockRejectedValue(reason);
+    vi.mocked(renameTodo).mockRejectedValue(reason);
     const view = await renderLoaded();
     act(() => view.result.current.setTitle("豆乳を買う"));
     await act(() => view.result.current.saveTitle());
@@ -494,7 +502,7 @@ describe("項目ごとのエラー", () => {
         errors: [{ pointer: "#/title", key: "todo.title.empty" }],
       }),
     );
-    vi.mocked(updateTodo).mockResolvedValue({ ...milk, title: "豆乳を買う" });
+    vi.mocked(renameTodo).mockResolvedValue({ ...milk, title: "豆乳を買う" });
 
     await act(() => result.current.saveTitle());
 
@@ -504,7 +512,7 @@ describe("項目ごとのエラー", () => {
 
   test("LocaleProvider のロケールが en なら、項目の文言は英語になる", async () => {
     vi.mocked(getTodo).mockResolvedValue(milk);
-    vi.mocked(updateTodo).mockRejectedValue(
+    vi.mocked(renameTodo).mockRejectedValue(
       new ApiError({
         status: 400,
         type: "/problems/validation-error",
@@ -530,18 +538,22 @@ describe("完了の切り替え", () => {
   test("現在の completed を反転して更新し、更新後の Todo を反映する", async () => {
     const completedMilk = { ...milk, completed: true };
     vi.mocked(getTodo).mockResolvedValue(milk);
-    vi.mocked(updateTodo).mockResolvedValue(completedMilk);
+    vi.mocked(changeTodoCompletion).mockResolvedValue(completedMilk);
     const { result } = await renderLoaded();
 
     await act(() => result.current.toggleCompleted());
 
-    expect(updateTodo).toHaveBeenCalledWith("todo-1", { completed: true });
+    expect(changeTodoCompletion).toHaveBeenCalledWith("todo-1", true);
+    expect(renameTodo).not.toHaveBeenCalled();
     expect(result.current.todo).toEqual(completedMilk);
   });
 
   test("切り替えでは編集中（未保存）の title を上書きしない", async () => {
     vi.mocked(getTodo).mockResolvedValue(milk);
-    vi.mocked(updateTodo).mockResolvedValue({ ...milk, completed: true });
+    vi.mocked(changeTodoCompletion).mockResolvedValue({
+      ...milk,
+      completed: true,
+    });
     const { result } = await renderLoaded();
 
     act(() => result.current.setTitle("編集中"));
@@ -552,7 +564,7 @@ describe("完了の切り替え", () => {
 
   test("前の操作のエラーは、次の操作が成功すると消える", async () => {
     vi.mocked(getTodo).mockResolvedValue(milk);
-    vi.mocked(updateTodo)
+    vi.mocked(changeTodoCompletion)
       .mockRejectedValueOnce(
         new ApiError({
           status: 500,
@@ -581,7 +593,7 @@ describe("完了の切り替え", () => {
 
     await act(() => result.current.toggleCompleted());
 
-    expect(updateTodo).not.toHaveBeenCalled();
+    expect(changeTodoCompletion).not.toHaveBeenCalled();
     expect(result.current.todo).toBeNull();
     expect(result.current.isLoading).toBe(true);
   });

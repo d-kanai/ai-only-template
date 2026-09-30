@@ -5,7 +5,7 @@ import { keyedIssue, keyedRefine } from "../../../shared/domain/keyed-issue";
 import { validate } from "../../../shared/domain/validate";
 
 // タイトルの上限の文字数（前後の空白を除いたコードポイント数）。
-// WHY export する（Issue #144）: presentation のリクエストのスキーマ（create-todo.api.ts・update-todo.api.ts）が同じ上限を
+// WHY export する（Issue #144）: presentation のリクエストのスキーマ（create-todo.api.ts・rename-todo.api.ts）が同じ上限を
 //   同じキー（todo.title.tooLong）で重ね、項目ごとの誤り（Problem の errors）として返す。数値を 2 か所に書くと片方だけ
 //   直してずれ、presentation が domain より厳しく（domain が通す値を弾く）なりうるので、この定数を参照させる。
 // WHY UPPER_SNAKE_CASE: presentation が feature の domain から値で import してよいのは、この形の名前の定数だけ

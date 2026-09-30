@@ -4,10 +4,10 @@ import {
   toErrorMessages,
 } from "@/features/todo/api/api-error";
 import {
+  changeTodoCompletion,
   getTodo,
+  renameTodo,
   type Todo,
-  type UpdateTodoRequest,
-  updateTodo,
 } from "@/features/todo/api/todo-api";
 import { useLocale } from "@/shared/i18n/i18n";
 
@@ -64,17 +64,20 @@ export function useTodoDetailScreen(todoId: string) {
     };
   }, [todoId]);
 
-  // PUT は更新後の Todo を返す契約なので、GET で取り直さずレスポンスをそのまま反映する（一覧画面と違い 1 件だけのため）。
+  // 名前の変更（PUT .../title）と完了の切り替え（PUT .../completion）の共通処理。send に今の todoId を渡して呼ぶ。
+  // どちらの PUT も更新後の Todo を返す契約なので、GET で取り直さずレスポンスをそのまま反映する（一覧画面と違い 1 件だけのため）。
   // 成功したら前の操作のエラー表示は古い情報なので消す。
   // 応答を待つ間に todoId が変わっていたら、成功も失敗も反映せず null を返す。
   // 反映すると、新しい Todo の画面に前の Todo の内容やエラーが出てしまうため。
   // 呼び出し側（saveTitle）も null なら編集中の title を書き換えないので、新しい Todo の title も保たれる。
+  // WHY todoId を send の引数で渡す（saveTitle などの closure で読まない）: todoId に依存するのをこの useCallback だけにし、
+  //   世代（todoGenerationRef）を控える時点と、送る先の todoId を同じ描画の値にそろえる。
   const update = useCallback(
-    async (request: UpdateTodoRequest): Promise<Todo | null> => {
+    async (send: (id: string) => Promise<Todo>): Promise<Todo | null> => {
       const generation = todoGenerationRef.current;
       const isStale = () => generation !== todoGenerationRef.current;
       try {
-        const updated = await updateTodo(todoId, request);
+        const updated = await send(todoId);
         if (isStale()) return null;
         setTodo(updated);
         setFailure(null);
@@ -91,15 +94,16 @@ export function useTodoDetailScreen(todoId: string) {
     // 空白だけの title はサーバで弾かれる入力なので送らない（一覧画面の追加と同じ扱い）。前後の空白は保存しない。
     const trimmed = title.trim();
     if (trimmed === "") return;
-    const updated = await update({ title: trimmed });
+    const updated = await update((id) => renameTodo(id, trimmed));
     // 失敗したときは入力を残し、直して再送できるようにする。
     if (updated !== null) setTitle(updated.title);
   }, [title, update]);
 
   const toggleCompleted = useCallback(async () => {
     if (todo === null) return;
-    // title は送らない。編集中で未保存の title を、完了の切り替えのついでに保存してしまわないため。
-    await update({ completed: !todo.completed });
+    // 完了の API（本文は completed だけ）を呼ぶので、編集中で未保存の title は保存されない。
+    const completed = !todo.completed;
+    await update((id) => changeTodoCompletion(id, completed));
   }, [todo, update]);
 
   // 失敗を、フォーム全体の文言（error。role="alert" で出す）と、入力の下に出す項目ごとの文言（fieldErrors）に分ける（Issue #144）。

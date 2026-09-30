@@ -1,13 +1,17 @@
 import type {
+  ChangeTodoCompletionRequest,
+  ChangeTodoCompletionResponse,
+} from "@repo/backend/features/todo/presentation/change-todo-completion.api";
+import type {
   CreateTodoRequest,
   CreateTodoResponse,
 } from "@repo/backend/features/todo/presentation/create-todo.api";
 import type { GetTodoResponse } from "@repo/backend/features/todo/presentation/get-todo.api";
 import type { ListTodosResponse } from "@repo/backend/features/todo/presentation/list-todos.api";
 import type {
-  UpdateTodoRequest,
-  UpdateTodoResponse,
-} from "@repo/backend/features/todo/presentation/update-todo.api";
+  RenameTodoRequest,
+  RenameTodoResponse,
+} from "@repo/backend/features/todo/presentation/rename-todo.api";
 import type { Problem } from "@repo/backend/shared/presentation/problem";
 import { commonMessages } from "@/shared/i18n/common.messages";
 import { isMessageKey } from "@/shared/i18n/i18n";
@@ -21,12 +25,14 @@ import { ApiError } from "./api-error";
 // WHY: 画面とサーバの境界（契約の型）を 1 ファイルに集約し、契約が変わったときの影響をここ 1 か所で追えるようにする。
 //   hook や components は、ここで re-export した型を使い、backend のパスを直接書かない。
 export type {
+  ChangeTodoCompletionRequest,
+  ChangeTodoCompletionResponse,
   CreateTodoRequest,
   CreateTodoResponse,
   GetTodoResponse,
   ListTodosResponse,
-  UpdateTodoRequest,
-  UpdateTodoResponse,
+  RenameTodoRequest,
+  RenameTodoResponse,
 };
 
 // 画面が扱う「Todo 1 件」の型。
@@ -167,11 +173,24 @@ export function createTodo(
   return requestJson(todosPath(), jsonInit("POST", request));
 }
 
-export function updateTodo(
+// 名前の変更と完了の切り替えは、ユースケースごとに別の API を呼ぶ（1 ユースケース = 1 API。Issue #175）。
+// WHY 引数を request オブジェクトではなく値 1 つにする: 本文の項目はユースケースで決まる 1 つだけで、呼び出し側に本文の形を
+//   組み立てさせると、相手の項目（title に completed など）を混ぜる余地が残る（backend は未知の項目を 400 で拒否する）。
+// WHY 本文を Request 型の変数に置く: 本文の形が backend の契約（*Request）とずれたら型チェックで止める。
+export function renameTodo(
   id: string,
-  request: UpdateTodoRequest,
-): Promise<UpdateTodoResponse> {
-  return requestJson(todoPath(id), jsonInit("PUT", request));
+  title: string,
+): Promise<RenameTodoResponse> {
+  const body: RenameTodoRequest = { title };
+  return requestJson(`${todoPath(id)}/title`, jsonInit("PUT", body));
+}
+
+export function changeTodoCompletion(
+  id: string,
+  completed: boolean,
+): Promise<ChangeTodoCompletionResponse> {
+  const body: ChangeTodoCompletionRequest = { completed };
+  return requestJson(`${todoPath(id)}/completion`, jsonInit("PUT", body));
 }
 
 // DELETE は 204（本文なし）を返す契約なので、requestJson で本文を読むと JSON の解析に失敗する。本文は読まない。

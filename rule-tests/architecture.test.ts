@@ -2125,7 +2125,7 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
   });
 
   // WHY 本物の 5 本が列挙に入っていることを見る: 列挙（パスの正規表現）が壊れて 0 件になると、違反も 0 件で常に緑になる。
-  it("handle を withProblemResponse で包む規則は、本物の api ファイル 5 本を対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
+  it("handle を withProblemResponse で包む規則は、本物の api ファイル 6 本を対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
     const files = listProblemResponseCheckedFiles(repoRoot);
     expect(files).toEqual(
       expect.arrayContaining([
@@ -2133,7 +2133,8 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "apps/backend/features/todo/presentation/delete-todo.api.ts",
         "apps/backend/features/todo/presentation/get-todo.api.ts",
         "apps/backend/features/todo/presentation/list-todos.api.ts",
-        "apps/backend/features/todo/presentation/update-todo.api.ts",
+        "apps/backend/features/todo/presentation/rename-todo.api.ts",
+        "apps/backend/features/todo/presentation/change-todo-completion.api.ts",
       ]),
     );
     expect(files.filter((file) => TEST_FILE.test(file))).toEqual([]);
@@ -4735,7 +4736,8 @@ const REAL_API_FILES = [
   "delete-todo",
   "get-todo",
   "list-todos",
-  "update-todo",
+  "rename-todo",
+  "change-todo-completion",
 ].map((name) => `apps/backend/features/todo/presentation/${name}.api.ts`);
 
 const API_FILE = "apps/backend/features/todo/presentation/x.api.ts";
