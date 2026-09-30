@@ -177,7 +177,11 @@ function isInlineTypeOnly(clause: string): boolean {
     .map((name) => name.trim())
     .filter((name) => name !== "");
   // WHY 空の {} は型だけにしない: `import {} from "x"` は名前を取らないが、参照先のモジュールは実行時に読み込まれる。
-  return names.length > 0 && names.every((name) => /^type\s/.test(name));
+  // WHY `type as <別名>` は型だけにしない（Issue #224。Codex のレビュー）: `type` という名前の値の export を別名で受ける形で、
+  //   inline の type 修飾子（`type <名前>`）ではなく実行時の import になる。
+  return (
+    names.length > 0 && names.every((name) => /^type\s+(?!as\s)/.test(name))
+  );
 }
 
 // 定数の名前の形（UPPER_SNAKE_CASE）。英大文字で始まり、英大文字・数字・_ だけ。
@@ -8171,12 +8175,17 @@ describe("参照の抽出（extractImports）", () => {
       'import { type A, Value } from "mixed";',
       'import Default, { type A } from "with-default";',
       'import {} from "empty";',
+      // Issue #224（Codex のレビュー）: `type` という名前の値の export を別名で受ける形は、inline の type 修飾子ではなく値の import。
+      'import { type as portValue } from "named-type";',
+      'import { type A, type as portValue } from "named-type-mixed";',
     ].join("\n");
     expect(extractImports(source)).toEqual([
       { specifier: "all-type", typeOnly: true },
       { specifier: "mixed", typeOnly: false },
       { specifier: "with-default", typeOnly: false },
       { specifier: "empty", typeOnly: false },
+      { specifier: "named-type", typeOnly: false },
+      { specifier: "named-type-mixed", typeOnly: false },
     ]);
   });
 
