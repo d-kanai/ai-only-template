@@ -1,0 +1,144 @@
+# PR ごとのプレビュー（Issue #137）。PR を開く・更新すると、frontend-customer-preview（preview 専用の Cloud Run の service）に
+#   PR のイメージを「トラフィックなし・タグ pr-<番号>」のリビジョンとして出し、タグの URL を PR にコメントする。PR を閉じると
+#   タグを外す（URL が無くなる）。
+# WHY 本番と別の service・DB: infra/run.tf の customer_preview。preview の DB（app_preview）には PR のマイグレーションを当てない
+#   （スキーマを変える PR は preview で試せない。WHY は infra/run.tf の migrate_preview）。
+# 名前は infra/main.tf の locals と同じ。手順は .claude/skills/deploy/SKILL.md。
+name: Preview
+
+on:
+  pull_request:
+    # opened / synchronize（push）/ reopened で出し、closed（マージも含む）でタグを外す。
+    types: [opened, synchronize, reopened, closed]
+
+# 同じ PR の実行は 1 本ずつ順に（前の実行を止めない）。
+# WHY cancel-in-progress: false: デプロイの途中で止めると、タグが古いリビジョンを指したまま、コメントの URL と中身がずれる。
+#   また closed の実行が前のデプロイを止めて先に終わると、その後のデプロイがタグを付け直してしまう（順に実行すれば必ず外れる）。
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+# contents: read: checkout。id-token: write: WIF（deploy.yml と同じ）。pull-requests: write: URL を PR にコメントする。
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+env:
+  REGION: ${{ vars.GCP_REGION }}
+  SERVICE: frontend-customer-preview
+  # Cloud Run のリビジョンのタグ。URL は https://pr-<番号>---frontend-customer-preview-<hash>.<region>.run.app の形になる。
+  TAG: pr-${{ github.event.pull_request.number }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+
+jobs:
+  deploy:
+    # fork からの PR は対象外（WHY: fork の PR には id-token: write が付かず WIF で認証できない。付けられたとしても、外部の人の
+    #   コードを GCP の資格情報で動かすことになる）。Variables が無ければ実行しない（WHY は deploy.yml）。
+    if: >-
+      github.event.action != 'closed'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && vars.GCP_WIF_PROVIDER != ''
+    runs-on: ubuntu-latest
+    env:
+      # pull_request の checkout は PR を base にマージした結果（refs/pull/<番号>/merge）で、github.sha はそのコミット。
+      #   WHY マージ結果で作る: main に入ったときと同じコードを試す。
+      IMAGE: ${{ vars.GCP_AR_REPO }}/frontend-customer:pr-${{ github.event.pull_request.number }}-${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Configure docker for Artifact Registry
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - uses: docker/setup-buildx-action@v4
+
+      # runtime のイメージだけを作る（preview では migrate しないので migrate のイメージは要らない）。
+      # キャッシュは deploy.yml の runtime と共有する（main のビルドの依存のレイヤーを使う）。WHY cache-to を書かない:
+      #   PR のビルドで main のキャッシュを上書きしない（PR ごとに依存が違うと、main のキャッシュが効かなくなる）。
+      - name: Build and push runtime image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: runtime
+          push: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha,scope=runtime
+
+      # PR のリビジョンを出す。
+      #   --no-traffic: 既定の URL へのトラフィックを移さない（PR ごとのリビジョンはタグの URL だけで開く）。
+      #   --tag: このリビジョンに pr-<番号> のタグを付ける（同じ PR の前のリビジョンからは外れ、付け替わる）。
+      #   --max-instances 1: 接続数の予算（infra/sql.tf）。Terraform の値と同じ（preview の service を作り直しても同じになるように明示する）。
+      - name: Deploy preview revision
+        run: >-
+          gcloud run deploy "$SERVICE" --image "$IMAGE" --region "$REGION"
+          --no-traffic --tag "$TAG" --max-instances 1 --quiet
+
+      # タグの URL を service の status.traffic から取る（<hash> はプロジェクトごとに決まるので、組み立てずに Cloud Run に聞く）。
+      # 見つからなければ失敗させる（URL の無いコメントを出さない）。
+      - name: Read preview URL
+        id: url
+        run: |
+          url=$(gcloud run services describe "$SERVICE" --region "$REGION" --format=json \
+            | jq -r --arg tag "$TAG" '.status.traffic[] | select(.tag == $tag) | .url')
+          if [ -z "$url" ]; then
+            echo "タグ $TAG の URL が $SERVICE の status.traffic に無い" >&2
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # PR にコメントする。同じ PR の 2 回目以降は、前のコメント（先頭の目印で探す）を書き換える。
+      # WHY 書き換える: push のたびにコメントが増えて PR が読みにくくなるのを防ぐ。
+      # per_page=100 の 1 ページだけを見る。WHY: 目印のコメントは PR を開いた直後に作るので先頭のほうにある。--paginate にすると
+      #   --jq がページごとに走り、id が複数行になりうる。
+      # GH_TOKEN: このワークフローの GITHUB_TOKEN（上の pull-requests: write）。
+      - name: Comment preview URL
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.url.outputs.url }}
+        run: |
+          marker='<!-- preview-url -->'
+          body="${marker}
+          プレビュー: ${URL}
+          （コミット ${GITHUB_SHA} のマージ結果。DB は app_preview で、この PR のマイグレーションは当たっていない）"
+          comment_id=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100" \
+            --jq "[.[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"${marker}\")))][0].id // empty")
+          if [ -n "$comment_id" ]; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${comment_id}" -f body="$body"
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" -f body="$body"
+          fi
+
+  cleanup:
+    # PR を閉じた（マージを含む）ときにタグを外す。条件の WHY は deploy と同じ。
+    if: >-
+      github.event.action == 'closed'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && vars.GCP_WIF_PROVIDER != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      # タグがあるときだけ外す。WHY 先に確かめる: preview を出す前に閉じた PR（Variables を設定する前の PR や、ビルドに失敗した PR）
+      #   では、無いタグを外そうとして失敗する。失敗を打ち消す（|| true）と、本当の失敗（権限など）も見えなくなるので使わない。
+      # タグを外したリビジョンはトラフィックもタグも無くなり、課金されない（リビジョン自体は残る）。
+      - name: Remove preview tag
+        run: |
+          tagged=$(gcloud run services describe "$SERVICE" --region "$REGION" --format=json \
+            | jq -r --arg tag "$TAG" '[.status.traffic[] | select(.tag == $tag)] | length')
+          if [ "$tagged" = "0" ]; then
+            echo "タグ $TAG は $SERVICE に無い（preview を出していない PR）。何もしない。"
+            exit 0
+          fi
+          gcloud run services update-traffic "$SERVICE" --region "$REGION" --remove-tags "$TAG" --quiet

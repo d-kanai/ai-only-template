@@ -61,3 +61,16 @@ next-env.d.ts
 # isolation: worktree のサブエージェントが作る git worktree（.claude/worktrees/agent-<id>。Issue #64 の実測）。
 # WHY コミットしない: worktree は別の作業ツリーで、本体の作業ツリーから見ると未追跡のディレクトリとして git status に出てしまう。
 /.claude/worktrees/
+
+# terraform（infra/。Issue #137）
+# .terraform/: terraform init が provider のバイナリとバックエンドの設定を置く作業ディレクトリ（数百 MB。init で作り直せる）。
+# *.tfstate / *.tfstate.*: state（DB のホスト名などの値を含む）。state は GCS のバックエンドに置く（infra/versions.tf）ので、
+#   手元にできたら誤ってコミットしないように無視する（init の前の apply やバックアップ）。
+# *.tfplan: terraform plan -out の結果（state と同じく値を含む）。
+# *.tfvars: project_id などの入力（プロジェクトごとに違い、コミットしない）。
+# WHY .terraform.lock.hcl は無視しない: provider のハッシュを固定し、誰の init でも同じ provider にするためにコミットする。
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars

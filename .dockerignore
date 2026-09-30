@@ -1,0 +1,32 @@
+# docker build のコンテキスト（リポジトリ直下）から外すもの。Dockerfile の COPY . . に入らない。
+# WHY 外すか: (1) 秘密をイメージに入れない（.env）、(2) コンテナの中で作り直すもの（node_modules・.next）を持ち込まず、
+#   手元の OS 向けのバイナリや古いビルドが混ざるのを防ぐ、(3) ビルドに要らない大きなものを送らず、コンテキストの転送と
+#   COPY . . のキャッシュの無効化を減らす。
+# 書き方: .gitignore と違い、パターンはコンテキストの直下からの相対パス。サブディレクトリにも当てるときは **/ を付ける。
+
+# 依存（pnpm workspace では apps/*/node_modules もできる）。deps ステージが pnpm install で作り直す。
+**/node_modules
+# next build の出力。build ステージが作り直す。
+**/.next
+# git の履歴。ビルドに使わない。
+.git
+# 環境変数のファイル。接続先などの秘密を含みうるのでイメージに入れない（実行時の値は Cloud Run が渡す）。
+.env
+.env.*
+# .env.example だけは入れる。WHY: build ステージが next build の間だけ .env にコピーして使う（開発用の値で秘密ではない）。
+!.env.example
+# テスト・mutation testing・E2E の実行結果（.gitignore と同じもの）。
+.stryker-tmp
+reports
+coverage
+apps/e2e/test-results
+apps/e2e/playwright-report
+apps/e2e/blob-report
+# 文書とインフラの定義。アプリのビルドに使わない。
+docs
+infra
+# Claude Code の設定・記録・サブエージェントの worktree（.claude/worktrees。リポジトリ全体の複製を含む）。ビルドに使わない。
+.claude
+# Cloudflare（OpenNext）のビルドの出力・ローカルの状態。このイメージには使わない。
+.open-next
+.wrangler

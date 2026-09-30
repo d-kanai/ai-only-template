@@ -78,6 +78,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-28 | linter / formatter は Biome を使い、ESLint は使わない。pre-commit は lefthook で止める | 採用 | [20260928-biome-instead-of-eslint.md](tech-stack/20260928-biome-instead-of-eslint.md) |
 | 2026-09-28 | Stryker の vitest-runner は pnpm patch で直して使う | 採用 | [20260928-patch-stryker-vitest-runner.md](tech-stack/20260928-patch-stryker-vitest-runner.md) |
 | 2026-09-28 | TypeScript は 7 系（7.0.2）を使う | 採用 | [20260928-typescript-7.md](tech-stack/20260928-typescript-7.md) |
+| 2026-09-30 | 本番は GCP の Cloud Run + Cloud SQL にし、Terraform は器だけを、イメージの入れ替えは GitHub Actions の gcloud を受け持つ | 採用 | [20260930-gcp-cloud-run-and-cloud-sql.md](tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md) |
 
 ### quality/
 品質ゲートとテストの方針
