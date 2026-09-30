@@ -94,9 +94,12 @@ export class PostgresWriter implements Writer {
     }
     // WHY id の無い行に Writer が id を作る: 前のログ（row_id）と変更履歴（row_id）に、文を実行する前に行の id が要る。DB の既定値
     //   （defaultRandom）の id は INSERT の後にしか分からない。渡された id はそのまま使う（Todo の id は Todo.create が作る）。
+    // WHY `row.id ?? randomUUID()` を row の後ろに置く（`{ id: randomUUID(), ...row }` にしない）: row が `id: undefined` を明示して
+    //   持つと、スプレッドが作った id を undefined で上書きし、INSERT の id が NULL（NOT NULL 違反）、ログと変更履歴の row_id も
+    //   undefined になる。id が無い・undefined のときだけ作る（Issue #215 の reviewer の指摘）。
     const withIds = rows.map((row) => ({
-      id: randomUUID(),
       ...row,
+      id: (row as { id?: string }).id ?? randomUUID(),
     })) as (T["$inferInsert"] & { id: string })[];
     return this.logged(
       table,

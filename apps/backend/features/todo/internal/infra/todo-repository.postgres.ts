@@ -154,9 +154,11 @@ export class PostgresTodoRepository implements TodoRepository {
   // command 用: tx の中で、根の行（todos）を FOR UPDATE でロックしてから（1 文目）、findById と同じ SELECT で集約を読む（2 文目）。
   //   ロックは tx の終わりまで続き、同じ Todo を変える別の command の findByIdOrThrow と DELETE は、この tx が終わるまで待つ。
   // WHY ロックと読み込みを別の文にする（読み込みの SELECT に FOR UPDATE OF todos を付けない）: READ COMMITTED で 1 文の
-  //   SELECT ... LEFT JOIN ... FOR UPDATE がロックを待つと、ロックが取れた後に todos の行だけを最新の版で読み直し（EvalPlanQual）、
-  //   JOIN した履歴の行は文の始めのスナップショットのままになる（https://www.postgresql.org/docs/current/transaction-iso.html の
-  //   Read Committed の節）。先の command が完了にした Todo を、completed = true と古い履歴（最後が未完了）の組で読み、不変条件の
+  //   SELECT ... LEFT JOIN ... FOR UPDATE がロックを待つと、ロックが取れた後に todos の行だけを最新の版で読み直し、JOIN した履歴の
+  //   行は文の始めのスナップショットのままになる。公式（https://www.postgresql.org/docs/current/transaction-iso.html の Read
+  //   Committed の節）: 「In the case of SELECT FOR UPDATE and SELECT FOR SHARE, this means it is the updated version of the row
+  //   that is locked and returned to the client.」「it can see the effects of concurrent updating commands on the same rows it is
+  //   trying to update, but it does not see effects of those commands on other rows in the database.」。先の command が完了にした Todo を、completed = true と古い履歴（最後が未完了）の組で読み、不変条件の
   //   違反（500）になった（Issue #215 の実測。todo-repository.postgres.test.ts の「同時に動かすと」のテスト）。ロックを取った後の
   //   別の文なら、先の command の COMMIT の後の新しいスナップショットで、根と履歴をそろって読める。
   // WHY ロックの文は列を選ばない（全列）: 見るのは行のロックだけ。select({ id }) と列を選ぶと、Stryker の select({})（列の無い

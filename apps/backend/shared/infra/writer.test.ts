@@ -228,6 +228,29 @@ describe("PostgresWriter の insert", () => {
     );
   });
 
+  // WHY id: undefined を明示した行も「id の無い行」として扱う: スプレッドで後から row を重ねると、undefined の id が作った id を
+  //   上書きし、INSERT の id が NULL（NOT NULL 違反）になり、ログと変更履歴の row_id も undefined になる。
+  test("id: undefined を明示した行にも uuid（v4）の id を作って INSERT し、その id をログと変更履歴に使う", async () => {
+    const logs = captureLogs();
+
+    const inserted = await inWriter((writer) =>
+      writer.insert(items, [
+        {
+          id: undefined,
+          itemName: "牛乳",
+        } as unknown as typeof items.$inferInsert,
+      ]),
+    );
+
+    const generated = inserted[0]?.id;
+    expect(generated).toMatch(UUID_PATTERN);
+    expect(inserted).toStrictEqual([{ id: generated, itemName: "牛乳" }]);
+    expect(logs.info()[0]).toMatchObject({ row_id: generated });
+    expect((await changeLogRows()).map((row) => row.rowId)).toEqual([
+      generated,
+    ]);
+  });
+
   test("行が空なら SQL を発行せず、ログも変更履歴も出さずに空配列を返す", async () => {
     const logs = captureLogs();
 
@@ -282,20 +305,55 @@ describe("PostgresWriter の update", () => {
 
   // WHY FOR UPDATE で読む: before を読んでから UPDATE するまでの間に別のトランザクションが同じ行を変えると、before が
   //   UPDATE の直前の値でなくなる。ロックすれば別のトランザクションの UPDATE / DELETE はこのトランザクションの終わりまで待つ。
-  //   lock_timeout を短くして、待つ（= ロックがある）ことを 55P03（lock_not_available）で確かめる。
-  test("update は行を FOR UPDATE でロックして読むので、別のトランザクションはその行を同じトランザクションの終わりまで変えられない", async () => {
+  // WHY UPDATE の前（before の SELECT の後）で別の接続から書く: UPDATE 文の後だと、UPDATE 自体の行ロックで同じ結果になり、
+  //   SELECT の FOR UPDATE を外しても通ってしまう（Issue #215 の reviewer の実測）。drizzle の tx の update を、別の接続での
+  //   書き込みを試みてから本物の UPDATE を実行するものに差し替え、before を読んだ時点でロックが取れていることを確かめる。
+  // WHY 別の接続の書き込みを終えてから本物の UPDATE を実行する（並行にしない）: 並行だと、ロックが無くても先に走った本物の UPDATE の
+  //   ロックで待ちになることがあり、結果が実行順に左右される。
+  // lock_timeout を短くして、待つ（= ロックがある）ことを 55P03（lock_not_available）で確かめる（時間の長さで判定しない）。
+  test("update は before を読む時点で行を FOR UPDATE でロックするので、UPDATE の前でも別のトランザクションはその行を UPDATE / DELETE できない", async () => {
     await database.db.insert(items).values({ id: ID, itemName: "牛乳" });
     captureLogs();
+    const writeFromOtherConnection = (
+      write: (other: DrizzleTransaction) => Promise<unknown>,
+    ) =>
+      database.db.transaction(async (other) => {
+        await other.execute(sql`set local lock_timeout = '50ms'`);
+        await write(other);
+      });
+    const probed: string[] = [];
 
-    await inWriter(async (writer) => {
-      await writer.update(items, ID, { itemName: "卵" });
-      await expect(
-        database.db.transaction(async (other) => {
-          await other.execute(sql`set local lock_timeout = '50ms'`);
-          await other.delete(items);
+    await inWriter(async (writer, tx) => {
+      const realUpdate = tx.update.bind(tx);
+      // writer.ts の update の chain（update(table).set(changes).where(where).returning()）の形で受け、returning の前に確かめる。
+      vi.spyOn(tx, "update").mockImplementation(((table: typeof items) => ({
+        set: (changes: Partial<typeof items.$inferInsert>) => ({
+          where: (where: ReturnType<typeof sql>) => ({
+            returning: async () => {
+              await expect(
+                writeFromOtherConnection((other) =>
+                  other.update(items).set({ itemName: "他" }),
+                ),
+              ).rejects.toMatchObject({ cause: { code: "55P03" } });
+              probed.push("update");
+              await expect(
+                writeFromOtherConnection((other) => other.delete(items)),
+              ).rejects.toMatchObject({ cause: { code: "55P03" } });
+              probed.push("delete");
+              return realUpdate(table).set(changes).where(where).returning();
+            },
+          }),
         }),
-      ).rejects.toMatchObject({ cause: { code: "55P03" } });
+      })) as never);
+      await expect(
+        writer.update(items, ID, { itemName: "卵" }),
+      ).resolves.toStrictEqual({ id: ID, itemName: "卵" });
     });
+
+    expect(probed).toEqual(["update", "delete"]);
+    await expect(database.db.select().from(items)).resolves.toStrictEqual([
+      { id: ID, itemName: "卵" },
+    ]);
   });
 
   test("渡した列が空なら SQL を発行せず、ログも変更履歴も出さずに undefined を返す（行が無くてもエラーにしない）", async () => {

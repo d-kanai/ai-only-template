@@ -488,6 +488,39 @@ describe("PostgresTodoRepository", () => {
     await expect(repository().findById(todo.id)).resolves.toEqual(todo);
   });
 
+  // WHY ロックを待った後の読み込みで not_found にする: 先の command が消して COMMIT した Todo を、待っていた後の command が読むと、
+  //   ロックの文は消えた行を返さず（READ COMMITTED は待った後に行の最新の版を見る）、集約を読む 2 文目も空になる。そのまま
+  //   update / delete に進まず、無い Todo として 404 にする（findByIdOrThrow の契約）。
+  test("findByIdOrThrow がロックを待っている間に、先の command が同じ Todo を delete して COMMIT すると、not_found の DomainError を投げる", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await insert(todo);
+    const firstLocked = deferred<number>();
+    const releaseFirst = deferred();
+
+    const first = inTransaction(async (tx) => {
+      await repository().findByIdOrThrow(todo.id, tx);
+      firstLocked.resolve(await backendPid(tx));
+      await releaseFirst.promise;
+      await repository().delete(todo.id, tx);
+    });
+    const firstPid = await firstLocked.promise;
+    const second = inTransaction((tx) =>
+      repository().findByIdOrThrow(todo.id, tx),
+    );
+    // WHY finally で先を進め、両方の終わりを待つ: 上の「同時に動かすと」のテストと同じ（失敗しても次のテストに持ち越さない）。
+    try {
+      await waitUntilBlockedBy(firstPid);
+    } finally {
+      releaseFirst.resolve();
+      await Promise.allSettled([first, second]);
+    }
+
+    await expect(first).resolves.toBeUndefined();
+    await expect(second).rejects.toEqual(
+      new DomainError("not_found", "todo.notFound", { id: todo.id }),
+    );
+  });
+
   // WHY query（findAll / findById）は行をロックしない（待たない）: 一覧・詳細はトランザクションを張らない 1 文の読み取りで、command が
   //   ロックしている間も読める（ロックを取ると、command の間は一覧も詳細も待たされる）。
   test("findAll・findById は、command が行をロックしている間も待たずに読める", async () => {
