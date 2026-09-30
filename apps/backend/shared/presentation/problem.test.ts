@@ -6,6 +6,7 @@ import {
   type Problem,
   type ProblemErrorInput,
   toProblemResponse,
+  withProblemResponse,
 } from "./problem";
 
 describe("InvalidRequestError", () => {
@@ -249,5 +250,136 @@ describe("toProblemResponse", () => {
     );
 
     expect(consoleError).not.toHaveBeenCalled();
+  });
+});
+
+// withProblemResponse: handler を包み、handler が投げた例外（reject も同期の throw も）を toProblemResponse で Problem Details の
+//   Response にする（Issue #141）。変換の規則は上の toProblemResponse のテストが固定しているので、ここでは「包んだ handler が
+//   どの経路の例外でも toProblemResponse を通ること」と「引数・戻り値を素通しすること」を確かめる。
+describe("withProblemResponse", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("handler が返した Response を、そのまま（同じオブジェクトで）返す", async () => {
+    const ok = Response.json({ ok: true }, { status: 201 });
+    const handle = withProblemResponse(async (_request: Request) => ok);
+
+    await expect(handle(request("/api/todos"))).resolves.toBe(ok);
+  });
+
+  test("handler に渡した引数（request と、動的セグメントの ctx）を、そのまま handler に渡す", async () => {
+    const received: unknown[] = [];
+    const handle = withProblemResponse(
+      async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
+        received.push(req, await ctx.params);
+        return new Response(null, { status: 204 });
+      },
+    );
+    const req = request("/api/todos/abc");
+
+    const response = await handle(req, {
+      params: Promise.resolve({ id: "abc" }),
+    });
+
+    expect(response.status).toBe(204);
+    expect(received).toEqual([req, { id: "abc" }]);
+    expect(received[0]).toBe(req);
+  });
+
+  test("handler が DomainError(not_found) で reject すると、404 の Problem を返す（instance は第 1 引数の request のパス）", async () => {
+    const handle = withProblemResponse(
+      async (_request: Request, _ctx: { params: Promise<{ id: string }> }) => {
+        throw new DomainError("not_found", "todo.notFound", { id: "abc" });
+      },
+    );
+
+    const response = await handle(request("/api/todos/abc"), {
+      params: Promise.resolve({ id: "abc" }),
+    });
+
+    await expectProblem(response, {
+      type: "/problems/not-found",
+      title: "Not found",
+      status: 404,
+      detail: "Todo abc was not found.",
+      instance: "/api/todos/abc",
+      key: "todo.notFound",
+      params: { id: "abc" },
+    });
+  });
+
+  test("handler が DomainError(validation_error) で reject すると、400 の Problem を返す", async () => {
+    const handle = withProblemResponse(async (_request: Request) => {
+      throw new DomainError("validation_error", "todo.title.empty");
+    });
+
+    await expectProblem(await handle(request("/api/todos")), {
+      type: "/problems/validation-error",
+      title: "Validation error",
+      status: 400,
+      detail: "Title must not be empty.",
+      instance: "/api/todos",
+      key: "todo.title.empty",
+    });
+  });
+
+  test("handler が InvalidRequestError で reject すると、400 の Problem を返す", async () => {
+    const handle = withProblemResponse(async (_request: Request) => {
+      throw new InvalidRequestError("request.body.notJson");
+    });
+
+    await expectProblem(await handle(request("/api/todos")), {
+      type: "/problems/validation-error",
+      title: "Validation error",
+      status: 400,
+      detail: "Request body must be valid JSON.",
+      instance: "/api/todos",
+      key: "request.body.notJson",
+    });
+  });
+
+  test("handler が想定外の例外で reject すると、500 の Problem を返し、logger.error でサーバのログに残す", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const handle = withProblemResponse(async (_request: Request) => {
+      throw new Error("DB のパスワードが違います");
+    });
+
+    await expectProblem(await handle(request("/api/todos")), {
+      type: "/problems/internal-error",
+      title: "Internal error",
+      status: 500,
+      detail: "Internal server error.",
+      instance: "/api/todos",
+      key: "server.internalError",
+    });
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    const [line] = consoleError.mock.calls[0] as [string];
+    expect(JSON.parse(line)).toEqual({
+      level: "error",
+      timestamp: expect.any(String),
+      message: "unexpected error",
+      error: { name: "Error", message: "DB のパスワードが違います" },
+    });
+  });
+
+  // WHY 同期の throw も確かめる: 型は Promise を返す関数だが、async でない関数（(request) => { throw ... }）も渡せる。
+  //   handler(...args) の呼び出しを try の外に置く実装だと、同期の throw が変換されずに素の例外として漏れる。
+  test("handler が（Promise を返さずに）同期で throw しても、reject せずに Problem を返す", async () => {
+    const handle = withProblemResponse(
+      (_request: Request): Promise<Response> => {
+        throw new DomainError("not_found", "todo.notFound", { id: "x" });
+      },
+    );
+
+    const response = await handle(request("/api/todos/x"));
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({
+      key: "todo.notFound",
+      instance: "/api/todos/x",
+    });
   });
 });

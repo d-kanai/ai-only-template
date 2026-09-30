@@ -1,5 +1,5 @@
 import { getDatabase } from "../../../shared/infra/database";
-import { toProblemResponse } from "../../../shared/presentation/problem";
+import { withProblemResponse } from "../../../shared/presentation/problem";
 import { parseUuidParam } from "../../../shared/presentation/resource-id";
 import { DeleteTodoCommand } from "../application/delete-todo.command";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
@@ -11,17 +11,15 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 type Context = { params: Promise<{ id: string }> };
 
 // DELETE /api/todos/:id の Route Handler を持つクラス。コンストラクタで command を受け取り、handle を Route Handler として export する
-//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにするは list-todos.api.ts の ListTodosApi のコメント）。
+//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包むは
+//   list-todos.api.ts の ListTodosApi のコメント）。
 export class DeleteTodoApi {
   constructor(
     private readonly deleteTodo: Pick<DeleteTodoCommand, "execute">,
   ) {}
 
-  readonly handle = async (
-    request: Request,
-    ctx: Context,
-  ): Promise<Response> => {
-    try {
+  readonly handle = withProblemResponse(
+    async (_request: Request, ctx: Context): Promise<Response> => {
       const { id: rawId } = await ctx.params;
       // uuid の形でない id のキーと params は、query / command が無い id に投げる not_found と同じにそろえる
       //   （画面から見て「無い Todo」と同じ契約）。
@@ -29,10 +27,8 @@ export class DeleteTodoApi {
       await this.deleteTodo.execute(id);
       // WHY 204 で本文なし: 削除後に返す内容が無いため。Response.json は本文を持つので使わない。
       return new Response(null, { status: 204 });
-    } catch (error) {
-      return toProblemResponse(error, request);
-    }
-  };
+    },
+  );
 }
 
 // app/api/todos/[id]/route.ts が re-export する Route Handler。本番は常に Postgres で組み立てる。
