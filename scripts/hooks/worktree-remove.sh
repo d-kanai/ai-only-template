@@ -7,7 +7,8 @@
 # 終了コード: 常に 0。WHY: 0 以外だと、ディレクトリが残っている場合に worktree の削除そのものが失敗する（公式）。
 #   DB の削除に失敗しても worktree の削除は止めない（残った DB は次の worktree-create.sh が孤立として消す）。
 # WHY worktree のディレクトリは消さない: このフックの役割は worktree の外にあるリソース（DB）の後始末だけ。
-# 注意: このフックが発火することは確かめられていない（isolation: worktree のサブエージェントの終了では発火しない）。
+# 注意: このフックが発火することは確かめられていない（isolation: worktree のサブエージェントの終了で発火したことも確かめられて
+#   いない。.claude/rules/worktree.md の「WorktreeRemove に頼らない」）。
 #   後始末の本命は worktree-create.sh の孤立した DB の掃除で、こちらは発火したときに早めに消すだけ。
 #
 # 確認:

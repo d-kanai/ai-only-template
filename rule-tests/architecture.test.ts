@@ -5689,7 +5689,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'export const title = z.string().min(1, { error: "タイトルを入力してください" });',
     'export const key = new DomainError("not_found", "todo.notFound", { id: 1 });',
   ),
-  // backend-relative-only:層の規則では許される参照先（自 feature の domain・application、backend/shared）でも、
+  // backend-relative-only: 層の規則では許される参照先（自 feature の domain・application、backend/shared）でも、
   //   "@repo/backend/" で書くと違反。import type・re-export・dynamic import・パッケージ名だけの import も同じ。
   //   パッケージ名だけの "@repo/backend" は apps/backend 直下を指し、層に属さないので application の規則にもかかる。
   "apps/backend/features/todo/application/bad-alias.command.ts": lines(
