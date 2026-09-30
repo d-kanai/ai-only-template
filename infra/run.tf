@@ -1,5 +1,5 @@
-# Cloud Run: frontend-customer（本番）、frontend-customer-preview（PR のプレビュー）、migrate ジョブ（本番 / preview）。
-# Metabase は metabase.tf。イメージは GitHub Actions が入れ替える（.github/workflows/deploy.yml・preview.yml）。
+# Cloud Run: frontend-customer（本番）と migrate ジョブ。
+# Metabase は metabase.tf。イメージは GitHub Actions が入れ替える（.github/workflows/deploy.yml）。
 
 locals {
   # アプリが起動時に必須とする DB の設定（apps/shared/env.ts。.env.example に意味と WHY）。DATABASE_URL は Secret から入れる。
@@ -13,8 +13,8 @@ locals {
 
 # lifecycle.ignore_changes（下の service / job）の WHY: イメージとトラフィックは GitHub Actions の gcloud が入れ替える（main.tf）。
 #   `gcloud run deploy` はそのたびに client / client_version（どのツールでデプロイしたか）・リビジョン名・ラベルも書くので、
-#   無視しないと次の terraform plan が毎回それを戻す差分を出す。traffic は preview の PR ごとのタグ（pr-<番号>）と、
-#   本番のロールバック（update-traffic --to-revisions）を gcloud が書く。
+#   無視しないと次の terraform plan が毎回それを戻す差分を出す。traffic は、ロールバック（update-traffic --to-revisions）と
+#   deploy.yml の LATEST への切り替え（update-traffic --to-latest）を gcloud が書く。
 
 # 本番の frontend-customer（Next.js の standalone。Dockerfile の runtime ステージ）。
 resource "google_cloud_run_v2_service" "customer" {
@@ -118,105 +118,16 @@ resource "google_cloud_run_v2_service" "customer" {
   ]
 }
 
-# preview（PR ごとのプレビュー）。PR のイメージを --no-traffic --tag pr-<番号> でリビジョンとして出し、
-#   https://pr-<番号>---frontend-customer-preview-<hash>.a.run.app で開く（.github/workflows/preview.yml）。
-# WHY 本番と別の service: 本番の service にタグ付きのリビジョンを出すと、本番の DB を PR のコードが使い、さらに
-#   --no-traffic のデプロイの後は、本番のトラフィックが LATEST に流れなくなる（main のデプロイで新しいリビジョンに切り替わらない）
-#   （2026-09-30 の work-logs）。
-# 既定の URL（タグなし）は、作ったときの仮のイメージか最初の preview のまま。見るのはタグの URL だけ。
-resource "google_cloud_run_v2_service" "customer_preview" {
-  name     = local.customer_preview_service
-  location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL"
-  # preview は作り直してよい（データは app_preview DB にあり、URL は PR ごとにコメントされる）。
-  deletion_protection = false
-
-  template {
-    service_account = google_service_account.run_customer_preview.email
-
-    scaling {
-      min_instance_count = 0
-      # 1: 接続数の予算（sql.tf）。preview.yml の --max-instances 1 と同じ値。
-      max_instance_count = 1
-    }
-
-    volumes {
-      name = "cloudsql"
-      cloud_sql_instance {
-        instances = [local.instance_connection_name]
-      }
-    }
-
-    containers {
-      image = var.bootstrap_image
-
-      ports {
-        container_port = 8080
-      }
-
-      resources {
-        limits = {
-          cpu    = "1"
-          memory = "512Mi"
-        }
-        cpu_idle          = true
-        startup_cpu_boost = true
-      }
-
-      env {
-        name = "DATABASE_URL"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.database_url_preview.secret_id
-            version = "latest"
-          }
-        }
-      }
-      env {
-        name  = "DATABASE_POOL_MAX"
-        value = "2" # 接続数の予算（sql.tf）。
-      }
-      dynamic "env" {
-        for_each = local.database_env
-        content {
-          name  = env.key
-          value = env.value
-        }
-      }
-
-      volume_mounts {
-        name       = "cloudsql"
-        mount_path = "/cloudsql"
-      }
-    }
-  }
-
-  lifecycle {
-    ignore_changes = [
-      template[0].containers[0].image,
-      client,
-      client_version,
-      template[0].revision,
-      template[0].labels,
-      traffic,
-    ]
-  }
-
-  depends_on = [
-    google_project_iam_member.run_sql_client,
-    google_secret_manager_secret_iam_member.customer_preview_database_url,
-    google_secret_manager_secret_version.database_url_preview,
-  ]
-}
-
-# 誰でも（認証なしで）アクセスできるようにする。WHY: 公開の Web サイトで、ログインは画面側の責務。
+# 誰でも（認証なしで）アクセスできるようにする。WHY: 公開の Web サイトで、ログインは画面側の責務。Metabase は Metabase の
+#   ログインで守る（Claude の MCP もこの URL に接続する）。
+# 注意（Metabase）: 管理者を作るまでは、URL を知る誰でも初回セットアップ（/setup）を開いて管理者になれる。apply の直後に
+#   管理者を作る（infra/README.md の手順 3）。
 # 注意: 組織のポリシー「ドメインで制限された共有」があると allUsers を付けられない（その場合は service の
 #   invoker_iam_disabled = true を使う。https://cloud.google.com/run/docs/securing/managing-access#invoker_check）。
 resource "google_cloud_run_v2_service_iam_member" "public" {
   for_each = {
-    customer         = google_cloud_run_v2_service.customer.name
-    customer_preview = google_cloud_run_v2_service.customer_preview.name
-    metabase         = google_cloud_run_v2_service.metabase.name
+    customer = google_cloud_run_v2_service.customer.name
+    metabase = google_cloud_run_v2_service.metabase.name
   }
   name     = each.value
   location = var.region
@@ -297,76 +208,5 @@ resource "google_cloud_run_v2_job" "migrate" {
     google_project_iam_member.run_sql_client,
     google_secret_manager_secret_iam_member.customer_database_url,
     google_secret_manager_secret_version.database_url,
-  ]
-}
-
-# preview の DB（app_preview）に main のマイグレーションを当てるジョブ。deploy.yml が本番のデプロイの後に実行する。
-# WHY main のマイグレーションだけを当てる（PR の preview では当てない）: 複数の PR が 1 つの app_preview を共有するので、
-#   PR のマイグレーションを当てると、その PR が閉じた後も app_preview のスキーマが main から外れ、ほかの PR の preview が壊れる。
-#   代わりに、スキーマを変える PR は preview で試せない（ほかの PR は main と同じスキーマで動く）。
-resource "google_cloud_run_v2_job" "migrate_preview" {
-  name                = local.migrate_preview_job
-  location            = var.region
-  deletion_protection = false
-
-  template {
-    task_count = 1
-
-    template {
-      service_account = google_service_account.run_customer_preview.email
-      max_retries     = 0
-      timeout         = "600s"
-
-      volumes {
-        name = "cloudsql"
-        cloud_sql_instance {
-          instances = [local.instance_connection_name]
-        }
-      }
-
-      containers {
-        image = var.bootstrap_image
-
-        env {
-          name = "DATABASE_URL"
-          value_source {
-            secret_key_ref {
-              secret  = google_secret_manager_secret.database_url_preview.secret_id
-              version = "latest"
-            }
-          }
-        }
-        env {
-          name  = "DATABASE_POOL_MAX"
-          value = "1"
-        }
-        dynamic "env" {
-          for_each = local.database_env
-          content {
-            name  = env.key
-            value = env.value
-          }
-        }
-
-        volume_mounts {
-          name       = "cloudsql"
-          mount_path = "/cloudsql"
-        }
-      }
-    }
-  }
-
-  lifecycle {
-    ignore_changes = [
-      template[0].template[0].containers[0].image,
-      client,
-      client_version,
-    ]
-  }
-
-  depends_on = [
-    google_project_iam_member.run_sql_client,
-    google_secret_manager_secret_iam_member.customer_preview_database_url,
-    google_secret_manager_secret_version.database_url_preview,
   ]
 }

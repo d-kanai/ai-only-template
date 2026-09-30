@@ -1,4 +1,4 @@
-# Cloud SQL for PostgreSQL（インスタンス 1 つに app / app_preview / metabase の 3 DB）、DB ユーザー、接続情報の Secret。
+# Cloud SQL for PostgreSQL（インスタンス 1 つに app / metabase の 2 DB）、DB ユーザー、接続情報の Secret。
 
 # 資格情報の版。上げると、その回の apply で新しいパスワードを作り、DB ユーザーと Secret の両方に書く（ローテーション）。
 # WHY 1 つの値を DB ユーザーと Secret で共有する: password_wo / secret_data_wo は write-only で state に値が残らず、
@@ -7,9 +7,8 @@
 #   手順は .claude/skills/deploy/SKILL.md。
 locals {
   db_password_version = {
-    app         = 1
-    app_preview = 1
-    metabase    = 1
+    app      = 1
+    metabase = 1
   }
   # Metabase の MB_ENCRYPTION_SECRET_KEY の版。
   # WHY 原則変えない: Metabase は、このキーで接続情報（DB のパスワードなど）を暗号化して metabase DB に保存する。
@@ -22,11 +21,6 @@ locals {
 # length 32 / special = false: 英数字だけにする。WHY: 接続文字列（URL・JDBC の URI）にそのまま埋め込めるように
 #   （記号は URL エンコードが要り、pg と JDBC で解釈が違うおそれがある）。英数字 32 文字で約 190 bit。
 ephemeral "random_password" "db_app" {
-  length  = 32
-  special = false
-}
-
-ephemeral "random_password" "db_app_preview" {
   length  = 32
   special = false
 }
@@ -59,8 +53,8 @@ resource "google_sql_database_instance" "main" {
     #   SLA の対象外。接続数の配分は下の「接続数の予算」と docs/adr/tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md。
     #   足りなくなったら db-g1-small（+約 $18/月）か専用コアにする。
     # 接続数の予算（max_connections 25 のうち、PostgreSQL の既定で 3 はスーパーユーザー用に予約）:
-    #   本番 3 インスタンス x 3 = 9、preview 1 x 2 = 2、migrate 1（本番と preview は順に実行）、
-    #   Metabase 1 インスタンス x（アプリ DB 3 + 分析 3）= 6、残り 約 4 を Data Studio・psql・MCP に使う。
+    #   本番 3 インスタンス x 3 = 9、migrate 1、Metabase 1 インスタンス x（アプリ DB 3 + 分析 3）= 6、
+    #   残り 約 6 を Data Studio・psql・MCP に使う。
     tier              = "db-f1-micro"
     availability_type = "ZONAL" # 1 ゾーン。REGIONAL（HA）は料金が約 2 倍になるので試用では使わない。
     disk_type         = "PD_SSD"
@@ -120,14 +114,6 @@ resource "google_sql_database" "app" {
   instance = google_sql_database_instance.main.name
 }
 
-# preview（PR ごとのプレビュー）の DB。WHY 本番と同じインスタンスに別 DB: 本番のデータを PR のコードから触らせない一方、
-#   インスタンスを増やす費用（db-f1-micro でも月 約 $12）はかけない。スキーマは main へのデプロイのたびに
-#   migrate-preview ジョブが main のマイグレーションを当てる（PR のマイグレーションは当てない。WHY は run.tf）。
-resource "google_sql_database" "app_preview" {
-  name     = "app_preview"
-  instance = google_sql_database_instance.main.name
-}
-
 # Metabase のアプリ DB（Metabase 自身の設定・質問・ダッシュボードを保存する）。
 # WHY 同じインスタンス: Metabase の既定の H2（コンテナ内のファイル）は Cloud Run では再起動で消える。別インスタンスは費用が増える。
 resource "google_sql_database" "metabase" {
@@ -146,17 +132,6 @@ resource "google_sql_user" "app" {
   instance            = google_sql_database_instance.main.name
   password_wo         = ephemeral.random_password.db_app.result
   password_wo_version = local.db_password_version.app
-  deletion_policy     = "ABANDON"
-}
-
-# preview 用のユーザー。WHY 本番と別のユーザー: preview（PR のコード）の Secret に本番のパスワードを入れない。
-#   ただし上の注意のとおり cloudsqlsuperuser なので、DB の権限では本番の DB から完全には隔離されない（同じリポジトリに
-#   push できる人だけが preview を動かせる前提。fork の PR は対象外）。
-resource "google_sql_user" "app_preview" {
-  name                = "app_preview"
-  instance            = google_sql_database_instance.main.name
-  password_wo         = ephemeral.random_password.db_app_preview.result
-  password_wo_version = local.db_password_version.app_preview
   deletion_policy     = "ABANDON"
 }
 
@@ -199,21 +174,6 @@ resource "google_secret_manager_secret_version" "database_url" {
   secret                 = google_secret_manager_secret.database_url.id
   secret_data_wo         = "postgresql://${google_sql_user.app.name}:${ephemeral.random_password.db_app.result}@/${google_sql_database.app.name}?host=/cloudsql/${local.instance_connection_name}"
   secret_data_wo_version = local.db_password_version.app
-}
-
-# preview の DATABASE_URL（preview の service と migrate-preview ジョブが読む）。
-resource "google_secret_manager_secret" "database_url_preview" {
-  secret_id = "database-url-preview"
-  replication {
-    auto {}
-  }
-  depends_on = [google_project_service.apis]
-}
-
-resource "google_secret_manager_secret_version" "database_url_preview" {
-  secret                 = google_secret_manager_secret.database_url_preview.id
-  secret_data_wo         = "postgresql://${google_sql_user.app_preview.name}:${ephemeral.random_password.db_app_preview.result}@/${google_sql_database.app_preview.name}?host=/cloudsql/${local.instance_connection_name}"
-  secret_data_wo_version = local.db_password_version.app_preview
 }
 
 # Metabase のアプリ DB の接続（MB_DB_CONNECTION_URI、JDBC の形）。

@@ -1,6 +1,6 @@
 # apply の後に使う値。`terraform output` で表示する（infra/README.md の初回手順）。
 
-# GitHub の Repository variables にそのまま設定する値（deploy.yml・preview.yml が vars.<名前> で読む）。
+# GitHub の Repository variables にそのまま設定する値（deploy.yml が vars.<名前> で読む）。
 # WHY Variables（Secrets ではない）: どれも秘密ではない（WIF なので鍵は無い）。ログに出ても困らず、ワークフローの if でも読める。
 output "github_variables" {
   description = "GitHub の Settings > Secrets and variables > Actions > Variables に設定する値"
@@ -27,10 +27,6 @@ output "sql_public_ip" {
 # 各 service の既定の URL（https://<service>-<hash>.<region>.run.app の形）。
 output "customer_url" {
   value = google_cloud_run_v2_service.customer.uri
-}
-
-output "customer_preview_url" {
-  value = google_cloud_run_v2_service.customer_preview.uri
 }
 
 output "metabase_url" {

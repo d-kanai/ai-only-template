@@ -23,6 +23,17 @@ variable "github_repository" {
   default     = "d-kanai/ai-only-template"
 }
 
+# 上のリポジトリの数値の repository id（任意）。設定すると、WIF の条件でリポジトリ名に加えて id の一致も求める（github_wif.tf）。
+# WHY: リポジトリ名は、リポジトリを消した後に第三者が同じ名前で作り直せる。id は GitHub が一意で再利用しないと保証している
+#   （google-github-actions/auth の docs/SECURITY_CONSIDERATIONS.md）。
+# WHY 既定 null（任意）: テンプレートから作ったリポジトリでは id が違い、既定値を置けない。調べ方は infra/README.md の手順 3。
+# number: 数値だけを受け付け、名前などの取り違えを plan の前に止める。
+variable "github_repository_id" {
+  type        = number
+  description = "デプロイを許す GitHub のリポジトリの数値の id（任意。gh api repos/<owner>/<name> --jq .id）"
+  default     = null
+}
+
 # Cloud Run の service / job を初めて作るときだけ使うイメージ。
 # WHY 仮のイメージで作る: アプリのイメージは GitHub Actions が Artifact Registry に push して `gcloud run deploy` で入れ替える
 #   （Terraform は器だけ。lifecycle.ignore_changes でイメージの差分を無視する）。初回の apply の時点ではまだアプリのイメージが無いので、

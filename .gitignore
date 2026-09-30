@@ -35,6 +35,10 @@ yarn-error.log*
 # .env.example は接続情報の例（開発用の固定値だけで秘密を含まない）。コピー元としてコミットする。
 !.env.example
 
+# google-github-actions/auth（.github/workflows/deploy.yml）が $GITHUB_WORKSPACE に書く WIF の資格情報ファイル
+# （gha-creds-<乱数>.json）。WHY: ワークフローの中の git 操作で誤ってコミットしないように無視する（auth の README の推奨）。
+gha-creds-*.json
+
 # vercel
 .vercel
 

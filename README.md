@@ -138,7 +138,7 @@ pnpm start     # 本番ビルドを起動（pnpm --filter @repo/frontend-custome
 本番は GCP の Cloud Run（`frontend-customer`）+ Cloud SQL for PostgreSQL（Issue #137。決定は ADR `docs/adr/tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md`）。
 
 - 器（Cloud SQL・Cloud Run の service / job・Secret・IAM・GitHub Actions 用の WIF）は Terraform（`infra/`）。初回の手順（state のバケット → `terraform apply` → GitHub の Variables）と、Data Studio・Metabase・Cloud SQL の MCP の接続は `infra/README.md`。
-- main へのマージで `.github/workflows/deploy.yml` がイメージを build し、migrate ジョブ → 本番の service の順に入れ替える。PR は `.github/workflows/preview.yml` が preview 専用の service にタグ付きで出し、URL を PR にコメントする（fork の PR とスキーマを変える PR は対象外）。
+- main へのマージで `.github/workflows/deploy.yml` がイメージを build し、migrate ジョブ → 本番の service の順に入れ替える。
 - ロールバック・migrate の再実行・パスワードのローテーションはスキル `deploy`（`.claude/skills/deploy/SKILL.md`）。
 
 ## 指示ファイルの構成

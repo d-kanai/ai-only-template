@@ -1,16 +1,16 @@
 # infra（GCP: Cloud Run + Cloud SQL の Terraform）
 
 本番の器（API、Artifact Registry、Cloud SQL、Secret Manager、サービスアカウントと IAM、Cloud Run の service / job、GitHub Actions 用の WIF）を作る Terraform。
-アプリのイメージは GitHub Actions（`.github/workflows/deploy.yml`・`preview.yml`）が入れ替える。決定と WHY は ADR `docs/adr/tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md`、日々の操作（デプロイ・ロールバック・migrate の再実行）はスキル `.claude/skills/deploy/SKILL.md`。
+アプリのイメージは GitHub Actions（`.github/workflows/deploy.yml`）が入れ替える。決定と WHY は ADR `docs/adr/tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md`、日々の操作（デプロイ・ロールバック・migrate の再実行）はスキル `.claude/skills/deploy/SKILL.md`。
 
 | ファイル | 中身 |
 | --- | --- |
 | `versions.tf` | Terraform・provider の版（完全固定）、GCS のバックエンド |
-| `variables.tf` | 入力（`project_id` だけ必須） |
+| `variables.tf` | 入力（`project_id` だけ必須。`github_repository_id` は任意で推奨） |
 | `main.tf` | 名前（service / job）、API の有効化、Artifact Registry と古いイメージの削除 |
-| `sql.tf` | Cloud SQL（`app` / `app_preview` / `metabase` の 3 DB）、DB ユーザー、接続情報の Secret、接続数の予算 |
+| `sql.tf` | Cloud SQL（`app` / `metabase` の 2 DB）、DB ユーザー、接続情報の Secret、接続数の予算 |
 | `iam.tf` | 実行用のサービスアカウントと権限、MCP 用の IAM ユーザーの権限 |
-| `run.tf` | Cloud Run: `frontend-customer`・`frontend-customer-preview`・migrate ジョブ 2 つ、公開（allUsers） |
+| `run.tf` | Cloud Run: `frontend-customer`・migrate ジョブ、公開（allUsers） |
 | `metabase.tf` | Cloud Run: `metabase`（Cloud SQL Auth Proxy のサイドカー付き） |
 | `github_wif.tf` | Workload Identity Federation とデプロイ用のサービスアカウント |
 | `outputs.tf` | GitHub の Variables に入れる値、URL、接続名 |
@@ -47,6 +47,8 @@ terraform init -backend-config="bucket=<PROJECT_ID>-tfstate"
 terraform apply -var="project_id=<PROJECT_ID>"
 ```
 - 毎回 `-var` を書く代わりに `infra/terraform.tfvars` に `project_id = "<PROJECT_ID>"` と書いてもよい（`.gitignore` で `*.tfvars` を除外済み。コミットしない）。
+- 推奨: `-var="github_repository_id=<id>"`（tfvars なら `github_repository_id = <id>`）も渡す。WIF の条件にリポジトリの数値の id が加わる（`github_wif.tf`）。WHY: リポジトリ名は、リポジトリを消した後に第三者が同じ名前で作り直せるが、id は再利用されない（google-github-actions/auth の `docs/SECURITY_CONSIDERATIONS.md`）。id の調べ方: `gh api repos/<owner>/<repo> --jq .id`（または https://api.github.com/repos/<owner>/<repo> の `id`）。
+- **apply が終わったらすぐに Metabase の管理者を作る**（手順 8 の 1）。WHY: Metabase の service は `allUsers` の invoker で公開している（`run.tf`）ので、管理者ができるまでの間は、URL を知る誰でも初回セットアップ（`/setup`）を開いて管理者になれる。
 - Cloud SQL の作成には時間がかかる（所要時間は未計測）。
 - Cloud Run の service / job は仮のイメージ（`variables.tf` の `bootstrap_image`）で作られる。アプリのイメージは手順 5 で入る。
 
@@ -56,10 +58,10 @@ terraform output github_variables
 ```
 表示された 5 つ（`GCP_PROJECT_ID` / `GCP_REGION` / `GCP_WIF_PROVIDER` / `GCP_DEPLOYER_SA` / `GCP_AR_REPO`）を、GitHub の Settings > Secrets and variables > Actions > **Variables**（Secrets ではない）に同じ名前で登録する。
 - WHY Variables: どれも秘密ではない（WIF なので鍵は無い）。
-- `GCP_WIF_PROVIDER` が無いあいだは、deploy.yml / preview.yml のジョブはスキップされる（GCP の準備前に赤くしないため）。
+- `GCP_WIF_PROVIDER` が無いあいだは、deploy.yml のジョブはスキップされる（GCP の準備前に赤くしないため）。
 
 ### 5. 最初のデプロイ
-main に push する（PR をマージする）か、Actions の「Deploy」を「Run workflow」で手動実行する。migrate ジョブ → 本番の service → preview の DB の migrate の順に動く。
+main に push する（PR をマージする）か、Actions の「Deploy」を「Run workflow」で手動実行する。migrate ジョブ → 本番の service → トラフィックを最新のリビジョンへ、の順に動く（main 以外のブランチを選んだ手動実行はスキップされる）。
 URL は `terraform output customer_url`。
 
 ### 6. 読み取り専用ユーザー（Data Studio・Metabase の分析用。psql で手作業）
@@ -92,7 +94,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE app IN SCHEMA public GRANT SELECT ON TABLES TO
 - 「カスタムクエリ」で SELECT を書ける（1 文だけ、1 クエリ最大 15 万行）。Data Studio の AI 機能（Conversational Analytics）は BigQuery だけが対象で、Cloud SQL には使えない。
 
 ### 8. Metabase の接続
-1. `terraform output -raw metabase_url` を開く（min instances 0 なので、最初は JVM の起動に 1〜2 分かかる）。管理者アカウントを作る。
+1. `terraform output -raw metabase_url` を開く（min instances 0 なので、最初は JVM の起動に 1〜2 分かかる）。管理者アカウントを作る。**apply の直後に行う**（管理者ができるまでは URL を知る誰でも `/setup` で管理者になれる。手順 3 の WHY）。
 2. 分析する DB を追加する: PostgreSQL、ホスト `127.0.0.1`、ポート `5432`、データベース `app`、ユーザー `bi_readonly`、SSL は使わない。WHY: 同じインスタンスのサイドカーの Cloud SQL Auth Proxy が 127.0.0.1:5432 で待ち受け、Cloud SQL との間を TLS で暗号化する（`metabase.tf`）。
 3. Admin > Settings の Site URL を `metabase_url` にする（メールやリンクの URL に使われる）。
 4. Claude から使う: Metabase の MCP（`<metabase_url>/api/metabase-mcp`、v0.60 以降、内蔵の OAuth。https://www.metabase.com/docs/latest/ai/mcp ）。未確認: Claude Code からの接続手順と、有効にするための管理画面の設定。

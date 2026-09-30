@@ -1,19 +1,12 @@
 # 実行用のサービスアカウント（Cloud Run の service / job が動くときの ID）と、その権限。
 # デプロイ用（GitHub Actions）のサービスアカウントと WIF は github_wif.tf。
-# WHY service ごとに分ける: 読める Secret を必要なものだけにする（preview の PR のコードに本番の DATABASE_URL を読ませない、
-#   Metabase にアプリの DB のパスワードを読ませない）。
+# WHY service ごとに分ける: 読める Secret を必要なものだけにする（Metabase にアプリの DB のパスワードを読ませない、
+#   アプリに Metabase の DB のパスワードと暗号化キーを読ませない）。
 
 # 本番の frontend-customer と migrate ジョブ。
 resource "google_service_account" "run_customer" {
   account_id   = "run-frontend-customer"
   display_name = "Cloud Run: frontend-customer（本番）と migrate ジョブ"
-  depends_on   = [google_project_service.apis]
-}
-
-# preview の frontend-customer-preview と migrate-preview ジョブ。
-resource "google_service_account" "run_customer_preview" {
-  account_id   = "run-frontend-customer-preview"
-  display_name = "Cloud Run: frontend-customer-preview と migrate-preview ジョブ"
   depends_on   = [google_project_service.apis]
 }
 
@@ -28,9 +21,8 @@ resource "google_service_account" "run_metabase" {
 # WHY プロジェクト単位: roles/cloudsql.client はインスタンス単位で付けられない（プロジェクトの IAM だけ）。
 resource "google_project_iam_member" "run_sql_client" {
   for_each = {
-    customer         = google_service_account.run_customer.member
-    customer_preview = google_service_account.run_customer_preview.member
-    metabase         = google_service_account.run_metabase.member
+    customer = google_service_account.run_customer.member
+    metabase = google_service_account.run_metabase.member
   }
   project = var.project_id
   role    = "roles/cloudsql.client"
@@ -42,12 +34,6 @@ resource "google_secret_manager_secret_iam_member" "customer_database_url" {
   secret_id = google_secret_manager_secret.database_url.id
   role      = "roles/secretmanager.secretAccessor"
   member    = google_service_account.run_customer.member
-}
-
-resource "google_secret_manager_secret_iam_member" "customer_preview_database_url" {
-  secret_id = google_secret_manager_secret.database_url_preview.id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = google_service_account.run_customer_preview.member
 }
 
 resource "google_secret_manager_secret_iam_member" "metabase_db_uri" {

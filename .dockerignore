@@ -15,6 +15,11 @@
 .env.*
 # .env.example だけは入れる。WHY: build ステージが next build の間だけ .env にコピーして使う（開発用の値で秘密ではない）。
 !.env.example
+# google-github-actions/auth（deploy.yml）が $GITHUB_WORKSPACE（= ビルドのコンテキスト）に書く WIF の資格情報ファイル。
+# WHY: COPY . . でイメージ（Artifact Registry に push される）と GitHub Actions のビルドキャッシュに入り、ビルド中に動く
+#   コード（依存の install スクリプトなど）が deployer のサービスアカウントのトークンを読めてしまう。auth の README が
+#   .dockerignore への追加を求めている。
+gha-creds-*.json
 # テスト・mutation testing・E2E の実行結果（.gitignore と同じもの）。
 .stryker-tmp
 reports

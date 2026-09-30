@@ -79,7 +79,7 @@
 - `db-migration`: スキーマの変更とマイグレーション。
 - `dependency-update`: 依存の追加・更新・lockfile の作り直し・pnpm patch。
 - `cloud-session`: クラウドセッションの確認と復旧。
-- `deploy`: GCP（Cloud Run + Cloud SQL）への初回 apply・デプロイ・preview・ロールバック・migrate の再実行・BI と MCP の接続。
+- `deploy`: GCP（Cloud Run + Cloud SQL）への初回 apply・デプロイ・ロールバック・migrate の再実行・BI と MCP の接続。
 
 ### 機械的な強制（原則 7）
 - git: PreToolUse フック `scripts/hooks/guard-git.sh`（サブエージェントの commit / push / PR、main への commit / push、force push、`--no-verify` を拒否）、lefthook の pre-commit（Biome）と commit-msg（形式）。

@@ -6,12 +6,10 @@
 #   （Cloud Run の service / job は lifecycle.ignore_changes でイメージとトラフィックの差分を無視する）。
 
 locals {
-  # Cloud Run の service / job の名前。.github/workflows/deploy.yml・preview.yml も同じ名前を使う（変えるときは両方）。
-  customer_service         = "frontend-customer"
-  customer_preview_service = "frontend-customer-preview"
-  migrate_job              = "frontend-customer-migrate"
-  migrate_preview_job      = "frontend-customer-migrate-preview"
-  metabase_service         = "metabase"
+  # Cloud Run の service / job の名前。.github/workflows/deploy.yml も同じ名前を使う（変えるときは両方）。
+  customer_service = "frontend-customer"
+  migrate_job      = "frontend-customer-migrate"
+  metabase_service = "metabase"
 
   # Artifact Registry のリポジトリ名。イメージは <region>-docker.pkg.dev/<project>/app/<イメージ名>:<git の sha>。
   artifact_repository = "app"
@@ -48,7 +46,7 @@ resource "google_artifact_registry_repository" "app" {
   format        = "DOCKER"
   description   = "frontend-customer の runtime / migrate イメージ（GitHub Actions が push する）"
 
-  # 古いイメージを消す。WHY: main への push と PR の更新ごとにイメージが増え（migrate イメージは約 385MB。2026-09-30 の
+  # 古いイメージを消す。WHY: main への push ごとにイメージが増え（migrate イメージは約 385MB。2026-09-30 の
   #   work-logs）、保存量に課金される。Cloud Run はデプロイ時にイメージを取り込むので、デプロイ済みのリビジョンは
   #   Artifact Registry からイメージを消しても動く（https://cloud.google.com/run/docs/deploying 「The container image is
   #   imported by Cloud Run when deployed, so after the deployment, you can delete the image from Artifact Registry」）。
