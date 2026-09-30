@@ -90,7 +90,7 @@ describe("Todo.create", () => {
     expect(Todo.create("a".repeat(100)).title).toBe("a".repeat(100));
   });
 
-  // WHY 定数の値を固定する: presentation のリクエストのスキーマ（create-todo.api.ts・update-todo.api.ts）がこの定数を参照して
+  // WHY 定数の値を固定する: presentation のリクエストのスキーマ（create-todo.api.ts・rename-todo.api.ts）がこの定数を参照して
   //   同じ上限を重ねる（Issue #144）。値を変えると画面の文言（params.max）と API の契約が変わるので、変えるときはここも直す。
   test("タイトルの上限の文字数 TODO_TITLE_MAX_LENGTH は 100 で、それを超えると validation_error になる", () => {
     expect(TODO_TITLE_MAX_LENGTH).toBe(100);

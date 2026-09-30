@@ -15,7 +15,7 @@ export interface TodoRepository {
   //   のため。テストで保存・削除の結果（削除後は undefined）を確かめるのにも使う。
   findById(id: string): Promise<Todo | undefined>;
   // 見つからないときは DomainError("not_found", "todo.notFound", { id }) を投げる（API では 404）。
-  // WHY interface に持たせる: get / update / delete の 3 つのユースケースが同じ「無ければ not_found」を書いていた
+  // WHY interface に持たせる: get / rename / changeCompletion / delete のユースケースが同じ「無ければ not_found」を書いていた
   //   （Issue #123 の後のユーザー指示、2026-09-29）。例外の code・key・params をここで 1 つに決め、
   //   ユースケースごとの書き漏れ・書き違い（別の key や params を渡す）を無くす。実装は requireTodo を使う。
   findByIdOrThrow(id: string): Promise<Todo>;

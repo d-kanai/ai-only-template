@@ -41,14 +41,17 @@ paths:
 - `apps/backend/tsconfig.json` は Next の plugin・jsx・DOM の型を持たない（backend 単体の型チェック。`Response#json()` は `unknown` なのでテストでは `as` で型を付ける）。`pnpm typecheck` が検査する。
 
 ## presentation（api ファイル）
+- 1 ユースケース = 1 API = 1 command。複数の項目を任意（optional）で受けて command の中で分岐する「部分更新 API」（`PUT /api/todos/:id` に `{ title?, completed? }`）は作らない。項目ごとに `PUT /api/todos/:id/title`（`RenameTodoApi`）・`PUT /api/todos/:id/completion`（`ChangeTodoCompletionApi`）のように分ける（Issue #175。ADR `docs/adr/architecture/20260930-one-api-per-use-case.md`）。
+  - WHY: 名前の変更と完了は業務プロセスが別で、後から片方だけに処理（完了で通知を送るなど）が付くと command に if が増える。
+  - 検査は `rule-tests/api-request.test.ts`（リクエストの項目の `.optional()` を止める。同じユースケースの中で本当に任意の項目は直前の行の `// WHY 任意: <理由>` で通す）。限界（`.partial()` / `.nullish()` / `.default()` / `z.optional(x)` は見ない）はそのテストの冒頭に書いてある。任意の項目はこの規則の趣旨（ユースケースを混ぜない）で判断し、書き方で検査を逃れない。
 - 1 API = 1 ファイルにし、その API のリクエスト / レスポンスの型（DTO）もそのファイルで定義して export する。複数の API が同じ形の Todo を返しても各ファイルの Response 型に直接書く（共通の型ファイルや別名の型を置かない。domain の `Todo` を `toResponse` で各 API の Response に直接写す。Issue #139）。
   - WHY: api ファイルを 1 つ開けば契約と処理がすべて見える（ユーザー判断）。形を変えるときに複数ファイルを直す手間より優先する。
 - handler は `(request: Request) => Promise<Response>`。動的セグメントがあれば `(request, ctx: { params: Promise<{ id: string }> })` で、`await ctx.params` は api ファイル側で行う。
-- 各 api ファイルはクラス `<Verb><Noun>Api`（`ListTodosApi`・`GetTodoApi`・`CreateTodoApi`・`UpdateTodoApi`・`DeleteTodoApi`）を export する。コンストラクタで query / command を受け取り（型は `Pick<CreateTodoCommand, "execute">` のように execute だけ）、`handle` を Route Handler にする（Issue #123。ユーザー判断）。
+- 各 api ファイルはクラス `<Verb><Noun>Api`（`ListTodosApi`・`GetTodoApi`・`CreateTodoApi`・`RenameTodoApi`・`ChangeTodoCompletionApi`・`DeleteTodoApi`）を export する。コンストラクタで query / command を受け取り（型は `Pick<CreateTodoCommand, "execute">` のように execute だけ）、`handle` を Route Handler にする（Issue #123。ユーザー判断）。
   - `handle` は `withProblemResponse`（`problem.ts`）で包んだアロー関数のプロパティ（`readonly handle = withProblemResponse(async (request[, ctx]) => { ... })`）にする。try / catch は書かない。
     - WHY アロー関数: `export const POST = new CreateTodoApi(...).handle` のようにインスタンスから取り出して渡すと、メソッドでは `this` が外れる。
     - WHY `withProblemResponse`（Issue #141）: handler が投げた例外を `toProblemResponse` で Problem Details にする。Next の Route Handler には共通の catch が無く（Proxy は handler の例外を捕まえず、`onRequestError` は記録だけ）、包み忘れると Next の素の 500 が漏れる。以前は 5 本の api が同じ try / catch を手書きしていた。包み忘れは規則 `presentation-with-problem-response`（`rule-tests/architecture.test.ts`）が止める。
-    - `parseJsonBody` と `await ctx.params` + `parseUuidParam` は handler の中に書く（共通化しない。ユーザー判断）。WHY: 本文・動的セグメントの有無と確かめる順番（update は id を先に見て 404 を優先）が api ごとに違い、handler の中にあればその api の処理を 1 か所で読める。
+    - `parseJsonBody` と `await ctx.params` + `parseUuidParam` は handler の中に書く（共通化しない。ユーザー判断）。WHY: 本文・動的セグメントの有無と確かめる順番（rename / change-todo-completion は id を先に見て 404 を優先）が api ごとに違い、handler の中にあればその api の処理を 1 か所で読める。
   - 組み立てはファイルの最下部: `export const POST = new CreateTodoApi(new CreateTodoCommand(new PostgresTodoRepository(getDatabase().db))).handle;`。本番は常に Postgres（下の「永続化」）。
     - WHY api ファイルで組み立てる（DI コンテナを置かない）: コンテナ（以前の `infra/container.ts`）は分かりにくい（ユーザー判断）。その API が何で動くかを、api ファイル 1 つで読める。
     - WHY api ファイルごとに `new PostgresTodoRepository(getDatabase().db)` してよい: プールは `getDatabase` が `globalThis` に 1 つだけ持つので、Repository を api ファイルの数だけ作ってもプールは 1 つ。
@@ -74,7 +77,7 @@ paths:
   - presentation: 各 api ファイルにリクエストの zod スキーマを置き（`requestBodySchema({ 項目: z.string() })`。型の検査に `error` は書かない。必須・長さは `refine` に `keyedIssue` / `keyedRefine`（`apps/backend/shared/domain/keyed-issue.ts`）で domain と同じキーを付ける）、`parseJsonBody(request, schema)` で読む。違反は `InvalidRequestError`（`errors` 付き）→ 400（`/problems/validation-error`、Problem の `errors` に `{ pointer, key, params, detail }` の一覧、`key`・`params` は最初の 1 件）。型は `z.infer` でスキーマから導出する。
     - zod の issue からキーと `pointer` を決める対応は `json-body.ts` の `toProblemError` 1 か所だけに書く（message が ErrorKey（`keyedIssue` / `keyedRefine` で付けた）→ そのキーと refine の params、未知の項目 → `request.body.unknownKeys`、本文がオブジェクトでない → `request.body.notObject`、文字列・真偽値の項目の型違い → `request.field.notString` / `notBoolean`）。対応の無い issue（数値の項目を足したときなど）は InvalidRequestError ではない Error（500）にする。
       - WHY 各 api ファイルの型の検査の `error` にキーを書かない: 同じ対応（文字列の項目 → notString）を項目ごとに重ねて書くことになる。WHY 対応の無い issue を 500 にする: キーの集合は画面の辞書と共有する閉じた集合で、近いキーに寄せると画面が誤った文言を出す。キーと対応を足し忘れたことをテストで気づかせる。
-    - 未知のキーは拒否する（`z.strictObject`）。WHY: 部分更新で項目名を打ち間違えた本文が「何も変えない」200 に化ける。画面と API は同時に変えるので互換性の心配は無い。
+    - 未知のキーは拒否する（`z.strictObject`）。WHY: 項目名を打ち間違えた本文や別の API の項目（`/title` に `completed`）を黙って捨てると、送った変更が反映されないまま成功する。画面と API は同時に変えるので互換性の心配は無い。
     - 動的セグメントの `id` は `z.uuid()` で確かめ、形が違えば 404（`not_found`。無い Todo と同じ契約）。本文より先に確かめる。
   - domain: 値の中身の規則（例: `title` は前後の空白を除いて 1〜`TODO_TITLE_MAX_LENGTH`（100）文字。文字数はコードポイント数で、zod の `.min` / `.max`（`String#length`）は使わない）の正は domain の zod スキーマ（`todo.ts` の `todoPropsSchema` の `title`）。`Todo` のコンストラクタがそれで検証し、違反は `DomainError("validation_error", key, params)` → 400（`errors` は付かない。presentation で重ねた規則は先に presentation の `errors` 付きの 400 になる）。
     - domain の zod スキーマ・refine の `error` にはキーだけを書く（キー以外の文字列は書かない）。`keyedIssue(key)` / `keyedRefine(key, params)`（`apps/backend/shared/domain/keyed-issue.ts`）を通して `{ error: key }` / `{ error: key, params }` を作り、キーと params を型で縛る。params は zod の refine の `params` で運ぶ（zod 4.6.5 は refine の `params` を失敗した custom の issue にそのまま載せる。実測 2026-09-29）。`validate` が最初の issue の message（= キー）と params を DomainError に戻す。
@@ -101,7 +104,7 @@ paths:
   - WHY 差分を遷移メソッドに記録させず origin との比較で取る: Entity は不変で遷移メソッドは何も記録しない。記録させると遷移メソッドを足すたびに書く必要があり、書き漏れた変更は保存されない。「読み込んだときの値」は Entity の事実として持ち、どの列・どの SQL にするか（永続化の都合）は infra に置く。
   - `origin` は Todo の private フィールド（getter で読む）で、列挙されるプロパティに出さない（値の等価と直列化に混ざらない）。
   - InMemory も同じ意味にする（読み出しは `Todo.reconstruct` で作り直して origin を持たせ、save は変わった項目だけを反映）。共通の契約は `todo-repository.postgres.test.ts` と `todo-repository.in-memory.test.ts` が同じテスト名で固定する。DB を直接見る・spy するテスト（SQL を発行しない、変えていない列を書かない）は Postgres だけ。
-- Repository の `findById` は無ければ `undefined`、`findByIdOrThrow` は無ければ `DomainError("not_found", "todo.notFound", { id })`（API で 404）。「無ければ not_found」のユースケース（get / update / delete）は `findByIdOrThrow` を呼び、自分で throw を書かない。各実装は domain の `requireTodo(await this.findById(id), id)` を使う。WHY: 例外の code・key・params を 1 か所に決め、ユースケースごと・実装（本番の Postgres とテストの InMemory）ごとのずれを無くす。
+- Repository の `findById` は無ければ `undefined`、`findByIdOrThrow` は無ければ `DomainError("not_found", "todo.notFound", { id })`（API で 404）。「無ければ not_found」のユースケース（get / rename / change-todo-completion / delete）は `findByIdOrThrow` を呼び、自分で throw を書かない。各実装は domain の `requireTodo(await this.findById(id), id)` を使う。WHY: 例外の code・key・params を 1 か所に決め、ユースケースごと・実装（本番の Postgres とテストの InMemory）ごとのずれを無くす。
 - DB の行から Entity に戻すときは `Todo.reconstruct`（コンストラクタが不変条件で検証する。行の型は Drizzle のスキーマが保証するので Repository では zod で parse しない）、利用者の入力からは `Todo.create` / `rename`。
   - 不変条件を満たさない行が 1 件あると、一覧（findAll）とその id への GET / PUT / DELETE はすべて 500 になり、画面からは直せず消せない（reviewer の実測、Issue #94）。直すのは DB 側（規則を変えたときはスキル `db-migration` でデータを先に移行する。手で入れた行は SQL で直す）。ログの id と理由で行を特定する。
   - 不変条件を満たさない行（規則を変えたのに移行していない・手で入れた行）は、Repository（`toTodo`）が DomainError ではない `Error`（id と違反の理由を message に、元の DomainError を cause に）にして投げ、API は 500。WHY: DomainError のままだと 400 になり、クライアントに直せない誤りを「リクエストの誤り」と伝える。500 なら `toProblemResponse` がログに残す。行を読み飛ばさない（不整合に気づけない）。
@@ -110,11 +113,11 @@ paths:
   - WHY 今は要らない: 今の command は書き込みが 1 文だけ（`save` の `INSERT` か `UPDATE`、または `delete`）で、Postgres は 1 文を原子的に実行する（途中まで書かれた状態は残らない）。
   - 複数の書き込みが要る command が出たら、その command にトランザクションを扱う依存をコンストラクタで注入し、command の中で `db.transaction(async (tx) => ...)` の範囲を書く（包む場所を command ごとに明示する）。ただし今の規則では application から `Database`（`apps/backend/shared/infra/database`）と `drizzle-orm` を参照できない（規則 `application`・`core-to-persistence`）ので、依存の形（domain に interface を置くか、規則を変えるか）はその Issue で決める。
   - command の中で遅い処理（外部 API など）をしない（トランザクションを張ったときに接続を 1 本占有する。接続待ちは `DATABASE_CONNECTION_TIMEOUT_MS` でエラーにする）。
-  - 分離レベルは既定の READ COMMITTED（update / delete の command は findByIdOrThrow と save / delete が別の文）。読んでから書くまでの同時更新は、`save` が変わった列だけを書くことで次のようになる（Issue #165。`todo-repository.postgres.test.ts` が実 Postgres で固定）:
+  - 分離レベルは既定の READ COMMITTED（rename / change-todo-completion / delete の command は findByIdOrThrow と save / delete が別の文）。読んでから書くまでの同時更新は、`save` が変わった列だけを書くことで次のようになる（Issue #165。`todo-repository.postgres.test.ts` が実 Postgres で固定）:
     - 別の列の同時更新（片方は完了、片方は名前の変更）は両方残る。
     - 同じ列の同時更新は後勝ち。ただし読み込んだときと同じ値に戻す変更は差分が無いので書かれず、他方の更新が残る（その PUT は 200 で、戻した値を返す）。楽観ロックの version 列は入れない（ユーザー判断）。防ぐ必要が出たら version 列か `SELECT ... FOR UPDATE` を Issue で検討する。
     - 読み込んだ後に消された Todo の `save` は、変わった列があれば `not_found`（API で 404）。変わった列が無ければ SQL を発行せず何もしない（戻しもしない）。Issue #165 より前の全列の upsert は、消した Todo を INSERT で戻していた。
-    - update の応答は自分が読み込んで変えた値で、同時更新の他方の変更は含まない（save の後に読み直さない。WHY: SELECT が 1 回増える）。
+    - rename / change-todo-completion の応答は自分が読み込んで変えた値で、同時更新の他方の変更は含まない（save の後に読み直さない。WHY: SELECT が 1 回増える）。
 - 接続とプール（`database.ts`）: `pg.Pool` を `env` の値で作る（変数の一覧は `.claude/rules/env.md`）。アイドル中の接続のエラーは `pool.on("error")` で `logger.error` に出すだけ。プールは `globalThis` に 1 つ（`next dev` の HMR で増やさない）。終了時は `closeDatabase()`。値は開発・CI・E2E 用の暫定で、本番用は Issue #58。
 - テスト: 実 Postgres を使うテストは `createTestDatabase()` でファイルごとに別スキーマを使う（`.claude/rules/testing.md`）。
 
@@ -148,7 +151,7 @@ paths:
 
 ## 命名
 - ディレクトリ・ファイルは kebab-case。型は PascalCase（`ListTodosResponse`）。
-- api ファイル・query・command は `<verb>-<noun>`（`list-todos`・`get-todo`・`create-todo`・`update-todo`・`delete-todo`）に役割の接尾辞（`.api.ts`・`.query.ts`・`.command.ts`・`.in-memory.ts`・`.postgres.ts`・`.test.ts`）。クラス名は `<Verb><Noun>` に役割（`ListTodosApi`・`ListTodosQuery`・`CreateTodoCommand`）。Repository の実装は `<名前>-repository.<実装>.ts`（規則 `presentation` がファイル名 `*-repository.postgres` で組み立てに使う実装を見分ける）。
+- api ファイル・query・command は `<verb>-<noun>`（`list-todos`・`get-todo`・`create-todo`・`rename-todo`・`change-todo-completion`・`delete-todo`）に役割の接尾辞（`.api.ts`・`.query.ts`・`.command.ts`・`.in-memory.ts`・`.postgres.ts`・`.test.ts`）。クラス名は `<Verb><Noun>` に役割（`ListTodosApi`・`ListTodosQuery`・`CreateTodoCommand`）。Repository の実装は `<名前>-repository.<実装>.ts`（規則 `presentation` がファイル名 `*-repository.postgres` で組み立てに使う実装を見分ける）。
 
 ## 後で別プロセスに分けるとき
 `apps/backend` に起動口（`server.ts`）と script を足し、`apps/frontend_customer/app/api/**` を消して Next の `rewrites` で `/api/*` を向ける。frontend の `@repo/backend` は型だけの依存になる。env・logger は `apps/shared` にあるので、両方のプロセスがそのまま使える（詳細は ADR `docs/adr/architecture/20260928-monorepo-apps-frontend-backend.md`）。

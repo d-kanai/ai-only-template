@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ApiError } from "@/features/todo/api/api-error";
 import {
+  changeTodoCompletion,
   createTodo,
   deleteTodo,
   getTodo,
   listTodos,
-  updateTodo,
+  renameTodo,
 } from "@/features/todo/api/todo-api";
 
 // fetch を差し替えて、画面側が送る HTTP リクエスト（URL / method / body）と、返ってきたレスポンスの扱いを検証する。
@@ -83,18 +84,109 @@ describe("createTodo", () => {
   });
 });
 
-describe("updateTodo", () => {
-  test("PUT /api/todos/:id に JSON の変更内容を送り、更新後の Todo を返す", async () => {
-    const updated = { ...todo, completed: true };
-    fetchMock.mockResolvedValue(jsonResponse(updated, 200));
+// 名前の変更と完了の切り替えは、ユースケースごとに別の API（PUT /api/todos/:id/title・/completion）を呼ぶ（Issue #175）。
+// WHY 本文を toHaveBeenCalledWith で丸ごと比べる: 相手の項目（title なら completed）を本文に混ぜると、backend は未知の項目として
+//   400 で拒否する。混ぜていないことまで固定する。
+describe("renameTodo", () => {
+  test("PUT /api/todos/:id/title に JSON の { title } を送り、更新後の Todo を返す", async () => {
+    const renamed = { ...todo, title: "豆乳を買う" };
+    fetchMock.mockResolvedValue(jsonResponse(renamed, 200));
 
-    await expect(updateTodo("todo-1", { completed: true })).resolves.toEqual(
-      updated,
-    );
-    expect(fetchMock).toHaveBeenCalledWith("/api/todos/todo-1", {
+    await expect(renameTodo("todo-1", "豆乳を買う")).resolves.toEqual(renamed);
+    expect(fetchMock).toHaveBeenCalledWith("/api/todos/todo-1/title", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ completed: true }),
+      body: JSON.stringify({ title: "豆乳を買う" }),
+    });
+  });
+
+  test("id に URL で意味を持つ文字が含まれていてもエンコードしてパスに入れる", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(todo, 200));
+
+    await renameTodo("a/b?c", "豆乳を買う");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/todos/a%2Fb%3Fc/title",
+      expect.anything(),
+    );
+  });
+
+  test("400 の Problem Details なら、errors（#/title）を持つ ApiError を投げる", async () => {
+    fetchMock.mockResolvedValue(
+      problemResponse(
+        {
+          ...validationProblem,
+          key: "todo.title.empty",
+          params: undefined,
+          errors: [{ pointer: "#/title", key: "todo.title.empty" }],
+        },
+        400,
+      ),
+    );
+
+    const reason = await renameTodo("todo-1", "").catch(
+      (error: unknown) => error,
+    );
+
+    expect(reason).toBeInstanceOf(ApiError);
+    expect(reason).toMatchObject({
+      status: 400,
+      type: "/problems/validation-error",
+      key: "todo.title.empty",
+    });
+    expect((reason as ApiError).errors).toStrictEqual([
+      { pointer: "#/title", key: "todo.title.empty", params: {} },
+    ]);
+  });
+});
+
+describe("changeTodoCompletion", () => {
+  test.each([true, false])(
+    "PUT /api/todos/:id/completion に JSON の { completed: %s } を送り、更新後の Todo を返す",
+    async (completed) => {
+      const changed = { ...todo, completed };
+      fetchMock.mockResolvedValue(jsonResponse(changed, 200));
+
+      await expect(changeTodoCompletion("todo-1", completed)).resolves.toEqual(
+        changed,
+      );
+      expect(fetchMock).toHaveBeenCalledWith("/api/todos/todo-1/completion", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ completed }),
+      });
+    },
+  );
+
+  test("id に URL で意味を持つ文字が含まれていてもエンコードしてパスに入れる", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(todo, 200));
+
+    await changeTodoCompletion("a/b?c", true);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/todos/a%2Fb%3Fc/completion",
+      expect.anything(),
+    );
+  });
+
+  test("404 の Problem Details なら、type・key・params を持つ ApiError を投げる", async () => {
+    fetchMock.mockResolvedValue(problemResponse(notFoundProblem, 404));
+
+    const failure = changeTodoCompletion("missing", true);
+
+    await expect(failure).rejects.toEqual(
+      new ApiError({
+        status: 404,
+        type: "/problems/not-found",
+        key: "todo.notFound",
+        params: { id: "missing" },
+      }),
+    );
+    await expect(failure).rejects.toMatchObject({
+      status: 404,
+      type: "/problems/not-found",
+      key: "todo.notFound",
+      params: { id: "missing" },
     });
   });
 });

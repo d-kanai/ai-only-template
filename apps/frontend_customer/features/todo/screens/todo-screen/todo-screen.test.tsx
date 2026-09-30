@@ -9,10 +9,10 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { TodoScreen } from "@/features/todo";
 import { ApiError } from "@/features/todo/api/api-error";
 import {
+  changeTodoCompletion,
   createTodo,
   deleteTodo,
   listTodos,
-  updateTodo,
 } from "@/features/todo/api/todo-api";
 import { todoItemMessages } from "@/features/todo/components/todo-item.messages";
 import { commonMessages } from "@/shared/i18n/common.messages";
@@ -155,7 +155,10 @@ test("完了チェックボックスを押すと、その Todo が完了に更�
   vi.mocked(listTodos)
     .mockResolvedValueOnce({ todos: [milk] })
     .mockResolvedValueOnce({ todos: [{ ...milk, completed: true }] });
-  vi.mocked(updateTodo).mockResolvedValue({ ...milk, completed: true });
+  vi.mocked(changeTodoCompletion).mockResolvedValue({
+    ...milk,
+    completed: true,
+  });
   render(<TodoScreen />, { wrapper: JaLocale });
 
   fireEvent.click(
@@ -170,7 +173,7 @@ test("完了チェックボックスを押すと、その Todo が完了に更�
       checked: true,
     }),
   ).toBeDefined();
-  expect(updateTodo).toHaveBeenCalledWith("todo-1", { completed: true });
+  expect(changeTodoCompletion).toHaveBeenCalledWith("todo-1", true);
 });
 
 test("削除ボタンを押すと、その Todo が削除され一覧から消える", async () => {
