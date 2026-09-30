@@ -9,6 +9,7 @@ import { DeleteTodoCommand } from "../features/todo/application/delete-todo.comm
 import { GetTodoQuery } from "../features/todo/application/get-todo.query";
 import { ListTodosQuery } from "../features/todo/application/list-todos.query";
 import { RenameTodoCommand } from "../features/todo/application/rename-todo.command";
+import { todos } from "../features/todo/infra/schema";
 import { PostgresTodoRepository } from "../features/todo/infra/todo-repository.postgres";
 import {
   ChangeTodoCompletionApi,
@@ -45,9 +46,13 @@ import {
 //   query → Api）で、画面を通さずに API の流れだけを見る。
 // WHY 本番の export（GET / POST など）を使わず、ここで組み立てる: 本番の handler は getDatabase()（.env の DATABASE_URL の public
 //   スキーマ）を使い、テストファイルごとの別スキーマ（createTestDatabase）に向けられない。組み立ての形は各 *.api.ts の最下部と同じ。
-// WHY テストダブルを使わない（vi.mock も InMemory も無し。rule-tests/journey.test.ts が止める）: 本番と同じ部品の組み合わせで
-//   動くことを確かめるのが目的で、差し替えるとその部分のつながりを確かめなくなる。
-// WHY DB の中身を SQL で覗かない: 利用者が見るのは API の応答だけ。保存されたことは、次の API の応答（一覧・詳細）で確かめる。
+// WHY テストダブルを使わない（vitest から vi を import しない・InMemory も無し。rule-tests/journey.test.ts が止める）: 本番と同じ
+//   部品の組み合わせで動くことを確かめるのが目的で、差し替えるとその部分のつながりを確かめなくなる。
+// WHY 変更系の API（POST / PUT / DELETE）の後は、応答に加えて DB の行も見る（読み取り系の GET の後は見ない。ユーザー判断、
+//   Issue #187）: 応答が正しくても永続化がずれる誤り（差分 UPDATE の漏れ・where の欠落・削除の取り違え）は、次の API の応答だけでは
+//   見逃しうる。ジャーニーは実 DB を使う唯一の複数 API のテストなので、ここで行を見る。行は `database.db.select().from(todos)` で
+//   読み、期待の行全体と toStrictEqual で比べる（無いはずの行・変わってはいけない列も確かめる）。
+//   `db.select(` を呼び出しごとに書く（補助の関数にまとめない）のは、rule-tests/journey.test.ts がソースの `db.select(` の位置で検査するため。
 // WHY 1 テスト = 1 つの流れ（E2E と同じ）: 順序で状態を担保する。ステップごとにテストを分けると、前のテストの結果に依存する。
 
 // 実 Postgres（compose.yaml。`pnpm db:up` で起動）に対して実行する。テスト用のスキーマにマイグレーションを当て、
@@ -69,18 +74,27 @@ beforeEach(async () => {
 });
 
 // 本番の api ファイルの最下部と同じ組み立てで、テスト用のスキーマの db を使う handler をそろえる。
+// WHY 名前を HTTP メソッドで始める（postTodo・putTitle・deleteTodo、読み取りは getTodo・listTodos）: rule-tests/journey.test.ts が
+//   呼び出しの名前で変更系（post / put / patch / delete）を見分け、その後に DB の読み取りがあるかを検査する（.claude/rules/testing.md の
+//   「ジャーニーテスト」）。
 function api() {
   const repository = new PostgresTodoRepository(database.db);
   return {
-    createTodo: new CreateTodoApi(new CreateTodoCommand(repository)).handle,
+    postTodo: new CreateTodoApi(new CreateTodoCommand(repository)).handle,
     listTodos: new ListTodosApi(new ListTodosQuery(repository)).handle,
     getTodo: new GetTodoApi(new GetTodoQuery(repository)).handle,
-    renameTodo: new RenameTodoApi(new RenameTodoCommand(repository)).handle,
-    changeTodoCompletion: new ChangeTodoCompletionApi(
+    putTitle: new RenameTodoApi(new RenameTodoCommand(repository)).handle,
+    putCompletion: new ChangeTodoCompletionApi(
       new ChangeTodoCompletionCommand(repository),
     ).handle,
     deleteTodo: new DeleteTodoApi(new DeleteTodoCommand(repository)).handle,
   };
+}
+
+// API の応答の Todo を、todos の行の期待値にする。作成日時は応答では ISO 文字列、行では Date（schema.ts の mode "date"）。
+// WHY 応答から作る: 行の id・作成日時は API が決めるので、応答の値と同じ行が保存されていることを確かめる。
+function rowOf(todo: CreateTodoResponse): typeof todos.$inferSelect {
+  return { ...todo, createdAt: new Date(todo.createdAt) };
 }
 
 const BASE_URL = "http://localhost";
@@ -137,30 +151,31 @@ function notFoundProblem(id: string, instance: string): Problem {
 }
 
 test("Todo を 2 件作り、一覧で作成順に見え、1 件を改名して完了にすると詳細に反映され、削除すると一覧から消えて詳細は 404 になる", async () => {
-  const {
-    createTodo,
-    listTodos,
-    getTodo,
-    renameTodo,
-    changeTodoCompletion,
-    deleteTodo,
-  } = api();
+  const { postTodo, listTodos, getTodo, putTitle, putCompletion, deleteTodo } =
+    api();
 
-  // 1. 2 件作る。
-  const createdMilk = await createTodo(
+  // 1. 2 件作る（作るたびに行が 1 件ずつ増える）。
+  const createdMilk = await postTodo(
     jsonRequest("POST", "/api/todos", { title: "牛乳を買う" }),
   );
   expect(createdMilk.status).toBe(201);
   const milk = (await createdMilk.json()) as CreateTodoResponse;
   expect(milk).toMatchObject({ title: "牛乳を買う", completed: false });
+  await expect(database.db.select().from(todos)).resolves.toStrictEqual([
+    rowOf(milk),
+  ]);
 
   await waitUntilAfter(milk.createdAt);
-  const createdBread = await createTodo(
+  const createdBread = await postTodo(
     jsonRequest("POST", "/api/todos", { title: "パンを買う" }),
   );
   expect(createdBread.status).toBe(201);
   const bread = (await createdBread.json()) as CreateTodoResponse;
   expect(bread).toMatchObject({ title: "パンを買う", completed: false });
+  // WHY 作成日時で並べる: select の並び順は SQL で決めないと決まらない。2 件は waitUntilAfter で作成日時が違う。
+  await expect(
+    database.db.select().from(todos).orderBy(todos.createdAt),
+  ).resolves.toStrictEqual([rowOf(milk), rowOf(bread)]);
 
   // 2. 一覧に作成順で並ぶ（作成の応答と同じ値）。
   const listed = await listTodos(bodylessRequest("GET", "/api/todos"));
@@ -169,8 +184,8 @@ test("Todo を 2 件作り、一覧で作成順に見え、1 件を改名して�
     todos: [milk, bread],
   } satisfies ListTodosResponse);
 
-  // 3. 1 件目を改名する。
-  const renamed = await renameTodo(
+  // 3. 1 件目を改名する（行はその 1 件の title だけが変わり、2 件目は変わらない）。
+  const renamed = await putTitle(
     jsonRequest("PUT", `/api/todos/${milk.id}/title`, {
       title: "豆乳を買う",
     }),
@@ -181,9 +196,15 @@ test("Todo を 2 件作り、一覧で作成順に見え、1 件を改名して�
     ...milk,
     title: "豆乳を買う",
   } satisfies RenameTodoResponse);
+  await expect(
+    database.db.select().from(todos).orderBy(todos.createdAt),
+  ).resolves.toStrictEqual([
+    rowOf({ ...milk, title: "豆乳を買う" }),
+    rowOf(bread),
+  ]);
 
   // 4. 同じ Todo を完了にする（改名が保存されていれば、完了の応答にも新しい名前が出る）。
-  const completed = await changeTodoCompletion(
+  const completed = await putCompletion(
     jsonRequest("PUT", `/api/todos/${milk.id}/completion`, {
       completed: true,
     }),
@@ -195,6 +216,12 @@ test("Todo を 2 件作り、一覧で作成順に見え、1 件を改名して�
     title: "豆乳を買う",
     completed: true,
   } satisfies ChangeTodoCompletionResponse);
+  await expect(
+    database.db.select().from(todos).orderBy(todos.createdAt),
+  ).resolves.toStrictEqual([
+    rowOf({ ...milk, title: "豆乳を買う", completed: true }),
+    rowOf(bread),
+  ]);
 
   // 5. 詳細に改名と完了が反映されている。
   const detail = await getTodo(
@@ -208,13 +235,16 @@ test("Todo を 2 件作り、一覧で作成順に見え、1 件を改名して�
     completed: true,
   } satisfies GetTodoResponse);
 
-  // 6. 削除する。
+  // 6. 削除する（消えるのはその 1 件の行だけ）。
   const deleted = await deleteTodo(
     bodylessRequest("DELETE", `/api/todos/${milk.id}`),
     context(milk.id),
   );
   expect(deleted.status).toBe(204);
   await expect(deleted.text()).resolves.toBe("");
+  await expect(database.db.select().from(todos)).resolves.toStrictEqual([
+    rowOf(bread),
+  ]);
 
   // 7. 一覧には残りの 1 件だけ（手を付けていない 2 件目はそのまま）。
   const listedAfterDelete = await listTodos(
@@ -236,19 +266,22 @@ test("Todo を 2 件作り、一覧で作成順に見え、1 件を改名して�
 });
 
 test("空の title で作ろうとすると 400 で一覧は増えず、存在しない Todo を改名しようとすると 404 で一覧は変わらない", async () => {
-  const { createTodo, listTodos, renameTodo } = api();
+  const { postTodo, listTodos, putTitle } = api();
 
   // WHY 先に 1 件作る: 空の一覧のままだと「増えない」「変わらない」が、何も保存しない実装でも通ってしまう。
   //   1 件ある状態から、失敗した要求がそれを増やさず・変えないことを確かめる。
-  const created = await createTodo(
+  const created = await postTodo(
     jsonRequest("POST", "/api/todos", { title: "牛乳を買う" }),
   );
   expect(created.status).toBe(201);
   const milk = (await created.json()) as CreateTodoResponse;
+  await expect(database.db.select().from(todos)).resolves.toStrictEqual([
+    rowOf(milk),
+  ]);
 
-  // 1. 空の title は 400（Problem Details。項目ごとの誤りの errors 付き）。
+  // 1. 空の title は 400（Problem Details。項目ごとの誤りの errors 付き）で、行は増えない。
   await expectProblem(
-    await createTodo(jsonRequest("POST", "/api/todos", { title: "" })),
+    await postTodo(jsonRequest("POST", "/api/todos", { title: "" })),
     {
       type: "/problems/validation-error",
       title: "Validation error",
@@ -265,6 +298,9 @@ test("空の title で作ろうとすると 400 で一覧は増えず、存在�
       ],
     },
   );
+  await expect(database.db.select().from(todos)).resolves.toStrictEqual([
+    rowOf(milk),
+  ]);
 
   // 2. 一覧は増えていない。
   const listed = await listTodos(bodylessRequest("GET", "/api/todos"));
@@ -273,10 +309,10 @@ test("空の title で作ろうとすると 400 で一覧は増えず、存在�
     todos: [milk],
   } satisfies ListTodosResponse);
 
-  // 3. 存在しない id の改名は 404。
+  // 3. 存在しない id の改名は 404 で、既存の行は変わらない（行も増えない）。
   const missingId = randomUUID();
   await expectProblem(
-    await renameTodo(
+    await putTitle(
       jsonRequest("PUT", `/api/todos/${missingId}/title`, {
         title: "豆乳を買う",
       }),
@@ -284,6 +320,9 @@ test("空の title で作ろうとすると 400 で一覧は増えず、存在�
     ),
     notFoundProblem(missingId, `/api/todos/${missingId}/title`),
   );
+  await expect(database.db.select().from(todos)).resolves.toStrictEqual([
+    rowOf(milk),
+  ]);
 
   // 4. 一覧は変わっていない（既存の Todo の名前も元のまま）。
   const listedAfterRename = await listTodos(

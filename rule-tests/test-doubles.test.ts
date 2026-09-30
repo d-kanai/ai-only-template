@@ -44,7 +44,7 @@ import { afterAll, describe, expect, it } from "vitest";
 //     WHY: DB ありのテストは infra に分け、ユースケースと HTTP のテストは DB に接続しない（ユーザー判断 2026-09-30）。
 //     WHY ジャーニーテストは許す（Issue #187）: 複数の API を実 Postgres の上で業務の流れに沿って順に呼ぶテストの種類で、
 //       層ごとの単体テスト（DB に接続しない）とは置き場所（apps/backend/journeys/）で分けている。形（*.journey.test.ts だけ・
-//       InMemory と vi.mock の禁止・API 2 つ以上・test-support/database の import）は rule-tests/journey.test.ts が見る。
+//       InMemory と vi の import の禁止・API 2 つ以上・test-support/database の import）は rule-tests/journey.test.ts が見る。
 //     WHY import type も違反: 型だけでも DB の準備を前提にしたテストの形が application / presentation に入り込む入口になる。
 // 検査の対象: apps/ の下のテストファイル（*.test.ts / *.test.tsx）と、リポジトリ直下の vitest.global-setup.ts。
 //   apps/shared（`vi.mock("./now")`）と frontend（`vi.mock("@/features/.../api/...")`）の vi.mock は vi-mock-only-now の対象外。

@@ -14,6 +14,8 @@ backend のテストは層ごとの単体テストで、application と presenta
   - E2E（`apps/e2e/`）: 画面・本番ビルド・ルーティングを通した利用者の操作。
 - 置き場所と形は `rule-tests/journey.test.ts` で止める（`journeys/` の直下は `*.journey.test.ts` だけ・InMemory と `vi.mock` の禁止・異なる api を 2 つ以上・`test-support/database` の import）。`db-tests-in-infra-only` にジャーニーの例外を足す。
 - 実行は `pnpm test:journey`。`pnpm test`（カバレッジ込み）と Stryker にも含まれる。
+- 補足（同日）: 「確かめるのは応答だけで、SQL で DB を覗かない」をユーザー判断で改め、変更系の API（POST / PUT / PATCH / DELETE）の後は応答に加えて DB の行も `db.select()` で読み、期待の行全体と比べる（GET の後は不要）。WHY: 応答が正しくても永続化がずれる誤り（差分 UPDATE の漏れ・`where` の欠落・削除の取り違え）は、次の API の応答だけでは見逃しうる。
+- 補足（同日）: テストダブルの禁止は `vi.mock` の呼び出しではなく `vitest` から `vi` を import しないことで止める（`vi.spyOn`・`vi.useFakeTimers` などが通ったため。reviewer の指摘）。変更系の見分けのため handler の名前を HTTP メソッドで始める。検査は `rule-tests/journey.test.ts`（規則と限界は `.claude/rules/testing.md` の「ジャーニーテスト」）。
 
 ## 理由
 - 単体テストは層を InMemory でつなぐので、Postgres の Repository と API の組み合わせ（行と Entity の変換・並び順・変わった列だけの更新・無い id の 404）が流れの中で正しいかは見ない。E2E は本番ビルドとブラウザを起動するので遅く、失敗したときに画面・API・DB のどこが原因かを切り分けにくい。ジャーニーは画面を通さずに API の流れだけを実 DB で見るので、その間を速く埋められる。
