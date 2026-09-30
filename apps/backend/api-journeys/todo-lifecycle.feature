@@ -3,7 +3,7 @@
 # 各 step の文は、同じシナリオの中で同じ種類（Given / When / Then / And）の step と重ならないように書く
 #   （vitest-cucumber 8.0.0 は、式（{string} / {int}）の step を、同じ種類で最初に一致した行に割り当てる）。
 # このファイルは業務の仕様として読むもの（Issue #217）。step と見出しは業務の言葉だけで書き、技術の言葉（DB・状態コード・
-#   応答の形・API など。禁止語の一覧は rule-tests/api-journey.test.ts の FORBIDDEN_WORDS_IN_FEATURE）は書かない。技術の検証
+#   応答の形・API など。禁止語の一覧は rule-tests/feature-business-language.ts の FORBIDDEN_WORDS_IN_FEATURE）は書かない。技術の検証
 #   （状態コード・応答の本文・DB の行）は step の実装に閉じる（api-journey-business-language。仕切り以外のコメント行は対象外）。
 # API を呼ぶ step（When）の直前には、業務の動作を名前にした仕切り `# ───── <業務の動作> ─────` を置く
 #   （api-journey-section-divider。Background には置かない）。

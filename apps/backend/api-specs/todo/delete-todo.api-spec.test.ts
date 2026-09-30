@@ -2,6 +2,7 @@
 import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";
 import type { CreateTodoResponse } from "../../features/todo/internal/presentation/create-todo.api";
+import type { DeleteTodoApi } from "../../features/todo/internal/presentation/delete-todo.api";
 import {
   createTestDatabase,
   type TestDatabase,
@@ -43,7 +44,9 @@ beforeEach(async () => {
   await emptyTodos(database.db);
 });
 
-async function deleteTodo(id: string): Promise<Response> {
+// WHY 戻り値を DeleteTodoApi の handle の型にする: 対の api ファイルの型を使い、この仕様が delete-todo.api のものだと import で示す
+//   （rule-tests/api-spec.test.ts の api-spec-uses-own-api）。
+async function deleteTodo(id: string): ReturnType<DeleteTodoApi["handle"]> {
   return apis.deleteTodo(
     bodylessRequest("DELETE", `/api/todos/${id}`),
     context(id),
