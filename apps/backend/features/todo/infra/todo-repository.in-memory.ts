@@ -45,11 +45,10 @@ export class InMemoryTodoRepository implements TodoRepository {
       this.todos.set(todo.id, todo);
       return;
     }
-    const changed = changedProps(
-      todo.origin,
-      { title: todo.title, completed: todo.completed },
-      ["title", "completed"],
-    );
+    const changed = changedProps(todo.origin, {
+      title: todo.title,
+      completed: todo.completed,
+    });
     if (Object.keys(changed).length === 0) {
       return;
     }

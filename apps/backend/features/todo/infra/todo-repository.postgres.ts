@@ -90,11 +90,10 @@ export class PostgresTodoRepository implements TodoRepository {
     }
     // WHY 比べる列は title と completed だけ: Todo を変える操作（rename・changeCompletion）が変えるのはこの 2 つで、
     //   id と作成日時は作った後で変わらない。
-    const changed = changedProps(
-      todo.origin,
-      { title: todo.title, completed: todo.completed },
-      ["title", "completed"],
-    );
+    const changed = changedProps(todo.origin, {
+      title: todo.title,
+      completed: todo.completed,
+    });
     // WHY 変わった列が無ければ SQL を発行しない: 空の SET は SQL にならず、書く必要も無い。そのため、読み込んだ後に
     //   消された Todo でも、変えずに save したときは何もせず気づかない（戻しもしない）。
     if (Object.keys(changed).length === 0) {
