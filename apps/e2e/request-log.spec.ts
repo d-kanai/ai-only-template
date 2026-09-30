@@ -1,12 +1,13 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import { env } from "@repo/shared/env";
 import { resetTodos } from "./database";
 
 // リクエストログ（apps/frontend_customer/proxy.ts。Issue #80）が、本番ビルドの next start の stdout に 1 リクエスト = JSON 1 行で出ることを
 // 確かめる E2E テスト。1 行の中身の決め方は apps/frontend_customer/shared/request-log/request-log.test.ts で固定しているので、ここでは
 // proxy.ts の結線（規約の場所で呼ばれる・matcher・logger 経由で stdout への 1 行・応答ヘッダ x-request-id）だけを見る。
-// 行の先頭の level / timestamp は logger（apps/shared/logger.ts。Issue #85・#90）が付ける（形は logger.test.ts で固定）。
+// 行の先頭の severity / time は logger（apps/shared/logger.ts。Issue #85・#90・#209）が付ける（形は logger.test.ts で固定）。
 // WHY playwright.config.ts の webServer を使わず、このテストの中で next start を子プロセスで起動する:
 //   webServer の stdout はテストから読めない（Playwright 1.63.0 の webServer.stdout は "pipe" にしてもランナーのプロセスの
 //   stdout に流すだけ。types/test.d.ts の説明。テストは別の worker プロセスで動く）。ローカルの reuseExistingServer では、起動済みのサーバ（別のプロセス）を使うので stdout を取る手段がない。
@@ -26,32 +27,42 @@ let baseURL = "";
 // next start の stdout の行（リクエストログの JSON 行と Next の起動メッセージ）。
 const stdoutLines: string[] = [];
 
+// リクエストログの 1 行のうち、このテストが見る項目（キーの名前は Issue #209 の OTel semconv の入れ子の名前）。
 type LoggedRequest = {
-  level: string;
-  timestamp: string;
-  requestId: string;
-  kind: string;
-  method: string;
-  path: string;
-  queryKeys: string[];
-  accept: string | null;
-  referer: string | null;
+  severity: string;
+  time: string;
+  message: string;
+  event: { name: string };
+  http: {
+    request: {
+      id: string;
+      method: string;
+      header: { accept: string | null; referer: string | null };
+    };
+  };
+  url: { path: string; query_keys: string[] };
 };
 
 // stdout のうちリクエストログの行だけを取り出す。JSON でない行（Next の起動メッセージ）と、リクエストログ以外の JSON の行
-//   （Repository の書き込みのログ "repository write start" / "done"。apps/backend/shared/infra/write.ts。Issue #205）は除く。
-// WHY kind で見分ける: logger（apps/shared/logger.ts）を通るログはどれも JSON 1 行で stdout に出るので、「JSON の行」では
-//   リクエストログに絞れない。kind（page / api）はリクエストログ（request-log.ts）だけが持つ。
+//   （Repository の書き込みのログ。event.name が db_write。apps/backend/shared/infra/write.ts。Issue #205）は除く。
+// WHY event.name で見分ける: logger（apps/shared/logger.ts）を通るログはどれも JSON 1 行で stdout に出るので、「JSON の行」では
+//   リクエストログに絞れない。page_request / api_request はリクエストログ（request-log.ts）だけが出す種類（apps/shared/log-event.ts）。
 function loggedRequests(): LoggedRequest[] {
   return stdoutLines.flatMap((line) => {
     if (!line.startsWith("{")) {
       return [];
     }
     const parsed = JSON.parse(line) as Partial<LoggedRequest>;
-    return parsed.kind === "page" || parsed.kind === "api"
+    return parsed.event?.name === "page_request" ||
+      parsed.event?.name === "api_request"
       ? [parsed as LoggedRequest]
       : [];
   });
+}
+
+// 並びを比べるための要約（種類・メソッド・パス）。
+function summary({ event, http, url }: LoggedRequest) {
+  return { name: event.name, method: http.request.method, path: url.path };
 }
 
 test.beforeAll(async () => {
@@ -107,7 +118,7 @@ test.beforeEach(async () => {
   stdoutLines.length = 0;
 });
 
-test("画面を開くと page の行が 1 つ、画面が呼ぶ /api/todos で api の行が 1 つ出て、プリフェッチは出ない", async ({
+test("画面を開くと page_request の行が 1 つ、画面が呼ぶ /api/todos で api_request の行が 1 つ出て、プリフェッチは出ない", async ({
   page,
   request,
 }) => {
@@ -124,51 +135,47 @@ test("画面を開くと page の行が 1 つ、画面が呼ぶ /api/todos で a
 
   // 画面の表示（document の GET /）と、画面の hook が呼ぶ GET /api/todos。
   await expect
-    .poll(() =>
-      loggedRequests().map(({ kind, method, path }) => ({
-        kind,
-        method,
-        path,
-      })),
-    )
+    .poll(() => loggedRequests().map(summary))
     .toEqual([
-      { kind: "api", method: "POST", path: "/api/todos" },
-      { kind: "page", method: "GET", path: "/" },
-      { kind: "api", method: "GET", path: "/api/todos" },
+      { name: "api_request", method: "POST", path: "/api/todos" },
+      { name: "page_request", method: "GET", path: "/" },
+      { name: "api_request", method: "GET", path: "/api/todos" },
     ]);
   const [, pageLine, apiLine] = loggedRequests();
-  expect(pageLine.accept).toContain("text/html");
-  expect(apiLine.referer).toBe(`${baseURL}/`);
+  expect(pageLine.http.request.header.accept).toContain("text/html");
+  expect(apiLine.http.request.header.referer).toBe(`${baseURL}/`);
 
-  // リンクを押したときのクライアント遷移（RSC の取得）は page の行になる。表示されたリンクのプリフェッチ
+  // リンクを押したときのクライアント遷移（RSC の取得）は page_request の行になる。表示されたリンクのプリフェッチ
   //   （next-router-prefetch ヘッダ付き）は proxy.ts の matcher の missing で除くので、押す前に /todo/<id> の行は無い。
   // WHY 押す前の行を数え直す: プリフェッチはリンクの表示後に非同期で飛ぶので、上の poll の時点ではまだ届いていないことがある。
-  //   詳細の画面を開いた後の行の一覧を丸ごと比べ、/todo/<id> の page の行がクライアント遷移の 1 つだけであることを確かめる。
+  //   詳細の画面を開いた後の行の一覧を丸ごと比べ、/todo/<id> の page_request の行がクライアント遷移の 1 つだけであることを確かめる。
   await page.getByRole("link", { name: title }).click();
   await expect(page).toHaveURL(`${baseURL}/todo/${todo.id}`);
   await expect(
     page.getByRole("heading", { name: title, level: 1 }),
   ).toBeVisible();
   await expect
-    .poll(() =>
-      loggedRequests()
-        .slice(3)
-        .map(({ kind, method, path }) => ({ kind, method, path })),
-    )
+    .poll(() => loggedRequests().slice(3).map(summary))
     .toEqual([
-      { kind: "page", method: "GET", path: `/todo/${todo.id}` },
-      { kind: "api", method: "GET", path: `/api/todos/${todo.id}` },
+      { name: "page_request", method: "GET", path: `/todo/${todo.id}` },
+      { name: "api_request", method: "GET", path: `/api/todos/${todo.id}` },
     ]);
 });
 
-test("x-request-id を付けて呼ぶと、その値が行の requestId と応答ヘッダに入り、クエリは値を出さない", async ({
+// WHY traceparent も付ける: trace の値のプロジェクト ID は proxy.ts が env.GCP_PROJECT_ID から渡す（Issue #209）。proxy.ts は
+//   カバレッジの対象外なので、その結線（env の値が行に入ること）はここで確かめる。解析の規則は request-log.test.ts が固定する。
+test("x-request-id と traceparent を付けて呼ぶと、その値が行の http.request.id・trace と応答ヘッダに入り、クエリは値を出さない", async ({
   request,
 }) => {
   const requestId = `e2e-${Date.now()}`;
+  const traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
   const response = await request.get(
     `${baseURL}/api/todos?token=secret-value`,
     {
-      headers: { "x-request-id": requestId },
+      headers: {
+        "x-request-id": requestId,
+        traceparent: `00-${traceId}-00f067aa0ba902b7-01`,
+      },
     },
   );
   expect(response.status()).toBe(200);
@@ -177,14 +184,22 @@ test("x-request-id を付けて呼ぶと、その値が行の requestId と応�
   await expect.poll(() => loggedRequests()).toHaveLength(1);
   const [line] = loggedRequests();
   expect(line).toMatchObject({
-    level: "info",
-    requestId,
-    kind: "api",
-    path: "/api/todos",
-    queryKeys: ["token"],
+    severity: "INFO",
+    message: "GET /api/todos",
+    event: { name: "api_request" },
+    http: { request: { id: requestId } },
+    url: { path: "/api/todos", query_keys: ["token"] },
+    "logging.googleapis.com/trace": `projects/${env.GCP_PROJECT_ID}/traces/${traceId}`,
+    "logging.googleapis.com/spanId": "00f067aa0ba902b7",
+    "logging.googleapis.com/trace_sampled": true,
   });
-  // logger を通っていること: 先頭が level・timestamp の順で、timestamp は受信時刻の ISO 8601（UTC）のまま。
-  expect(Object.keys(line).slice(0, 2)).toEqual(["level", "timestamp"]);
-  expect(new Date(line.timestamp).toISOString()).toBe(line.timestamp);
+  // logger を通っていること: 先頭が severity・time・message・event の順で、time は受信時刻の RFC 3339（UTC）のまま。
+  expect(Object.keys(line).slice(0, 4)).toEqual([
+    "severity",
+    "time",
+    "message",
+    "event",
+  ]);
+  expect(new Date(line.time).toISOString()).toBe(line.time);
   expect(stdoutLines.join("\n")).not.toContain("secret-value");
 });

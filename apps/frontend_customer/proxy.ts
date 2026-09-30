@@ -1,3 +1,4 @@
+import { env } from "@repo/shared/env";
 import { logger } from "@repo/shared/logger";
 import { now } from "@repo/shared/now";
 import { type NextRequest, NextResponse } from "next/server";
@@ -28,19 +29,27 @@ export function proxy(request: NextRequest): NextResponse {
     // WHY now(): 現在時刻は唯一の出口 now（apps/shared/now.ts）から取る（規則 now-single-source）。
     receivedAt: now(),
     generateRequestId: () => crypto.randomUUID(),
+    // WHY env から渡す: trace の projects/<ID>/ に入れる GCP のプロジェクト ID（Issue #209）。request-log.ts は画面側の shared/ に
+    //   あり apps/shared（env）を参照できない（規則 screen-to-shared）ので、ここで読んで渡す。
+    // WHY 静的に import してよい: env.ts は読み込み時に必須の変数を検証するが、起動時に instrumentation-node.ts が先に同じ検証で
+    //   止めている（欠けていればリクエストを受ける前にプロセスが終わる）。
+    projectId: env.GCP_PROJECT_ID,
   });
   // WHY logger.info（info は stdout）に同期で 1 行: 出力先は stdout の NDJSON だけにし（ログの収集は実行環境に任せる）、
   //   ライブラリを入れない（Issue #80）。stdout への書き込みは同期で終わるので event.waitUntil は使わない。
-  //   logger が先頭に level（"info"）を付ける。timestamp は log の受信時刻がそのまま使われる（ADR docs/adr/architecture/20260929-request-log-in-proxy.md の 1 行の形）。
+  //   logger が先頭に severity（"INFO"）を付ける。time は log の受信時刻がそのまま使われる（1 行の形は ADR
+  //   docs/adr/architecture/20260930-log-format-cloud-logging-otel.md）。
+  // WHY ここで型が縛られる: log.event.name（page_request / api_request）が一覧（apps/shared/log-event.ts）に無ければ、logger.info の
+  //   引数の型（LogEvent）に合わず pnpm typecheck が落ちる（request-log.ts は画面側で一覧の型を import できない）。
   logger.info(log);
   // WHY 応答ヘッダに x-request-id: ブラウザの開発者ツールや呼び出し側から、応答と stdout の行を突き合わせられるようにする。
   //   NextResponse.next({ headers }) ではなく、応答を作ってから set する（next-response.md の next()）。
   // WHY /api/** にはロケールを載せない: API は画面の文言を返さず（Problem Details の key と params を画面が翻訳する。detail は翻訳しない英語）、ロケールを使わない（Issue #116・#126）。
   const response =
-    log.kind === "api"
+    log.event.name === "api_request"
       ? NextResponse.next()
       : NextResponse.next({ request: { headers: withLocale(request) } });
-  response.headers.set("x-request-id", log.requestId);
+  response.headers.set("x-request-id", log.http.request.id);
   return response;
 }
 

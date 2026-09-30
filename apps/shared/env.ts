@@ -27,6 +27,12 @@ export type Env = {
   DATABASE_POOL_IDLE_TIMEOUT_MS: number;
   // 接続待ちの上限（ミリ秒、0 以上。0 は無制限）。
   DATABASE_CONNECTION_TIMEOUT_MS: number;
+  // GCP のプロジェクト ID。リクエストログの trace（projects/<ID>/traces/<trace-id>。Cloud Logging の特別フィールド
+  //   logging.googleapis.com/trace）に入れる（Issue #209。apps/frontend_customer/proxy.ts）。
+  // WHY 環境変数で受け取る: Cloud Run が自動で付ける環境変数（PORT・K_SERVICE など。
+  //   https://docs.cloud.google.com/run/docs/container-contract の Environment variables）にプロジェクト ID は無い。メタデータ
+  //   サーバからは取れるが、起動時の通信が要り、手元・CI では取れない。infra（infra/modules/app/run.tf）が var.project_id を渡す。
+  GCP_PROJECT_ID: string;
 };
 
 // 開発ツールの切り替え（任意）。アプリの設定ではなく、テストや CI の実行のしかたを変えるだけのフラグ。
@@ -92,6 +98,7 @@ const PARSERS: { [K in keyof Env]: (raw: string) => Check<Env[K]> } = {
   DATABASE_POOL_MAX: positiveInteger,
   DATABASE_POOL_IDLE_TIMEOUT_MS: nonNegativeInteger,
   DATABASE_CONNECTION_TIMEOUT_MS: nonNegativeInteger,
+  GCP_PROJECT_ID: requiredString,
 };
 
 // source（本番は process.env）から Env を読む。純粋関数にして、テストで偽の source を渡せるようにしている。

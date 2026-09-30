@@ -31,11 +31,19 @@ export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 // write（本体の書き込み）を db のトランザクションの中で実行し、write が返した記録を同じトランザクションの最後に
 //   recordChange で change_logs に書く。前後に 1 行ずつ logger でログを出し、失敗なら warn を出して同じ例外を投げ直す。
-// ログの形（どれも table・rowId・operation を持つ）:
-//   - 前: info "repository write start"
-//   - 後: info "repository write done"。durationMs（所要時間）と changes（記録の tableName・rowId・operation）
-//   - 失敗: warn "repository write failed"。durationMs と error（logger が { name, message } にする）。DB のエラーなら
-//     error は pg のエラーの name だけで、sqlState（SQLSTATE）と constraint（制約の名前）を出す（下の failureFields）
+// ログの形（Issue #209。ADR docs/adr/architecture/20260930-log-format-cloud-logging-otel.md。どれも event.name は db_write で、
+//   db.collection.name（表名）・db.operation.name（操作）・row_id を持つ）:
+//   - 前: info "db write start"（event.phase は start）
+//   - 後: info "db write done"（event.phase は done）。event.duration_ms（所要時間）と changes（記録の table・row_id・operation）
+//   - 失敗: warn "db write failed"（event.phase は failed）。event.duration_ms と error（logger が { type, message } にする）。
+//     DB のエラーなら error は pg のエラーの name だけの { type } で、db.response.status_code（SQLSTATE）と constraint（制約の名前）を
+//     出す（下の failureFields）
+// WHY db.* の名前: OTel semconv の DB の属性（db.collection.name・db.operation.name・db.response.status_code。
+//   https://opentelemetry.io/docs/specs/semconv/registry/attributes/db/ ）にそろえ、入れ子のオブジェクトにする（Logs Explorer で
+//   jsonPayload.db.collection.name と書ける）。操作の名前は OTel の例（SELECT など）と違い、変更履歴と同じ insert / update / delete。
+// WHY 段階を event.phase に入れる（event.name を db_write_start などに分けない）: 1 回の書き込みの前後を event.name="db_write" の
+//   1 つの条件で引け、種類の一覧（apps/shared/log-event.ts）を段階の数だけ増やさずに済む。
+// WHY duration_ms を event に入れる: その出来事（書き込み）の所要時間で、event の属性として種類と一緒に読む。
 // WHY changes に値（before / after）を出さない: 個人情報を含みうる。値は change_logs に残る（リクエストログがクエリの値を
 //   出さないのと同じ方針。ADR docs/adr/architecture/20260929-request-log-in-proxy.md）。
 // WHY 失敗を warn にする（error にしない）: not_found（読み込んだ後に消された Todo の save）などの DomainError は 404 の正常な結果。
@@ -47,12 +55,14 @@ export async function writeInTransaction(
   target: WriteTarget,
   write: (tx: Transaction) => Promise<readonly ChangeEntry[]>,
 ): Promise<void> {
-  const fields = {
-    table: getTableName(target.table),
-    rowId: target.rowId,
-    operation: target.operation,
-  };
-  logger.info({ message: "repository write start", ...fields });
+  const collection = { name: getTableName(target.table) };
+  const operation = { name: target.operation };
+  logger.info({
+    message: "db write start",
+    event: { name: "db_write", phase: "start" },
+    db: { collection, operation },
+    row_id: target.rowId,
+  });
   const startedAt = performance.now();
   let entries: readonly ChangeEntry[];
   // WHY try は transaction だけを囲む: 失敗のログの対象は書き込み（本体・記録・COMMIT）の失敗だけ。後のログは外に置く。
@@ -63,39 +73,63 @@ export async function writeInTransaction(
       return written;
     });
   } catch (error) {
+    const failure = failureFields(error);
     logger.warn({
-      message: "repository write failed",
-      ...fields,
-      durationMs: elapsedMs(startedAt),
-      ...failureFields(error),
+      message: "db write failed",
+      event: {
+        name: "db_write",
+        phase: "failed",
+        duration_ms: elapsedMs(startedAt),
+      },
+      db: {
+        collection,
+        operation,
+        // WHY SQLSTATE が無ければ undefined（JSON.stringify がキーごと落とす）: DB のエラーでないとき・code が文字列でない
+        //   ときに、空の response: {} を出さない。
+        response:
+          failure.statusCode === undefined
+            ? undefined
+            : { status_code: failure.statusCode },
+      },
+      row_id: target.rowId,
+      constraint: failure.constraint,
+      error: failure.error,
     });
     throw error;
   }
   logger.info({
-    message: "repository write done",
-    ...fields,
-    durationMs: elapsedMs(startedAt),
+    message: "db write done",
+    event: {
+      name: "db_write",
+      phase: "done",
+      duration_ms: elapsedMs(startedAt),
+    },
+    db: { collection, operation },
+    row_id: target.rowId,
+    // WHY snake_case の { table, row_id, operation } にする（ChangeEntry の tableName・rowId をそのまま出さない）: ログのキーは
+    //   OTel の名前にそろえた snake_case で、行の中で表記を混ぜない。
     changes: entries.map(({ tableName, rowId, operation }) => ({
-      tableName,
-      rowId,
+      table: tableName,
+      row_id: rowId,
       operation,
     })),
   });
 }
 
-// 失敗のログに載せる例外。DB のエラー（drizzle-orm の DrizzleQueryError）は、元の pg のエラー（cause）の name と、SQLSTATE（sqlState）・
-//   制約の名前（constraint。pg の DatabaseError のプロパティ）だけにし、message は出さない。それ以外（DomainError など）はそのまま。
+// 失敗のログに載せる例外。DB のエラー（drizzle-orm の DrizzleQueryError）は、元の pg のエラー（cause）の name（error.type）と、
+//   SQLSTATE（statusCode → db.response.status_code）・制約の名前（constraint。pg の DatabaseError のプロパティ）だけにし、message は
+//   出さない。それ以外（DomainError など）はそのまま（logger が { type, message } にする）。
 // WHY DB のエラーの message を出さない: DrizzleQueryError の message は「Failed query: <SQL>\nparams: <値>」（drizzle-orm 0.45.3 の
 //   errors.js）で、行の値（個人情報を含みうる）がログに出る。元の pg のエラーの message も、データ例外（SQLSTATE 22 系）は入力値を
 //   含む（22P02 の invalid input syntax for type uuid: "<入力>"、22003 の value "<入力>" is out of range。Issue #205 の reviewer の
 //   実測）。changes に値を出さないのと同じ方針。
-// WHY sqlState と constraint を出す: message が無くても、何の失敗か（23505 の一意制約違反・23503 の外部キー違反など）と、どの制約かを
+// WHY SQLSTATE と constraint を出す: message が無くても、何の失敗か（23505 の一意制約違反・23503 の外部キー違反など）と、どの制約かを
 //   引ける。どちらも DB が決める名前・コードで、入力値を含まない。文字列でないとき（想定外）は出さない。
 // WHY cause が Error でなければ元の例外を出す: drizzle は pg の例外を cause に入れるが、想定外の形で何も出さないよりは
 //   元の例外を残す（値が出うるのは、この想定外のときだけ）。
 function failureFields(error: unknown): {
   error: unknown;
-  sqlState?: string;
+  statusCode?: string;
   constraint?: string;
 } {
   if (!(error instanceof DrizzleQueryError && error.cause instanceof Error)) {
@@ -106,8 +140,8 @@ function failureFields(error: unknown): {
     constraint?: unknown;
   };
   return {
-    error: { name },
-    sqlState: typeof code === "string" ? code : undefined,
+    error: { type: name },
+    statusCode: typeof code === "string" ? code : undefined,
     constraint: typeof constraint === "string" ? constraint : undefined,
   };
 }

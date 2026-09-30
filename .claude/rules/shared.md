@@ -9,7 +9,7 @@ paths:
 規則は `rule-tests/architecture.test.ts` が検査する（一覧は `.claude/rules/architecture-check.md`）。決定は ADR `docs/adr/architecture/20260929-apps-shared-package.md`。
 
 ## 置いてよいもの
-- `env.ts`（環境変数の唯一の入口。`.claude/rules/env.md`）、`logger.ts`（サーバ側のログの唯一の出口。`.claude/rules/backend.md` の「ログ」）、`now.ts`（現在時刻の唯一の出口。下の「now」）、そのテスト（`env.test.ts`・`logger.test.ts`・`now.test.ts`）、`package.json`・`tsconfig.json` だけ（規則 `shared-placement`。ソース以外のファイルも名前で決める）。
+- `env.ts`（環境変数の唯一の入口。`.claude/rules/env.md`）、`logger.ts`（サーバ側のログの唯一の出口。`.claude/rules/backend.md` の「ログ」）、`now.ts`（現在時刻の唯一の出口。下の「now」）、そのテスト（`env.test.ts`・`logger.test.ts`・`now.test.ts`）、`log-event.ts`（logger の `event.name` に使える名前の一覧 `LOG_EVENT_NAMES` と型 `LogEventName`。Issue #209。テストは `logger.test.ts` に置き、`log-event.test.ts` は置かない）、`package.json`・`tsconfig.json` だけ（規則 `shared-placement`。ソース以外のファイルも名前で決める）。
   - WHY: 「frontend と backend の両方で使う」ものは多く、共通の置き場所を自由にすると feature のコードや DB・React に依存するコードが集まり、層の規則（backend の 4 層・画面側の境界）の外で依存が育つ。置いてよいのは、どの層・どのパッケージからも同じものを使うべき基盤（外の世界との入口・出口）だけにする。
 - 文言（`env.ts` のエラー、`logger.ts` のメッセージ）は英語で書き、日本語のリテラルを置かない（規則 `server-hardcoded-text`）。WHY: 利用者に見せる文言は frontend の辞書（`apps/frontend_customer/` の `*.messages.ts`）だけで、運用者向けの文言は英語に統一する。
 - 置かないもの: feature のコード（型・DTO を含む。画面とサーバの契約は backend の api ファイルに置く）、DB（`drizzle-orm` / `pg`。永続化は backend の infra）、React・Next・ブラウザの API。
@@ -25,6 +25,7 @@ paths:
 ## exports（`apps/shared/package.json`）
 - キーは `./env`・`./logger`・`./now` の 3 つ。1 ファイル = 1 キーで、パターン（`"./*"`）を使わない（規則 `shared-exports` が過不足と値の形を止める。検査の内容は `backend-exports` と同じ）。
   - WHY: 置いてよいファイルを名前で決めている（`shared-placement`）ので、公開も名前で決め、置き場所と公開を 1 対 1 にする。
+  - 例外: `log-event.ts` は公開しない（`./log-event` のキーを置かない。Issue #209）。WHY: 使うのは `logger.ts`（`LogEvent` の型）だけで、外の呼び出し側は `logger.info({ event: { name: "db_write" } })` のように名前を文字列で書けば `LogEvent` の型で一覧に縛られる。外から参照されないキーは `shared-exports` が違反にする（2026-09-30 に `./log-event` を足して実測）。外から一覧の値（`LOG_EVENT_NAMES`）が要るようになったら、キーと `SHARED_MODULES_BY_LAYER` の許可を同じ変更で足す。
 - 値はキーのパスに `.ts` を付けた TS のソース（ビルドしない。`@repo/backend` と同じ）。
 
 ## now（現在時刻の唯一の出口。`now.ts`）

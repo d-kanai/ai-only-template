@@ -27,7 +27,7 @@ type Writer = Pick<Database, "insert" | "update" | "select">;
 //   通る」とクライアントに伝えてしまう。保存済みのデータの不整合（規則を変えたのに移行していない、手で入れた行）は
 //   クライアントには直せないサーバ側の誤りで、直すのは運用（データの移行。スキル db-migration）。500 なら
 //   toProblemResponse が logger.error で 1 行残すので、どの行が何に違反したかをログで追える。
-// WHY message に id と違反の理由を入れる: logger は Error を { name, message } にし、cause は出さない。
+// WHY message に id と違反の理由を入れる: logger は Error を { type, message } にし、cause は出さない。
 //   クライアントへの本文は固定のキー（server.internalError と固定の英語の detail。toProblemResponse）なので、ここに書いた内容は外に出ない。
 // WHY 行を読み飛ばさない（一覧から黙って外さない）: データが消えたように見え、不整合に気づけない。
 // WHY cause に元の DomainError を持たせる: 例外を調べるとき（テスト・デバッガ）に元の例外をたどれるようにする。

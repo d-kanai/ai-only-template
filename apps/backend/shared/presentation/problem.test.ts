@@ -216,7 +216,7 @@ describe("toProblemResponse", () => {
     });
   });
 
-  test("想定外の例外は logger.error で、例外の name と message を含む 1 行の JSON としてサーバのログ（stderr）に残す", () => {
+  test("想定外の例外は logger.error で、event.name（server_error）と例外の type・message を含む 1 行の JSON としてサーバのログ（stderr）に残す", () => {
     // logger（apps/shared/logger.ts。Issue #90 で移した）は error を console.error に 1 行の文字列で渡す。
     const consoleError = vi
       .spyOn(console, "error")
@@ -228,10 +228,11 @@ describe("toProblemResponse", () => {
     expect(consoleError).toHaveBeenCalledTimes(1);
     const [line] = consoleError.mock.calls[0] as [string];
     expect(JSON.parse(line)).toEqual({
-      level: "error",
-      timestamp: expect.any(String),
+      severity: "ERROR",
+      time: expect.any(String),
       message: "unexpected error",
-      error: { name: "Error", message: "想定外" },
+      event: { name: "server_error" },
+      error: { type: "Error", message: "想定外" },
     });
   });
 
@@ -358,10 +359,11 @@ describe("withProblemResponse", () => {
     expect(consoleError).toHaveBeenCalledTimes(1);
     const [line] = consoleError.mock.calls[0] as [string];
     expect(JSON.parse(line)).toEqual({
-      level: "error",
-      timestamp: expect.any(String),
+      severity: "ERROR",
+      time: expect.any(String),
       message: "unexpected error",
-      error: { name: "Error", message: "DB のパスワードが違います" },
+      event: { name: "server_error" },
+      error: { type: "Error", message: "DB のパスワードが違います" },
     });
   });
 

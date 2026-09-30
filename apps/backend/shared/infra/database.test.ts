@@ -64,15 +64,16 @@ describe("createDatabase", () => {
     const handler = pool.handlers.get("error");
     expect(handler).toBeDefined();
     expect(() => handler?.(error)).not.toThrow();
-    // logger.error（中で console.error）が、文言と例外の name・message を 1 行の JSON で出す。
+    // logger.error（中で console.error）が、文言・event.name（db_pool_error）と例外の type・message を 1 行の JSON で出す。
     expect(consoleError).toHaveBeenCalledTimes(1);
     const [line] = consoleError.mock.calls[0] as [string];
     expect(JSON.parse(line)).toEqual({
-      level: "error",
-      timestamp: expect.any(String),
+      severity: "ERROR",
+      time: expect.any(String),
       message: "idle Postgres connection error",
+      event: { name: "db_pool_error" },
       error: {
-        name: "Error",
+        type: "Error",
         message: "terminating connection due to administrator command",
       },
     });

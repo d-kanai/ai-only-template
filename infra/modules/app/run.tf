@@ -9,6 +9,14 @@ locals {
     DATABASE_POOL_IDLE_TIMEOUT_MS  = "10000" # 使われない接続を 10 秒で閉じる（node-postgres の既定。.env.example と同じ）。
     DATABASE_CONNECTION_TIMEOUT_MS = "5000"  # 接続待ちの上限 5 秒（.env.example と同じ WHY）。
   }
+  # DB 以外でアプリが起動時に必須とする設定（apps/shared/env.ts。.env.example に意味と WHY）。service と job で同じ値。
+  # WHY job にも渡す: migrate（drizzle-kit）も設定の読み込みで env.ts を通り、必須の変数が 1 つでも欠けると止まる。
+  app_env = {
+    # リクエストログの trace（projects/<ID>/traces/<trace-id>。Cloud Logging の logging.googleapis.com/trace）に入れる
+    #   プロジェクト ID（Issue #209）。Cloud Run が自動で付ける環境変数にプロジェクト ID は無い
+    #   （https://docs.cloud.google.com/run/docs/container-contract ）ので、この module の入力から渡す。
+    GCP_PROJECT_ID = var.project_id
+  }
 }
 
 # lifecycle.ignore_changes（下の service / job）の WHY: イメージとトラフィックは GitHub Actions の gcloud が入れ替える（main.tf）。
@@ -85,7 +93,7 @@ resource "google_cloud_run_v2_service" "customer" {
         value = "3"
       }
       dynamic "env" {
-        for_each = local.database_env
+        for_each = merge(local.database_env, local.app_env)
         content {
           name  = env.key
           value = env.value
@@ -182,7 +190,7 @@ resource "google_cloud_run_v2_job" "migrate" {
           value = "1"
         }
         dynamic "env" {
-          for_each = local.database_env
+          for_each = merge(local.database_env, local.app_env)
           content {
             name  = env.key
             value = env.value

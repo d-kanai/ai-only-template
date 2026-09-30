@@ -46,9 +46,9 @@ backend の feature を 1 つのモジュールとし、他のモジュールと
   - 限界（見逃す）: `apps/backend/features/` の外（`apps/backend/test-support/`・`apps/backend/api-journeys/` のテスト、frontend の `app/api`）から `internal/` への参照はこの規則の対象外（test-support は InMemory の実装のために internal を使い、app/api は exports 経由で internal/presentation の api ファイルを指す。exports と `app-api` が見る）。テスト（`*.test.ts`）も対象外（列挙がテストを除く）。
 - 呼び出しの形（Todo の完了で notification に通知する。`features/todo/internal/application/change-todo-completion.command.ts`）:
   - command はコンストラクタで関数（`NotifyTodoCompleted = (message: string) => void`）を受け取り、api ファイル（`change-todo-completion.api.ts`）の組み立てが notification の `expose/notify.ts` の `notify` を渡す。command は notification を import しない。テストは記録する関数を渡す。
-  - `notify(message)` は同期の `void`。中で command を実行し、Promise は `.catch` で受けて `logger.error({ message: "notification failed", error })` を出す（呼び出し側は await しない = fire-and-forget）。WHY: Promise を expose の外に出すと、呼び出し側が受け取らなかった reject が未処理になり、Node 24 は未処理の reject でプロセスを終了する。通知の失敗で完了（保存済み）は取り消さない。
+  - `notify(message)` は同期の `void`。中で command を実行し、Promise は `.catch` で受けて `logger.error({ message: "notification failed", event: { name: "notification", phase: "failed" }, error })` を出す（呼び出し側は await しない = fire-and-forget）。WHY: Promise を expose の外に出すと、呼び出し側が受け取らなかった reject が未処理になり、Node 24 は未処理の reject でプロセスを終了する。通知の失敗で完了（保存済み）は取り消さない。
   - 通知は保存の後、未完了 → 完了に変わったときだけ（`!current.completed && changed.completed`）。WHY: PUT は冪等で、同じ要求を 2 回送っても通知は 1 回。保存に失敗した Todo の完了は知らせない。未完了に戻すときは知らせない。
-  - 本文は id だけの英語（`Todo completed: <id>`）。title などの利用者の値を入れない（ログに値を出さない方針。通知は今はログの 1 行 `{ message: "notification", notification: <本文> }` に出るだけ）。
+  - 本文は id だけの英語（`Todo completed: <id>`）。title などの利用者の値を入れない（ログに値を出さない方針。通知は今はログの 1 行 `{ message: "notification", event: { name: "notification" }, notification: <本文> }` に出るだけ）。
   - 本番の組み立てが `notify` を渡していることは、api のテスト（本番の `PUT` で完了にするとログに通知の 1 行が出る）が固定する。API ジャーニーは記録する関数を渡し、完了の step で通知が 1 件だけであることを確かめる。
 
 ## import の書き方と公開の範囲（exports）
@@ -179,19 +179,23 @@ backend の feature を 1 つのモジュールとし、他のモジュールと
 - インデックスは、検索するクエリが決まってから足す。
 - 検査が違反にするもの: `varchar(` / `char(`、`timestamp(` で `withTimezone: true` が無いもの、`serial(` / `bigserial(` / `smallserial(`、`json(`。既定から外れる理由があるときは、その列の直前の行（空行を挟まない `//` の連続）に `// WHY 長さ: <理由>`（varchar / char）・`// WHY タイムゾーン: <理由>`・`// WHY 連番: <理由>`・`// WHY json: <理由>` を書くと通る。見出しは規則ごとに分け、別の理由の WHY では通らない。
 
-## ログ（`apps/shared/logger.ts`。Issue #85。Issue #90 で `apps/backend/shared/infra/` から移した）
-- サーバ側のログは必ず `logger.info / warn / error(event)` を通す。`console.*` を書いてよいのは `logger.ts` だけ（テストは除く）。
-  - 1 呼び出し = JSON 1 行（NDJSON）。先頭に `level` と `timestamp`（ISO 8601、UTC。event に `timestamp` があればそれ）。info は stdout（`console.log`）、warn / error は stderr（`console.warn` / `console.error`）。`Error` は `{ name, message }` にする（stack は出さない）。JSON にできない event（循環参照・BigInt）は例外にせず、失敗した旨だけの 1 行を出す。
+## ログ（`apps/shared/logger.ts`。Issue #85。Issue #90 で `apps/backend/shared/infra/` から移した。行の形は Issue #209）
+- サーバ側のログは必ず `logger.info / warn / error(entry)` を通す。`console.*` を書いてよいのは `logger.ts` だけ（テストは除く）。
+  - 1 呼び出し = JSON 1 行（NDJSON）。先頭は `severity`（`INFO` / `WARNING` / `ERROR`）・`time`（RFC 3339、UTC。entry に `time` があればそれ）・`message`・`event` の順。info は stdout（`console.log`）、warn / error は stderr（`console.warn` / `console.error`）。`Error` は `{ type, message }` にする（stack は出さない）。JSON にできない entry（循環参照・BigInt）は例外にせず、同じ形の失敗の 1 行（`event.name` は `logger_error`）を出す。
+  - `message`（英語の 1 文。Logs Explorer の一覧の行）と `event.name`（ログの種類）は必須（`LogEvent` の型）。`event.name` は `apps/shared/log-event.ts` の `LOG_EVENT_NAMES` の一覧だけ（一覧に無い名前は `pnpm typecheck` が落ちる。型の縛りは `logger.test.ts` の `@ts-expect-error` が固定する）。段階は `event.phase`、所要時間は `event.duration_ms` に入れ、名前に段階を入れない。種類を足すときは一覧・`logger.test.ts` の一覧のテスト・ADR を同じ変更で直す。
+  - ほかのキーは OTel semconv の名前を入れ子のオブジェクト（`{"http":{"request":{"method":…}}}`。平らな `"http.request.method"` にしない）の snake_case で書く（`db.collection.name`・`row_id` など）。キーの一覧と出典は ADR `docs/adr/architecture/20260930-log-format-cloud-logging-otel.md`。
+  - WHY Cloud Logging の特別フィールド（`severity`・`time`・`message`・`logging.googleapis.com/trace`）: Cloud Run で基盤が JSON の行から重大度・時刻・trace として読むのはこれだけ。WHY OTel の名前: 基盤を移っても対応表が要らない。WHY `event.name` の固定の一覧: `jsonPayload.event.name="db_write"` の 1 つの条件で種類を引け、名前の揺れで保存したクエリ・アラートが行を取りこぼさない。
   - WHY 1 か所に集める: 行の形を呼び出し側ごとにずらさない。出力先を変える（ファイル・外部のログ基盤）ときに直すのが `logger.ts` だけで済む。依存（pino など）は足さない。
-  - 使ってよい場所: backend の `presentation`（`problem.ts` の想定外の例外）・`infra`（`database.ts`・`write.ts`・notification の `notification-sender.log.ts`）・モジュールの `expose/`（notification の `notify.ts` の送信の失敗。Issue #208）、frontend 直下の `proxy.ts`・`instrumentation-node.ts`（規則 `presentation`・`infra`・`expose-imports`・`frontend-to-shared-specifier`）。domain・application は使わない（`SHARED_MODULES_BY_LAYER`）。画面側（`app/`・`features/`・`shared/`）も使わない（規則 `screen-to-shared`）。
+  - 使ってよい場所: backend の `presentation`（`problem.ts` の想定外の例外。`server_error`）・`infra`（`database.ts` の `db_pool_error`・`write.ts` の `db_write`・notification の `notification-sender.log.ts` の `notification`）・モジュールの `expose/`（notification の `notify.ts` の送信の失敗。`notification` の `phase: failed`。Issue #208）、frontend 直下の `proxy.ts`（`page_request` / `api_request`）・`instrumentation-node.ts`（`app_start_failed`）（規則 `presentation`・`infra`・`expose-imports`・`frontend-to-shared-specifier`）。domain・application は使わない（`SHARED_MODULES_BY_LAYER`）。画面側（`app/`・`features/`・`shared/`）も使わない（規則 `screen-to-shared`）。
+    - WHY 通知の失敗を `server_error` にしない: `server_error` は HTTP の境界の 500（`toProblemResponse`）だけの種類。通知の失敗は応答を 500 にしない（完了は成功している）。
   - テストは `vi.spyOn(console, "error")` などで出力を抑え、渡された 1 行を `JSON.parse` して確かめる（`logger.test.ts`・`problem.test.ts`）。
-- Repository の書き込みのログ（Issue #205。`shared/infra/write.ts` の `writeInTransaction` が出す。上の「書き込みの入口」）: どの行も `table`（表名）・`rowId`・`operation`（`insert` / `update` / `delete`）を持つ。
-  - 前: info `repository write start`。後: info `repository write done`（`durationMs` と `changes`（書いた行ごとの `tableName`・`rowId`・`operation`））。失敗: warn `repository write failed`（`durationMs` と `error`）で、同じ例外を投げ直す。DB のエラー（DrizzleQueryError）は message を出さず、`error` を元の pg のエラー（cause）の `{ name }` だけにし、SQLSTATE を `sqlState`、制約の名前を `constraint` に出す。WHY: DrizzleQueryError の message は SQL とパラメータの値を含み、pg のエラーの message もデータ例外（SQLSTATE 22 系。22P02 の `invalid input syntax for type uuid: "<入力>"` など）は入力値を含む。
-  - `durationMs` は `performance.now()` の差をミリ秒の整数に四捨五入（経過時間で時刻ではないので `now()` の規則の対象外）。
+- Repository の書き込みのログ（Issue #205。`shared/infra/write.ts` の `writeInTransaction` が出す。上の「書き込みの入口」）: どの行も `event.name` が `db_write` で、`db.collection.name`（表名）・`db.operation.name`（`insert` / `update` / `delete`）・`row_id` を持つ。
+  - 前: info `db write start`（`event.phase: "start"`）。後: info `db write done`（`event.phase: "done"`、`event.duration_ms` と `changes`（書いた行ごとの `table`・`row_id`・`operation`））。失敗: warn `db write failed`（`event.phase: "failed"`、`event.duration_ms` と `error`）で、同じ例外を投げ直す。DB のエラー（DrizzleQueryError）は message を出さず、`error` を元の pg のエラー（cause）の `{ type }`（name）だけにし、SQLSTATE を `db.response.status_code`、制約の名前を `constraint` に出す。WHY: DrizzleQueryError の message は SQL とパラメータの値を含み、pg のエラーの message もデータ例外（SQLSTATE 22 系。22P02 の `invalid input syntax for type uuid: "<入力>"` など）は入力値を含む。
+  - `event.duration_ms` は `performance.now()` の差をミリ秒の整数に四捨五入（経過時間で時刻ではないので `now()` の規則の対象外）。
   - WHY 値（`changes` の before / after）を出さない: 個人情報を含みうる。値は `change_logs` に残る（リクエストログがクエリの値を出さないのと同じ）。
   - WHY 失敗を warn にする: `not_found` などの DomainError は 404 の正常な結果。500 になる例外は `toProblemResponse` が `logger.error` で別に残す。
   - Repository のテスト（`todo-repository.postgres.test.ts`）は `beforeEach` で `console.log` / `console.warn` を黙らせる（save / delete のたびに行が出る）。
-- 強制は 2 系統（`env.ts` の `process.env` と同じ設計）: Biome の `suspicious/noConsole`（`allow` なし。`overrides` で `logger.ts` とテストだけ off。`.claude/rules/lint.md`）と、`rule-tests/architecture.test.ts` の規則 `console-direct-access`（`.claude/rules/architecture-check.md`）。決定は ADR `docs/adr/architecture/20260929-logger-single-exit.md`、片方だけが拾う書き方と限界は `.claude/rules/architecture-check.md` と `rule-tests/architecture.test.ts` のテスト。
+- 強制は 2 系統（`env.ts` の `process.env` と同じ設計）: Biome の `suspicious/noConsole`（`allow` なし。`overrides` で `logger.ts` とテストだけ off。`.claude/rules/lint.md`）と、`rule-tests/architecture.test.ts` の規則 `console-direct-access`（`.claude/rules/architecture-check.md`）。決定は ADR `docs/adr/architecture/20260929-logger-single-exit.md`（行の形は `docs/adr/architecture/20260930-log-format-cloud-logging-otel.md` で置き換え）、片方だけが拾う書き方と限界は `.claude/rules/architecture-check.md` と `rule-tests/architecture.test.ts` のテスト。
 
 ## 命名
 - ディレクトリ・ファイルは kebab-case。型は PascalCase（`ListTodosResponse`）。
