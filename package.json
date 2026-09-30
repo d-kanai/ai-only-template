@@ -8,7 +8,7 @@
     "start": "TZ=UTC pnpm --filter @repo/frontend-customer --fail-if-no-match start",
     "test": "vitest run --coverage",
     "test:unit": "vitest run",
-    "test:journey": "vitest run apps/backend/journeys",
+    "test:api-journey": "vitest run apps/backend/api-journeys",
     "test:e2e": "pnpm --filter @repo/e2e --fail-if-no-match test",
     "test:mutation": "stryker run",
     "lint": "biome check --error-on-warnings .",
@@ -22,6 +22,7 @@
     "db:migrate": "pnpm --filter @repo/backend --fail-if-no-match db:migrate"
   },
   "devDependencies": {
+    "@amiceli/vitest-cucumber": "8.0.0",
     "@biomejs/biome": "2.5.13",
     "@repo/shared": "workspace:*",
     "@stryker-mutator/core": "10.0.0",

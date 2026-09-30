@@ -52,7 +52,7 @@ import { afterAll, describe, expect, it } from "vitest";
 //     WHY: InMemory の Repository はテストだけが使うコードで、infra に置くと本番のコードと見分けが付かず、本番の api ファイルが
 //     参照でき（architecture.test.ts の規則 presentation の例外の絞り込みだけが頼り）、イメージにも入る。test-support に置けば
 //     production-imports-test-support と .dockerignore が本番とイメージから外す。
-//     WHY 名前が `.in-memory` で終わるものだけ: journey.test.ts の journey-no-in-memory と同じ目印。名前に in-memory を含むだけの別名
+//     WHY 名前が `.in-memory` で終わるものだけ: api-journey.test.ts の api-journey-no-in-memory と同じ目印。名前に in-memory を含むだけの別名
 //     （`in-memory-x.ts`・`x.in-memory-y.ts`）とテスト（`x.in-memory.test.ts`）は対象外。
 //     限界: 名前で見分けるので、目印の無い名前の InMemory の実装（`fake-x-repository.ts` など）は見ない。apps/backend の外は見ない。
 // 検査の対象の列挙が 0 件（test-support/ のファイル・本番のソース・apps/*/package.json・apps/backend の *.in-memory）なら、実ファイルのテストで失敗させる

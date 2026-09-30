@@ -115,7 +115,7 @@ pnpm dev       # 開発サーバを起動（http://localhost:3000。pnpm --filte
 pnpm typecheck # 型チェック（リポジトリ全体と apps/backend・apps/shared の tsconfig。next build は frontend から import したファイルしか見ないため）
 pnpm test      # 単体テストを実行し、カバレッジ 100% 未満なら失敗（Vitest。詳細は .claude/rules/testing.md）
 pnpm test:unit # 単体テストだけを実行（カバレッジを計測しない。速く回したいとき）
-pnpm test:journey # ジャーニーテストだけを実行（実 Postgres で複数の API を業務の流れの順に呼ぶ。詳細は .claude/rules/testing.md）
+pnpm test:api-journey # API ジャーニーテストだけを実行（実 Postgres で複数の API を、.feature に書いた業務の流れの順に呼ぶ。詳細は .claude/rules/testing.md）
 pnpm test:e2e  # E2E テストを実行（Playwright。本番ビルドを Postgres に接続して起動し、ブラウザで操作する。詳細は .claude/rules/testing.md）
 pnpm test:mutation # mutation testing を実行し、reports/mutation/ にレポートを出す（Stryker。数分かかる。詳細はスキル mutation-testing）
 pnpm lint      # lint + format の違反を検査（Biome。変更しない）
