@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
-// 「1 ユースケース = 1 API」（.claude/rules/backend.md、Issue #175）を、api ファイル（apps/backend/features/*/presentation/*.api.ts）の
+// 「1 ユースケース = 1 API」（.claude/rules/backend.md、Issue #175）を、api ファイル（apps/backend/features/*/internal/presentation/*.api.ts）の
 // リクエストの項目の `.optional()` で機械的に検査するテスト。
 // WHY 検査する: 複数の項目を任意で受けて command の中で「来た項目だけ変える」分岐をする部分更新の API（`{ title?, completed? }`）は、
 //   1 つの API に複数のユースケース（改名・完了の切り替え）が混ざり、項目の組み合わせごとの振る舞い・検証・権限が増える。
@@ -55,7 +55,7 @@ function findOptionalViolations(text: string): number[] {
   });
 }
 
-// 検査の対象: apps/backend/features/<f>/presentation/ の直下の *.api.ts（テストは除く）。リポジトリ相対の / 区切りで、名前順。
+// 検査の対象: apps/backend/features/<f>/internal/presentation/ の直下の *.api.ts（テストは除く）。リポジトリ相対の / 区切りで、名前順。
 // WHY root を引数で受け取る: 本番（リポジトリ直下）と fixture（一時ディレクトリ）で同じ列挙を通すため。
 function listApiFiles(root: string): string[] {
   let entries: string[];
@@ -71,7 +71,7 @@ function listApiFiles(root: string): string[] {
     .map((path) => `apps/backend/features/${path.split(sep).join("/")}`)
     .filter((path) =>
       // `*.api.test.ts` は `.api.ts` で終わらないので、この形だけでテストは外れる。
-      /^apps\/backend\/features\/[^/]+\/presentation\/[^/]+\.api\.ts$/.test(
+      /^apps\/backend\/features\/[^/]+\/internal\/presentation\/[^/]+\.api\.ts$/.test(
         path,
       ),
     )
@@ -292,33 +292,37 @@ describe("api ファイルの列挙と検査（fixture）", () => {
     "});",
   );
 
-  it("features/<f>/presentation/*.api.ts だけを対象にし、違反を「パス:行: 行の内容」で返す", () => {
+  it("features/<f>/internal/presentation/*.api.ts だけを対象にし、違反を「パス:行: 行の内容」で返す", () => {
     const root = fixture({
-      "apps/backend/features/a/presentation/rename-a.api.ts": source(
+      "apps/backend/features/a/internal/presentation/rename-a.api.ts": source(
         "requestBodySchema({",
         "  title: z.string(),",
         "});",
       ),
-      "apps/backend/features/a/presentation/update-a.api.ts": source(
+      "apps/backend/features/a/internal/presentation/update-a.api.ts": source(
         "requestBodySchema({",
         "  title: z.string().optional(),",
         "  completed: z.boolean().optional(),",
         "});",
       ),
-      "apps/backend/features/b/presentation/create-b.api.ts": source(
+      "apps/backend/features/b/internal/presentation/create-b.api.ts": source(
         "requestBodySchema({",
         "  // WHY 任意: 説明文は省略でき、省略は空文字と同じ意味。",
         "  description: z.string().optional(),",
         "});",
       ),
       // 対象外: api のテスト、presentation 以外の層、presentation の入れ子、api でないファイル、shared、features の外。
-      "apps/backend/features/a/presentation/update-a.api.test.ts":
+      "apps/backend/features/a/internal/presentation/update-a.api.test.ts":
         partialUpdate,
-      "apps/backend/features/a/application/update-a.command.ts": partialUpdate,
-      "apps/backend/features/a/application/x.api.ts": partialUpdate,
-      "apps/backend/features/a/presentation/nested/x.api.ts": partialUpdate,
-      "apps/backend/features/a/presentation/helper.ts": partialUpdate,
+      "apps/backend/features/a/internal/application/update-a.command.ts":
+        partialUpdate,
+      "apps/backend/features/a/internal/application/x.api.ts": partialUpdate,
+      "apps/backend/features/a/internal/presentation/nested/x.api.ts":
+        partialUpdate,
+      "apps/backend/features/a/internal/presentation/helper.ts": partialUpdate,
       "apps/backend/shared/presentation/x.api.ts": partialUpdate,
+      // Issue #208: internal/ を挟まない旧の置き場所（置き場所の規則 backend-placement が違反にする）。
+      "apps/backend/features/a/presentation/old-a.api.ts": partialUpdate,
       "apps/frontend_customer/features/a/presentation/x.api.ts": partialUpdate,
     });
     expect({
@@ -326,13 +330,13 @@ describe("api ファイルの列挙と検査（fixture）", () => {
       violations: collectApiRequestViolations(root),
     }).toEqual({
       files: [
-        "apps/backend/features/a/presentation/rename-a.api.ts",
-        "apps/backend/features/a/presentation/update-a.api.ts",
-        "apps/backend/features/b/presentation/create-b.api.ts",
+        "apps/backend/features/a/internal/presentation/rename-a.api.ts",
+        "apps/backend/features/a/internal/presentation/update-a.api.ts",
+        "apps/backend/features/b/internal/presentation/create-b.api.ts",
       ],
       violations: [
-        "apps/backend/features/a/presentation/update-a.api.ts:2: title: z.string().optional(),",
-        "apps/backend/features/a/presentation/update-a.api.ts:3: completed: z.boolean().optional(),",
+        "apps/backend/features/a/internal/presentation/update-a.api.ts:2: title: z.string().optional(),",
+        "apps/backend/features/a/internal/presentation/update-a.api.ts:3: completed: z.boolean().optional(),",
       ],
     });
   });
@@ -347,10 +351,10 @@ describe("api ファイルの列挙と検査（fixture）", () => {
 });
 
 describe("リクエストの任意項目（実ファイル）", () => {
-  it("apps/backend/features/*/presentation/*.api.ts は .optional() を WHY 任意: 無しで使わない", () => {
+  it("apps/backend/features/*/internal/presentation/*.api.ts は .optional() を WHY 任意: 無しで使わない", () => {
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     expect(listApiFiles(repoRoot)).toContain(
-      "apps/backend/features/todo/presentation/create-todo.api.ts",
+      "apps/backend/features/todo/internal/presentation/create-todo.api.ts",
     );
     expect(collectApiRequestViolations(repoRoot)).toEqual([]);
   });

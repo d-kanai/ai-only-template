@@ -1,12 +1,12 @@
 import { z } from "zod";
-import { keyedIssue, keyedRefine } from "../../../shared/domain/keyed-issue";
-import { getDatabase } from "../../../shared/infra/database";
+import { keyedIssue, keyedRefine } from "../../../../shared/domain/keyed-issue";
+import { getDatabase } from "../../../../shared/infra/database";
 import {
   parseJsonBody,
   requestBodySchema,
-} from "../../../shared/presentation/json-body";
-import { withProblemResponse } from "../../../shared/presentation/problem";
-import { parseUuidParam } from "../../../shared/presentation/resource-id";
+} from "../../../../shared/presentation/json-body";
+import { withProblemResponse } from "../../../../shared/presentation/problem";
+import { parseUuidParam } from "../../../../shared/presentation/resource-id";
 import { RenameTodoCommand } from "../application/rename-todo.command";
 import { TODO_TITLE_MAX_LENGTH, type Todo } from "../domain/todo";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";

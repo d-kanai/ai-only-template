@@ -1,5 +1,5 @@
-import { getDatabase } from "../../../shared/infra/database";
-import { withProblemResponse } from "../../../shared/presentation/problem";
+import { getDatabase } from "../../../../shared/infra/database";
+import { withProblemResponse } from "../../../../shared/presentation/problem";
 import { ListTodosQuery } from "../application/list-todos.query";
 import type { Todo } from "../domain/todo";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
-import { InMemoryTodoRepository } from "../../../test-support/todo/todo-repository.in-memory";
+import { InMemoryTodoRepository } from "../../../../test-support/todo/todo-repository.in-memory";
 import { CreateTodoCommand } from "./create-todo.command";
 
 describe("CreateTodoCommand", () => {

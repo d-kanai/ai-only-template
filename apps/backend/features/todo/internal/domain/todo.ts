@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { now } from "@repo/shared/now";
 import { z } from "zod";
-import { keyedIssue, keyedRefine } from "../../../shared/domain/keyed-issue";
-import { validate } from "../../../shared/domain/validate";
+import { keyedIssue, keyedRefine } from "../../../../shared/domain/keyed-issue";
+import { validate } from "../../../../shared/domain/validate";
 
 // タイトルの上限の文字数（前後の空白を除いたコードポイント数）。
 // WHY export する（Issue #144）: presentation のリクエストのスキーマ（create-todo.api.ts・rename-todo.api.ts）が同じ上限を

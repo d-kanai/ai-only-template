@@ -17,7 +17,7 @@ paths:
 ## app/（ルーティングだけ）
 - 置くもの: Next の規約ファイル（`page.tsx` / `layout.tsx` / `loading.tsx` / `error.tsx` など）と `app/api/**/route.ts` だけ。テストは置かない（仕様は screen と api ファイルのテストで固定し、ルーティングにロジックを置かせない）。
 - `page.tsx` は screen を返すだけ（`return <TodoScreen />`。動的セグメントは `await params` で取り出して props で渡す）。
-- `app/api/**/route.ts` は backend の api ファイルが export する HTTP メソッド名の関数を re-export するだけ（`export { GET } from "@repo/backend/features/todo/presentation/list-todos.api";`）。同じ URL の複数メソッドはそれぞれ別の api ファイルから re-export する。入力検証やレスポンスの組み立ては書かない。
+- `app/api/**/route.ts` は backend の api ファイルが export する HTTP メソッド名の関数を re-export するだけ（`export { GET } from "@repo/backend/features/todo/internal/presentation/list-todos.api";`）。同じ URL の複数メソッドはそれぞれ別の api ファイルから re-export する。入力検証やレスポンスの組み立ては書かない。
 - `instrumentation.ts` は Next の規約で `apps/frontend_customer/` 直下に置く（起動時の環境変数の検証。`.claude/rules/env.md`）。直下のファイルは backend を参照しない（規則 `frontend-root-to-backend`）。起動時の検証の `env` とログの `logger` は、frontend と backend で共通の `apps/shared` から `@repo/shared/env`・`@repo/shared/logger` で使う（Issue #90。以前は backend の中にあり、この規則の例外だった）。
 - `proxy.ts`（Next の Proxy。旧 `middleware.ts` は使わない）も規約で直下に置く。画面アクセスと `/api/**` の呼び出しを 1 リクエスト 1 行の JSON で stdout に出すだけにし、1 行の中身は `shared/request-log/` の `buildRequestLog`（テストで固定）で組み立て、`logger.info` で出す。受信時刻は `@repo/shared/now` の `now()` で取る（現在時刻の唯一の出口。`new Date()` は書かない。規則 `now-single-source`、`.claude/rules/shared.md` の「now」）。認可・リダイレクトなどのロジックは置かない。決定は ADR `docs/adr/architecture/20260929-request-log-in-proxy.md`、ブラウザのリクエスト一覧の実測は 2026-09-29 の work-logs「docs/ から移した記録」。限界: status と所要時間は取れない（Proxy は応答の前に動く）、プリフェッチは matcher で除く、ブラウザの戻る・進むで Next のルーターのキャッシュが使われると画面の行は出ない（出るのは画面が呼ぶ API の行だけ）、`client.ip` は `x-forwarded-for` を信じる値でクライアントが偽装できるので、信頼できるリバースプロキシがヘッダを付け直す前提で使う。
 - WHY ルーティングを分ける: URL を変えてもコードを動かさずに済む（Next は構成について unopinionated で、`app/` の外にコードを置くのは公式の例の 1 つ）。
@@ -30,7 +30,7 @@ paths:
 - `index.ts`: 公開 API。feature の外（`app/`・他の feature）から import してよいのはここだけ（内部の構成を変えても外の import を直さずに済む）。feature 同士は原則 import せず、必要なら相手の `index.ts` だけ。
 
 ## 画面側とサーバ側の境界
-- `features/<f>/api/` から backend への参照は `import type` / `export type` だけで、参照先は自 feature の `apps/backend/features/<f>/presentation/<name>.api.ts` と `apps/backend/shared/presentation/problem.ts`（`Problem`・`ErrorKey`・`ErrorKeyParams`）。api ファイルの関数や application・domain・infra の実装は import しない。
+- `features/<f>/api/` から backend への参照は `import type` / `export type` だけで、参照先は自 feature の `apps/backend/features/<f>/internal/presentation/<name>.api.ts` と `apps/backend/shared/presentation/problem.ts`（`Problem`・`ErrorKey`・`ErrorKeyParams`）。api ファイルの関数や application・domain・infra の実装は import しない。
   - WHY: 画面とサーバで同じ契約（型）を使い、ずれを型チェックで検出する。`import type` はビルドで消えるので、サーバのコードがバンドルに入らない。
 - screens / components / hooks は backend を直接参照せず、`api/` が re-export した型を使う（`import type { Todo } from "@/features/todo/api/todo-api"`。`Todo` は `api/todo-api.ts` が一覧 API の Response から導出する（`ListTodosResponse["todos"][number]`））。WHY: 契約が変わったときの影響を `api/` の 1 ファイルで追える。
 - 型で担保されること: リクエスト / レスポンスの形（`pnpm build` / `pnpm typecheck` で不一致を検出）。

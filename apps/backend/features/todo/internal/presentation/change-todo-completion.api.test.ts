@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import type { Problem } from "../../../shared/presentation/problem";
-import { InMemoryTodoRepository } from "../../../test-support/todo/todo-repository.in-memory";
+import type { Problem } from "../../../../shared/presentation/problem";
+import { InMemoryTodoRepository } from "../../../../test-support/todo/todo-repository.in-memory";
 import { ChangeTodoCompletionCommand } from "../application/change-todo-completion.command";
 import { Todo } from "../domain/todo";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";

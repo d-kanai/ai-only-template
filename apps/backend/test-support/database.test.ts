@@ -84,7 +84,7 @@ describe("createTestDatabase", () => {
   });
 
   // WHY: drizzle-kit 0.31.11 の generate は外部キーを REFERENCES "public"."todos" と書くので、todo_status_changes の外部キーは
-  //   手書きのマイグレーション（shared/drizzle/0002_*.sql）でスキーマを書かずに張る（Issue #188。features/todo/infra/schema.ts）。
+  //   手書きのマイグレーション（shared/drizzle/0002_*.sql）でスキーマを書かずに張る（Issue #188。features/todo/internal/infra/schema.ts）。
   //   public を指すと、テスト用のスキーマの Todo に履歴を足せず、テストのスキーマを消しても public の todos に参照が残る。
   test("migrate した外部キー（todo_status_changes → todos）は、テスト用のスキーマの todos を指す（public を指さない）", async () => {
     const database = await createTestDatabase();

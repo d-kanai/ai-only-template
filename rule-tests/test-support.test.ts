@@ -48,7 +48,7 @@ import { afterAll, describe, expect, it } from "vitest";
 //     限界: ステップは「行頭が `- key:` の行」で区切り、コメントの行（`#` で始まる）は除いて読む。パターンのほか（find の結果を
 //     判定に使っているか・対象のイメージ）は見ない（手元のイメージで exit 0 / 混入で exit 1 を実測した。Issue #181 の work-logs）。
 //   - in-memory-placement: apps/backend の下の InMemory の実装（名前が `.in-memory.<ソースの拡張子>` で終わるファイル）が
-//     apps/backend/test-support/ の下に無い（Issue #191。features/<f>/infra/・shared/infra/・features/<f>/test-support/ は違反）。
+//     apps/backend/test-support/ の下に無い（Issue #191。features/<f>/internal/infra/・shared/infra/・features/<f>/test-support/ は違反）。
 //     WHY: InMemory の Repository はテストだけが使うコードで、infra に置くと本番のコードと見分けが付かず、本番の api ファイルが
 //     参照でき（architecture.test.ts の規則 presentation の例外の絞り込みだけが頼り）、イメージにも入る。test-support に置けば
 //     production-imports-test-support と .dockerignore が本番とイメージから外す。
@@ -538,7 +538,7 @@ describe(".dockerignore のパターンの解釈（isExcludedByDockerignore）",
 
 describe("本番のソースか（isProductionSource）", () => {
   it.each([
-    "apps/backend/features/todo/infra/database.ts",
+    "apps/backend/features/todo/internal/infra/database.ts",
     "apps/frontend_customer/features/todo/components/todo-item.tsx",
     "apps/frontend_customer/proxy.ts",
     "apps/shared/env.ts",
@@ -689,8 +689,8 @@ describe("package.json の exports（findTestSupportInExports）", () => {
     [
       "test-support を含まないキーと値",
       {
-        "./features/todo/presentation/*.api":
-          "./features/todo/presentation/*.api.ts",
+        "./features/todo/internal/presentation/*.api":
+          "./features/todo/internal/presentation/*.api.ts",
       },
     ],
     [
@@ -751,24 +751,24 @@ describe("InMemory の実装の置き場所（isMisplacedInMemory）", () => {
     "apps/backend/test-support/x.in-memory.ts",
     "apps/backend/test-support/x/y/x.in-memory.mts",
     // 名前に in-memory を含むだけの別名（`.in-memory` で終わらない）は対象外。
-    "apps/backend/features/x/infra/in-memory-x.ts",
-    "apps/backend/features/x/infra/x-in-memory.ts",
-    "apps/backend/features/x/infra/x.in-memory-y.ts",
+    "apps/backend/features/x/internal/infra/in-memory-x.ts",
+    "apps/backend/features/x/internal/infra/x-in-memory.ts",
+    "apps/backend/features/x/internal/infra/x.in-memory-y.ts",
     // テスト・ソースでないファイルは対象外。
-    "apps/backend/features/x/infra/x-repository.in-memory.test.ts",
-    "apps/backend/features/x/infra/x.in-memory.md",
+    "apps/backend/features/x/internal/infra/x-repository.in-memory.test.ts",
+    "apps/backend/features/x/internal/infra/x.in-memory.md",
     // apps/backend の外（前方一致だけが同じ apps/backend-x も）は対象外。
     "apps/frontend_customer/features/x/x.in-memory.ts",
-    "apps/backend-x/features/x/infra/x.in-memory.ts",
+    "apps/backend-x/features/x/internal/infra/x.in-memory.ts",
   ])("%s は違反なし", (path) => {
     expect(isMisplacedInMemory(path)).toBe(false);
   });
 
   it.each([
-    "apps/backend/features/x/infra/x-repository.in-memory.ts",
+    "apps/backend/features/x/internal/infra/x-repository.in-memory.ts",
     "apps/backend/shared/infra/x.in-memory.ts",
-    "apps/backend/features/x/application/x.in-memory.mts",
-    "apps/backend/features/x/infra/x.in-memory.tsx",
+    "apps/backend/features/x/internal/application/x.in-memory.mts",
+    "apps/backend/features/x/internal/infra/x.in-memory.tsx",
     "apps/backend/x.in-memory.cjs",
     // test-support は apps/backend 直下だけ（features/<f>/test-support/ や前方一致の test-support-x/ は違う）。
     "apps/backend/features/x/test-support/x.in-memory.ts",
@@ -799,7 +799,7 @@ describe("列挙と検査（fixture）", () => {
   }
 
   const importDatabase =
-    'import { createTestDatabase } from "../../../test-support/database";';
+    'import { createTestDatabase } from "../../../../test-support/database";';
   const allowedFiles = {
     "apps/backend/test-support/database.ts": lines(
       'import type { Database } from "../shared/infra/database";',
@@ -811,7 +811,7 @@ describe("列挙と検査（fixture）", () => {
       'import { a } from "@/test-support/other";',
     ),
     // テストからの import は production-imports-test-support の対象外。ただし .dockerignore で外れること（dockerignore-excludes）は見る。
-    "apps/backend/features/x/infra/x.postgres.test.ts": importDatabase,
+    "apps/backend/features/x/internal/infra/x.postgres.test.ts": importDatabase,
     "apps/frontend_customer/features/x/x.test.tsx":
       'import { tJa } from "@/test-support/i18n";\n',
     // test-support を import しないテストは dockerignore-excludes の対象外（コメントの中の import も数えない）。
@@ -820,8 +820,8 @@ describe("列挙と検査（fixture）", () => {
       '// import { tJa } from "@/test-support/i18n";',
     ),
     // 本番のコードの test-support と関係の無い import・コメントの中。
-    "apps/backend/features/x/infra/x.postgres.ts": lines(
-      'import { getDatabase } from "../../../shared/infra/database";',
+    "apps/backend/features/x/internal/infra/x.postgres.ts": lines(
+      'import { getDatabase } from "../../../../shared/infra/database";',
       `// ${importDatabase}`,
     ),
     // 依存と生成物の中は見ない。
@@ -864,13 +864,13 @@ describe("列挙と検査（fixture）", () => {
         "apps/frontend_customer/test-support/i18n.tsx",
       ],
       excludedTargets: [
-        "apps/backend/features/x/infra/x.postgres.test.ts",
+        "apps/backend/features/x/internal/infra/x.postgres.test.ts",
         "apps/backend/test-support/database.ts",
         "apps/backend/test-support/nested/x.ts",
         "apps/frontend_customer/features/x/x.test.tsx",
         "apps/frontend_customer/test-support/i18n.tsx",
       ],
-      production: ["apps/backend/features/x/infra/x.postgres.ts"],
+      production: ["apps/backend/features/x/internal/infra/x.postgres.ts"],
       packages: [
         "apps/backend/package.json",
         "apps/frontend_customer/package.json",
@@ -890,8 +890,8 @@ describe("列挙と検査（fixture）", () => {
       ...allowedFiles,
       // 行が無く、別の書き方（/ 付き）だけ → test-support/ のすべてのファイルが除外されない。
       ".dockerignore": lines(".git", "**/test-support/"),
-      "apps/backend/features/x/infra/bad.postgres.ts": lines(
-        'import { getDatabase } from "../../../shared/infra/database";',
+      "apps/backend/features/x/internal/infra/bad.postgres.ts": lines(
+        'import { getDatabase } from "../../../../shared/infra/database";',
         importDatabase,
       ),
       "apps/frontend_customer/features/x/components/bad.tsx": lines(
@@ -906,7 +906,7 @@ describe("列挙と検査（fixture）", () => {
         name: "@repo/shared",
         exports: { "./test-support/x": "./test-support/x.ts" },
       }),
-      "apps/backend/features/x/infra/bad-repository.in-memory.ts":
+      "apps/backend/features/x/internal/infra/bad-repository.in-memory.ts":
         "export class InMemoryBadRepository {}\n",
     });
     expect(collectViolations(root)).toEqual({
@@ -914,14 +914,14 @@ describe("列挙と検査（fixture）", () => {
         "dockerignore-entry: .dockerignore に **/test-support が無い",
       ],
       "dockerignore-excludes": [
-        "dockerignore-excludes: apps/backend/features/x/infra/x.postgres.test.ts",
+        "dockerignore-excludes: apps/backend/features/x/internal/infra/x.postgres.test.ts",
         "dockerignore-excludes: apps/backend/test-support/database.ts",
         "dockerignore-excludes: apps/backend/test-support/nested/x.ts",
         "dockerignore-excludes: apps/frontend_customer/features/x/x.test.tsx",
         "dockerignore-excludes: apps/frontend_customer/test-support/i18n.tsx",
       ],
       "production-imports-test-support": [
-        "production-imports-test-support: apps/backend/features/x/infra/bad.postgres.ts:2",
+        "production-imports-test-support: apps/backend/features/x/internal/infra/bad.postgres.ts:2",
         "production-imports-test-support: apps/frontend_customer/features/x/components/bad.tsx:1",
         "production-imports-test-support: apps/frontend_customer/shared/x/bad.mjs:3",
       ],
@@ -930,7 +930,7 @@ describe("列挙と検査（fixture）", () => {
         "exports-test-support: apps/shared/package.json ./test-support/x.ts",
       ],
       "in-memory-placement": [
-        "in-memory-placement: apps/backend/features/x/infra/bad-repository.in-memory.ts",
+        "in-memory-placement: apps/backend/features/x/internal/infra/bad-repository.in-memory.ts",
       ],
     });
   });
@@ -946,7 +946,7 @@ describe("列挙と検査（fixture）", () => {
       ),
     });
     expect(collectViolations(root)["dockerignore-excludes"]).toEqual([
-      "dockerignore-excludes: apps/backend/features/x/infra/x.postgres.test.ts",
+      "dockerignore-excludes: apps/backend/features/x/internal/infra/x.postgres.test.ts",
       "dockerignore-excludes: apps/backend/test-support/database.ts",
       "dockerignore-excludes: apps/backend/test-support/nested/x.ts",
       "dockerignore-excludes: apps/frontend_customer/features/x/x.test.tsx",
@@ -982,15 +982,16 @@ describe("列挙と検査（fixture）", () => {
         "export class InMemoryXRepository {}\n",
       "apps/backend/test-support/y.in-memory.mts": "export const y = 1;\n",
       // 対象外（別名・テスト・ソースでない・apps/backend の外・依存の中）。
-      "apps/backend/features/x/infra/in-memory-x.ts": "export const a = 1;\n",
-      "apps/backend/features/x/infra/x-repository.in-memory.test.ts":
+      "apps/backend/features/x/internal/infra/in-memory-x.ts":
+        "export const a = 1;\n",
+      "apps/backend/features/x/internal/infra/x-repository.in-memory.test.ts":
         'import { test } from "vitest";\n',
-      "apps/backend/features/x/infra/x.in-memory.md": "# x\n",
+      "apps/backend/features/x/internal/infra/x.in-memory.md": "# x\n",
       "apps/frontend_customer/features/x/x.in-memory.ts":
         "export const b = 1;\n",
       "apps/backend/node_modules/x/x.in-memory.ts": "export const c = 1;\n",
       // 違反。
-      "apps/backend/features/x/infra/x-repository.in-memory.ts":
+      "apps/backend/features/x/internal/infra/x-repository.in-memory.ts":
         "export class InMemoryXRepository {}\n",
       "apps/backend/shared/infra/z.in-memory.js": "export const z = 1;\n",
       "apps/backend/features/x/test-support/w.in-memory.ts":
@@ -1001,7 +1002,7 @@ describe("列挙と検査（fixture）", () => {
       violations: collectViolations(root),
     }).toEqual({
       inMemory: [
-        "apps/backend/features/x/infra/x-repository.in-memory.ts",
+        "apps/backend/features/x/internal/infra/x-repository.in-memory.ts",
         "apps/backend/features/x/test-support/w.in-memory.ts",
         "apps/backend/shared/infra/z.in-memory.js",
         "apps/backend/test-support/x/x-repository.in-memory.ts",
@@ -1013,7 +1014,7 @@ describe("列挙と検査（fixture）", () => {
         "production-imports-test-support": [],
         "exports-test-support": [],
         "in-memory-placement": [
-          "in-memory-placement: apps/backend/features/x/infra/x-repository.in-memory.ts",
+          "in-memory-placement: apps/backend/features/x/internal/infra/x-repository.in-memory.ts",
           "in-memory-placement: apps/backend/features/x/test-support/w.in-memory.ts",
           "in-memory-placement: apps/backend/shared/infra/z.in-memory.js",
         ],
@@ -1226,7 +1227,7 @@ describe("test-support（実ファイル）", () => {
     expect(files).toContain("apps/backend/test-support/database.ts");
     expect(files).toContain("apps/frontend_customer/test-support/i18n.tsx");
     expect(files).toContain(
-      "apps/backend/features/todo/infra/todo-repository.postgres.test.ts",
+      "apps/backend/features/todo/internal/infra/todo-repository.postgres.test.ts",
     );
     expect(files).toContain(
       "apps/frontend_customer/features/todo/components/todo-item.test.tsx",

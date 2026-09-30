@@ -3,10 +3,10 @@ import {
   deleteEntry,
   insertEntry,
   updateEntries,
-} from "../../../shared/infra/change-log";
-import { changedProps } from "../../../shared/infra/changed-props";
-import type { Database } from "../../../shared/infra/database";
-import { writeInTransaction } from "../../../shared/infra/write";
+} from "../../../../shared/infra/change-log";
+import { changedProps } from "../../../../shared/infra/changed-props";
+import type { Database } from "../../../../shared/infra/database";
+import { writeInTransaction } from "../../../../shared/infra/write";
 import { Todo, type TodoStatusChange } from "../domain/todo";
 import { requireTodo, type TodoRepository } from "../domain/todo-repository";
 import { todoStatusChanges, todos } from "./schema";

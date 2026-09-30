@@ -1,11 +1,11 @@
 import { z } from "zod";
-import { getDatabase } from "../../../shared/infra/database";
+import { getDatabase } from "../../../../shared/infra/database";
 import {
   parseJsonBody,
   requestBodySchema,
-} from "../../../shared/presentation/json-body";
-import { withProblemResponse } from "../../../shared/presentation/problem";
-import { parseUuidParam } from "../../../shared/presentation/resource-id";
+} from "../../../../shared/presentation/json-body";
+import { withProblemResponse } from "../../../../shared/presentation/problem";
+import { parseUuidParam } from "../../../../shared/presentation/resource-id";
 import { ChangeTodoCompletionCommand } from "../application/change-todo-completion.command";
 import type { Todo } from "../domain/todo";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";

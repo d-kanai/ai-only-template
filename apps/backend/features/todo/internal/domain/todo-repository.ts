@@ -1,4 +1,4 @@
-import { DomainError } from "../../../shared/domain/domain-error";
+import { DomainError } from "../../../../shared/domain/domain-error";
 import type { Todo } from "./todo";
 
 // Todo の永続化の窓口（interface）。

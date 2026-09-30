@@ -47,11 +47,12 @@ apps/
   backend/
     package.json        # @repo/backend。drizzle-orm / pg / @repo/shared、exports（外に公開するファイルの一覧）、db:generate / db:migrate
     features/           # 機能ごとのまとまり（frontend の features/ と同じ。Issue #98）
-      todo/               # API 側（DDD 4 層）
-        presentation/       # 1 API = 1 ファイル（list-todos.api.ts など）。クラス <Verb><Noun>Api（コンストラクタで query / command を受け取り、handle が Route Handler）、ファイルの最下部で組み立てた本番用の GET / POST など、リクエスト / レスポンスの型を export
-        application/        # 読むだけの query（list-todos.query.ts）と状態を変える command（create-todo.command.ts）
-        domain/             # Entity / Value Object / Repository の interface
-        infra/              # Repository の実装（Postgres と、テスト用の InMemory）、schema.ts（Drizzle のスキーマ）
+      todo/               # API 側の 1 機能（直下は internal/ だけ。他のモジュールへ公開する入口 expose/ は Issue #208 の段階 B で足す）
+        internal/           # feature の中だけで使う実装（DDD 4 層。Issue #208）
+          presentation/       # 1 API = 1 ファイル（list-todos.api.ts など）。クラス <Verb><Noun>Api（コンストラクタで query / command を受け取り、handle が Route Handler）、ファイルの最下部で組み立てた本番用の GET / POST など、リクエスト / レスポンスの型を export
+          application/        # 読むだけの query（list-todos.query.ts）と状態を変える command（create-todo.command.ts）
+          domain/             # Entity / Value Object / Repository の interface
+          infra/              # Repository の実装（Postgres と、テスト用の InMemory）、schema.ts（Drizzle のスキーマ）
     shared/             # API 側で feature をまたぐ共通部品（domain/ に DomainError とエラーのキー、presentation/ にエラー応答（RFC 9457 の Problem Details）と本文の読み取り、infra/ に Postgres のプールと Drizzle の db）
       drizzle/            # drizzle.config.ts（drizzle-kit の設定）と、生成したマイグレーション（*.sql と meta/。pnpm db:generate が作る。コミットする）
   shared/               # @repo/shared。frontend と backend で共通の基盤だけ（Issue #90。.claude/rules/shared.md）
@@ -65,7 +66,7 @@ apps/
 
 - 画面は SSR を前提にせず、データは hook から `/api/...` を呼んで取る。サーバの処理はすべて `apps/backend/` に置く。
 - frontend（と `apps/e2e/`・リポジトリ直下の設定ファイル）から backend へは `@repo/backend/<path>` でだけ参照する（相対パスは使わない。例外はテスト基盤の `vitest.global-setup.ts` → `apps/backend/test-support/database` だけ）。使えるのは `apps/backend/package.json` の `exports` に書いたファイルだけ。frontend で参照してよいのは `app/api/**`（api ファイルの値）と `features/*/api/`（型だけ）だけ。`apps/shared`（env・logger）は frontend 直下のサーバ側のファイル・backend・`apps/e2e/`・リポジトリ直下から `@repo/shared/<name>` で参照し、画面側（`app/`・`features/`・`shared/`）からは参照しない。backend は frontend を参照せず、backend の中の import は相対パスだけにする（`rule-tests/architecture.test.ts` で検査。`.claude/rules/backend.md` の「import の書き方と公開の範囲（exports）」）。
-- 画面側からサーバ側へは、各 api ファイル（`apps/backend/features/<feature>/presentation/<name>.api.ts`）の型を `import type` で参照するだけ。型で担保されるのはリクエスト / レスポンスの形で、URL・メソッド・実行時の JSON の形は担保されない。
+- 画面側からサーバ側へは、各 api ファイル（`apps/backend/features/<feature>/internal/presentation/<name>.api.ts`）の型を `import type` で参照するだけ。型で担保されるのはリクエスト / レスポンスの形で、URL・メソッド・実行時の JSON の形は担保されない。
 - テストは対象の隣に置く（`app/` には置かない）。
 
 詳細は `.claude/rules/backend.md`（API 側）・`.claude/rules/frontend.md`（画面側）・`.claude/rules/architecture-check.md`（依存の向きの検査）・`.claude/rules/testing.md`（テストの置き方）、決定と採用しなかった案は ADR（`docs/adr/README.md` の一覧）を参照。
@@ -98,7 +99,7 @@ pnpm db:up       # Postgres を起動し、healthcheck が通るまで待つ（d
 pnpm db:migrate  # apps/backend/shared/drizzle/ のマイグレーションを当てる（drizzle-kit migrate。当て済みのものは飛ばす）
 pnpm db:psql     # psql で接続する（docker compose exec db psql -U app -d app）
 pnpm db:down     # 止める（データは名前付きボリューム pgdata に残る。消すときは docker compose down -v）
-pnpm db:generate # apps/backend/features/*/infra/schema.ts を変えたら、差分の SQL を apps/backend/shared/drizzle/ に生成する（drizzle-kit generate。DB には接続しない）
+pnpm db:generate # apps/backend/features/*/internal/infra/schema.ts を変えたら、差分の SQL を apps/backend/shared/drizzle/ に生成する（drizzle-kit generate。DB には接続しない）
 ```
 
 - 接続先は `.env` の `DATABASE_URL`（`.env.example` の値は `postgresql://app:app@localhost:5432/app`。開発用の固定値で秘密ではない）。アプリは常に Postgres を使うので、`pnpm dev` の前にも `pnpm db:up` と `pnpm db:migrate` が要る。

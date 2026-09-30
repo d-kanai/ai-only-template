@@ -1,11 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { now } from "@repo/shared/now";
-import { Todo, type TodoStatusChange } from "../../features/todo/domain/todo";
+import {
+  Todo,
+  type TodoStatusChange,
+} from "../../features/todo/internal/domain/todo";
 import {
   requireTodo,
   type TodoRepository,
-} from "../../features/todo/domain/todo-repository";
-import { todoStatusChanges, todos } from "../../features/todo/infra/schema";
+} from "../../features/todo/internal/domain/todo-repository";
+import {
+  todoStatusChanges,
+  todos,
+} from "../../features/todo/internal/infra/schema";
 import {
   type ChangeEntry,
   type ChangeLog,
@@ -16,15 +22,15 @@ import {
 import { changedProps } from "../../shared/infra/changed-props";
 
 // TodoRepository の InMemory 実装。プロセスが終わるとデータは消える。
-// テスト専用（本番の永続化は Postgres。features/todo/infra/todo-repository.postgres.ts を api ファイルが組み立てる）。テストでは
+// テスト専用（本番の永続化は Postgres。features/todo/internal/infra/todo-repository.postgres.ts を api ファイルが組み立てる）。テストでは
 // query / command のコンストラクタに渡し、DB に接続せずに application・presentation の振る舞いを確かめる（Issue #123）。
 // WHY 本番のコード（presentation）から参照させない: 環境変数などで InMemory に切り替えると、設定漏れでもデータが保存されない
 //   まま動いてしまう（Issue #59）。test-support に置くので本番のコードから参照できない（rule-tests/test-support.test.ts の
 //   production-imports-test-support）。イメージにも入らない（.dockerignore の **/test-support）。
-// WHY test-support/<feature>/ に置く（Issue #191）: テストだけが使うコードで、features/todo/infra/ に置くと本番のコードと
+// WHY test-support/<feature>/ に置く（Issue #191）: テストだけが使うコードで、features/todo/internal/infra/ に置くと本番のコードと
 //   見分けが付かない。*.in-memory.ts は test-support の下だけに置く（rule-tests/test-support.test.ts の in-memory-placement）。
 // WHY Map を使う: id での取得・上書き・削除がそのまま書け、挿入順も保つ（作成日時が同じ Todo の並びが安定する）。
-// WHY Todo をそのまま保持してよい: Todo は不変（apps/backend/features/todo/domain/todo.ts）なので、
+// WHY Todo をそのまま保持してよい: Todo は不変（apps/backend/features/todo/internal/domain/todo.ts）なので、
 //   呼び出し側が取り出した Todo を通して保持中のデータが書き換わることはない。
 // WHY 取り出すときは保持中の値から Todo.reconstruct で作り直す（保持中のインスタンスを返さない。Issue #165）:
 //   Postgres の実装と同じく「読み込んだ Todo」（origin を持つ）を返すため。保持中の Todo が create したもの（origin が

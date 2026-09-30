@@ -11,13 +11,13 @@ import {
   test,
   vi,
 } from "vitest";
-import { DomainError } from "../../../shared/domain/domain-error";
-import type { ChangeEntry } from "../../../shared/infra/change-log";
-import { changeLogs } from "../../../shared/infra/schema";
+import { DomainError } from "../../../../shared/domain/domain-error";
+import type { ChangeEntry } from "../../../../shared/infra/change-log";
+import { changeLogs } from "../../../../shared/infra/schema";
 import {
   createTestDatabase,
   type TestDatabase,
-} from "../../../test-support/database";
+} from "../../../../test-support/database";
 import { Todo } from "../domain/todo";
 import { todoStatusChanges, todos } from "./schema";
 import { PostgresTodoRepository } from "./todo-repository.postgres";
