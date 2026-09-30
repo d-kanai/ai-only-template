@@ -227,6 +227,9 @@ test("エラーが無いときは、title の入力は invalid でなく、説�
   });
   expect(input.getAttribute("aria-invalid")).toBe("false");
   expect(input.getAttribute("aria-describedby")).toBeNull();
+  // 項目のエラーの段落（<p>）も描画しない。WHY: aria-invalid / aria-describedby だけを見ると、エラーが無いのに
+  //   空の段落を描画しても通ってしまう（Issue #202 で、描画の条件を常に偽にする変異が生き残った）。
+  expect(input.closest("form")?.querySelector("p")).toBeNull();
 });
 
 test("空タイトルの 400（#/title）は、title の入力の説明として直下に出し、alert は出さない", async () => {
