@@ -35,6 +35,10 @@ yarn-error.log*
 # .env.example は接続情報の例（開発用の固定値だけで秘密を含まない）。コピー元としてコミットする。
 !.env.example
 
+# google-github-actions/auth（.github/workflows/deploy.yml）が $GITHUB_WORKSPACE に書く WIF の資格情報ファイル
+# （gha-creds-<乱数>.json）。WHY: ワークフローの中の git 操作で誤ってコミットしないように無視する（auth の README の推奨）。
+gha-creds-*.json
+
 # vercel
 .vercel
 
@@ -61,3 +65,17 @@ next-env.d.ts
 # isolation: worktree のサブエージェントが作る git worktree（.claude/worktrees/agent-<id>。Issue #64 の実測）。
 # WHY コミットしない: worktree は別の作業ツリーで、本体の作業ツリーから見ると未追跡のディレクトリとして git status に出てしまう。
 /.claude/worktrees/
+
+# terraform（infra/。Issue #137）
+# .terraform/: terraform init が provider のバイナリとバックエンドの設定を置く作業ディレクトリ（数百 MB。init で作り直せる）。
+# *.tfstate / *.tfstate.*: state（DB のホスト名などの値を含む）。state は GCS のバックエンドに置く（infra/envs/<環境>/backend.tf）ので、
+#   手元にできたら誤ってコミットしないように無視する（init の前の apply やバックアップ）。
+# *.tfplan: terraform plan -out の結果（state と同じく値を含む）。
+# *.tfvars: project_id などの入力（プロジェクトごとに違い、コミットしない）。例の infra/envs/<環境>/terraform.tfvars.example は
+#   拡張子が .example なので対象外（コミットする）。
+# WHY .terraform.lock.hcl は無視しない: provider のハッシュを固定し、誰の init でも同じ provider にするためにコミットする。
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
