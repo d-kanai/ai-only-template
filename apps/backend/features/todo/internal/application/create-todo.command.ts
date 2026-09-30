@@ -1,4 +1,4 @@
-import type { TransactionRunner } from "../../../../shared/domain/transaction";
+import type { TransactionRunner } from "../../../../shared/application/transaction";
 import { Todo } from "../domain/todo";
 import type { TodoRepository } from "../domain/todo-repository";
 

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, describe, expect, test, vi } from "vitest";
-import type { TransactionRunner } from "../../../../shared/domain/transaction";
+import type { TransactionRunner } from "../../../../shared/application/transaction";
 import { InMemoryTodoRepository } from "../../../../test-support/todo/todo-repository.in-memory";
 import {
   InMemoryTransactionRunner,

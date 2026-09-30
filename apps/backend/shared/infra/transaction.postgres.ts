@@ -1,8 +1,12 @@
-import type { Transaction, TransactionRunner } from "../domain/transaction";
+import type { TransactionRunner } from "../application/transaction";
+import type { Transaction } from "../domain/transaction";
 import type { Database } from "./database";
 import { PostgresWriter, transactionOf } from "./writer";
 
-// TransactionRunner の Postgres 実装（Issue #215。ADR docs/adr/architecture/20260930-transaction-from-application.md）。
+// TransactionRunner（shared/application/transaction.ts の port。Issue #220 で domain から移した）の Postgres 実装（Issue #215。
+//   ADR docs/adr/architecture/20260930-transaction-from-application.md）。
+// WHY infra から application を参照する: この port を実装するため。infra が参照してよい application はこの port だけ
+//   （rule-tests/architecture.test.ts の SHARED_TRANSACTION_PORT_MODULE）。
 // command（application）がコンストラクタで受け取り、execute の本体を run で包む。api ファイルが
 //   `new PostgresTransactionRunner(getDatabase().db)` と組み立てる（テストは InMemoryTransactionRunner）。
 // WHY トランザクションを張るのはここだけ: Repository（*.postgres.ts）は db.transaction を呼ばない（rule-tests/persistence.test.ts の
