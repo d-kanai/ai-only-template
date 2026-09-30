@@ -27,6 +27,8 @@ export interface TodoRepository {
   //   同じ項目の同時更新は後勝ち。ただし読み込んだときと同じ値に戻す変更は差分が無いので書かれず、他方の更新が残る）。
   //   変わった項目が無ければ何もしない。読み込んだ後に消されていれば
   //   DomainError("not_found", "todo.notFound", { id }) を投げる（Issue #165）。
+  //   完了の履歴（statusChanges）は、読み込んだときより後ろに増えた分だけを足す（既存の履歴は書き換えない・消さない）。
+  //   読み込んだ後に別の save が履歴を足していたら、増えた分を足さずにエラーにする（同じ save の他の変更も書かない。Issue #188）。
   save(todo: Todo): Promise<void>;
   // 存在しない id でも何もしない（存在確認は呼び出し側が findById / findByIdOrThrow で行う）。
   delete(id: string): Promise<void>;

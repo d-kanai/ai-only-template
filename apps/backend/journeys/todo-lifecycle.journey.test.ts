@@ -9,7 +9,7 @@ import { DeleteTodoCommand } from "../features/todo/application/delete-todo.comm
 import { GetTodoQuery } from "../features/todo/application/get-todo.query";
 import { ListTodosQuery } from "../features/todo/application/list-todos.query";
 import { RenameTodoCommand } from "../features/todo/application/rename-todo.command";
-import { todos } from "../features/todo/infra/schema";
+import { todoStatusChanges, todos } from "../features/todo/infra/schema";
 import { PostgresTodoRepository } from "../features/todo/infra/todo-repository.postgres";
 import {
   ChangeTodoCompletionApi,
@@ -56,7 +56,8 @@ import {
 // WHY 1 テスト = 1 つの流れ（E2E と同じ）: 順序で状態を担保する。ステップごとにテストを分けると、前のテストの結果に依存する。
 
 // 実 Postgres（compose.yaml。`pnpm db:up` で起動）に対して実行する。テスト用のスキーマにマイグレーションを当て、
-//   各テストの前に todos を空にする（todo-repository.postgres.test.ts と同じ形）。
+//   各テストの前に todos と完了の履歴（todo_status_changes）を空にする（todo-repository.postgres.test.ts と同じ形。
+//   todo_status_changes は todos を外部キーで参照するので、同じ文で truncate する）。
 // WHY 共通の補助にしない: ジャーニーは今 1 ファイルだけ。ファイルが増えて同じ準備が重なったら test-support/ に切り出す。
 let database: TestDatabase;
 
@@ -70,7 +71,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await database.db.execute(sql`truncate todos`);
+  await database.db.execute(sql`truncate todo_status_changes, todos`);
 });
 
 // 本番の api ファイルの最下部と同じ組み立てで、テスト用のスキーマの db を使う handler をそろえる。
@@ -95,6 +96,33 @@ function api() {
 // WHY 応答から作る: 行の id・作成日時は API が決めるので、応答の値と同じ行が保存されていることを確かめる。
 function rowOf(todo: CreateTodoResponse): typeof todos.$inferSelect {
   return { ...todo, createdAt: new Date(todo.createdAt) };
+}
+
+// 完了の履歴の行（todo_status_changes）のうち、比べる列。行の id（uuid）は DB が乱数で作るので除く。
+const STATUS_CHANGE_COLUMNS = {
+  todoId: todoStatusChanges.todoId,
+  position: todoStatusChanges.position,
+  completed: todoStatusChanges.completed,
+  changedAt: todoStatusChanges.changedAt,
+};
+
+// 完了の履歴の行を Todo の id・position の順に並べる（select の結果と期待値の両方に使う）。
+// WHY SQL の ORDER BY ではなく JS で並べる: 期待値の Todo の id（uuid）の大小は実行ごとに変わるので、同じ規則で両方を並べる。
+function byTodoAndPosition(
+  a: { todoId: string; position: number },
+  b: { todoId: string; position: number },
+): number {
+  return a.todoId.localeCompare(b.todoId) || a.position - b.position;
+}
+
+// 作成したときの完了の履歴の行（作成日時に未完了。Todo.create）。
+function createdStatusRow(todo: CreateTodoResponse) {
+  return {
+    todoId: todo.id,
+    position: 0,
+    completed: false,
+    changedAt: new Date(todo.createdAt),
+  };
 }
 
 const BASE_URL = "http://localhost";
@@ -164,6 +192,10 @@ test("Todo を 2 件作り、一覧で作成順に見え、1 件を改名して�
   await expect(database.db.select().from(todos)).resolves.toStrictEqual([
     rowOf(milk),
   ]);
+  // 完了の履歴は「作成日時に未完了」の 1 行（Issue #188）。
+  await expect(
+    database.db.select(STATUS_CHANGE_COLUMNS).from(todoStatusChanges),
+  ).resolves.toStrictEqual([createdStatusRow(milk)]);
 
   await waitUntilAfter(milk.createdAt);
   const createdBread = await postTodo(
@@ -176,6 +208,12 @@ test("Todo を 2 件作り、一覧で作成順に見え、1 件を改名して�
   await expect(
     database.db.select().from(todos).orderBy(todos.createdAt),
   ).resolves.toStrictEqual([rowOf(milk), rowOf(bread)]);
+  const createdStatusRows = [createdStatusRow(milk), createdStatusRow(bread)];
+  expect(
+    (
+      await database.db.select(STATUS_CHANGE_COLUMNS).from(todoStatusChanges)
+    ).sort(byTodoAndPosition),
+  ).toStrictEqual([...createdStatusRows].sort(byTodoAndPosition));
 
   // 2. 一覧に作成順で並ぶ（作成の応答と同じ値）。
   const listed = await listTodos(bodylessRequest("GET", "/api/todos"));
@@ -202,6 +240,12 @@ test("Todo を 2 件作り、一覧で作成順に見え、1 件を改名して�
     rowOf({ ...milk, title: "豆乳を買う" }),
     rowOf(bread),
   ]);
+  // 改名は完了の履歴を変えない。
+  expect(
+    (
+      await database.db.select(STATUS_CHANGE_COLUMNS).from(todoStatusChanges)
+    ).sort(byTodoAndPosition),
+  ).toStrictEqual([...createdStatusRows].sort(byTodoAndPosition));
 
   // 4. 同じ Todo を完了にする（改名が保存されていれば、完了の応答にも新しい名前が出る）。
   const completed = await putCompletion(
@@ -222,6 +266,28 @@ test("Todo を 2 件作り、一覧で作成順に見え、1 件を改名して�
     rowOf({ ...milk, title: "豆乳を買う", completed: true }),
     rowOf(bread),
   ]);
+  // 完了にすると、その Todo の履歴に「完了」の 1 行が足される（既存の行は変わらない）。完了の日時は API が now() で決めるので、
+  //   値は作成日時以上であることだけを見る。
+  const completedStatusRows = (
+    await database.db.select(STATUS_CHANGE_COLUMNS).from(todoStatusChanges)
+  ).sort(byTodoAndPosition);
+  const completion = completedStatusRows.find(
+    (row) => row.todoId === milk.id && row.position === 1,
+  );
+  expect(completedStatusRows).toStrictEqual(
+    [
+      ...createdStatusRows,
+      {
+        todoId: milk.id,
+        position: 1,
+        completed: true,
+        changedAt: completion?.changedAt,
+      },
+    ].sort(byTodoAndPosition),
+  );
+  expect(completion?.changedAt.getTime()).toBeGreaterThanOrEqual(
+    Date.parse(milk.createdAt),
+  );
 
   // 5. 詳細に改名と完了が反映されている。
   const detail = await getTodo(
@@ -245,6 +311,10 @@ test("Todo を 2 件作り、一覧で作成順に見え、1 件を改名して�
   await expect(database.db.select().from(todos)).resolves.toStrictEqual([
     rowOf(bread),
   ]);
+  // 削除した Todo の完了の履歴も消える（外部キーの on delete cascade）。
+  await expect(
+    database.db.select(STATUS_CHANGE_COLUMNS).from(todoStatusChanges),
+  ).resolves.toStrictEqual([createdStatusRow(bread)]);
 
   // 7. 一覧には残りの 1 件だけ（手を付けていない 2 件目はそのまま）。
   const listedAfterDelete = await listTodos(

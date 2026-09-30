@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { now } from "@repo/shared/now";
-import { sql } from "drizzle-orm";
+import { asc, sql } from "drizzle-orm";
 import {
   afterAll,
   afterEach,
@@ -17,19 +17,25 @@ import {
   type TestDatabase,
 } from "../../../test-support/database";
 import { Todo } from "../domain/todo";
-import { todos } from "./schema";
+import { todoStatusChanges, todos } from "./schema";
 import { PostgresTodoRepository } from "./todo-repository.postgres";
 
 // WHY 時計（now）を差し替えられるようにする: 作成日時（Todo.create が now() から入れる）をミリ秒まで決めた値で保存し、
 //   同じ値で読み戻せることを確かめるため。spy: true で本物の now を残し、時刻を決めたいテストだけ次の 1 回の値を返させる。
 vi.mock("@repo/shared/now", { spy: true });
 
+// WHY restoreAllMocks: 文の数を数えるテストが Pool（database.pool）の query を vi.spyOn で包む。失敗したときも次のテストに
+//   spy を残さない（vi.mock の now は restoreAllMocks の対象外で、上の mockReset が戻す）。
 afterEach(() => {
   vi.mocked(now).mockReset();
+  vi.restoreAllMocks();
 });
 
 // 実 Postgres（compose.yaml。`pnpm db:up` で起動）に対して実行する。
-// テスト用のスキーマにマイグレーション（drizzle/）を当て、各テストの前に todos を空にする（テスト同士が干渉しない）。
+// テスト用のスキーマにマイグレーション（drizzle/）を当て、各テストの前に todos と完了の履歴（todo_status_changes）を空にする
+//   （テスト同士が干渉しない）。
+// WHY 2 つの表を 1 文で truncate する: todo_status_changes は todos を外部キーで参照するので、todos だけの truncate は Postgres が
+//   拒否する（参照する表も同じ文で指定するか CASCADE が要る）。
 let database: TestDatabase;
 
 beforeAll(async () => {
@@ -42,11 +48,24 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await database.db.execute(sql`truncate todos`);
+  await database.db.execute(sql`truncate todo_status_changes, todos`);
 });
 
 function repository(): PostgresTodoRepository {
   return new PostgresTodoRepository(database.db);
+}
+
+// 完了の履歴の行（todo_status_changes）を、Todo ごと・足した順（position）に読む。行の id（uuid）は乱数なので除く。
+function statusChangeRows() {
+  return database.db
+    .select({
+      todoId: todoStatusChanges.todoId,
+      position: todoStatusChanges.position,
+      completed: todoStatusChanges.completed,
+      changedAt: todoStatusChanges.changedAt,
+    })
+    .from(todoStatusChanges)
+    .orderBy(asc(todoStatusChanges.todoId), asc(todoStatusChanges.position));
 }
 
 describe("PostgresTodoRepository", () => {
@@ -69,6 +88,7 @@ describe("PostgresTodoRepository", () => {
   // 並び順のテスト用に id を固定した行を入れる（Todo.create の id は乱数で、id の大小が決まらないため）。
   // WHY Repository の save を通さず行を直接入れる: id を決めた Todo は Todo.reconstruct でしか作れず、reconstruct した
   //   Todo は「読み込み済み」（origin を持つ）なので、save は変わった列だけの UPDATE になり行を作らない（Issue #165）。
+  // 完了の履歴も「作成日時に未完了」の 1 行を入れる（履歴が無い行は不変条件を満たさない）。
   async function insertTodo(
     id: string,
     title: string,
@@ -77,6 +97,12 @@ describe("PostgresTodoRepository", () => {
     await database.db
       .insert(todos)
       .values({ id, title, completed: false, createdAt: new Date(createdAt) });
+    await database.db.insert(todoStatusChanges).values({
+      todoId: id,
+      position: 0,
+      completed: false,
+      changedAt: new Date(createdAt),
+    });
   }
 
   test("findAll は作成日時の昇順で返す（保存した順・id の順によらない）", async () => {
@@ -208,24 +234,31 @@ describe("PostgresTodoRepository", () => {
     });
   });
 
-  // db の insert / update を spy するので Postgres だけ（InMemory には SQL が無い）。
+  // db の insert / update / transaction を spy するので Postgres だけ（InMemory には SQL が無い）。
+  // WHY transaction も数える: save の書き込みはトランザクション（tx）の中で行うので、db の insert / update の spy だけでは
+  //   tx 経由の INSERT・UPDATE を数えられない。トランザクションを始めないことで、その中の SQL も無いことを確かめる。
+  // 同じ値への changeCompletion は Todo を変えない（todo.ts）ので、履歴も足さず SQL を発行しない。
   test("読み込んだ Todo を変えずに save すると、SQL（INSERT・UPDATE）を発行しない", async () => {
     const todo = Todo.create("牛乳を買う");
     await repository().save(todo);
     const loaded = await repository().findByIdOrThrow(todo.id);
     const update = vi.spyOn(database.db, "update");
     const insert = vi.spyOn(database.db, "insert");
+    const transaction = vi.spyOn(database.db, "transaction");
 
     await repository().save(loaded);
+    await repository().save(loaded.changeCompletion(false));
     const calls = {
       update: update.mock.calls.length,
       insert: insert.mock.calls.length,
+      transaction: transaction.mock.calls.length,
     };
     // 次の検証（findByIdOrThrow）や失敗時に spy を残さないよう、数えたらすぐ戻す。
     update.mockRestore();
     insert.mockRestore();
+    transaction.mockRestore();
 
-    expect(calls).toEqual({ update: 0, insert: 0 });
+    expect(calls).toEqual({ update: 0, insert: 0, transaction: 0 });
   });
 
   // WHY not_found にする: 以前の upsert は、読み込んだ後に消された Todo を INSERT で戻していた（PUT と DELETE の競合）。
@@ -277,6 +310,7 @@ describe("PostgresTodoRepository", () => {
       title: "牛乳を買う",
       completed: true,
       createdAt: todo.createdAt,
+      statusChanges: todo.statusChanges,
     };
 
     expect((await repository().findById(todo.id))?.origin).toStrictEqual(
@@ -307,6 +341,263 @@ describe("PostgresTodoRepository", () => {
       completed: true,
       createdAt,
     });
+  });
+
+  // ここから下の完了の履歴（Issue #188）のテストは todo-repository.in-memory.test.ts と同じ契約で、同じテスト名にそろえる。
+  //   DB の行（todo_status_changes）を直接見る確認と、DB だけのテストは Postgres だけ。
+  test("新規の Todo を save すると完了の履歴（作成日時に未完了の 1 件）も保存され、読み出した Todo が同じ履歴を持つ", async () => {
+    const todo = Todo.create("牛乳を買う");
+
+    await repository().save(todo);
+
+    await expect(repository().findById(todo.id)).resolves.toMatchObject({
+      statusChanges: [{ completed: false, changedAt: todo.createdAt }],
+    });
+    await expect(statusChangeRows()).resolves.toStrictEqual([
+      {
+        todoId: todo.id,
+        position: 0,
+        completed: false,
+        changedAt: todo.createdAt,
+      },
+    ]);
+  });
+
+  test("新規の Todo を作ってすぐ完了にして save すると、履歴の 2 件がどちらも保存される", async () => {
+    const todo = Todo.create("牛乳を買う").changeCompletion(true);
+
+    await repository().save(todo);
+
+    await expect(repository().findById(todo.id)).resolves.toEqual(todo);
+    await expect(statusChangeRows()).resolves.toStrictEqual(
+      todo.statusChanges.map((change, position) => ({
+        todoId: todo.id,
+        position,
+        ...change,
+      })),
+    );
+  });
+
+  // WHY 既存の行が変わらないことを行の id で確かめる: 増分だけを INSERT する（insert のみの子表。UPDATE / DELETE しない）。
+  //   全件を消して入れ直す実装では、既存の行の id が変わる。
+  test("読み込んだ Todo の完了状態を変えて save すると、増えた履歴だけが足され、既存の履歴は変わらない", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await repository().save(todo);
+    const [first] = await database.db.select().from(todoStatusChanges);
+
+    const completed = (
+      await repository().findByIdOrThrow(todo.id)
+    ).changeCompletion(true);
+    await repository().save(completed);
+    const reopened = (
+      await repository().findByIdOrThrow(todo.id)
+    ).changeCompletion(false);
+    await repository().save(reopened);
+
+    await expect(repository().findById(todo.id)).resolves.toEqual(reopened);
+    expect(reopened.statusChanges.map((change) => change.completed)).toEqual([
+      false,
+      true,
+      false,
+    ]);
+    const rows = await database.db
+      .select()
+      .from(todoStatusChanges)
+      .orderBy(asc(todoStatusChanges.position));
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toStrictEqual(first);
+    expect(rows.map(({ id: _id, ...row }) => row)).toStrictEqual(
+      reopened.statusChanges.map((change, position) => ({
+        todoId: todo.id,
+        position,
+        ...change,
+      })),
+    );
+  });
+
+  // 完了状態は読み込んだときと同じでも、途中の遷移は履歴に残す（todos の UPDATE は無く、履歴の INSERT だけになる）。
+  test("読み込んだ Todo を完了にしてから未完了に戻して save すると、履歴の 2 件が足され、完了状態は変わらない", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await repository().save(todo);
+    const toggled = (await repository().findByIdOrThrow(todo.id))
+      .changeCompletion(true)
+      .changeCompletion(false);
+
+    await repository().save(toggled);
+
+    await expect(repository().findById(todo.id)).resolves.toEqual(toggled);
+    await expect(statusChangeRows()).resolves.toStrictEqual(
+      toggled.statusChanges.map((change, position) => ({
+        todoId: todo.id,
+        position,
+        ...change,
+      })),
+    );
+  });
+
+  // WHY 足した順（position）で返す: 日時が同じ履歴（作成と完了が同じミリ秒）は、日時だけでは順が決まらない。行の物理的な順
+  //   （入れた順）に頼らないことを確かめるため、Postgres では position の逆順に行を入れる。
+  test("findAll・findById は完了の履歴を足した順で返す", async () => {
+    const createdAt = new Date("2026-09-28T00:00:00.000Z");
+    const id = "00000000-0000-4000-8000-000000000001";
+    await database.db
+      .insert(todos)
+      .values({ id, title: "牛乳を買う", completed: false, createdAt });
+    const history = [
+      { position: 2, completed: false, changedAt: createdAt },
+      { position: 1, completed: true, changedAt: createdAt },
+      { position: 0, completed: false, changedAt: createdAt },
+    ];
+    for (const change of history) {
+      await database.db
+        .insert(todoStatusChanges)
+        .values({ todoId: id, ...change });
+    }
+    await insertTodo(
+      "00000000-0000-4000-8000-000000000002",
+      "卵を買う",
+      "2026-09-28T01:00:00.000Z",
+    );
+    const expected = [
+      { completed: false, changedAt: createdAt },
+      { completed: true, changedAt: createdAt },
+      { completed: false, changedAt: createdAt },
+    ];
+
+    await expect(repository().findById(id)).resolves.toMatchObject({
+      statusChanges: expected,
+    });
+    const all = await repository().findAll();
+    expect(all.map((todo) => todo.statusChanges)).toStrictEqual([
+      expected,
+      [
+        {
+          completed: false,
+          changedAt: new Date("2026-09-28T01:00:00.000Z"),
+        },
+      ],
+    ]);
+  });
+
+  // WHY 2 回目をエラーにする: どちらも「読み込んだときの履歴の次」（同じ position）に足そうとする。両方を足すと、足した順と
+  //   日時の順・今の completed がずれうる（履歴の最後の completed が今の completed と違う Todo は読めなくなる）。Postgres では
+  //   (todo_id, position) の一意制約違反（SQLSTATE 23505）になり、同じ save の todos の UPDATE（title）も戻る（トランザクション）。
+  test("同じ Todo を 2 回読み、両方で完了状態を変えて save すると、2 回目はエラーになり、1 回目の変更だけが残る", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await repository().save(todo);
+    const a = await repository().findByIdOrThrow(todo.id);
+    const b = await repository().findByIdOrThrow(todo.id);
+    const first = a.changeCompletion(true);
+    await repository().save(first);
+
+    const second = repository().save(b.rename("x").changeCompletion(true));
+
+    await expect(second).rejects.toBeInstanceOf(Error);
+    await expect(second).rejects.toMatchObject({ cause: { code: "23505" } });
+    await expect(repository().findById(todo.id)).resolves.toEqual(first);
+    await expect(statusChangeRows()).resolves.toStrictEqual(
+      first.statusChanges.map((change, position) => ({
+        todoId: todo.id,
+        position,
+        ...change,
+      })),
+    );
+  });
+
+  // DB の外部キー（on delete cascade）の確認なので Postgres だけ。
+  test("delete すると、その Todo の完了の履歴も消え、他の Todo の履歴は残る", async () => {
+    const removed = Todo.create("牛乳を買う").changeCompletion(true);
+    const kept = Todo.create("卵を買う");
+    await repository().save(removed);
+    await repository().save(kept);
+
+    await repository().delete(removed.id);
+
+    await expect(statusChangeRows()).resolves.toStrictEqual([
+      {
+        todoId: kept.id,
+        position: 0,
+        completed: false,
+        changedAt: kept.createdAt,
+      },
+    ]);
+  });
+
+  // 読み込んだ後に消された Todo は、完了状態の UPDATE が 0 行で not_found になり、同じトランザクションの履歴の INSERT もしない。
+  test("読み込んだ後に delete された Todo の完了状態を変えて save すると、not_found を投げ、履歴を足さない", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await repository().save(todo);
+    const loaded = await repository().findByIdOrThrow(todo.id);
+    await repository().delete(todo.id);
+
+    await expect(
+      repository().save(loaded.changeCompletion(true)),
+    ).rejects.toEqual(
+      new DomainError("not_found", "todo.notFound", { id: todo.id }),
+    );
+    await expect(statusChangeRows()).resolves.toStrictEqual([]);
+  });
+
+  // 完了状態を変えて戻すと todos の列は変わらない（changed が空）が、履歴は 2 件増える。UPDATE が無くても todos の行が
+  //   あることを確かめ、無ければ not_found にする（履歴の INSERT の外部キー違反 23503 → 500 にしない）。
+  test("読み込んだ後に delete された Todo を、完了にして未完了に戻して save すると、not_found を投げ、履歴を足さない", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await repository().save(todo);
+    const loaded = await repository().findByIdOrThrow(todo.id);
+    await repository().delete(todo.id);
+
+    await expect(
+      repository().save(loaded.changeCompletion(true).changeCompletion(false)),
+    ).rejects.toEqual(
+      new DomainError("not_found", "todo.notFound", { id: todo.id }),
+    );
+    await expect(statusChangeRows()).resolves.toStrictEqual([]);
+  });
+
+  // WHY 文の数を 1 に固定する（read skew を防ぐ）: todos と完了の履歴を別の文で読むと、READ COMMITTED では文ごとに
+  //   スナップショットが変わる。2 文の間に別の要求が DELETE（cascade で履歴も消える）や完了の変更をコミットすると、片方だけに
+  //   見え、不変条件の違反（500）になる。同時実行のタイミングはテストで再現しにくいので、文の数で固定する。
+  // WHY Pool（database.pool）の query を数える: drizzle-orm 0.45.3 の node-postgres は、トランザクションの外の文を 1 文ごとに
+  //   Pool の query で送る（node-postgres/session.js の execute が client.query を呼び、client はコンストラクタで渡した Pool）。
+  //   Pool.query は内部で接続を借りて Client の query を呼ぶので、Pool の query の回数が文の数になる（pg 8.23.0）。drizzle が
+  //   Pool を通さずに送る形に変わると 0 回になり、このテストは落ちる（数え方の前提が崩れたことに気づける）。
+  test("一覧 / 詳細の読み出しは SQL 1 文で行う（読み出しの途中で別の要求の変更が片方だけに見えない）", async () => {
+    const todo = Todo.create("牛乳を買う").changeCompletion(true);
+    await repository().save(todo);
+    await repository().save(Todo.create("卵を買う"));
+    const query = vi.spyOn(database.pool, "query");
+
+    const all = await repository().findAll();
+    const findAll = query.mock.calls.length;
+    query.mockClear();
+    const found = await repository().findById(todo.id);
+    const findById = query.mock.calls.length;
+
+    expect({ findAll, findById }).toEqual({ findAll: 1, findById: 1 });
+    // 1 文で読んでも、履歴を Todo ごとに組み立てられていることも確かめる。
+    expect(all).toHaveLength(2);
+    expect(found).toEqual(todo);
+  });
+
+  // WHY 一時的な CHECK 制約で履歴の INSERT を失敗させる: domain は不変条件を満たす Todo しか作れないので、履歴の INSERT を
+  //   domain 経由では失敗させられない。position < 0 だけを許す制約を張ると、新規の save の 2 文目（履歴の INSERT）が
+  //   check_violation（SQLSTATE 23514）で失敗する。トランザクションが無ければ 1 文目の todos の INSERT が残る。
+  // 制約は後始末（finally）で外す（beforeEach の truncate は制約を外さないので、残すと後のテストの save がすべて失敗する）。
+  test("新規の Todo の save は、完了の履歴の INSERT が失敗すると todos の INSERT も戻す（1 つのトランザクション）", async () => {
+    await database.db.execute(
+      sql`alter table todo_status_changes add constraint tmp_reject_all_history check (position < 0)`,
+    );
+    try {
+      const result = repository().save(Todo.create("牛乳を買う"));
+
+      await expect(result).rejects.toBeInstanceOf(Error);
+      await expect(result).rejects.toMatchObject({ cause: { code: "23514" } });
+      await expect(database.db.select().from(todos)).resolves.toEqual([]);
+    } finally {
+      await database.db.execute(
+        sql`alter table todo_status_changes drop constraint tmp_reject_all_history`,
+      );
+    }
   });
 
   test("無い id の findById は undefined を返す", async () => {
@@ -427,6 +718,16 @@ describe("PostgresTodoRepository", () => {
     ],
   ] as const;
 
+  // 完了の履歴の行（作成日時に未完了の 1 行）。不変条件の違反を行ごとに 1 つにするため、履歴は正しい形で入れる。
+  async function insertHistory(row: { id: string; createdAt: Date }) {
+    await database.db.insert(todoStatusChanges).values({
+      todoId: row.id,
+      position: 0,
+      completed: false,
+      changedAt: row.createdAt,
+    });
+  }
+
   function invalidRow(override: { id?: string; title?: string }) {
     return {
       id: "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e",
@@ -451,6 +752,7 @@ describe("PostgresTodoRepository", () => {
     async (_label, override, cause) => {
       const row = invalidRow(override);
       await database.db.insert(todos).values(row);
+      await insertHistory(row);
 
       await expect(repository().findById(row.id)).rejects.toEqual(
         corruptedRowError(row.id, cause),
@@ -464,10 +766,39 @@ describe("PostgresTodoRepository", () => {
       const row = invalidRow(override);
       await repository().save(Todo.create("卵を買う"));
       await database.db.insert(todos).values(row);
+      await insertHistory(row);
 
       await expect(repository().findAll()).rejects.toEqual(
         corruptedRowError(row.id, cause),
       );
+    },
+  );
+
+  // 完了の履歴の不変条件（Issue #188）: 履歴の無い行（Issue #188 より前の行を移行していない・手で入れた行）と、最後の履歴の
+  //   completed が todos.completed と違う行。
+  test.each([
+    ["完了の履歴が無い", []],
+    [
+      "最後の履歴の completed が todos.completed と違う",
+      [{ position: 0, completed: true }],
+    ],
+  ] as const)(
+    "完了の履歴が不変条件を満たさない行（%s）の findById・findAll は、DomainError ではない Error を投げる",
+    async (_label, history) => {
+      const row = invalidRow({});
+      await database.db.insert(todos).values(row);
+      for (const change of history) {
+        await database.db
+          .insert(todoStatusChanges)
+          .values({ todoId: row.id, changedAt: row.createdAt, ...change });
+      }
+      const error = corruptedRowError(
+        row.id,
+        new DomainError("validation_error", "todo.statusChanges.invalid"),
+      );
+
+      await expect(repository().findById(row.id)).rejects.toEqual(error);
+      await expect(repository().findAll()).rejects.toEqual(error);
     },
   );
 });

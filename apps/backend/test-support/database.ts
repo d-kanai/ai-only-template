@@ -30,6 +30,10 @@ export function testSchemaPrefix(): string {
 export type TestDatabase = {
   // テスト用のスキーマを search_path にした接続の db。
   db: Database;
+  // db が使う node-postgres の Pool（search_path はテスト用のスキーマ）。
+  // WHY db とは別に返す: Repository が発行した文の数を数えるテスト（todo-repository.postgres.test.ts の read skew）が
+  //   Pool の query を spy する。Database 型（NodePgDatabase）は $client を型に持たないので、db から取ると型を崩すことになる。
+  pool: Pool;
   // 接続先の URL（search_path の指定は含まない）。
   url: string;
   // drizzle/ のマイグレーションをテスト用のスキーマに当てる。
@@ -55,6 +59,7 @@ export async function createTestDatabase(): Promise<TestDatabase> {
   const db = drizzle({ client: pool });
   return {
     db,
+    pool,
     url,
     // migrationsFolder: apps/backend/shared/drizzle/（このファイルから ../shared/drizzle。Issue #98 で apps/backend 直下の drizzle/ から移し、
     //   Issue #181 でこのファイルを apps/backend/shared/infra/ から apps/backend/test-support/ に移した）。

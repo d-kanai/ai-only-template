@@ -1,4 +1,12 @@
-import { boolean, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 
 // todos テーブルの定義（Drizzle のスキーマ）。
 // WHY スキーマを TypeScript で宣言し、SQL はここから生成する（codebase-first）: テーブルの形の正をこのファイルに置き、
@@ -21,3 +29,46 @@ export const todos = pgTable("todos", {
     .notNull()
     .defaultNow(),
 });
+
+// Todo の完了の履歴（Todo.statusChanges）の子表（Issue #188。ADR docs/adr/architecture/20260930-status-transitions-as-append-only-child-table.md）。
+// WHY insert のみ（UPDATE / DELETE しない。rule-tests/persistence.test.ts の no-update-delete-on-append-only-tables が止める）:
+//   遷移の日時は後から書き換えない記録。消えるのは親の Todo を消したときだけ（外部キーの on delete cascade）。
+export const todoStatusChanges = pgTable(
+  "todo_status_changes",
+  {
+    // 行の id。domain（TodoStatusChange）は持たない（履歴は Todo の中の値で、1 件を外から指すことは無い）ので、DB が作る
+    //   （defaultRandom = gen_random_uuid()）。
+    id: uuid("id").primaryKey().defaultRandom(),
+    // 親の Todo の id。外部キー（references todos(id) on delete cascade）は、ここで .references() と書かず、手書きの
+    //   マイグレーション（shared/drizzle/0002_todo_status_changes_foreign_key_and_backfill.sql）で張る。
+    // WHY on delete cascade: Todo を消したら履歴も消す（delete は todos の 1 文のまま。履歴の DELETE は書かない）。
+    // WHY .references() を使わない: drizzle-kit 0.31.11 の generate は、スキーマを指定しない表への外部キーを必ず
+    //   REFERENCES "public"."todos" と書く（drizzle-kit の bin.cjs の PgSquasher.squashFK が schemaTo || "public"）。
+    //   テストは表をテストファイルごとの別スキーマ（search_path。test-support/database.ts）に作るので、その外部キーは
+    //   public の todos を指し、テストのスキーマの Todo に履歴を足せない（外部キー違反）。手書きの SQL でスキーマを書かずに
+    //   REFERENCES "todos" と張れば、マイグレーションを当てたスキーマ（search_path）の todos を指す。
+    todoId: uuid("todo_id").notNull(),
+    // 履歴の中の位置（0 始まり。Todo.statusChanges の添字）。
+    // WHY 日時とは別に持つ: 日時は同じ値を許す（作成と完了が同じミリ秒になりうる）ので、日時だけでは足した順が決まらず、
+    //   読み出した順が変わると「最後の completed が今の completed と同じ」の不変条件を満たさなくなる。
+    // WHY integer: 1 つの Todo の遷移の回数で、21 億を超えない。
+    position: integer("position").notNull(),
+    // 変わった後の完了状態。
+    completed: boolean("completed").notNull(),
+    // 変わった日時。todos.created_at と同じく timestamptz・mode "date"。
+    changedAt: timestamp("changed_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+  },
+  (table) => [
+    // WHY (todo_id, position) の一意制約: 同じ Todo を 2 か所で読み込み、両方で完了状態を変えて save すると、どちらも
+    //   「読み込んだときの履歴の次」に足そうとする。両方を足すと、足した順と今の completed がずれうる（読めない Todo になる）。
+    //   一意制約なら 2 回目の save は一意制約違反（SQLSTATE 23505）で失敗し、同じトランザクションの todos の UPDATE も戻る。
+    // この index は todo_id で始まるので、Repository が todo_id で履歴を読む検索（where todo_id in (...)）にも使われる。
+    uniqueIndex("todo_status_changes_todo_id_position_index").on(
+      table.todoId,
+      table.position,
+    ),
+  ],
+);

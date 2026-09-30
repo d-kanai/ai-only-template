@@ -17,6 +17,9 @@ export type ErrorKeyParams = {
   "todo.id.invalid": Record<string, never>;
   "todo.completed.invalid": Record<string, never>;
   "todo.createdAt.invalid": Record<string, never>;
+  // 完了の履歴（statusChanges）が不変条件（1 件以上・日時の昇順・最初は作成日時以上・最後の completed が今の completed と同じ）を
+  //   満たさない（Issue #188）。利用者の入力からは作れず、DB の行（reconstruct）を読んだときだけ起きる（Repository が 500 にする）。
+  "todo.statusChanges.invalid": Record<string, never>;
   // 指定した id の Todo が無い（uuid の形でない id も同じ。resource-id.ts）。
   "todo.notFound": { id: string };
   // リクエストの形の誤り（presentation の json-body.ts）。
@@ -54,6 +57,7 @@ export const ERROR_KEYS = [
   "todo.id.invalid",
   "todo.completed.invalid",
   "todo.createdAt.invalid",
+  "todo.statusChanges.invalid",
   "todo.notFound",
   "request.body.notJson",
   "request.body.notObject",

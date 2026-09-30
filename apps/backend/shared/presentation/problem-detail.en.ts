@@ -26,6 +26,8 @@ function detailMessages(): DetailMessages {
     "todo.id.invalid": () => "Id must be a UUID.",
     "todo.completed.invalid": () => "Completed must be a boolean.",
     "todo.createdAt.invalid": () => "CreatedAt must be a valid date.",
+    "todo.statusChanges.invalid": () =>
+      "Completion history is inconsistent with the Todo.",
     "todo.notFound": ({ id }) => `Todo ${id} was not found.`,
     "request.body.notJson": () => "Request body must be valid JSON.",
     "request.body.notObject": () => "Request body must be a JSON object.",

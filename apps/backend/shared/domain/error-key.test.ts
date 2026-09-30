@@ -41,6 +41,7 @@ describe("ParamlessErrorKey", () => {
       | "todo.id.invalid"
       | "todo.completed.invalid"
       | "todo.createdAt.invalid"
+      | "todo.statusChanges.invalid"
       | "request.body.notJson"
       | "request.body.notObject"
       | "server.internalError"

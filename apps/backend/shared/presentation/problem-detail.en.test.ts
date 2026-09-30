@@ -20,6 +20,11 @@ describe("problemDetail", () => {
     ["todo.completed.invalid", undefined, "Completed must be a boolean."],
     ["todo.createdAt.invalid", undefined, "CreatedAt must be a valid date."],
     [
+      "todo.statusChanges.invalid",
+      undefined,
+      "Completion history is inconsistent with the Todo.",
+    ],
+    [
       "todo.notFound",
       { id: "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e" },
       "Todo 8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e was not found.",

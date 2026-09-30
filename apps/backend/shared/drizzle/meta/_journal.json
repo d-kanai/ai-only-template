@@ -8,6 +8,20 @@
       "when": 1790607274539,
       "tag": "0000_create_todos",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790756027679,
+      "tag": "0001_add_todo_status_changes",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790756028458,
+      "tag": "0002_todo_status_changes_foreign_key_and_backfill",
+      "breakpoints": true
     }
   ]
 }

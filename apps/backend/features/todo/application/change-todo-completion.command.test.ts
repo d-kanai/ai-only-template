@@ -40,6 +40,32 @@ describe("ChangeTodoCompletionCommand", () => {
     await expect(repository.findById(todo.id)).resolves.toEqual(changed);
   });
 
+  // 完了の履歴（Issue #188）: 完了状態を変えるたびに 1 件ずつ増え、保存される。
+  test("完了状態を変えると、完了の履歴が 1 件増えて保存される", async () => {
+    const { repository, todo, command } = await setup();
+
+    const changed = await command.execute({ id: todo.id, completed: true });
+
+    expect(changed.statusChanges.map((change) => change.completed)).toEqual([
+      false,
+      true,
+    ]);
+    await expect(repository.findById(todo.id)).resolves.toMatchObject({
+      statusChanges: changed.statusChanges,
+    });
+  });
+
+  test("今と同じ完了状態を指定すると、完了の履歴は増えない", async () => {
+    const { repository, todo, command } = await setup();
+
+    const changed = await command.execute({ id: todo.id, completed: false });
+
+    expect(changed.statusChanges).toStrictEqual(todo.statusChanges);
+    await expect(repository.findById(todo.id)).resolves.toMatchObject({
+      statusChanges: todo.statusChanges,
+    });
+  });
+
   test("無い id なら、その id を params に持つ DomainError(not_found, todo.notFound) を投げる", async () => {
     const { command } = await setup();
 
