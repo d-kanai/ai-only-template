@@ -1,7 +1,7 @@
 # 全モデルの変更履歴（監査）は汎用の change_logs 表に、Repository が本体と同じトランザクションで書く
 
 - 日付: 2026-09-30
-- 状態: 採用
+- 状態: 置き換え（→ architecture/20260930-transaction-from-application.md）
 - 関連: Issue #189 / `.claude/rules/backend.md` / `rule-tests/persistence.test.ts` / `apps/backend/shared/infra/schema.ts` / `apps/backend/shared/infra/change-log.ts` / `apps/backend/features/todo/infra/todo-repository.postgres.ts`
 
 ## 背景

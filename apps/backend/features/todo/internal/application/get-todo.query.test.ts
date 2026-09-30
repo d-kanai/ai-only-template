@@ -2,6 +2,7 @@
 import { describe, expect, test } from "vitest";
 import { DomainError } from "../../../../shared/domain/domain-error";
 import { InMemoryTodoRepository } from "../../../../test-support/todo/todo-repository.in-memory";
+import { inMemoryTransaction } from "../../../../test-support/transaction-runner.in-memory";
 import { Todo } from "../domain/todo";
 import { GetTodoQuery } from "./get-todo.query";
 
@@ -9,7 +10,7 @@ describe("GetTodoQuery", () => {
   test("id に一致する Todo を返す", async () => {
     const repository = new InMemoryTodoRepository();
     const todo = Todo.create("牛乳を買う");
-    await repository.save(todo);
+    await repository.insert(todo, inMemoryTransaction);
 
     await expect(
       new GetTodoQuery(repository).execute(todo.id),

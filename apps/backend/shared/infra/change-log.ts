@@ -4,12 +4,12 @@ import type { ChangeOperation } from "../domain/change-operation";
 import type { Database } from "./database";
 import { type Changes, type ChangeValue, changeLogs } from "./schema";
 
-// 変更履歴（change_logs。Issue #189）の記録の組み立てと書き込み。Repository（*.postgres.ts）は記録を組み立てて返すだけで、
-//   書き込みの唯一の入口 writeInTransaction（write.ts。Issue #205）が本体の書き込みと同じトランザクションの中で recordChange を
-//   呼ぶ（*.postgres.ts が recordChange を直接呼ぶことは rule-tests/persistence.test.ts の no-direct-record-change が止める）。
-//   InMemory の Repository（テスト用）も同じ組み立て（insertEntry など）で記録を作り、同じ形で積む。
-// WHY Repository が書く（DB のトリガーにしない）: 記録の組み立てが TypeScript にあり、InMemory でも同じ記録を確かめられる。
-//   トリガーは手書きの SQL の変更も拾えるが、ロジックが SQL に隠れる（ADR docs/adr/architecture/20260930-change-logs-written-by-repository.md）。
+// 変更履歴（change_logs。Issue #189）の記録の組み立てと書き込み。使うのは書き込みの唯一の口 Writer（writer.ts。Issue #215）だけで、
+//   Writer が文ごとに記録を組み立て（insertEntry など）、同じトランザクションの中で recordChange を呼ぶ。Repository（*.postgres.ts）は
+//   このファイルを import しない（rule-tests/persistence.test.ts の no-change-log-in-repository・no-direct-record-change が止める）。
+// WHY TypeScript で書く（DB のトリガーにしない）: 記録の組み立てがコードにあり、テストで確かめられる。トリガーは手書きの SQL の
+//   変更も拾えるが、ロジックが SQL に隠れる（ADR docs/adr/architecture/20260930-change-logs-written-by-repository.md。Repository が
+//   組み立てる形は Issue #215 で Writer が組み立てる形に置き換えた。ADR docs/adr/architecture/20260930-transaction-from-application.md）。
 
 // 1 件の記録（change_logs の 1 行から id と occurred_at を除いたもの）。
 export type ChangeEntry = {
@@ -30,7 +30,7 @@ export type ChangeLog = typeof changeLogs.$inferSelect;
 //   （Drizzle の行の型 $inferSelect をそのまま渡せるように）。
 type Row = { readonly id: string } & Readonly<Record<string, unknown>>;
 
-// 書き込みに使う接続（writeInTransaction（write.ts）が張ったトランザクションの tx。テストは db そのものも渡す）。
+// 書き込みに使う接続（Writer（writer.ts）が持つトランザクションの tx。テストは db そのものも渡す）。
 // WHY insert だけ: 記録は insert のみ（change_logs を UPDATE / DELETE しない）。
 type Writer = Pick<Database, "insert">;
 
@@ -65,14 +65,13 @@ export function deleteEntry(
   };
 }
 
-// 変えた行の記録: changed（changedProps の差分。変わった列の今の値）の列ごとに、origin（読み込んだときの値）を before、
-//   差分の値を after に持つ。変わった列が無ければ記録しない（空配列。差分の無い save は何も書かないので）。
-// WHY 配列で返す: 呼び出し側（save）が、差分の有無で分岐せずに履歴の insert の記録と 1 つの配列にまとめられる。
-// before は読み込んだときの値で、DB が UPDATE の直前に持っていた値ではない。別の要求が同じ列を同時に変えた（後勝ち）ときは、
-//   その要求が書いた値ではなく、この要求が読んだ値が before になる（UPDATE の前の値を返させる書き方は drizzle-orm 0.45.3 に
-//   無い）。どちらの要求の記録も残るので、順番（occurred_at）で追える。
-// WHY origin の型を changed から決める（NoInfer）: origin は Entity の読み込んだときの値（statusChanges など表の列でない
-//   項目も持つ）で、比べるのは changed の key だけ。origin の key まで K に入れると、表の列でない項目の型も求めてしまう。
+// 変えた行の記録: changed（書き込む列と値）の列ごとに、origin（変える前の値）を before、changed の値を after に持つ。
+//   changed が空なら記録しない（空配列。差分の無い update は何も書かないので）。
+// Writer（writer.ts）は origin に、同じトランザクションで UPDATE の直前に FOR UPDATE で読んだ行を渡す（Issue #215）。そのため
+//   before は DB が UPDATE の直前に持っていた値になる（Issue #189〜#205 は Repository が渡す読み込んだときの値だった）。
+// WHY 配列で返す: 呼び出し側が、差分の有無で分岐せずに記録の配列にまとめられる。
+// WHY origin の型を changed から決める（NoInfer）: origin は変える前の行（changed に無い列も持つ）で、比べるのは changed の key
+//   だけ。origin の key まで K に入れると、changed に無い列の型も求めてしまう。
 export function updateEntries<K extends string>(
   table: Table,
   rowId: string,
@@ -109,6 +108,7 @@ export function updateEntries<K extends string>(
 //   記録も戻り、記録が失敗したら本体も戻る。todo-repository.postgres.test.ts が一時的な CHECK 制約と、COMMIT で失敗させる
 //   遅延制約で固定する）。
 // WHY 記録が無ければ SQL を発行しない: drizzle-orm の insert は空の values を受け付けない。無い id の delete は記録が 0 件。
+// WHY 本体と同じトランザクション: Writer が文ごとに、同じ tx で本体の後に呼ぶ（writer.test.ts・todo-repository.postgres.test.ts が固定する）。
 export async function recordChange(
   writer: Writer,
   entries: readonly ChangeEntry[],

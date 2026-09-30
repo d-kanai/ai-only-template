@@ -35,8 +35,29 @@ import { afterAll, describe, expect, it } from "vitest";
 //   Input（`<T = string>`。`=` で止まる）、Readonly 以外で包んだ Input、Input の型を付けずに引数に直接書いた型
 //   （`execute(input: { title?: string })`）も見えない。逆に、Input の中の関数の型の任意の引数（`(x?: string) => void`）は
 //   任意の項目と数える（誤検知。Input に関数を持たせる書き方は無い想定）。
+// トランザクションの規則（Issue #215。ADR docs/adr/architecture/20260930-transaction-from-application.md）:
+//   - command-runs-in-transaction: *.command.ts の execute の定義（行の先頭が `execute(` / `async execute(`。`public` などの修飾子と
+//     型引数も可）の本体（`{ … }`）に、`this.<依存>.run(`（`.` と名前と `(` の間の空白・改行は可）が無い。行は execute の行。
+//     execute の定義が 1 つも無い command は 1 行目を違反にする（確かめられないので安全側）。query（*.query.ts）は対象外。
+//     WHY: command はトランザクションの範囲を決め、読み込み（findByIdOrThrow の行ロック）と書き込みを runner の run が渡した 1 つの
+//       トランザクションで行う。run を通さない command は、Repository に渡す tx が無い（型で止まる）か、別の経路で書き込みを
+//       作ってしまう。書き忘れを型より先にここで止め、規則を名前で読めるようにする。
+//     WHY query は対象外: query は 1 文の読み取りでトランザクションを張らない（行ロックも取らない。ADR の決定）。
+//     例外の書き方: execute の定義の行の直前に続く `//` のコメント行（空行を挟まない）のどれかが「// WHY トランザクション無し: <理由>」
+//       なら通す（DB に触らない command。notification の送信など）。理由が空・別の見出しの WHY では通さない。
+//     WHY 例外を名前付きの WHY にする（対象の一覧にしない）: DB に触らない command は理由がその場で読め、DB を使うように変えたときに
+//       コメントと食い違うことがレビューで分かる。見出しを固定するのは、別の理由の WHY が直前にあるだけで黙って通らないようにするため
+//       （rule-tests/api-request.test.ts の `// WHY 任意:` と同じ）。
+//     限界: 本体に `this.<何か>.run(` があるかだけを見る。run の依存が TransactionRunner か（型）、Repository の呼び出しが run の
+//       コールバックの中か、run が実際に呼ばれる経路にあるか（早い return の後・呼ばれない関数の中）は見ない（command のテストが
+//       runner の run が渡した tx で Repository が呼ばれることを確かめる）。`const { run } = this.transactions` のような分割代入・
+//       別名の変数（`const t = this.transactions; t.run(…)`）は見逃さず違反と数える（安全側）。本体の範囲は括弧の対応で決めるので、
+//       文字列・正規表現の中の `{` `}` があるとずれる。
 
-type RuleId = "no-optional-input-field" | "no-undefined-branch-on-input";
+type RuleId =
+  | "no-optional-input-field"
+  | "no-undefined-branch-on-input"
+  | "command-runs-in-transaction";
 
 type UseCaseViolation = { rule: RuleId; line: number };
 
@@ -99,6 +120,73 @@ function findUseCaseViolations(text: string): UseCaseViolation[] {
   return violations.sort((a, b) => a.line - b.line);
 }
 
+// code[open] の "(" に対応する ")" の位置（閉じが無ければ末尾）。
+function closingParenOf(code: string, open: number): number {
+  let depth = 0;
+  for (let index = open; index < code.length; index += 1) {
+    if (code[index] === "(") depth += 1;
+    if (code[index] === ")") depth -= 1;
+    if (depth === 0) return index;
+  }
+  return code.length;
+}
+
+// 引数の ")" の後の、本体の "{" の位置（無ければ -1）。戻り値の型の中の "{"（`Promise<{ a: string }>`）は飛ばす。
+// WHY `<` と `>` の深さを数える: 戻り値の型の中のオブジェクトの型を本体と取り違えない。`=>`（関数の型）の `>` は数えない。
+function bodyOpenOf(code: string, afterParams: number): number {
+  let angle = 0;
+  for (let index = afterParams; index < code.length; index += 1) {
+    const char = code[index];
+    if (char === "<") angle += 1;
+    if (char === ">" && code[index - 1] !== "=") angle -= 1;
+    if (char === "{" && angle === 0) return index;
+  }
+  return -1;
+}
+
+// 例外を認める WHY の見出し（`// WHY トランザクション無し: <理由>`）。理由（空白でない文字）が要る。
+const TRANSACTION_OPT_OUT = /^\s*\/\/\s*WHY トランザクション無し:\s*\S/;
+
+// 行（1 始まり）の直前に続く `//` の行に、例外の WHY があるか。
+function optedOutOfTransaction(lines: string[], line: number): boolean {
+  for (
+    let index = line - 2;
+    index >= 0 && /^\s*\/\//.test(lines[index] ?? "");
+    index -= 1
+  ) {
+    if (TRANSACTION_OPT_OUT.test(lines[index] ?? "")) return true;
+  }
+  return false;
+}
+
+// *.command.ts の execute の本体が this.<依存>.run( を含まない（トランザクションを張らない）ものの違反。
+function findCommandTransactionViolations(text: string): UseCaseViolation[] {
+  const lines = text.split("\n");
+  const code = stripLineComments(text);
+  const definitions = [
+    ...code.matchAll(
+      /^[ \t]*(?:(?:public|private|protected|override)\s+)*(?:async\s+)?execute\s*(?:<[^>(]*>)?\s*\(/gm,
+    ),
+  ];
+  if (definitions.length === 0) {
+    return [{ rule: "command-runs-in-transaction", line: 1 }];
+  }
+  return definitions.flatMap((definition) => {
+    const params = definition.index + definition[0].length - 1;
+    const open = bodyOpenOf(code, closingParenOf(code, params) + 1);
+    const body =
+      open === -1 ? "" : code.slice(open, closingBraceOf(code, open));
+    const line = lineOf(
+      code,
+      definition.index + definition[0].indexOf("execute"),
+    );
+    return /\bthis\s*\.\s*[A-Za-z_$][\w$]*\s*\.\s*run\s*\(/.test(body) ||
+      optedOutOfTransaction(lines, line)
+      ? []
+      : [{ rule: "command-runs-in-transaction" as const, line }];
+  });
+}
+
 // 検査の対象: apps/backend/features/<f>/internal/application/ の直下の *.command.ts / *.query.ts（テストは除く）。
 //   リポジトリ相対の / 区切りで、名前順。
 // WHY root を引数で受け取る: 本番（リポジトリ直下）と fixture（一時ディレクトリ）で同じ列挙を通すため。
@@ -128,7 +216,13 @@ function collectUseCaseViolations(root: string): string[] {
   return listUseCaseFiles(root).flatMap((path) => {
     const text = readFileSync(join(root, path), "utf8");
     const lines = text.split("\n");
-    return findUseCaseViolations(text).map(
+    const violations = [
+      ...findUseCaseViolations(text),
+      ...(path.endsWith(".command.ts")
+        ? findCommandTransactionViolations(text)
+        : []),
+    ].sort((a, b) => a.line - b.line);
+    return violations.map(
       ({ rule, line }) =>
         `${rule}: ${path}:${line}: ${(lines[line - 1] ?? "").trim()}`,
     );
@@ -302,6 +396,146 @@ describe("command の入力の判定（findUseCaseViolations）: must reject", (
   });
 });
 
+describe("command のトランザクションの判定（findCommandTransactionViolations）: must pass", () => {
+  it.each([
+    [
+      "execute の本体を this.transactions.run( で包む（複数行・return する）",
+      source(
+        "export class RenameXCommand {",
+        "  constructor(",
+        "    private readonly repository: XRepository,",
+        "    private readonly transactions: TransactionRunner,",
+        "  ) {}",
+        "",
+        "  async execute(input: RenameXInput): Promise<X> {",
+        "    return this.transactions.run(async (tx) => {",
+        "      const current = await this.repository.findByIdOrThrow(input.id, tx);",
+        "      await this.repository.update(current.rename(input.title), tx);",
+        "      return current;",
+        "    });",
+        "  }",
+        "}",
+      ),
+    ],
+    [
+      "修飾子・型引数・戻り値の型のオブジェクト型・run の前後の空白と改行・run の後に通知を書く",
+      source(
+        "  public async execute<T>(input: T): Promise<{ id: string }> {",
+        "    const { current } = await this.transactions",
+        "      . run (async (tx) => ({ current: await this.repository.findByIdOrThrow(input.id, tx) }));",
+        "    this.notify(current.id);",
+        "    return current;",
+        "  }",
+      ),
+    ],
+    [
+      "直前に続くコメント行のどれかに // WHY トランザクション無し: <理由> がある（DB に触らない command）",
+      source(
+        "// WHY トランザクション無し: 通知をログに出すだけで DB に書かない。",
+        "// 送信の失敗の扱いは expose が決める。",
+        "  async execute(input: I): Promise<void> {",
+        "    await this.sender.send(input.message);",
+        "  }",
+      ),
+    ],
+    [
+      "戻り値の型に関数の型（=>）を含む",
+      source(
+        "execute(input: I): Promise<() => void> {",
+        "  return this.transactions.run(async () => () => undefined);",
+        "}",
+      ),
+    ],
+  ])("%s は違反なし", (_name, text) => {
+    expect(findCommandTransactionViolations(text)).toEqual([]);
+  });
+});
+
+describe("command のトランザクションの判定（findCommandTransactionViolations）: must reject", () => {
+  it.each<[string, string, UseCaseViolation[]]>([
+    [
+      "execute が Repository を直接呼び、run で包まない",
+      source(
+        "export class DeleteXCommand {",
+        "  async execute(id: string): Promise<void> {",
+        "    await this.repository.findByIdOrThrow(id, tx);",
+        "    await this.repository.delete(id, tx);",
+        "  }",
+        "}",
+      ),
+      [{ rule: "command-runs-in-transaction", line: 2 }],
+    ],
+    [
+      "run が execute の外（別のメソッド）にだけある",
+      source(
+        "class A {",
+        "  execute(input: I) {",
+        "    return this.save(input);",
+        "  }",
+        "  private save(input: I) {",
+        "    return this.transactions.run(async (tx) => this.repository.insert(input, tx));",
+        "  }",
+        "}",
+      ),
+      [{ rule: "command-runs-in-transaction", line: 2 }],
+    ],
+    [
+      "this の無い transactions.run( / 名前が run で始まるだけの runLater( / 依存を挟まない this.run( / コメントの中の run",
+      source(
+        "async execute(input: I) {",
+        "  await transactions.run(async (tx) => {});",
+        "  await this.transactions.runLater(async (tx) => {});",
+        "  await this.run(async (tx) => {});",
+        "  // return this.transactions.run(async (tx) => {});",
+        "}",
+      ),
+      [{ rule: "command-runs-in-transaction", line: 1 }],
+    ],
+    [
+      "例外の WHY が空行を挟む・理由が空・別の見出し（WHY 任意:）・execute の中にある",
+      source(
+        "// WHY トランザクション無し: DB に書かない。",
+        "",
+        "async execute(a: I) {}",
+        "// WHY トランザクション無し: ",
+        "async execute(b: I) {}",
+        "// WHY 任意: DB に書かない。",
+        "async execute(c: I) {",
+        "  // WHY トランザクション無し: DB に書かない。",
+        "}",
+      ),
+      [
+        { rule: "command-runs-in-transaction", line: 3 },
+        { rule: "command-runs-in-transaction", line: 5 },
+        { rule: "command-runs-in-transaction", line: 7 },
+      ],
+    ],
+    [
+      "execute の定義が無い command（1 行目）",
+      source("export class XCommand {", "  run() {}", "}"),
+      [{ rule: "command-runs-in-transaction", line: 1 }],
+    ],
+    [
+      "execute の後ろの別のクラスに run がある（本体の範囲は execute の { } だけ）",
+      source(
+        "class A {",
+        "  async execute(input: I) {",
+        "    await this.repository.insert(input, tx);",
+        "  }",
+        "}",
+        "class B {",
+        "  async execute(input: I) {",
+        "    await this.transactions.run(async (tx) => {});",
+        "  }",
+        "}",
+      ),
+      [{ rule: "command-runs-in-transaction", line: 2 }],
+    ],
+  ])("%s は違反", (_name, text, expected) => {
+    expect(findCommandTransactionViolations(text)).toEqual(expected);
+  });
+});
+
 // --- 列挙 → 読み取り → 判定を通した fixture テスト ---
 // WHY: 判定が正しくても、対象の列挙（application/*.command.ts・*.query.ts の見つけ方）が漏れれば見逃す。一時ディレクトリに
 //   架空のツリーを置き、本番と同じ collectUseCaseViolations に通して、違反の集合を丸ごと比較する（見逃しも余分な検出も失敗にする）。
@@ -337,7 +571,11 @@ describe("command / query の列挙と検査（fixture）", () => {
           "  id: string;",
           "  title: string;",
           "};",
-          "const current = await this.repository.findByIdOrThrow(input.id);",
+          "async execute(input: RenameXInput) {",
+          "  return this.transactions.run(async (tx) => {",
+          "    const current = await this.repository.findByIdOrThrow(input.id, tx);",
+          "  });",
+          "}",
         ),
       "apps/backend/features/x/internal/application/update-x.command.ts":
         source(
@@ -346,10 +584,25 @@ describe("command / query の列挙と検査（fixture）", () => {
           "  title?: string;",
           "};",
           "if (input.title !== undefined) current = current.rename(input.title);",
+          "async execute(input: UpdateXInput) {",
+          "  await this.transactions.run(async (tx) => {});",
+          "}",
         ),
+      // Issue #215: トランザクションを張らない command（execute の本体に run が無い）。
+      "apps/backend/features/x/internal/application/delete-x.command.ts":
+        source(
+          "export class DeleteXCommand {",
+          "  async execute(id: string): Promise<void> {",
+          "    await this.repository.delete(id, tx);",
+          "  }",
+          "}",
+        ),
+      // query は execute に run が無くても対象外。
       "apps/backend/features/x/internal/application/list-x.query.ts": source(
         "export type ListXResult = { next?: string };",
-        "const items = await this.repository.findAll();",
+        "execute() {",
+        "  return this.repository.findAll();",
+        "}",
       ),
       // 対象外: command のテスト、application の command / query 以外、入れ子、domain・presentation、shared、frontend。
       "apps/backend/features/x/internal/application/update-x.command.test.ts":
@@ -371,11 +624,13 @@ describe("command / query の列挙と検査（fixture）", () => {
       violations: collectUseCaseViolations(root),
     }).toEqual({
       files: [
+        "apps/backend/features/x/internal/application/delete-x.command.ts",
         "apps/backend/features/x/internal/application/list-x.query.ts",
         "apps/backend/features/x/internal/application/rename-x.command.ts",
         "apps/backend/features/x/internal/application/update-x.command.ts",
       ],
       violations: [
+        "command-runs-in-transaction: apps/backend/features/x/internal/application/delete-x.command.ts:2: async execute(id: string): Promise<void> {",
         "no-optional-input-field: apps/backend/features/x/internal/application/update-x.command.ts:3: title?: string;",
         "no-undefined-branch-on-input: apps/backend/features/x/internal/application/update-x.command.ts:5: if (input.title !== undefined) current = current.rename(input.title);",
       ],
@@ -392,7 +647,7 @@ describe("command / query の列挙と検査（fixture）", () => {
 });
 
 describe("1 ユースケース = 1 command（実ファイル）", () => {
-  it("command / query の Input に任意の項目が無く、input の項目の有無で分岐しない", () => {
+  it("command / query の Input に任意の項目が無く、input の項目の有無で分岐せず、command の execute はトランザクション（runner の run）で包む", () => {
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     const files = listUseCaseFiles(repoRoot);
     expect(files).toContain(

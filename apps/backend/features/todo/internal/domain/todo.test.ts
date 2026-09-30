@@ -225,7 +225,7 @@ describe("Todo#changeCompletion", () => {
     ]);
   });
 
-  // WHY 同じ値なら遷移しない: 同じ状態への遷移を積むと履歴にノイズが入る。Todo が同じなら Repository の save も差分が無く
+  // WHY 同じ値なら遷移しない: 同じ状態への遷移を積むと履歴にノイズが入る。Todo が同じなら Repository の update も差分が無く
   //   SQL を発行しない。
   test.each([false, true])(
     "今と同じ値（%s）を渡すと、履歴を足さず同じ Todo を返す（now() も読まない）",
@@ -318,7 +318,7 @@ describe("Todo.reconstruct", () => {
     ]);
   });
 
-  // WHY 凍結する: 履歴は Todo の値で、Todo は不変（todo.ts）。配列や要素を書き換えられると、save の前に保持中の値
+  // WHY 凍結する: 履歴は Todo の値で、Todo は不変（todo.ts）。配列や要素を書き換えられると、update の前に保持中の値
   //   （InMemory）や origin との差分が変わる。
   test("完了の履歴の配列と要素は凍結されていて書き換えられない", () => {
     const todo = Todo.reconstruct({
@@ -467,7 +467,7 @@ describe("Todo.reconstruct", () => {
   });
 });
 
-// origin: 読み込んだとき（reconstruct）の値。Repository の save が「変わった列だけ」を書くために差分を取る（Issue #165）。
+// origin: 読み込んだとき（reconstruct）の値。Repository の update が「変わった列だけ」を書くために差分を取る（Issue #165）。
 describe("Todo#origin", () => {
   const VALUES = {
     id: "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e",
@@ -488,7 +488,7 @@ describe("Todo#origin", () => {
   });
 
   // WHY 検証後の値（trim 後）: 差分は今の値（常に検証後）と比べる。引数のまま持つと、前後に空白のある行を読んで
-  //   何も変えずに save しただけで title が「変わった」ことになる。
+  //   何も変えずに update しただけで title が「変わった」ことになる。
   test("reconstruct した Todo の origin は検証後の値（title は前後の空白を取り除いた値）", () => {
     const todo = Todo.reconstruct({ ...VALUES, title: "  牛乳を買う \n" });
 

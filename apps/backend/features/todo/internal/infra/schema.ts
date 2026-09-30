@@ -36,8 +36,9 @@ export const todos = pgTable("todos", {
 export const todoStatusChanges = pgTable(
   "todo_status_changes",
   {
-    // 行の id。domain（TodoStatusChange）は持たない（履歴は Todo の中の値で、1 件を外から指すことは無い）ので、DB が作る
-    //   （defaultRandom = gen_random_uuid()）。
+    // 行の id。domain（TodoStatusChange）は持たない（履歴は Todo の中の値で、1 件を外から指すことは無い）。アプリの書き込みでは
+    //   Writer（shared/infra/writer.ts）が randomUUID で作る（前のログと変更履歴に INSERT の前の id が要る。Issue #215）。DB の既定値
+    //   （defaultRandom = gen_random_uuid()）は、手で行を足すときとマイグレーション（既存の Todo の履歴の補完）のために残す。
     id: uuid("id").primaryKey().defaultRandom(),
     // 親の Todo の id。外部キー（references todos(id) on delete cascade）は、ここで .references() と書かず、手書きの
     //   マイグレーション（shared/drizzle/0002_todo_status_changes_foreign_key_and_backfill.sql）で張る。
@@ -62,9 +63,9 @@ export const todoStatusChanges = pgTable(
     }).notNull(),
   },
   (table) => [
-    // WHY (todo_id, position) の一意制約: 同じ Todo を 2 か所で読み込み、両方で完了状態を変えて save すると、どちらも
+    // WHY (todo_id, position) の一意制約: 同じ Todo を 2 か所で（ロックせずに）読み込み、両方で完了状態を変えて update すると、どちらも
     //   「読み込んだときの履歴の次」に足そうとする。両方を足すと、足した順と今の completed がずれうる（読めない Todo になる）。
-    //   一意制約なら 2 回目の save は一意制約違反（SQLSTATE 23505）で失敗し、同じトランザクションの todos の UPDATE も戻る。
+    //   一意制約なら 2 回目の update は一意制約違反（SQLSTATE 23505）で失敗し、同じトランザクションの todos の UPDATE も戻る。
     // この index は todo_id で始まるので、Repository が todo_id で履歴を読む検索（where todo_id in (...)）にも使われる。
     uniqueIndex("todo_status_changes_todo_id_position_index").on(
       table.todoId,

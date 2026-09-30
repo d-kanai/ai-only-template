@@ -1,8 +1,13 @@
 // @vitest-environment node
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";
 import type { Problem } from "../../../../shared/presentation/problem";
 import { InMemoryTodoRepository } from "../../../../test-support/todo/todo-repository.in-memory";
+import {
+  InMemoryTransactionRunner,
+  inMemoryTransaction,
+} from "../../../../test-support/transaction-runner.in-memory";
 import { ChangeTodoCompletionCommand } from "../application/change-todo-completion.command";
 import { Todo } from "../domain/todo";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
@@ -17,12 +22,16 @@ import {
 async function setup() {
   const repository = new InMemoryTodoRepository();
   const todo = Todo.create("牛乳を買う");
-  await repository.save(todo);
+  await repository.insert(todo, inMemoryTransaction);
   return {
     repository,
     todo,
     PUT: new ChangeTodoCompletionApi(
-      new ChangeTodoCompletionCommand(repository, ignoreNotification),
+      new ChangeTodoCompletionCommand(
+        repository,
+        new InMemoryTransactionRunner(),
+        ignoreNotification,
+      ),
     ).handle,
   };
 }
@@ -84,7 +93,9 @@ function spiedRepository() {
   return {
     repository,
     findById: vi.spyOn(repository, "findById"),
-    save: vi.spyOn(repository, "save"),
+    findByIdOrThrow: vi.spyOn(repository, "findByIdOrThrow"),
+    insert: vi.spyOn(repository, "insert"),
+    update: vi.spyOn(repository, "update"),
     delete: vi.spyOn(repository, "delete"),
   };
 }
@@ -140,14 +151,20 @@ describe("PUT /api/todos/:id/completion", () => {
   });
 
   // WHY 本番の PUT（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない（Issue #59）
-  //   ことを、Postgres の Repository が呼ばれることで固定する。findById と save を差し替えるので DB には接続しない。
-  test("本番の PUT は Postgres の Repository に保存する", async () => {
+  //   ことを、Postgres の Repository が呼ばれることで固定する。runner の run と findByIdOrThrow と update を差し替えるので DB には接続しない。
+  test("本番の PUT は Postgres の runner が張ったトランザクションで、Postgres の Repository に保存する", async () => {
     const todo = Todo.create("牛乳を買う");
-    vi.spyOn(PostgresTodoRepository.prototype, "findById").mockResolvedValue(
-      todo,
-    );
-    const save = vi
-      .spyOn(PostgresTodoRepository.prototype, "save")
+    // WHY runner の run を差し替える: 本番の組み立ての PostgresTransactionRunner が DB に接続しないよう、work を呼ぶだけにする。
+    //   run が 1 回呼ばれ、Repository がその tx を受け取ることで、本番の command がトランザクションを張ることも確かめる。
+    const run = vi
+      .spyOn(PostgresTransactionRunner.prototype, "run")
+      .mockImplementation((work) => work(inMemoryTransaction));
+    vi.spyOn(
+      PostgresTodoRepository.prototype,
+      "findByIdOrThrow",
+    ).mockResolvedValue(todo);
+    const update = vi
+      .spyOn(PostgresTodoRepository.prototype, "update")
       .mockResolvedValue();
     // 完了にすると通知のログが 1 行出る（下のテストで確かめる）。ここではテストの出力に出さないためだけに差し替える。
     vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -158,22 +175,28 @@ describe("PUT /api/todos/:id/completion", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(save).toHaveBeenCalledTimes(1);
-    expect(save.mock.calls[0]?.[0]).toMatchObject({
-      id: todo.id,
-      completed: true,
-    });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update.mock.calls[0]).toEqual([
+      expect.objectContaining({ id: todo.id, completed: true }),
+      inMemoryTransaction,
+    ]);
   });
 
   // WHY 本番の PUT の通知をログの行で確かめる: 組み立てで渡す関数（notification の expose の notify）は api ファイルの中の
   //   値で、外から差し替えも参照もできない。notify は通知をログ（console.log の JSON 1 行）に出すので、本番の PUT で完了にした
-  //   後にその行が出れば、notification の expose につながっていることが分かる。findById と save を差し替えるので DB には接続しない。
+  //   後にその行が出れば、notification の expose につながっていることが分かる。runner の run と findByIdOrThrow と update を
+  //   差し替えるので DB には接続しない。
   test("本番の PUT は、未完了の Todo を完了にすると notification の expose で Todo completed: <id> を通知する（ログの 1 行）", async () => {
     const todo = Todo.create("牛乳を買う");
-    vi.spyOn(PostgresTodoRepository.prototype, "findById").mockResolvedValue(
-      todo,
+    vi.spyOn(PostgresTransactionRunner.prototype, "run").mockImplementation(
+      (work) => work(inMemoryTransaction),
     );
-    vi.spyOn(PostgresTodoRepository.prototype, "save").mockResolvedValue();
+    vi.spyOn(
+      PostgresTodoRepository.prototype,
+      "findByIdOrThrow",
+    ).mockResolvedValue(todo);
+    vi.spyOn(PostgresTodoRepository.prototype, "update").mockResolvedValue();
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
     const response = await productionPut(
@@ -223,14 +246,20 @@ describe("PUT /api/todos/:id/completion", () => {
     async (_idLabel, _bodyLabel, id, requestBody) => {
       const { repository, ...spies } = spiedRepository();
       const PUT = new ChangeTodoCompletionApi(
-        new ChangeTodoCompletionCommand(repository, ignoreNotification),
+        new ChangeTodoCompletionCommand(
+          repository,
+          new InMemoryTransactionRunner(),
+          ignoreNotification,
+        ),
       ).handle;
 
       const response = await PUT(putRequest(id, requestBody), context(id));
 
       await expectProblem(response, notFoundProblem(id));
       expect(spies.findById).not.toHaveBeenCalled();
-      expect(spies.save).not.toHaveBeenCalled();
+      expect(spies.findByIdOrThrow).not.toHaveBeenCalled();
+      expect(spies.insert).not.toHaveBeenCalled();
+      expect(spies.update).not.toHaveBeenCalled();
       expect(spies.delete).not.toHaveBeenCalled();
     },
   );

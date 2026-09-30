@@ -9,6 +9,8 @@ export type SendNotificationInput = {
 export class SendNotificationCommand {
   constructor(private readonly sender: NotificationSender) {}
 
+  // WHY トランザクション無し: 通知は送信の口（NotificationSender。今はログに出すだけ）を呼ぶだけで、DB に読み書きしない（Repository を
+  //   持たない）。トランザクションを張ると接続を 1 本占有するだけになる（rule-tests/use-case.test.ts の command-runs-in-transaction）。
   async execute(input: SendNotificationInput): Promise<void> {
     await this.sender.send(input.message);
   }

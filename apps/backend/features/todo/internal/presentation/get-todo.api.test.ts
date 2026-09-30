@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { Problem } from "../../../../shared/presentation/problem";
 import { InMemoryTodoRepository } from "../../../../test-support/todo/todo-repository.in-memory";
+import { inMemoryTransaction } from "../../../../test-support/transaction-runner.in-memory";
 import { GetTodoQuery } from "../application/get-todo.query";
 import { Todo } from "../domain/todo";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
@@ -68,7 +69,9 @@ function spiedRepository() {
   return {
     repository,
     findById: vi.spyOn(repository, "findById"),
-    save: vi.spyOn(repository, "save"),
+    findByIdOrThrow: vi.spyOn(repository, "findByIdOrThrow"),
+    insert: vi.spyOn(repository, "insert"),
+    update: vi.spyOn(repository, "update"),
     delete: vi.spyOn(repository, "delete"),
   };
 }
@@ -84,7 +87,7 @@ describe("GET /api/todos/:id", () => {
   test("200 と Todo（GetTodoResponse）を返す", async () => {
     const { repository, GET } = setup();
     const todo = Todo.create("牛乳を買う");
-    await repository.save(todo);
+    await repository.insert(todo, inMemoryTransaction);
 
     const response = await GET(getRequest(todo.id), context(todo.id));
 
@@ -99,7 +102,7 @@ describe("GET /api/todos/:id", () => {
   });
 
   // WHY 本番の GET（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない（Issue #59）
-  //   ことを、Postgres の Repository が呼ばれることで固定する。findById をを差し替えるので DB には接続しない。
+  //   ことを、Postgres の Repository が呼ばれることで固定する。findById を差し替えるので DB には接続しない。
   test("本番の GET は Postgres の Repository から読む", async () => {
     const todo = Todo.create("牛乳を買う");
     const findById = vi
@@ -132,7 +135,9 @@ describe("GET /api/todos/:id", () => {
 
       await expectProblem(response, notFoundProblem(id));
       expect(spies.findById).not.toHaveBeenCalled();
-      expect(spies.save).not.toHaveBeenCalled();
+      expect(spies.findByIdOrThrow).not.toHaveBeenCalled();
+      expect(spies.insert).not.toHaveBeenCalled();
+      expect(spies.update).not.toHaveBeenCalled();
       expect(spies.delete).not.toHaveBeenCalled();
     },
   );

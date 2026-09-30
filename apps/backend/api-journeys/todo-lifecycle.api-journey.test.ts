@@ -38,6 +38,7 @@ import {
 } from "../features/todo/internal/presentation/rename-todo.api";
 import type { ChangeEntry } from "../shared/infra/change-log";
 import { changeLogs } from "../shared/infra/schema";
+import { PostgresTransactionRunner } from "../shared/infra/transaction.postgres";
 import type { Problem } from "../shared/presentation/problem";
 import {
   createTestDatabase,
@@ -101,19 +102,25 @@ afterAll(async () => {
 // WHY 名前を HTTP メソッドで始める（postTodo・putTitle・deleteTodo、読み取りは getTodo・listTodos）: rule-tests/api-journey.test.ts
 //   が呼び出しの名前で変更系（post / put / patch / delete）を見分け、その後に DB の読み取りがあるかを検査する（.claude/rules/testing.md
 //   の「API ジャーニーテスト」）。
+// 書き込みの command には、本番と同じくトランザクションを張る PostgresTransactionRunner を同じ db で渡す（Issue #215）。
 function api() {
   const repository = new PostgresTodoRepository(database.db);
+  const transactions = new PostgresTransactionRunner(database.db);
   return {
-    postTodo: new CreateTodoApi(new CreateTodoCommand(repository)).handle,
+    postTodo: new CreateTodoApi(new CreateTodoCommand(repository, transactions))
+      .handle,
     listTodos: new ListTodosApi(new ListTodosQuery(repository)).handle,
     getTodo: new GetTodoApi(new GetTodoQuery(repository)).handle,
-    putTitle: new RenameTodoApi(new RenameTodoCommand(repository)).handle,
+    putTitle: new RenameTodoApi(new RenameTodoCommand(repository, transactions))
+      .handle,
     putCompletion: new ChangeTodoCompletionApi(
-      new ChangeTodoCompletionCommand(repository, (message) => {
+      new ChangeTodoCompletionCommand(repository, transactions, (message) => {
         notifications.push(message);
       }),
     ).handle,
-    deleteTodo: new DeleteTodoApi(new DeleteTodoCommand(repository)).handle,
+    deleteTodo: new DeleteTodoApi(
+      new DeleteTodoCommand(repository, transactions),
+    ).handle,
   };
 }
 

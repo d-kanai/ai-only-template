@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
 import { InMemoryTodoRepository } from "../../../../test-support/todo/todo-repository.in-memory";
+import { inMemoryTransaction } from "../../../../test-support/transaction-runner.in-memory";
 import { Todo } from "../domain/todo";
 import { ListTodosQuery } from "./list-todos.query";
 
@@ -17,8 +18,8 @@ describe("ListTodosQuery", () => {
     const repository = new InMemoryTodoRepository();
     const first = Todo.create("牛乳を買う");
     const second = Todo.create("卵を買う");
-    await repository.save(first);
-    await repository.save(second);
+    await repository.insert(first, inMemoryTransaction);
+    await repository.insert(second, inMemoryTransaction);
 
     const todos = await new ListTodosQuery(repository).execute();
 

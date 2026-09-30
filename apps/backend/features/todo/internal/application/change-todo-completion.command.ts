@@ -1,3 +1,4 @@
+import type { TransactionRunner } from "../../../../shared/domain/transaction";
 import type { Todo } from "../domain/todo";
 import type { TodoRepository } from "../domain/todo-repository";
 
@@ -18,18 +19,26 @@ export type NotifyTodoCompleted = (message: string) => void;
 
 // Todo を完了にする / 未完了に戻して保存する（command: 状態を変える）。未完了から完了に変わったときは通知する。
 // WHY 名前の変更（rename-todo.command.ts）と分ける: rename-todo.command.ts の RenameTodoCommand のコメント。
+// WHY transactions を受け取り run で包む: rename-todo.command.ts の RenameTodoCommand のコメント。transactions は Repository の次
+//   （組み立ての順を Repository → トランザクション → 他のモジュールの口にそろえる）。
 export class ChangeTodoCompletionCommand {
   constructor(
     private readonly repository: TodoRepository,
+    private readonly transactions: TransactionRunner,
     private readonly notifyCompleted: NotifyTodoCompleted,
   ) {}
 
   async execute(input: ChangeTodoCompletionInput): Promise<Todo> {
-    // 無い id は findByIdOrThrow が not_found の DomainError を投げる（API で 404）。
-    const current = await this.repository.findByIdOrThrow(input.id);
-    const changed = current.changeCompletion(input.completed);
-    await this.repository.save(changed);
-    // WHY 保存の後: 保存に失敗した（完了になっていない）Todo の完了を知らせない。
+    const { current, changed } = await this.transactions.run(async (tx) => {
+      // 無い id は findByIdOrThrow が not_found の DomainError を投げる（API で 404）。
+      const current = await this.repository.findByIdOrThrow(input.id, tx);
+      const changed = current.changeCompletion(input.completed);
+      await this.repository.update(changed, tx);
+      return { current, changed };
+    });
+    // WHY 保存の後（run が resolve した = COMMIT した後。トランザクションの外）: 保存に失敗した・COMMIT が失敗して戻った
+    //   （完了になっていない）Todo の完了を知らせない（Issue #215）。通知は同期の fire-and-forget で、トランザクションの接続を
+    //   通知の間は占有しない。
     // WHY 未完了 → 完了に変わったときだけ: PUT は冪等で、同じ要求を 2 回送っても通知は 1 回にする。未完了に戻すときは知らせない。
     // WHY 本文は id だけの英語: title などの利用者の値をログに出さない（通知は今はログに出るだけ）。
     if (!current.completed && changed.completed) {

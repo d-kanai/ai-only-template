@@ -1,7 +1,7 @@
 # Repository の書き込みは唯一の入口 writeInTransaction を通し、その前後に 1 行ずつログを自動で出す
 
 - 日付: 2026-09-30
-- 状態: 採用
+- 状態: 置き換え（→ architecture/20260930-transaction-from-application.md）
 - 関連: Issue #205 / `.claude/rules/backend.md` / `rule-tests/persistence.test.ts` / `apps/backend/shared/infra/write.ts` / `apps/backend/features/todo/infra/todo-repository.postgres.ts` / ADR `architecture/20260930-change-logs-written-by-repository.md` / ADR `architecture/20260929-logger-single-exit.md`
 
 ## 背景

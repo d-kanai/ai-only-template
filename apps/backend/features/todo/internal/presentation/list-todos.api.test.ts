@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { InMemoryTodoRepository } from "../../../../test-support/todo/todo-repository.in-memory";
+import { inMemoryTransaction } from "../../../../test-support/transaction-runner.in-memory";
 import { ListTodosQuery } from "../application/list-todos.query";
 import { Todo } from "../domain/todo";
 import type { TodoRepository } from "../domain/todo-repository";
@@ -29,7 +30,8 @@ function failingRepository(error: Error): TodoRepository {
     findAll: () => Promise.reject(error),
     findById: () => Promise.reject(error),
     findByIdOrThrow: () => Promise.reject(error),
-    save: () => Promise.reject(error),
+    insert: () => Promise.reject(error),
+    update: () => Promise.reject(error),
     delete: () => Promise.reject(error),
   };
 }
@@ -71,8 +73,8 @@ describe("GET /api/todos", () => {
     const { repository, GET } = setup();
     const first = Todo.create("牛乳を買う");
     const second = Todo.create("卵を買う").changeCompletion(true);
-    await repository.save(first);
-    await repository.save(second);
+    await repository.insert(first, inMemoryTransaction);
+    await repository.insert(second, inMemoryTransaction);
 
     const response = await GET(listRequest());
 
