@@ -1,6 +1,13 @@
 # GitHub Actions から GCP にデプロイするための Workload Identity Federation（WIF）と、デプロイ用のサービスアカウント。
 # WHY WIF（鍵ファイルを使わない）: GitHub の OIDC トークンを短期の GCP のトークンに交換するので、長期の鍵を GitHub の Secrets に
 #   置かずに済む（漏れても使える期間が短く、ローテーションも要らない）。
+# WHY 環境（プロジェクト）ごとに作る: stg と prod は別の GCP プロジェクトで、pool・provider・deployer もその中にある。stg の
+#   deployer に prod を触る権限は無い。
+
+locals {
+  # デプロイを許す git の ref。deploy.yml の job の if（github.ref == 'refs/heads/main'）と同じ（変えるときは両方）。
+  github_deploy_ref = "refs/heads/main"
+}
 
 resource "google_iam_workload_identity_pool" "github" {
   workload_identity_pool_id = "github"
@@ -26,9 +33,20 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   # github_repository_id を設定したら、数値の repository id の一致も求める。WHY: リポジトリ名は、リポジトリを消した後に第三者が
   #   同じ名前で作り直せる。id は GitHub が一意で再利用しないと保証している（google-github-actions/auth の
   #   docs/SECURITY_CONSIDERATIONS.md「Use GitHub's Numeric, Immutable Values」）。id は文字列の claim なので引用符で比べる。
+  # ref（refs/heads/main）: main のワークフローのトークンだけを受け付ける。WHY: stg も prod も main からしか出さない
+  #   （deploy.yml の job の if も main に限る）。ここで絞らないと、main 以外のブランチに push したワークフロー（レビューも CI も
+  #   通っていないコード）が deployer になりすませる（job の if はそのワークフローの中の条件で、ブランチ側で書き換えられる）。
+  # environment（GitHub Environment の名前 = var.github_environment）: その Environment を参照した job のトークンだけを受け付ける。
+  #   WHY: prod の Environment に required reviewers を付けたとき、承認を通らない job（environment を書かないワークフローや、
+  #   environment: stg の job）が prod のプロジェクトに入れないようにする。Variables は秘密ではないので、prod の WIF の値は
+  #   誰でも書ける。GitHub の OIDC トークンの environment の claim は「job が使う Environment の名前」
+  #   （https://docs.github.com/en/actions/reference/security/oidc 、2026-09-30 確認）。未確認: environment を参照しない job の
+  #   トークン（claim が無い）が実際に拒否されること（初回のデプロイの後に確かめる。.claude/skills/deploy/SKILL.md）。
   attribute_condition = join(" && ", compact([
     "assertion.repository == \"${var.github_repository}\"",
     var.github_repository_id == null ? null : "assertion.repository_id == \"${var.github_repository_id}\"",
+    "assertion.ref == \"${local.github_deploy_ref}\"",
+    "assertion.environment == \"${var.github_environment}\"",
   ]))
 
   oidc {
@@ -44,10 +62,8 @@ resource "google_service_account" "deployer" {
 }
 
 # このリポジトリのワークフローに、deployer へのなりすましを許す。
-# 注意: principalSet はリポジトリ単位なので、main 以外のブランチのワークフロー（ブランチに push したワークフローの変更も含む）も
-#   deployer になりすませる（deploy.yml の job の if で main に限っているのは、このワークフローの中だけ）。WHY 今は ref で絞らない:
-#   リポジトリに push できる人は main にもマージできる（信頼の境界が同じ）。絞るなら attribute.ref（refs/heads/main）に限った
-#   principalSet にする。
+# principalSet はリポジトリ単位だが、上の provider の attribute_condition が main（ref）と Environment に合わないトークンを
+#   交換の時点で拒否するので、なりすませるのは「main の、この環境の Environment を参照した job」だけになる。
 resource "google_service_account_iam_member" "deployer_wif" {
   service_account_id = google_service_account.deployer.name
   role               = "roles/iam.workloadIdentityUser"

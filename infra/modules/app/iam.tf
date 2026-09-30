@@ -3,10 +3,10 @@
 # WHY service ごとに分ける: 読める Secret を必要なものだけにする（Metabase にアプリの DB のパスワードを読ませない、
 #   アプリに Metabase の DB のパスワードと暗号化キーを読ませない）。
 
-# 本番の frontend-customer と migrate ジョブ。
+# アプリ（frontend-customer）と migrate ジョブ。
 resource "google_service_account" "run_customer" {
-  account_id   = "run-frontend-customer"
-  display_name = "Cloud Run: frontend-customer（本番）と migrate ジョブ"
+  account_id   = "run-${var.name_prefix}"
+  display_name = "Cloud Run: ${var.name_prefix} と migrate ジョブ"
   depends_on   = [google_project_service.apis]
 }
 

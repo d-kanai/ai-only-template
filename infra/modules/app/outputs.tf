@@ -1,9 +1,11 @@
-# apply の後に使う値。`terraform output` で表示する（infra/README.md の初回手順）。
+# apply の後に使う値。infra/envs/<環境>/outputs.tf がそのまま外に出し、`terraform output` で表示する（infra/README.md の初回手順）。
 
-# GitHub の Repository variables にそのまま設定する値（deploy.yml が vars.<名前> で読む）。
-# WHY Variables（Secrets ではない）: どれも秘密ではない（WIF なので鍵は無い）。ログに出ても困らず、ワークフローの if でも読める。
+# GitHub の Environment（var.github_environment。stg / prod）の Variables にそのまま設定する値（deploy.yml が vars.<名前> で読む）。
+# WHY Environment ごと（Repository variables ではない）: 名前は同じで値が環境ごとに違う。deploy.yml の job が
+#   environment: stg / prod を参照すると、vars.<名前> はその Environment の値になる。
+# WHY Variables（Secrets ではない）: どれも秘密ではない（WIF なので鍵は無い）。ログに出ても困らない。
 output "github_variables" {
-  description = "GitHub の Settings > Secrets and variables > Actions > Variables に設定する値"
+  description = "GitHub の Settings > Environments > <環境> > Environment variables に設定する値"
   value = {
     GCP_PROJECT_ID   = var.project_id
     GCP_REGION       = var.region

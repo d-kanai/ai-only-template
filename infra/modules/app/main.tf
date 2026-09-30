@@ -1,4 +1,6 @@
 # 共通の名前、API の有効化、Artifact Registry。
+# この module（infra/modules/app）が 1 環境（1 つの GCP プロジェクト）分の器をすべて作る。stg / prod は infra/envs/<環境> から
+#   同じ module を別の project_id で呼ぶ（環境ごとの差は変数だけ。variables.tf）。
 # 構成の全体と WHY は docs/adr/tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md、手順は infra/README.md と
 #   .claude/skills/deploy/SKILL.md。
 # WHY Terraform は「器」だけ: イメージとトラフィック（どのリビジョンに流すか）はデプロイのたびに変わるので、GitHub Actions の
@@ -6,9 +8,11 @@
 #   （Cloud Run の service / job は lifecycle.ignore_changes でイメージとトラフィックの差分を無視する）。
 
 locals {
-  # Cloud Run の service / job の名前。.github/workflows/deploy.yml も同じ名前を使う（変えるときは両方）。
-  customer_service = "frontend-customer"
-  migrate_job      = "frontend-customer-migrate"
+  # Cloud Run の service / job の名前。.github/workflows/deploy.yml も同じ名前を使う（name_prefix を変えるときは両方）。
+  # WHY 環境名（stg / prod）を名前に入れない: 環境ごとにプロジェクトが別なので、同じ名前でもぶつからない。名前をそろえると、
+  #   deploy.yml・スキルの gcloud のコマンドが環境によらず同じになる（違うのはプロジェクトだけ）。
+  customer_service = var.name_prefix
+  migrate_job      = "${var.name_prefix}-migrate"
   metabase_service = "metabase"
 
   # Artifact Registry のリポジトリ名。イメージは <region>-docker.pkg.dev/<project>/app/<イメージ名>:<git の sha>。
@@ -44,7 +48,7 @@ resource "google_artifact_registry_repository" "app" {
   repository_id = local.artifact_repository
   location      = var.region
   format        = "DOCKER"
-  description   = "frontend-customer の runtime / migrate イメージ（GitHub Actions が push する）"
+  description   = "${var.name_prefix} の runtime / migrate イメージ（GitHub Actions が push する）"
 
   # 古いイメージを消す。WHY: main への push ごとにイメージが増え（migrate イメージは約 385MB。2026-09-30 の
   #   work-logs）、保存量に課金される。Cloud Run はデプロイ時にイメージを取り込むので、デプロイ済みのリビジョンは

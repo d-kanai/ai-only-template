@@ -1,4 +1,4 @@
-# Cloud Run: frontend-customer（本番）と migrate ジョブ。
+# Cloud Run: アプリ（frontend-customer）と migrate ジョブ。
 # Metabase は metabase.tf。イメージは GitHub Actions が入れ替える（.github/workflows/deploy.yml）。
 
 locals {
@@ -16,21 +16,22 @@ locals {
 #   無視しないと次の terraform plan が毎回それを戻す差分を出す。traffic は、ロールバック（update-traffic --to-revisions）と
 #   deploy.yml の LATEST への切り替え（update-traffic --to-latest）を gcloud が書く。
 
-# 本番の frontend-customer（Next.js の standalone。Dockerfile の runtime ステージ）。
+# アプリの frontend-customer（Next.js の standalone。Dockerfile の runtime ステージ）。
 resource "google_cloud_run_v2_service" "customer" {
   name     = local.customer_service
   location = var.region
   # 外部からの HTTP を受ける（公開サイト）。
   ingress = "INGRESS_TRAFFIC_ALL"
-  # Terraform からの削除を拒否する（URL が変わるのを防ぐ）。
-  deletion_protection = true
+  # Terraform からの削除を拒否する（URL が変わるのを防ぐ）。stg では外せる（variables.tf の deletion_protection）。
+  deletion_protection = var.deletion_protection
 
   template {
     service_account = google_service_account.run_customer.email
 
     scaling {
-      # 0: アクセスが無いときは課金されない（代わりに最初のリクエストでコールドスタートを待つ）。
-      min_instance_count = 0
+      # 既定 0: アクセスが無いときは課金されない（代わりに最初のリクエストでコールドスタートを待つ）。
+      #   prod でコールドスタートを無くしたいときは 1 にする（variables.tf の customer_min_instances）。
+      min_instance_count = var.customer_min_instances
       # 3: 接続数の予算（sql.tf）で、3 インスタンス x プール 3 = 9 接続まで。
       max_instance_count = 3
     }
@@ -136,13 +137,13 @@ resource "google_cloud_run_v2_service_iam_member" "public" {
 }
 
 # マイグレーション（Dockerfile の migrate ステージ。`pnpm db:migrate` = drizzle-kit migrate）を 1 回実行するジョブ。
-# deploy.yml が main のデプロイのたびに、イメージを入れ替えて（jobs update）から実行し（jobs execute --wait）、成功したら
+# deploy.yml がデプロイのたびに、イメージを入れ替えて（jobs update）から実行し（jobs execute --wait）、成功したら
 #   service をデプロイする。WHY アプリの起動時に migrate しない: 複数インスタンスが同時に当てるのを避け、失敗したら
 #   新しいリビジョンを出さずに止めるため（.claude/skills/db-migration/SKILL.md「アプリの起動で migrate しない」）。
 resource "google_cloud_run_v2_job" "migrate" {
   name                = local.migrate_job
   location            = var.region
-  deletion_protection = true
+  deletion_protection = var.deletion_protection
 
   template {
     # 1 タスクだけ（同じマイグレーションを並列に当てない）。

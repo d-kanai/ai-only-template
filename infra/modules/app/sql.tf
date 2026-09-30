@@ -43,7 +43,8 @@ resource "google_sql_database_instance" "main" {
   database_version = "POSTGRES_18"
   # Terraform からの削除（destroy や作り直しになる変更）を拒否する。下の deletion_protection_enabled は GCP 側の保護で、
   #   コンソールや gcloud からの削除も拒否する。WHY 両方: データを持つ唯一の resource で、消すと戻せない（バックアップも消える）。
-  deletion_protection = true
+  # stg では外せる（variables.tf の deletion_protection。作り直しを試すとき）。
+  deletion_protection = var.deletion_protection
 
   settings {
     # WHY ENTERPRISE を明示: PostgreSQL 16 以降は、指定しないと Enterprise Plus（高価で db-f1-micro を使えない）になる
@@ -51,17 +52,18 @@ resource "google_sql_database_instance" "main" {
     edition = "ENTERPRISE"
     # WHY db-f1-micro（共有コア、RAM 0.6GB、max_connections 25）: 試用の段階で最も安い（#129 のコメントの料金比較で月 約 $12）。
     #   SLA の対象外。接続数の配分は下の「接続数の予算」と docs/adr/tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md。
-    #   足りなくなったら db-g1-small（+約 $18/月）か専用コアにする。
+    #   足りなくなったら db-g1-small（+約 $18/月）か専用コアにする（環境ごとに variables.tf の sql_tier で変える）。
+    #   tier を変えると max_connections も変わるので、下の予算を見直す。
     # 接続数の予算（max_connections 25 のうち、PostgreSQL の既定で 3 はスーパーユーザー用に予約）:
-    #   本番 3 インスタンス x 3 = 9、migrate 1、Metabase 1 インスタンス x（アプリ DB 3 + 分析 3）= 6、
+    #   アプリ 3 インスタンス x 3 = 9、migrate 1、Metabase 1 インスタンス x（アプリ DB 3 + 分析 3）= 6、
     #   残り 約 6 を Data Studio・psql・MCP に使う。
-    tier              = "db-f1-micro"
+    tier              = var.sql_tier
     availability_type = "ZONAL" # 1 ゾーン。REGIONAL（HA）は料金が約 2 倍になるので試用では使わない。
     disk_type         = "PD_SSD"
     disk_size         = 10   # GB。最小。
     disk_autoresize   = true # 足りなくなったら自動で増やす（減らせない）。
     # GCP 側の削除保護（上の deletion_protection の WHY）。
-    deletion_protection_enabled = true
+    deletion_protection_enabled = var.deletion_protection
     # Cloud SQL の Data API（ExecuteSql）を許す。WHY: Cloud SQL のリモート MCP の execute_sql / execute_sql_readonly は、
     #   これが ALLOW_DATA_API でないと動かない（https://docs.cloud.google.com/sql/docs/postgres/use-cloudsql-mcp）。
     #   実行できるのは IAM の権限（cloudsql.instances.executeSql）を持つ IAM データベース認証のユーザーだけ。
@@ -75,7 +77,7 @@ resource "google_sql_database_instance" "main" {
       # バックアップの開始時刻（UTC）。18:00 UTC = 03:00 JST（利用の少ない時間）。
       start_time = "18:00"
       backup_retention_settings {
-        retained_backups = 7 # 7 世代（7 日分）。
+        retained_backups = var.sql_backup_retained_count # 日次なので、世代数 = 日数（既定 7。variables.tf）。
       }
     }
 
@@ -108,7 +110,7 @@ resource "google_sql_database_instance" "main" {
   depends_on = [google_project_service.apis]
 }
 
-# 本番のアプリの DB。
+# アプリの DB。
 resource "google_sql_database" "app" {
   name     = "app"
   instance = google_sql_database_instance.main.name
@@ -155,7 +157,7 @@ resource "google_sql_user" "iam" {
 # 接続情報の Secret。値は write-only（secret_data_wo）で送り、state に残さない。
 # replication auto: Google がレプリカの場所を決める（最も安く、リージョンを選ぶ理由が無い）。
 
-# 本番の DATABASE_URL（Cloud Run の本番 service と migrate ジョブが読む）。
+# アプリの DATABASE_URL（Cloud Run のアプリの service と migrate ジョブが読む）。
 # WHY URL 全体を Secret に入れる（パスワードだけにしない）: アプリは DATABASE_URL の 1 つだけを読む（apps/shared/env.ts）。
 #   Cloud Run の環境変数は「Secret の値」か「固定の文字列」のどちらかで、Secret の値を文字列に埋め込んで組み立てられない。
 #   パスワードだけを Secret にすると、アプリ側に URL を組み立てるコードと環境変数（ホスト・DB 名など）が増える。
