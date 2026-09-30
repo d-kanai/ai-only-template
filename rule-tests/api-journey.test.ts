@@ -42,6 +42,40 @@ import { afterAll, describe, expect, it } from "vitest";
 //       だと loadFeature が読むファイルが無い。対の名前にそろえると、どの .feature をどのテストが実行するかがファイル名で分かる。
 //     限界: step のファイルが loadFeature に渡すパスが対の .feature かは見ない（別の .feature を読んでも通る）。.feature の中身
 //       （シナリオの数・step の書き方）も見ない（step の不足は vitest-cucumber が読み込み時に失敗にする）。
+//   以下は .feature（apps/backend/api-journeys/ の直下の *.feature）の中身の規則（Issue #217）:
+//   - api-journey-business-language: `#` のコメント行（仕切りの行は除く）と空行を除くすべての行（Feature / Background / Scenario /
+//     Rule などの見出し、step（Given / When / Then / And / But / `*`）、説明の行・表の行、仕切り `# ───── <見出し> ─────` も）に、
+//     FORBIDDEN_WORDS_IN_FEATURE の禁止語のどれかが含まれると違反（1 行 1 件。行はその行）。大文字小文字は区別しない（`Db` も違反）。
+//     WHY: .feature は業務の仕様として、開発者でない人（業務の担当者・利用者）も読むもの。「DB」「返り値」「状態 201」のような技術の
+//       言葉が混ざると、読める人が絞られ、業務の流れがどこに書いてあるかも埋もれる。技術の検証（状態コード・応答の形・DB の行）は
+//       step の実装（*.api-journey.test.ts）に閉じ、.feature には業務の言葉で「何が起きるか」だけを書く（ユーザー判断、Issue #217）。
+//     WHY 見出しと step 以外の行（説明・表）も見る: 業務の言葉にしたいのは読者が読む行すべてで、見出しと step だけにすると、説明の
+//       行や表（`| id | title |`）に書いた技術の言葉が素通りする。見ない（読者向けでない）のは、仕切りでない `#` のコメント行だけ。
+//     WHY コメント行を見ない: ファイル冒頭の技術の説明（step の実装の場所・vitest-cucumber の制約）は開発者向けのメモで、Gherkin では
+//       実行にも仕様にも含まれない。
+//     WHY 仕切りの見出しは見る（reviewer の指摘、Issue #217）: 仕切りは `#` で始まるが、読者が拾い読みする業務の動作の見出し。見ないと
+//       技術の言葉を見出しに移すだけで検査を逃れられる（`# ───── POST /api/todos で DB に insert ─────` が違反 0 件だった）。
+//     WHY 3 桁の数（1xx〜5xx）を HTTP の状態コードとして止め、後ろに「文字」「件」「行」が続くものは許す: 状態コードは「201」「404」の
+//       ように数だけで書かれ、`状態` などの前置きが無くても技術の言葉になる。一方で業務の数（「100 文字のタイトル」「200 件の一覧」
+//       「300 行のメモ」）は 3 桁でもありうり、数えるものの単位（助数詞）が後ろに付く。状態コードの後ろに助数詞は付かないので、
+//       助数詞の有無で分ける。許す助数詞は今の業務で使うものだけにし、要るようになったら FORBIDDEN_WORDS_IN_FEATURE の除外に足す
+//       （「円」「個」などを最初から広く許すと、「200 個」のような書き方で状態コードを紛れ込ませる余地が増える）。
+//     WHY 引用符の中（step の値。"牛乳を買う"）も見る: 値も読者が読む仕様の一部。技術の言葉を含む値が要るときは別の値を選ぶ。
+//   - api-journey-section-divider: シナリオ（Scenario / Scenario Outline / Scenario Template / Example）の中の When の行の直前の
+//     行（空行を挟まない）が、仕切り `# ───── <見出し> ─────`（字下げは任意。`#`・空白 1 つ・`─` 5 つ・空白 1 つ・空白と `─` で始まり
+//     終わらない見出し・空白 1 つ・`─` 5 つで行が終わる）でなければ違反（行は When の行）。形の違うもの（`─` の数が違う・見出しが
+//     空・`#` の後に空白が無い・`-` や `━`・後ろに文字や空白がある）も違反。Background の中の When は見ない。
+//     WHY: API を呼ぶ step（When）の前に業務の動作の名前（「Todo を作る」「一覧を見る」）の仕切りを置くと、長いシナリオでも、どこで
+//       何をしているかを見出しで拾い読みできる（ユーザー判断、Issue #217）。
+//     WHY 形を 1 つに固定する: 形が揺れると見た目がそろわず拾い読みしにくい。検査も「仕切りかどうか」を 1 つの正規表現で決められる。
+//     WHY Background の When は見ない: Background は各シナリオの前提（表を空にする）で、業務の動作の区切りではない（今は Background に
+//       When は無い）。
+//     限界: 仕切りを付けるのは When の直前だけで、仕切りが When 以外（Given・Then・Background の中）の前にあっても止めない。API を
+//       呼ぶ step を When 以外（Given の準備・`*`・And）で書くと、仕切りは要求されない。キーワードは英語（`# language:` で日本語の
+//       キーワードにすると When を見分けられない）。
+//     限界（両方の規則）: 行ごとに見るので、docstring（`"""` で囲んだ複数行の値）の中も行の種類を区別しない（中の `#` の行は
+//       コメントとして禁止語を見ず、`When` で始まる行は When として仕切りを求める）。全角の数字・英字（`２０１`・`ＤＢ`）は禁止語として
+//       見ない（正規表現は半角だけ）。複数形（ids・APIs）・一覧に無い技術の言葉も見ない。
 //   以下は API ジャーニー（apps/backend/api-journeys/ の直下の *.api-journey.test.ts）の中身の規則:
 //   - api-journey-no-in-memory: *.in-memory（InMemory の Repository）を import しない（`import type` も・`import()` も・`export … from` も）。
 //     WHY: ジャーニーは本番と同じ部品（Postgres の Repository）で API のつながりを確かめる。InMemory で組むと単体テストと同じになる。
@@ -96,6 +130,8 @@ import { afterAll, describe, expect, it } from "vitest";
 type ApiJourneyRuleId =
   | "api-journey-placement"
   | "api-journey-feature-pair"
+  | "api-journey-business-language"
+  | "api-journey-section-divider"
   | "api-journey-no-in-memory"
   | "api-journey-no-vi"
   | "api-journey-handler-naming"
@@ -370,7 +406,97 @@ function findApiJourneyContentViolations(
   return [...lineLevel, ...fileLevel];
 }
 
-// path の違反。置き場所が違えば置き場所の違反だけを返し（中身は見ない）、API ジャーニーなら中身を見る。対象外のファイルは []。
+// .feature に書かない言葉（api-journey-business-language。大文字小文字は区別しない）。WHY と数の扱いは冒頭の説明。
+// WHY 正規表現の配列: 語ごとに境界（\b）の要否が違う。英語の短い語（id・title・DB・API・HTTP のメソッド）は語の一部（idea・
+//   subtitle・MongoDB）で止めないよう境界を付け、長い語・日本語は含まれるだけで止める（PostgreSQL の SQL・HTTPS の HTTP も技術の言葉）。
+// 限界: 複数形（ids・APIs）・綴りの揺れ・ここに無い技術の言葉は見ない。語を足すときは must reject の例も足す。
+const FORBIDDEN_WORDS_IN_FEATURE: readonly RegExp[] = [
+  /\bDB\b/i,
+  /データベース/i,
+  /SQL/i,
+  /テーブル/i,
+  /カラム/i,
+  /返り値/i,
+  /戻り値/i,
+  /レスポンス/i,
+  /ステータス/i,
+  /状態\s*\d{3}/i,
+  // HTTP の状態コード（3 桁の 1xx〜5xx）。後ろに業務の数の助数詞（文字・件・行）が続くものは除く（冒頭の WHY）。
+  /\b[1-5]\d{2}\b(?!\s*(?:文字|件|行))/i,
+  // WHY 区切りに _ と - も許す: `/problems/not-found`（Problem Details の type）・`not_found`（DomainError の code）の書き方も止める。
+  /problem[\s_-]*details/i,
+  /JSON/i,
+  /null/i,
+  /undefined/i,
+  /\binsert\b/i,
+  /\bupdate\b/i,
+  /\bdelete\b/i,
+  // 表名（apps/backend の schema.ts の pgTable）。
+  /\btodos\b/i,
+  /todo_status_changes/i,
+  /change_logs/i,
+  /\bid\b/i,
+  /uuid/i,
+  /not[\s_-]*found/i,
+  // 業務の言葉は「タイトル」。
+  /\btitle\b/i,
+  /\bcompleted\b/i,
+  /\bAPI\b/i,
+  /HTTP/i,
+  /\b(?:GET|POST|PUT|PATCH|DELETE)\b/i,
+  /エンドポイント/i,
+  /リクエスト/i,
+  /レコード/i,
+  /バリデーション/i,
+  /状態コード/i,
+];
+
+// 仕切りの行（api-journey-section-divider）か。形は冒頭の説明。
+// WHY 見出しの最初と最後の文字を「空白でも ─ でもない」に限る: `─` の数の違い（6 つ・4 つ）や空白の重なりを、見出しの一部として
+//   通さないため（`# ────── x ─────` は左の 6 つ目の ─ が見出しの先頭になりうる）。
+function isSectionDivider(line: string): boolean {
+  return /^\s*# ─{5} [^\s─](?:.*[^\s─])? ─{5}$/.test(line);
+}
+
+// .feature（isFeatureFile のファイル）の中身の違反（行の順。同じ行なら business-language が先）。
+function findFeatureContentViolations(source: string): ApiJourneyViolation[] {
+  // WHY \r?\n で分ける: CRLF のファイルを \n だけで分けると行末に \r が残り、仕切りの `─{5}$` が一致せず、すべての When が
+  //   仕切りの違反になる（reviewer の実測、Issue #217）。
+  const lines = source.split(/\r?\n/);
+  // 今いる区画。シナリオの中の When だけが仕切りを要る。Feature / Rule の見出しでシナリオの外に戻る。
+  let section: "scenario" | "background" | "other" = "other";
+  return lines.flatMap((line, index): ApiJourneyViolation[] => {
+    const lineNumber = index + 1;
+    // WHY 行頭（字下げの後）の # だけをコメントにする: Gherkin のコメントは行全体だけで、行の途中の # は文の一部。
+    // WHY 仕切りはコメントでも禁止語を見る（reviewer の指摘、Issue #217）: 仕切りの見出しは読者が拾い読みする行で、見ないと
+    //   `# ───── POST /api/todos で DB に insert ─────` のように技術の言葉を見出しに移すだけで検査を逃れられる。
+    if (/^\s*(?:#|$)/.test(line) && !isSectionDivider(line)) {
+      return [];
+    }
+    if (/^\s*(?:Scenario(?: Outline| Template)?|Example)\s*:/.test(line)) {
+      section = "scenario";
+    } else if (/^\s*Background\s*:/.test(line)) {
+      section = "background";
+    } else if (/^\s*(?:Feature|Rule)\s*:/.test(line)) {
+      section = "other";
+    }
+    const wording: ApiJourneyViolation[] = FORBIDDEN_WORDS_IN_FEATURE.some(
+      (word) => word.test(line),
+    )
+      ? [{ rule: "api-journey-business-language", line: lineNumber }]
+      : [];
+    const divider: ApiJourneyViolation[] =
+      section === "scenario" &&
+      /^\s*When\s/.test(line) &&
+      !isSectionDivider(lines[index - 1] ?? "")
+        ? [{ rule: "api-journey-section-divider", line: lineNumber }]
+        : [];
+    return [...wording, ...divider];
+  });
+}
+
+// path の違反。置き場所が違えば置き場所の違反だけを返し（中身は見ない）、API ジャーニー・.feature なら中身を見る。
+//   対象外のファイルは []。
 function findApiJourneyViolations(
   path: string,
   source: string,
@@ -378,9 +504,10 @@ function findApiJourneyViolations(
   if (isMisplacedApiJourneyFile(path)) {
     return [{ rule: "api-journey-placement" }];
   }
-  return isApiJourneyFile(path)
-    ? findApiJourneyContentViolations(path, source)
-    : [];
+  if (isApiJourneyFile(path)) {
+    return findApiJourneyContentViolations(path, source);
+  }
+  return isFeatureFile(path) ? findFeatureContentViolations(source) : [];
 }
 
 // .feature と step の対の違反（api-journey-feature-pair）。files は同じ列挙（listApiJourneyTargets）の結果。
@@ -1055,6 +1182,307 @@ describe("Gherkin の .feature と step の対（findFeaturePairViolations）", 
   });
 });
 
+// .feature の例の部品。仕切り（api-journey-section-divider の形）と、業務の言葉だけの Background。
+const DIVIDER = "    # ───── Todo を作る ─────";
+const FEATURE_HEAD = [
+  "Feature: Todo のライフサイクル",
+  "",
+  "  Background: 空の Todo 一覧",
+  "    Given Todo が 1 件も無い",
+  "",
+  "  Scenario: 作成から削除まで",
+];
+
+describe(".feature の業務の言葉と仕切り（findApiJourneyViolations）: must pass", () => {
+  it.each([
+    [
+      "業務の言葉だけで、API を呼ぶ step（When）の直前ごとに仕切りがある",
+      source(
+        ...FEATURE_HEAD,
+        DIVIDER,
+        '    When Todo "牛乳を買う" を作る',
+        '    Then 未完了の Todo "牛乳を買う" が作られる',
+        '    And Todo は "牛乳を買う" の 1 件だけになる',
+        "    # ───── 一覧を見る ─────",
+        "    When Todo の一覧を見る",
+        "    Then 一覧に 1 件が並ぶ",
+        "",
+        "  Scenario: 不正な入力は保存されない",
+        '    Given Todo "牛乳を買う" が作られている',
+        "    # ───── 空のタイトルで Todo を作る ─────",
+        "    When タイトルが空の Todo を作る",
+        "    Then タイトルが空という理由で拒否される",
+      ),
+    ],
+    [
+      "# のコメント行（字下げも）と空行は禁止語があっても見ない",
+      source(
+        "# step の実装は DB の todos を SQL で読み、状態 201 と Problem Details の JSON を確かめる。",
+        ...FEATURE_HEAD,
+        "      # API の返り値の id・title・completed は step の実装が見る（not found・uuid・null・undefined）。",
+        "",
+        DIVIDER,
+        '    When Todo "牛乳を買う" を作る',
+      ),
+    ],
+    [
+      "3 桁の数の後ろが「文字」「件」「行」（空白の有無によらない）・3 桁でない数・1xx〜5xx でない 3 桁の数",
+      source(
+        ...FEATURE_HEAD,
+        DIVIDER,
+        '    When 100 文字のタイトルの Todo "牛乳を買う" を作る',
+        "    Then 200件が並ぶ",
+        "    And メモは 300 行まで書ける",
+        "    And 2 件目・10 件目・1000 円・600 円・099 番は業務の数",
+      ),
+    ],
+    [
+      "禁止語を語の一部に含むだけの言葉（Todo・MongoDB・idea・subtitle・APIs でない API 風の語・completely）",
+      source(
+        ...FEATURE_HEAD,
+        DIVIDER,
+        '    When Todo "idea を MongoDB に書く subtitle" を作る',
+        "    Then completely な Todo と APIary の Todo が並ぶ",
+      ),
+    ],
+    [
+      "Background の中の When（仕切りは要らない）・When 以外の step（Given / Then / And / But / *）",
+      source(
+        "Feature: x",
+        "  Background: y",
+        "    When Todo を 1 件も持たない",
+        "  Scenario: z",
+        "    Given Todo が 1 件ある",
+        "    Then 1 件が並ぶ",
+        "    And 1 件目が見える",
+        "    But 2 件目は見えない",
+        "    * 何もしない",
+      ),
+    ],
+    [
+      "仕切りの字下げが When と違う・見出しの中に空白や ─ がある（Scenario Outline・Example・Rule の中でも）",
+      source(
+        "Feature: x",
+        "  Rule: r",
+        "    Scenario Outline: y",
+        "# ───── Todo を作る ─────",
+        '      When Todo "牛乳を買う" を作る',
+        "    Example: z",
+        "        # ───── 一覧 を 見る（─ の入った見出し） ─────",
+        "    When Todo の一覧を見る",
+      ),
+    ],
+    ["When の無い .feature（Feature だけ）", "Feature: x\n"],
+    [
+      "改行が CRLF（Windows の改行。仕切りの行末の \\r を形の違いにしない）",
+      [
+        ...FEATURE_HEAD,
+        DIVIDER,
+        '    When Todo "牛乳を買う" を作る',
+        '    Then 未完了の Todo "牛乳を買う" が作られる',
+        "",
+      ].join("\r\n"),
+    ],
+  ])("%s は違反なし", (_name, text) => {
+    expect(findApiJourneyViolations(FEATURE, text)).toEqual([]);
+  });
+
+  it("api-journeys/ の外の .feature は置き場所の違反だけを返す（中身は見ない）", () => {
+    expect(
+      findApiJourneyViolations(
+        "apps/e2e/x.feature",
+        source("Feature: DB", "  Scenario: y", "    When 状態 201 を返す"),
+      ),
+    ).toEqual([{ rule: "api-journey-placement" }]);
+  });
+});
+
+describe(".feature の業務の言葉（api-journey-business-language）: must reject", () => {
+  // 禁止語を 1 つだけ含む step（When の直前には仕切りを置き、仕切りの違反と混ざらないようにする）。行は 9 行目の Then。
+  it.each([
+    ["DB（語の境界）", "Then DB の Todo は 1 件になる"],
+    ["DB の大文字小文字違い（Db・db）", "Then Db と db の Todo は 1 件になる"],
+    ["データベース", "Then データベースに 1 件ある"],
+    ["SQL（PostgreSQL の中も）", "Then PostgreSQL に 1 件ある"],
+    ["テーブル", "Then テーブルに 1 件ある"],
+    ["カラム", "Then カラムが 1 つ変わる"],
+    ["返り値", "Then 返り値は Todo になる"],
+    ["戻り値", "Then 戻り値は Todo になる"],
+    ["レスポンス", "Then レスポンスに Todo がある"],
+    ["ステータス", "Then ステータスは成功になる"],
+    ["状態 \\d{3}（空白なし）", "Then 状態201 で作られる"],
+    ["HTTP の状態コード（3 桁の 1xx〜5xx）", "Then 201 で作られる"],
+    [
+      "HTTP の状態コード（行末・後ろが「文字」「件」「行」以外）",
+      "Then 作られた Todo が 404",
+    ],
+    [
+      "Problem Details（空白なし・大文字小文字違い）",
+      "Then problemdetails が届く",
+    ],
+    ["JSON", "Then Json の Todo が届く"],
+    ["null", "Then 期限は NULL になる"],
+    ["undefined", "Then 期限は undefined になる"],
+    ["insert", "Then Todo の Insert が 1 件になる"],
+    ["update", "Then Todo の update が 1 件になる"],
+    ["delete", "Then Todo の delete が 1 件になる"],
+    ["表名 todos", "Then todos は 1 件になる"],
+    ["表名 todo_status_changes", "Then todo_status_changes は 1 件になる"],
+    ["表名 change_logs", "Then change_logs は 2 件になる"],
+    ["id", "Then その ID の Todo は無い"],
+    ["uuid", "Then UUID の Todo は無い"],
+    ["not found（空白なし）", "Then NotFound と伝えられる"],
+    ["title（業務の言葉はタイトル）", "Then Title が空と伝えられる"],
+    ["completed", "Then completed が真になる"],
+    ["API", "Then Api が Todo を返す"],
+    ["HTTP（HTTPS も）", "Then HTTPS で Todo が届く"],
+    ["HTTP のメソッド（GET）", "Then get で Todo を読む"],
+    ["HTTP のメソッド（POST・PUT・PATCH）", "Then Post と Put と Patch で送る"],
+    ["エンドポイント", "Then エンドポイントが Todo を返す"],
+    ["リクエスト", "Then リクエストが拒否される"],
+    ["レコード", "Then レコードが 1 件ある"],
+    ["バリデーション", "Then バリデーションで拒否される"],
+    ["状態コード", "Then 状態コードで成功が分かる"],
+    [
+      "not found（- 区切り。/problems/not-found）",
+      "Then /problems/not-found と伝えられる",
+    ],
+    ["not found（_ 区切り）", "Then not_found と伝えられる"],
+    ["Problem Details（- 区切り）", "Then problem-details が届く"],
+    ["Problem Details（_ 区切り）", "Then problem_details が届く"],
+  ])("step（Then）に %s は違反", (_name, step) => {
+    expect(
+      findApiJourneyViolations(
+        FEATURE,
+        source(...FEATURE_HEAD, DIVIDER, "    When Todo を作る", `    ${step}`),
+      ),
+    ).toEqual([{ rule: "api-journey-business-language", line: 9 }]);
+  });
+
+  it("見出し（Feature / Background / Scenario / Rule / Scenario Outline / Example）と各 step（Given / When / And / But / *）・説明の行・表の行も見る（1 行 1 件、行番号付き）", () => {
+    expect(
+      findApiJourneyViolations(
+        FEATURE,
+        source(
+          "Feature: Todo の API",
+          "  Todo の DB を説明する行",
+          "  Background: 空の todos",
+          "    Given DB が空",
+          "  Rule: 状態 404 の扱い",
+          "  Scenario: 作成の JSON",
+          "    # ───── Todo を作る ─────",
+          "    When POST で Todo を作る",
+          "    And Todo の id を控える",
+          "    But title は空でない",
+          "    * uuid が振られる",
+          "      | id | title |",
+          "  Scenario Outline: 改名の update",
+          "  Example: 削除の delete",
+        ),
+      ),
+    ).toEqual(
+      [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14].map((line) => ({
+        rule: "api-journey-business-language",
+        line,
+      })),
+    );
+  });
+
+  // 仕切りは `#` で始まるが、読者が拾い読みする見出しなので禁止語を見る（reviewer の指摘、Issue #217）。
+  //   仕切りの形は正しいので、仕切りの違反（section-divider）は出さない。
+  it("仕切りの見出しに禁止語があれば、仕切りの行を違反にする", () => {
+    expect(
+      findApiJourneyViolations(
+        FEATURE,
+        source(
+          ...FEATURE_HEAD,
+          "    # ───── POST /api/todos で DB に insert ─────",
+          "    When Todo を作る",
+          "    Then 1 件になる",
+          "    # ───── Db を見る ─────",
+          "    When Todo の一覧を見る",
+        ),
+      ),
+    ).toEqual([
+      { rule: "api-journey-business-language", line: 7 },
+      { rule: "api-journey-business-language", line: 10 },
+    ]);
+  });
+
+  it("禁止語と仕切りの違反が同じ When の行にあれば、両方を行の順に返す", () => {
+    expect(
+      findApiJourneyViolations(
+        FEATURE,
+        source(...FEATURE_HEAD, "    When DB に Todo を入れる"),
+      ),
+    ).toEqual([
+      { rule: "api-journey-business-language", line: 7 },
+      { rule: "api-journey-section-divider", line: 7 },
+    ]);
+  });
+});
+
+describe(".feature の仕切り（api-journey-section-divider）: must reject", () => {
+  // 7 行目に仕切りの候補（または別の行）、8 行目に When を置く。違反の行は When の行（8 行目）。
+  it.each([
+    ["直前が Then（仕切りが無い）", "    Then 1 件になる"],
+    ["直前が普通のコメント", "    # Todo を作る"],
+    ["─ が 4 つ（左）", "    # ──── Todo を作る ─────"],
+    ["─ が 6 つ（左）", "    # ────── Todo を作る ─────"],
+    ["─ が 4 つ（右）", "    # ───── Todo を作る ────"],
+    ["─ が 6 つ（右）", "    # ───── Todo を作る ──────"],
+    ["見出しが空（空白 1 つ）", "    # ───── ─────"],
+    ["見出しが空白だけ", "    # ─────   ─────"],
+    ["# の後に空白が無い", "    #───── Todo を作る ─────"],
+    ["# の後の空白が 2 つ", "    #  ───── Todo を作る ─────"],
+    ["─ と見出しの間に空白が無い", "    # ─────Todo を作る─────"],
+    ["─ と見出しの間の空白が 2 つ", "    # ─────  Todo を作る  ─────"],
+    ["─ でなく - を使う", "    # ----- Todo を作る -----"],
+    ["─ でなく太い ━ を使う", "    # ━━━━━ Todo を作る ━━━━━"],
+    ["右の ─ の後ろに文字がある", "    # ───── Todo を作る ───── 作成"],
+    ["右の ─ の後ろに空白がある", "    # ───── Todo を作る ───── "],
+    ["# でなく // のコメント風", "    // ───── Todo を作る ─────"],
+  ])("When の直前の行が %s は違反", (_name, previous) => {
+    expect(
+      findApiJourneyViolations(
+        FEATURE,
+        source(...FEATURE_HEAD, previous, "    When Todo を作る"),
+      ),
+    ).toEqual([{ rule: "api-journey-section-divider", line: 8 }]);
+  });
+
+  it("仕切りと When の間に空行・コメント行がある、シナリオの見出しの直後の When、Background の後・2 つ目のシナリオ・Rule の中の When も見る", () => {
+    expect(
+      findApiJourneyViolations(
+        FEATURE,
+        source(
+          ...FEATURE_HEAD,
+          DIVIDER,
+          "",
+          "    When Todo を作る",
+          DIVIDER,
+          "    # 作る",
+          "    When Todo を作る",
+          "  Scenario: 2 つ目",
+          "    When Todo を作る",
+          "  Rule: r",
+          "  Background: b",
+          "    When Todo を持たない",
+          "  Example: e",
+          DIVIDER,
+          "    When Todo を作る",
+          "    When 続けて Todo を作る",
+        ),
+      ),
+    ).toEqual([
+      { rule: "api-journey-section-divider", line: 9 },
+      { rule: "api-journey-section-divider", line: 12 },
+      { rule: "api-journey-section-divider", line: 14 },
+      { rule: "api-journey-section-divider", line: 21 },
+    ]);
+  });
+});
+
 // --- 列挙 → 読み取り → 判定を通した fixture テスト ---
 // WHY: 判定が正しくても、対象の列挙（api-journeys/ の下と、外に置くと違反になる名前の見つけ方）が漏れれば見逃す。一時ディレクトリに
 //   架空のツリーを置き、本番と同じ collectApiJourneyViolations に通して、違反の集合を丸ごと比較する（見逃しも余分な検出も失敗にする）。
@@ -1087,7 +1515,7 @@ describe("API ジャーニーの列挙と検査（fixture）", () => {
         'import { vi } from "vitest";',
         'vi.mock("@repo/shared/now");',
       ),
-      "apps/backend/api-journeys/no-db-check.feature": "Feature: no-db\n",
+      "apps/backend/api-journeys/no-db-check.feature": "Feature: no-check\n",
       "apps/backend/api-journeys/no-db-check.api-journey.test.ts": source(
         ...JOURNEY_HEAD,
         "const renameX = new RenameXApi(command).handle;",
@@ -1097,6 +1525,18 @@ describe("API ジャーニーの列挙と検査（fixture）", () => {
         "await postX(request);",
       ),
       "apps/backend/api-journeys/single-api.feature": "Feature: single\n",
+      // 対になっているが、.feature が業務の言葉と仕切りの規則に違反する（step の実装は違反なし）。
+      "apps/backend/api-journeys/wording.feature": source(
+        "Feature: wording",
+        "  Scenario: w",
+        "    # ───── Todo を作る ─────",
+        "    When Todo を作る",
+        "    Then 状態 201 で返る",
+        "    When Todo の一覧を見る",
+      ),
+      "apps/backend/api-journeys/wording.api-journey.test.ts": source(
+        ...REQUIRED_IMPORTS,
+      ),
       "apps/backend/api-journeys/single-api.api-journey.test.ts": source(
         DATABASE_IMPORT,
         CREATE_API_IMPORT,
@@ -1127,7 +1567,8 @@ describe("API ジャーニーの列挙と検査（fixture）", () => {
         ...REQUIRED_IMPORTS,
       ),
       "apps/backend/features/todo/out.feature": "Feature: out\n",
-      "apps/e2e/out.feature": "Feature: e2e\n",
+      // 置き場所の違反の .feature は中身を見ない（DB があっても置き場所の違反だけ）。
+      "apps/e2e/out.feature": "Feature: e2e の DB\n",
       "apps/frontend_customer/x.feature": "Feature: front\n",
       // 対象外: 層の下のテスト（vi.mock があっても API ジャーニーではない）、名前に feature を含むだけのソース、
       //   node_modules と . で始まるディレクトリの中。
@@ -1160,6 +1601,8 @@ describe("API ジャーニーの列挙と検査（fixture）", () => {
         "apps/backend/api-journeys/only-steps.api-journey.test.ts",
         "apps/backend/api-journeys/single-api.api-journey.test.ts",
         "apps/backend/api-journeys/single-api.feature",
+        "apps/backend/api-journeys/wording.api-journey.test.ts",
+        "apps/backend/api-journeys/wording.feature",
         "apps/backend/api-journeys/x.api-journey.test.ts",
         "apps/backend/api-journeys/x.feature",
         "apps/backend/api-journeys/x.test.ts",
@@ -1183,6 +1626,8 @@ describe("API ジャーニーの列挙と検査（fixture）", () => {
         "api-journey-feature-pair: apps/backend/api-journeys/only-steps.api-journey.test.ts",
         "api-journey-no-in-memory: apps/backend/api-journeys/single-api.api-journey.test.ts:3",
         "api-journey-uses-multiple-apis: apps/backend/api-journeys/single-api.api-journey.test.ts",
+        "api-journey-business-language: apps/backend/api-journeys/wording.feature:5",
+        "api-journey-section-divider: apps/backend/api-journeys/wording.feature:6",
         "api-journey-placement: apps/backend/api-journeys/x.test.ts",
         "api-journey-placement: apps/backend/features/todo/out.feature",
         "api-journey-placement: apps/backend/features/x/api-journeys/x.api-journey.test.ts",
@@ -1203,7 +1648,7 @@ describe("API ジャーニーの列挙と検査（fixture）", () => {
 });
 
 describe("API ジャーニー（実ファイル）", () => {
-  it("apps/backend/api-journeys/ には対になった *.feature と *.api-journey.test.ts だけがあり、各 API ジャーニーは InMemory と vi を使わず、実 DB と 2 つ以上の API を使い、変更系の API の後に DB を読む", () => {
+  it("apps/backend/api-journeys/ には対になった *.feature と *.api-journey.test.ts だけがあり、.feature は業務の言葉だけで API を呼ぶ step の前に仕切りがあり、各 API ジャーニーは InMemory と vi を使わず、実 DB と 2 つ以上の API を使い、変更系の API の後に DB を読む", () => {
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     expect(listApiJourneyTargets(repoRoot)).toEqual(
       expect.arrayContaining([
