@@ -1,7 +1,12 @@
 // @vitest-environment node
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";
 import type { Problem } from "../../../../shared/presentation/problem";
 import { InMemoryTodoRepository } from "../../../../test-support/todo/todo-repository.in-memory";
+import {
+  InMemoryTransactionRunner,
+  inMemoryTransaction,
+} from "../../../../test-support/transaction-runner.in-memory";
 import { CreateTodoCommand } from "../application/create-todo.command";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 import {
@@ -15,7 +20,9 @@ function setup() {
   const repository = new InMemoryTodoRepository();
   return {
     repository,
-    POST: new CreateTodoApi(new CreateTodoCommand(repository)).handle,
+    POST: new CreateTodoApi(
+      new CreateTodoCommand(repository, new InMemoryTransactionRunner()),
+    ).handle,
   };
 }
 
@@ -59,10 +66,15 @@ describe("POST /api/todos", () => {
   });
 
   // WHY 本番の POST（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない（Issue #59）
-  //   ことを、Postgres の Repository に保存されることで固定する。save を差し替えるので DB には接続しない。
-  test("本番の POST は Postgres の Repository に保存する", async () => {
-    const save = vi
-      .spyOn(PostgresTodoRepository.prototype, "save")
+  //   ことを、Postgres の Repository に保存されることで固定する。runner の run と insert を差し替えるので DB には接続しない。
+  test("本番の POST は Postgres の runner が張ったトランザクションで、Postgres の Repository に保存する", async () => {
+    // WHY runner の run を差し替える: 本番の組み立ての PostgresTransactionRunner が DB に接続しないよう、work を呼ぶだけにする。
+    //   run が 1 回呼ばれ、Repository がその tx を受け取ることで、本番の command がトランザクションを張ることも確かめる。
+    const run = vi
+      .spyOn(PostgresTransactionRunner.prototype, "run")
+      .mockImplementation((work) => work(inMemoryTransaction));
+    const insert = vi
+      .spyOn(PostgresTodoRepository.prototype, "insert")
       .mockResolvedValue();
 
     const response = await productionPost(
@@ -70,8 +82,12 @@ describe("POST /api/todos", () => {
     );
 
     expect(response.status).toBe(201);
-    expect(save).toHaveBeenCalledTimes(1);
-    expect(save.mock.calls[0]?.[0]).toMatchObject({ title: "牛乳を買う" });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(insert.mock.calls[0]).toEqual([
+      expect.objectContaining({ title: "牛乳を買う" }),
+      inMemoryTransaction,
+    ]);
   });
 
   // presentation は domain より厳しくしない（Issue #144）。domain が通す境界の値（1 文字・前後の空白付き）を presentation も通す。

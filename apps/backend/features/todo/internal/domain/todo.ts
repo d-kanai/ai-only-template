@@ -64,7 +64,7 @@ function todoPropsSchema() {
     // 完了の履歴（Issue #188）。完了状態が変わるたびに、変わった後の値と日時を末尾に足す（古い順）。
     //   項目どうしの規則（今の completed・作成日時との関係）は、下の refine（isConsistentHistory）が見る。
     // WHY readonly()（zod が parse の結果を Object.freeze する）: 履歴は Todo の値で、Todo は不変。配列や要素を書き換えられると、
-    //   InMemory が保持中の値や、save が比べる origin の履歴が save の前に変わる。
+    //   InMemory が保持中の値や、update が比べる origin の履歴が update の前に変わる。
     // WHY 要素の z.object にキーを付けない: 外側の z.object と同じ（値が型の上でオブジェクトなので、as で偽らない限り失敗しない）。
     statusChanges: z
       .array(
@@ -130,7 +130,7 @@ type TodoProps = z.input<ReturnType<typeof todoPropsSchema>>;
 // Todo の Entity（集約ルート）。
 // WHY 不変（immutable）にする: 変更系のメソッドは新しい Todo を返し、自分は変えない。
 //   InMemory リポジトリは Todo をそのまま Map に保持するため、可変だと「取得した Todo を書き換えただけで
-//   save 前にリポジトリの中身が変わる」ことが起きる。不変にすれば状態が変わるのは save したときだけになり、
+//   update 前にリポジトリの中身が変わる」ことが起きる。不変にすれば状態が変わるのは update したときだけになり、
 //   DB に差し替えても同じ振る舞いになる。
 // 完全コンストラクタ: コンストラクタが毎回、値のすべてを不変条件（todoPropsSchema）で検証する（Issue #94）。
 //   create / reconstruct / rename / changeCompletion はコンストラクタに値を渡すだけで、自分では検証しない。
@@ -150,7 +150,7 @@ export class Todo {
   // 完了の履歴（古い順）。凍結した配列（todoPropsSchema の statusChanges）。
   readonly statusChanges: readonly TodoStatusChange[];
   // 読み込んだとき（reconstruct）の値。新規（create）なら undefined。外からは origin（getter）で読む（Issue #165）。
-  // WHY Entity が持つ: Repository の save が「読み込んだときから変わった列だけ」を書き（別の列の同時更新を巻き戻さない）、
+  // WHY Entity が持つ: Repository の update が「読み込んだときから変わった列だけ」を書き（別の列の同時更新を巻き戻さない）、
   //   新規か読み込み済みかを見分けるため。「自分が読み込まれたときに何だったか」は Entity の事実で、差分をどの列・
   //   どの SQL にするか（永続化の都合）は infra（Repository と shared/infra/changed-props.ts）に置く。
   // WHY 遷移メソッドに「何を変えたか」を記録させない: 記録させると遷移メソッドを足すたびに書く必要があり、書き忘れた
@@ -173,7 +173,7 @@ export class Todo {
     this.createdAt = valid.createdAt;
     this.statusChanges = valid.statusChanges;
     // WHY reconstruct は検証後の値（valid）を origin にする: 引数の値ではなく、今の値と同じ形（title は trim 後）で持つ。
-    //   引数のままだと、前後に空白のある行を読んで何も変えずに save しただけで title が「変わった」ことになる。
+    //   引数のままだと、前後に空白のある行を読んで何も変えずに update しただけで title が「変わった」ことになる。
     // WHY 値ではなく関数で受け取る: 検証後の値はコンストラクタの中でしか得られない。reconstruct で先に検証して渡すと、
     //   検証が口ごとに増える（完全コンストラクタはコンストラクタの 1 か所だけで検証する）。関数なら、どの口も同じ形で
     //   「valid から origin を決める」ことを書け、特別な値（番兵）で分岐せずに済む。
@@ -189,8 +189,8 @@ export class Todo {
   // WHY 作成日時を引数で受け取らない: 「作ったときの時刻が入る」は Todo の生成ルールで、呼び出し側が時刻を渡せると
   //   そのルールが呼び出し側に漏れ、任意の時刻の Todo を作れてしまう。テストで時刻を決めるときは、現在時刻の唯一の出口
   //   now（apps/shared/now.ts）を vi.mock で差し替える（.claude/rules/testing.md）。
-  // WHY origin は undefined: 新規で、読み込んだ値が無い。Repository の save は origin の有無で新規（INSERT）か
-  //   読み込み済み（変わった列だけの UPDATE）かを決める。
+  // WHY origin は undefined: 新規で、読み込んだ値が無い。Repository の insert は origin が undefined の
+  //   Todo だけを、update は origin のある Todo だけを受け付ける（取り違えを Error にする。Issue #215）。
   static create(title: string): Todo {
     const createdAt = now();
     return new Todo(
@@ -215,7 +215,7 @@ export class Todo {
   //   Repository の実装が決める（infra/todo-repository.postgres.ts の toTodo）。
   // WHY 引数をオブジェクトにする: 同じ型（string / boolean）の引数が並ぶので、順番の取り違えを防ぐ。
   // 完了の履歴（statusChanges）も DB の行（子表 todo_status_changes）から受け取り、不変条件で検証する（Issue #188）。
-  // WHY 検証した後の値を origin にする: Repository の save が、読み込んだときから変わった列だけを書くため（Issue #165）。
+  // WHY 検証した後の値を origin にする: Repository の update が、読み込んだときから変わった列だけを書くため（Issue #165）。
   static reconstruct(values: TodoProps): Todo {
     return new Todo(values, (valid) => valid);
   }
@@ -230,7 +230,7 @@ export class Todo {
   // completed の規則（boolean であること）も含めて、コンストラクタが全体を検証する。
   // 完了状態が変わるときは、変わった後の値と現在時刻（now()）を完了の履歴の末尾に足す（Issue #188）。
   // WHY 今と同じ値なら遷移しない（this を返す）: 同じ状態への遷移を履歴に積むとノイズになる（「いつ完了したか」の
-  //   答えが複数になる）。Todo が変わらないので、Repository の save も差分が無く SQL を発行しない。
+  //   答えが複数になる）。Todo が変わらないので、Repository の update も差分が無く SQL を発行しない。
   changeCompletion(completed: boolean): Todo {
     if (completed === this.completed) {
       return this;

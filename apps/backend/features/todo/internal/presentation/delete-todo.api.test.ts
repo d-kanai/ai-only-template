@@ -1,8 +1,13 @@
 // @vitest-environment node
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";
 import type { Problem } from "../../../../shared/presentation/problem";
 import { InMemoryTodoRepository } from "../../../../test-support/todo/todo-repository.in-memory";
+import {
+  InMemoryTransactionRunner,
+  inMemoryTransaction,
+} from "../../../../test-support/transaction-runner.in-memory";
 import { DeleteTodoCommand } from "../application/delete-todo.command";
 import { Todo } from "../domain/todo";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
@@ -13,7 +18,9 @@ function setup() {
   const repository = new InMemoryTodoRepository();
   return {
     repository,
-    DELETE: new DeleteTodoApi(new DeleteTodoCommand(repository)).handle,
+    DELETE: new DeleteTodoApi(
+      new DeleteTodoCommand(repository, new InMemoryTransactionRunner()),
+    ).handle,
   };
 }
 
@@ -63,7 +70,9 @@ function spiedRepository() {
   return {
     repository,
     findById: vi.spyOn(repository, "findById"),
-    save: vi.spyOn(repository, "save"),
+    findByIdOrThrow: vi.spyOn(repository, "findByIdOrThrow"),
+    insert: vi.spyOn(repository, "insert"),
+    update: vi.spyOn(repository, "update"),
     delete: vi.spyOn(repository, "delete"),
   };
 }
@@ -79,7 +88,7 @@ describe("DELETE /api/todos/:id", () => {
   test("204 と空の本文を返し、Todo が消える", async () => {
     const { repository, DELETE } = setup();
     const todo = Todo.create("牛乳を買う");
-    await repository.save(todo);
+    await repository.insert(todo, inMemoryTransaction);
 
     const response = await DELETE(deleteRequest(todo.id), context(todo.id));
 
@@ -89,12 +98,18 @@ describe("DELETE /api/todos/:id", () => {
   });
 
   // WHY 本番の DELETE（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない（Issue #59）
-  //   ことを、Postgres の Repository が呼ばれることで固定する。findById と delete を差し替えるので DB には接続しない。
-  test("本番の DELETE は Postgres の Repository から削除する", async () => {
+  //   ことを、Postgres の Repository が呼ばれることで固定する。runner の run と findByIdOrThrow と delete を差し替えるので DB には接続しない。
+  test("本番の DELETE は Postgres の runner が張ったトランザクションで、Postgres の Repository から削除する", async () => {
     const todo = Todo.create("牛乳を買う");
-    vi.spyOn(PostgresTodoRepository.prototype, "findById").mockResolvedValue(
-      todo,
-    );
+    // WHY runner の run を差し替える: 本番の組み立ての PostgresTransactionRunner が DB に接続しないよう、work を呼ぶだけにする。
+    //   run が 1 回呼ばれ、Repository がその tx を受け取ることで、本番の command がトランザクションを張ることも確かめる。
+    const run = vi
+      .spyOn(PostgresTransactionRunner.prototype, "run")
+      .mockImplementation((work) => work(inMemoryTransaction));
+    vi.spyOn(
+      PostgresTodoRepository.prototype,
+      "findByIdOrThrow",
+    ).mockResolvedValue(todo);
     const remove = vi
       .spyOn(PostgresTodoRepository.prototype, "delete")
       .mockResolvedValue();
@@ -105,7 +120,8 @@ describe("DELETE /api/todos/:id", () => {
     );
 
     expect(response.status).toBe(204);
-    expect(remove.mock.calls).toEqual([[todo.id]]);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(remove.mock.calls).toEqual([[todo.id, inMemoryTransaction]]);
   });
 
   test("uuid の形だが存在しない id なら 404 の /problems/not-found を、todo.notFound と id の params 付きで返す", async () => {
@@ -121,14 +137,17 @@ describe("DELETE /api/todos/:id", () => {
     "id が %s なら、Repository に問い合わせずに 404 の /problems/not-found（todo.notFound と id の params）を返す",
     async (_label, id) => {
       const { repository, ...spies } = spiedRepository();
-      const DELETE = new DeleteTodoApi(new DeleteTodoCommand(repository))
-        .handle;
+      const DELETE = new DeleteTodoApi(
+        new DeleteTodoCommand(repository, new InMemoryTransactionRunner()),
+      ).handle;
 
       const response = await DELETE(deleteRequest(id), context(id));
 
       await expectProblem(response, notFoundProblem(id));
       expect(spies.findById).not.toHaveBeenCalled();
-      expect(spies.save).not.toHaveBeenCalled();
+      expect(spies.findByIdOrThrow).not.toHaveBeenCalled();
+      expect(spies.insert).not.toHaveBeenCalled();
+      expect(spies.update).not.toHaveBeenCalled();
       expect(spies.delete).not.toHaveBeenCalled();
     },
   );

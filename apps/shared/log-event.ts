@@ -15,7 +15,7 @@
 // 名前と、それを出す場所:
 //   page_request      画面アクセスのリクエストログ（apps/frontend_customer/proxy.ts）
 //   api_request       /api/** の呼び出しのリクエストログ（同上）
-//   db_write          Repository の書き込みの前後（apps/backend/shared/infra/write.ts。event.phase が start / done / failed）
+//   db_write          Repository の書き込みの 1 文ごとの前後（apps/backend/shared/infra/writer.ts。event.phase が start / done / failed）
 //   db_pool_error     アイドル中の Postgres の接続のエラー（apps/backend/shared/infra/database.ts）
 //   server_error      API の想定外の例外（500。apps/backend/shared/presentation/problem.ts）
 //   app_start_failed  起動時の検証の失敗（apps/frontend_customer/instrumentation-node.ts）

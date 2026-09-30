@@ -139,7 +139,7 @@ describe("updateEntries", () => {
     ]);
   });
 
-  // WHY 空にする: 差分の無い save は何も書かない（SQL を発行しない）ので、変更の記録も残さない。
+  // WHY 空にする: 差分の無い update は何も書かない（SQL を発行しない）ので、変更の記録も残さない。
   test("変わった列が無ければ記録しない（空配列）", () => {
     expect(updateEntries(items, ROW.id, ROW, {}, ACTOR_ID)).toStrictEqual([]);
   });
@@ -228,7 +228,7 @@ describe("recordChange", () => {
     expect(rows[0]?.id).not.toBe(rows[1]?.id);
   });
 
-  // WHY: 差分の無い save・無い id の delete は記録が 0 件になる。drizzle-orm の insert は空の values を受け付けないので、
+  // WHY: 差分の無い update・無い id の delete は記録が 0 件になる。drizzle-orm の insert は空の values を受け付けないので、
   //   SQL を発行せずに終える。
   test("記録が 0 件なら SQL を発行しない", async () => {
     const insert = vi.spyOn(database.db, "insert");

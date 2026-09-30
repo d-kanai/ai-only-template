@@ -1,24 +1,46 @@
 // @vitest-environment node
 import { afterEach, describe, expect, test, vi } from "vitest";
+import type { TransactionRunner } from "../../../../shared/domain/transaction";
 import { InMemoryTodoRepository } from "../../../../test-support/todo/todo-repository.in-memory";
+import {
+  InMemoryTransactionRunner,
+  inMemoryTransaction,
+} from "../../../../test-support/transaction-runner.in-memory";
 import { Todo } from "../domain/todo";
 import { ChangeTodoCompletionCommand } from "./change-todo-completion.command";
 
 // notifications: command が完了の通知に渡したメッセージ（呼ばれた順）。
 // WHY 記録する関数を渡す（vi.fn にしない）: 通知の口はコンストラクタで受け取る関数で、型で縛られた偽物をここで書ける
 //   （InMemory の Repository と同じく、差し替えはコンストラクタで行う）。
-async function setup() {
+async function setup(
+  transactions: TransactionRunner = new InMemoryTransactionRunner(),
+) {
   const repository = new InMemoryTodoRepository();
   const todo = Todo.create("牛乳を買う");
-  await repository.save(todo);
+  await repository.insert(todo, inMemoryTransaction);
   const notifications: string[] = [];
   return {
     repository,
     todo,
     notifications,
-    command: new ChangeTodoCompletionCommand(repository, (message) => {
-      notifications.push(message);
-    }),
+    command: new ChangeTodoCompletionCommand(
+      repository,
+      transactions,
+      (message) => {
+        notifications.push(message);
+      },
+    ),
+  };
+}
+
+// run の work が終わった（COMMIT した）ことを events に記録する runner（create-todo.command.test.ts と同じ）。
+function committingRunner(events: string[]): TransactionRunner {
+  return {
+    async run(work) {
+      const result = await work(inMemoryTransaction);
+      events.push("commit");
+      return result;
+    },
   };
 }
 
@@ -117,13 +139,63 @@ describe("ChangeTodoCompletionCommand", () => {
   // WHY 保存の後に通知する: 保存に失敗した（完了になっていない）Todo の完了を知らせない。
   test("保存に失敗したら、その例外で reject し、通知しない", async () => {
     const { repository, todo, notifications, command } = await setup();
-    vi.spyOn(repository, "save").mockRejectedValue(new Error("save failed"));
+    vi.spyOn(repository, "update").mockRejectedValue(new Error("save failed"));
 
     await expect(
       command.execute({ id: todo.id, completed: true }),
     ).rejects.toEqual(new Error("save failed"));
 
     expect(notifications).toEqual([]);
+  });
+
+  // WHY 通知はトランザクションの外（run が resolve した後）: 保存が確定（COMMIT）してから知らせる。update が成功しても COMMIT が
+  //   失敗すれば完了は戻るので、run の中で通知すると、完了していない Todo の完了を知らせてしまう（Issue #215）。
+  test("update の後に COMMIT が失敗したら、その例外で reject し、通知しない", async () => {
+    const failingCommit: TransactionRunner = {
+      async run(work) {
+        await work(inMemoryTransaction);
+        throw new Error("commit failed");
+      },
+    };
+    const { todo, notifications, command } = await setup(failingCommit);
+
+    await expect(
+      command.execute({ id: todo.id, completed: true }),
+    ).rejects.toEqual(new Error("commit failed"));
+
+    expect(notifications).toEqual([]);
+  });
+
+  // WHY 読み込み（行ロック）と書き込みを同じ tx で行う（Issue #215）: 読んでから書くまでの間に、別の要求が同じ Todo を変えられない
+  //   （通知の条件「未完了 → 完了」も、読んだ値のまま判定できる）。
+  test("findByIdOrThrow と update を run が渡した同じ tx で run の中で行い、通知は COMMIT の後に行う", async () => {
+    const events: string[] = [];
+    const { repository, todo } = await setup();
+    const loaded = (await repository.findById(todo.id)) as Todo;
+    const find = vi
+      .spyOn(repository, "findByIdOrThrow")
+      .mockImplementation(async () => {
+        events.push("findByIdOrThrow");
+        return loaded;
+      });
+    const update = vi
+      .spyOn(repository, "update")
+      .mockImplementation(async () => {
+        events.push("update");
+      });
+    const notifying = new ChangeTodoCompletionCommand(
+      repository,
+      committingRunner(events),
+      () => {
+        events.push("notify");
+      },
+    );
+
+    const changed = await notifying.execute({ id: todo.id, completed: true });
+
+    expect(find.mock.calls).toEqual([[todo.id, inMemoryTransaction]]);
+    expect(update.mock.calls).toEqual([[changed, inMemoryTransaction]]);
+    expect(events).toEqual(["findByIdOrThrow", "update", "commit", "notify"]);
   });
 
   test("無い id なら、その id を params に持つ DomainError(not_found, todo.notFound) を投げる", async () => {

@@ -689,8 +689,8 @@ function isOwnFeatureApiFile(ref: Reference): boolean {
 const LAYERS_MAY_USE: Record<BackendLayer, ReadonlySet<BackendLayer>> = {
   domain: new Set(["domain"]),
   application: new Set(["domain", "application"]),
-  // presentation の infra は Postgres の Repository の実装と backend/shared/infra/database だけ、feature の domain は型だけ
-  //   （presentationAllows で絞る）。
+  // presentation の infra は Postgres の Repository の実装と backend/shared/infra/database・transaction.postgres だけ、feature の
+  //   domain は型だけ（presentationAllows で絞る）。
   presentation: new Set(["domain", "application", "presentation", "infra"]),
   // Repository の実装が同じ infra の schema、backend/shared/infra の database（Database の型）を使うので、infra 同士の参照も許す。
   infra: new Set(["domain", "application", "infra"]),
@@ -698,6 +698,11 @@ const LAYERS_MAY_USE: Record<BackendLayer, ReadonlySet<BackendLayer>> = {
 
 // presentation の api ファイルが本番の handler を組み立てるときに参照してよい、backend/shared の infra（プールと Drizzle の db）。
 const SHARED_DATABASE_MODULE = "apps/backend/shared/infra/database";
+// 同じく組み立てに使う、トランザクションを張る runner（PostgresTransactionRunner。Issue #215）。command のコンストラクタに渡す。
+// WHY runner だけを許す（writer は許さない）: presentation が組み立てに要るのは runner の実体だけで、書き込みの口（Writer）を
+//   presentation から使わせない（書き込みは Repository が runner の tx から取り出す）。
+const SHARED_TRANSACTION_RUNNER_MODULE =
+  "apps/backend/shared/infra/transaction.postgres";
 
 // 自 feature の infra の Postgres の Repository の実装（`<名前>-repository.postgres`。1 階層だけ）か。
 // WHY ファイル名の形で絞る: Issue #123 でコンテナを廃止し、api ファイルが `new XxxQuery(new PostgresTodoRepository(getDatabase().db))`
@@ -717,7 +722,8 @@ function isOwnPostgresRepository(
 
 // presentation 固有の絞り込み。
 //   - infra は、feature の presentation から、自 feature の Postgres の Repository の実装（`*-repository.postgres`）と
-//     backend/shared/infra/database だけ（Issue #123。api ファイルがモジュールの最下部で本番の handler を組み立てる）。
+//     backend/shared/infra/database と backend/shared/infra/transaction.postgres（トランザクションの runner。Issue #215）だけ
+//     （Issue #123。api ファイルがモジュールの最下部で本番の handler を組み立てる）。
 //     backend/shared/presentation（problem など）は何も組み立てないので infra を参照しない。
 //     ログの出口 apps/shared/logger は backend の外なので、ここではなく SHARED_MODULES_BY_LAYER で許す（Issue #90）。
 //   - feature の domain は import type と、定数（UPPER_SNAKE_CASE の名前）だけの値の import だけ（「domain（Entity の型の参照と
@@ -733,7 +739,9 @@ function presentationAllows(
   if (target.layer === "infra") {
     return (
       self.scope !== BACKEND_SHARED_SCOPE &&
-      (isOwnPostgresRepository(ref, self) || ref.to === SHARED_DATABASE_MODULE)
+      (isOwnPostgresRepository(ref, self) ||
+        ref.to === SHARED_DATABASE_MODULE ||
+        ref.to === SHARED_TRANSACTION_RUNNER_MODULE)
     );
   }
   if (target.layer === "domain" && target.scope !== BACKEND_SHARED_SCOPE) {
@@ -1010,13 +1018,13 @@ const RULES: Rule[] = [
   },
   {
     // 「presentation の依存してよい先: application、domain（Entity の型の参照と定数のみ。定数は Issue #144）、自 feature の infra の Postgres の
-    //   Repository の実装と backend/shared/infra/database（api ファイルが本番の handler を組み立てる。Issue #123）、
+    //   Repository の実装と backend/shared/infra/database・transaction.postgres（api ファイルが本番の handler を組み立てる。Issue #123・#215）、
     //   backend/shared、apps/shared の logger（Issue #85・#90）」
     //   同じ presentation の中の参照（api ファイル間の re-export など）は許す。
     // WHY next も禁止する: api ファイルは Web 標準の Request / Response で書き、Next を起動せずにテストできるようにしているため
     //   （.claude/rules/testing.md の「置き方と環境」）。
     id: "presentation",
-    name: "apps/backend/features/<f>/internal/presentation/ が参照してよい自前コードは自 feature と apps/backend/shared/ の application/・domain/（feature の domain は型と UPPER_SNAKE_CASE の定数だけ）・presentation/ と自 feature の infra/*-repository.postgres・apps/backend/shared/infra/database・apps/shared/logger だけで、next・react も参照しない",
+    name: "apps/backend/features/<f>/internal/presentation/ が参照してよい自前コードは自 feature と apps/backend/shared/ の application/・domain/（feature の domain は型と UPPER_SNAKE_CASE の定数だけ）・presentation/ と自 feature の infra/*-repository.postgres・apps/backend/shared/infra/database・apps/backend/shared/infra/transaction.postgres・apps/shared/logger だけで、next・react も参照しない",
     appliesTo: (from) => backendLayerOf(from)?.layer === "presentation",
     isViolation: violatesBackendLayer,
   },
@@ -3242,6 +3250,12 @@ const RULE_EXAMPLES: Record<
         "../infra/todo-repository.postgres",
         "value",
       ],
+      // Issue #215: runner の実体（infra）は application から参照しない（domain の TransactionRunner を受け取る）。
+      [
+        "apps/backend/features/todo/internal/application/x.command.ts",
+        "../../../../shared/infra/transaction.postgres",
+        "value",
+      ],
       [
         "apps/backend/features/todo/internal/application/x.ts",
         "../presentation/list-todos.api",
@@ -3309,6 +3323,12 @@ const RULE_EXAMPLES: Record<
         "apps/backend/features/todo/internal/application/x.ts",
         "../../../../shared/domain/domain-error",
         "value",
+      ],
+      // Issue #215: トランザクションの口（Transaction・TransactionRunner）は backend/shared の domain。
+      [
+        "apps/backend/features/todo/internal/application/x.command.ts",
+        "../../../../shared/domain/transaction",
+        "type",
       ],
       // 現在時刻の出口（now）はすべての層で使ってよい。
       [
@@ -3451,10 +3471,27 @@ const RULE_EXAMPLES: Record<
         "../infra/repository.postgres",
         "value",
       ],
-      //   backend/shared/infra は database だけ。前方一致だけが同じ別ファイル、テスト基盤（test-support/database。層に属さない）は不可。
+      //   backend/shared/infra は database と transaction.postgres だけ。前方一致だけが同じ別ファイル、テスト基盤（test-support/database。
+      //   層に属さない）は不可。
       [
         "apps/backend/features/todo/internal/presentation/x.api.ts",
         "../../../../shared/infra/database-helper",
+        "value",
+      ],
+      //   Issue #215: 書き込みの口（writer）・InMemory の runner（test-support）・前方一致だけの別ファイルは不可。
+      [
+        "apps/backend/features/todo/internal/presentation/x.api.ts",
+        "../../../../shared/infra/writer",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/presentation/x.api.ts",
+        "../../../../shared/infra/transaction.postgres-helper",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/presentation/x.api.ts",
+        "../../../../test-support/transaction-runner.in-memory",
         "value",
       ],
       [
@@ -3462,8 +3499,13 @@ const RULE_EXAMPLES: Record<
         "../../../../test-support/database",
         "value",
       ],
-      //   backend/shared/presentation は何も組み立てないので、database も Repository の実装の名前のファイルも不可。
+      //   backend/shared/presentation は何も組み立てないので、database も runner も Repository の実装の名前のファイルも不可。
       ["apps/backend/shared/presentation/x.ts", "../infra/database", "value"],
+      [
+        "apps/backend/shared/presentation/x.ts",
+        "../infra/transaction.postgres",
+        "value",
+      ],
       [
         "apps/backend/shared/presentation/x.ts",
         "../infra/x-repository.postgres",
@@ -3521,6 +3563,12 @@ const RULE_EXAMPLES: Record<
       [
         "apps/backend/features/todo/internal/presentation/x.api.ts",
         "../../../../shared/infra/database",
+        "value",
+      ],
+      // Issue #215: command に渡すトランザクションの runner（PostgresTransactionRunner）の組み立て。
+      [
+        "apps/backend/features/todo/internal/presentation/x.api.ts",
+        "../../../../shared/infra/transaction.postgres",
         "value",
       ],
       //   feature の名前が shared でも、自 feature の infra の Repository の実装は可。
@@ -6284,7 +6332,11 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import type { Database } from "../infra/database";',
   ),
   "apps/backend/features/todo/internal/application/bad-application-infra.ts":
-    lines('import { getDatabase } from "../../../../shared/infra/database";'),
+    lines(
+      'import { getDatabase } from "../../../../shared/infra/database";',
+      // Issue #215: application は runner の実体（infra）を参照しない（domain の TransactionRunner を受け取る）。
+      'import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";',
+    ),
   "apps/backend/features/todo/internal/presentation/bad-presentation-infra.api.ts":
     lines(
       // Issue #123: database と自 feature の Postgres の Repository の実装は許す（組み立てに使う）。schema とテスト基盤は違反。
@@ -6292,6 +6344,11 @@ const MUST_REJECT_FILES: Record<string, string> = {
       'import { todos } from "../infra/schema";',
       'import { PostgresTodoRepository } from "../infra/todo-repository.postgres";',
       'import { cleanupTestSchemas } from "../../../../test-support/database";',
+      // Issue #215: トランザクションの runner（PostgresTransactionRunner）は許す（command の組み立てに使う）。書き込みの口
+      //   （writer）と InMemory の runner（test-support）は違反。
+      'import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";',
+      'import { writerOf } from "../../../../shared/infra/writer";',
+      'import { InMemoryTransactionRunner } from "../../../../test-support/transaction-runner.in-memory";',
     ),
   // core-to-persistence: domain / application から DB のパッケージ（drizzle-orm とそのサブパス、pg）。型だけの参照・re-export・
   //   dynamic import も違反。名前の前方一致だけが同じ別パッケージ（pg-format）は対象外。
@@ -7074,9 +7131,12 @@ const MUST_REJECT_VIOLATIONS = [
   "domain: apps/backend/features/todo/internal/domain/bad-domain-infra.ts → apps/backend/test-support/database",
   "domain: apps/backend/shared/domain/bad-shared-domain-infra.ts → apps/backend/shared/infra/database",
   "application: apps/backend/features/todo/internal/application/bad-application-infra.ts → apps/backend/shared/infra/database",
+  "application: apps/backend/features/todo/internal/application/bad-application-infra.ts → apps/backend/shared/infra/transaction.postgres",
   ...[
     "apps/backend/features/todo/internal/infra/schema",
     "apps/backend/test-support/database",
+    "apps/backend/shared/infra/writer",
+    "apps/backend/test-support/transaction-runner.in-memory",
   ].map(
     (to) =>
       `presentation: apps/backend/features/todo/internal/presentation/bad-presentation-infra.api.ts → ${to}`,

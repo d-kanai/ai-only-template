@@ -1,8 +1,13 @@
 // @vitest-environment node
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";
 import type { Problem } from "../../../../shared/presentation/problem";
 import { InMemoryTodoRepository } from "../../../../test-support/todo/todo-repository.in-memory";
+import {
+  InMemoryTransactionRunner,
+  inMemoryTransaction,
+} from "../../../../test-support/transaction-runner.in-memory";
 import { RenameTodoCommand } from "../application/rename-todo.command";
 import { Todo } from "../domain/todo";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
@@ -17,11 +22,13 @@ import {
 async function setup() {
   const repository = new InMemoryTodoRepository();
   const todo = Todo.create("牛乳を買う");
-  await repository.save(todo);
+  await repository.insert(todo, inMemoryTransaction);
   return {
     repository,
     todo,
-    PUT: new RenameTodoApi(new RenameTodoCommand(repository)).handle,
+    PUT: new RenameTodoApi(
+      new RenameTodoCommand(repository, new InMemoryTransactionRunner()),
+    ).handle,
   };
 }
 
@@ -78,7 +85,9 @@ function spiedRepository() {
   return {
     repository,
     findById: vi.spyOn(repository, "findById"),
-    save: vi.spyOn(repository, "save"),
+    findByIdOrThrow: vi.spyOn(repository, "findByIdOrThrow"),
+    insert: vi.spyOn(repository, "insert"),
+    update: vi.spyOn(repository, "update"),
     delete: vi.spyOn(repository, "delete"),
   };
 }
@@ -138,14 +147,20 @@ describe("PUT /api/todos/:id/title", () => {
   );
 
   // WHY 本番の PUT（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない（Issue #59）
-  //   ことを、Postgres の Repository が呼ばれることで固定する。findById と save を差し替えるので DB には接続しない。
-  test("本番の PUT は Postgres の Repository に保存する", async () => {
+  //   ことを、Postgres の Repository が呼ばれることで固定する。runner の run と findByIdOrThrow と update を差し替えるので DB には接続しない。
+  test("本番の PUT は Postgres の runner が張ったトランザクションで、Postgres の Repository に保存する", async () => {
     const todo = Todo.create("牛乳を買う");
-    vi.spyOn(PostgresTodoRepository.prototype, "findById").mockResolvedValue(
-      todo,
-    );
-    const save = vi
-      .spyOn(PostgresTodoRepository.prototype, "save")
+    // WHY runner の run を差し替える: 本番の組み立ての PostgresTransactionRunner が DB に接続しないよう、work を呼ぶだけにする。
+    //   run が 1 回呼ばれ、Repository がその tx を受け取ることで、本番の command がトランザクションを張ることも確かめる。
+    const run = vi
+      .spyOn(PostgresTransactionRunner.prototype, "run")
+      .mockImplementation((work) => work(inMemoryTransaction));
+    vi.spyOn(
+      PostgresTodoRepository.prototype,
+      "findByIdOrThrow",
+    ).mockResolvedValue(todo);
+    const update = vi
+      .spyOn(PostgresTodoRepository.prototype, "update")
       .mockResolvedValue();
 
     const response = await productionPut(
@@ -154,11 +169,12 @@ describe("PUT /api/todos/:id/title", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(save).toHaveBeenCalledTimes(1);
-    expect(save.mock.calls[0]?.[0]).toMatchObject({
-      id: todo.id,
-      title: "卵を買う",
-    });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update.mock.calls[0]).toEqual([
+      expect.objectContaining({ id: todo.id, title: "卵を買う" }),
+      inMemoryTransaction,
+    ]);
   });
 
   test("uuid の形だが存在しない id なら 404 の /problems/not-found を、todo.notFound と id の params 付きで返す", async () => {
@@ -192,13 +208,17 @@ describe("PUT /api/todos/:id/title", () => {
     "id が %s なら、%sときも、Repository に問い合わせずに 404 の /problems/not-found（todo.notFound と id の params）を返す",
     async (_idLabel, _bodyLabel, id, requestBody) => {
       const { repository, ...spies } = spiedRepository();
-      const PUT = new RenameTodoApi(new RenameTodoCommand(repository)).handle;
+      const PUT = new RenameTodoApi(
+        new RenameTodoCommand(repository, new InMemoryTransactionRunner()),
+      ).handle;
 
       const response = await PUT(putRequest(id, requestBody), context(id));
 
       await expectProblem(response, notFoundProblem(id));
       expect(spies.findById).not.toHaveBeenCalled();
-      expect(spies.save).not.toHaveBeenCalled();
+      expect(spies.findByIdOrThrow).not.toHaveBeenCalled();
+      expect(spies.insert).not.toHaveBeenCalled();
+      expect(spies.update).not.toHaveBeenCalled();
       expect(spies.delete).not.toHaveBeenCalled();
     },
   );

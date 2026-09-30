@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { getDatabase } from "../../../../shared/infra/database";
+import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";
 import {
   parseJsonBody,
   requestBodySchema,
@@ -90,9 +91,13 @@ export class ChangeTodoCompletionApi {
 // WHY ここで import して渡す（command が直接 import しない）: 他のモジュールの expose を import してよいのは組み立ての場所
 //   （presentation）だけ（rule-tests/architecture.test.ts の module-expose-only-from-presentation）。command は関数を受け取るだけで、
 //   notification モジュールを知らない。
+// 書き込みの command には、トランザクションを張る PostgresTransactionRunner を Repository と同じ db で渡す（Issue #215）。
+//   WHY 同じ getDatabase().db: command の読み込み（findByIdOrThrow）と書き込みは runner の tx で、Repository の query（findAll /
+//   findById）は Repository の db で行う。どちらも同じプールを使う。
 export const PUT = new ChangeTodoCompletionApi(
   new ChangeTodoCompletionCommand(
     new PostgresTodoRepository(getDatabase().db),
+    new PostgresTransactionRunner(getDatabase().db),
     notify,
   ),
 ).handle;
