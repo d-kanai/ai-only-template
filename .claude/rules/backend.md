@@ -106,6 +106,26 @@ paths:
 - 接続とプール（`database.ts`）: `pg.Pool` を `env` の値で作る（変数の一覧は `.claude/rules/env.md`）。アイドル中の接続のエラーは `pool.on("error")` で `logger.error` に出すだけ。プールは `globalThis` に 1 つ（`next dev` の HMR で増やさない）。終了時は `closeDatabase()`。値は開発・CI・E2E 用の暫定で、本番用は Issue #58。
 - テスト: 実 Postgres を使うテストは `createTestDatabase()` でファイルごとに別スキーマを使う（`.claude/rules/testing.md`）。
 
+### 列の型（Issue #145）
+列の型は下の既定に従い、長さ・精度は意味があるときだけ書く。`rule-tests/schema.test.ts` が `apps/backend/**/infra/schema.ts` を検査する。決定と採用しなかった案は ADR `docs/adr/quality/20260930-db-column-types-default-text-and-integer.md`。
+
+| 用途 | 既定 | 長さ・精度を書くとき |
+| --- | --- | --- |
+| 文字列 | `text`（長さ無し） | 長さそのものを DB で保証する必要があるとき（外部システムの固定長コード、CHECK で守りたい不変条件）だけ `varchar(n)` / `char(n)` か CHECK。文字数の上限は domain（zod）が持つ |
+| 整数 | `integer`。連番の id・件数・金額の最小単位など 21 億（2^31 - 1）を超えうるものは `bigint` | 書かない（Postgres の整数に長さは無い。`int(10)` は MySQL の表示幅） |
+| 小数・金額 | `numeric(p, s)` | 常に書く（精度は意味そのもの） |
+| 真偽 | `boolean` | — |
+| 日時 | `timestamp` の `withTimezone: true`（timestamptz） | — |
+| id | `uuid` | — |
+| JSON | `jsonb` | — |
+
+- 長さは domain が持ち、DB は型だけにする。WHY: 2 か所に上限を書くと片方だけ直してずれる。DB の制約違反は 500 になり、domain の 400（`errors[]` 付き。ADR `docs/adr/architecture/20260930-presentation-overlaps-domain-validation.md`）に負ける。
+- WHY `varchar(255)` を既定にしない: Postgres では `text` / `varchar(n)` / `char(n)` に性能の差は無く、長さ制約は保存時の検査だけ（公式: https://www.postgresql.org/docs/current/datatype-character.html 「There is no performance difference among these three types ... In most situations text or character varying should be used instead.」）。長さを書くと上限を変えるたびにマイグレーションが要る。
+- WHY timezone 無しの `timestamp` を使わない: サーバ・DB のタイムゾーン設定で時刻の意味が変わる（TZ=UTC 前提。Issue #116）。
+- WHY `serial` / `bigserial` を使わない: id は `uuid`（アプリが `randomUUID` で作る）。WHY `json` を使わない: `json` は入力の文字列をそのまま保持して処理のたびに解析し直す。`jsonb` は分解した形で保持して処理が速く、インデックスも張れる（https://www.postgresql.org/docs/current/datatype-json.html ）。
+- インデックスは、検索するクエリが決まってから足す。
+- 検査が違反にするもの: `varchar(` / `char(`、`timestamp(` で `withTimezone: true` が無いもの、`serial(` / `bigserial(` / `smallserial(`、`json(`。既定から外れる理由があるときは、その列の直前の行（空行を挟まない `//` の連続）に `// WHY 長さ: <理由>`（varchar / char）・`// WHY タイムゾーン: <理由>`・`// WHY 連番: <理由>`・`// WHY json: <理由>` を書くと通る。見出しは規則ごとに分け、別の理由の WHY では通らない。
+
 ## ログ（`apps/shared/logger.ts`。Issue #85。Issue #90 で `apps/backend/shared/infra/` から移した）
 - サーバ側のログは必ず `logger.info / warn / error(event)` を通す。`console.*` を書いてよいのは `logger.ts` だけ（テストは除く）。
   - 1 呼び出し = JSON 1 行（NDJSON）。先頭に `level` と `timestamp`（ISO 8601、UTC。event に `timestamp` があればそれ）。info は stdout（`console.log`）、warn / error は stderr（`console.warn` / `console.error`）。`Error` は `{ name, message }` にする（stack は出さない）。JSON にできない event（循環参照・BigInt）は例外にせず、失敗した旨だけの 1 行を出す。

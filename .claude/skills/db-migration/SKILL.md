@@ -15,6 +15,8 @@ description: Drizzle のスキーマ変更とマイグレーション（schema.t
 ## 手順
 1. **テスト（仕様）から**: 新しい列・表を使う Repository のテスト（`*.postgres.test.ts`）を先に書き、失敗することを確かめる。
 2. **スキーマを変える**: `apps/backend/features/<feature>/infra/schema.ts`（Drizzle の `pgTable`）。feature を足したら同じ場所に `schema.ts` を置く（設定の `schema` は `apps/backend/features/*/infra/schema.ts` を読む。`apps/backend/shared/` にはテーブルを置かない）。
+   - 列の型は `.claude/rules/backend.md` の「列の型」の表に従う: 文字列は `text`（長さは書かず、上限は domain の zod が持つ）、整数は `integer`（21 億を超えうるものは `bigint`）、小数・金額は `numeric(p, s)`（精度は常に書く）、日時は `timestamp(..., { withTimezone: true })`、id は `uuid`、JSON は `jsonb`。WHY: Postgres では長さで性能は変わらず、上限を DB と domain の 2 か所に書くとずれて、DB の違反は 500 になる（決定は ADR `docs/adr/quality/20260930-db-column-types-default-text-and-integer.md`）。
+   - 既定から外れる（`varchar(n)` / `char(n)`・timezone 無しの `timestamp`・`serial`・`json`）ときは、その列の直前の行に `// WHY 長さ: <理由>` など規則ごとの見出しで理由を書く。無いと `rule-tests/schema.test.ts` が失敗する（`pnpm test`）。
 3. **SQL を生成する**: `pnpm db:generate --name <内容>`（例: `--name add_todo_due_date`）。前回のスナップショット（`apps/backend/shared/drizzle/meta/`）との差分から `apps/backend/shared/drizzle/<番号>_<名前>.sql` を作る。DB には接続しない。
 4. **SQL を読む**: 意図どおりか確かめる。とくに列の改名が「削除 + 追加」になっていないか（データが消える）。
    - 意図と違えば `schema.ts` を直して作り直す。**生成済みの SQL は手で直さない**。WHY: `meta/` のスナップショットとずれ、次の generate の差分が壊れる。
