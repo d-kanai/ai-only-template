@@ -19,41 +19,6 @@ import { keyedIssue, keyedRefine } from "../../../shared/domain/keyed-issue";
 // WHY 100 文字: 一覧で 1 行に収まる程度の上限。上限を設けないと巨大な文字列でメモリと画面が埋まる。
 export const TODO_TITLE_MAX_LENGTH = 100;
 
-// タイトルの不変条件: 前後の空白を除いて 1〜TODO_TITLE_MAX_LENGTH 文字。Todo の規則はこのスキーマ 1 か所に宣言する（Issue #88）。
-//   presentation は同じ規則を同じキーで重ねてよいが、これより厳しくしない（Issue #144。.claude/rules/backend.md）。
-// WHY trim してから数え、trim した値を保持する: 空白だけのタイトルを「空」とみなし、
-//   前後の空白の有無だけが違う Todo が混ざらないようにする。z.string().trim() は値を置き換える（後の refine も parse の結果も
-//   trim 後の値）。
-// WHY 文字数を Array.from で数える（zod の .min / .max を使わない）: .min / .max は String#length（UTF-16 のコード単位の数）で
-//   数え、絵文字（サロゲートペア）を 2 と数える。利用者の感覚の「文字数」に近いコードポイント数で数える。
-// WHY refine を 2 つに分ける: 空と長すぎでキーを変える（どちらも API の Problem Details の key として画面が翻訳する契約）。
-//   zod は同じスキーマの refine をすべて実行するが、同じ値で両方が失敗することは無い（0 文字と 101 文字以上は両立しない）。
-// WHY 関数にする（スキーマを最上位の定数にしない）: 最上位の式は読み込み時にだけ評価される static な変異になり、
-//   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に作れば、比較や message の変異を
-//   テストで検出できる（Issue #55）。上限の値そのもの（TODO_TITLE_MAX_LENGTH）は最上位の定数なので、todo.test.ts が値と
-//   境界（100 は通し 101 は弾く）で固定する。
-// WHY branded 型（TodoTitle）にしない: Todo のコンストラクタは private で、どの口（create / reconstruct / rename /
-//   changeCompletion）もコンストラクタの検証（todoPropsSchema）を通る。Todo 型そのものが「不変条件を満たす値」で
-//   あることを表しているので、title だけに brand を付けても守れるものが増えない。
-// WHY todoPropsSchema の中でだけ使う: 口ごとに一部の項目だけを検証すると、どの口を通ったかで守られる規則が変わる
-//   （Issue #94 で撤回した分け方）。規則はいつも全体で当てる。
-function todoTitleSchema() {
-  // WHY 文字列でないときのキーも付ける: todoPropsSchema の「zod の既定の文言を domain の外に出さない」に
-  //   そろえる。この経路を通るのは型を as で偽ったときだけ（presentation は z.string で弾き、DB の列は NOT NULL text）。
-  return z
-    .string(keyedIssue("todo.title.invalid"))
-    .trim()
-    .refine(
-      (title) => Array.from(title).length >= 1,
-      keyedIssue("todo.title.empty"),
-    )
-    .refine(
-      (title) => Array.from(title).length <= TODO_TITLE_MAX_LENGTH,
-      // 画面の文言に上限の文字数を埋め込めるよう、params で渡す（上限を変えても画面の辞書を直さずに済む）。
-      keyedRefine("todo.title.tooLong", { max: TODO_TITLE_MAX_LENGTH }),
-    );
-}
-
 // Todo が持つ値のすべて（完全コンストラクタが検証する値）の規則 = Todo の不変条件。
 // WHY タイトル以外（id・完了状態・作成日時）も規則に含める: どの口から来た値も、すべてが規則を満たすことを 1 つの
 //   スキーマで宣言する。create の id は randomUUID で常に満たすが、reconstruct は DB の行（Postgres の uuid 型は
@@ -64,10 +29,42 @@ function todoTitleSchema() {
 //   失敗しない）。渡し忘れは validate が DomainError ではない Error（500）にする。
 // WHY id は z.uuid()（RFC 9562 の形）: presentation の parseUuidParam と同じ形にそろえる。Todo の id は randomUUID（v4）で
 //   作るので必ず満たす（ADR docs/adr/architecture/20260929-zod-for-backend-validation.md。z.uuid() は RFC 9562 の形だけで大文字も通す。.claude/rules/backend.md）。
+// WHY 関数にする（スキーマを最上位の定数にしない）: 最上位の式は読み込み時にだけ評価される static な変異になり、
+//   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に作れば、比較や message の変異を
+//   テストで検出できる（Issue #55）。上限の値そのもの（TODO_TITLE_MAX_LENGTH）は最上位の定数なので、todo.test.ts が値と
+//   境界（100 は通し 101 は弾く）で固定する。
+// WHY branded 型（TodoTitle）にしない: Todo のコンストラクタは private で、どの口（create / reconstruct / rename /
+//   changeCompletion）もコンストラクタの検証（todoPropsSchema）を通る。Todo 型そのものが「不変条件を満たす値」で
+//   あることを表しているので、title だけに brand を付けても守れるものが増えない。
+// WHY title のスキーマを別の関数に切り出さない: 読むのはここ（todoPropsSchema の title）だけで、切り出すと規則が
+//   2 か所に分かれて見える（Issue #159）。口ごとに一部の項目だけを検証すると、どの口を通ったかで守られる規則が変わる
+//   （Issue #94 で撤回した分け方）ので、規則はいつも全体で当てる。
 function todoPropsSchema() {
   return z.object({
     id: z.uuid(keyedIssue("todo.id.invalid")),
-    title: todoTitleSchema(),
+    // タイトルの不変条件: 前後の空白を除いて 1〜TODO_TITLE_MAX_LENGTH 文字。Todo の規則は todoPropsSchema 1 か所に宣言する（Issue #88）。
+    //   presentation は同じ規則を同じキーで重ねてよいが、これより厳しくしない（Issue #144。.claude/rules/backend.md）。
+    // WHY trim してから数え、trim した値を保持する: 空白だけのタイトルを「空」とみなし、
+    //   前後の空白の有無だけが違う Todo が混ざらないようにする。z.string().trim() は値を置き換える（後の refine も parse の結果も
+    //   trim 後の値）。
+    // WHY 文字数を Array.from で数える（zod の .min / .max を使わない）: .min / .max は String#length（UTF-16 のコード単位の数）で
+    //   数え、絵文字（サロゲートペア）を 2 と数える。利用者の感覚の「文字数」に近いコードポイント数で数える。
+    // WHY refine を 2 つに分ける: 空と長すぎでキーを変える（どちらも API の Problem Details の key として画面が翻訳する契約）。
+    //   zod は同じスキーマの refine をすべて実行するが、同じ値で両方が失敗することは無い（0 文字と 101 文字以上は両立しない）。
+    // WHY 文字列でないときのキーも付ける: todoPropsSchema の「zod の既定の文言を domain の外に出さない」に
+    //   そろえる。この経路を通るのは型を as で偽ったときだけ（presentation は z.string で弾き、DB の列は NOT NULL text）。
+    title: z
+      .string(keyedIssue("todo.title.invalid"))
+      .trim()
+      .refine(
+        (title) => Array.from(title).length >= 1,
+        keyedIssue("todo.title.empty"),
+      )
+      .refine(
+        (title) => Array.from(title).length <= TODO_TITLE_MAX_LENGTH,
+        // 画面の文言に上限の文字数を埋め込めるよう、params で渡す（上限を変えても画面の辞書を直さずに済む）。
+        keyedRefine("todo.title.tooLong", { max: TODO_TITLE_MAX_LENGTH }),
+      ),
     completed: z.boolean(keyedIssue("todo.completed.invalid")),
     createdAt: z.date(keyedIssue("todo.createdAt.invalid")),
   });
@@ -130,7 +127,7 @@ export function validate<Schema extends z.ZodType>(
 //   「規則を満たさない Todo」が存在しうる状態になっていた。
 //   規則を変えるときは、既存のデータを先に移行（スキル db-migration）して規則に追従させる。
 // WHY コンストラクタを private にする: 値を作る口を上の 4 つに限り、コンストラクタの検証を通らない Todo を作らせない。
-// WHY 検証の結果（parse した値）を持つ: タイトルは trim した値が規則の対象で、その値を保持する（todoTitleSchema のコメント）。
+// WHY 検証の結果（parse した値）を持つ: タイトルは trim した値が規則の対象で、その値を保持する（todoPropsSchema の title のコメント）。
 export class Todo {
   readonly id: string;
   readonly title: string;

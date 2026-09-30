@@ -211,7 +211,7 @@ describe("Todo.reconstruct", () => {
   const CREATED_AT = new Date("2026-09-28T00:00:00.000Z");
 
   // WHY 型に反する値を as で渡す: 型の上では string しか渡せないが、文字列でない値にもキーを付ける
-  //   （zod の既定の英語の文言を domain の外に出さない。todo.ts の todoTitleSchema のコメント）。
+  //   （zod の既定の英語の文言を domain の外に出さない。todo.ts の todoPropsSchema の title のコメント）。
   test("title が文字列でなければ validation_error を投げる", () => {
     expectValidationError(
       () =>
