@@ -37,7 +37,13 @@ export function createDatabase(
   //   ログに残して続ける。
   // WHY 英語の文言: ログは開発者が読むもので、apps/backend の非テストコードには自然言語の日本語を置かない（Issue #116）。
   pool.on("error", (error) => {
-    logger.error({ message: "idle Postgres connection error", error });
+    // WHY event.name を db_pool_error にする（Issue #209）: 書き込みの失敗（db_write）と違い、どのリクエストにも属さない
+    //   プールの接続の異常（DB の再起動・ネットワークの切断）で、頻発したら DB 側を見る合図になる。
+    logger.error({
+      message: "idle Postgres connection error",
+      event: { name: "db_pool_error" },
+      error,
+    });
   });
   return { db: drizzle({ client: pool }), pool };
 }

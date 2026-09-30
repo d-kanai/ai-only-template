@@ -1259,7 +1259,9 @@ const FRONTEND_PLACEMENT = {
 const PLACEMENT_RULES = [BACKEND_PLACEMENT, FRONTEND_PLACEMENT];
 
 // apps/shared（@repo/shared。Issue #90）に置いてよいのは、名前を決めたファイルだけ（env.ts・logger.ts・now.ts とそのテスト、
-//   package.json・tsconfig.json）。
+//   logger の event.name の一覧 log-event.ts（Issue #209）、package.json・tsconfig.json）。
+// WHY log-event.ts にテストを置かない（一覧に log-event.test.ts を足さない）: 型と定数だけのファイルで、一覧の値と型の縛りは
+//   それを使う logger のテスト（logger.test.ts）が固定する。
 // WHY 何でも置ける場所にしない: 「frontend と backend の両方で使う」ものは多く、共通の置き場所を自由にすると、feature の
 //   コードや DB・React に依存するコードが集まり、層の規則（backend の 4 層・画面側の境界）の外で依存が育つ。
 //   置いてよいのは横断的な基盤（環境変数の入口・ログの出口・現在時刻の出口）だけにし、足すときはこの一覧・exports（SHARED_EXPORTS）・
@@ -1273,6 +1275,7 @@ const SHARED_FILES = new Set(
     "env.test.ts",
     "logger.ts",
     "logger.test.ts",
+    "log-event.ts",
     "now.ts",
     "now.test.ts",
     "package.json",
@@ -1282,7 +1285,7 @@ const SHARED_FILES = new Set(
 
 const SHARED_PLACEMENT = {
   id: "shared-placement",
-  name: "apps/shared/ に置いてよいのは env.ts・logger.ts・now.ts とそのテスト（env.test.ts・logger.test.ts・now.test.ts）、package.json・tsconfig.json だけ",
+  name: "apps/shared/ に置いてよいのは env.ts・logger.ts・now.ts とそのテスト（env.test.ts・logger.test.ts・now.test.ts）、log-event.ts、package.json・tsconfig.json だけ",
   isMisplaced: (file: string) =>
     isUnder(file, SHARED_ROOT) && !SHARED_FILES.has(file),
 };
@@ -4389,6 +4392,9 @@ const SHARED_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/shared/logger.tsx",
     "apps/shared/now-helper.ts",
     "apps/shared/now.test-support.ts",
+    "apps/shared/log-events.ts",
+    // Issue #209: log-event.ts のテストは logger.test.ts に置く（一覧に無い）。
+    "apps/shared/log-event.test.ts",
     // Issue #181: backend・frontend の直下で許した test-support/ も、apps/shared では決めた名前の外。
     "apps/shared/test-support/now.ts",
     "apps/shared/env.js",
@@ -4403,6 +4409,7 @@ const SHARED_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/shared/env.test.ts",
     "apps/shared/logger.ts",
     "apps/shared/logger.test.ts",
+    "apps/shared/log-event.ts",
     "apps/shared/now.ts",
     "apps/shared/now.test.ts",
     "apps/shared/package.json",

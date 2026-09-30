@@ -198,9 +198,15 @@ export function toProblemResponse(error: unknown, request: Request): Response {
   }
   // WHY ログに残す: 想定外の例外は原因を調べる必要がある。レスポンスでは詳細を隠すので、
   //   サーバのログ（stderr の 1 行の JSON）にだけ残す。ログはすべて logger を通す（.claude/rules/backend.md の「ログ」）。
-  //   Error は logger が { name, message } にする（stack は出さない）。
+  //   Error は logger が { type, message } にする（stack は出さない）。
   // WHY 英語の固定の文言: ログは開発者が読むもので、apps/backend の非テストコードには日本語を置かない（Issue #116）。
-  logger.error({ message: "unexpected error", error });
+  // WHY event.name を server_error にする（Issue #209。apps/shared/log-event.ts）: API の想定外の例外（500）を 1 つの種類で引け、
+  //   アラートの条件にできる。DomainError など 400 / 404 の行は出さないので、この名前の行はすべてサーバ側の不具合の候補。
+  logger.error({
+    message: "unexpected error",
+    event: { name: "server_error" },
+    error,
+  });
   // WHY 固定のキーと detail にする: 例外の message には内部の情報（接続先、SQL など）が含まれうるため、クライアントに返さない。
   return problemResponse(
     "internal_error",

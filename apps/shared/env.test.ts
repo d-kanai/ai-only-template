@@ -27,6 +27,7 @@ const VALID = {
   DATABASE_POOL_MAX: "10",
   DATABASE_POOL_IDLE_TIMEOUT_MS: "10000",
   DATABASE_CONNECTION_TIMEOUT_MS: "5000",
+  GCP_PROJECT_ID: "my-project",
 };
 
 const REQUIRED_NAMES = Object.keys(VALID);
@@ -48,6 +49,7 @@ describe("readEnv", () => {
       DATABASE_POOL_MAX: 10,
       DATABASE_POOL_IDLE_TIMEOUT_MS: 10_000,
       DATABASE_CONNECTION_TIMEOUT_MS: 5_000,
+      GCP_PROJECT_ID: "my-project",
     });
   });
 

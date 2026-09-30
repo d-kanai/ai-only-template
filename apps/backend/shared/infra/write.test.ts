@@ -21,7 +21,7 @@ import { deleteEntry, insertEntry } from "./change-log";
 import { changeLogs } from "./schema";
 import { writeInTransaction } from "./write";
 
-// WHY 時計（now）を差し替える: ログの行の timestamp と、recordChange が occurred_at に入れる時刻を決めた値にして、
+// WHY 時計（now）を差し替える: ログの行の time と、recordChange が occurred_at に入れる時刻を決めた値にして、
 //   行を丸ごと比べるため。
 vi.mock("@repo/shared/now");
 
@@ -70,7 +70,7 @@ function captureLogs() {
   return { info: () => lines(info), warn: () => lines(warn) };
 }
 
-// performance.now の 1 回目（開始）と 2 回目（終了）の値を決める。所要時間（durationMs）はその差。
+// performance.now の 1 回目（開始）と 2 回目（終了）の値を決める。所要時間（event.duration_ms）はその差。
 function fixElapsed(start: number, end: number) {
   vi.spyOn(performance, "now")
     .mockReturnValueOnce(start)
@@ -78,7 +78,9 @@ function fixElapsed(start: number, end: number) {
 }
 
 describe("writeInTransaction", () => {
-  test("書き込みの前後に 1 行ずつログ（表・行の id・操作、後は所要時間と記録の表・行の id・操作）を出す", async () => {
+  // 行の形は Cloud Logging の特別フィールドと OTel semconv の DB の名前（db.collection.name・db.operation.name。Issue #209。
+  //   https://opentelemetry.io/docs/specs/semconv/registry/attributes/db/ ）。
+  test("書き込みの前後に 1 行ずつログ（event.name は db_write、phase は start / done。表・行の id・操作、後は所要時間と記録の表・行の id・操作）を出す", async () => {
     const logs = captureLogs();
     fixElapsed(1000, 1012.4);
     const row = { id: ID, itemName: "牛乳" };
@@ -98,28 +100,27 @@ describe("writeInTransaction", () => {
     );
 
     const start = {
-      level: "info",
-      timestamp: TIMESTAMP.toISOString(),
-      message: "repository write start",
-      table: "items",
-      rowId: ID,
-      operation: "insert",
+      severity: "INFO",
+      time: TIMESTAMP.toISOString(),
+      message: "db write start",
+      event: { name: "db_write", phase: "start" },
+      db: { collection: { name: "items" }, operation: { name: "insert" } },
+      row_id: ID,
     };
     expect(linesBeforeWrite).toStrictEqual([start]);
     // WHY changes に値（before / after）を出さない: 個人情報を含みうる。値は change_logs に残る。
     expect(logs.info()).toStrictEqual([
       start,
       {
-        level: "info",
-        timestamp: TIMESTAMP.toISOString(),
-        message: "repository write done",
-        table: "items",
-        rowId: ID,
-        operation: "insert",
-        durationMs: 12,
+        severity: "INFO",
+        time: TIMESTAMP.toISOString(),
+        message: "db write done",
+        event: { name: "db_write", phase: "done", duration_ms: 12 },
+        db: { collection: { name: "items" }, operation: { name: "insert" } },
+        row_id: ID,
         changes: [
-          { tableName: "items", rowId: ID, operation: "insert" },
-          { tableName: "items", rowId: OTHER_ID, operation: "delete" },
+          { table: "items", row_id: ID, operation: "insert" },
+          { table: "items", row_id: OTHER_ID, operation: "delete" },
         ],
       },
     ]);
@@ -137,7 +138,7 @@ describe("writeInTransaction", () => {
       async () => [],
     );
 
-    expect(logs.info()[1]).toMatchObject({ durationMs: 13 });
+    expect(logs.info()[1]).toMatchObject({ event: { duration_ms: 13 } });
   });
 
   test("書き込みの本体と、返した記録（change_logs）を同じトランザクションで書く", async () => {
@@ -173,14 +174,14 @@ describe("writeInTransaction", () => {
 
     await expect(database.db.select().from(changeLogs)).resolves.toEqual([]);
     expect(logs.info()[1]).toMatchObject({
-      message: "repository write done",
+      message: "db write done",
       changes: [],
     });
   });
 
   // WHY warn（error にしない）: not_found などの DomainError は 404 の正常な結果。500 になる例外は presentation の
   //   toProblemResponse が logger.error で別に残す。
-  test("書き込みが失敗すると、失敗のログ（所要時間と例外の name・message）を warn で 1 行出し、同じ例外を投げ直し、本体を戻す", async () => {
+  test("書き込みが失敗すると、失敗のログ（所要時間と例外の type・message）を warn で 1 行出し、同じ例外を投げ直し、本体を戻す", async () => {
     const logs = captureLogs();
     fixElapsed(2000, 2003);
     const error = new DomainError("not_found", "todo.notFound", { id: ID });
@@ -197,24 +198,23 @@ describe("writeInTransaction", () => {
     await expect(result).rejects.toBe(error);
     expect(logs.info()).toStrictEqual([
       {
-        level: "info",
-        timestamp: TIMESTAMP.toISOString(),
-        message: "repository write start",
-        table: "items",
-        rowId: ID,
-        operation: "update",
+        severity: "INFO",
+        time: TIMESTAMP.toISOString(),
+        message: "db write start",
+        event: { name: "db_write", phase: "start" },
+        db: { collection: { name: "items" }, operation: { name: "update" } },
+        row_id: ID,
       },
     ]);
     expect(logs.warn()).toStrictEqual([
       {
-        level: "warn",
-        timestamp: TIMESTAMP.toISOString(),
-        message: "repository write failed",
-        table: "items",
-        rowId: ID,
-        operation: "update",
-        durationMs: 3,
-        error: { name: "DomainError", message: error.message },
+        severity: "WARNING",
+        time: TIMESTAMP.toISOString(),
+        message: "db write failed",
+        event: { name: "db_write", phase: "failed", duration_ms: 3 },
+        db: { collection: { name: "items" }, operation: { name: "update" } },
+        row_id: ID,
+        error: { type: "DomainError", message: error.message },
       },
     ]);
     await expect(database.db.select().from(items)).resolves.toEqual([]);
@@ -222,22 +222,32 @@ describe("writeInTransaction", () => {
 
   // WHY DB のエラーは message を出さない: drizzle-orm の DrizzleQueryError の message は「Failed query: <SQL>\nparams: <値>」で、
   //   行の値（個人情報を含みうる）がログに出る。元の pg のエラーの message も、データ例外（SQLSTATE 22 系。22P02 の
-  //   invalid input syntax for type uuid: "<入力>" など）は入力値を含む。何の失敗かは SQLSTATE（sqlState）と制約の名前（constraint）で分かる。
-  // 失敗のログの行（DB のエラーの項目だけを変える）。
-  function failedLine(operation: string, durationMs: number, db: object) {
+  //   invalid input syntax for type uuid: "<入力>" など）は入力値を含む。何の失敗かは SQLSTATE（db.response.status_code）と
+  //   制約の名前（constraint）で分かる。
+  // 失敗のログの行（DB のエラーの項目だけを変える）。statusCode が無ければ db.response を出さない。
+  function failedLine(
+    operation: string,
+    durationMs: number,
+    failure: { statusCode?: string; rest: object },
+  ) {
     return {
-      level: "warn",
-      timestamp: TIMESTAMP.toISOString(),
-      message: "repository write failed",
-      table: "items",
-      rowId: ID,
-      operation,
-      durationMs,
-      ...db,
+      severity: "WARNING",
+      time: TIMESTAMP.toISOString(),
+      message: "db write failed",
+      event: { name: "db_write", phase: "failed", duration_ms: durationMs },
+      db: {
+        collection: { name: "items" },
+        operation: { name: operation },
+        ...(failure.statusCode === undefined
+          ? {}
+          : { response: { status_code: failure.statusCode } }),
+      },
+      row_id: ID,
+      ...failure.rest,
     };
   }
 
-  test("DB のエラー（一意制約違反）のとき、失敗のログは pg のエラーの name・SQLSTATE（23505）・制約の名前だけを出し、message（SQL と値）を出さない", async () => {
+  test("DB のエラー（一意制約違反）のとき、失敗のログは pg のエラーの name（error.type）・SQLSTATE（23505）・制約の名前だけを出し、message（SQL と値）を出さない", async () => {
     const row = { id: ID, itemName: "牛乳" };
     await database.db.insert(items).values(row);
     const logs = captureLogs();
@@ -255,9 +265,8 @@ describe("writeInTransaction", () => {
     await expect(result).rejects.toMatchObject({ cause: { code: "23505" } });
     expect(logs.warn()).toStrictEqual([
       failedLine("insert", 4, {
-        error: { name: "error" },
-        sqlState: "23505",
-        constraint: "items_pkey",
+        statusCode: "23505",
+        rest: { constraint: "items_pkey", error: { type: "error" } },
       }),
     ]);
     expect(JSON.stringify(logs.warn())).not.toContain("牛乳");
@@ -285,7 +294,10 @@ describe("writeInTransaction", () => {
       },
     });
     expect(logs.warn()).toStrictEqual([
-      failedLine("delete", 2, { error: { name: "error" }, sqlState: "22P02" }),
+      failedLine("delete", 2, {
+        statusCode: "22P02",
+        rest: { error: { type: "error" } },
+      }),
     ]);
     expect(JSON.stringify(logs.warn())).not.toContain(input);
   });
@@ -296,21 +308,25 @@ describe("writeInTransaction", () => {
     [
       "cause が無いときは、元の DrizzleQueryError をそのまま出す",
       new DrizzleQueryError("select 1", [], undefined),
-      { error: { name: "Error", message: "Failed query: select 1\nparams: " } },
+      {
+        rest: {
+          error: { type: "Error", message: "Failed query: select 1\nparams: " },
+        },
+      },
     ],
     [
       "cause が code・constraint を持たない Error のときは、cause の name だけを出す",
       new DrizzleQueryError("select 1", [], new Error("boom")),
-      { error: { name: "Error" } },
+      { rest: { error: { type: "Error" } } },
     ],
     [
-      "cause の code・constraint が文字列でないときは、sqlState・constraint を出さない",
+      "cause の code・constraint が文字列でないときは、db.response・constraint を出さない",
       new DrizzleQueryError(
         "select 1",
         [],
         Object.assign(new Error("boom"), { code: 23505, constraint: 1 }),
       ),
-      { error: { name: "Error" } },
+      { rest: { error: { type: "Error" } } },
     ],
   ])("DB のエラーの %s", async (_label, thrown, expected) => {
     const logs = captureLogs();
@@ -351,7 +367,7 @@ describe("writeInTransaction", () => {
       });
       await expect(database.db.select().from(items)).resolves.toEqual([]);
       expect(logs.warn()).toMatchObject([
-        { message: "repository write failed", table: "items", rowId: ID },
+        { message: "db write failed", row_id: ID },
       ]);
       expect(logs.info()).toHaveLength(1);
     } finally {

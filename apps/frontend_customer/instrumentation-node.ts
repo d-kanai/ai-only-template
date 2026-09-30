@@ -16,10 +16,13 @@ export async function verifyEnvAtStartup(): Promise<void> {
   try {
     await import("@repo/shared/env");
   } catch (error) {
-    // ログはすべて logger を通す（Issue #85）。Error は { name, message } になり、欠けた変数の名前は message に入る（env.ts）。
+    // ログはすべて logger を通す（Issue #85）。Error は { type, message } になり、欠けた変数の名前は message に入る（env.ts）。
     // WHY 英語: サーバのログは運用者向けで、画面の辞書（shared/i18n/）の対象外。運用者向けの文言は英語にそろえる（Issue #116）。
+    // WHY event.name を app_start_failed にする（Issue #209。apps/shared/log-event.ts）: 起動できなかった理由（環境変数・TZ）を
+    //   1 つの種類で引ける。デプロイ直後に新しいリビジョンが立ち上がらないときに最初に見る行。
     logger.error({
       message: "Environment variable validation failed at startup",
+      event: { name: "app_start_failed" },
       error,
     });
     process.exit(1);
@@ -39,6 +42,7 @@ export function verifyTimeZoneAtStartup(): void {
   if (timeZone !== "UTC") {
     logger.error({
       message: "The server time zone must be UTC; start the server with TZ=UTC",
+      event: { name: "app_start_failed" },
       timeZone,
     });
     process.exit(1);

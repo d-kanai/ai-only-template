@@ -90,7 +90,7 @@ function byTableAndChanges(a: ChangeEntry, b: ChangeEntry): number {
   );
 }
 
-// action の間に出た書き込みのログ（writeInTransaction の "repository write ..." の行）を、info（console.log）と
+// action の間に出た書き込みのログ（writeInTransaction の event.name が db_write の行）を、info（console.log）と
 //   warn（console.warn）ごとに JSON にして返す。WHY action の前に消す: 準備の save のログを数えない。
 async function writeLogsBy(
   action: () => Promise<unknown>,
@@ -105,15 +105,20 @@ async function writeLogsBy(
   return { info: lines(info), warn: lines(warn) };
 }
 
-// 書き込みの前後のログの行（timestamp と所要時間は実行ごとに変わるので形だけを見る。値は shared/infra/write.test.ts が固定する）。
+// 書き込みのログの db（表名と操作）。
+function dbFields(table: string, operation: string) {
+  return { collection: { name: table }, operation: { name: operation } };
+}
+
+// 書き込みの前後のログの行（time と所要時間は実行ごとに変わるので形だけを見る。値は shared/infra/write.test.ts が固定する）。
 function writeStartLine(table: string, rowId: string, operation: string) {
   return {
-    level: "info",
-    timestamp: expect.any(String),
-    message: "repository write start",
-    table,
-    rowId,
-    operation,
+    severity: "INFO",
+    time: expect.any(String),
+    message: "db write start",
+    event: { name: "db_write", phase: "start" },
+    db: dbFields(table, operation),
+    row_id: rowId,
   };
 }
 
@@ -122,15 +127,19 @@ function writeDoneLine(
   rowId: string,
   operation: string,
   changes: {
-    tableName: string;
-    rowId: string | undefined;
+    table: string;
+    row_id: string | undefined;
     operation: string;
   }[],
 ) {
   return {
     ...writeStartLine(table, rowId, operation),
-    message: "repository write done",
-    durationMs: expect.any(Number),
+    message: "db write done",
+    event: {
+      name: "db_write",
+      phase: "done",
+      duration_ms: expect.any(Number),
+    },
     changes,
   };
 }
@@ -1006,10 +1015,10 @@ describe("PostgresTodoRepository", () => {
       info: [
         writeStartLine("todos", todo.id, "insert"),
         writeDoneLine("todos", todo.id, "insert", [
-          { tableName: "todos", rowId: todo.id, operation: "insert" },
+          { table: "todos", row_id: todo.id, operation: "insert" },
           {
-            tableName: "todo_status_changes",
-            rowId: await statusChangeId(todo.id, 0),
+            table: "todo_status_changes",
+            row_id: await statusChangeId(todo.id, 0),
             operation: "insert",
           },
         ]),
@@ -1031,10 +1040,10 @@ describe("PostgresTodoRepository", () => {
       info: [
         writeStartLine("todos", todo.id, "update"),
         writeDoneLine("todos", todo.id, "update", [
-          { tableName: "todos", rowId: todo.id, operation: "update" },
+          { table: "todos", row_id: todo.id, operation: "update" },
           {
-            tableName: "todo_status_changes",
-            rowId: await statusChangeId(todo.id, 1),
+            table: "todo_status_changes",
+            row_id: await statusChangeId(todo.id, 1),
             operation: "insert",
           },
         ]),
@@ -1057,7 +1066,7 @@ describe("PostgresTodoRepository", () => {
       info: [
         writeStartLine("todos", todo.id, "delete"),
         writeDoneLine("todos", todo.id, "delete", [
-          { tableName: "todos", rowId: todo.id, operation: "delete" },
+          { table: "todos", row_id: todo.id, operation: "delete" },
         ]),
         writeStartLine("todos", missing, "delete"),
         writeDoneLine("todos", missing, "delete", []),
@@ -1086,14 +1095,17 @@ describe("PostgresTodoRepository", () => {
       info: [writeStartLine("todos", todo.id, "update")],
       warn: [
         {
-          level: "warn",
-          timestamp: expect.any(String),
-          message: "repository write failed",
-          table: "todos",
-          rowId: todo.id,
-          operation: "update",
-          durationMs: expect.any(Number),
-          error: { name: "DomainError", message: error.message },
+          severity: "WARNING",
+          time: expect.any(String),
+          message: "db write failed",
+          event: {
+            name: "db_write",
+            phase: "failed",
+            duration_ms: expect.any(Number),
+          },
+          db: dbFields("todos", "update"),
+          row_id: todo.id,
+          error: { type: "DomainError", message: error.message },
         },
       ],
     });

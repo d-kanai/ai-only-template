@@ -184,8 +184,9 @@ describe("PUT /api/todos/:id/completion", () => {
     expect(response.status).toBe(200);
     await vi.waitFor(() => expect(log).toHaveBeenCalledTimes(1));
     expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toMatchObject({
-      level: "info",
+      severity: "INFO",
       message: "notification",
+      event: { name: "notification" },
       notification: `Todo completed: ${todo.id}`,
     });
   });
