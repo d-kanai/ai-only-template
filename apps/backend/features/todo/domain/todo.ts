@@ -100,7 +100,7 @@ export class Todo {
   readonly #origin: Readonly<TodoProps> | undefined;
 
   // origin: 検証した後の props（valid）から origin を決める関数。create は () => undefined、reconstruct は
-  //   (valid) => valid、状態遷移（with）は () => this.#origin（引き継ぐ）。
+  //   (valid) => valid、状態遷移（transition）は () => this.#origin（引き継ぐ）。
   private constructor(
     props: TodoProps,
     origin: (valid: TodoProps) => Readonly<TodoProps> | undefined,
@@ -154,16 +154,16 @@ export class Todo {
     return new Todo(values, (valid) => valid);
   }
 
-  // タイトルだけを変える操作。他の値は with が引き継ぎ、引き継いだ値も含めてコンストラクタが全体を検証する。
+  // タイトルだけを変える操作。他の値は transition が引き継ぎ、引き継いだ値も含めてコンストラクタが全体を検証する。
   rename(title: string): Todo {
-    return this.with({ title });
+    return this.transition({ title });
   }
 
   // WHY toggle（反転）ではなく値を受け取る: API は「完了にする / 未完了に戻す」を completed の値で指定する。
   //   反転だと同じリクエストを 2 回送ったときに結果が変わる（冪等でなくなる）。
   // completed の規則（boolean であること）も含めて、コンストラクタが全体を検証する。
   changeCompletion(completed: boolean): Todo {
-    return this.with({ completed });
+    return this.transition({ completed });
   }
 
   // 状態遷移の共通部分: 変える項目だけを受け取り、他の値と origin を引き継いだ新しい Todo を返す。
@@ -171,7 +171,9 @@ export class Todo {
   //   遷移メソッドごとに書くと、遷移を足したときに引き継ぎ忘れが起き、読み込んで変えた Todo が新規（全列の
   //   INSERT ... ON CONFLICT）として保存されて別の列の同時更新を巻き戻す。遷移メソッドは「何を変えるか」だけを書く。
   // WHY id と createdAt を変えられない型にする: 遷移で変わらない値（id は同一性、作成日時は生成時に決まる）。
-  private with(changes: Partial<Omit<TodoProps, "id" | "createdAt">>): Todo {
+  private transition(
+    changes: Partial<Omit<TodoProps, "id" | "createdAt">>,
+  ): Todo {
     return new Todo({ ...this.props(), ...changes }, () => this.#origin);
   }
 
