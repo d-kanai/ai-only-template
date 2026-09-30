@@ -1,5 +1,5 @@
-# Todo のライフサイクル（Issue #200。.claude/rules/testing.md の「ジャーニーテスト」）。
-# step の実装は todo-lifecycle.feature.journey.test.ts（対の名前。rule-tests/journey.test.ts の journey-feature-pair）。
+# Todo のライフサイクル（Issue #200。.claude/rules/testing.md の「API ジャーニーテスト」）。
+# step の実装は todo-lifecycle.api-journey.test.ts（対の名前。rule-tests/api-journey.test.ts の api-journey-feature-pair）。
 # 各 step の文は、同じシナリオの中で同じ種類（Given / When / Then / And）の step と重ならないように書く
 #   （vitest-cucumber 8.0.0 は、式（{string} / {int}）の step を、同じ種類で最初に一致した行に割り当てる）。
 Feature: Todo のライフサイクル

@@ -8,7 +8,7 @@
     "start": "TZ=UTC pnpm --filter @repo/frontend-customer --fail-if-no-match start",
     "test": "vitest run --coverage",
     "test:unit": "vitest run",
-    "test:journey": "vitest run apps/backend/journeys",
+    "test:api-journey": "vitest run apps/backend/api-journeys",
     "test:e2e": "pnpm --filter @repo/e2e --fail-if-no-match test",
     "test:mutation": "stryker run",
     "lint": "biome check --error-on-warnings .",

@@ -11,7 +11,7 @@ export default mergeConfig(
   baseConfig,
   defineConfig({
     test: {
-      // exclude: Gherkin の .feature の step を書いたジャーニー（apps/backend/journeys/*.feature.journey.test.ts）を Stryker では
+      // exclude: Gherkin の .feature の step を書いた API ジャーニー（apps/backend/api-journeys/*.api-journey.test.ts）を Stryker では
       //   実行しない。mergeConfig は配列を連結するので、vitest.config.mts の exclude（node_modules・apps/e2e/**・.stryker-tmp/**）に
       //   この 1 行が足される。
       //   WHY: vitest-cucumber 8.0.0 は step 1 つを Vitest の test 1 つにし、前の step の結果（作った Todo・応答）を後の step が使う
@@ -20,9 +20,10 @@ export default mergeConfig(
       //   pnpm patch の説明）。後の step だけが選ばれると、前提の step が skip されて値が undefined のまま失敗し、変異の検出と
       //   関係なく killed と数えられうる（`vitest run <file> -t "<後の step の名前>"` で TypeError になることを 2026-09-30 に実測。
       //   同日の work-logs）。
-      //   同じ流れは既存のジャーニー（*.journey.test.ts。1 シナリオ = 1 test）が Stryker でも検証するので、変異を殺す力は減らない。
-      //   pnpm test（vitest.config.mts）では .feature のジャーニーも実行する。
-      exclude: ["apps/backend/journeys/*.feature.journey.test.ts"],
+      //   代償: TS だけのジャーニー（1 シナリオ = 1 test）は廃止した（Issue #200 のユーザー判断）ので、API ジャーニーの流れは Stryker
+      //   では検証しない。変異は層ごとの単体テストと *.postgres.test.ts が殺す。pnpm test（vitest.config.mts）では API ジャーニーも
+      //   実行する。
+      exclude: ["apps/backend/api-journeys/*.api-journey.test.ts"],
     },
   }),
 );
