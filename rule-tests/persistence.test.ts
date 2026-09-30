@@ -62,9 +62,10 @@ import { afterAll, describe, expect, it } from "vitest";
 //     （コールバック）にも無い（字句の範囲。括弧を数えて対応する閉じを探す）。行は recordChange の行。
 //     WHY: 記録は本体の書き込みと同じトランザクションで書く。外で書くと、記録の失敗で本体だけが残り、変更が記録から漏れる。
 //     限界は recordChangeOutsideTransaction のコメント。
+//     限界: `import { recordChange as rc }` のように別名で読むと、別名の呼び出しは見ない（writes-record-change-log は import で見る）。
 //   - aggregate-loads-all-children（Issue #189。ユーザー判断 2026-09-30）: insert のみの子表（`Changes` / `Events` で終わる名前）を
 //     import した *.postgres.ts で、(a) 親の `.from(<表>)` の chain に子表の `.leftJoin(` が無い（行ロック `.for(` の chain は除く）、
-//     (b) 子表だけを `.from(<子表>)` で読む、(c) `.limit(`、(d) `.where(` の引数に子表の列がある。
+//     (b) 子表だけを `.from(<子表>)` で読む、(c) `.limit(` / `.offset(` / `.selectDistinctOn(`、(d) `.where(` の引数に子表の列がある。
 //     WHY: 集約は常に全体（全件の履歴）を読んで reconstruct の不変条件で検証する。WHY と限界は partialAggregateReads のコメント。
 // 変更履歴の表（change_logs。変数名 changeLogs）も insert のみ: no-update-delete-on-append-only-tables と append-only-table-naming は
 //   `Logs` / `_logs` も対象にし、append-only-table-naming は横断の表の置き場所 shared/infra/schema.ts も見る（Issue #189）。
@@ -186,14 +187,16 @@ function importedChildTables(code: string): string[] {
 //   (a) 子表でない表の `.from(<表>)` の chain（`.from(` から次の `;` まで）に、import した子表ごとの `.leftJoin(<子表>` が無い。
 //       chain に `.for(`（行ロック）があれば対象外（save の存在確認。集約を組み立てない）。行は from の行。
 //   (b) 子表の `.from(<子表>)`（子表だけを読む）。行は from の行。
-//   (c) `.limit(`。
+//   (c) `.limit(` / `.offset(`（件数を絞る・飛ばす）、`.selectDistinctOn(`（親ごとに 1 行だけを読む）。行はその名前の行。
 //   (d) `.where(` の引数に子表の列（`<子表>.<列>`）がある。行は where の行。orderBy・select の中は可。
 // WHY: 集約は常に全体（全件の履歴）を読み、reconstruct の不変条件（最後の completed = completed など）で検証する。最新だけ・
 //   一部だけを読むと不変条件を検証できず、部分的な集約が domain に入る。LEFT JOIN の WHERE で子表の列を絞ると、履歴の無い
 //   親も外れる（INNER JOIN と同じになる）。
 // 限界（字句の推定）: from / leftJoin / where の引数が変数経由（`.where(where)` に子表の条件を渡す、表を別名の変数に入れ直す）
 //   なら見ない。leftJoin の結合条件（ON）で子表を絞る書き方、`;` を含む chain、`.for(` を含む chain での集約の読み出しは見逃す。
-//   子表の import が名前空間（`import * as schema`）なら対象外。
+//   子表の import が名前空間（`import * as schema`）なら対象外。子表を import した *.postgres.ts で別の表だけ（change_logs など）を
+//   `.from(` で読む書き方も (a) の違反になる（誤検知。今は無い）。`.for(` の付いた chain は行ロック（save の存在確認）と
+//   みなして (a) を見ないので、`.for("update")` で集約を読む書き方は見逃す。
 function partialAggregateReads(code: string): number[] {
   const children = importedChildTables(code);
   if (children.length === 0) {
@@ -220,8 +223,10 @@ function partialAggregateReads(code: string): number[] {
       lines.push(line);
     }
   }
-  for (const { index } of code.matchAll(/\.\s*limit\s*\(/g)) {
-    lines.push(lineAt(code, index + code.slice(index).search(/limit/)));
+  for (const { index } of code.matchAll(
+    /\.\s*(?:limit|offset|selectDistinctOn)\s*\(/g,
+  )) {
+    lines.push(lineAt(code, index + code.slice(index).search(/[a-zA-Z]/)));
   }
   for (const { 0: whole, index } of code.matchAll(/\.\s*where\s*\(/g)) {
     const open = index + whole.length - 1;
@@ -1079,6 +1084,22 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
         "  .limit(1);",
       ),
       [{ rule: "aggregate-loads-all-children", line: 3 }],
+    ],
+    [
+      "(c) offset( で行を飛ばす・selectDistinctOn で各 Todo の 1 行だけを読む（leftJoin で読んでいても）",
+      POSTGRES,
+      source(
+        IMPORT_CHILD,
+        "const rows = await this.db.select().from(todos).leftJoin(todoStatusChanges, on)",
+        "  .offset(1);",
+        "const latest = await this.db",
+        "  .selectDistinctOn([todos.id], { id: todos.id })",
+        "  .from(todos).leftJoin(todoStatusChanges, on);",
+      ),
+      [
+        { rule: "aggregate-loads-all-children", line: 3 },
+        { rule: "aggregate-loads-all-children", line: 5 },
+      ],
     ],
     [
       "(d) where で子表の position / changedAt を絞る（and の奥・改行を挟む。orderBy の子表の列は可）",
