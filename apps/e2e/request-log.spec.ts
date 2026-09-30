@@ -38,13 +38,19 @@ type LoggedRequest = {
   referer: string | null;
 };
 
-// stdout のうち JSON として読める行（リクエストログ）だけを取り出す。起動メッセージなどは除く。
+// stdout のうちリクエストログの行だけを取り出す。JSON でない行（Next の起動メッセージ）と、リクエストログ以外の JSON の行
+//   （Repository の書き込みのログ "repository write start" / "done"。apps/backend/shared/infra/write.ts。Issue #205）は除く。
+// WHY kind で見分ける: logger（apps/shared/logger.ts）を通るログはどれも JSON 1 行で stdout に出るので、「JSON の行」では
+//   リクエストログに絞れない。kind（page / api）はリクエストログ（request-log.ts）だけが持つ。
 function loggedRequests(): LoggedRequest[] {
   return stdoutLines.flatMap((line) => {
     if (!line.startsWith("{")) {
       return [];
     }
-    return [JSON.parse(line) as LoggedRequest];
+    const parsed = JSON.parse(line) as Partial<LoggedRequest>;
+    return parsed.kind === "page" || parsed.kind === "api"
+      ? [parsed as LoggedRequest]
+      : [];
   });
 }
 
