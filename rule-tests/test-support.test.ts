@@ -47,7 +47,15 @@ import { afterAll, describe, expect, it } from "vitest";
 //     Variables の無いリポジトリで失敗するか、条件を変えたときに黙ってスキップされる。
 //     限界: ステップは「行頭が `- key:` の行」で区切り、コメントの行（`#` で始まる）は除いて読む。パターンのほか（find の結果を
 //     判定に使っているか・対象のイメージ）は見ない（手元のイメージで exit 0 / 混入で exit 1 を実測した。Issue #181 の work-logs）。
-// 検査の対象の列挙が 0 件（test-support/ のファイル・本番のソース・apps/*/package.json）なら、実ファイルのテストで失敗させる
+//   - in-memory-placement: apps/backend の下の InMemory の実装（名前が `.in-memory.<ソースの拡張子>` で終わるファイル）が
+//     apps/backend/test-support/ の下に無い（Issue #191。features/<f>/infra/・shared/infra/・features/<f>/test-support/ は違反）。
+//     WHY: InMemory の Repository はテストだけが使うコードで、infra に置くと本番のコードと見分けが付かず、本番の api ファイルが
+//     参照でき（architecture.test.ts の規則 presentation の例外の絞り込みだけが頼り）、イメージにも入る。test-support に置けば
+//     production-imports-test-support と .dockerignore が本番とイメージから外す。
+//     WHY 名前が `.in-memory` で終わるものだけ: journey.test.ts の journey-no-in-memory と同じ目印。名前に in-memory を含むだけの別名
+//     （`in-memory-x.ts`・`x.in-memory-y.ts`）とテスト（`x.in-memory.test.ts`）は対象外。
+//     限界: 名前で見分けるので、目印の無い名前の InMemory の実装（`fake-x-repository.ts` など）は見ない。apps/backend の外は見ない。
+// 検査の対象の列挙が 0 件（test-support/ のファイル・本番のソース・apps/*/package.json・apps/backend の *.in-memory）なら、実ファイルのテストで失敗させる
 //   （列挙が壊れて 0 件になると違反も 0 件になり、常に緑になるため）。
 //
 // .dockerignore のパターンの解釈（限界）: Docker の .dockerignore は Go の filepath.Match に `**` を足した書き方で、後ろの行ほど優先
@@ -69,7 +77,8 @@ type RuleId =
   | "dockerignore-entry"
   | "dockerignore-excludes"
   | "production-imports-test-support"
-  | "exports-test-support";
+  | "exports-test-support"
+  | "in-memory-placement";
 
 const repoRoot = join(import.meta.dirname, "..");
 
@@ -215,6 +224,21 @@ function findTestSupportInExports(exports: unknown): string[] {
   return [];
 }
 
+// --- (f) InMemory の実装の置き場所 ---
+
+const BACKEND_DIR = "apps/backend";
+const IN_MEMORY_SOURCE = /\.in-memory\.(?:[cm]?[jt]s|[jt]sx)$/;
+
+// path（リポジトリ相対）が apps/backend の下の InMemory の実装で、apps/backend/test-support/ の外にあるか。
+// WHY 前方一致に `/` を付ける: apps/backend-x/ や apps/backend/test-support-x/ を取り違えない。
+function isMisplacedInMemory(path: string): boolean {
+  return (
+    path.startsWith(`${BACKEND_DIR}/`) &&
+    IN_MEMORY_SOURCE.test(path) &&
+    !path.startsWith(`${BACKEND_DIR}/${TEST_SUPPORT_DIR}/`)
+  );
+}
+
 // --- 列挙と検査（本番と fixture で同じ関数を通す） ---
 
 // WHY node_modules と .next に入らない: 依存と生成物は検査の対象ではない（architecture.test.ts の EXCLUDED_DIRS と同じ）。
@@ -267,6 +291,13 @@ function listDockerExcludedTargets(root: string): string[] {
   return [...listTestSupportFiles(root), ...testsImportingTestSupport].sort();
 }
 
+// apps/backend の下の InMemory の実装（置き場所を問わず、名前順）。
+function listBackendInMemorySources(root: string): string[] {
+  return walk(root, BACKEND_DIR)
+    .filter((path) => IN_MEMORY_SOURCE.test(path))
+    .sort();
+}
+
 // apps/*/package.json（名前順）。
 function listAppPackageJsons(root: string): string[] {
   return listApps(root)
@@ -304,6 +335,9 @@ function collectViolations(root: string): Record<RuleId, string[]> {
         (entry) => `exports-test-support: ${path} ${entry}`,
       );
     }),
+    "in-memory-placement": listBackendInMemorySources(root)
+      .filter(isMisplacedInMemory)
+      .map((path) => `in-memory-placement: ${path}`),
   };
 }
 
@@ -711,6 +745,39 @@ describe("package.json の exports（findTestSupportInExports）", () => {
   });
 });
 
+describe("InMemory の実装の置き場所（isMisplacedInMemory）", () => {
+  it.each([
+    "apps/backend/test-support/x/x-repository.in-memory.ts",
+    "apps/backend/test-support/x.in-memory.ts",
+    "apps/backend/test-support/x/y/x.in-memory.mts",
+    // 名前に in-memory を含むだけの別名（`.in-memory` で終わらない）は対象外。
+    "apps/backend/features/x/infra/in-memory-x.ts",
+    "apps/backend/features/x/infra/x-in-memory.ts",
+    "apps/backend/features/x/infra/x.in-memory-y.ts",
+    // テスト・ソースでないファイルは対象外。
+    "apps/backend/features/x/infra/x-repository.in-memory.test.ts",
+    "apps/backend/features/x/infra/x.in-memory.md",
+    // apps/backend の外（前方一致だけが同じ apps/backend-x も）は対象外。
+    "apps/frontend_customer/features/x/x.in-memory.ts",
+    "apps/backend-x/features/x/infra/x.in-memory.ts",
+  ])("%s は違反なし", (path) => {
+    expect(isMisplacedInMemory(path)).toBe(false);
+  });
+
+  it.each([
+    "apps/backend/features/x/infra/x-repository.in-memory.ts",
+    "apps/backend/shared/infra/x.in-memory.ts",
+    "apps/backend/features/x/application/x.in-memory.mts",
+    "apps/backend/features/x/infra/x.in-memory.tsx",
+    "apps/backend/x.in-memory.cjs",
+    // test-support は apps/backend 直下だけ（features/<f>/test-support/ や前方一致の test-support-x/ は違う）。
+    "apps/backend/features/x/test-support/x.in-memory.ts",
+    "apps/backend/test-support-x/x.in-memory.ts",
+  ])("%s は違反", (path) => {
+    expect(isMisplacedInMemory(path)).toBe(true);
+  });
+});
+
 // --- 列挙 → 読み取り → 判定を通した fixture テスト ---
 // WHY: 判定が正しくても、列挙（test-support/ のファイル・本番のソース・package.json の見つけ方）や読み取りが漏れれば見逃す。
 //   一時ディレクトリに架空のツリーを置き、本番と同じ collectViolations に通して、違反の集合を丸ごと比較する。
@@ -813,6 +880,7 @@ describe("列挙と検査（fixture）", () => {
         "dockerignore-excludes": [],
         "production-imports-test-support": [],
         "exports-test-support": [],
+        "in-memory-placement": [],
       },
     });
   });
@@ -838,6 +906,8 @@ describe("列挙と検査（fixture）", () => {
         name: "@repo/shared",
         exports: { "./test-support/x": "./test-support/x.ts" },
       }),
+      "apps/backend/features/x/infra/bad-repository.in-memory.ts":
+        "export class InMemoryBadRepository {}\n",
     });
     expect(collectViolations(root)).toEqual({
       "dockerignore-entry": [
@@ -858,6 +928,9 @@ describe("列挙と検査（fixture）", () => {
       "exports-test-support": [
         "exports-test-support: apps/shared/package.json ./test-support/x",
         "exports-test-support: apps/shared/package.json ./test-support/x.ts",
+      ],
+      "in-memory-placement": [
+        "in-memory-placement: apps/backend/features/x/infra/bad-repository.in-memory.ts",
       ],
     });
   });
@@ -893,6 +966,58 @@ describe("列挙と検査（fixture）", () => {
       ],
       "production-imports-test-support": [],
       "exports-test-support": [],
+      "in-memory-placement": [],
+    });
+  });
+
+  it("in-memory-placement: apps/backend の下の *.in-memory のソースを列挙し、test-support/ の外にあるものだけが違反", () => {
+    const root = fixture({
+      ...allowedFiles,
+      ".dockerignore": lines(
+        "**/test-support",
+        "**/*.test.ts",
+        "**/*.test.tsx",
+      ),
+      "apps/backend/test-support/x/x-repository.in-memory.ts":
+        "export class InMemoryXRepository {}\n",
+      "apps/backend/test-support/y.in-memory.mts": "export const y = 1;\n",
+      // 対象外（別名・テスト・ソースでない・apps/backend の外・依存の中）。
+      "apps/backend/features/x/infra/in-memory-x.ts": "export const a = 1;\n",
+      "apps/backend/features/x/infra/x-repository.in-memory.test.ts":
+        'import { test } from "vitest";\n',
+      "apps/backend/features/x/infra/x.in-memory.md": "# x\n",
+      "apps/frontend_customer/features/x/x.in-memory.ts":
+        "export const b = 1;\n",
+      "apps/backend/node_modules/x/x.in-memory.ts": "export const c = 1;\n",
+      // 違反。
+      "apps/backend/features/x/infra/x-repository.in-memory.ts":
+        "export class InMemoryXRepository {}\n",
+      "apps/backend/shared/infra/z.in-memory.js": "export const z = 1;\n",
+      "apps/backend/features/x/test-support/w.in-memory.ts":
+        "export const w = 1;\n",
+    });
+    expect({
+      inMemory: listBackendInMemorySources(root),
+      violations: collectViolations(root),
+    }).toEqual({
+      inMemory: [
+        "apps/backend/features/x/infra/x-repository.in-memory.ts",
+        "apps/backend/features/x/test-support/w.in-memory.ts",
+        "apps/backend/shared/infra/z.in-memory.js",
+        "apps/backend/test-support/x/x-repository.in-memory.ts",
+        "apps/backend/test-support/y.in-memory.mts",
+      ],
+      violations: {
+        "dockerignore-entry": [],
+        "dockerignore-excludes": [],
+        "production-imports-test-support": [],
+        "exports-test-support": [],
+        "in-memory-placement": [
+          "in-memory-placement: apps/backend/features/x/infra/x-repository.in-memory.ts",
+          "in-memory-placement: apps/backend/features/x/test-support/w.in-memory.ts",
+          "in-memory-placement: apps/backend/shared/infra/z.in-memory.js",
+        ],
+      },
     });
   });
 
@@ -903,12 +1028,14 @@ describe("列挙と検査（fixture）", () => {
       excludedTargets: listDockerExcludedTargets(root),
       production: listProductionSources(root),
       packages: listAppPackageJsons(root),
+      inMemory: listBackendInMemorySources(root),
       violations: collectViolations(root),
     }).toEqual({
       testSupport: [],
       excludedTargets: [],
       production: [],
       packages: [],
+      inMemory: [],
       violations: {
         "dockerignore-entry": [
           "dockerignore-entry: .dockerignore に **/test-support が無い",
@@ -916,6 +1043,7 @@ describe("列挙と検査（fixture）", () => {
         "dockerignore-excludes": [],
         "production-imports-test-support": [],
         "exports-test-support": [],
+        "in-memory-placement": [],
       },
     });
   });
@@ -1125,5 +1253,13 @@ describe("test-support（実ファイル）", () => {
     expect(files).toContain("apps/backend/package.json");
     expect(files).toContain("apps/shared/package.json");
     expect(violations["exports-test-support"]).toEqual([]);
+  });
+
+  it("in-memory-placement: apps/backend の *.in-memory のソースは apps/backend/test-support/ の下だけにある", () => {
+    // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
+    expect(listBackendInMemorySources(repoRoot)).toContain(
+      "apps/backend/test-support/todo/todo-repository.in-memory.ts",
+    );
+    expect(violations["in-memory-placement"]).toEqual([]);
   });
 });

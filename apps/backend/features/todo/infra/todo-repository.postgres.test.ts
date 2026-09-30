@@ -210,7 +210,7 @@ describe("PostgresTodoRepository", () => {
     await expect(repository().findAll()).resolves.toEqual([updated]);
   });
 
-  // ここから下の save のテストは todo-repository.in-memory.test.ts と同じ契約で、同じテスト名にそろえる（Issue #165）。
+  // ここから下の save のテストは test-support/todo/todo-repository.in-memory.test.ts と同じ契約で、同じテスト名にそろえる（Issue #165）。
   //   DB を直接見る・spy するテストは Postgres だけにあり、そのことをテストの上に書く。
   // WHY 読み込み済みの Todo は変わった列だけを UPDATE する: 全列を書くと、同じ Todo を同時に別の列で更新したときに
   //   後から save した方が、先に save された別の列を読み込んだときの値に巻き戻す（lost update）。
@@ -387,7 +387,7 @@ describe("PostgresTodoRepository", () => {
     });
   });
 
-  // ここから下の完了の履歴（Issue #188）のテストは todo-repository.in-memory.test.ts と同じ契約で、同じテスト名にそろえる。
+  // ここから下の完了の履歴（Issue #188）のテストは test-support/todo/todo-repository.in-memory.test.ts と同じ契約で、同じテスト名にそろえる。
   //   DB の行（todo_status_changes）を直接見る確認と、DB だけのテストは Postgres だけ。
   test("新規の Todo を save すると完了の履歴（作成日時に未完了の 1 件）も保存され、読み出した Todo が同じ履歴を持つ", async () => {
     const todo = Todo.create("牛乳を買う");
@@ -644,7 +644,7 @@ describe("PostgresTodoRepository", () => {
     }
   });
 
-  // ここから下の変更履歴（change_logs。Issue #189）のテストは todo-repository.in-memory.test.ts と同じ契約で、同じテスト名に
+  // ここから下の変更履歴（change_logs。Issue #189）のテストは test-support/todo/todo-repository.in-memory.test.ts と同じ契約で、同じテスト名に
   //   そろえる。記録は Postgres では change_logs の行、InMemory では changeLogs。表の名前と changes のキーは DB の名前。
   //   完了の履歴の行の id は DB が作るので、ここでは DB から読んで照らし合わせる。
   test("新規の Todo を save すると、変更履歴に todos の insert（全列）と完了の履歴の insert（全列）の 2 件を記録する", async () => {
