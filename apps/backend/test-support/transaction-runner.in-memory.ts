@@ -1,7 +1,5 @@
-import type {
-  Transaction,
-  TransactionRunner,
-} from "../shared/domain/transaction";
+import type { TransactionRunner } from "../shared/application/transaction";
+import type { Transaction } from "../shared/domain/transaction";
 
 // TransactionRunner の InMemory 実装（テスト用。Issue #215）。command のテストと、api ファイルのテストの組み立てで
 //   InMemory の Repository と一緒に渡す。本番は PostgresTransactionRunner（shared/infra/transaction.postgres.ts）。
