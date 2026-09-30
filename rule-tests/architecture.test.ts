@@ -177,11 +177,17 @@ function isInlineTypeOnly(clause: string): boolean {
     .map((name) => name.trim())
     .filter((name) => name !== "");
   // WHY 空の {} は型だけにしない: `import {} from "x"` は名前を取らないが、参照先のモジュールは実行時に読み込まれる。
-  // WHY `type as <別名>` は型だけにしない（Issue #224。Codex のレビュー）: `type` という名前の値の export を別名で受ける形で、
-  //   inline の type 修飾子（`type <名前>`）ではなく実行時の import になる。
-  return (
-    names.length > 0 && names.every((name) => /^type\s+(?!as\s)/.test(name))
-  );
+  // WHY `type as <別名>` は型だけにしない（Issue #224 / #227。Codex のレビュー）: `type` という名前の値の export を別名で受ける形で、
+  //   inline の type 修飾子（`type <名前>`）ではなく実行時の import になる。空白で分けた語で見る（`type` と `as` の間の空白が
+  //   複数でも同じ。正規表現の `\s+` だと後戻りで負の先読みが通ってしまう）。`type as as x`（`as` という名前の型の別名）と
+  //   `type as`（`as` という名前の型）は型だけ。
+  return names.length > 0 && names.every(isInlineTypeName);
+}
+
+function isInlineTypeName(name: string): boolean {
+  const words = name.split(/\s+/);
+  const valueNamedType = words.length === 3 && words[1] === "as";
+  return words[0] === "type" && words.length >= 2 && !valueNamedType;
 }
 
 // 定数の名前の形（UPPER_SNAKE_CASE）。英大文字で始まり、英大文字・数字・_ だけ。
@@ -8178,6 +8184,9 @@ describe("参照の抽出（extractImports）", () => {
       // Issue #224（Codex のレビュー）: `type` という名前の値の export を別名で受ける形は、inline の type 修飾子ではなく値の import。
       'import { type as portValue } from "named-type";',
       'import { type A, type as portValue } from "named-type-mixed";',
+      // 空白が複数でも（ブロックコメントを落とした跡）`type as` は値の import。
+      'import { type    as portValue } from "named-type-spaces";',
+      'import { type /* keep */ as portValue } from "named-type-comment";',
     ].join("\n");
     expect(extractImports(source)).toEqual([
       { specifier: "all-type", typeOnly: true },
@@ -8186,6 +8195,8 @@ describe("参照の抽出（extractImports）", () => {
       { specifier: "empty", typeOnly: false },
       { specifier: "named-type", typeOnly: false },
       { specifier: "named-type-mixed", typeOnly: false },
+      { specifier: "named-type-spaces", typeOnly: false },
+      { specifier: "named-type-comment", typeOnly: false },
     ]);
   });
 
