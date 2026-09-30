@@ -1,11 +1,11 @@
 import Link from "next/link";
-import type { TodoDto } from "@/features/todo/api/todo-api";
+import type { Todo } from "@/features/todo/api/todo-api";
 import { formatDateTime } from "@/shared/i18n/format";
 import { useLocale, useT } from "@/shared/i18n/i18n";
 import { todoItemMessages } from "./todo-item.messages";
 
 type TodoItemProps = {
-  todo: TodoDto;
+  todo: Todo;
   // 切り替え後の値を渡す。呼び出し側が現在値を反転する処理を持たずに済み、PUT の body にそのまま使える。
   onToggle: (id: string, completed: boolean) => void;
   onDelete: (id: string) => void;

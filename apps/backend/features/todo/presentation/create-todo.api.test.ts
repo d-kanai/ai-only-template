@@ -36,7 +36,7 @@ function postRequest(body: string): Request {
 }
 
 describe("POST /api/todos", () => {
-  test("201 と作成した TodoDto を返し、保存される", async () => {
+  test("201 と作成した Todo（CreateTodoResponse）を返し、保存される", async () => {
     const { repository, POST } = setup();
 
     const response = await POST(

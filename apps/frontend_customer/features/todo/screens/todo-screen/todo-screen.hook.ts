@@ -4,7 +4,7 @@ import {
   createTodo,
   deleteTodo,
   listTodos,
-  type TodoDto,
+  type Todo,
   updateTodo,
 } from "@/features/todo/api/todo-api";
 import { useLocale } from "@/shared/i18n/i18n";
@@ -16,7 +16,7 @@ type Failure = { reason: unknown };
 
 // 一覧画面の状態とイベント。見た目（todo-screen.tsx）はこの戻り値を描くだけにし、ロジックは renderHook で単体テストする。
 export function useTodoScreen() {
-  const [todos, setTodos] = useState<TodoDto[]>([]);
+  const [todos, setTodos] = useState<Todo[]>([]);
   // 初回の取得が終わるまでは「空の一覧」と区別したいので true から始める。
   const [isLoading, setIsLoading] = useState(true);
   const locale = useLocale();

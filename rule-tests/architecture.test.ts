@@ -4496,7 +4496,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import { GET } from "../../backend/features/todo/presentation/list-todos.api";',
     'import type { DomainError } from "@repo/backend/shared/domain/domain-error";',
     'import { TodoScreen } from "@/features/todo";',
-    'import type { TodoDto } from "../features/todo/api/todo-api";',
+    'import type { ListTodosResponse } from "../features/todo/api/todo-api";',
     'export { TodoItem } from "@/features/todo/components/todo-item";',
     'export { default } from "@/app/page";',
     'const layout = import("../app/layout");',
@@ -4506,7 +4506,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import { ListTodosApi } from "@repo/backend/features/todo/presentation/list-todos.api";',
     'import type { Todo } from "../../../../backend/features/todo/domain/todo";',
     'import type { ListOthersResponse } from "@repo/backend/features/other/presentation/list-others.api";',
-    'import { type TodoDto, GET } from "@repo/backend/features/todo/presentation/get-todo.api";',
+    'import { type GetTodoResponse, GET } from "@repo/backend/features/todo/presentation/get-todo.api";',
     'export { toProblemResponse } from "../../../../backend/shared/presentation/problem";',
     'import type { X } from "@repo/backend/features/todo/presentation/list-todos";',
     'import type { DomainError } from "@repo/backend/shared/domain/domain-error";',
@@ -4517,7 +4517,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import { TodoItem } from "@/features/todo/components/todo-item";',
     'import { useTodoScreen } from "../../todo/screens/todo-screen/todo-screen.hook";',
     'export { fetchTodos } from "@/features/todo/api/todo-api";',
-    'import type { TodoDto } from "../../todo/api/todo-api";',
+    'import type { ListTodosResponse } from "../../todo/api/todo-api";',
     'const c = import("@/features/todo/components");',
   ),
   // feature-to-feature: 名前の前方一致だけが同じ別 feature（todo と todo-extra）を同じ feature と誤認しない。
@@ -4537,10 +4537,10 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import { createRoot } from "react-dom/client";',
     'import { CreateTodoCommand } from "../application/create-todo.command";',
     'import type { PostgresTodoRepository } from "../infra/todo-repository.postgres";',
-    'import type { TodoDto } from "../presentation/list-todos.api";',
+    'import type { ListTodosResponse } from "../presentation/list-todos.api";',
     'import type { Other } from "../../other/domain/other";',
     'import { toProblemResponse } from "../../../shared/presentation/problem";',
-    'export type { TodoDto as Dto } from "@/features/todo";',
+    'export type { ListTodosResponse as Dto } from "@/features/todo";',
     'const s = import("@/shared/x");',
     'import "@/app/globals.css";',
   ),
@@ -4551,7 +4551,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   // application
   "apps/backend/features/todo/application/bad-application.ts": lines(
     'import { todoRepository } from "../infra/todo-repository.postgres";',
-    'import type { TodoDto } from "../presentation/list-todos.api";',
+    'import type { ListTodosResponse } from "../presentation/list-todos.api";',
     'import { InvalidRequestError } from "../../../shared/presentation/problem";',
     'import { useState } from "react";',
     'import { notFound } from "next/navigation";',
@@ -4569,7 +4569,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'export { Todo as Entity } from "../domain/todo-entity";',
     'import { NextResponse } from "next/server";',
     'import { cache } from "react";',
-    'export type { TodoDto } from "@/features/todo/api/todo-api";',
+    'export type { ListTodosResponse } from "@/features/todo/api/todo-api";',
     'const c = import("../../other/infra/other-repository.in-memory");',
     'import "../../../../frontend_customer/app/globals.css";',
   ),
@@ -4659,7 +4659,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/frontend_customer/app/bad-page.tsx": lines(
     'import { TodoItem } from "@/features/todo/components/todo-item";',
     'import { useTodoScreen } from "../features/todo/screens/todo-screen/todo-screen.hook";',
-    'import type { TodoDto } from "@repo/backend/features/todo/presentation/list-todos.api";',
+    'import type { ListTodosResponse } from "@repo/backend/features/todo/presentation/list-todos.api";',
     'export { GET } from "../../backend/features/todo/presentation/get-todo.api";',
     'const x = import("@/features/todo/api/todo-api");',
     'import { Y } from "@/features/todo-extra/components/y";',
@@ -4863,7 +4863,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   //   置き場所の規則の例外なので、置き場所の違反にはならない。backend/shared の中なので backend-shared にもかかる（Issue #98）。
   "apps/backend/shared/drizzle/drizzle.config.ts": lines(
     'import nextConfig from "../../../frontend_customer/next.config";',
-    'import type { TodoDto } from "@/features/todo/api/todo-api";',
+    'import type { ListTodosResponse } from "@/features/todo/api/todo-api";',
     'export { TodoScreen } from "../../../frontend_customer/features/todo";',
   ),
   // backend-placement: drizzle.config.ts の例外は apps/backend/shared/drizzle/ の直下だけ。feature の直下に置くと違反。
@@ -4895,7 +4895,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   //   app/api からの api ファイル、直下からの env）が、相対パスや "@/../backend/" で書いたもの。この規則だけにかかる。
   //   apps/e2e/ とリポジトリ直下のファイル（.ts / .mts）からの相対パスも同じ。
   "apps/frontend_customer/features/todo/api/bad-specifier.ts": lines(
-    'import type { TodoDto } from "../../../../backend/features/todo/presentation/list-todos.api";',
+    'import type { ListTodosResponse } from "../../../../backend/features/todo/presentation/list-todos.api";',
     'export type { GetTodoResponse } from "@/../backend/features/todo/presentation/get-todo.api";',
   ),
   "apps/frontend_customer/app/api/todos/[id]/bad-relative.ts": lines(
@@ -5473,7 +5473,6 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import type { GetTodoResponse } from "@repo/backend/features/todo/presentation/get-todo.api";',
     "import type {",
     "  ListTodosResponse,",
-    "  TodoDto,",
     '} from "@repo/backend/features/todo/presentation/list-todos.api";',
     "import type {",
     "  UpdateTodoRequest,",
@@ -5490,7 +5489,7 @@ const MUST_PASS_FILES: Record<string, string> = {
   ),
   "apps/frontend_customer/features/todo/components/todo-item.tsx": lines(
     'import Link from "next/link";',
-    'import type { TodoDto } from "@/features/todo/api/todo-api";',
+    'import type { Todo } from "@/features/todo/api/todo-api";',
     // messages-colocation（Issue #125）: 同じディレクトリの辞書と、*.messages ではない名前（前方一致だけが同じ、パッケージ）。
     'import { todoItemMessages } from "./todo-item.messages";',
     'import { helper } from "../screens/todo-screen/todo-screen.messages-helper";',
@@ -5515,7 +5514,7 @@ const MUST_PASS_FILES: Record<string, string> = {
       'import type { todoScreenMessages } from "@/features/todo/screens/todo-screen/todo-screen.messages";',
       "import {",
       "  listTodos,",
-      "  type TodoDto,",
+      "  type Todo,",
       "  updateTodo,",
       '} from "@/features/todo/api/todo-api";',
     ),
@@ -5530,7 +5529,7 @@ const MUST_PASS_FILES: Record<string, string> = {
       'import { useCallback, useEffect, useRef, useState } from "react";',
       "import {",
       "  getTodo,",
-      "  type TodoDto,",
+      "  type Todo,",
       "  updateTodo,",
       '} from "@/features/todo/api/todo-api";',
     ),

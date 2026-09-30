@@ -3,10 +3,7 @@ import type {
   CreateTodoResponse,
 } from "@repo/backend/features/todo/presentation/create-todo.api";
 import type { GetTodoResponse } from "@repo/backend/features/todo/presentation/get-todo.api";
-import type {
-  ListTodosResponse,
-  TodoDto,
-} from "@repo/backend/features/todo/presentation/list-todos.api";
+import type { ListTodosResponse } from "@repo/backend/features/todo/presentation/list-todos.api";
 import type {
   UpdateTodoRequest,
   UpdateTodoResponse,
@@ -28,10 +25,13 @@ export type {
   CreateTodoResponse,
   GetTodoResponse,
   ListTodosResponse,
-  TodoDto,
   UpdateTodoRequest,
   UpdateTodoResponse,
 };
+
+// 画面が扱う「Todo 1 件」の型。
+// WHY 一覧 API の契約から導出する: backend に共通の DTO 型の別名を持たせず、画面側の 1 か所（ここ）で決める（Issue #139）。
+export type Todo = ListTodosResponse["todos"][number];
 
 // 一覧・作成の URL。
 // WHY 関数の中に置く（モジュールの最上位の定数にしない）: 最上位の式は読み込み時にだけ評価される static な変異になり、

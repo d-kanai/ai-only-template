@@ -31,7 +31,7 @@ paths:
 ## 画面側とサーバ側の境界
 - `features/<f>/api/` から backend への参照は `import type` / `export type` だけで、参照先は自 feature の `apps/backend/features/<f>/presentation/<name>.api.ts` と `apps/backend/shared/presentation/problem.ts`（`Problem`・`ErrorKey`・`ErrorKeyParams`）。api ファイルの関数や application・domain・infra の実装は import しない。
   - WHY: 画面とサーバで同じ契約（型）を使い、ずれを型チェックで検出する。`import type` はビルドで消えるので、サーバのコードがバンドルに入らない。
-- screens / components / hooks は backend を直接参照せず、`api/` が re-export した型を使う（`import type { TodoDto } from "@/features/todo/api/todo-api"`）。WHY: 契約が変わったときの影響を `api/` の 1 ファイルで追える。
+- screens / components / hooks は backend を直接参照せず、`api/` が re-export した型を使う（`import type { Todo } from "@/features/todo/api/todo-api"`。`Todo` は `api/todo-api.ts` が一覧 API の Response から導出する（`ListTodosResponse["todos"][number]`））。WHY: 契約が変わったときの影響を `api/` の 1 ファイルで追える。
 - 型で担保されること: リクエスト / レスポンスの形（`pnpm build` / `pnpm typecheck` で不一致を検出）。
 - 型で担保されないこと: URL と HTTP メソッド（画面側に文字列で書く）、実行時の JSON の形（`response.json()` を型に当てはめるだけ）。URL を型で担保したくなったら、api ファイルから path の定数を export する案を検討する（今は入れない）。
 
