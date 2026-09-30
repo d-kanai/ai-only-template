@@ -35,7 +35,7 @@ export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 //   - 前: info "repository write start"
 //   - 後: info "repository write done"。durationMs（所要時間）と changes（記録の tableName・rowId・operation）
 //   - 失敗: warn "repository write failed"。durationMs と error（logger が { name, message } にする）。DB のエラーなら
-//     error は pg のエラーで、sqlState（SQLSTATE）も出す（下の failureFields）
+//     error は pg のエラーの name だけで、sqlState（SQLSTATE）と constraint（制約の名前）を出す（下の failureFields）
 // WHY changes に値（before / after）を出さない: 個人情報を含みうる。値は change_logs に残る（リクエストログがクエリの値を
 //   出さないのと同じ方針。ADR docs/adr/architecture/20260929-request-log-in-proxy.md）。
 // WHY 失敗を warn にする（error にしない）: not_found（読み込んだ後に消された Todo の save）などの DomainError は 404 の正常な結果。
@@ -83,22 +83,32 @@ export async function writeInTransaction(
   });
 }
 
-// 失敗のログに載せる例外。DB のエラー（drizzle-orm の DrizzleQueryError）は、元の pg のエラー（cause）と SQLSTATE（sqlState）に
-//   する。それ以外（DomainError など）はそのまま。
-// WHY DrizzleQueryError をそのまま出さない: message が「Failed query: <SQL>\nparams: <値>」（drizzle-orm 0.45.3 の errors.js）で、
-//   行の値（個人情報を含みうる）がログに出る。pg の DatabaseError の message は「duplicate key value violates unique constraint
-//   "…"」のように値を含まない（値は detail にあるが、logger は name と message しか出さない）。changes に値を出さないのと同じ方針。
-// WHY sqlState を出す: 何の失敗か（23505 の一意制約違反・23503 の外部キー違反など）を、message の文言に頼らずに引ける。
+// 失敗のログに載せる例外。DB のエラー（drizzle-orm の DrizzleQueryError）は、元の pg のエラー（cause）の name と、SQLSTATE（sqlState）・
+//   制約の名前（constraint。pg の DatabaseError のプロパティ）だけにし、message は出さない。それ以外（DomainError など）はそのまま。
+// WHY DB のエラーの message を出さない: DrizzleQueryError の message は「Failed query: <SQL>\nparams: <値>」（drizzle-orm 0.45.3 の
+//   errors.js）で、行の値（個人情報を含みうる）がログに出る。元の pg のエラーの message も、データ例外（SQLSTATE 22 系）は入力値を
+//   含む（22P02 の invalid input syntax for type uuid: "<入力>"、22003 の value "<入力>" is out of range。Issue #205 の reviewer の
+//   実測）。changes に値を出さないのと同じ方針。
+// WHY sqlState と constraint を出す: message が無くても、何の失敗か（23505 の一意制約違反・23503 の外部キー違反など）と、どの制約かを
+//   引ける。どちらも DB が決める名前・コードで、入力値を含まない。文字列でないとき（想定外）は出さない。
 // WHY cause が Error でなければ元の例外を出す: drizzle は pg の例外を cause に入れるが、想定外の形で何も出さないよりは
 //   元の例外を残す（値が出うるのは、この想定外のときだけ）。
-function failureFields(error: unknown): { error: unknown; sqlState?: string } {
+function failureFields(error: unknown): {
+  error: unknown;
+  sqlState?: string;
+  constraint?: string;
+} {
   if (!(error instanceof DrizzleQueryError && error.cause instanceof Error)) {
     return { error };
   }
-  const { code } = error.cause as { code?: unknown };
+  const { name, code, constraint } = error.cause as Error & {
+    code?: unknown;
+    constraint?: unknown;
+  };
   return {
-    error: error.cause,
+    error: { name },
     sqlState: typeof code === "string" ? code : undefined,
+    constraint: typeof constraint === "string" ? constraint : undefined,
   };
 }
 

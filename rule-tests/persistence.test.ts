@@ -62,8 +62,10 @@ import { afterAll, describe, expect, it } from "vitest";
 //     WHY change-log の import では満たさない（以前の writes-record-change-log）: 記録の組み立て（insertEntry など）の import だけで
 //       は、トランザクション・記録の書き込み・ログを通したことにならない。
 //     限界: import していても、書き込みが writeInTransaction のコールバックの中（tx）で行われているかは見ない（コールバックから
-//       呼ぶ private メソッドの中の `writer.insert(` もあり、字句の範囲では決められない。トランザクションの外の `this.db.insert(`
-//       は見逃す）。Repository のテストがログと記録の行を固定する。
+//       呼ぶ private メソッドの中の `writer.insert(` もあり、字句の範囲では決められない）。`db` を直接使った書き込みは次の
+//       no-direct-db-write が止める。Repository のテストがログと記録の行を固定する。
+//     限界: 生の SQL（`this.db.execute(sql\`insert …\`)`）・ドライバの直接の呼び出し（`this.db.$client.query(…)`）の書き込みは
+//       `.insert(` などの形でないので見ない。import はブロックコメント（`/* … */`）の中にあるだけでも満たしたと見なす。
 //   - no-direct-transaction（Issue #205）: *.postgres.ts に `transaction` の名前（語の境界。`db.transaction(`・`tx.transaction(`
 //     （セーブポイント）・ブラケット `db["transaction"]`・分割代入 `const { transaction } = db`・`.` の後の改行）がある。行はその名前の行。
 //     WHY: トランザクションを張るのは writeInTransaction だけにする。Repository が直接張ると、前後のログと変更履歴の書き込みを
@@ -71,6 +73,8 @@ import { afterAll, describe, expect, it } from "vitest";
 //     WHY `.` と `(` を要求しない（no-upsert と同じ）: 変数に入れ直す・ブラケットで呼ぶ書き方も拾う。`transactional(`・
 //       `myTransaction(`・`transactions`・型の `Transaction`（大文字）は別の名前として通す。
 //     限界: 文字列の中の `transaction`（ログの文言など）も違反と数える（安全側）。`db["trans" + "action"]` のような組み立ては見ない。
+//       生の SQL（`this.db.execute(sql\`begin\`)`）・ドライバの直接の呼び出し（`this.db.$client.query("begin")`）でのトランザクションは
+//       名前が出ないので見ない。文字列の中の `//` の後ろ（`"a//b"; db.transaction(…)` の同じ行）は、行の `//` 以降を落とすので見逃す。
 //   - no-direct-record-change（Issue #205。Issue #189 の record-change-in-transaction を置き換え）: *.postgres.ts に `recordChange` の
 //     名前（語の境界。呼び出し・import・別名の import の元の名前・名前空間の `changeLog.recordChange`）がある。行はその名前の行。
 //     WHY: 変更履歴は writeInTransaction がコールバックの返した記録を同じトランザクションの最後に書く。Repository が直接書くと、
@@ -78,6 +82,13 @@ import { afterAll, describe, expect, it } from "vitest";
 //       （`recordChange(` が `transaction(` の括弧の中か）は、記録の書き込みが writeInTransaction の中だけになり、要らなくなった
 //       （記録が本体と同じトランザクションで書かれることは write.test.ts と todo-repository.postgres.test.ts が実行で固定する）。
 //     限界: 文字列の中の `recordChange` も違反と数える（安全側）。名前を組み立てて参照する書き方は見ない。
+//   - no-direct-db-write（Issue #205）: *.postgres.ts で `db` を受け手にした書き込み（`db.insert(` / `db.update(` / `db.delete(`。
+//     `this.db.` も `database.db.` も。`db` と `.` と名前と `(` の間の空白・改行は可）がある。行は書き込みの名前の行。
+//     WHY: write を import したうえでコールバックの外で `this.db.insert(` と書くと、トランザクションもログも変更履歴も無しに書けて
+//       しまう。書き込みは writeInTransaction がコールバックに渡す tx（とそれを受け取る private メソッドの writer）で行う。
+//     WHY 受け手の名前 `db`（語の境界）で見る: Repository は db をコンストラクタで受け取り `this.db` で使う（.claude/rules/backend.md）。
+//       `mydb`・`this.dbx` のような名前に db を含むだけの受け手は通す。
+//     限界: `const w = this.db; w.insert(…)` のような別名、`this["db"]`、分割代入した関数の呼び出しは見ない。
 //   - aggregate-loads-all-children（Issue #189。ユーザー判断 2026-09-30）: insert のみの子表（`Changes` / `Events` で終わる名前）を
 //     import した *.postgres.ts で、(a) 親の `.from(<表>)` の chain に子表の `.leftJoin(` が無い（行ロック `.for(` の chain は除く）、
 //     (b) 子表だけを `.from(<子表>)` で読む、(c) `.limit(` / `.offset(` / `.selectDistinctOn(`、(d) `.where(` の引数に子表の列がある。
@@ -105,6 +116,7 @@ type RuleId =
   | "writes-through-write-in-transaction"
   | "no-direct-transaction"
   | "no-direct-record-change"
+  | "no-direct-db-write"
   | "aggregate-loads-all-children";
 
 type PersistenceViolation = { rule: RuleId; line: number };
@@ -152,10 +164,14 @@ function closingParen(code: string, open: number): number {
 }
 
 // 書き込み（`.insert(` / `.update(` / `.delete(`。`.` と名前と `(` の間の空白・改行は可）の、名前の行番号（1 始まり）。
-function writeLines(code: string): number[] {
-  return [...code.matchAll(/\.\s*(insert|update|delete)\s*\(/g)].map(
-    ({ 0: whole, index }) =>
-      lineAt(code, index + whole.search(/insert|update|delete/)),
+// receiver を渡すと、受け手がその正規表現に一致する書き込みだけを返す（no-direct-db-write の `db`）。
+function writeLines(code: string, receiver = ""): number[] {
+  return [
+    ...code.matchAll(
+      new RegExp(`${receiver}\\.\\s*(insert|update|delete)\\s*\\(`, "g"),
+    ),
+  ].map(({ 0: whole, index }) =>
+    lineAt(code, index + whole.search(/insert|update|delete/)),
   );
 }
 
@@ -312,6 +328,10 @@ function findPersistenceViolations(
         rule: "no-direct-record-change" as const,
         line,
       })),
+      ...writeLines(code, "\\bdb\\s*").map((line) => ({
+        rule: "no-direct-db-write" as const,
+        line,
+      })),
       ...partialAggregateReads(code).map((line) => ({
         rule: "aggregate-loads-all-children" as const,
         line,
@@ -427,7 +447,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
         IMPORT_CHANGED_PROPS,
         "export class XRepository {",
         "  async save(x: X): Promise<void> {",
-        "    await this.db.insert(xs).values(row);",
+        "    await tx.insert(xs).values(row);",
         "  }",
         "}",
       ),
@@ -466,7 +486,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       POSTGRES,
       withWrite(
         "// .onConflictDoUpdate( で上書きしない。",
-        "await this.db.insert(xs).values(row); // .onConflictDoNothing() も使わない",
+        "await tx.insert(xs).values(row); // .onConflictDoNothing() も使わない",
       ),
     ],
     [
@@ -535,20 +555,20 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       POSTGRES,
       withWrite(
         "await tx.insert(todoStatusChanges).values(rows);",
-        "await this.db.insert(orderEvents).values(rows);",
+        "await tx.insert(orderEvents).values(rows);",
         "await writer.insert(changeLogs).values(rows);",
         "await this.db.select().from(todoStatusChanges);",
         "await tx.update(todos).set(changed);",
-        "await this.db.delete(todos).where(eq(todos.id, id));",
+        "await tx.delete(todos).where(eq(todos.id, id));",
       ),
     ],
     [
       "名前の途中に Changes / Events / Logs を含むだけの表（todoChangesLog / eventsArchive / logsArchive）",
       POSTGRES,
       withWrite(
-        "await this.db.delete(todoChangesLog);",
-        "await this.db.update(eventsArchive).set(row);",
-        "await this.db.delete(logsArchive);",
+        "await tx.delete(todoChangesLog);",
+        "await tx.update(eventsArchive).set(row);",
+        "await tx.delete(logsArchive);",
       ),
     ],
     [
@@ -565,7 +585,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       POSTGRES,
       withWrite(
         "// this.db.delete(todoStatusChanges) は書かない（cascade で消える）。",
-        "await this.db.delete(todos); // tx.update(todoStatusChanges) も書かない",
+        "await tx.delete(todos); // tx.update(todoStatusChanges) も書かない",
       ),
     ],
     [
@@ -666,6 +686,18 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       ),
     ],
     [
+      "db でない受け手（tx / writer / 名前に db を含むだけの mydb・this.dbx）の書き込みと、db の読み取り（select / execute）",
+      POSTGRES,
+      withWrite(
+        "await tx.insert(xs).values(row);",
+        "await writer.update(xs).set(row);",
+        "await mydb.delete(xs);",
+        "await this.dbx.insert(xs).values(row);",
+        "await this.db.select().from(xs);",
+        "await this.db.execute(sql`select 1`);",
+      ),
+    ],
+    [
       "書き込みの唯一の入口（shared/infra/write.ts。*.postgres.ts でない）は db.transaction( と recordChange( を呼んでよい",
       "apps/backend/shared/infra/write.ts",
       source(
@@ -686,7 +718,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       ),
     ],
     [
-      "コメントの中の書き込み・transaction(・recordChange(",
+      "コメントの中の書き込み・transaction(・recordChange(・this.db.insert(",
       POSTGRES,
       source(
         "// await this.db.insert(xs).values(row); は write を import して書く",
@@ -785,7 +817,7 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
       POSTGRES,
       withWrite(
         IMPORT_CHANGED_PROPS,
-        "await this.db",
+        "await tx",
         "  .insert(xs)",
         "  .values(row)",
         "  .onConflictDoUpdate({ target: xs.id, set: row });",
@@ -797,7 +829,7 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
       POSTGRES,
       withWrite(
         IMPORT_CHANGED_PROPS,
-        "await this.db.insert(xs).values(row).onConflictDoNothing();",
+        "await tx.insert(xs).values(row).onConflictDoNothing();",
       ),
       [{ rule: "no-upsert", line: 2 }],
     ],
@@ -837,7 +869,7 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
       withWrite(
         "export class XRepository {",
         "  async save(x: X): Promise<void> {",
-        "    await this.db.update(xs).set(row);",
+        "    await tx.update(xs).set(row);",
         "  }",
         "}",
       ),
@@ -930,9 +962,9 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
       [{ rule: "entity-with-reconstruct-has-origin", line: 2 }],
     ],
     [
-      "db.delete(todoStatusChanges)（insert のみの表の DELETE）",
+      "tx.delete(todoStatusChanges)（insert のみの表の DELETE）",
       POSTGRES,
-      withWrite("await this.db.delete(todoStatusChanges);"),
+      withWrite("await tx.delete(todoStatusChanges);"),
       [{ rule: "no-update-delete-on-append-only-tables", line: 1 }],
     ],
     [
@@ -949,7 +981,7 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
       "改行を挟んだ .delete( と表の名前（chain の次の行で .delete(、その次の行に表。行は delete の行）",
       POSTGRES,
       withWrite(
-        "await this.db",
+        "await tx",
         "  .delete(",
         "    todoStatusChanges",
         "  )",
@@ -966,16 +998,16 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
     [
       "メンバーの参照（schema.todoStatusChanges）",
       POSTGRES,
-      withWrite("await db.delete(schema.todoStatusChanges);"),
+      withWrite("await tx.delete(schema.todoStatusChanges);"),
       [{ rule: "no-update-delete-on-append-only-tables", line: 1 }],
     ],
     [
       "1 行に 2 つ・複数の行（行の順に、見つけた数だけ返す）",
       POSTGRES,
       withWrite(
-        "await db.update(aChanges).set(r); await db.delete(bEvents);",
-        "await db.delete(todos);",
-        "await db.delete(cChanges);",
+        "await tx.update(aChanges).set(r); await tx.delete(bEvents);",
+        "await tx.delete(todos);",
+        "await tx.delete(cChanges);",
       ),
       [
         { rule: "no-update-delete-on-append-only-tables", line: 1 },
@@ -1017,7 +1049,7 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
         "await tx",
         "  .update(xs)",
         "  .set(row);",
-        "await this.db . delete (xs);",
+        "await tx . delete (xs);",
       ),
       [
         { rule: "writes-through-write-in-transaction", line: 1 },
@@ -1035,7 +1067,7 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
         'import { x } from "../../../shared/infra/write-x";',
         'import { y } from "../../../shared/infra/writer";',
         'import { insertEntry } from "../../../shared/infra/change-log";',
-        "await db.insert(xs).values(r);",
+        "await tx.insert(xs).values(r);",
       ),
       [{ rule: "writes-through-write-in-transaction", line: 7 }],
     ],
@@ -1059,6 +1091,24 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
         { rule: "no-direct-transaction", line: 5 },
         { rule: "no-direct-transaction", line: 6 },
         { rule: "no-direct-transaction", line: 8 },
+      ],
+    ],
+    [
+      "*.postgres.ts で db を直接使って書き込む（this.db.insert( / 空白を挟む db . update ( / 改行を挟む this.db\\n  .delete( / database.db）",
+      POSTGRES,
+      withWrite(
+        "await this.db.insert(xs).values(row);",
+        "await db . update ( xs ).set(row);",
+        "await this.db",
+        "  .delete(xs)",
+        "  .where(eq(xs.id, id));",
+        "await database.db.insert(xs).values(row);",
+      ),
+      [
+        { rule: "no-direct-db-write", line: 1 },
+        { rule: "no-direct-db-write", line: 2 },
+        { rule: "no-direct-db-write", line: 4 },
+        { rule: "no-direct-db-write", line: 6 },
       ],
     ],
     [
@@ -1326,6 +1376,7 @@ describe("backend のソースの列挙と検査（fixture）", () => {
         "append-only-table-naming: apps/backend/features/y/infra/schema.ts:2",
         "no-update-delete-on-append-only-tables: apps/backend/features/y/infra/y-reader.postgres.ts:2",
         "writes-through-write-in-transaction: apps/backend/features/y/infra/y-reader.postgres.ts:2",
+        "no-direct-db-write: apps/backend/features/y/infra/y-reader.postgres.ts:2",
         "save-uses-changed-props: apps/backend/features/y/infra/y-repository.postgres.ts:2",
         "no-upsert: apps/backend/features/y/infra/y-repository.postgres.ts:4",
         "no-direct-transaction: apps/backend/features/z/infra/z-repository.postgres.ts:3",

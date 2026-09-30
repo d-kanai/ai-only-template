@@ -30,7 +30,7 @@ export type ChangeLog = typeof changeLogs.$inferSelect;
 //   （Drizzle の行の型 $inferSelect をそのまま渡せるように）。
 type Row = { readonly id: string } & Readonly<Record<string, unknown>>;
 
-// 書き込みに使う接続（db そのものか、db.transaction の tx）。
+// 書き込みに使う接続（writeInTransaction（write.ts）が張ったトランザクションの tx。テストは db そのものも渡す）。
 // WHY insert だけ: 記録は insert のみ（change_logs を UPDATE / DELETE しない）。
 type Writer = Pick<Database, "insert">;
 
