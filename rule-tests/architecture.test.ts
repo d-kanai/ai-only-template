@@ -695,7 +695,7 @@ const LAYERS_MAY_USE: Record<BackendLayer, ReadonlySet<BackendLayer>> = {
   // Repository の実装が同じ infra の schema、backend/shared/infra の database（Database の型）を使うので、infra 同士の参照も許す。
   // WHY application を層では許さない（Issue #220）: Issue #123 でコンテナを廃止してから、infra が application を参照する本番の
   //   コードは 0 件だった。infra が application を知ると、command（ユースケース）の都合が永続化の実装に入り込む。
-  //   infra が実装する port（shared/application/transaction）だけを名前で許す（下の SHARED_TRANSACTION_PORT_MODULE と backendMayUse）。
+  //   infra が実装する port（shared/application/transaction）だけを名前で、型だけ（import type）許す（下の SHARED_TRANSACTION_PORT_MODULE と backendMayUse。Issue #224）。
   infra: new Set(["domain", "infra"]),
 };
 
@@ -789,7 +789,14 @@ function backendMayUse(ref: Reference): boolean {
   const sameFeatureOrShared =
     target.scope === self.scope || target.scope === BACKEND_SHARED_SCOPE;
   // Issue #220: infra は application の層を許さず（LAYERS_MAY_USE）、infra が実装する port だけを名前で許す。
-  if (self.layer === "infra" && ref.to === SHARED_TRANSACTION_PORT_MODULE) {
+  // Issue #224: port は型だけ（import type / export type）。interface の実装に型以外は要らない。値の import・re-export・
+  //   dynamic import（typeOnly が false）を許すと、port のモジュールに実行時の export が増えたときに infra が application の
+  //   ロジックを実行時に取り込める（Codex のレビュー、PR #223）。
+  if (
+    self.layer === "infra" &&
+    ref.typeOnly &&
+    ref.to === SHARED_TRANSACTION_PORT_MODULE
+  ) {
     return true;
   }
   return (
@@ -1049,7 +1056,7 @@ const RULES: Rule[] = [
     //   中の参照も許す。application は、infra が実装する port（apps/backend/shared/application/transaction の TransactionRunner）
     //   だけ（Issue #220。Issue #123 でコンテナを廃止してから application の層ごとの許可は使っていなかったので狭めた）。
     id: "infra",
-    name: "apps/backend/features/<f>/internal/infra/ が参照してよい自前コードは自 feature と apps/backend/shared/ の domain/・infra/ と apps/backend/shared/application/transaction（infra が実装する port）と apps/shared/ の env・logger だけで、next・react も参照しない",
+    name: "apps/backend/features/<f>/internal/infra/ が参照してよい自前コードは自 feature と apps/backend/shared/ の domain/・infra/ と apps/backend/shared/application/transaction（infra が実装する port。import type だけ）と apps/shared/ の env・logger だけで、next・react も参照しない",
     appliesTo: (from) => backendLayerOf(from)?.layer === "infra",
     isViolation: violatesBackendLayer,
   },
@@ -3745,6 +3752,23 @@ const RULE_EXAMPLES: Record<
         "../application/transaction/x",
         "type",
       ],
+      // Issue #224: port は型だけ（import type）。値の import・re-export・dynamic import（typeOnly が false）は、port のモジュールに
+      //   実行時の export が増えたときに infra が application のロジックを実行時に取り込めるので違反。
+      [
+        "apps/backend/shared/infra/transaction.postgres.ts",
+        "../application/transaction",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/infra/x.ts",
+        "../../../../shared/application/transaction",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/infra/x.ts",
+        "../../../../shared/application/transaction",
+        "re-export",
+      ],
     ],
     allowed: [
       [
@@ -6407,6 +6431,8 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import type { CreateTodoCommand } from "../application/create-todo.command";',
     'import type { X } from "../../../../shared/application/x";',
     'import type { Y } from "../../../../shared/application/transaction/x";',
+    // Issue #224: port でも値の import は違反（型だけ）。
+    'import { TransactionRunner } from "../../../../shared/application/transaction";',
   ),
   "apps/backend/features/todo/internal/application/bad-application-infra.ts":
     lines(
@@ -7211,6 +7237,7 @@ const MUST_REJECT_VIOLATIONS = [
   "infra: apps/backend/features/todo/internal/infra/bad-infra-application.ts → apps/backend/features/todo/internal/application/create-todo.command",
   "infra: apps/backend/features/todo/internal/infra/bad-infra-application.ts → apps/backend/shared/application/x",
   "infra: apps/backend/features/todo/internal/infra/bad-infra-application.ts → apps/backend/shared/application/transaction/x",
+  "infra: apps/backend/features/todo/internal/infra/bad-infra-application.ts → apps/backend/shared/application/transaction",
   "application: apps/backend/features/todo/internal/application/bad-application-infra.ts → apps/backend/shared/infra/database",
   "application: apps/backend/features/todo/internal/application/bad-application-infra.ts → apps/backend/shared/infra/transaction.postgres",
   ...[
