@@ -40,7 +40,7 @@ paths:
 
 ## カバレッジ（100%）
 - `pnpm test`（`vitest run --coverage`）は Statements / Branches / Functions / Lines のどれかが 100% 未満なら失敗する（CI でも止まる）。速く回すだけなら `pnpm test:unit`、完了前は必ず `pnpm test`。設定と WHY は `vitest.config.mts`。
-- 計測対象: `apps/frontend_customer/features/`・`apps/frontend_customer/shared/`・`apps/frontend_customer/test-support/`（Issue #181）・`apps/backend/` の `.ts` / `.tsx`、`apps/shared/` の `.ts`（Issue #90）と `scripts/` の `.ts`（テスト・`*.d.ts`・`apps/backend/` 直下の `*.config.ts` を除く）。
+- 計測対象: `apps/frontend_customer/features/`・`apps/frontend_customer/shared/`・`apps/frontend_customer/test-support/`（Issue #181）・`apps/backend/` の `.ts` / `.tsx`、`apps/shared/` の `.ts`（Issue #90）と `scripts/` の `.ts` / `.mjs`（テスト・`*.d.ts`・`apps/backend/` 直下の `*.config.ts` を除く。`.mjs` は Issue #178 の `work-log-sections.mjs`）。
 - 計測しないもの（ユーザー判断、Issue #45）: `apps/frontend_customer/app/`（ルーティングだけ。E2E で確かめる）、設定ファイル、`instrumentation*.ts`（起動時だけ動く。中身は `env.ts` のテストで固定）、`apps/frontend_customer/proxy.ts`（Next がリクエストごとに呼ぶ結線だけ。1 行の中身は `shared/request-log/` のテスト、結線は E2E。Issue #80）、`.sh`（V8 は JS しか測れない）。
 - 足りなければテストを足して埋める。`/* v8 ignore */` などで逃がさない。対象外を増やすときは上の方針に当てはまるか確かめ、`vitest.config.mts` とここに理由を書く。
 

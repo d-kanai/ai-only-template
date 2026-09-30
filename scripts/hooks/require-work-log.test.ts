@@ -200,6 +200,18 @@ describe("require-work-log.sh（Stop フック）", () => {
     expect(result.stdout).toBe("");
   }
 
+  // 追加した項目に `- 機械化:` の行が無いときの拒否（Issue #178）。見出しは追加した順に「」で囲んで並べる。
+  function expectMechanizationBlocked(
+    result: ReturnType<typeof run>,
+    headings: string[],
+  ) {
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      decision: "block",
+      reason: `作業ログ ${todayLog} の項目${headings.map((h) => `「${h}」`).join("、")}に \`- 機械化: <縛れる（何で）/ 縛れない（理由）/ 対象外>\` の行を足してください（.claude/general/work-log.md）。`,
+    });
+  }
+
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "require-work-log-"));
     repo = join(tmp, "repo");
@@ -578,6 +590,143 @@ describe("require-work-log.sh（Stop フック）", () => {
       });
       expectAllowed(result);
       expect(result.stderr).toContain("入力を読めない");
+    });
+  });
+
+  // 追加した項目（`## ` の見出し）ごとに `- 機械化:` の行を要求する（Issue #178。CLAUDE.md の 7.）。
+  // 追加した行 = このターンのコミットがあれば最も古いコミットの親から、無ければ HEAD から、作業ツリーまでの diff の `+` の行
+  // （ファイルが追跡されていなければ全行）。判定の細部は scripts/hooks/work-log-sections.test.ts。
+  describe("追加した項目の `- 機械化:` の行", () => {
+    const item = (heading: string, mechanization?: string) =>
+      [
+        `## ${heading}`,
+        "- 理由: x",
+        ...(mechanization === undefined ? [] : [`- 機械化: ${mechanization}`]),
+      ].join("\n");
+    const log = (...items: string[]) => `# ${today}\n\n${items.join("\n\n")}\n`;
+    // ターンより前（昨日）にコミットした今日のログ。既存の項目は `- 機械化:` を持たない（この規則より前に書いたログと同じ）。
+    const commitBeforeTurn = (content: string) => {
+      writeRepoFile(todayLog, content);
+      commit("log before turn", {
+        GIT_AUTHOR_DATE: `${yesterday}T13:00:00`,
+        GIT_COMMITTER_DATE: `${yesterday}T13:00:00`,
+      });
+    };
+
+    describe("拒否する（must reject）", () => {
+      it("未追跡の新しいログで追加した項目に無ければ、見出しを挙げて拒否する", () => {
+        writeTranscript(turnWithTool());
+        writeRepoFile(todayLog, log(item("調べた")));
+        expectMechanizationBlocked(run(stopInput()), ["調べた"]);
+      });
+
+      it("ステージ済みの新しいログで追加した項目に無ければ拒否する", () => {
+        writeTranscript(turnWithTool());
+        writeRepoFile(todayLog, log(item("調べた")));
+        git(["add", todayLog]);
+        expectMechanizationBlocked(run(stopInput()), ["調べた"]);
+      });
+
+      it("コミット済みのログに作業ツリーで追加した項目に無ければ、追加した項目だけを挙げて拒否する", () => {
+        writeTranscript(turnWithTool());
+        commitBeforeTurn(log(item("前からある")));
+        writeRepoFile(
+          todayLog,
+          log(
+            item("前からある"),
+            item("足した1"),
+            item("足した2", "縛れる（CI）"),
+            item("足した3"),
+          ),
+        );
+        expectMechanizationBlocked(run(stopInput()), ["足した1", "足した3"]);
+      });
+
+      it("このターンのコミットで追加した項目に無ければ（作業ツリーがきれいでも）拒否する", () => {
+        writeTranscript(turnWithTool());
+        commitBeforeTurn(log(item("前からある")));
+        writeRepoFile(todayLog, log(item("前からある"), item("足した")));
+        commit("log");
+        expect(git(["status", "--porcelain"])).toBe("");
+        expectMechanizationBlocked(run(stopInput()), ["足した"]);
+      });
+
+      it("このターンに 2 回コミットしたら、最初のコミットで追加した項目も見る（最も古いコミットの親から比べる）", () => {
+        writeTranscript(turnWithTool());
+        commitBeforeTurn(log(item("前からある")));
+        writeRepoFile(todayLog, log(item("前からある"), item("1回目")));
+        commit("log 1");
+        writeRepoFile(
+          todayLog,
+          log(
+            item("前からある"),
+            item("1回目"),
+            item("2回目", "縛れない（判断）"),
+          ),
+        );
+        commit("log 2");
+        expectMechanizationBlocked(run(stopInput()), ["1回目"]);
+      });
+
+      it("このターンのコミットに加えて作業ツリーで追加した項目も見る", () => {
+        writeTranscript(turnWithTool());
+        writeRepoFile(
+          todayLog,
+          log(item("コミットした", "対象外（調査のみ）")),
+        );
+        commit("log");
+        writeRepoFile(
+          todayLog,
+          log(item("コミットした", "対象外（調査のみ）"), item("未コミット")),
+        );
+        expectMechanizationBlocked(run(stopInput()), ["未コミット"]);
+      });
+
+      it("このターンのコミットが親の無い最初のコミットでも、空のツリーから比べて拒否する", () => {
+        writeTranscript(turnWithTool());
+        git(["checkout", "-q", "--orphan", "fresh"]);
+        writeRepoFile(todayLog, log(item("最初のコミット")));
+        commit("root");
+        expectMechanizationBlocked(run(stopInput()), ["最初のコミット"]);
+      });
+    });
+
+    describe("許可する（must pass）", () => {
+      it("未追跡の新しいログで追加した項目にあれば許可する", () => {
+        writeTranscript(turnWithTool());
+        writeRepoFile(
+          todayLog,
+          log(
+            item("調べた", "対象外（調査のみ）"),
+            item("直した", "縛れる（Stop フック）"),
+          ),
+        );
+        expectAllowed(run(stopInput()));
+      });
+
+      it("既存の項目に箇条書きを足しただけ（追加した見出しが無い）なら許可する", () => {
+        writeTranscript(turnWithTool());
+        commitBeforeTurn(log(item("前からある")));
+        writeRepoFile(todayLog, `${log(item("前からある"))}- 追記: y\n`);
+        expectAllowed(run(stopInput()));
+      });
+
+      it("ターンより前のコミットにある項目は見ない（このターンのコミットで追加した項目にあれば許可する）", () => {
+        writeTranscript(turnWithTool());
+        commitBeforeTurn(log(item("前からある")));
+        writeRepoFile(
+          todayLog,
+          log(item("前からある"), item("足した", "縛れない（理由）")),
+        );
+        commit("log");
+        expectAllowed(run(stopInput()));
+      });
+
+      it("stop_hook_active が true なら、追加した項目に無くても判定せずに許可する", () => {
+        writeTranscript(turnWithTool());
+        writeRepoFile(todayLog, log(item("調べた")));
+        expectAllowed(run(stopInput({ stop_hook_active: true })));
+      });
     });
   });
 
