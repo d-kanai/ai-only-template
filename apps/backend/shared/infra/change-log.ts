@@ -4,8 +4,9 @@ import type { ChangeOperation } from "../domain/change-operation";
 import type { Database } from "./database";
 import { type Changes, type ChangeValue, changeLogs } from "./schema";
 
-// 変更履歴（change_logs。Issue #189）の記録の組み立てと書き込み。Repository（*.postgres.ts）が本体の書き込みと同じ
-//   トランザクションの中で recordChange を呼ぶ（rule-tests/persistence.test.ts の record-change-in-transaction が止める）。
+// 変更履歴（change_logs。Issue #189）の記録の組み立てと書き込み。Repository（*.postgres.ts）は記録を組み立てて返すだけで、
+//   書き込みの唯一の入口 writeInTransaction（write.ts。Issue #205）が本体の書き込みと同じトランザクションの中で recordChange を
+//   呼ぶ（*.postgres.ts が recordChange を直接呼ぶことは rule-tests/persistence.test.ts の no-direct-record-change が止める）。
 //   InMemory の Repository（テスト用）も同じ組み立て（insertEntry など）で記録を作り、同じ形で積む。
 // WHY Repository が書く（DB のトリガーにしない）: 記録の組み立てが TypeScript にあり、InMemory でも同じ記録を確かめられる。
 //   トリガーは手書きの SQL の変更も拾えるが、ロジックが SQL に隠れる（ADR docs/adr/architecture/20260930-change-logs-written-by-repository.md）。
