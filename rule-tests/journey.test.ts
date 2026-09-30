@@ -65,6 +65,9 @@ import { afterAll, describe, expect, it } from "vitest";
 //     再公開した vi は見ない。
 //   - 変更系の見分け: 名前の規約で推定する。handler を別の名前の変数に入れ直す（`const r = putTitle`）・`await` を付けずに呼ぶ・
 //     Api のクラスを別名で import する（`import { CreateTodoApi as C }`）と見分けられない。
+//     名前の HTTP メソッドと Api の実際のメソッドが合っているかは見ない（変更系の Api を `getRenamed` のように get / list で始まる
+//     名前に入れると DB の読み取りの検査を素通りする。`listener` のように前方一致だけで通る名前も同じ）。
+//     クラス名が Api で終わらない handler は命名の検査の対象外。
 //   - DB の読み取り: `db.select(` があるかだけを見て、結果を検証しているか（`toStrictEqual` で行全体と比べているか）は見ない。
 //     実行の順ではなくソースの順で見るので、変更系と次の変更系の間に置いた補助の関数の定義の中の `db.select(` も数える。
 //   - 「業務ユースケースに沿っているか」「DB の行を期待の行全体と比べているか」は見ない（reviewer が見る）。
@@ -633,6 +636,15 @@ describe("ジャーニーの中身（findJourneyViolations）: must reject", () 
       [{ rule: "journey-no-vi", line: 8 }],
     ],
     [
+      "vi と同じものの別名 vitest を単独で import（vitest.spyOn などが使える）",
+      source(
+        ...REQUIRED_IMPORTS,
+        'import { vitest } from "vitest";',
+        'vitest.spyOn(console, "error");',
+      ),
+      [{ rule: "journey-no-vi", line: 4 }],
+    ],
+    [
       "vitest の名前空間・既定の import（名前空間経由で vi に届く）",
       source(
         ...REQUIRED_IMPORTS,
@@ -664,6 +676,7 @@ describe("ジャーニーの中身（findJourneyViolations）: must reject", () 
         "await new CreateXApi(command).handle(request);",
         "const fetchX =",
         "  new GetXApi(query).handle;",
+        "const completeX = new CompleteXApi (command).handle;",
       ),
       [
         { rule: "journey-handler-naming", line: 4 },
@@ -671,6 +684,7 @@ describe("ジャーニーの中身（findJourneyViolations）: must reject", () 
         { rule: "journey-handler-naming", line: 6 },
         { rule: "journey-handler-naming", line: 7 },
         { rule: "journey-handler-naming", line: 9 },
+        { rule: "journey-handler-naming", line: 10 },
       ],
     ],
     [
