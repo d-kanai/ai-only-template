@@ -1,12 +1,15 @@
 // @vitest-environment node
+import { now } from "@repo/shared/now";
 import { sql } from "drizzle-orm";
 import {
   afterAll,
+  afterEach,
   beforeAll,
   beforeEach,
   describe,
   expect,
   test,
+  vi,
 } from "vitest";
 import { DomainError } from "../../../shared/domain/domain-error";
 import {
@@ -16,6 +19,14 @@ import {
 import { Todo } from "../domain/todo";
 import { todos } from "./schema";
 import { PostgresTodoRepository } from "./todo-repository.postgres";
+
+// WHY 時計（now）を差し替えられるようにする: 作成日時（Todo.create が now() から入れる）をミリ秒まで決めた値で保存し、
+//   同じ値で読み戻せることを確かめるため。spy: true で本物の now を残し、時刻を決めたいテストだけ次の 1 回の値を返させる。
+vi.mock("@repo/shared/now", { spy: true });
+
+afterEach(() => {
+  vi.mocked(now).mockReset();
+});
 
 // 実 Postgres（compose.yaml。`pnpm db:up` で起動）に対して実行する。
 // テスト用のスキーマにマイグレーション（drizzle/）を当て、各テストの前に todos を空にする（テスト同士が干渉しない）。
@@ -44,10 +55,10 @@ describe("PostgresTodoRepository", () => {
   });
 
   test("save した Todo を findById / findAll で同じ値（id・title・completed・作成日時）として取り出せる", async () => {
-    const todo = Todo.create(
-      "牛乳を買う",
-      new Date("2026-09-28T01:02:03.456Z"),
-    ).changeCompletion(true);
+    const createdAt = new Date("2026-09-28T01:02:03.456Z");
+    vi.mocked(now).mockReturnValueOnce(createdAt);
+    const todo = Todo.create("牛乳を買う").changeCompletion(true);
+    expect(todo.createdAt).toEqual(createdAt);
 
     await repository().save(todo);
 

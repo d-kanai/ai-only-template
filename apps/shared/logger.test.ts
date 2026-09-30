@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { logger } from "./logger";
+import { now } from "./now";
 
 // logger（サーバ側のログの唯一の出口。Issue #85）の仕様。出力先は console の各メソッドを spy して確かめる。
 // WHY console を spy する（stdout / stderr のストリームを直接見ない）: logger は console.log / console.warn / console.error
@@ -8,6 +9,9 @@ import { logger } from "./logger";
 //   （problem.test.ts など）も同じく console を spy して、ログに残したことを確かめる。
 
 const NOW = "2026-09-29T01:02:03.456Z";
+
+// WHY 時計（now）を差し替える: 行の timestamp は現在時刻の唯一の出口 now() から取る。決まった時刻で行を丸ごと比べるため。
+vi.mock("./now");
 
 const consoleMethods = ["log", "warn", "error"] as const;
 type ConsoleMethod = (typeof consoleMethods)[number];
@@ -34,12 +38,11 @@ function onlyLine(
 }
 
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ["Date"] });
-  vi.setSystemTime(new Date(NOW));
+  vi.mocked(now).mockReturnValue(new Date(NOW));
 });
 
 afterEach(() => {
-  vi.useRealTimers();
+  vi.mocked(now).mockReset();
   vi.restoreAllMocks();
 });
 

@@ -42,7 +42,8 @@ import { describe, expect, it } from "vitest";
 // 境界（Issue #68。backend → frontend の禁止、backend の中は相対パスだけ、frontend などから backend へは "@repo/backend/..." の
 // 書き方だけ、apps/backend/package.json の exports の過不足）、frontend と backend で共通の apps/shared（Issue #90。置き場所、
 // "@repo/shared/..." の書き方、画面側から参照しない、apps/shared/package.json の exports の過不足）と、環境変数の直参照の禁止
-// （.claude/rules/env.md の「環境変数」。規則 env-direct-access）、画面と backend のハードコードの文言の禁止（Issue #116 の i18n。
+// （.claude/rules/env.md の「環境変数」。規則 env-direct-access）、現在時刻を apps/shared/now.ts の外で読むことの禁止
+// （規則 now-single-source）、画面と backend のハードコードの文言の禁止（Issue #116 の i18n。
 // 規則 frontend-hardcoded-text・server-hardcoded-text。これだけは正規表現ではなく構文木で見る。WHY は該当の節）、画面・部品の辞書
 // （*.messages.ts）を同じディレクトリのファイルだけが参照すること（Issue #125。規則 messages-colocation）。
 //
@@ -570,6 +571,8 @@ const COMMON_MESSAGES_MODULE =
 //   以前は frontend 直下から backend を参照する frontend-root-to-backend の例外だった）。
 const SHARED_ENV_MODULE = `${SHARED_ROOT}/env`;
 const SHARED_LOGGER_MODULE = `${SHARED_ROOT}/logger`;
+// 現在時刻の唯一の出口（規則 now-single-source）。
+const SHARED_NOW_MODULE = `${SHARED_ROOT}/now`;
 
 // backend の層ごとに、参照してよい apps/shared のモジュール（Issue #90。移す前に backend/shared/infra にあったときと同じ範囲）。
 // WHY domain / application には許さない: env・logger は外の世界（環境変数・stdout）に触る基盤で、移す前も infra 層にあった。
@@ -578,11 +581,14 @@ const SHARED_LOGGER_MODULE = `${SHARED_ROOT}/logger`;
 //   backend/shared/infra/database だけ（下の presentationAllows）だが、想定外の例外をログに残すのは HTTP の境界
 //   （toProblemResponse）の仕事で、ログの出口をコンストラクタで渡すと全 API の組み立てに logger が入る。logger は状態を持たず、差し替えずにテストできる（console を spy する）ので、直接 import させる（Issue #85）。
 //   env は infra（接続先・プールの設定）だけが使う。
+// WHY now はすべての層に許す: now() は現在時刻の Date を返すだけで、環境変数・出力・DB に触らない。Entity の生成ルール
+//   （Todo.create の作成日時）は domain に置くので、domain から現在時刻を読めないと時刻を引数で受け取る形になり、
+//   生成ルールが呼び出し側に漏れる。テストは vi.mock でこのモジュールを差し替えて時刻を決める。
 const SHARED_MODULES_BY_LAYER: Record<BackendLayer, ReadonlySet<string>> = {
-  domain: new Set(),
-  application: new Set(),
-  presentation: new Set([SHARED_LOGGER_MODULE]),
-  infra: new Set([SHARED_ENV_MODULE, SHARED_LOGGER_MODULE]),
+  domain: new Set([SHARED_NOW_MODULE]),
+  application: new Set([SHARED_NOW_MODULE]),
+  presentation: new Set([SHARED_LOGGER_MODULE, SHARED_NOW_MODULE]),
+  infra: new Set([SHARED_ENV_MODULE, SHARED_LOGGER_MODULE, SHARED_NOW_MODULE]),
 };
 
 // features/<f>/api/ から、同じ feature の api ファイル（backend/features/<f>/presentation/*.api）への参照か。
@@ -839,6 +845,8 @@ const RULES: Rule[] = [
     //   入る。画面側のログは出さない（.claude/rules/frontend.md）。
     // WHY 画面側の shared/ も含める: screen-to-backend と同じく、shared/ は features から使われる画面側の部品で、Client Component
     //   からも読み込まれるため。app/api/ も含める（app-api が api ファイル以外を止めるので重ねて検出するが、範囲を app/ 全体で書く）。
+    // WHY now（現在時刻の出口）も画面側には許さない: 画面は今、現在時刻を読まない。使う必要が出たときに、画面の時刻を
+    //   サーバと同じ出口にするか（ブラウザのバンドルに apps/shared を入れてよいか）を決めて、この規則を緩める。
     id: "screen-to-shared",
     name: "apps/frontend_customer の app/・features/・shared/ は apps/shared/ を参照しない（env・logger をブラウザのバンドルに持ち込まない）",
     appliesTo: (from) =>
@@ -1105,11 +1113,11 @@ const FRONTEND_PLACEMENT = {
 // 置き場所の規則（参照ではなくファイルの場所で決まる）。collectViolations で使う。
 const PLACEMENT_RULES = [BACKEND_PLACEMENT, FRONTEND_PLACEMENT];
 
-// apps/shared（@repo/shared。Issue #90）に置いてよいのは、名前を決めたファイルだけ（env.ts・logger.ts とそのテスト、
+// apps/shared（@repo/shared。Issue #90）に置いてよいのは、名前を決めたファイルだけ（env.ts・logger.ts・now.ts とそのテスト、
 //   package.json・tsconfig.json）。
 // WHY 何でも置ける場所にしない: 「frontend と backend の両方で使う」ものは多く、共通の置き場所を自由にすると、feature の
 //   コードや DB・React に依存するコードが集まり、層の規則（backend の 4 層・画面側の境界）の外で依存が育つ。
-//   置いてよいのは横断的な基盤（環境変数の入口とログの出口）だけにし、足すときはこの一覧・exports（SHARED_EXPORTS）・
+//   置いてよいのは横断的な基盤（環境変数の入口・ログの出口・現在時刻の出口）だけにし、足すときはこの一覧・exports（SHARED_EXPORTS）・
 //   .claude/rules/shared.md を同じ変更で直す（足すことを規則の変更としてレビューに出す）。
 // WHY ソース以外（.md・.json・テスト）も含めてすべてのファイルを見る（BACKEND_PLACEMENT / FRONTEND_PLACEMENT はソースだけ）:
 //   置いてよいものを名前で決めているので、テストだけ・説明だけのファイルも一覧の外なら違反にし、置き場所の意図を 1 か所で持つ。
@@ -1120,6 +1128,8 @@ const SHARED_FILES = new Set(
     "env.test.ts",
     "logger.ts",
     "logger.test.ts",
+    "now.ts",
+    "now.test.ts",
     "package.json",
     "tsconfig.json",
   ].map((name) => `${SHARED_ROOT}/${name}`),
@@ -1127,7 +1137,7 @@ const SHARED_FILES = new Set(
 
 const SHARED_PLACEMENT = {
   id: "shared-placement",
-  name: "apps/shared/ に置いてよいのは env.ts・logger.ts とそのテスト（env.test.ts・logger.test.ts）、package.json・tsconfig.json だけ",
+  name: "apps/shared/ に置いてよいのは env.ts・logger.ts・now.ts とそのテスト（env.test.ts・logger.test.ts・now.test.ts）、package.json・tsconfig.json だけ",
   isMisplaced: (file: string) =>
     isUnder(file, SHARED_ROOT) && !SHARED_FILES.has(file),
 };
@@ -1307,6 +1317,77 @@ function findConsoleViolations(root: string): string[] {
     .filter((file) => file !== CONSOLE_DIRECT_ACCESS.allowedFile)
     .flatMap((file) =>
       findConsoleAccesses(readFileSync(join(root, file), "utf8")).map(
+        (line) => `${file}:${line}`,
+      ),
+    );
+}
+
+// --- 現在時刻の読み取り（規則 now-single-source。.claude/rules/shared.md の now） ---
+// 現在時刻を読んでよいのは apps/shared/now.ts だけ。ほかは now()（"@repo/shared/now"）を使う。
+// WHY: 時刻を各所で直接読むと、時刻に依存する振る舞い（Entity の作成日時・一覧の並び順・ログの時刻）のテストが実行した
+//   瞬間で結果を変え、決定的にならない。出口を 1 つにすれば、テストは vi.mock でそのモジュールを差し替えるだけで時刻を決められる。
+// 違反にする書き方: 引数の無い new Date（new Date()・new Date( )・括弧なしの new Date・改行を挟むもの）、Date.now（呼ばずに
+//   参照するだけでも。?.・["now"] も）、new を付けない Date()（現在時刻の文字列を返す）。globalThis.Date / global.Date を
+//   経由するものも拾う。
+// 通すもの: 引数のある new Date(x)（与えた値の解析で、現在時刻ではない）、Date.parse / Date.UTC、型の位置の Date、
+//   DateTime・toDate・myDate のような別の識別子。
+// WHY 対象を apps/frontend_customer・apps/backend・apps/shared のソースにする（テストと *.test-support.* は除く）:
+//   - テストとテストの補助は、期待値や時刻を決めるために Date を作る。本番の振る舞いに入らない。
+//   - apps/e2e/ は別プロセスで動く本番ビルドを外から操作するので now を差し替えられず、現在時刻は一意なタイトルを作るためだけに使う。
+//   - scripts/・リポジトリ直下の設定はアプリのコードではなく、時刻をテストで決める必要が無い。
+// 限界（見逃す方向。「現在時刻の読み取りの抽出」のテストで固定）: 別名（const D = Date; new D()）、分割代入（const { now } = Date）、
+//   括弧で囲んだ Date（new (Date)()）、空のスプレッド（new Date(...[])）、Reflect.construct(Date, [])、テンプレートリテラルの ${} の中。
+//   performance.now()・process.hrtime() は経過時間の計測で時刻ではないので対象にしない。
+// 限界（多く検出する方向）: Date という名前のメソッドの呼び出し（calendar.Date()）も new の無い Date() として数える（今のリポジトリには無い）。
+const NOW_CHECK_DIRS = [FRONTEND_ROOT, BACKEND_ROOT, SHARED_ROOT];
+
+// テストの補助（apps/backend/shared/infra/database.test-support.ts・apps/frontend_customer/shared/i18n/i18n.test-support.tsx など）。
+const TEST_SUPPORT_FILE = /\.test-support\.(?:[cm]?[jt]s|[jt]sx)$/;
+
+const NOW_SINGLE_SOURCE = {
+  id: "now-single-source",
+  name: "現在時刻（引数の無い new Date・Date.now・new の無い Date()）を読んでよいのは apps/shared/now.ts だけ（apps/frontend_customer・apps/backend・apps/shared が対象。テストとテストの補助は除く）",
+  // 現在時刻を読んでよいファイル（現在時刻の唯一の出口）。
+  allowedFile: `${SHARED_NOW_MODULE}.ts`,
+  appliesTo: (file: string) =>
+    isSourceNonTest(file) &&
+    !TEST_SUPPORT_FILE.test(file) &&
+    NOW_CHECK_DIRS.some((dir) => isUnder(file, dir)),
+};
+
+// 現在時刻を読む書き方（上の「違反にする書き方」）。1 つの書き方 = 1 つの選択肢で、どれに当たっても 1 件と数える。
+//   1. new Date の後ろに「空白以外の文字を含む (」が無いもの。new globalThis.Date のような 1 段のプロパティ経由も含む。
+//   2. Date.now / Date?.now / Date["now"]（と ?.[ ]）。\bDate なので globalThis.Date.now も拾い、Dates.now・myDate.now は拾わない。
+//   3. new の付かない Date(。new Date(x) の Date( は後読みで除く。
+const CURRENT_TIME_ACCESS = new RegExp(
+  [
+    String.raw`\bnew\s+(?:[\w$]+\s*\.\s*)?Date(?![\w$])(?!\s*\(\s*[^\s)])`,
+    String.raw`\bDate\s*(?:\??\.\s*now(?![\w$])|(?:\?\.)?\s*\[\s*(["'\`])now\1\s*\])`,
+    String.raw`(?<!\bnew\s+(?:[\w$]+\s*\.\s*)?)\bDate\s*\(`,
+  ].join("|"),
+  "g",
+);
+
+// source の中で現在時刻を読む箇所を、書かれた順に行番号（1 始まり）で返す。
+// コメントの中と文字列リテラルの中は拾わない（findConsoleAccesses と同じ stripComments / stringRanges を使う）。
+function findCurrentTimeAccesses(source: string): number[] {
+  const code = stripComments(source);
+  const ranges = stringRanges(code);
+  return [...code.matchAll(CURRENT_TIME_ACCESS)]
+    .filter((match) => !isInsideString(ranges, match.index))
+    .map((match) => code.slice(0, match.index).split("\n").length);
+}
+
+function listNowCheckedFiles(root: string): string[] {
+  return listAllSourceFiles(root).filter(NOW_SINGLE_SOURCE.appliesTo);
+}
+
+// 「ファイル:行」の一覧。now.ts は除く。
+function findNowViolations(root: string): string[] {
+  return listNowCheckedFiles(root)
+    .filter((file) => file !== NOW_SINGLE_SOURCE.allowedFile)
+    .flatMap((file) =>
+      findCurrentTimeAccesses(readFileSync(join(root, file), "utf8")).map(
         (line) => `${file}:${line}`,
       ),
     );
@@ -1746,7 +1827,7 @@ const BACKEND_EXPORTS: ExportedPackage = {
   packageName: BACKEND_PACKAGE,
 };
 
-// apps/shared/package.json の exports（Issue #90）。今のキーは "./env" と "./logger" の 2 つ（1 ファイル = 1 キー。パターンを使わない
+// apps/shared/package.json の exports（Issue #90）。今のキーは "./env"・"./logger"・"./now" の 3 つ（1 ファイル = 1 キー。パターンを使わない
 //   のは .claude/rules/shared.md の方針で、置き場所の規則 SHARED_PLACEMENT と合わせて公開するものを名前で決めるため）。
 const SHARED_EXPORTS: ExportedPackage = {
   id: "shared-exports",
@@ -1899,6 +1980,7 @@ function findViolations(references: Reference[], rule: Rule): string[] {
 //   置き場所の違反は「backend-placement: ファイル」「frontend-placement: ファイル」の 1 行で出す。
 //   環境変数の直参照は「env-direct-access: ファイル:行」を参照ごとに 1 行で出す（同じファイルの複数の書き方を、
 //   1 つずつ拾えているかまで比べるため）。console の直接の呼び出しも「console-direct-access: ファイル:行」で同じく出す。
+//   現在時刻の読み取りも「now-single-source: ファイル:行」で同じく出す。
 //   ハードコードの文言も「frontend-hardcoded-text: ファイル:行」「server-hardcoded-text: ファイル:行」を文言ごとに 1 行で出す。
 //   withProblemResponse で包んでいない handle も「presentation-with-problem-response: ファイル:行」を handle ごとに 1 行で出す。
 //   exports の違反は「backend-exports: ...」「shared-exports: ...」の 1 行で出す（findExportsViolations）。
@@ -1924,6 +2006,9 @@ function collectViolations(root: string): string[] {
     ),
     ...findConsoleViolations(root).map(
       (line) => `${CONSOLE_DIRECT_ACCESS.id}: ${line}`,
+    ),
+    ...findNowViolations(root).map(
+      (line) => `${NOW_SINGLE_SOURCE.id}: ${line}`,
     ),
     ...HARDCODED_TEXT_RULES.flatMap((rule) =>
       findHardcodedTextViolations(root, rule).map(
@@ -1995,6 +2080,38 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
     expect(findConsoleViolations(repoRoot)).toEqual([]);
   });
 
+  it(NOW_SINGLE_SOURCE.name, () => {
+    // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
+    expect(findNowViolations(repoRoot)).toEqual([]);
+  });
+
+  it("現在時刻の読み取りの検査は、apps/frontend_customer・apps/backend・apps/shared のソースを対象にし、テスト・テストの補助・apps/e2e/・ルート直下は対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
+    const files = listNowCheckedFiles(repoRoot);
+    expect(files).toEqual(
+      expect.arrayContaining([
+        "apps/shared/now.ts",
+        "apps/shared/logger.ts",
+        "apps/backend/features/todo/domain/todo.ts",
+        "apps/backend/features/todo/infra/todo-repository.postgres.ts",
+        "apps/frontend_customer/proxy.ts",
+        "apps/frontend_customer/shared/i18n/format.ts",
+        "apps/frontend_customer/features/todo/components/todo-item.tsx",
+        "apps/frontend_customer/app/page.tsx",
+      ]),
+    );
+    for (const excluded of [
+      "apps/shared/now.test.ts",
+      "apps/backend/features/todo/domain/todo.test.ts",
+      "apps/backend/shared/infra/database.test-support.ts",
+      "apps/frontend_customer/shared/i18n/i18n.test-support.tsx",
+      "apps/e2e/todo.spec.ts",
+      "vitest.config.mts",
+    ]) {
+      expect(files).not.toContain(excluded);
+    }
+    expect(files.filter((file) => file.includes("/.next/"))).toEqual([]);
+  });
+
   for (const rule of HARDCODED_TEXT_RULES) {
     it(rule.name, () => {
       // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
@@ -2050,7 +2167,7 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
   it("apps/shared の exports を読め、apps/frontend_customer 直下・apps/backend・apps/e2e/・リポジトリ直下の @repo/shared の参照を取り出せている（読み込みや列挙が壊れて素通りするのを防ぐ）", () => {
     expect(
       Object.keys(readPackageExports(repoRoot, SHARED_EXPORTS)).sort(),
-    ).toEqual(["./env", "./logger"]);
+    ).toEqual(["./env", "./logger", "./now"]);
     const consumers = new Set(
       references
         .filter((ref) => isSharedPackage(ref.specifier))
@@ -2060,6 +2177,7 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
       expect.arrayContaining([
         "apps/frontend_customer/instrumentation-node.ts",
         "apps/frontend_customer/proxy.ts",
+        "apps/backend/features/todo/domain/todo.ts",
         "apps/backend/shared/drizzle/drizzle.config.ts",
         "apps/backend/shared/infra/database.ts",
         "apps/backend/shared/presentation/problem.ts",
@@ -2296,6 +2414,7 @@ const RULE_EXAMPLES: Record<
       ],
       // "@/" の後ろの ".." で apps/frontend_customer の外に出る書き方も、apps/shared への参照として数える（toReference の normalize）。
       ["apps/frontend_customer/proxy.ts", "@/../shared/logger", "value"],
+      ["apps/frontend_customer/proxy.ts", "../shared/now", "value"],
       ["apps/e2e/database.ts", "../shared/env", "value"],
       ["apps/e2e/playwright.config.ts", "../shared/env.ts", "type"],
       ["vitest.global-setup.ts", "./apps/shared/env", "value"],
@@ -2314,6 +2433,7 @@ const RULE_EXAMPLES: Record<
         "value",
       ],
       ["apps/frontend_customer/proxy.ts", "@repo/shared/logger", "value"],
+      ["apps/frontend_customer/proxy.ts", "@repo/shared/now", "value"],
       ["apps/e2e/playwright.config.ts", "@repo/shared/env", "value"],
       ["vitest.global-setup.ts", "@repo/shared/env", "value"],
       // 画面側の shared/（apps/frontend_customer/shared/）は apps/shared ではない。前方一致だけが同じ別ディレクトリ（apps/shared-x）も。
@@ -2579,6 +2699,12 @@ const RULE_EXAMPLES: Record<
         "type",
       ],
       ["apps/frontend_customer/app/page.tsx", "@repo/shared/env", "value"],
+      // 現在時刻の出口（now）も画面側からは使わない（今は画面が現在時刻を読まない）。
+      [
+        "apps/frontend_customer/features/todo/components/todo-item.tsx",
+        "@repo/shared/now",
+        "value",
+      ],
       [
         "apps/frontend_customer/app/api/todos/route.ts",
         "@repo/shared/logger",
@@ -2603,6 +2729,7 @@ const RULE_EXAMPLES: Record<
         "value",
       ],
       ["apps/frontend_customer/proxy.ts", "@repo/shared/logger", "value"],
+      ["apps/frontend_customer/proxy.ts", "@repo/shared/now", "value"],
       // 画面側の shared/（apps/frontend_customer/shared/）は apps/shared ではない。
       [
         "apps/frontend_customer/features/todo/components/x.tsx",
@@ -2778,6 +2905,12 @@ const RULE_EXAMPLES: Record<
         "value",
       ],
       ["apps/backend/shared/domain/x.ts", "@repo/shared/env", "type"],
+      // 許すのは now だけで、前方一致だけが同じ別のモジュール（now-helper）は不可。
+      [
+        "apps/backend/features/todo/domain/x.ts",
+        "@repo/shared/now-helper",
+        "value",
+      ],
       // Issue #98: features/ の下の shared という名前の feature は backend/shared ではなく別の feature（Issue #98 より前の
       //   相対パス "../../shared/..." は、今は features/shared/ を指す）。
       [
@@ -2807,6 +2940,13 @@ const RULE_EXAMPLES: Record<
         "value",
       ],
       ["apps/backend/features/todo/domain/x.ts", "node:crypto", "value"],
+      // 現在時刻の出口（now）は domain からも使う（Entity の生成ルールの作成日時）。
+      [
+        "apps/backend/features/todo/domain/todo.ts",
+        "@repo/shared/now",
+        "value",
+      ],
+      ["apps/backend/shared/domain/x.ts", "@repo/shared/now", "value"],
       // next / react / DB 以外のパッケージは使ってよい（Todo の不変条件を zod のスキーマで宣言する。Issue #88）。
       ["apps/backend/features/todo/domain/x.ts", "zod", "value"],
     ],
@@ -2921,6 +3061,12 @@ const RULE_EXAMPLES: Record<
       [
         "apps/backend/features/todo/application/x.ts",
         "../../../shared/domain/domain-error",
+        "value",
+      ],
+      // 現在時刻の出口（now）はすべての層で使ってよい。
+      [
+        "apps/backend/features/todo/application/x.command.ts",
+        "@repo/shared/now",
         "value",
       ],
     ],
@@ -3171,6 +3317,11 @@ const RULE_EXAMPLES: Record<
       ],
       [
         "apps/backend/features/todo/presentation/x.api.ts",
+        "@repo/shared/now",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/presentation/x.api.ts",
         "../../../../shared/logger",
         "value",
       ],
@@ -3221,6 +3372,7 @@ const RULE_EXAMPLES: Record<
       // 環境変数の入口とログの出口（Issue #90 で apps/shared に移した）。
       ["apps/backend/shared/infra/database.ts", "@repo/shared/env", "value"],
       ["apps/backend/shared/infra/database.ts", "@repo/shared/logger", "value"],
+      ["apps/backend/features/todo/infra/x.ts", "@repo/shared/now", "value"],
       [
         "apps/backend/features/todo/infra/x.ts",
         "../../../../shared/env",
@@ -3619,6 +3771,8 @@ const SHARED_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     // 名前の前方一致だけが同じ別ファイル、別の拡張子、許した名前でも直下でないもの。
     "apps/shared/env-helper.ts",
     "apps/shared/logger.tsx",
+    "apps/shared/now-helper.ts",
+    "apps/shared/now.test-support.ts",
     "apps/shared/env.js",
     "apps/shared/lib/env.ts",
     // ソース以外（説明・テストだけ・設定）も、決めた名前でなければ違反。
@@ -3631,6 +3785,8 @@ const SHARED_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/shared/env.test.ts",
     "apps/shared/logger.ts",
     "apps/shared/logger.test.ts",
+    "apps/shared/now.ts",
+    "apps/shared/now.test.ts",
     "apps/shared/package.json",
     "apps/shared/tsconfig.json",
     // apps/shared の外は対象外（前方一致だけが同じ別ディレクトリ・backend の shared/・画面側の shared/）。
@@ -3999,6 +4155,142 @@ describe("console の参照の抽出（findConsoleAccesses）", () => {
     // WHY テンプレートリテラルで書く: 環境変数の抽出のテストと同じく、noTemplateCurlyInString を避けるため。
     const source = `const s = \`x: \${console.log(1)}\`;`;
     expect(findConsoleAccesses(source)).toEqual([]);
+  });
+});
+
+// 現在時刻の読み取りの規則（NOW_SINGLE_SOURCE）の判定例。CONSOLE_ACCESS_EXAMPLES と同じく [ファイル, ソース] で決まる。
+const NOW_ACCESS_EXAMPLES: {
+  violating: [file: string, source: string][];
+  allowed: [file: string, source: string][];
+} = {
+  violating: [
+    // 書き方（引数なしの new Date・括弧なし・空白と改行だけの括弧・Date.now・?.・[]・new の無い Date()・globalThis 経由）。
+    ["apps/backend/features/todo/domain/todo.ts", "const d = new Date();"],
+    ["apps/backend/features/todo/domain/todo.ts", "const d = new Date;"],
+    ["apps/backend/features/todo/domain/todo.ts", "const d = new Date(  );"],
+    ["apps/backend/features/todo/domain/todo.ts", "const d = new Date(\n);"],
+    ["apps/backend/features/todo/application/x.command.ts", "Date.now();"],
+    ["apps/backend/features/todo/application/x.command.ts", "Date?.now();"],
+    ["apps/backend/features/todo/infra/x.ts", 'Date["now"]();'],
+    ["apps/backend/features/todo/infra/x.ts", "const f = Date.now;"],
+    ["apps/backend/features/todo/presentation/x.api.ts", "String(Date());"],
+    ["apps/backend/shared/infra/x.ts", "globalThis.Date.now();"],
+    ["apps/backend/shared/domain/x.ts", "new globalThis.Date();"],
+    ["apps/backend/shared/presentation/x.ts", "new global.Date ( );"],
+    // 場所（frontend 直下・画面側・apps/shared の now.ts 以外）と拡張子。
+    ["apps/frontend_customer/proxy.ts", "receivedAt: new Date(),"],
+    ["apps/frontend_customer/features/todo/components/x.tsx", "new Date();"],
+    ["apps/frontend_customer/shared/x.mjs", "Date.now();"],
+    ["apps/frontend_customer/app/page.tsx", "new Date();"],
+    ["apps/shared/logger.ts", "const t = new Date().toISOString();"],
+    // now.ts と名前が似た別ファイル・別の場所の now.ts・名前に test-support を含むが補助の接尾辞ではないもの。
+    ["apps/shared/now-helper.ts", "new Date();"],
+    ["apps/shared/now.js", "new Date();"],
+    ["apps/backend/shared/infra/now.ts", "new Date();"],
+    ["apps/backend/shared/infra/test-support-clock.ts", "new Date();"],
+  ],
+  allowed: [
+    // 例外の now.ts。
+    ["apps/shared/now.ts", "export function now() { return new Date(); }"],
+    // now() を使う。
+    ["apps/backend/features/todo/domain/todo.ts", "createdAt: now(),"],
+    ["apps/shared/logger.ts", "const t = now().toISOString();"],
+    // 引数のある new Date（解析）、Date.parse / Date.UTC、型の位置の Date、改行を挟んだ引数。
+    [
+      "apps/backend/features/todo/infra/x.ts",
+      "createdAt: new Date(row.createdAt),",
+    ],
+    ["apps/frontend_customer/shared/i18n/format.ts", "format(new Date(iso));"],
+    ["apps/backend/features/todo/infra/x.ts", 'new Date(\n  "2026-01-01",\n);'],
+    [
+      "apps/backend/features/todo/infra/x.ts",
+      "Date.parse(s); Date.UTC(2026, 0);",
+    ],
+    ["apps/backend/features/todo/domain/x.ts", "readonly createdAt: Date;"],
+    // 別の識別子。
+    [
+      "apps/backend/features/todo/domain/x.ts",
+      "new DateTime(); toDate(); myDate.now(); Dates.now();",
+    ],
+    // コメント・文字列の中。
+    ["apps/backend/features/todo/domain/x.ts", "// new Date() は書かない"],
+    ["apps/backend/features/todo/domain/x.ts", "/* Date.now() */ export {};"],
+    ["apps/backend/features/todo/domain/x.ts", 'const s = "new Date()";'],
+    ["apps/backend/features/todo/domain/x.ts", "const t = `Date.now()`;"],
+    // テスト・テストの補助・対象外の場所（apps/e2e/・scripts/・ルート直下）・TS / JS 以外。
+    ["apps/backend/features/todo/domain/todo.test.ts", "new Date();"],
+    ["apps/shared/now.test.ts", "Date.now();"],
+    [
+      "apps/backend/shared/infra/database.test-support.ts",
+      "const n = Date.now();",
+    ],
+    ["apps/frontend_customer/shared/i18n/i18n.test-support.tsx", "new Date();"],
+    ["apps/e2e/todo.spec.ts", "const runId = Date.now();"],
+    ["apps/e2e/database.ts", "new Date();"],
+    ["scripts/tool.ts", "Date.now();"],
+    ["vitest.config.mts", "Date.now();"],
+    ["apps/backend/features/todo/domain/x.md", "new Date();"],
+  ],
+};
+
+function judgeNowAccess([file, source]: [string, string]): boolean {
+  return (
+    NOW_SINGLE_SOURCE.appliesTo(file) &&
+    file !== NOW_SINGLE_SOURCE.allowedFile &&
+    findCurrentTimeAccesses(source).length > 0
+  );
+}
+
+describe("現在時刻を読む規則の判定", () => {
+  it("違反例・許可例はそれぞれ 4 件以上ある", () => {
+    expect(NOW_ACCESS_EXAMPLES.violating.length).toBeGreaterThanOrEqual(4);
+    expect(NOW_ACCESS_EXAMPLES.allowed.length).toBeGreaterThanOrEqual(4);
+  });
+  it.each(NOW_ACCESS_EXAMPLES.violating)("%s の %j は違反", (...example) => {
+    expect(judgeNowAccess(example)).toBe(true);
+  });
+  it.each(NOW_ACCESS_EXAMPLES.allowed)(
+    "%s の %j は違反ではない",
+    (...example) => {
+      expect(judgeNowAccess(example)).toBe(false);
+    },
+  );
+});
+
+describe("現在時刻の読み取りの抽出（findCurrentTimeAccesses）", () => {
+  it("読み取りごとに、書かれた行番号を返す（1 行に 2 つあれば 2 件。コメントを消しても行はずれない）", () => {
+    const source = [
+      "/*",
+      " * new Date() は書かない",
+      " */",
+      "const a = new Date(); const b = Date.now();",
+      "// Date.now()",
+      "const c = new Date(a);",
+      "const d = new Date(",
+      ");",
+    ].join("\n");
+    expect(findCurrentTimeAccesses(source)).toEqual([4, 4, 7]);
+  });
+
+  it("別名・分割代入・括弧で囲んだ Date・空のスプレッド・Reflect.construct は拾わない（見逃す方向の限界）", () => {
+    const source = [
+      "const D = Date; const a = new D();",
+      "const { now: read } = Date; read();",
+      "const b = new (Date)();",
+      "const c = new Date(...[]);",
+      "const d = Reflect.construct(Date, []);",
+    ].join("\n");
+    expect(findCurrentTimeAccesses(source)).toEqual([]);
+  });
+
+  it("テンプレートリテラルの埋め込み式の中は拾わない（見逃す方向の限界）", () => {
+    // WHY テンプレートリテラルで書く: console の抽出のテストと同じく、noTemplateCurlyInString を避けるため。
+    const source = `const s = \`at: \${Date.now()}\`;`;
+    expect(findCurrentTimeAccesses(source)).toEqual([]);
+  });
+
+  it("Date という名前のメソッドの呼び出し（calendar.Date()）も new の無い Date() として数える（多く検出する方向の限界）", () => {
+    expect(findCurrentTimeAccesses("calendar.Date();")).toEqual([1]);
   });
 });
 
@@ -4988,11 +5280,12 @@ function violationsOfFixture(files: Record<string, string>): string[] {
 // あわせて、置き場所の規則（BACKEND_PLACEMENT / FRONTEND_PLACEMENT）、環境変数の直参照の規則（ENV_DIRECT_ACCESS）、
 // exports の規則（BACKEND_EXPORTS。fixture の apps/backend/package.json）の違反も置く。
 // console の直接の呼び出しの規則（CONSOLE_DIRECT_ACCESS。Issue #85）の違反も置く。
+// 現在時刻の読み取りの規則（NOW_SINGLE_SOURCE）の違反も置く。
 // apps/shared の規則（Issue #90。frontend-to-shared-specifier・screen-to-shared・SHARED_PLACEMENT・SHARED_EXPORTS と、層の規則の
 // apps/shared の許可 SHARED_MODULES_BY_LAYER）の違反も置く。
 // ハードコードの文言の規則（FRONTEND_HARDCODED_TEXT・SERVER_HARDCODED_TEXT。Issue #116）と、辞書の置き場所の規則
 // （messages-colocation。Issue #125）の違反も置く。
-// 規則は全部で 31（RULES の 21 + 置き場所 3 + 環境変数の直参照 + console + exports 2 + ハードコードの文言 2 + handle を withProblemResponse で包む 1）。Issue #68 で RULES に 3 規則（backend-to-frontend・
+// 規則は全部で 32（RULES の 21 + 置き場所 3 + 環境変数の直参照 + console + 現在時刻の読み取り + exports 2 + ハードコードの文言 2 + handle を withProblemResponse で包む 1）。Issue #68 で RULES に 3 規則（backend-to-frontend・
 // backend-relative-only・frontend-root-to-backend）を足し、段階 2 で frontend-to-backend-specifier と BACKEND_EXPORTS を足した。
 // Issue #90 で frontend-to-shared-specifier・screen-to-shared・shared-self-contained・SHARED_PLACEMENT・SHARED_EXPORTS を足した。
 // Issue #141 で presentation-with-problem-response（PRESENTATION_WITH_PROBLEM_RESPONSE）を足した。
@@ -5574,9 +5867,49 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import { env } from "@/../shared/env";',
     'import { logger } from "../../../shared/logger";',
   ),
+  // now-single-source: now.ts 以外で現在時刻を読む。書き方ごとに 1 行ずつ置き、行番号で検出を比べる（11 行目の引数のある
+  //   new Date と 12 行目のコメントは違反ではない）。画面側（.tsx・.mjs）、apps/shared の決めた名前以外のファイル（shared-placement
+  //   にもかかる）、別の場所の now.ts、名前に test-support を含むが補助の接尾辞ではないファイルも置く。
+  "apps/backend/features/todo/domain/bad-now.ts": lines(
+    "export const a = new Date();",
+    "export const b = Date.now();",
+    "export const c = new Date;",
+    "export const d = globalThis.Date.now();",
+    'export const e = Date["now"]();',
+    "export const f = Date();",
+    "export const g = new globalThis.Date( );",
+    "export const h = Date?.now;",
+    "export const i = new Date(",
+    ");",
+    'export const ok = new Date("2026-01-01T00:00:00.000Z");',
+    "// new Date()",
+  ),
+  "apps/frontend_customer/features/todo/components/bad-now.tsx": lines(
+    "export const t = new Date();",
+  ),
+  "apps/frontend_customer/shared/bad-now.mjs": lines(
+    "export const n = Date.now();",
+  ),
+  "apps/shared/lib/clock.ts": lines("export const n = new Date();"),
+  "apps/backend/shared/infra/now.ts": lines(
+    "export function now() { return new Date(); }",
+  ),
+  "apps/backend/shared/infra/test-support-clock.ts": lines(
+    "export const n = Date.now();",
+  ),
 };
 
 const MUST_REJECT_VIOLATIONS = [
+  ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(
+    (line) =>
+      `now-single-source: apps/backend/features/todo/domain/bad-now.ts:${line}`,
+  ),
+  "now-single-source: apps/frontend_customer/features/todo/components/bad-now.tsx:1",
+  "now-single-source: apps/frontend_customer/shared/bad-now.mjs:1",
+  "now-single-source: apps/shared/lib/clock.ts:1",
+  "shared-placement: apps/shared/lib/clock.ts",
+  "now-single-source: apps/backend/shared/infra/now.ts:1",
+  "now-single-source: apps/backend/shared/infra/test-support-clock.ts:1",
   ...[3, 12, 15].map(
     (line) =>
       `presentation-with-problem-response: apps/backend/features/todo/presentation/bad-handle.api.ts:${line}`,
@@ -6207,6 +6540,7 @@ const MUST_PASS_FILES: Record<string, string> = {
   ),
   "apps/backend/features/todo/domain/todo.ts": lines(
     'import { randomUUID } from "node:crypto";',
+    'import { now } from "@repo/shared/now";',
     'import { z } from "zod";',
     'import { DomainError } from "../../../shared/domain/domain-error";',
     'import { DomainError as E } from "../../../shared/domain/domain-error";',
@@ -6345,6 +6679,7 @@ const MUST_PASS_FILES: Record<string, string> = {
     exports: {
       "./env": "./env.ts",
       "./logger": "./logger.ts",
+      "./now": "./now.ts",
     },
   }),
   "apps/shared/tsconfig.json": "{}",
@@ -6408,10 +6743,52 @@ const MUST_PASS_FILES: Record<string, string> = {
   //   出力はログの唯一の出口（apps/shared/logger。Issue #85・#90）を通す。
   "apps/frontend_customer/proxy.ts": lines(
     'import { logger } from "@repo/shared/logger";',
+    'import { now } from "@repo/shared/now";',
     'import { type NextRequest, NextResponse } from "next/server";',
     'import { buildRequestLog } from "@/shared/request-log/request-log";',
-    "logger.info(buildRequestLog());",
+    "logger.info(buildRequestLog({ receivedAt: now() }));",
   ),
+  // now-single-source: 現在時刻は apps/shared/now.ts だけが読み、ほかは now() を使う（backend の 4 層すべてと frontend 直下）。
+  "apps/shared/now.ts": lines(
+    "export function now(): Date {",
+    "  return new Date();",
+    "}",
+  ),
+  "apps/backend/features/todo/application/uses-now.command.ts": lines(
+    'import { now } from "@repo/shared/now";',
+    "export const at = now();",
+  ),
+  "apps/backend/shared/presentation/uses-now.ts": lines(
+    'import { now } from "@repo/shared/now";',
+    "export const at = now();",
+  ),
+  "apps/backend/features/todo/infra/uses-now.ts": lines(
+    'import { now } from "@repo/shared/now";',
+    "export const at = now();",
+  ),
+  // 現在時刻の読み取りに見えるが違反ではないもの（引数のある new Date・Date.parse / Date.UTC・型・別の識別子・コメント・文字列）。
+  "apps/backend/features/todo/domain/date-lookalikes.ts": lines(
+    "// new Date() と Date.now() は now.ts だけ",
+    "/* Date() */",
+    'const s = "new Date()";',
+    "const t = 'Date.now()';",
+    'export const parsed = new Date("2026-01-01T00:00:00.000Z");',
+    "export const copied = new Date(parsed);",
+    "export const multi = new Date(",
+    '  "2026-01-01",',
+    ");",
+    'export const utc = Date.UTC(2026, 0, 1) + Date.parse("2026-01-01");',
+    "export let d: Date;",
+    "export const x = [new DateTime(), toDate(), myDate.now(), Dates.now()];",
+  ),
+  // テスト・テストの補助・apps/e2e/・scripts/・ルート直下は対象外。
+  "apps/backend/features/todo/domain/clock.test.ts": lines(
+    "vi.mocked(now).mockReturnValue(new Date());",
+    "const n = Date.now();",
+  ),
+  "apps/e2e/clock.spec.ts": lines("export const runId = Date.now();"),
+  "scripts/clock.ts": lines("export const t = Date.now();"),
+  "clock.config.mts": lines("export default { at: new Date() };"),
   "apps/frontend_customer/shared/request-log/request-log.ts": lines(
     "export function buildRequestLog() {}",
   ),
@@ -6461,6 +6838,8 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { Pool } from "pg";',
     'import type { Database } from "./database";',
     'import { env } from "@repo/shared/env";',
+    // now-single-source: テストの補助（*.test-support.*）は現在時刻を直接読んでもよい。
+    "export const stamp = Date.now();",
   ),
   "apps/backend/features/todo/infra/schema.ts": lines(
     'import { boolean, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";',
@@ -6485,6 +6864,7 @@ const MUST_PASS_FILES: Record<string, string> = {
   ),
   "apps/frontend_customer/shared/i18n/i18n.test-support.tsx": lines(
     'import { commonMessages } from "./common.messages";',
+    "export const at = new Date();",
   ),
   "apps/frontend_customer/features/todo/components/todo-item.messages.ts":
     lines(

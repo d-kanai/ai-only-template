@@ -4,7 +4,7 @@
 //   （process・node:fs・console）だけを使う pure な TypeScript にし、ブラウザや React の API を使うと型エラーになるようにする。
 //   frontend から import される（instrumentation-node.ts・proxy.ts）が、Next のビルドでは apps/frontend_customer/tsconfig.json の設定で
 //   型チェックされるので、DOM の型が無いことの検査はここ（と apps/backend の tsconfig。backend も import する）で行う。
-// WHY paths を持たない: apps/shared の中は同じディレクトリのファイルを相対パスで読むだけで（今はファイル同士の import も無い）、
+// WHY paths を持たない: apps/shared の中は同じディレクトリのファイルを相対パスで読むだけで（logger.ts が ./now を読む）、
 //   ほかのパッケージ（@repo/backend・frontend の "@/"）を参照しない（.claude/rules/shared.md）。
 // compilerOptions は apps/backend/tsconfig.json と同じ値にしている（そろえておくと、backend 経由で型チェックされたときと
 //   ここで型チェックしたときの結果が同じになる）。

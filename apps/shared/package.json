@@ -3,6 +3,7 @@
   "private": true,
   "exports": {
     "./env": "./env.ts",
-    "./logger": "./logger.ts"
+    "./logger": "./logger.ts",
+    "./now": "./now.ts"
   }
 }
