@@ -297,6 +297,54 @@ describe("check-work-logs-diff.sh", () => {
       expect(result.stderr).toBe("");
     });
 
+    it("作業ログの名前変更・移動では、元からある項目（`- 機械化:` が無い）を追加として挙げない（diff.renames=false でも）", () => {
+      // 機械化の検査の diff は -M で名前変更を検出する。--no-renames だと移動が「削除 + 追加」になり、この規則より前の
+      // ログの項目がすべて追加として挙がって CI が赤になる（reviewer 指摘）。移動と同時に足した項目だけを見る。
+      const old = log(item("前からある1"), item("前からある2"));
+      commitFiles({ "docs/work-logs/2026-09-26.md": old }, "old log");
+      git(["checkout", "-q", "main"]);
+      git(["merge", "-q", "--ff-only", "work"]);
+      git(["checkout", "-q", "work"]);
+      git(["config", "diff.renames", "false"]);
+      mkdirSync(join(repo, "docs/work-logs/2026"), { recursive: true });
+      git([
+        "mv",
+        "docs/work-logs/2026-09-26.md",
+        "docs/work-logs/2026/09-26.md",
+      ]);
+      commitFiles({
+        "docs/work-logs/2026/09-26.md": `${old}\n${item("移動と同時に足した")}\n`,
+      });
+      const result = run(["main"]);
+      expect(result.status).toBe(1);
+      expect(listedHeadings(result.stderr)).toEqual(["移動と同時に足した"]);
+    });
+
+    it("作業ログの名前変更・移動だけなら 0 で終わる", () => {
+      commitFiles(
+        {
+          "docs/work-logs/2026-09-26.md": log(
+            item("前からある1"),
+            item("前からある2"),
+          ),
+        },
+        "old log",
+      );
+      git(["checkout", "-q", "main"]);
+      git(["merge", "-q", "--ff-only", "work"]);
+      git(["checkout", "-q", "work"]);
+      mkdirSync(join(repo, "docs/work-logs/2026"), { recursive: true });
+      git([
+        "mv",
+        "docs/work-logs/2026-09-26.md",
+        "docs/work-logs/2026/09-26.md",
+      ]);
+      git(["commit", "-q", "-m", "move log"]);
+      const result = run(["main"]);
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe("");
+    });
+
     it("作業ログ以外の .md で追加した見出しは見ない", () => {
       commitFiles({
         "docs/work-logs/2026-09-28.md": log(

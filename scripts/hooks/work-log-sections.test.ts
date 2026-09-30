@@ -187,7 +187,8 @@ describe("findSectionsWithoutMechanization", () => {
       ).toEqual([]);
     });
 
-    it("`+++`（ファイル名の行）などの diff の見出し行を追加行と誤認しない", () => {
+    // `+++ b/<path>` は先頭の `+` を除くと `++ b/...` で、見出しにも `- 機械化:` にもならない（別扱いせずに通る）。
+    it("`+++`（ファイル名の行）などの diff の見出し行があっても、見出しと `- 機械化:` を読める", () => {
       expect(
         findSectionsWithoutMechanization(
           newFileDiff("docs/work-logs/2026-09-30.md", [

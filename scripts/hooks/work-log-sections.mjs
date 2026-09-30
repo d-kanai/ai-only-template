@@ -37,10 +37,6 @@ function headingText(line) {
 export function findSectionsWithoutMechanization(diffLines) {
   const missing = [];
   let current;
-  // diff のファイルの見出し（`diff --git` から最初の `@@` まで。`--- a/...`・`+++ b/...` を含む）の中か。
-  // WHY: `+++ b/<path>` を追加行と取り違えないため。hunk の中の行は必ず ` ` / `+` / `-` / `\` で始まるので、`diff --git` と
-  //   `@@` で見出しの範囲を決められる（hunk の中で `++` で始まる内容を足した行 `+++...` は追加行として扱える）。
-  let inFileHeader = false;
   const closeSection = () => {
     if (current !== undefined && !current.mechanized)
       missing.push(current.heading);
@@ -52,14 +48,11 @@ export function findSectionsWithoutMechanization(diffLines) {
     if (line.startsWith("diff --git ")) {
       // WHY ファイルの境目で項目を閉じる: CI の diff は複数のログを含む。次のファイルの追加行を前のファイルの項目に数えない。
       closeSection();
-      inFileHeader = true;
       continue;
     }
-    if (line.startsWith("@@")) {
-      inFileHeader = false;
-      continue;
-    }
-    if (inFileHeader || !line.startsWith("+")) continue;
+    // WHY diff のファイルの見出し（`+++ b/<path>`）を別扱いしない: 先頭の `+` を除くと `++ b/...` になり、見出し（`## `）にも
+    //   `- 機械化:` の行にもならない。`--- a/...`・`@@` は `+` で始まらないので下で飛ばす。
+    if (!line.startsWith("+")) continue;
     const added = line.slice(1);
     if (added.startsWith(SECTION_HEADING)) {
       closeSection();

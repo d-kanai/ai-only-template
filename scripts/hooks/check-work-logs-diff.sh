@@ -37,11 +37,16 @@ if ! printf '%s\n' "$changed" | grep -Eq '^docs/work-logs/.*\.md$'; then
   exit 1
 fi
 
-# 追加した項目の `- 機械化:` の行（Issue #178）。上と同じ三点・追加と変更だけ・rename なしの diff の + の行を見る。
+# 追加した項目の `- 機械化:` の行（Issue #178）。上と同じ三点 diff の + の行を見る。
+# WHY -M と R（上の 1 本目と違い、名前変更を検出する）: --no-renames だと、作業ログの名前変更・移動（docs/work-logs/2026/09-01.md など）が
+#   「削除 + 追加」になり、この規則より前のログの項目がすべて追加として挙がって CI が赤になる（reviewer 指摘）。-M を明示すると
+#   利用者の diff.renames=false の下でも検出する（reviewer の実測。テストで固定）。移動と同時に書き足した行だけが + になる。
+#   限界: 中身を大きく変えて移動すると（類似度が既定の 50% 未満）、名前変更と見なされず元の項目も追加として挙がる。
+# WHY --diff-filter=AMR: 削除（D）は + の行を持たないので判定には効かないが、1 本目と同じ条件（追加・変更）にそろえ、名前変更（R）を足す。
 # WHY pathspec の 'docs/work-logs/*.md': git の pathspec の * は / にも一致するので、上の grep（サブディレクトリの .md も数える）と同じ範囲になる。
 # WHY --no-color --no-ext-diff: 利用者の設定（color.diff=always・diff.external）で出力の形が変わると、+ の行を読めない。
 # 失敗（diff が取れない・node が動かない）は通さない（CI は判定できないまま exit 0 にしない）。
-if ! log_diff=$(git diff --no-color --no-ext-diff --no-renames --diff-filter=AM "${base}...HEAD" -- 'docs/work-logs/*.md'); then
+if ! log_diff=$(git diff --no-color --no-ext-diff -M --diff-filter=AMR "${base}...HEAD" -- 'docs/work-logs/*.md'); then
   echo "check-work-logs-diff: ${base}...HEAD の作業ログの差分を取れない" >&2
   exit 1
 fi
