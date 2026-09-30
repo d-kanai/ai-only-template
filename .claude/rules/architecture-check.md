@@ -11,6 +11,9 @@ paths:
 ## 対象と抽出
 - 対象: `apps/frontend_customer/`・`apps/backend/`・`apps/shared/`（Issue #90）の全体（再帰。除くのは `node_modules/` と `.next/` だけで、ほかの `.` で始まるディレクトリも検査する）、`apps/e2e/`（workspace パッケージ `@repo/e2e`。Issue #84）、リポジトリ直下のファイル。拡張子は `.ts` / `.tsx` / `.mts` / `.cts` / `.js` / `.jsx` / `.mjs` / `.cjs`（tsconfig の `allowJs: true` に合わせる）。テスト（`*.test.*`）は除く。
   - WHY テストを除く: テストは組み立てのために規則の外を参照する（presentation のテストが InMemory のリポジトリを使うなど）。
+- 列挙（`walkFiles`。`listSourceFiles`・`listAllFiles` の元。Issue #142）: 自前の再帰で、除外のディレクトリ（`EXCLUDED_DIRS`: `node_modules`・`.next`）は中に入る前に飛ばす。symlink は先がディレクトリならたどり（symlink で置いたコードも検査する）、それ以外（ファイルへの symlink・先の無い symlink）はファイルとして返す。
+  - WHY 入る前に飛ばす（`readdirSync` の `recursive: true` で列挙してから除かない）: `recursive: true` は Node 24.21.0 で symlink の先にも入る。`pnpm build` が作る `.next/standalone/` には pnpm の相対 symlink（手元の `node_modules/node_modules` の自己参照も）が複製されて循環し、列挙が止まらず OOM・SIGABRT になった（#130 で 463 秒で OOM、#137。#142 の実測で旧実装は 120 秒で打ち切り、新実装は 2.3 秒）。`EXCLUDED_DIRS` に足すだけでは直らない。
+  - 読まないことは結果の一覧からは見えない（後で除いても同じ一覧）ので、「ファイルの列挙」のテストは読んだディレクトリを記録して確かめる（`walkFiles` の第 3 引数）。
 - import / re-export / dynamic import を正規表現で抜き出す（依存は足さない）。コメントと文字列の中の import 風の文字列は除く。``import(`x`)``（`${}` 無し）と第 2 引数つきの `import("x", { with: ... })` も拾う。
 - 参照先の正規化: `@/x` → `apps/frontend_customer/x`（backend のファイルに書いても frontend の paths が当たるため）、`@repo/backend/x` → `apps/backend/x`、`@repo/shared/x` → `apps/shared/x`（`@repo/backend-extra`・`@repo/shared-extra` は別パッケージ）、相対パスはリポジトリ相対、それ以外はパッケージ。`@/`・`@repo/backend/`・`@repo/shared/` の後ろの `..` も解決する。
 - ハードコードの文言と `handle` の包み方だけは構文木で見る（JSX のテキスト・属性・文字列リテラルの範囲を正規表現では正しく切り出せないため）。TypeScript 7.0.2 は JS のパーサ（`ts.createSourceFile`）を持たないので、同梱の tsgo を `typescript/unstable/sync` の API で起動し、仮想のファイルシステムに置いたソースの構文木を `forEachChild` の再帰でたどる（依存は足さない。`parseSourceFiles`）。
@@ -56,6 +59,7 @@ paths:
 - `.claude/rules/backend.md`・`frontend.md`・`shared.md` の規則の文と、テストの規則を突き合わせる。
 
 ## 限界（見逃す方向と多く検出する方向）
+- 列挙: 除外の外で循環する symlink（`apps/backend/loop -> ..`）は、symlink が 40 段を超えたところで `statSync` が ELOOP を投げ、テストが例外で失敗する（無限には回らない。以前の列挙は ELOOP を握りつぶして途中までの一覧を返していた）。直すのは symlink を消すか、生成物なら `EXCLUDED_DIRS` に足す。`listAllFiles`（`shared-placement`）は Issue #142 から、ファイルへの symlink もファイルとして数える（以前は通常ファイルだけ）。
 - 見逃す: 正規表現リテラルやテンプレートリテラルの入れ子でコメント・文字列の区切りを誤認しうる、`${}` の中の `import()`、``import(`@repo/backend/${name}`)``（静的に決められない）、`}` の直後に同じ行で続けた `export ... from`。
 - 多く検出する: 型の位置の `import("x").T` は値の参照として数える。`presentation-with-problem-response` は別名で import した `withProblemResponse`（`import { withProblemResponse as w }`）や型アサーションを付けた呼び出し（`withProblemResponse(...) as any`）も違反にする（名前だけで見るため）。
 - `frontend-to-backend-specifier`・`frontend-to-shared-specifier` と `backend-exports`・`shared-exports` は `apps/frontend_customer/`・`apps/backend/`・`apps/shared/`・`apps/e2e/`・リポジトリ直下のファイルしか見ない（`scripts/*.ts` のテスト以外などは見ない。今は該当なし）。足すときは `listReferencingFiles` と fixture も直す。
