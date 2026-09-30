@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { existsSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import type { Database } from "../infra/database";
 
 // 各 feature の *.api.ts は、モジュールの評価時に `new <Api>(new <Command>(new Postgres<X>Repository(getDatabase().db)))` で
@@ -48,17 +48,19 @@ function isConstructor(value: unknown): value is new (db: Database) => object {
   return typeof value === "function" && value.prototype !== undefined;
 }
 
-afterEach(async () => {
-  for (const file of repositoryFiles) vi.doUnmock(file);
-  const { closeDatabase } = await import("../infra/database");
-  await closeDatabase();
-  vi.resetModules();
-});
+// Repository のコンストラクタが受け取った db（beforeAll で api ファイルを読み込んだときに記録する）。
+const received: Database[] = [];
 
-test("全 feature の api ファイルをすべて読み込んでも、Repository に渡る db は getDatabase() の 1 つだけ", async () => {
+// WHY 読み込みを test ではなく beforeAll で行う（Issue #202）: Stryker の vitest-runner は beforeEach でテスト id を立て、
+//   afterEach で消す（@stryker-mutator/vitest-runner 10.0.0 の dist/src/stryker-setup.js）。test の中で api ファイルを
+//   読み込むと、そこから読み込まれる schema.ts などのモジュールの評価（読み込み時にだけ実行される static な変異）が
+//   「このテスト中に実行された」と記録され、static かつテストに覆われた hybrid になる。ignoreStatic（stryker.config.mjs）は
+//   hybrid を Ignored にせず、覆ったテストだけで判定するので、実行時の振る舞いに現れない列定義の変異がこの 1 テストで
+//   判定されて Survived になっていた（schema.ts の 35 件）。beforeAll はテスト id が無い文脈なので、ここでの評価は
+//   static のままになる。getDatabase() の呼び出しは test の中に残し、database.ts の変異はこのテストでも判定させる。
+beforeAll(async () => {
   // WHY resetModules: このファイルより前に読み込まれた api モジュールが残っていると、組み立てが再実行されず記録できない。
   vi.resetModules();
-  const received: Database[] = [];
   for (const file of repositoryFiles) {
     // WHY モック: api ファイルは Repository の実体を export しないので、受け取った db を記録するサブクラスに差し替えて結線を確かめる
     vi.doMock(file, async (importOriginal) => {
@@ -80,6 +82,18 @@ test("全 feature の api ファイルをすべて読み込んでも、Repositor
   }
 
   await Promise.all(apiFiles.map((file) => import(file)));
+});
+
+// WHY afterAll: 読み込みを beforeAll で行うので、モックの解除とプールの後始末もファイルの最後に 1 回行う。
+afterAll(async () => {
+  for (const file of repositoryFiles) vi.doUnmock(file);
+  const { closeDatabase } = await import("../infra/database");
+  await closeDatabase();
+  vi.resetModules();
+});
+
+test("全 feature の api ファイルをすべて読み込んでも、Repository に渡る db は getDatabase() の 1 つだけ", async () => {
+  // beforeAll の resetModules 後に読み込まれた database モジュール（api ファイルが使ったもの）を取る。
   const { getDatabase } = await import("../infra/database");
 
   // 列挙が空だと Repository も 0 個で、下の検証が意味を持たないまま通る。
