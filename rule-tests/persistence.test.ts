@@ -119,6 +119,11 @@ import { afterAll, describe, expect, it } from "vitest";
 //     限界: `.for(` を別の関数（クラスの外の関数・別のメソッド）の中に置いて呼ぶ書き方は、呼び出し側のメソッドの本体に `.for(` が
 //       出ないので見ない（呼ばれた側のメソッドは見る）。プロパティでの定義（`find = async () => …`）・ブラケット（`q["for"](…)`）・
 //       生の SQL（sql`… for update`）は見ない。文字列の中の `.for(` は数える（安全側）。
+//       クラスの `{` は `class … {` の最初の `{` とみなすので、`extends B<{ a: 1 }>` のように型引数に `{` があると本体を
+//       取り違えて見逃す。文字列の中の `//`（`"http://x"`）はコメントとして落とすので、その行より後ろの `{` が消えて深さが
+//       ずれ、同じクラスの後ろのメソッドすべてを見逃す。JSDoc の行（`* lockForUpdate() を…`）を generator の宣言と取り違え、
+//       overload のシグネチャ（`findForUpdate(id): Promise<X>;`）は本体が空なので、どちらも `ForUpdate` の名前として違反にする
+//       （誤検出。reviewer の probe で確認。今のコードには現れない）。
 // 変更履歴の表（change_logs。変数名 changeLogs）も insert のみ: no-update-delete-on-append-only-tables と append-only-table-naming は
 //   `Logs` / `_logs` も対象にし、append-only-table-naming は横断の表の置き場所 shared/infra/schema.ts も見る（Issue #189）。
 // コメントと文字列の扱い（限界）: 各行の `//` 以降を落としてから探す（「// .onConflictDoUpdate( は使わない」を違反と数えない）。
