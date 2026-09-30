@@ -4,15 +4,6 @@ import { Todo } from "../domain/todo";
 import { requireTodo, type TodoRepository } from "../domain/todo-repository";
 import { todos } from "./schema";
 
-// id が uuid の形か（8-4-4-4-12 の 16 進。大文字も Postgres は受け付ける）。
-// WHY 関数の中に置く（モジュールの最上位の定数にしない）: 最上位の式は読み込み時にだけ評価される static な変異になり、
-//   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に評価すれば、変異をテストで検出できる（Issue #55）。
-function isUuid(id: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-    id,
-  );
-}
-
 type TodoRow = typeof todos.$inferSelect;
 
 // 行 → Entity の変換。
@@ -71,23 +62,16 @@ export class PostgresTodoRepository implements TodoRepository {
   }
 
   async findById(id: string): Promise<Todo | undefined> {
-    // WHY uuid の形でない id は問い合わせずに「無い」とする: id 列は uuid 型で、形の違う値（URL の /api/todos/abc など）を
-    //   渡すと Postgres が invalid input syntax のエラーを返し、API が 404 ではなく 500 になる。
-    //   InMemory と同じく「その id の Todo は無い」として扱う。
-    // WHY presentation も id を z.uuid() で確かめる（Issue #88）のに残す: TodoRepository は「無い id なら undefined」を
-    //   どの文字列にも約束している（InMemory も同じ）。呼び出し元（今は presentation の api だけ）の検査に頼ると、
-    //   検査しない呼び出し元を足したときに 500 になる。Repository の実装が自分の約束を自分で守る防御として残す。
-    if (!isUuid(id)) {
-      return undefined;
-    }
+    // WHY id の形（uuid）をここで検査しない: 利用者の入力は presentation の parseUuidParam（z.uuid() → 404）が唯一の
+    //   検査で、ここに uuid の形でない id が来るのは呼び出し側の実装ミスだけ。「無い」（undefined）として黙って通すと
+    //   誤りが隠れるので、Postgres の uuid 型のエラー（invalid input syntax）をそのまま投げ、API は 500 でログに残す。
     const rows = await this.db.select().from(todos).where(eq(todos.id, id));
     const row = rows[0];
     return row === undefined ? undefined : toTodo(row);
   }
 
-  // WHY findById を通す: uuid の形の検査（isUuid）と行の変換（toTodo）を 1 か所に保ち、形の違う id も「無い」
-  //   = not_found（API で 404）にする。本番の api のテストは prototype の findById を spy して Postgres の実装が
-  //   呼ばれることを確かめているので、ここで findById を呼ぶ形はそのテストとも合う。
+  // WHY findById を通す: 行の変換（toTodo）を 1 か所に保つ。本番の api のテストは prototype の findById を spy して
+  //   Postgres の実装が呼ばれることを確かめているので、ここで findById を呼ぶ形はそのテストとも合う。
   async findByIdOrThrow(id: string): Promise<Todo> {
     return requireTodo(await this.findById(id), id);
   }
@@ -111,10 +95,7 @@ export class PostgresTodoRepository implements TodoRepository {
   }
 
   async delete(id: string): Promise<void> {
-    // findById と同じ理由で、uuid の形でない id は DB に渡さない（その id の Todo は無いので、何もしない）。
-    if (!isUuid(id)) {
-      return;
-    }
+    // WHY id の形を検査しない: findById と同じ。「無い」として黙って何もしないと、消したつもりで消えていない実装ミスが隠れる。
     await this.db.delete(todos).where(eq(todos.id, id));
   }
 }
