@@ -43,7 +43,7 @@ paths:
 ## presentation（api ファイル）
 - 1 ユースケース = 1 API = 1 command。複数の項目を任意（optional）で受けて command の中で分岐する「部分更新 API」（`PUT /api/todos/:id` に `{ title?, completed? }`）は作らない。項目ごとに `PUT /api/todos/:id/title`（`RenameTodoApi`）・`PUT /api/todos/:id/completion`（`ChangeTodoCompletionApi`）のように分ける（Issue #175。ADR `docs/adr/architecture/20260930-one-api-per-use-case.md`）。
   - WHY: 名前の変更と完了は業務プロセスが別で、後から片方だけに処理（完了で通知を送るなど）が付くと command に if が増える。
-  - 検査は `rule-tests/api-request.test.ts`（リクエストの項目の `.optional()` を止める。同じユースケースの中で本当に任意の項目は直前の行の `// WHY 任意: <理由>` で通す）。
+  - 検査は `rule-tests/api-request.test.ts`（リクエストの項目の `.optional()` を止める。同じユースケースの中で本当に任意の項目は直前の行の `// WHY 任意: <理由>` で通す）。限界（`.partial()` / `.nullish()` / `.default()` / `z.optional(x)` は見ない）はそのテストの冒頭に書いてある。任意の項目はこの規則の趣旨（ユースケースを混ぜない）で判断し、書き方で検査を逃れない。
 - 1 API = 1 ファイルにし、その API のリクエスト / レスポンスの型（DTO）もそのファイルで定義して export する。複数の API が同じ形の Todo を返しても各ファイルの Response 型に直接書く（共通の型ファイルや別名の型を置かない。domain の `Todo` を `toResponse` で各 API の Response に直接写す。Issue #139）。
   - WHY: api ファイルを 1 つ開けば契約と処理がすべて見える（ユーザー判断）。形を変えるときに複数ファイルを直す手間より優先する。
 - handler は `(request: Request) => Promise<Response>`。動的セグメントがあれば `(request, ctx: { params: Promise<{ id: string }> })` で、`await ctx.params` は api ファイル側で行う。
