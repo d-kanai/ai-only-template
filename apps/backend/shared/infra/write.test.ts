@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { now } from "@repo/shared/now";
-import { sql } from "drizzle-orm";
+import { DrizzleQueryError, sql } from "drizzle-orm";
 import { pgTable, text, uuid } from "drizzle-orm/pg-core";
 import {
   afterAll,
@@ -218,6 +218,94 @@ describe("writeInTransaction", () => {
       },
     ]);
     await expect(database.db.select().from(items)).resolves.toEqual([]);
+  });
+
+  // WHY pg のエラー（cause）に絞る: drizzle-orm の DrizzleQueryError の message は「Failed query: <SQL>\nparams: <値>」で、
+  //   行の値（個人情報を含みうる）がログに出る。pg の DatabaseError の message は制約の名前などだけで値を含まない（値は detail に
+  //   あるが、logger は name と message しか出さない）。SQLSTATE は sqlState に出す。
+  test("DB のエラー（一意制約違反）のとき、失敗のログの error は pg のエラー（name・message）で SQL と値を含まず、sqlState に SQLSTATE（23505）を出す", async () => {
+    const row = { id: ID, itemName: "牛乳" };
+    await database.db.insert(items).values(row);
+    const logs = captureLogs();
+    fixElapsed(3000, 3004);
+
+    const result = writeInTransaction(
+      database.db,
+      { table: items, rowId: ID, operation: "insert" },
+      async (tx) => {
+        await tx.insert(items).values(row);
+        return [];
+      },
+    );
+
+    await expect(result).rejects.toMatchObject({ cause: { code: "23505" } });
+    expect(logs.warn()).toStrictEqual([
+      {
+        level: "warn",
+        timestamp: TIMESTAMP.toISOString(),
+        message: "repository write failed",
+        table: "items",
+        rowId: ID,
+        operation: "insert",
+        durationMs: 4,
+        error: {
+          name: "error",
+          message:
+            'duplicate key value violates unique constraint "items_pkey"',
+        },
+        sqlState: "23505",
+      },
+    ]);
+    expect(JSON.stringify(logs.warn())).not.toContain("牛乳");
+  });
+
+  // 想定外の形の DrizzleQueryError（cause が Error でない・SQLSTATE が無い）。cause が Error でなければ元の例外を、SQLSTATE が
+  //   文字列でなければ sqlState を出さない。
+  test.each([
+    [
+      "cause が無いときは、元の DrizzleQueryError をそのまま出す",
+      new DrizzleQueryError("select 1", [], undefined),
+      { error: { name: "Error", message: "Failed query: select 1\nparams: " } },
+    ],
+    [
+      "cause が code を持たない Error のときは、cause を出し sqlState は出さない",
+      new DrizzleQueryError("select 1", [], new Error("boom")),
+      { error: { name: "Error", message: "boom" } },
+    ],
+    [
+      "cause の code が文字列でないときは、sqlState を出さない",
+      new DrizzleQueryError(
+        "select 1",
+        [],
+        Object.assign(new Error("boom"), { code: 23505 }),
+      ),
+      { error: { name: "Error", message: "boom" } },
+    ],
+  ])("DB のエラーの %s", async (_label, thrown, expected) => {
+    const logs = captureLogs();
+    fixElapsed(0, 1);
+
+    const result = writeInTransaction(
+      database.db,
+      { table: items, rowId: ID, operation: "update" },
+      async () => {
+        throw thrown;
+      },
+    );
+
+    await expect(result).rejects.toBe(thrown);
+    expect(logs.warn()).toStrictEqual([
+      {
+        level: "warn",
+        timestamp: TIMESTAMP.toISOString(),
+        message: "repository write failed",
+        table: "items",
+        rowId: ID,
+        operation: "update",
+        durationMs: 1,
+        ...expected,
+      },
+    ]);
   });
 
   // WHY 一時的な CHECK 制約で change_logs の INSERT を失敗させる: 記録を本体と別のトランザクション（またはトランザクションの

@@ -167,7 +167,7 @@ paths:
   - 使ってよい場所: backend の `presentation`（`problem.ts` の想定外の例外）・`infra`（`database.ts`・`write.ts`）、frontend 直下の `proxy.ts`・`instrumentation-node.ts`（規則 `presentation`・`infra`・`frontend-to-shared-specifier`）。domain・application は使わない（`SHARED_MODULES_BY_LAYER`）。画面側（`app/`・`features/`・`shared/`）も使わない（規則 `screen-to-shared`）。
   - テストは `vi.spyOn(console, "error")` などで出力を抑え、渡された 1 行を `JSON.parse` して確かめる（`logger.test.ts`・`problem.test.ts`）。
 - Repository の書き込みのログ（Issue #205。`shared/infra/write.ts` の `writeInTransaction` が出す。上の「書き込みの入口」）: どの行も `table`（表名）・`rowId`・`operation`（`insert` / `update` / `delete`）を持つ。
-  - 前: info `repository write start`。後: info `repository write done`（`durationMs` と `changes`（書いた行ごとの `tableName`・`rowId`・`operation`））。失敗: warn `repository write failed`（`durationMs` と `error`）で、同じ例外を投げ直す。
+  - 前: info `repository write start`。後: info `repository write done`（`durationMs` と `changes`（書いた行ごとの `tableName`・`rowId`・`operation`））。失敗: warn `repository write failed`（`durationMs` と `error`）で、同じ例外を投げ直す。DB のエラー（DrizzleQueryError）は message に SQL と値を含むので、`error` を元の pg のエラー（cause。message に値を含まない）にし、SQLSTATE を `sqlState` に出す。
   - `durationMs` は `performance.now()` の差をミリ秒の整数に四捨五入（経過時間で時刻ではないので `now()` の規則の対象外）。
   - WHY 値（`changes` の before / after）を出さない: 個人情報を含みうる。値は `change_logs` に残る（リクエストログがクエリの値を出さないのと同じ）。
   - WHY 失敗を warn にする: `not_found` などの DomainError は 404 の正常な結果。500 になる例外は `toProblemResponse` が `logger.error` で別に残す。
