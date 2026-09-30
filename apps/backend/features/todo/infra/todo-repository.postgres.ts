@@ -1,4 +1,4 @@
-import { asc, eq, inArray } from "drizzle-orm";
+import { asc, eq, type SQL } from "drizzle-orm";
 import { changedProps } from "../../../shared/infra/changed-props";
 import type { Database } from "../../../shared/infra/database";
 import { Todo, type TodoStatusChange } from "../domain/todo";
@@ -7,8 +7,9 @@ import { todoStatusChanges, todos } from "./schema";
 
 type TodoRow = typeof todos.$inferSelect;
 
-// save が書き込みに使う接続（db そのものか、db.transaction の tx）。
-type Writer = Pick<Database, "insert" | "update">;
+// save が書き込みに使う接続（db そのものか、db.transaction の tx）。select は読み込み済みの save が todos の行の有無を
+//   確かめる（updateOrLock）のに使う。
+type Writer = Pick<Database, "insert" | "update" | "select">;
 
 // 行 → Entity の変換。
 // WHY Repository で zod の parse をしない: 行の型（uuid・text・boolean・timestamptz の NOT NULL）は Drizzle のスキーマ
@@ -48,68 +49,92 @@ function toTodo(
   }
 }
 
+// todos と完了の履歴を LEFT JOIN した行（Todo 1 件につき履歴の件数の行。履歴の無い Todo は change が null の 1 行）を、
+//   Todo ごとにまとめて Todo にする。返す順は、各 Todo が最初に現れた順（= SELECT の ORDER BY の順）。
+// WHY Map でまとめる: 同じ Todo の行は ORDER BY（todos の列が先、position が後）で連続し、Map は最初に入れた順を保つので、
+//   一覧の順（作成日時・id）と履歴の順（position）の両方を SELECT の並びのまま保てる。
+// change が null（LEFT JOIN で履歴が 1 件も無い）なら履歴は空配列で、toTodo が不変条件の違反（1 件以上）の Error にする。
+function toTodos(
+  rows: readonly {
+    todo: TodoRow;
+    change: TodoStatusChange | null;
+  }[],
+): Todo[] {
+  const grouped = new Map<
+    string,
+    { row: TodoRow; statusChanges: TodoStatusChange[] }
+  >();
+  for (const { todo, change } of rows) {
+    const entry = grouped.get(todo.id) ?? { row: todo, statusChanges: [] };
+    grouped.set(todo.id, entry);
+    if (change !== null) {
+      entry.statusChanges.push(change);
+    }
+  }
+  return Array.from(grouped.values(), ({ row, statusChanges }) =>
+    toTodo(row, statusChanges),
+  );
+}
+
 // TodoRepository の Postgres 実装（Drizzle）。
 // WHY db（Database）をコンストラクタで受け取る: プールは getDatabase が globalThis に 1 つだけ持ち、api ファイルが
 //   `new PostgresTodoRepository(getDatabase().db)` と組み立てる（Issue #123）。テストはテスト用のスキーマの db を渡す。
 // WHY save はトランザクションを張る（Issue #188）: Todo（集約）は todos の行と完了の履歴（todo_status_changes の行）の 2 つの表に
 //   またがり、1 つの Todo の保存が 2 文になる。片方だけ書かれると、履歴の最後の completed と todos.completed がずれた読めない
 //   Todo が残る。集約を 1 単位で保存するのは Repository の責務なので、command ではなく save の中で張る。
-//   findAll / findById / delete は 1 文ずつの読み取り・削除（cascade）なので張らない。command をまたぐトランザクションが
+//   findAll / findById / delete は 1 文の読み取り（下の select）・削除（cascade）なので張らない。command をまたぐトランザクションが
 //   要るようになったら、その command にトランザクションを扱う依存を注入する（.claude/rules/backend.md の「永続化（Drizzle + Postgres）」。
 //   ADR architecture/20260929-constructor-injection-without-container.md）。
 export class PostgresTodoRepository implements TodoRepository {
   constructor(private readonly db: Database) {}
 
   // WHY 作成日時の昇順で返す: TodoRepository は順序を約束しない（並べ替えは ListTodosQuery が行う）が、
-  //   DB は ORDER BY が無いと返す順が決まらない。毎回同じ順で返すため、並び順をここで決める。
-  // WHY id を第 2 キーにする: 作成日時が同じ時刻の行が複数あると、作成日時だけでは Postgres が返す順が決まらない
-  //   （行の物理的な位置や実行計画で変わりうる）。一意な id で並べれば、同じ時刻の行どうしの順序も毎回固定される
-  //   （ListTodosQuery の並べ替えは安定ソートなので、この順が一覧の順になる）。
+  //   DB は ORDER BY が無いと返す順が決まらない。毎回同じ順で返すため、並び順をここで決める（select の ORDER BY）。
   async findAll(): Promise<Todo[]> {
-    const rows = await this.db
-      .select()
-      .from(todos)
-      .orderBy(asc(todos.createdAt), asc(todos.id));
-    const history = await this.statusChangesOf(rows.map((row) => row.id));
-    return rows.map((row) => toTodo(row, history.get(row.id) ?? []));
+    return this.select();
   }
 
   async findById(id: string): Promise<Todo | undefined> {
     // WHY id の形（uuid）をここで検査しない: 利用者の入力は presentation の parseUuidParam（z.uuid() → 404）が唯一の
     //   検査で、ここに uuid の形でない id が来るのは呼び出し側の実装ミスだけ。「無い」（undefined）として黙って通すと
     //   誤りが隠れるので、Postgres の uuid 型のエラー（invalid input syntax）をそのまま投げ、API は 500 でログに残す。
-    const rows = await this.db.select().from(todos).where(eq(todos.id, id));
-    const row = rows[0];
-    if (row === undefined) {
-      return undefined;
-    }
-    // WHY 行の id（row.id）で履歴を読む（引数の id ではない）: 引数は大文字の uuid でもよく（Postgres の uuid 型は同じ値と
-    //   見る）、履歴を Todo ごとに分けるキーは DB が返す正規の形（小文字）の todo_id になる。
-    const history = await this.statusChangesOf([row.id]);
-    return toTodo(row, history.get(row.id) ?? []);
+    // 引数の id は大文字の uuid でもよい（Postgres の uuid 型は同じ値と見る）。履歴を Todo ごとにまとめるキーは、DB が返す
+    //   正規の形（小文字）の todos.id（toTodos）なので、大文字で探しても 1 件にまとまる。
+    const [todo] = await this.select(eq(todos.id, id));
+    return todo;
   }
 
-  // 指定した Todo の完了の履歴を 1 つのクエリで読み、Todo の id ごとに足した順（position の昇順）で返す。
-  // WHY 1 つのクエリ（where todo_id in (...)）: Todo ごとに読むと、一覧で Todo の数だけクエリが増える（N+1）。
-  // WHY position の昇順: 日時は同じ値を許すので、日時では足した順が決まらない（schema.ts の position）。
-  //   ORDER BY が無いと Postgres が返す順は決まらない。
-  // ids が空なら、drizzle-orm 0.45.3 の inArray は where false になり、行を返さない（空の in () の構文エラーにならない）。
-  private async statusChangesOf(
-    ids: string[],
-  ): Promise<Map<string, TodoStatusChange[]>> {
+  // Todo（todos の行と完了の履歴）を 1 つの SELECT（todos LEFT JOIN todo_status_changes）で読む。where が無ければ全件。
+  // WHY 1 文で読む（todos と履歴を別の文にしない）: 既定の READ COMMITTED では、文ごとに別のスナップショットを見る。2 文に
+  //   分けると、その間に別の要求がコミットした DELETE（cascade で履歴も消える）や完了の変更が片方の文だけに見え、履歴の
+  //   無い Todo や、履歴の最後と todos.completed がずれた Todo として読んで不変条件の違反（500）になる（read skew）。
+  //   1 文なら 1 つのスナップショットなので、分離レベルやトランザクションに頼らずに済む（.claude/rules/backend.md の「永続化」）。
+  //   todo-repository.postgres.test.ts が Pool の query の回数（1 回）で固定する。
+  // WHY LEFT JOIN（INNER JOIN にしない）: 履歴の無い行（移行していない・手で入れた行）を一覧から黙って外さず、不変条件の
+  //   違反として見つける（toTodo）。
+  // WHY ORDER BY は作成日時・id・position の順: 作成日時が同じ行が複数あると作成日時だけでは Postgres が返す順が決まらない
+  //   （行の物理的な位置や実行計画で変わりうる）ので、一意な id を第 2 キーにして毎回同じ順にする（ListTodosQuery の並べ替えは
+  //   安定ソートなので、この順が一覧の順になる）。todos の列を先に並べると同じ Todo の行が連続する（toTodos がまとめる）。
+  //   position は履歴の中の添字で、日時は同じ値を許すので日時では足した順が決まらない（schema.ts の position）。
+  // WHY 履歴を Todo ごとの問い合わせにしない: 一覧で Todo の数だけクエリが増える（N+1）。
+  private async select(where?: SQL): Promise<Todo[]> {
     const rows = await this.db
-      .select()
-      .from(todoStatusChanges)
-      .where(inArray(todoStatusChanges.todoId, ids))
-      .orderBy(asc(todoStatusChanges.position));
-    const history = new Map<string, TodoStatusChange[]>();
-    for (const { todoId, completed, changedAt } of rows) {
-      history.set(todoId, [
-        ...(history.get(todoId) ?? []),
-        { completed, changedAt },
-      ]);
-    }
-    return history;
+      .select({
+        todo: todos,
+        change: {
+          completed: todoStatusChanges.completed,
+          changedAt: todoStatusChanges.changedAt,
+        },
+      })
+      .from(todos)
+      .leftJoin(todoStatusChanges, eq(todoStatusChanges.todoId, todos.id))
+      .where(where)
+      .orderBy(
+        asc(todos.createdAt),
+        asc(todos.id),
+        asc(todoStatusChanges.position),
+      );
+    return toTodos(rows);
   }
 
   // WHY findById を通す: 行の変換（toTodo）を 1 か所に保つ。本番の api のテストは prototype の findById を spy して
@@ -129,6 +154,8 @@ export class PostgresTodoRepository implements TodoRepository {
   async save(todo: Todo): Promise<void> {
     const { origin } = todo;
     if (origin === undefined) {
+      // 原子性（履歴の INSERT が失敗したら todos の INSERT も戻る）は、テスト用のスキーマに一時的な CHECK 制約を張って
+      //   履歴の INSERT を失敗させるテスト（todo-repository.postgres.test.ts）が固定する。
       await this.db.transaction(async (tx) => {
         await this.insert(tx, todo);
         await this.appendStatusChanges(tx, todo, 0);
@@ -147,6 +174,7 @@ export class PostgresTodoRepository implements TodoRepository {
     const appendedFrom = origin.statusChanges.length;
     // WHY 変わった列も増えた履歴も無ければ SQL を発行しない（トランザクションも張らない）: 空の SET は SQL にならず、
     //   書く必要も無い。そのため、読み込んだ後に消された Todo でも、変えずに save したときは何もせず気づかない（戻しもしない）。
+    // 変わった列が無く履歴だけが増えた（完了にして未完了に戻した）ときも、updateOrLock が todos の行の有無を確かめる。
     if (
       Object.keys(changed).length === 0 &&
       todo.statusChanges.length === appendedFrom
@@ -154,28 +182,41 @@ export class PostgresTodoRepository implements TodoRepository {
       return;
     }
     await this.db.transaction(async (tx) => {
-      await this.update(tx, todo, changed);
+      await this.updateOrLock(tx, todo, changed);
       await this.appendStatusChanges(tx, todo, appendedFrom);
     });
   }
 
-  // 変わった列だけを UPDATE する。変わった列が無ければ何もしない（完了の履歴だけが増えた save）。
-  private async update(
+  // 変わった列だけを UPDATE する。変わった列が無ければ（完了の履歴だけが増えた save）、UPDATE の代わりに todos の行を
+  //   ロックして読み、行があることだけを確かめる。どちらも行が無ければ not_found。
+  // WHY 変わった列が無くても行を確かめる: 読み込んだ後に消された Todo を完了にして未完了に戻すと、changed は空で履歴だけが
+  //   2 件増える。確かめずに履歴を INSERT すると外部キー違反（SQLSTATE 23503）→ 500 になり、InMemory（not_found）ともずれる。
+  // WHY for key share（外部キーの検査と同じ強さのロック）: 確かめてから履歴を INSERT するまでの間に、別の要求がその Todo を
+  //   消せないようにする（DELETE はこのロックと衝突して、このトランザクションの終わりまで待つ）。UPDATE（名前の変更・完了）
+  //   とは衝突しないので、別の列の同時更新を待たせない。ロックの効果は同時実行のテストが無く、テストで固定できていない。
+  private async updateOrLock(
     writer: Writer,
     todo: Todo,
     changed: Partial<Pick<TodoRow, "title" | "completed">>,
   ): Promise<void> {
-    if (Object.keys(changed).length === 0) {
-      return;
-    }
+    // WHY select() は列を選ばない（全列）: 見るのは行の有無だけ。select({ id }) と列を選ぶと、Stryker の select({})（列の無い
+    //   SELECT。Postgres は受け付け、行の数は同じ）が結果を変えない変異として残る（.claude/rules/testing.md の「等価な変異を
+    //   生む書き方をしない」）。1 行だけなので全列を読んでも負担にならない。
     // WHY .returning で更新した行を受け取る: 0 行（読み込んだ後に消された）を not_found にするため。drizzle-orm 0.45.3 の
     //   node-postgres は、returning が無いと pg の QueryResult（rowCount は number | null）を、あると行の配列を返す
     //   （node-postgres/session.js の execute）。配列なら null の場合を考えずに済む。
-    const [updated] = await writer
-      .update(todos)
-      .set(changed)
-      .where(eq(todos.id, todo.id))
-      .returning({ id: todos.id });
+    const [updated] =
+      Object.keys(changed).length === 0
+        ? await writer
+            .select()
+            .from(todos)
+            .where(eq(todos.id, todo.id))
+            .for("key share")
+        : await writer
+            .update(todos)
+            .set(changed)
+            .where(eq(todos.id, todo.id))
+            .returning({ id: todos.id });
     // WHY 0 行なら not_found: 読み込んだ後に別のリクエストが消した Todo。以前の upsert は INSERT で消した Todo を
     //   戻していた（PUT と DELETE の競合）。API は 404 を返す。例外でトランザクションは戻り、履歴も足さない。
     // WHY requireTodo を通す（DomainError をここで作らない）: findByIdOrThrow と同じ例外（code・key・params）を

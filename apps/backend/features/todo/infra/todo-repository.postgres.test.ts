@@ -24,8 +24,11 @@ import { PostgresTodoRepository } from "./todo-repository.postgres";
 //   同じ値で読み戻せることを確かめるため。spy: true で本物の now を残し、時刻を決めたいテストだけ次の 1 回の値を返させる。
 vi.mock("@repo/shared/now", { spy: true });
 
+// WHY restoreAllMocks: 文の数を数えるテストが Pool（database.pool）の query を vi.spyOn で包む。失敗したときも次のテストに
+//   spy を残さない（vi.mock の now は restoreAllMocks の対象外で、上の mockReset が戻す）。
 afterEach(() => {
   vi.mocked(now).mockReset();
+  vi.restoreAllMocks();
 });
 
 // 実 Postgres（compose.yaml。`pnpm db:up` で起動）に対して実行する。
@@ -533,6 +536,68 @@ describe("PostgresTodoRepository", () => {
       new DomainError("not_found", "todo.notFound", { id: todo.id }),
     );
     await expect(statusChangeRows()).resolves.toStrictEqual([]);
+  });
+
+  // 完了状態を変えて戻すと todos の列は変わらない（changed が空）が、履歴は 2 件増える。UPDATE が無くても todos の行が
+  //   あることを確かめ、無ければ not_found にする（履歴の INSERT の外部キー違反 23503 → 500 にしない）。
+  test("読み込んだ後に delete された Todo を、完了にして未完了に戻して save すると、not_found を投げ、履歴を足さない", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await repository().save(todo);
+    const loaded = await repository().findByIdOrThrow(todo.id);
+    await repository().delete(todo.id);
+
+    await expect(
+      repository().save(loaded.changeCompletion(true).changeCompletion(false)),
+    ).rejects.toEqual(
+      new DomainError("not_found", "todo.notFound", { id: todo.id }),
+    );
+    await expect(statusChangeRows()).resolves.toStrictEqual([]);
+  });
+
+  // WHY 文の数を 1 に固定する（read skew を防ぐ）: todos と完了の履歴を別の文で読むと、READ COMMITTED では文ごとに
+  //   スナップショットが変わる。2 文の間に別の要求が DELETE（cascade で履歴も消える）や完了の変更をコミットすると、片方だけに
+  //   見え、不変条件の違反（500）になる。同時実行のタイミングはテストで再現しにくいので、文の数で固定する。
+  // WHY Pool（database.pool）の query を数える: drizzle-orm 0.45.3 の node-postgres は、トランザクションの外の文を 1 文ごとに
+  //   Pool の query で送る（node-postgres/session.js の execute が client.query を呼び、client はコンストラクタで渡した Pool）。
+  //   Pool.query は内部で接続を借りて Client の query を呼ぶので、Pool の query の回数が文の数になる（pg 8.23.0）。drizzle が
+  //   Pool を通さずに送る形に変わると 0 回になり、このテストは落ちる（数え方の前提が崩れたことに気づける）。
+  test("一覧 / 詳細の読み出しは SQL 1 文で行う（読み出しの途中で別の要求の変更が片方だけに見えない）", async () => {
+    const todo = Todo.create("牛乳を買う").changeCompletion(true);
+    await repository().save(todo);
+    await repository().save(Todo.create("卵を買う"));
+    const query = vi.spyOn(database.pool, "query");
+
+    const all = await repository().findAll();
+    const findAll = query.mock.calls.length;
+    query.mockClear();
+    const found = await repository().findById(todo.id);
+    const findById = query.mock.calls.length;
+
+    expect({ findAll, findById }).toEqual({ findAll: 1, findById: 1 });
+    // 1 文で読んでも、履歴を Todo ごとに組み立てられていることも確かめる。
+    expect(all).toHaveLength(2);
+    expect(found).toEqual(todo);
+  });
+
+  // WHY 一時的な CHECK 制約で履歴の INSERT を失敗させる: domain は不変条件を満たす Todo しか作れないので、履歴の INSERT を
+  //   domain 経由では失敗させられない。position < 0 だけを許す制約を張ると、新規の save の 2 文目（履歴の INSERT）が
+  //   check_violation（SQLSTATE 23514）で失敗する。トランザクションが無ければ 1 文目の todos の INSERT が残る。
+  // 制約は後始末（finally）で外す（beforeEach の truncate は制約を外さないので、残すと後のテストの save がすべて失敗する）。
+  test("新規の Todo の save は、完了の履歴の INSERT が失敗すると todos の INSERT も戻す（1 つのトランザクション）", async () => {
+    await database.db.execute(
+      sql`alter table todo_status_changes add constraint tmp_reject_all_history check (position < 0)`,
+    );
+    try {
+      const result = repository().save(Todo.create("牛乳を買う"));
+
+      await expect(result).rejects.toBeInstanceOf(Error);
+      await expect(result).rejects.toMatchObject({ cause: { code: "23514" } });
+      await expect(database.db.select().from(todos)).resolves.toEqual([]);
+    } finally {
+      await database.db.execute(
+        sql`alter table todo_status_changes drop constraint tmp_reject_all_history`,
+      );
+    }
   });
 
   test("無い id の findById は undefined を返す", async () => {

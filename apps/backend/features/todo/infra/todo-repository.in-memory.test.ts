@@ -360,6 +360,21 @@ describe("InMemoryTodoRepository", () => {
     await expect(repository.findAll()).resolves.toEqual([]);
   });
 
+  test("読み込んだ後に delete された Todo を、完了にして未完了に戻して save すると、not_found を投げ、履歴を足さない", async () => {
+    const repository = new InMemoryTodoRepository();
+    const todo = Todo.create("牛乳を買う");
+    await repository.save(todo);
+    const loaded = await repository.findByIdOrThrow(todo.id);
+    await repository.delete(todo.id);
+
+    await expect(
+      repository.save(loaded.changeCompletion(true).changeCompletion(false)),
+    ).rejects.toEqual(
+      new DomainError("not_found", "todo.notFound", { id: todo.id }),
+    );
+    await expect(repository.findAll()).resolves.toEqual([]);
+  });
+
   // WHY: 読み込んだ Todo が origin を持たないと、save が新規として全体を上書きし、上の同時更新のテストの意味が無くなる。
   test("findById・findByIdOrThrow・findAll が返す Todo は、読み込んだときの値を origin に持つ", async () => {
     const repository = new InMemoryTodoRepository();

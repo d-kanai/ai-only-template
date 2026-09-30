@@ -40,7 +40,18 @@ import { afterAll, describe, expect, it } from "vitest";
 //       命名（`*Changes` / `*Events`）に縛れば、足した表も同じ検査にかかる。
 //     WHY *.postgres.ts だけ: DB に SQL を発行するのは Postgres の Repository だけ。InMemory の `Map#delete(id)` などは表ではない。
 //     限界: 表を別名の変数に入れ直す（`const t = todoStatusChanges; db.delete(t)`）・ブラケット（`db["delete"](…)`）・生の SQL
-//       （sql`delete from todo_status_changes`）・名前の接尾辞に従わない表は見ない。
+//       （sql`delete from todo_status_changes`）は見ない。表の変数名が接尾辞に従っているかは、schema.ts で宣言した表なら
+//       次の append-only-table-naming が見る。
+//   - append-only-table-naming（Issue #188）: apps/backend/features/<f>/infra/schema.ts で、`pgTable("<表名>"` の表名が `_changes` か
+//     `_events` で終わるのに、それを受ける変数（`const <名前> =` の直後の pgTable）の名前が `Changes` / `Events` で終わらない
+//     （変数で受けていない `export default pgTable(…)` も違反）。行は pgTable の行。`pgTable(` と表名の間の空白・改行は可、
+//     表名の引用符は `"` / `'` / `` ` ``。
+//     WHY: no-update-delete-on-append-only-tables は変数名の接尾辞で insert のみの表を見分けるので、
+//       `export const statusLog = pgTable("todo_status_changes", …)` のように表名と変数名がずれると素通りする。表名（DB の命名）
+//       から変数名を縛れば、insert のみの表は必ずその検査にかかる。
+//     WHY schema.ts だけ: 表の宣言の置き場所は features/<f>/infra/schema.ts だけ（drizzle-kit の設定が読む glob。.claude/rules/backend.md）。
+//     限界: 表名が `_changes` / `_events` で終わらない insert のみの表（命名の規約そのもの）、`pgSchema("s").table(…)`・
+//       pgTable を別名で import した宣言、型注釈付きの変数（`const x: T = pgTable(…)`。違反と数える）、分割代入は見ない。
 // コメントと文字列の扱い（限界）: 各行の `//` 以降を落としてから探す（「// .onConflictDoUpdate( は使わない」を違反と数えない）。
 //   文字列の中身は解釈しない。そのため、文字列の中の `//` の後ろは見逃し、文字列の中の `.onConflictDoUpdate(` は違反と数える。
 //   ブロックコメント（`/* … */`）の中はコードと同じに扱う（upsert は安全側で違反になるが、`get origin()` と changed-props の
@@ -57,7 +68,8 @@ type RuleId =
   | "no-upsert"
   | "save-uses-changed-props"
   | "entity-with-reconstruct-has-origin"
-  | "no-update-delete-on-append-only-tables";
+  | "no-update-delete-on-append-only-tables"
+  | "append-only-table-naming";
 
 type PersistenceViolation = { rule: RuleId; line: number };
 
@@ -105,6 +117,28 @@ function appendOnlyTableWrites(lines: string[]): number[] {
   });
 }
 
+// schema.ts の `pgTable("<表名>"` で、表名が _changes / _events で終わるのに、受ける変数の名前が Changes / Events で終わらない
+//   ものの、pgTable の行番号（1 始まり）。
+// WHY 行ではなく、行をつないだコード全体で探す: `pgTable(` と表名の間に改行を挟む書き方（Biome の整形で引数が折り返される）も拾う。
+// WHY 受ける変数は pgTable の直前が `const <名前> =` かで見る: `export const x = pgTable(` の形だけが今の書き方で、それ以外の
+//   受け方（変数で受けない・関数で包む）は名前を確かめられないので違反にする（安全側）。
+function appendOnlyTableNamingViolations(lines: string[]): number[] {
+  const code = lines.join("\n");
+  const tables = code.matchAll(/\bpgTable\s*\(\s*(["'`])([^"'`\n]*)\1/g);
+  return [...tables].flatMap(({ 2: table = "", index }) => {
+    if (!/_(?:changes|events)$/.test(table)) {
+      return [];
+    }
+    const before = code.slice(0, index);
+    const variable =
+      /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(before)?.[1] ??
+      "";
+    return /(?:Changes|Events)$/.test(variable)
+      ? []
+      : [before.split("\n").length];
+  });
+}
+
 // path はリポジトリ相対の / 区切り。規則ごとに対象のパスを絞り、違反を行の順に返す。
 function findPersistenceViolations(
   path: string,
@@ -123,6 +157,15 @@ function findPersistenceViolations(
     violations.push(
       ...appendOnlyTableWrites(lines).map((line) => ({
         rule: "no-update-delete-on-append-only-tables" as const,
+        line,
+      })),
+    );
+  }
+
+  if (/^apps\/backend\/features\/[^/]+\/infra\/schema\.ts$/.test(path)) {
+    violations.push(
+      ...appendOnlyTableNamingViolations(lines).map((line) => ({
+        rule: "append-only-table-naming" as const,
         line,
       })),
     );
@@ -202,6 +245,7 @@ const source = (...lines: string[]) => lines.join("\n");
 const POSTGRES = "apps/backend/features/x/infra/x-repository.postgres.ts";
 const IN_MEMORY = "apps/backend/features/x/infra/x-repository.in-memory.ts";
 const ENTITY = "apps/backend/features/x/domain/x.ts";
+const SCHEMA = "apps/backend/features/x/infra/schema.ts";
 const IMPORT_CHANGED_PROPS =
   'import { changedProps } from "../../../shared/infra/changed-props";';
 
@@ -357,6 +401,44 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       "*.postgres.ts 以外（in-memory）の .delete(xChanges)",
       IN_MEMORY,
       source("this.statusChanges.delete(todoStatusChanges);"),
+    ],
+    [
+      "schema.ts の _changes / _events の表を Changes / Events で終わる変数で受ける",
+      SCHEMA,
+      source(
+        'export const todoStatusChanges = pgTable("todo_status_changes", {',
+        "});",
+        "export const orderEvents = pgTable('order_events', {});",
+      ),
+    ],
+    [
+      '改行を挟んだ pgTable(\\n  "x_changes" を Changes で終わる変数で受ける',
+      SCHEMA,
+      source(
+        "export const todoStatusChanges = pgTable(",
+        '  "todo_status_changes",',
+        "  {},",
+        ");",
+      ),
+    ],
+    [
+      "_changes / _events で終わらない表は対象外（変数名は問わない）",
+      SCHEMA,
+      source(
+        'export const todos = pgTable("todos", {});',
+        'export const changeLog = pgTable("todo_changes_log", {});',
+        'export const history = pgTable("todo_changesx", {});',
+      ),
+    ],
+    [
+      'コメントの中の pgTable("x_changes")',
+      SCHEMA,
+      source('// export const statusLog = pgTable("todo_status_changes", {});'),
+    ],
+    [
+      "schema.ts でないファイル（schema.test.ts・infra の別のファイル）は append-only-table-naming の対象外",
+      "apps/backend/features/x/infra/x-tables.ts",
+      source('export const statusLog = pgTable("todo_status_changes", {});'),
     ],
   ])("%s は違反なし", (_name, path, text) => {
     expect(findPersistenceViolations(path, text)).toEqual([]);
@@ -569,6 +651,32 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
       ],
     ],
     [
+      "schema.ts の _changes の表を Changes で終わらない変数で受ける（表名と変数名のずれ）",
+      SCHEMA,
+      source(
+        'export const todos = pgTable("todos", {});',
+        'export const statusLog = pgTable("todo_status_changes", {});',
+      ),
+      [{ rule: "append-only-table-naming", line: 2 }],
+    ],
+    [
+      "改行を挟んだ pgTable(\\n  'x_events'（行は pgTable の行）",
+      SCHEMA,
+      source(
+        "export const orderLog = pgTable(",
+        "  'order_events',",
+        "  {},",
+        ");",
+      ),
+      [{ rule: "append-only-table-naming", line: 1 }],
+    ],
+    [
+      "変数で受けない _changes の表（export default pgTable(…)）",
+      SCHEMA,
+      source('export default pgTable("todo_status_changes", {});'),
+      [{ rule: "append-only-table-naming", line: 1 }],
+    ],
+    [
       "1 つのファイルに upsert と import の無い save（行の順に返す）",
       POSTGRES,
       source(
@@ -635,6 +743,13 @@ describe("backend のソースの列挙と検査（fixture）", () => {
         "}",
       ),
       "apps/backend/features/y/domain/y.ts": reconstructOnly,
+      [SCHEMA]: source(
+        'export const xStatusChanges = pgTable("x_status_changes", {});',
+      ),
+      "apps/backend/features/y/infra/schema.ts": source(
+        'export const ys = pgTable("ys", {});',
+        'export const yLog = pgTable("y_events", {});',
+      ),
       "apps/backend/features/y/domain/y-repository.ts": source(
         "export interface YRepository {}",
       ),
@@ -663,10 +778,12 @@ describe("backend のソースの列挙と検査（fixture）", () => {
     }).toEqual({
       files: [
         "apps/backend/features/x/domain/x.ts",
+        "apps/backend/features/x/infra/schema.ts",
         "apps/backend/features/x/infra/x-repository.in-memory.ts",
         "apps/backend/features/x/infra/x-repository.postgres.ts",
         "apps/backend/features/y/domain/y-repository.ts",
         "apps/backend/features/y/domain/y.ts",
+        "apps/backend/features/y/infra/schema.ts",
         "apps/backend/features/y/infra/y-reader.postgres.ts",
         "apps/backend/features/y/infra/y-repository.in-memory.ts",
         "apps/backend/features/y/infra/y-repository.postgres.ts",
@@ -676,6 +793,7 @@ describe("backend のソースの列挙と検査（fixture）", () => {
       violations: [
         "no-upsert: apps/backend/features/x/infra/x-repository.in-memory.ts:4",
         "entity-with-reconstruct-has-origin: apps/backend/features/y/domain/y.ts:2",
+        "append-only-table-naming: apps/backend/features/y/infra/schema.ts:2",
         "no-update-delete-on-append-only-tables: apps/backend/features/y/infra/y-reader.postgres.ts:2",
         "save-uses-changed-props: apps/backend/features/y/infra/y-repository.postgres.ts:2",
         "no-upsert: apps/backend/features/y/infra/y-repository.postgres.ts:4",
@@ -694,13 +812,14 @@ describe("backend のソースの列挙と検査（fixture）", () => {
 });
 
 describe("永続化（実ファイル）", () => {
-  it("upsert を使わず、*.postgres.ts の save は changed-props を import し、reconstruct を持つ Entity は origin を持ち、insert のみの表を update / delete しない", () => {
+  it("upsert を使わず、*.postgres.ts の save は changed-props を import し、reconstruct を持つ Entity は origin を持ち、insert のみの表を update / delete せず、その表を Changes / Events で終わる変数で宣言する", () => {
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     const files = listBackendSources(repoRoot);
     expect(files).toContain(
       "apps/backend/features/todo/infra/todo-repository.postgres.ts",
     );
     expect(files).toContain("apps/backend/features/todo/domain/todo.ts");
+    expect(files).toContain("apps/backend/features/todo/infra/schema.ts");
     expect(collectPersistenceViolations(repoRoot)).toEqual([]);
   });
 });

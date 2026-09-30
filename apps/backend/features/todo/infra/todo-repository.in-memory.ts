@@ -43,8 +43,9 @@ export class InMemoryTodoRepository implements TodoRepository {
 
   // Postgres の実装（todo-repository.postgres.ts の save）と同じ意味にする（Issue #165）:
   //   新規（origin が undefined）は置く（同じ id があればエラー。Postgres の一意制約違反と同じ）。読み込み済みは、読み込んだときから変わった項目
-  //   （title・completed）だけを保持中の値に反映する。変わった項目が無ければ何もしない。保持していなければ not_found。
-  // WHY 変わった項目が無いときは保持中かを確かめない: Postgres は SQL を発行しないので、消されたことに気づかない。
+  //   （title・completed）だけを保持中の値に反映する。変わった項目も増えた履歴も無ければ何もしない。保持していなければ not_found
+  //   （変わった項目が無く履歴だけが増えたときも。Postgres は todos の行をロックして読み、無ければ not_found にする）。
+  // WHY 変わった項目も増えた履歴も無いときは保持中かを確かめない: Postgres は SQL を発行しないので、消されたことに気づかない。
   //   ここで先に not_found にすると、テスト（InMemory）と本番（Postgres）で結果が変わる。
   // 完了の履歴（Issue #188）も Postgres と同じく、読み込んだときの件数より後ろに増えた分だけを保持中の履歴に足す
   //   （読み込んだ Todo の履歴で置き換えない。別の save が足した履歴を消さない）。
