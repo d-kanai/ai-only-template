@@ -50,6 +50,7 @@ const TOO_LONG_TITLE = {
 } as const;
 const INVALID_ID = { key: "todo.id.invalid" } as const;
 const INVALID_CREATED_AT = { key: "todo.createdAt.invalid" } as const;
+const INVALID_STATUS_CHANGES = { key: "todo.statusChanges.invalid" } as const;
 
 describe("Todo.create", () => {
   test("未完了で作られ、id と、作成日時として現在時刻（now()）が付く", () => {
@@ -61,6 +62,10 @@ describe("Todo.create", () => {
     expect(todo.title).toBe("牛乳を買う");
     expect(todo.completed).toBe(false);
     expect(todo.createdAt).toEqual(createdAt);
+    // 完了の履歴は「作成日時に未完了になった」の 1 件から始まる（Issue #188）。
+    expect(todo.statusChanges).toStrictEqual([
+      { completed: false, changedAt: createdAt },
+    ]);
     expect(now).toHaveBeenCalledTimes(1);
     // randomUUID の形式（8-4-4-4-12 の 16 進）。
     expect(todo.id).toMatch(
@@ -192,6 +197,68 @@ describe("Todo#changeCompletion", () => {
     expect(original.completed).toBe(false);
   });
 
+  // 完了の履歴（Issue #188）: 完了状態が変わるたびに、変わった後の値と日時（now()）を末尾に 1 件足す。
+  test("完了状態を変えると、変えた後の値と現在時刻（now()）の履歴を末尾に 1 件足す（元の Todo の履歴は変えない）", () => {
+    const createdAt = new Date("2026-09-27T00:00:00.000Z");
+    const completedAt = new Date("2026-09-27T01:00:00.000Z");
+    const reopenedAt = new Date("2026-09-27T02:00:00.000Z");
+    vi.mocked(now)
+      .mockReturnValueOnce(createdAt)
+      .mockReturnValueOnce(completedAt)
+      .mockReturnValueOnce(reopenedAt);
+    const original = Todo.create("牛乳を買う");
+
+    const completed = original.changeCompletion(true);
+    const reopened = completed.changeCompletion(false);
+
+    expect(reopened.statusChanges).toStrictEqual([
+      { completed: false, changedAt: createdAt },
+      { completed: true, changedAt: completedAt },
+      { completed: false, changedAt: reopenedAt },
+    ]);
+    expect(completed.statusChanges).toStrictEqual([
+      { completed: false, changedAt: createdAt },
+      { completed: true, changedAt: completedAt },
+    ]);
+    expect(original.statusChanges).toStrictEqual([
+      { completed: false, changedAt: createdAt },
+    ]);
+  });
+
+  // WHY 同じ値なら遷移しない: 同じ状態への遷移を積むと履歴にノイズが入る。Todo が同じなら Repository の save も差分が無く
+  //   SQL を発行しない。
+  test.each([false, true])(
+    "今と同じ値（%s）を渡すと、履歴を足さず同じ Todo を返す（now() も読まない）",
+    (value) => {
+      const todo =
+        value === false
+          ? Todo.create("牛乳を買う")
+          : Todo.create("牛乳を買う").changeCompletion(true);
+      vi.mocked(now).mockClear();
+
+      expect(todo.changeCompletion(value)).toBe(todo);
+      expect(now).not.toHaveBeenCalled();
+    },
+  );
+
+  // 作成と完了が同じミリ秒でも受け付ける（履歴の日時は同じ値を許す）。
+  test("作成と同じ時刻に完了にしても受け付ける（履歴の日時は昇順で、同じ値を許す）", () => {
+    const todo = Todo.create("牛乳を買う").changeCompletion(true);
+
+    expect(todo.statusChanges).toStrictEqual([
+      { completed: false, changedAt: NOW },
+      { completed: true, changedAt: NOW },
+    ]);
+  });
+
+  test("rename は完了の履歴を変えない", () => {
+    const todo = Todo.create("牛乳を買う").changeCompletion(true);
+
+    expect(todo.rename("卵を買う").statusChanges).toStrictEqual(
+      todo.statusChanges,
+    );
+  });
+
   // WHY 型に反する値を as で渡す: 型の上では boolean しか渡せないが、完全コンストラクタは口によらず全体を検証する
   //   （todo.ts のコメント）。completed の規則（boolean であること）も、changeCompletion を通って守られることを確かめる。
   test("completed が boolean でなければ validation_error を投げる（全体を検証する）", () => {
@@ -207,6 +274,9 @@ describe("Todo#changeCompletion", () => {
 describe("Todo.reconstruct", () => {
   const VALID_ID = "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e";
   const CREATED_AT = new Date("2026-09-28T00:00:00.000Z");
+  const BEFORE = new Date("2026-09-27T23:59:59.999Z");
+  const AFTER = new Date("2026-09-28T01:00:00.000Z");
+  const LATER = new Date("2026-09-28T02:00:00.000Z");
 
   // WHY 型に反する値を as で渡す: 型の上では string しか渡せないが、文字列でない値にもキーを付ける
   //   （zod の既定の英語の文言を domain の外に出さない。todo.ts の todoPropsSchema の title のコメント）。
@@ -218,17 +288,23 @@ describe("Todo.reconstruct", () => {
           title: undefined as unknown as string,
           completed: false,
           createdAt: CREATED_AT,
+          statusChanges: [{ completed: false, changedAt: CREATED_AT }],
         }),
       { key: "todo.title.invalid" },
     );
   });
 
-  test("保存済みの値（id・title・completed・作成日時）をそのまま持つ Todo を作る", () => {
+  test("保存済みの値（id・title・completed・作成日時・完了の履歴）をそのまま持つ Todo を作る", () => {
+    const completedAt = new Date("2026-09-28T01:00:00.000Z");
     const todo = Todo.reconstruct({
       id: VALID_ID,
       title: "牛乳を買う",
       completed: true,
       createdAt: CREATED_AT,
+      statusChanges: [
+        { completed: false, changedAt: CREATED_AT },
+        { completed: true, changedAt: completedAt },
+      ],
     });
 
     expect(todo).toBeInstanceOf(Todo);
@@ -236,6 +312,25 @@ describe("Todo.reconstruct", () => {
     expect(todo.title).toBe("牛乳を買う");
     expect(todo.completed).toBe(true);
     expect(todo.createdAt).toEqual(CREATED_AT);
+    expect(todo.statusChanges).toStrictEqual([
+      { completed: false, changedAt: CREATED_AT },
+      { completed: true, changedAt: completedAt },
+    ]);
+  });
+
+  // WHY 凍結する: 履歴は Todo の値で、Todo は不変（todo.ts）。配列や要素を書き換えられると、save の前に保持中の値
+  //   （InMemory）や origin との差分が変わる。
+  test("完了の履歴の配列と要素は凍結されていて書き換えられない", () => {
+    const todo = Todo.reconstruct({
+      id: VALID_ID,
+      title: "牛乳を買う",
+      completed: false,
+      createdAt: CREATED_AT,
+      statusChanges: [{ completed: false, changedAt: CREATED_AT }],
+    });
+
+    expect(Object.isFrozen(todo.statusChanges)).toBe(true);
+    expect(Object.isFrozen(todo.statusChanges[0])).toBe(true);
   });
 
   // create と同じスキーマを通るので、前後の空白は取り除かれる（規則を満たす形にそろう）。
@@ -245,6 +340,7 @@ describe("Todo.reconstruct", () => {
       title: "  牛乳を買う \n",
       completed: false,
       createdAt: CREATED_AT,
+      statusChanges: [{ completed: false, changedAt: CREATED_AT }],
     });
 
     expect(todo.title).toBe("牛乳を買う");
@@ -268,6 +364,59 @@ describe("Todo.reconstruct", () => {
       { createdAt: new Date("not a date") },
       INVALID_CREATED_AT,
     ],
+    // 完了の履歴の不変条件（Issue #188）: 1 件以上、日時は昇順（同じ値は可）、最初の日時は作成日時以上、最後の completed は
+    //   今の completed と等しい。
+    ["完了の履歴が空", { statusChanges: [] }, INVALID_STATUS_CHANGES],
+    // 型に反する値を as で渡す（DB からは来ないが、配列でない値にもキーを付ける。title が文字列でないときと同じ）。
+    [
+      "完了の履歴が配列でない",
+      { statusChanges: undefined as unknown as [] },
+      INVALID_STATUS_CHANGES,
+    ],
+    [
+      "最後の履歴の completed が今の completed と違う",
+      {
+        statusChanges: [
+          { completed: false, changedAt: CREATED_AT },
+          { completed: true, changedAt: AFTER },
+        ],
+      },
+      INVALID_STATUS_CHANGES,
+    ],
+    [
+      "履歴の日時が降順",
+      {
+        statusChanges: [
+          { completed: false, changedAt: CREATED_AT },
+          { completed: true, changedAt: LATER },
+          { completed: false, changedAt: AFTER },
+        ],
+      },
+      INVALID_STATUS_CHANGES,
+    ],
+    [
+      "最初の履歴の日時が作成日時より前",
+      { statusChanges: [{ completed: false, changedAt: BEFORE }] },
+      INVALID_STATUS_CHANGES,
+    ],
+    [
+      "履歴の completed が boolean でない",
+      {
+        statusChanges: [
+          { completed: "false" as unknown as boolean, changedAt: CREATED_AT },
+        ],
+      },
+      INVALID_STATUS_CHANGES,
+    ],
+    [
+      "履歴の日時が Invalid Date",
+      {
+        statusChanges: [
+          { completed: false, changedAt: new Date("not a date") },
+        ],
+      },
+      INVALID_STATUS_CHANGES,
+    ],
   ])(
     "%sなら validation_error を、理由の key（と params）付きで投げる",
     (_label, override, expected) => {
@@ -278,12 +427,44 @@ describe("Todo.reconstruct", () => {
             title: "牛乳を買う",
             completed: false,
             createdAt: CREATED_AT,
+            statusChanges: [{ completed: false, changedAt: CREATED_AT }],
             ...override,
           }),
         expected,
       );
     },
   );
+
+  // 境界: 日時が同じ値は昇順として受け付ける（作成と完了が同じミリ秒でも作れる。Todo.create の後すぐ changeCompletion）。
+  test("最初の履歴の日時が作成日時と同じ、履歴どうしの日時が同じ、は受け付ける", () => {
+    const todo = Todo.reconstruct({
+      id: VALID_ID,
+      title: "牛乳を買う",
+      completed: false,
+      createdAt: CREATED_AT,
+      statusChanges: [
+        { completed: false, changedAt: CREATED_AT },
+        { completed: true, changedAt: AFTER },
+        { completed: false, changedAt: AFTER },
+      ],
+    });
+
+    expect(todo.statusChanges).toHaveLength(3);
+  });
+
+  test("最初の履歴の日時は作成日時より後でもよい（作成日時と同時でなくてよい）", () => {
+    const todo = Todo.reconstruct({
+      id: VALID_ID,
+      title: "牛乳を買う",
+      completed: true,
+      createdAt: CREATED_AT,
+      statusChanges: [{ completed: true, changedAt: AFTER }],
+    });
+
+    expect(todo.statusChanges).toStrictEqual([
+      { completed: true, changedAt: AFTER },
+    ]);
+  });
 });
 
 // origin: 読み込んだとき（reconstruct）の値。Repository の save が「変わった列だけ」を書くために差分を取る（Issue #165）。
@@ -293,6 +474,9 @@ describe("Todo#origin", () => {
     title: "牛乳を買う",
     completed: false,
     createdAt: new Date("2026-09-28T00:00:00.000Z"),
+    statusChanges: [
+      { completed: false, changedAt: new Date("2026-09-28T00:00:00.000Z") },
+    ],
   };
 
   test("create した Todo の origin は undefined（新規で、読み込んだ値が無い）", () => {
@@ -334,6 +518,7 @@ describe("Todo#origin", () => {
       "title",
       "completed",
       "createdAt",
+      "statusChanges",
     ]);
     expect(todo).toEqual(
       Todo.reconstruct({ ...VALUES, title: "卵を買う" }).rename("卵を買う"),

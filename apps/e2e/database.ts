@@ -25,8 +25,12 @@ async function withClient<T>(fn: (client: Client) => Promise<T>): Promise<T> {
 
 // Todo をすべて消す。各テストの前に呼び、前のテスト・前回の実行のデータに結果が左右されないようにする。
 // WHY TRUNCATE: 行を 1 件ずつ消す DELETE より速く、表の中身だけを消す（表の定義とマイグレーションの記録は残る）。
+// WHY 完了の履歴（todo_status_changes）も同じ文で消す（Issue #188）: todo_status_changes は todos を外部キーで参照するので、
+//   todos だけの TRUNCATE は Postgres が拒否する（参照する表も同じ文で指定するか CASCADE が要る）。
 export async function resetTodos(): Promise<void> {
-  await withClient((client) => client.query("TRUNCATE todos"));
+  await withClient((client) =>
+    client.query("TRUNCATE todo_status_changes, todos"),
+  );
 }
 
 // title が一致する Todo の件数を DB から直接数える。画面の操作が Postgres まで届いていること（InMemory で

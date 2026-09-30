@@ -146,6 +146,11 @@ describe("InMemoryTodoRepository", () => {
       title: "x",
       completed: true,
     });
+    // 名前だけを変えた save は、先の save が足した完了の履歴を消さない（Issue #188）。
+    expect(saved.statusChanges.map((change) => change.completed)).toEqual([
+      false,
+      true,
+    ]);
   });
 
   test("同じ Todo を 2 回読み、両方で名前を変えて save すると、後から save した名前が残る（同じ列の同時更新は後勝ち）", async () => {
@@ -237,6 +242,124 @@ describe("InMemoryTodoRepository", () => {
     await expect(repository.findAll()).resolves.toEqual([todo]);
   });
 
+  // ここから下の完了の履歴（Issue #188）のテストは todo-repository.postgres.test.ts と同じ契約で、同じテスト名にそろえる。
+  //   DB の行（todo_status_changes）を直接見る確認と、DB だけのテスト（外部キーの cascade）は Postgres だけ。
+  test("新規の Todo を save すると完了の履歴（作成日時に未完了の 1 件）も保存され、読み出した Todo が同じ履歴を持つ", async () => {
+    const repository = new InMemoryTodoRepository();
+    const todo = Todo.create("牛乳を買う");
+
+    await repository.save(todo);
+
+    await expect(repository.findById(todo.id)).resolves.toMatchObject({
+      statusChanges: [{ completed: false, changedAt: todo.createdAt }],
+    });
+  });
+
+  test("新規の Todo を作ってすぐ完了にして save すると、履歴の 2 件がどちらも保存される", async () => {
+    const repository = new InMemoryTodoRepository();
+    const todo = Todo.create("牛乳を買う").changeCompletion(true);
+
+    await repository.save(todo);
+
+    await expect(repository.findById(todo.id)).resolves.toEqual(todo);
+  });
+
+  // InMemory は保持中の履歴に増分を足す（読み込んだ Todo の履歴で置き換えない）。既存の要素は同じもの（参照）のまま残る。
+  test("読み込んだ Todo の完了状態を変えて save すると、増えた履歴だけが足され、既存の履歴は変わらない", async () => {
+    const repository = new InMemoryTodoRepository();
+    const todo = Todo.create("牛乳を買う");
+    await repository.save(todo);
+    const [first] = (await repository.findByIdOrThrow(todo.id)).statusChanges;
+
+    const completed = (
+      await repository.findByIdOrThrow(todo.id)
+    ).changeCompletion(true);
+    await repository.save(completed);
+    const reopened = (
+      await repository.findByIdOrThrow(todo.id)
+    ).changeCompletion(false);
+    await repository.save(reopened);
+
+    const saved = await repository.findByIdOrThrow(todo.id);
+    expect(saved).toEqual(reopened);
+    expect(saved.statusChanges.map((change) => change.completed)).toEqual([
+      false,
+      true,
+      false,
+    ]);
+    expect(saved.statusChanges[0]).toStrictEqual(first);
+  });
+
+  test("読み込んだ Todo を完了にしてから未完了に戻して save すると、履歴の 2 件が足され、完了状態は変わらない", async () => {
+    const repository = new InMemoryTodoRepository();
+    const todo = Todo.create("牛乳を買う");
+    await repository.save(todo);
+    const toggled = (await repository.findByIdOrThrow(todo.id))
+      .changeCompletion(true)
+      .changeCompletion(false);
+
+    await repository.save(toggled);
+
+    await expect(repository.findById(todo.id)).resolves.toEqual(toggled);
+    expect(toggled.statusChanges).toHaveLength(3);
+  });
+
+  test("findAll・findById は完了の履歴を足した順で返す", async () => {
+    const repository = new InMemoryTodoRepository();
+    const createdAt = "2026-09-28T00:00:00.000Z";
+    // 作成・完了・未完了を同じ時刻にして、日時ではなく足した順で並ぶことを確かめる。
+    vi.mocked(now).mockReturnValue(new Date(createdAt));
+    const todo = Todo.create("牛乳を買う")
+      .changeCompletion(true)
+      .changeCompletion(false);
+    await repository.save(todo);
+    const expected = [false, true, false].map((completed) => ({
+      completed,
+      changedAt: new Date(createdAt),
+    }));
+
+    await expect(repository.findById(todo.id)).resolves.toMatchObject({
+      statusChanges: expected,
+    });
+    const all = await repository.findAll();
+    expect(all.map((loaded) => loaded.statusChanges)).toStrictEqual([expected]);
+  });
+
+  // Postgres の (todo_id, position) の一意制約違反と同じ契約（2 回目はエラー、1 回目の変更だけが残る。2 回目の名前の変更も残らない）。
+  test("同じ Todo を 2 回読み、両方で完了状態を変えて save すると、2 回目はエラーになり、1 回目の変更だけが残る", async () => {
+    const repository = new InMemoryTodoRepository();
+    const todo = Todo.create("牛乳を買う");
+    await repository.save(todo);
+    const a = await repository.findByIdOrThrow(todo.id);
+    const b = await repository.findByIdOrThrow(todo.id);
+    const first = a.changeCompletion(true);
+    await repository.save(first);
+
+    const second = repository.save(b.rename("x").changeCompletion(true));
+
+    await expect(second).rejects.toEqual(
+      new Error(
+        `todo status changes were appended by another save: ${todo.id}`,
+      ),
+    );
+    await expect(repository.findById(todo.id)).resolves.toEqual(first);
+  });
+
+  test("読み込んだ後に delete された Todo の完了状態を変えて save すると、not_found を投げ、履歴を足さない", async () => {
+    const repository = new InMemoryTodoRepository();
+    const todo = Todo.create("牛乳を買う");
+    await repository.save(todo);
+    const loaded = await repository.findByIdOrThrow(todo.id);
+    await repository.delete(todo.id);
+
+    await expect(
+      repository.save(loaded.changeCompletion(true)),
+    ).rejects.toEqual(
+      new DomainError("not_found", "todo.notFound", { id: todo.id }),
+    );
+    await expect(repository.findAll()).resolves.toEqual([]);
+  });
+
   // WHY: 読み込んだ Todo が origin を持たないと、save が新規として全体を上書きし、上の同時更新のテストの意味が無くなる。
   test("findById・findByIdOrThrow・findAll が返す Todo は、読み込んだときの値を origin に持つ", async () => {
     const repository = new InMemoryTodoRepository();
@@ -247,6 +370,7 @@ describe("InMemoryTodoRepository", () => {
       title: "牛乳を買う",
       completed: true,
       createdAt: todo.createdAt,
+      statusChanges: todo.statusChanges,
     };
 
     expect((await repository.findById(todo.id))?.origin).toStrictEqual(values);

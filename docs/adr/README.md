@@ -72,6 +72,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-30 | 現在時刻は apps/shared/now.ts の now() だけから取り、Entity の作成日時は引数で受け取らずに生成時に自動で入れる | 採用 | [20260930-now-single-source.md](architecture/20260930-now-single-source.md) |
 | 2026-09-30 | 1 ユースケース = 1 API = 1 command にし、複数の項目を任意で受けて command の中で分岐する部分更新 API は作らない | 採用 | [20260930-one-api-per-use-case.md](architecture/20260930-one-api-per-use-case.md) |
 | 2026-09-30 | presentation の入力検証は domain の規則を重ねてよい（presentation ⊆ domain）。domain は常に完全で、presentation は domain より厳しくしない | 採用 | [20260930-presentation-overlaps-domain-validation.md](architecture/20260930-presentation-overlaps-domain-validation.md) |
+| 2026-09-30 | Todo の完了の遷移は集約の子表（insert のみ）に積み、最新の状態は集約の現在値の列にも持つ | 採用 | [20260930-status-transitions-as-append-only-child-table.md](architecture/20260930-status-transitions-as-append-only-child-table.md) |
 
 ### tech-stack/
 言語・ツール・ライブラリの選定

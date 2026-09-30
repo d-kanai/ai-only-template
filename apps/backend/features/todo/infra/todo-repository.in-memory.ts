@@ -46,6 +46,11 @@ export class InMemoryTodoRepository implements TodoRepository {
   //   （title・completed）だけを保持中の値に反映する。変わった項目が無ければ何もしない。保持していなければ not_found。
   // WHY 変わった項目が無いときは保持中かを確かめない: Postgres は SQL を発行しないので、消されたことに気づかない。
   //   ここで先に not_found にすると、テスト（InMemory）と本番（Postgres）で結果が変わる。
+  // 完了の履歴（Issue #188）も Postgres と同じく、読み込んだときの件数より後ろに増えた分だけを保持中の履歴に足す
+  //   （読み込んだ Todo の履歴で置き換えない。別の save が足した履歴を消さない）。
+  // WHY 保持中の履歴が読み込んだときより増えていたら、増分を足さずに Error を投げる: Postgres の (todo_id, position) の
+  //   一意制約違反（同じ位置に 2 つの save が足そうとした）と同じ契約。名前の変更など同じ save の他の変更も反映しない
+  //   （Postgres ではトランザクションで戻る）。
   // WHY Todo.reconstruct で置く: 保持中の値と差分を合わせた値で作り直す（origin はその値になるが、取り出すときに
   //   load で作り直すので使われない）。
   async save(todo: Todo): Promise<void> {
@@ -61,18 +66,25 @@ export class InMemoryTodoRepository implements TodoRepository {
       title: todo.title,
       completed: todo.completed,
     });
-    if (Object.keys(changed).length === 0) {
+    const appended = todo.statusChanges.slice(todo.origin.statusChanges.length);
+    if (Object.keys(changed).length === 0 && appended.length === 0) {
       return;
     }
     const stored = requireTodo(this.todos.get(todo.id), todo.id);
+    if (
+      appended.length > 0 &&
+      stored.statusChanges.length !== todo.origin.statusChanges.length
+    ) {
+      throw new Error(
+        `todo status changes were appended by another save: ${todo.id}`,
+      );
+    }
     this.todos.set(
       todo.id,
       Todo.reconstruct({
-        id: stored.id,
-        title: stored.title,
-        completed: stored.completed,
-        createdAt: stored.createdAt,
+        ...values(stored),
         ...changed,
+        statusChanges: [...stored.statusChanges, ...appended],
       }),
     );
   }
@@ -84,10 +96,16 @@ export class InMemoryTodoRepository implements TodoRepository {
 
 // 保持中の Todo から「読み込んだ Todo」（今の値を origin に持つ）を作る。
 function load(stored: Todo): Todo {
-  return Todo.reconstruct({
-    id: stored.id,
-    title: stored.title,
-    completed: stored.completed,
-    createdAt: stored.createdAt,
-  });
+  return Todo.reconstruct(values(stored));
+}
+
+// Todo.reconstruct に渡す値（Postgres の行と同じ項目）。
+function values(todo: Todo) {
+  return {
+    id: todo.id,
+    title: todo.title,
+    completed: todo.completed,
+    createdAt: todo.createdAt,
+    statusChanges: todo.statusChanges,
+  };
 }

@@ -17,6 +17,7 @@ export const commonMessages = defineMessages({
     "todo.id.invalid": "id が不正です",
     "todo.completed.invalid": "完了状態が不正です",
     "todo.createdAt.invalid": "作成日時が不正です",
+    "todo.statusChanges.invalid": "完了の履歴が不正です",
     "todo.notFound": "Todo（id: {id}）が見つかりません",
     "request.body.notJson": "リクエスト本文が JSON ではありません",
     "request.body.notObject":
@@ -39,6 +40,7 @@ export const commonMessages = defineMessages({
     "todo.id.invalid": "The id is invalid",
     "todo.completed.invalid": "The completed state is invalid",
     "todo.createdAt.invalid": "The creation date is invalid",
+    "todo.statusChanges.invalid": "The completion history is invalid",
     "todo.notFound": "Todo (id: {id}) was not found",
     "request.body.notJson": "The request body is not JSON",
     "request.body.notObject": "The request body must be a JSON object",

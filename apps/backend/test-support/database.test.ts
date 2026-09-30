@@ -74,8 +74,28 @@ describe("createTestDatabase", () => {
       );
       expect(tables.rows.map((row) => row.table_name)).toEqual([
         "__drizzle_migrations",
+        "todo_status_changes",
         "todos",
       ]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  // WHY: drizzle-kit 0.31.11 の generate は外部キーを REFERENCES "public"."todos" と書くので、todo_status_changes の外部キーは
+  //   手書きのマイグレーション（shared/drizzle/0002_*.sql）でスキーマを書かずに張る（Issue #188。features/todo/infra/schema.ts）。
+  //   public を指すと、テスト用のスキーマの Todo に履歴を足せず、テストのスキーマを消しても public の todos に参照が残る。
+  test("migrate した外部キー（todo_status_changes → todos）は、テスト用のスキーマの todos を指す（public を指さない）", async () => {
+    const database = await createTestDatabase();
+    try {
+      await database.migrate();
+      const references = await database.db.execute<{
+        referenced: string;
+      }>(
+        sql`select confrelid::regclass::text as referenced from pg_constraint where contype = 'f' and connamespace = current_schema()::regnamespace`,
+      );
+      // regclass の文字列は、search_path（テスト用のスキーマ）にある表ならスキーマを付けずに表の名前だけになる。
+      expect(references.rows).toEqual([{ referenced: "todos" }]);
     } finally {
       await database.close();
     }
