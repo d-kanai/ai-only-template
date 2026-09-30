@@ -12,6 +12,8 @@
 // WHY 中で console.log / console.warn / console.error を使う（process.stdout.write にしない）: 呼び出し側のテストが
 //   vi.spyOn(console, ...) で「ログに残したこと」を確かめられるようにする。
 
+import { now } from "./now";
+
 export type LogLevel = "info" | "warn" | "error";
 
 // 1 行に載せる出来事。キーと値はそのまま JSON にする（Error は { name, message } に変える）。
@@ -41,7 +43,8 @@ function replaceError(_key: string, value: unknown): unknown {
 }
 
 function toLine(level: LogLevel, event: LogEvent): string {
-  const timestamp = new Date().toISOString();
+  // WHY now() から取る: 現在時刻の唯一の出口（now.ts）を通し、テストが時刻を差し替えて行を丸ごと比べられるようにする。
+  const timestamp = now().toISOString();
   try {
     // WHY { level, timestamp, ...event } の順: 先頭に level と timestamp を置き、どの行も同じ並びで読めるようにする。
     //   timestamp は event にあればそれを使う（リクエストの受信時刻など、出来事の時刻を優先する）。event の timestamp が

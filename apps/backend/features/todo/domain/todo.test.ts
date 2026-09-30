@@ -1,10 +1,27 @@
 // @vitest-environment node
-import { describe, expect, test } from "vitest";
+import { now } from "@repo/shared/now";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { DomainError } from "../../../shared/domain/domain-error";
 import type { ErrorKey } from "../../../shared/domain/error-key";
 import { keyedRefine } from "../../../shared/domain/keyed-issue";
 import { TODO_TITLE_MAX_LENGTH, Todo, validate } from "./todo";
+
+// WHY 時計（now）を差し替える: Todo.create は作成日時を now() から自動で入れる（引数では受け取らない）。
+//   テストで決まった時刻にするには、現在時刻の唯一の出口（apps/shared/now.ts）を差し替えるしかない。
+//   自動モックの now は既定で undefined を返すので、beforeEach で決まった時刻を返させる（返させ忘れた Todo.create は
+//   作成日時の不変条件で validation_error になり、気づける）。
+vi.mock("@repo/shared/now");
+
+const NOW = new Date("2026-09-28T00:00:00.000Z");
+
+beforeEach(() => {
+  vi.mocked(now).mockReturnValue(NOW);
+});
+
+afterEach(() => {
+  vi.mocked(now).mockReset();
+});
 
 // key と params は API の Problem Details（problem.ts）の拡張メンバーとして画面に渡る（画面が翻訳するクライアントとの契約。Issue #116）ので、両方を検証する。
 // WHY toEqual に params: undefined を含める: params の無いキーで params が {} などになっていないことも確かめる
@@ -37,18 +54,29 @@ const INVALID_ID = { key: "todo.id.invalid" } as const;
 const INVALID_CREATED_AT = { key: "todo.createdAt.invalid" } as const;
 
 describe("Todo.create", () => {
-  test("未完了で作られ、id と作成日時が付く", () => {
-    const createdAt = new Date("2026-09-28T00:00:00.000Z");
+  test("未完了で作られ、id と、作成日時として現在時刻（now()）が付く", () => {
+    const createdAt = new Date("2026-09-28T12:34:56.789Z");
+    vi.mocked(now).mockReturnValueOnce(createdAt);
 
-    const todo = Todo.create("牛乳を買う", createdAt);
+    const todo = Todo.create("牛乳を買う");
 
     expect(todo.title).toBe("牛乳を買う");
     expect(todo.completed).toBe(false);
     expect(todo.createdAt).toEqual(createdAt);
+    expect(now).toHaveBeenCalledTimes(1);
     // randomUUID の形式（8-4-4-4-12 の 16 進）。
     expect(todo.id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
     );
+  });
+
+  // WHY 型で止める: 作成日時は Entity の生成ルールとして now() から入れる。呼び出し側が渡せると、ルールが呼び出し側に漏れる。
+  test("作成日時は引数で受け取らない（型エラーで、渡しても now() の値が入る）", () => {
+    const createdAt = new Date("2000-01-01T00:00:00.000Z");
+    // @ts-expect-error Todo.create はタイトルだけを受け取る。
+    const todo = Todo.create("牛乳を買う", createdAt);
+
+    expect(todo.createdAt).toEqual(NOW);
   });
 
   test("作るたびに別の id になる", () => {
@@ -99,22 +127,24 @@ describe("Todo.create", () => {
 
   // 完全コンストラクタ: create はタイトルだけでなく Todo のすべての値（TodoProps）を検証してから作る。
   test("作成日時が日付として不正（Invalid Date）なら validation_error を投げる", () => {
-    expectValidationError(
-      () => Todo.create("牛乳を買う", new Date("not a date")),
-      INVALID_CREATED_AT,
-    );
+    vi.mocked(now).mockReturnValueOnce(new Date("not a date"));
+
+    expectValidationError(() => Todo.create("牛乳を買う"), INVALID_CREATED_AT);
   });
 });
 
 describe("Todo#rename", () => {
-  test("新しいタイトルの Todo を返し、元の Todo は変えない", () => {
+  test("新しいタイトルの Todo を返し、元の Todo は変えない（作成日時は作ったときのまま）", () => {
+    // WHY 作成時だけ別の時刻にする: rename が now() を読み直す書き換えでは、作成日時が既定の NOW に変わって落ちる。
+    const createdAt = new Date("2026-09-27T00:00:00.000Z");
+    vi.mocked(now).mockReturnValueOnce(createdAt);
     const original = Todo.create("牛乳を買う");
 
     const renamed = original.rename(" 卵を買う ");
 
     expect(renamed.title).toBe("卵を買う");
     expect(renamed.id).toBe(original.id);
-    expect(renamed.createdAt).toEqual(original.createdAt);
+    expect(renamed.createdAt).toEqual(createdAt);
     expect(original.title).toBe("牛乳を買う");
   });
 

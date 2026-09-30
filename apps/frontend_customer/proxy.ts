@@ -1,4 +1,5 @@
 import { logger } from "@repo/shared/logger";
+import { now } from "@repo/shared/now";
 import { type NextRequest, NextResponse } from "next/server";
 import {
   LOCALE_COOKIE,
@@ -24,7 +25,8 @@ export function proxy(request: NextRequest): NextResponse {
     method: request.method,
     url: request.url,
     headers: request.headers,
-    receivedAt: new Date(),
+    // WHY now(): 現在時刻は唯一の出口 now（apps/shared/now.ts）から取る（規則 now-single-source）。
+    receivedAt: now(),
     generateRequestId: () => crypto.randomUUID(),
   });
   // WHY logger.info（info は stdout）に同期で 1 行: 出力先は stdout の NDJSON だけにし（ログの収集は実行環境に任せる）、
