@@ -53,6 +53,11 @@ beforeEach(async () => {
   await database.db.execute(
     sql`truncate change_logs, todo_status_changes, todos`,
   );
+  // WHY console.log / console.warn を黙らせる: save / delete のたびに writeInTransaction（shared/infra/write.ts。Issue #205）が
+  //   書き込みの前後のログ（info は console.log、失敗は console.warn）を出し、テストの出力が埋まる。ログの行は下の
+  //   writeLogsBy が読む（afterEach の restoreAllMocks が戻す）。
+  vi.spyOn(console, "log").mockImplementation(() => undefined);
+  vi.spyOn(console, "warn").mockImplementation(() => undefined);
 });
 
 function repository(actorId?: string | null): PostgresTodoRepository {
@@ -83,6 +88,51 @@ function byTableAndChanges(a: ChangeEntry, b: ChangeEntry): number {
     a.tableName.localeCompare(b.tableName) ||
     JSON.stringify(a.changes).localeCompare(JSON.stringify(b.changes))
   );
+}
+
+// action の間に出た書き込みのログ（writeInTransaction の "repository write ..." の行）を、info（console.log）と
+//   warn（console.warn）ごとに JSON にして返す。WHY action の前に消す: 準備の save のログを数えない。
+async function writeLogsBy(
+  action: () => Promise<unknown>,
+): Promise<{ info: unknown[]; warn: unknown[] }> {
+  const info = vi.mocked(console.log);
+  const warn = vi.mocked(console.warn);
+  info.mockClear();
+  warn.mockClear();
+  await action();
+  const lines = (spy: typeof info) =>
+    spy.mock.calls.map(([line]) => JSON.parse(String(line)));
+  return { info: lines(info), warn: lines(warn) };
+}
+
+// 書き込みの前後のログの行（timestamp と所要時間は実行ごとに変わるので形だけを見る。値は shared/infra/write.test.ts が固定する）。
+function writeStartLine(table: string, rowId: string, operation: string) {
+  return {
+    level: "info",
+    timestamp: expect.any(String),
+    message: "repository write start",
+    table,
+    rowId,
+    operation,
+  };
+}
+
+function writeDoneLine(
+  table: string,
+  rowId: string,
+  operation: string,
+  changes: {
+    tableName: string;
+    rowId: string | undefined;
+    operation: string;
+  }[],
+) {
+  return {
+    ...writeStartLine(table, rowId, operation),
+    message: "repository write done",
+    durationMs: expect.any(Number),
+    changes,
+  };
 }
 
 // 完了の履歴の行（todo_status_changes）の id。変更履歴の row_id と照らし合わせる。
@@ -943,6 +993,121 @@ describe("PostgresTodoRepository", () => {
         sql`alter table todos drop constraint tmp_unique_title`,
       );
     }
+  });
+
+  // 書き込みのログ（Issue #205）は Postgres だけ（InMemory はログを出さない）。ログを出すのは shared/infra/write.ts の
+  //   writeInTransaction で、Repository は表・id・操作を渡すだけ。changes は書いた行ごとの記録（値は出さない）。
+  test("新規の Todo を save すると、書き込みの前後に todos・Todo の id・insert のログを出し、後のログに書いた行（todos と完了の履歴）を並べる", async () => {
+    const todo = Todo.create("牛乳を買う");
+
+    const logs = await writeLogsBy(() => repository().save(todo));
+
+    expect(logs).toStrictEqual({
+      info: [
+        writeStartLine("todos", todo.id, "insert"),
+        writeDoneLine("todos", todo.id, "insert", [
+          { tableName: "todos", rowId: todo.id, operation: "insert" },
+          {
+            tableName: "todo_status_changes",
+            rowId: await statusChangeId(todo.id, 0),
+            operation: "insert",
+          },
+        ]),
+      ],
+      warn: [],
+    });
+  });
+
+  test("読み込んだ Todo を変えて save すると、書き込みの前後に todos・Todo の id・update のログを出し、後のログに書いた行（todos の update と完了の履歴の insert）を並べる", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await repository().save(todo);
+    const changed = (await repository().findByIdOrThrow(todo.id))
+      .rename("卵を買う")
+      .changeCompletion(true);
+
+    const logs = await writeLogsBy(() => repository().save(changed));
+
+    expect(logs).toStrictEqual({
+      info: [
+        writeStartLine("todos", todo.id, "update"),
+        writeDoneLine("todos", todo.id, "update", [
+          { tableName: "todos", rowId: todo.id, operation: "update" },
+          {
+            tableName: "todo_status_changes",
+            rowId: await statusChangeId(todo.id, 1),
+            operation: "insert",
+          },
+        ]),
+      ],
+      warn: [],
+    });
+  });
+
+  test("delete すると、書き込みの前後に todos・id・delete のログを出す（無い id は後のログの changes が空）", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await repository().save(todo);
+    const missing = "00000000-0000-4000-8000-000000000000";
+
+    const logs = await writeLogsBy(async () => {
+      await repository().delete(todo.id);
+      await repository().delete(missing);
+    });
+
+    expect(logs).toStrictEqual({
+      info: [
+        writeStartLine("todos", todo.id, "delete"),
+        writeDoneLine("todos", todo.id, "delete", [
+          { tableName: "todos", rowId: todo.id, operation: "delete" },
+        ]),
+        writeStartLine("todos", missing, "delete"),
+        writeDoneLine("todos", missing, "delete", []),
+      ],
+      warn: [],
+    });
+  });
+
+  // 読み込んだ後に消された Todo の save は not_found（API で 404）。失敗は warn（500 の例外は toProblemResponse が error で残す）。
+  test("読み込んだ後に delete された Todo を変えて save すると、前のログの後に失敗のログ（warn。not_found の例外）を出す", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await repository().save(todo);
+    const loaded = await repository().findByIdOrThrow(todo.id);
+    await repository().delete(todo.id);
+    const error = new DomainError("not_found", "todo.notFound", {
+      id: todo.id,
+    });
+
+    const logs = await writeLogsBy(() =>
+      expect(repository().save(loaded.rename("卵を買う"))).rejects.toEqual(
+        error,
+      ),
+    );
+
+    expect(logs).toStrictEqual({
+      info: [writeStartLine("todos", todo.id, "update")],
+      warn: [
+        {
+          level: "warn",
+          timestamp: expect.any(String),
+          message: "repository write failed",
+          table: "todos",
+          rowId: todo.id,
+          operation: "update",
+          durationMs: expect.any(Number),
+          error: { name: "DomainError", message: error.message },
+        },
+      ],
+    });
+  });
+
+  // 変わった列も増えた履歴も無い save は SQL を発行しない（上の「SQL を発行しない」）ので、書き込みのログも出さない。
+  test("読み込んだ Todo を変えずに save すると、書き込みのログを出さない", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await repository().save(todo);
+    const loaded = await repository().findByIdOrThrow(todo.id);
+
+    const logs = await writeLogsBy(() => repository().save(loaded));
+
+    expect(logs).toStrictEqual({ info: [], warn: [] });
   });
 
   test("無い id の findById は undefined を返す", async () => {

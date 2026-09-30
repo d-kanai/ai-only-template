@@ -25,7 +25,8 @@ export type Changes = Readonly<
 >;
 
 // すべての表の行の変更履歴（監査。Issue #189。ADR docs/adr/architecture/20260930-change-logs-written-by-repository.md）。
-// 書くのは Repository（shared/infra/change-log.ts の recordChange）で、本体の書き込みと同じトランザクションの中。
+// 書くのは書き込みの唯一の入口 writeInTransaction（shared/infra/write.ts。Issue #205）で、Repository のコールバックが返した記録を
+//   本体の書き込みと同じトランザクションの中で shared/infra/change-log.ts の recordChange が入れる。
 // WHY insert のみ（UPDATE / DELETE しない。rule-tests/persistence.test.ts の no-update-delete-on-append-only-tables が
 //   *Logs の表への update / delete を止める）: 変更の記録は後から書き換えないことに意味がある。
 // WHY 外部キーを張らない: 消した行（delete の記録）も指し続ける。表をまたぐので、指す先の表も 1 つに決まらない。
