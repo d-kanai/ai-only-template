@@ -2,6 +2,7 @@
 paths:
   - "scripts/hooks/require-work-log*"
   - "scripts/hooks/check-work-logs-diff*"
+  - "scripts/hooks/work-log-sections*"
   - "scripts/hooks/pre-compact*"
   - "scripts/hooks/instructions-loaded*"
   - "rule-tests/work-logs-check.test.ts"
@@ -21,6 +22,7 @@ WHY 機械で止める: 調査だけの依頼などでログの追記が漏れ�
   - 作業ツリーで変わっていて（未追跡・ステージ済みを含む。`git status --porcelain`）、ファイルの更新時刻が起点（最後の人間の発言の `timestamp`）以降。
   - 起点以降のコミットで変わっている（`git log --since=<起点> -- docs/work-logs/<今日>.md`。ほかのファイルだけのコミットは数えない）。
   - どちらでもなければ `{"decision":"block","reason":...}` で停止を拒否する。Claude は理由を受け取ってログを書き、止まり直す。
+  - どちらかでも、このターンで追加した項目に `- 機械化:` の行が無ければ、その見出しを挙げて停止を拒否する（下の「追加した項目の `- 機械化:`」）。
 - 順序は「ログを追記 → コミット」: この環境のユーザー側の Stop フック（`~/.claude/stop-hook-git-check.sh`）は未コミットの変更があると止める。コミットした後も通るように、このターンの間のコミットでの変更も「書いた」とみなす。
 - 判定の仕様（`scripts/hooks/require-work-log.test.ts` で固定）:
   - 人間のターン = `type: "user"` で `isMeta` でなく、`message.content` が文字列か、配列で `tool_result` を含まない行。ツールの結果（`tool_result`）と、Stop フックのフィードバックなどの `isMeta` の行は数えない。
@@ -47,7 +49,26 @@ WHY 機械で止める: 調査だけの依頼などでログの追記が漏れ�
 - 検査（ルール検査テスト）: スクリプトの判定は `scripts/hooks/check-work-logs-diff.test.ts`、ci.yml への組み込み（ステップの有無・`if`・`continue-on-error`・`|| true` などの打ち消し・順序・`fetch-depth: 0`）は `rule-tests/work-logs-check.test.ts`。
 - 数えるのは追加・変更（`--diff-filter=AM`）だけ。ログを削除しただけの PR は通さない。
 - `--no-renames`: 名前の変更を常に「削除 + 追加」として扱い、利用者の `diff.renames` の設定に結果が左右されないようにする。限界: そのため、ログの名前を変えただけの PR は「追加」があるので通る（`check-work-logs-diff.test.ts` で固定）。
-- 限界: ファイル名だけを見る。中身（その PR の作業が書かれているか）は見ない（reviewer と PR 本文の「実装経緯」で見る。手順はスキル `pr-flow`）。
+- 追加: `git diff --no-renames --diff-filter=AM origin/<base>...HEAD -- 'docs/work-logs/*.md'` の `+` の行で追加した項目に `- 機械化:` の行が無ければ、見出しを stderr に挙げて失敗する（下の「追加した項目の `- 機械化:`」）。
+- 限界: ファイル名と追加した項目の `- 機械化:` の行だけを見る。中身（その PR の作業が書かれているか）は見ない（reviewer と PR 本文の「実装経緯」で見る。手順はスキル `pr-flow`）。
+- 実行環境: 判定に node を使う。このステップは setup-node より前に動くので、runner に入っている node を使う（`ubuntu-latest` = Ubuntu 24.04 の runner に Node.js 22 系が入っている。https://github.com/actions/runner-images の README と images/ubuntu/Ubuntu2404-Readme.md 、2026-09-30 に確認）。そのため `work-log-sections.mjs` は型の除去に頼らない JavaScript にしている。
+
+## 追加した項目の `- 機械化:`（Issue #178）
+- WHAT: 作業ログの 1 項目（`## <やったこと>` から次の `## ` の前まで）に `- 機械化: <縛れる（何で）/ 縛れない（理由）/ 対象外（調査・質問のみ）>` の行を要求し、追加した項目に無ければ Stop フックと CI で止める。書き方は `.claude/general/work-log.md`。
+- WHY: ルールを足す・変えるたびに「lint / 型 / テスト / フック / CI で機械的に止められないか」を必ず検討させる（CLAUDE.md の 7.。ユーザー指示「作業のたびに機械的に縛れないかの検討を必ず挟んでほしい。プロセスに」）。文章で頼むだけでは読み落とされるので、書いたかどうかを機械で止める。PR では本文の「実装経緯」の「機械化の検討」（`.github/PULL_REQUEST_TEMPLATE.md`）にも書く（こちらは reviewer が見る。機械では検査しない）。
+- 判定（`scripts/hooks/work-log-sections.mjs` の `findSectionsWithoutMechanization`。Stop フックと CI が同じものを呼ぶ。`work-log-sections.test.ts` で固定）:
+  - diff の `+` の行だけを見る。`## ` で始まる追加行を項目の見出しとし、そこから次の追加された `## ` 行の前まで（ファイルの diff の境目 `diff --git` でも閉じる）の追加行に `- 機械化:` の行があるかを見る。`#` / `###` は項目ではない。
+  - `- 機械化:` の行 = 行頭の空白を除いて `- 機械化:` で始まり、`:` の後に空白以外が 1 文字以上ある行（入れ子の `  - 機械化:` も可）。`- 機械化:` だけ・`機械化:`（`- ` 無し）・`- 機械化 :`・全角の `：` は無しとして扱う。
+  - diff のファイルの見出し（`diff --git` から最初の `@@` まで。`+++ b/<path>` を含む）は追加行として扱わない。
+- 追加した行の取り方:
+  - Stop フック: このターンのコミット（`git log --since=<起点> -- <今日のログ>`）があれば最も古いコミットの親（親が無ければ空のツリー `4b825dc642cb6eb9a060e54bf8d69288fbee4904`）、無ければ `HEAD` を base にして `git diff <base> -- <今日のログ>`（作業ツリーまで）。ファイルが追跡されていなければ全行を追加とみなす。WHY 最も古いコミットの親: ターンの中で何度コミットしても、ターンで足した行をすべて見る。ターンより前にコミットした項目は見ない。
+  - CI: 上の三点 diff（PR の変更だけ。base 側の既存の項目・PR の後に base 側で消した項目は見ない）。
+  - 判定が動かない（diff が取れない・node が失敗する）とき、Stop フックは止めずに理由を stderr に出し（止め続けないため）、CI は失敗する。
+- 限界:
+  - 追加した見出しの単位で見る。既存の項目に箇条書きを足しただけの変更は見ない（その作業の機械化の検討は漏れうる）。
+  - `+` の行だけを見るので、見出しを移動しただけ（または diff が既存の見出しの行と揃え直した）の diff では、移動した見出しが追加に見え、元の `- 機械化:` の行が context に残ると誤検知しうる。追加した見出しの後ろにある既存の `## `（context の行）は項目の境目として見ないので、後ろの別の項目に足した `- 機械化:` を数えて見逃しうる。
+  - `- 機械化:` の中身（検討の質）は見ない。形だけの記入は reviewer が見る。
+  - Stop フックは `stop_hook_active` のときに判定しないので、block の後に書き足した `- 機械化:` の行は確かめない（CI で止まる）。
 
 ## PreCompact `scripts/hooks/pre-compact.sh`
 - WHAT: compact の直前に `.claude/state/pre-compact.md` へ、日時・trigger（`manual` / `auto`）・ブランチ・HEAD・`git status --short`・stash の件数・直近 5 コミットの 1 行目を上書きで書く。compact は止めない（常に exit 0、出力なし）。

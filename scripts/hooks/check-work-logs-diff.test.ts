@@ -207,4 +207,104 @@ describe("check-work-logs-diff.sh", () => {
       expect(result.stderr).toContain("usage");
     });
   });
+
+  // PR で追加した項目（`## ` の見出し）ごとに `- 機械化:` の行を要求する（Issue #178。CLAUDE.md の 7.）。
+  // 見るのは `git diff --diff-filter=AM <base>...HEAD -- docs/work-logs/*.md` の `+` の行だけ。判定の細部は
+  // scripts/hooks/work-log-sections.test.ts。
+  describe("追加した項目の `- 機械化:` の行", () => {
+    const item = (heading: string, mechanization?: string) =>
+      [
+        `## ${heading}`,
+        "- 理由: x",
+        ...(mechanization === undefined ? [] : [`- 機械化: ${mechanization}`]),
+      ].join("\n");
+    const log = (...items: string[]) => `# log\n\n${items.join("\n\n")}\n`;
+    // stderr の見出しの一覧（`  - <見出し>` の行）。
+    const listedHeadings = (stderr: string) =>
+      stderr
+        .split("\n")
+        .filter((l) => l.startsWith("  - "))
+        .map((l) => l.slice(4));
+
+    it("追加した項目に無ければ 1 で終わり、無い見出しだけを stderr に挙げる", () => {
+      commitFiles({
+        "docs/work-logs/2026-09-28.md": log(
+          item("足した1"),
+          item("足した2", "縛れる（CI）"),
+        ),
+        "docs/work-logs/2026-09-29.md": log(item("足した3")),
+      });
+      const result = run(["main"]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("main...HEAD");
+      expect(result.stderr).toContain("- 機械化:");
+      expect(listedHeadings(result.stderr)).toEqual(["足した1", "足した3"]);
+    });
+
+    it("既存のログに追加した項目に無ければ 1 で終わる", () => {
+      commitFiles({
+        "docs/work-logs/2026-09-27.md": `# 27\n\n${item("足した")}\n`,
+      });
+      const result = run(["main"]);
+      expect(result.status).toBe(1);
+      expect(listedHeadings(result.stderr)).toEqual(["足した"]);
+    });
+
+    it("追加した項目にすべてあれば 0 で終わる", () => {
+      commitFiles({
+        "docs/work-logs/2026-09-28.md": log(
+          item("足した1", "縛れない（判断の中身）"),
+          item("足した2", "対象外（調査のみ）"),
+        ),
+      });
+      const result = run(["main"]);
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe("");
+    });
+
+    it("base 側に元からある項目（`- 機械化:` が無い）は見ず、追加した項目にあれば 0 で終わる", () => {
+      commitFiles(
+        { "docs/work-logs/2026-09-26.md": log(item("前からある")) },
+        "old log",
+      );
+      git(["checkout", "-q", "main"]);
+      git(["merge", "-q", "--ff-only", "work"]);
+      git(["checkout", "-q", "work"]);
+      commitFiles({
+        "docs/work-logs/2026-09-26.md": log(
+          item("前からある"),
+          item("足した", "縛れる（Stop フック）"),
+        ),
+      });
+      expect(run(["main"]).status).toBe(0);
+    });
+
+    it("PR の後に base 側で消した項目を、PR の追加と取り違えない（三点 diff）", () => {
+      // 二点（..）だと、base 側で消した項目が HEAD 側から見て「追加」になり、`- 機械化:` の無い見出しとして挙がる。
+      commitFiles(
+        { "docs/work-logs/2026-09-26.md": log(item("前からある")) },
+        "old log",
+      );
+      git(["checkout", "-q", "main"]);
+      git(["merge", "-q", "--ff-only", "work"]);
+      commitFiles({ "docs/work-logs/2026-09-26.md": "# log\n" }, "remove item");
+      git(["checkout", "-q", "work"]);
+      commitFiles({
+        "docs/work-logs/2026-09-28.md": log(item("足した", "縛れない（理由）")),
+      });
+      const result = run(["main"]);
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe("");
+    });
+
+    it("作業ログ以外の .md で追加した見出しは見ない", () => {
+      commitFiles({
+        "docs/work-logs/2026-09-28.md": log(
+          item("足した", "対象外（調査のみ）"),
+        ),
+        "docs/adr/x.md": "# x\n\n## 背景\n",
+      });
+      expect(run(["main"]).status).toBe(0);
+    });
+  });
 });

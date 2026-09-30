@@ -14,9 +14,20 @@
 # 出力: 拒否するときだけ JSON を 1 行。許可するときは何も出さない。終了コードは常に 0。
 # WHY 読めない・git でないときは何もしない（許可）: 判定できない状態で止め続けると、Claude が何をしても停止できなくなる
 #   （公式の 8 回の連続上限までループする）。理由は stderr に出す。
+# さらに（Issue #178）: ログが変わっていても、このターンで追加した項目（`## ` の見出し）に `- 機械化:` の行が無ければ、
+#   その見出しを挙げて block する。WHY: 作業のたびに「lint / 型 / テスト / フック / CI で機械的に止められないか」を検討させる
+#   （CLAUDE.md の 7.。ユーザー指示）。判定は scripts/hooks/work-log-sections.mjs（CI の check-work-logs-diff.sh と共通）。
 set -u
 
 warn() { echo "require-work-log: $*" >&2; }
+
+# このスクリプトの置き場所（scripts/hooks/）。WHY cwd から探さない: cwd は判定対象のリポジトリで、work-log-sections.mjs は
+#   このスクリプトと同じリポジトリにある（テストでは一時リポジトリを cwd にして、このリポジトリのスクリプトを実行する）。
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# 空のツリーのオブジェクト ID（git の SHA-1 リポジトリで固定の値）。このターンの最も古いコミットが親の無い最初のコミットのとき、
+# そこからの diff の起点にする（全行が追加になる）。
+empty_tree=4b825dc642cb6eb9a060e54bf8d69288fbee4904
 
 input=$(cat)
 
@@ -139,10 +150,11 @@ fi
 # WHY 更新時刻も見る: git status は「HEAD と違うか」しか見ないので、前のターンで書いて未コミットのまま残ったログがあると、
 #   以後のターンはログを書かずに通っていた（reviewer 指摘）。
 # stat は GNU（Linux: -c %Y）と BSD（macOS: -f %m）で書き方が違うので両方を試す。ファイルが無ければ（削除した変更など）空。
+changed_in_turn=no
 if [ -n "$(git -C "$root" status --porcelain -- "$log")" ]; then
   mtime=$(stat -c %Y "$root/$log" 2>/dev/null || stat -f %m "$root/$log" 2>/dev/null)
   if [ -n "$mtime" ] && [ "$mtime" -ge "$since_epoch" ] 2>/dev/null; then
-    exit 0
+    changed_in_turn=yes
   fi
 fi
 # このターンの間のコミットでの変更（コミットの日時が起点以降で、docs/work-logs/<今日>.md を変えたもの）。「ログを追記 → コミット」まで
@@ -151,10 +163,46 @@ fi
 #   作業ツリーだけを見ると、コミットした後に必ずこのフックで止まってしまう。
 # WHY 今日の 0 時ではなくターンの開始: 今日の 0 時以降にすると、その日に 1 度でもログがコミットされれば（main の取り込みを含む）
 #   以後のターンがすべて素通りした（Issue #64 の実測で当日 66 件。2026-09-28 の work-logs）。
-if [ -n "$(git -C "$root" log --since="$since" --format=%H -- "$log")" ]; then
+turn_commits=$(git -C "$root" log --since="$since" --format=%H -- "$log")
+[ -n "$turn_commits" ] && changed_in_turn=yes
+
+block() {
+  REASON="$1" node -e 'process.stdout.write(`${JSON.stringify({ decision: "block", reason: process.env.REASON })}\n`)'
   exit 0
+}
+
+if [ "$changed_in_turn" = no ]; then
+  block "作業ログ ${log} に、このターンでやったこと（調査・判断・確認した事実）を追記してください（.claude/general/work-log.md）。追記してからコミットしてください。"
 fi
 
-reason="作業ログ ${log} に、このターンでやったこと（調査・判断・確認した事実）を追記してください（.claude/general/work-log.md）。追記してからコミットしてください。"
-REASON="$reason" node -e 'process.stdout.write(`${JSON.stringify({ decision: "block", reason: process.env.REASON })}\n`)'
-exit 0
+# ここから Issue #178: このターンで追加した行（diff の + の行）の項目に `- 機械化:` の行があるか。
+# 起点（base）: このターンのコミットがあれば、その最も古いもの（git log は新しい順なので最後の行）の親。無ければ HEAD。
+#   WHY 最も古いコミットの親: このターンに何度コミットしても、ターンの中で足した行をすべて見る（最新のコミットの親だと、
+#   それより前のコミットで足した項目を見落とす）。ターンより前にコミットした項目は見ない（この規則より前に書いたログを止めない）。
+#   親が無い（最初のコミット）なら空のツリーから比べる。
+# diff は作業ツリーまで（git diff <base>）: コミット済みの分と未コミットの分をまとめて見る。
+# ファイルが追跡されていない（新しく作って add していない）なら git diff に出ないので、全行を追加の行として渡す。
+# WHY --no-color --no-ext-diff: 利用者の設定（color.diff=always・diff.external）で出力の形が変わると、+ の行を読めない。
+if [ -n "$turn_commits" ]; then
+  oldest=$(printf '%s\n' "$turn_commits" | tail -n 1)
+  base=$(git -C "$root" rev-parse -q --verify "${oldest}^") || base=$empty_tree
+else
+  base=HEAD
+fi
+if git -C "$root" ls-files --error-unmatch -- "$log" >/dev/null 2>&1; then
+  if ! added=$(git -C "$root" diff --no-color --no-ext-diff --no-renames "$base" -- "$log"); then
+    warn "${base} からの ${log} の差分を取れないため、- 機械化: の行を判定しない"
+    exit 0
+  fi
+else
+  added=$(sed 's/^/+/' "$root/$log")
+fi
+if ! missing=$(printf '%s\n' "$added" | node "$script_dir/work-log-sections.mjs"); then
+  warn "work-log-sections.mjs が失敗したため、- 機械化: の行を判定しない"
+  exit 0
+fi
+[ -z "$missing" ] && exit 0
+
+# 見出しは 1 行 1 つ。「」で囲んで「、」でつなぐ（bash の paste -d はマルチバイトの区切りを扱えないので node で組み立てる）。
+headings=$(MISSING="$missing" node -e 'process.stdout.write(process.env.MISSING.split("\n").map((h) => `「${h}」`).join("、"))')
+block "作業ログ ${log} の項目${headings}に \`- 機械化: <縛れる（何で）/ 縛れない（理由）/ 対象外>\` の行を足してください（.claude/general/work-log.md）。"

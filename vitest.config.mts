@@ -97,6 +97,9 @@ export default defineConfig({
       //   テストだけが使うコード（apps/backend/test-support/・apps/frontend_customer/test-support/。Issue #181）も対象にする。
       //   WHY: テストの前提を作るコード（テスト用の DB・翻訳の期待値）も仕様で、分岐が通らないまま残すとテストの前提が崩れても気づけない。
       //   apps/backend/test-support/ は apps/backend/ の全体に含まれるので、frontend の分だけを足す。
+      //   scripts/ の .mjs（scripts/hooks/work-log-sections.mjs。Issue #178）も対象にする。WHY: シェルスクリプトから node で呼ぶ
+      //   判定のロジックで、テストが import して計測できる。"scripts/**/*.ts" だけでは .mjs が拾われない（2026-09-30 に
+      //   json-summary で確認）。
       include: [
         "apps/frontend_customer/features/**/*.{ts,tsx}",
         "apps/frontend_customer/shared/**/*.{ts,tsx}",
@@ -104,6 +107,7 @@ export default defineConfig({
         "apps/backend/**/*.{ts,tsx}",
         "apps/shared/**/*.ts",
         "scripts/**/*.ts",
+        "scripts/**/*.mjs",
       ],
       // exclude: include のうち計測から外すもの。
       //   - **/*.test.{ts,tsx}: テストそのもの。Vitest もテストの include パターンを常に除外に足すが、意図を明示する。
