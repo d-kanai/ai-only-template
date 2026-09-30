@@ -43,16 +43,18 @@ import { afterAll, describe, expect, it } from "vitest";
 //     限界: step のファイルが loadFeature に渡すパスが対の .feature かは見ない（別の .feature を読んでも通る）。.feature の中身
 //       （シナリオの数・step の書き方）も見ない（step の不足は vitest-cucumber が読み込み時に失敗にする）。
 //   以下は .feature（apps/backend/api-journeys/ の直下の *.feature）の中身の規則（Issue #217）:
-//   - api-journey-business-language: `#` のコメント行と空行を除くすべての行（Feature / Background / Scenario / Rule などの見出し、
-//     step（Given / When / Then / And / But / `*`）、説明の行・表の行も）に、FORBIDDEN_WORDS_IN_FEATURE の禁止語のどれかが含まれると
-//     違反（1 行 1 件。行はその行）。大文字小文字は区別しない（`Db` も違反）。
+//   - api-journey-business-language: `#` のコメント行（仕切りの行は除く）と空行を除くすべての行（Feature / Background / Scenario /
+//     Rule などの見出し、step（Given / When / Then / And / But / `*`）、説明の行・表の行、仕切り `# ───── <見出し> ─────` も）に、
+//     FORBIDDEN_WORDS_IN_FEATURE の禁止語のどれかが含まれると違反（1 行 1 件。行はその行）。大文字小文字は区別しない（`Db` も違反）。
 //     WHY: .feature は業務の仕様として、開発者でない人（業務の担当者・利用者）も読むもの。「DB」「返り値」「状態 201」のような技術の
 //       言葉が混ざると、読める人が絞られ、業務の流れがどこに書いてあるかも埋もれる。技術の検証（状態コード・応答の形・DB の行）は
 //       step の実装（*.api-journey.test.ts）に閉じ、.feature には業務の言葉で「何が起きるか」だけを書く（ユーザー判断、Issue #217）。
 //     WHY 見出しと step 以外の行（説明・表）も見る: 業務の言葉にしたいのは読者が読む行すべてで、見出しと step だけにすると、説明の
-//       行や表（`| id | title |`）に書いた技術の言葉が素通りする。見ない（読者向けでない）のは `#` のコメント行だけ。
+//       行や表（`| id | title |`）に書いた技術の言葉が素通りする。見ない（読者向けでない）のは、仕切りでない `#` のコメント行だけ。
 //     WHY コメント行を見ない: ファイル冒頭の技術の説明（step の実装の場所・vitest-cucumber の制約）は開発者向けのメモで、Gherkin では
 //       実行にも仕様にも含まれない。
+//     WHY 仕切りの見出しは見る（reviewer の指摘、Issue #217）: 仕切りは `#` で始まるが、読者が拾い読みする業務の動作の見出し。見ないと
+//       技術の言葉を見出しに移すだけで検査を逃れられる（`# ───── POST /api/todos で DB に insert ─────` が違反 0 件だった）。
 //     WHY 3 桁の数（1xx〜5xx）を HTTP の状態コードとして止め、後ろに「文字」「件」「行」が続くものは許す: 状態コードは「201」「404」の
 //       ように数だけで書かれ、`状態` などの前置きが無くても技術の言葉になる。一方で業務の数（「100 文字のタイトル」「200 件の一覧」
 //       「300 行のメモ」）は 3 桁でもありうり、数えるものの単位（助数詞）が後ろに付く。状態コードの後ろに助数詞は付かないので、
@@ -71,6 +73,9 @@ import { afterAll, describe, expect, it } from "vitest";
 //     限界: 仕切りを付けるのは When の直前だけで、仕切りが When 以外（Given・Then・Background の中）の前にあっても止めない。API を
 //       呼ぶ step を When 以外（Given の準備・`*`・And）で書くと、仕切りは要求されない。キーワードは英語（`# language:` で日本語の
 //       キーワードにすると When を見分けられない）。
+//     限界（両方の規則）: 行ごとに見るので、docstring（`"""` で囲んだ複数行の値）の中も行の種類を区別しない（中の `#` の行は
+//       コメントとして禁止語を見ず、`When` で始まる行は When として仕切りを求める）。全角の数字・英字（`２０１`・`ＤＢ`）は禁止語として
+//       見ない（正規表現は半角だけ）。複数形（ids・APIs）・一覧に無い技術の言葉も見ない。
 //   以下は API ジャーニー（apps/backend/api-journeys/ の直下の *.api-journey.test.ts）の中身の規則:
 //   - api-journey-no-in-memory: *.in-memory（InMemory の Repository）を import しない（`import type` も・`import()` も・`export … from` も）。
 //     WHY: ジャーニーは本番と同じ部品（Postgres の Repository）で API のつながりを確かめる。InMemory で組むと単体テストと同じになる。
@@ -418,7 +423,8 @@ const FORBIDDEN_WORDS_IN_FEATURE: readonly RegExp[] = [
   /状態\s*\d{3}/i,
   // HTTP の状態コード（3 桁の 1xx〜5xx）。後ろに業務の数の助数詞（文字・件・行）が続くものは除く（冒頭の WHY）。
   /\b[1-5]\d{2}\b(?!\s*(?:文字|件|行))/i,
-  /problem\s*details/i,
+  // WHY 区切りに _ と - も許す: `/problems/not-found`（Problem Details の type）・`not_found`（DomainError の code）の書き方も止める。
+  /problem[\s_-]*details/i,
   /JSON/i,
   /null/i,
   /undefined/i,
@@ -431,7 +437,7 @@ const FORBIDDEN_WORDS_IN_FEATURE: readonly RegExp[] = [
   /change_logs/i,
   /\bid\b/i,
   /uuid/i,
-  /not\s*found/i,
+  /not[\s_-]*found/i,
   // 業務の言葉は「タイトル」。
   /\btitle\b/i,
   /\bcompleted\b/i,
@@ -439,6 +445,10 @@ const FORBIDDEN_WORDS_IN_FEATURE: readonly RegExp[] = [
   /HTTP/i,
   /\b(?:GET|POST|PUT|PATCH|DELETE)\b/i,
   /エンドポイント/i,
+  /リクエスト/i,
+  /レコード/i,
+  /バリデーション/i,
+  /状態コード/i,
 ];
 
 // 仕切りの行（api-journey-section-divider）か。形は冒頭の説明。
@@ -450,13 +460,17 @@ function isSectionDivider(line: string): boolean {
 
 // .feature（isFeatureFile のファイル）の中身の違反（行の順。同じ行なら business-language が先）。
 function findFeatureContentViolations(source: string): ApiJourneyViolation[] {
-  const lines = source.split("\n");
+  // WHY \r?\n で分ける: CRLF のファイルを \n だけで分けると行末に \r が残り、仕切りの `─{5}$` が一致せず、すべての When が
+  //   仕切りの違反になる（reviewer の実測、Issue #217）。
+  const lines = source.split(/\r?\n/);
   // 今いる区画。シナリオの中の When だけが仕切りを要る。Feature / Rule の見出しでシナリオの外に戻る。
   let section: "scenario" | "background" | "other" = "other";
   return lines.flatMap((line, index): ApiJourneyViolation[] => {
     const lineNumber = index + 1;
     // WHY 行頭（字下げの後）の # だけをコメントにする: Gherkin のコメントは行全体だけで、行の途中の # は文の一部。
-    if (/^\s*(?:#|$)/.test(line)) {
+    // WHY 仕切りはコメントでも禁止語を見る（reviewer の指摘、Issue #217）: 仕切りの見出しは読者が拾い読みする行で、見ないと
+    //   `# ───── POST /api/todos で DB に insert ─────` のように技術の言葉を見出しに移すだけで検査を逃れられる。
+    if (/^\s*(?:#|$)/.test(line) && !isSectionDivider(line)) {
       return [];
     }
     if (/^\s*(?:Scenario(?: Outline| Template)?|Example)\s*:/.test(line)) {
@@ -1259,6 +1273,16 @@ describe(".feature の業務の言葉と仕切り（findApiJourneyViolations）:
       ),
     ],
     ["When の無い .feature（Feature だけ）", "Feature: x\n"],
+    [
+      "改行が CRLF（Windows の改行。仕切りの行末の \\r を形の違いにしない）",
+      [
+        ...FEATURE_HEAD,
+        DIVIDER,
+        '    When Todo "牛乳を買う" を作る',
+        '    Then 未完了の Todo "牛乳を買う" が作られる',
+        "",
+      ].join("\r\n"),
+    ],
   ])("%s は違反なし", (_name, text) => {
     expect(findApiJourneyViolations(FEATURE, text)).toEqual([]);
   });
@@ -1315,6 +1339,17 @@ describe(".feature の業務の言葉（api-journey-business-language）: must r
     ["HTTP のメソッド（GET）", "Then get で Todo を読む"],
     ["HTTP のメソッド（POST・PUT・PATCH）", "Then Post と Put と Patch で送る"],
     ["エンドポイント", "Then エンドポイントが Todo を返す"],
+    ["リクエスト", "Then リクエストが拒否される"],
+    ["レコード", "Then レコードが 1 件ある"],
+    ["バリデーション", "Then バリデーションで拒否される"],
+    ["状態コード", "Then 状態コードで成功が分かる"],
+    [
+      "not found（- 区切り。/problems/not-found）",
+      "Then /problems/not-found と伝えられる",
+    ],
+    ["not found（_ 区切り）", "Then not_found と伝えられる"],
+    ["Problem Details（- 区切り）", "Then problem-details が届く"],
+    ["Problem Details（_ 区切り）", "Then problem_details が届く"],
   ])("step（Then）に %s は違反", (_name, step) => {
     expect(
       findApiJourneyViolations(
@@ -1351,6 +1386,27 @@ describe(".feature の業務の言葉（api-journey-business-language）: must r
         line,
       })),
     );
+  });
+
+  // 仕切りは `#` で始まるが、読者が拾い読みする見出しなので禁止語を見る（reviewer の指摘、Issue #217）。
+  //   仕切りの形は正しいので、仕切りの違反（section-divider）は出さない。
+  it("仕切りの見出しに禁止語があれば、仕切りの行を違反にする", () => {
+    expect(
+      findApiJourneyViolations(
+        FEATURE,
+        source(
+          ...FEATURE_HEAD,
+          "    # ───── POST /api/todos で DB に insert ─────",
+          "    When Todo を作る",
+          "    Then 1 件になる",
+          "    # ───── Db を見る ─────",
+          "    When Todo の一覧を見る",
+        ),
+      ),
+    ).toEqual([
+      { rule: "api-journey-business-language", line: 7 },
+      { rule: "api-journey-business-language", line: 10 },
+    ]);
   });
 
   it("禁止語と仕切りの違反が同じ When の行にあれば、両方を行の順に返す", () => {
