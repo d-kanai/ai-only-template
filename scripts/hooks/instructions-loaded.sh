@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Claude Code の InstructionsLoaded フック（.claude/settings.json の hooks.InstructionsLoaded から呼ぶ）。
+# Claude Code の InstructionsLoaded フック（.claude/settings.json の hooks.InstructionsLoaded から呼ぶ）。Issue #64。
 #
 # WHAT: CLAUDE.md / .claude/rules/*.md などの指示ファイルが読み込まれるたびに、
 #   <リポジトリ直下>/.claude/state/instructions-loaded.jsonl に 1 行の JSON を追記する。
 #   {"ts": 実行時刻（ISO 8601 の UTC）, "file_path", "load_reason", "trigger_file_path", "memory_type"}（入力に無い項目は null）。
 # WHY: 実際にどの指示ファイルが、いつ・何をきっかけに読まれたか（session_start / path_glob_match / nested_traversal /
-#   include / compact）を後から確かめるため。rules の paths の書き間違いで
+#   include / compact）を後から確かめるため（Issue #64 の完了条件「読めているかを実証する」）。rules の paths の書き間違いで
 #   ルールが黙って読まれない、を記録で見つけられるようにする。
 # WHY .claude/state/: セッションごとの一時的な記録で、コミットしない（.gitignore 済み）。docs/work-logs/ に書かない理由は
 #   pre-compact.sh と同じ（Stop フックの判定が素通りになる）。

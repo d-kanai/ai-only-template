@@ -3,10 +3,10 @@
 # 1. 共有の Git フック（メインの .git/hooks の pre-commit・commit-msg）が、メイン以外の作業ツリー（worktree）の lefthook を
 #    指していないか。指していたら、メインの作業ツリーで lefthook install を実行して直す。
 #    WHY: .git/hooks は全 worktree で共有され、worktree で pnpm install / lefthook run / git commit をすると、共有のフックが
-#    worktree の lefthook を指すように書き換わる（LEARNINGS.md）。
+#    worktree の lefthook を指すように書き換わる（LEARNINGS.md の Issue #26 / #34 / #50。毎回手作業で直していた）。
 #    worktree を消すとフックが動かなくなるので、サブエージェントの終わりに直す。
 # 2. pnpm-lock.yaml に未コミットの変更がないか（サブエージェントの作業ツリーとメインの作業ツリー）。あれば警告する。
-#    WHY: pnpm exec などが install を走らせて lockfile を書き換えることがある（LEARNINGS.md）。依頼していない
+#    WHY: pnpm exec などが install を走らせて lockfile を書き換えることがある（LEARNINGS.md の Issue #50）。依頼していない
 #    lockfile の変化がコミットに紛れ込まないよう、オーケストレータに知らせる。
 # 結果は stdout の {"systemMessage": "..."}（ユーザーに表示される）で返す。何もなければ何も出さない。
 # WHY block しない（decision: "block" を返さない）: block はサブエージェントを動かし続ける指示になるが、共有フックはここで直し、
@@ -78,7 +78,7 @@ for name in pre-commit commit-msg; do
 done
 
 if [ "${#broken[@]}" -gt 0 ]; then
-  # WHY node_modules/.bin/lefthook を直接呼ぶ: pnpm exec は依存の状態によって install を走らせることがある（LEARNINGS.md）。
+  # WHY node_modules/.bin/lefthook を直接呼ぶ: pnpm exec は依存の状態によって install を走らせることがある（LEARNINGS.md の Issue #50）。
   #   無いとき（node_modules が無いなど）だけ pnpm exec にする。
   if [ -x "$main_root/node_modules/.bin/lefthook" ]; then
     repair=("$main_root/node_modules/.bin/lefthook" install)

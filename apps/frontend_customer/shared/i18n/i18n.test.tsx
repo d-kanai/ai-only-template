@@ -107,7 +107,7 @@ describe("defineMessages（ja を正とする辞書を定義する）", () => {
           // @ts-expect-error en の文言が空白だけ
           en: { a: " \n" },
         }),
-      // 全角の空白と \r も空白として扱う（日本語の入力で全角の空白だけの文言を書きうる）。
+      // 全角の空白と \r も空白として扱う（Issue #125 の reviewer 指摘。日本語の入力で全角の空白だけの文言を書きうる）。
       () =>
         defineMessages({
           // @ts-expect-error ja の文言が全角の空白だけ

@@ -58,7 +58,7 @@ describe("POST /api/todos", () => {
     });
   });
 
-  // WHY 本番の POST（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない
+  // WHY 本番の POST（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない（Issue #59）
   //   ことを、Postgres の Repository に保存されることで固定する。save を差し替えるので DB には接続しない。
   test("本番の POST は Postgres の Repository に保存する", async () => {
     const save = vi
@@ -74,7 +74,7 @@ describe("POST /api/todos", () => {
     expect(save.mock.calls[0]?.[0]).toMatchObject({ title: "牛乳を買う" });
   });
 
-  // presentation は domain より厳しくしない。domain が通す境界の値（1 文字・前後の空白付き）を presentation も通す。
+  // presentation は domain より厳しくしない（Issue #144）。domain が通す境界の値（1 文字・前後の空白付き）を presentation も通す。
   test("title の前後の空白を除いて 1 文字なら作れる", async () => {
     const { POST } = setup();
 
@@ -98,7 +98,7 @@ describe("POST /api/todos", () => {
 
   // 本文は RFC 9457 の Problem Details（problem.ts）。type・status・key・params・errors は画面との契約で、detail は英語の文言を
   //   固定する（problem-detail.en.ts）ので、本文全体を検証する。
-  // errors: presentation の zod スキーマの誤り（形と、domain と同じキーで重ねた必須・長さ）に付く。
+  // errors: presentation の zod スキーマの誤り（形と、domain と同じキーで重ねた必須・長さ。Issue #144）に付く。
   //   JSON として読めない誤りには付かない（problem.ts の Problem のコメント）。
   // WHY toStrictEqual: toEqual は undefined のプロパティと無いプロパティを同じとみなす。params・errors の無い誤りで
   //   本文にそのキーが出ないこと（JSON は undefined を出さないので、出ていれば値がある）も確かめる。
@@ -177,7 +177,8 @@ describe("POST /api/todos", () => {
         ],
       },
     ],
-    // WHY 形の誤りを 2 つ同時に置く: presentation は誤りを項目ごとにまとめて返す（1 つ直すたびに次の誤りが出る往復を無くす）。
+    // WHY 形の誤りを 2 つ同時に置く: presentation は誤りを項目ごとにまとめて返す（1 つ直すたびに次の誤りが出る往復を無くす。
+    //   Issue #144）。
     [
       "title が文字列でなく、定義されていない項目もある",
       JSON.stringify({ title: 1, extra: true }),

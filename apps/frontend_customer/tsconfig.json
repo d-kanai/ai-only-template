@@ -1,4 +1,4 @@
-// apps/frontend_customer の tsconfig。Next（pnpm build / pnpm dev → pnpm --filter @repo/frontend-customer → apps/frontend_customer の next build / next dev）が読む。
+// apps/frontend_customer の tsconfig（Issue #68）。Next（pnpm build / pnpm dev → pnpm --filter @repo/frontend-customer → apps/frontend_customer の next build / next dev）が読む。
 // ベースは create-next-app@16.3.6 が生成した tsconfig（Next の plugin、jsx、DOM の型）。
 {
   "compilerOptions": {
@@ -22,7 +22,7 @@
     ],
     // paths:
     //   "@/*": frontend の中の参照（apps/frontend_customer/*）。リポジトリ直下の tsconfig.json の paths と同じ行き先にする。
-    //   "@repo/backend/..." は paths に書かない。package.json の "@repo/backend": "workspace:*" で入る
+    //   "@repo/backend/..." は paths に書かない（Issue #68 の段階 2）。package.json の "@repo/backend": "workspace:*" で入る
     //   node_modules/@repo/backend（apps/backend への symlink）と、apps/backend/package.json の exports で解決する。
     //   exports に無いファイルを import すると、型チェック（next build・pnpm typecheck）で解決できずに失敗する。
     //   注意: Next（Turbopack）は backend のファイルの "@/" にもこの paths を当てるので、backend の中では "@/" を使わない

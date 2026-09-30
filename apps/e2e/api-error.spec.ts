@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 // API のエラー応答が、本番ビルド（next start）を通っても RFC 9457 の Problem Details（application/problem+json）で返ることを
-//   確かめる E2E テスト。本文の形は apps/backend の problem.test.ts と各 api のテストで固定しているので、ここでは
+//   確かめる E2E テスト（Issue #126）。本文の形は apps/backend の problem.test.ts と各 api のテストで固定しているので、ここでは
 //   Route Handler（app/api/**/route.ts の re-export）から Next の応答までの結線だけを見る: Next が Content-Type を
 //   書き換えないこと、本文の type・status・key・errors の pointer が届くこと。
 // WHY 画面ではなく request（Playwright の APIRequestContext）で呼ぶ: 画面は形の誤りの本文（未知の項目）を送らないので、
@@ -26,7 +26,7 @@ test("形の誤った本文で POST /api/todos を呼ぶと、400 の applicatio
   });
 });
 
-// presentation のリクエストのスキーマが、domain と同じ規則（必須・長さ）を同じキーで重ね、項目ごとの errors に
+// Issue #144: presentation のリクエストのスキーマが、domain と同じ規則（必須・長さ）を同じキーで重ね、項目ごとの errors に
 //   載せる。本番ビルドを通っても、空のタイトルが pointer（#/title）付きの errors で届き、上限の params が届くことを確かめる。
 test("空のタイトル・長すぎるタイトルで POST /api/todos を呼ぶと、errors の pointer が #/title を指し、key と params が届く", async ({
   request,

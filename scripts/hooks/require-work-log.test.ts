@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// Stop フック（scripts/hooks/require-work-log.sh）の仕様。
+// Stop フック（scripts/hooks/require-work-log.sh）の仕様。Issue #64。
 // このターンでツールを使ったのに、その日の作業ログ（docs/work-logs/<今日>.md）が作業ツリーでも今日のコミットでも変わっていなければ、
 // {"decision":"block"} で停止を拒否する。WHY と限界は .claude/rules/work-log.md。
 
@@ -45,7 +45,7 @@ const todayLog = `docs/work-logs/${today}.md`;
 
 type Entry = Record<string, unknown>;
 
-// transcript の 1 行（Claude Code の JSONL と同じ形。type と content の形は実セッションの transcript に合わせる）。
+// transcript の 1 行（Claude Code の JSONL と同じ形。2026-09-28 に実セッションの transcript で type と content の形を確認）。
 // timestamp に null を渡すと timestamp の無い行になる（undefined だと既定値が入るため null で表す）。
 const human = (
   text: string,
@@ -94,7 +94,7 @@ const turnWithTool = (prompt = "調べて"): Entry[] => [
 ];
 
 // 自動の wake（バックグラウンドの完了通知など）の時刻。テストの中で作るコミットより後にする。自動の wake を人間のターンと
-// 数えると、起点がこの時刻になり、それより前のログのコミットを見落として止めてしまう。
+// 数えると、起点がこの時刻になり、それより前のログのコミットを見落として止めてしまう（Issue #64 のオーケストレータの実測）。
 const wakeAt = new Date(now.getTime() + 10 * 60_000).toISOString();
 
 // 自動の wake として transcript に記録される user 行（type "user"・isMeta なし・文字列の content）。先頭の文字列で見分ける。
@@ -239,7 +239,7 @@ describe("require-work-log.sh（Stop フック）", () => {
 
   describe("停止を拒否する（must reject）", () => {
     // 前のターンで書いて未コミットのまま残ったログ（ファイルの更新時刻が起点より前）。git status では「変わっている」ままなので、
-    // 作業ツリーの変更だけを見ると、以後のターンはログを書かずに通ってしまう。
+    // 作業ツリーの変更だけを見ると、以後のターンはログを書かずに通っていた（reviewer 指摘）。
     it("前のターンで書いた未コミットのログ（未追跡・更新時刻が最後の人間のターンより前）だけなら拒否する", () => {
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# 前のターンで書いた\n");
@@ -351,7 +351,7 @@ describe("require-work-log.sh（Stop フック）", () => {
     });
 
     it("docs/work-logs/<今日>.md が、今日だが最後の人間のターンより前のコミットでしか変わっていなければ拒否する", () => {
-      // 今日の 0 時を起点にすると、1 日の中で 1 度ログをコミットすれば、以後のターンが素通りしてしまう。
+      // 1 日の中で 1 度ログをコミットすると、以後のターンが素通りしていた（Issue #64 の worker の実測で 66 件）。
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# 今日\n");
       commit("log", {
@@ -396,8 +396,8 @@ describe("require-work-log.sh（Stop フック）", () => {
       );
     });
 
-    // WHY リポジトリ直下の work-logs/ を must reject に置く: 置き場所は docs/work-logs/ だけ。直下の work-logs/ に書いたログで
-    //   通すと、リポジトリ直下に work-logs/ を作って書く誤りを見逃す。
+    // WHY 旧い置き場所を must reject に置く: Issue #101 で work-logs/ を docs/ の下に移した。旧い置き場所に書いたログで
+    //   通すと、リポジトリ直下に作り直した旧いディレクトリに書く誤りを見逃す。
     it("旧い置き場所（リポジトリ直下の work-logs/<今日>.md）にこのターンで書いただけなら拒否する", () => {
       writeTranscript(turnWithTool());
       writeRepoFile(`work-logs/${today}.md`, "# 旧い置き場所\n");

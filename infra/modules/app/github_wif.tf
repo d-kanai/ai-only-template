@@ -40,7 +40,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   #   WHY: prod の Environment に required reviewers を付けたとき、承認を通らない job（environment を書かないワークフローや、
   #   environment: stg の job）が prod のプロジェクトに入れないようにする。Variables は秘密ではないので、prod の WIF の値は
   #   誰でも書ける。GitHub の OIDC トークンの environment の claim は「job が使う Environment の名前」
-  #   （https://docs.github.com/en/actions/reference/security/oidc ）。未確認: environment を参照しない job の
+  #   （https://docs.github.com/en/actions/reference/security/oidc 、2026-09-30 確認）。未確認: environment を参照しない job の
   #   トークン（claim が無い）が実際に拒否されること（初回のデプロイの後に確かめる。.claude/skills/deploy/SKILL.md）。
   attribute_condition = join(" && ", compact([
     "assertion.repository == \"${var.github_repository}\"",

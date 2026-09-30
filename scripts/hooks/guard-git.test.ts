@@ -105,7 +105,7 @@ function bash(
 
 describe("サブエージェント（agent_type / agent_id がある）", () => {
   // WHY 文字列のどこにあっても拒否するか: `-C` / `bash -c` / `&&` の後ろは permissions.deny では塞げない（公式の permissions
-  //   ドキュメント「What a rule doesn't match」）。フックはシェルの構文解析をせず、コマンド文字列全体から拾う。
+  //   ドキュメント「What a rule doesn't match」、Issue #64 の実測）。フックはシェルの構文解析をせず、コマンド文字列全体から拾う。
   it.each([
     ["git commit -m x"],
     ["git -C /tmp/x commit -m x"],
@@ -431,7 +431,7 @@ describe("入力を読めないとき", () => {
   });
 });
 
-// 取り違えやすい書き方のケース。見逃す書き方（must reject）と、似ているが危険でない書き方（must pass）を並べる。
+// reviewer の指摘（Issue #64）で足したケース。見逃す書き方（must reject）と、似ているが危険でない書き方（must pass）を並べる。
 describe("長いオプションの省略形（git は一意な接頭辞を受け付ける）", () => {
   // 最短の接頭辞の根拠（git 2.43.0 の builtin/commit.c・push.c・merge.c のオプション定義）:
   // - --no-v: commit / push / merge の --no-verify。--no-v〜--no-ver は --no-verbose とも一致して git では曖昧（エラー）に

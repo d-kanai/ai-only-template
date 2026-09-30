@@ -8,8 +8,8 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 // GET /api/todos/:id: Todo を 1 件返す。無ければ 404。
 
 // 同じ形の Response を各 *.api.ts に書く。
-//   WHY: 1 API = 1 ファイルで契約をそのファイルだけで読めるようにする。共通の dto.ts も共通の DTO 型の別名も作らず、
-//   domain の Todo を各 API の Response に直接写す。
+//   WHY: 1 API = 1 ファイルで契約をそのファイルだけで読めるようにする。共通の dto.ts を作らない（ユーザー判断）。
+//   Issue #139 で共通の DTO 型の別名もやめ、domain の Todo を各 API の Response に直接写す。
 export type GetTodoResponse = {
   id: string;
   title: string;
@@ -31,8 +31,9 @@ function toResponse(todo: Todo): GetTodoResponse {
   };
 }
 
-// WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包む:
-//   list-todos.api.ts の ListTodosApi のコメント。
+// GET /api/todos/:id の Route Handler を持つクラス。コンストラクタで query を受け取り、handle を Route Handler として export する
+//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包むは
+//   list-todos.api.ts の ListTodosApi のコメント）。
 export class GetTodoApi {
   constructor(private readonly getTodo: Pick<GetTodoQuery, "execute">) {}
 

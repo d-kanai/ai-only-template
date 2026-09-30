@@ -60,7 +60,7 @@ function getRequest(id: string): Request {
 
 // 問い合わせを記録するリポジトリ。uuid の形でない id で、presentation が query / command に渡す前に
 //   404 にしていること（parseUuidParam）を、Repository が呼ばれないことで確かめる。
-// WHY spy で確かめる（その id の Todo を置いて「あっても 404」を見ない）: Todo は常に不変条件
+// WHY spy で確かめる（その id の Todo を置いて「あっても 404」を見ない）: Issue #94 から Todo は常に不変条件
 //   （id は uuid の形）を満たすので、uuid の形でない id の Todo は作れない。空のリポジトリで 404 を見るだけだと、
 //   id をそのまま渡しても「無い」の 404 になり、presentation の検査を外しても通ってしまう。
 function spiedRepository() {
@@ -98,8 +98,8 @@ describe("GET /api/todos/:id", () => {
     });
   });
 
-  // WHY 本番の GET（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない
-  //   ことを、Postgres の Repository が呼ばれることで固定する。findById を差し替えるので DB には接続しない。
+  // WHY 本番の GET（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない（Issue #59）
+  //   ことを、Postgres の Repository が呼ばれることで固定する。findById をを差し替えるので DB には接続しない。
   test("本番の GET は Postgres の Repository から読む", async () => {
     const todo = Todo.create("牛乳を買う");
     const findById = vi

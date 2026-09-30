@@ -21,7 +21,7 @@ import type { Database } from "./database";
 
 // createTestDatabase が作るスキーマの名前の接頭辞。cleanupTestSchemas はこれで始まるスキーマを消す。
 // WHY 関数の中に置く（モジュールの最上位の定数にしない）: 最上位の式は読み込み時にだけ評価される static な変異になり、
-//   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に評価すれば、変異をテストで検出できる。
+//   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に評価すれば、変異をテストで検出できる（Issue #55）。
 export function testSchemaPrefix(): string {
   return "test_";
 }
@@ -41,7 +41,9 @@ export type TestDatabase = {
 export async function createTestDatabase(): Promise<TestDatabase> {
   const url = env.DATABASE_URL;
   const schema = `${testSchemaPrefix()}${randomUUID().replaceAll("-", "")}`;
-  // max 4: 同時に複数の接続を使うテストを足しても、接続待ちで止まらないようにする。
+  // max 4: 以前はトランザクションの runner のテストが「トランザクションの中」と「外」の 2 本を同時に使うため 2 以上にしていた
+  //   （Issue #123 で runner を廃止）。値はそのまま残す（下げる理由が無く、同時に複数の接続を使うテストを足しても
+  //   接続待ちで止まらない）。
   // options: 接続の開始時に Postgres に渡す設定（node-postgres の options）。search_path をテスト用のスキーマだけにする。
   const pool = new Pool({
     connectionString: url,
@@ -53,10 +55,10 @@ export async function createTestDatabase(): Promise<TestDatabase> {
   return {
     db,
     url,
-    // migrationsFolder: apps/backend/shared/drizzle/（このファイルから ../drizzle）。
-    //   WHY このファイルの場所から決める: カレントディレクトリからのパス（"drizzle"）だと、テストを動かすディレクトリによって
-    //   見つからない。このファイルは Vitest だけが読み込み（Next のバンドルには入らない）、import.meta.dirname は元のファイルの
-    //   場所を指す。
+    // migrationsFolder: apps/backend/shared/drizzle/（このファイルから ../drizzle。Issue #98 で apps/backend 直下の drizzle/ から移した）。
+    //   WHY このファイルの場所から決める: カレントディレクトリからのパス（"drizzle"）だと、ディレクトリを apps/backend に
+    //   移したとき（Issue #68）や、テストをリポジトリ直下以外から動かしたときに見つからない。このファイルは Vitest だけが
+    //   読み込み（Next のバンドルには入らない）、import.meta.dirname は元のファイルの場所を指す。
     // migrationsSchema: 当てた記録の表（__drizzle_migrations）もテスト用のスキーマに置く。既定の drizzle スキーマに置くと、
     //   pnpm db:migrate の記録と混ざり、「当て済み」と判断されてテスト用のスキーマに表が作られない。
     migrate: () =>
@@ -104,7 +106,7 @@ export async function cleanupTestSchemas(
     await client.connect();
   } catch (error) {
     await client.end();
-    // WHY 英語の文言: apps/backend の非テストコード（*.test.ts 以外）には自然言語の日本語を置かない。
+    // WHY 英語の文言: apps/backend の非テストコード（*.test.ts 以外）には自然言語の日本語を置かない（Issue #116）。
     throw new Error(
       `cannot connect to Postgres (${url}). Unit tests need Postgres: start it with pnpm db:up and run again`,
       { cause: error },

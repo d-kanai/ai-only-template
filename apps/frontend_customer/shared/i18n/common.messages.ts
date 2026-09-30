@@ -1,6 +1,6 @@
 import { defineMessages } from "./i18n";
 
-// 共通の辞書: 画面をまたいで使う文言だけを置く。画面・部品に固有の文言は、その画面・部品の隣の *.messages.ts に置く。
+// 共通の辞書: 画面をまたいで使う文言だけを置く（Issue #125）。画面・部品に固有の文言は、その画面・部品の隣の *.messages.ts に置く。
 // 置くもの:
 //   - サーバのエラー: backend の ErrorKey と同じ文字列のキー（<対象>.<項目>.<理由>。例 "todo.title.tooLong"）。
 //     backend の ErrorKey がすべてここにあることは、features/todo/api/api-error.ts の ApiErrorKey の型の制約で止める。

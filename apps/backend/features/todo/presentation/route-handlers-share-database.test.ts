@@ -7,7 +7,7 @@ import type { Database } from "../../../shared/infra/database";
 // Route Handler を 1 回だけ組み立てる（組み立ては api ファイルごと。list-todos.api.ts の GET のコメント）。
 // このテストは「api ファイルをすべて読み込んでも、Repository に渡る db は 1 つ（= プールは Next のサーバプロセスで 1 つ）」を固定する。
 // WHY: api ファイルごとに getDatabase() を呼ぶ設計は、getDatabase が同じものを返すことに依存している。呼ぶたびに
-//   新しいプールを作る実装に変わると、api ファイルの数だけプールができて max_connections を食いつぶす。
+//   新しいプールを作る実装に変わると、api ファイルの数だけプールができて max_connections を食いつぶす（Issue #132）。
 //   モジュールの読み直し（HMR）で同じプールが返ることは shared/infra/database.test.ts が固定する。
 
 // presentation の api ファイル（拡張子を除いた名前）。数を固定せずに読むのは、api を足したときにこのテストを直さなくてよいようにするため。

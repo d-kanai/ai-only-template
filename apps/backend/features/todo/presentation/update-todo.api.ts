@@ -13,7 +13,7 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 
 // PUT /api/todos/:id: Todo の title / completed を更新する。無ければ 404。
 
-// リクエスト本文の「形」（項目の型。未知の項目は拒否）に、title の必須・長さを domain と同じ規則で重ねる。
+// リクエスト本文の「形」（項目の型。未知の項目は拒否）に、title の必須・長さを domain と同じ規則で重ねる（Issue #144）。
 // 部分更新: 送った項目だけを更新する（PUT だが PATCH 相当の意味にしている。CRUD の雛形として動詞を減らすため）。
 // WHY title の空・長さも見る・domain と同じキーと定数にする: create-todo.api.ts の createTodoRequestSchema のコメント。
 //   不変条件の正は domain（Todo#rename が常に完全に検証する）。
@@ -45,8 +45,8 @@ export type UpdateTodoRequest = z.infer<
 >;
 
 // 同じ形の Response を各 *.api.ts に書く。
-//   WHY: 1 API = 1 ファイルで契約をそのファイルだけで読めるようにする。共通の dto.ts も共通の DTO 型の別名も作らず、
-//   domain の Todo を各 API の Response に直接写す。
+//   WHY: 1 API = 1 ファイルで契約をそのファイルだけで読めるようにする。共通の dto.ts を作らない（ユーザー判断）。
+//   Issue #139 で共通の DTO 型の別名もやめ、domain の Todo を各 API の Response に直接写す。
 export type UpdateTodoResponse = {
   id: string;
   title: string;
@@ -67,8 +67,9 @@ function toResponse(todo: Todo): UpdateTodoResponse {
   };
 }
 
-// WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包む:
-//   list-todos.api.ts の ListTodosApi のコメント。
+// PUT /api/todos/:id の Route Handler を持つクラス。コンストラクタで command を受け取り、handle を Route Handler として export する
+//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包むは
+//   list-todos.api.ts の ListTodosApi のコメント）。
 export class UpdateTodoApi {
   constructor(
     private readonly updateTodo: Pick<UpdateTodoCommand, "execute">,

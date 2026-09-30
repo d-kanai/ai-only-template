@@ -1,6 +1,6 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# dependencies（pnpm workspace では apps/*/node_modules もできる）
+# dependencies（pnpm workspace では apps/*/node_modules もできる。Issue #68 の段階 2）
 node_modules/
 /.pnp
 .pnp.*
@@ -13,7 +13,7 @@ node_modules/
 # testing
 /coverage
 
-# next.js（pnpm build → pnpm --filter @repo/frontend-customer build → apps/frontend_customer の next build は apps/frontend_customer/.next/ に出力する）
+# next.js（pnpm build → pnpm --filter @repo/frontend-customer build → apps/frontend_customer の next build は apps/frontend_customer/.next/ に出力する。Issue #68）
 /apps/frontend_customer/.next/
 /out/
 
@@ -47,8 +47,8 @@ gha-creds-*.json
 next-env.d.ts
 
 # playwright（E2E テストの実行結果・レポート。実行のたびに生成される）
-# WHY apps/e2e/ の下: Playwright の出力先（outputDir など）の既定は、設定ファイルに近い package.json のディレクトリ（E2E は
-#   workspace パッケージ apps/e2e なので apps/e2e）からの相対パスになる。
+# WHY apps/e2e/ の下: Playwright の出力先（outputDir など）の既定は、設定ファイルに近い package.json のディレクトリ（Issue #84 で
+#   E2E を workspace パッケージ apps/e2e にしたので apps/e2e）からの相対パスになる。
 /apps/e2e/test-results/
 /apps/e2e/playwright-report/
 /apps/e2e/blob-report/
@@ -58,15 +58,15 @@ next-env.d.ts
 /reports/
 /.stryker-tmp/
 
-# Claude Code のフックの記録。scripts/hooks/pre-compact.sh が compact 直前の作業状態を pre-compact.md に、
+# Claude Code のフックの記録（Issue #64）。scripts/hooks/pre-compact.sh が compact 直前の作業状態を pre-compact.md に、
 # scripts/hooks/instructions-loaded.sh が読み込まれた指示ファイルを instructions-loaded.jsonl に書く。
 # WHY コミットしない: セッションごとの一時的な記録で、人が読む作業の記録は docs/work-logs/ に書く（.claude/rules/work-log.md）。
 /.claude/state/
-# isolation: worktree のサブエージェントが作る git worktree（.claude/worktrees/agent-<id>）。
+# isolation: worktree のサブエージェントが作る git worktree（.claude/worktrees/agent-<id>。Issue #64 の実測）。
 # WHY コミットしない: worktree は別の作業ツリーで、本体の作業ツリーから見ると未追跡のディレクトリとして git status に出てしまう。
 /.claude/worktrees/
 
-# terraform（infra/）
+# terraform（infra/。Issue #137）
 # .terraform/: terraform init が provider のバイナリとバックエンドの設定を置く作業ディレクトリ（数百 MB。init で作り直せる）。
 # *.tfstate / *.tfstate.*: state（DB のホスト名などの値を含む）。state は GCS のバックエンドに置く（infra/envs/<環境>/backend.tf）ので、
 #   手元にできたら誤ってコミットしないように無視する（init の前の apply やバックアップ）。

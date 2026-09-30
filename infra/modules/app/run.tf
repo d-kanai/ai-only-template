@@ -42,7 +42,8 @@ resource "google_cloud_run_v2_service" "customer" {
 
     # Cloud Run 組み込みの Cloud SQL 接続。/cloudsql/<接続名>/.s.PGSQL.5432 に Unix ソケットを置く（中で Auth Proxy が動き、
     #   TLS と IAM で Cloud SQL に接続する）。WHY Cloud SQL Connector（ライブラリ）や Private IP を使わない: コードの変更も
-    #   VPC も要らず、DATABASE_URL の host をソケットのディレクトリにするだけで pg と drizzle-kit がつながる。
+    #   VPC も要らず、DATABASE_URL の host をソケットのディレクトリにするだけで pg と drizzle-kit がつながる
+    #   （2026-09-30 の work-logs）。
     volumes {
       name = "cloudsql"
       cloud_sql_instance {

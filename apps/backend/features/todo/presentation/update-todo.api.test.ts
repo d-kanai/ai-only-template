@@ -70,7 +70,7 @@ function putRequest(id: string, body: string): Request {
 
 // 問い合わせを記録するリポジトリ。uuid の形でない id で、presentation が query / command に渡す前に
 //   404 にしていること（parseUuidParam）を、Repository が呼ばれないことで確かめる。
-// WHY spy で確かめる（その id の Todo を置いて「あっても 404」を見ない）: Todo は常に不変条件
+// WHY spy で確かめる（その id の Todo を置いて「あっても 404」を見ない）: Issue #94 から Todo は常に不変条件
 //   （id は uuid の形）を満たすので、uuid の形でない id の Todo は作れない。空のリポジトリで 404 を見るだけだと、
 //   id をそのまま渡しても「無い」の 404 になり、presentation の検査を外しても通ってしまう。
 function spiedRepository() {
@@ -142,7 +142,7 @@ describe("PUT /api/todos/:id", () => {
     });
   });
 
-  // presentation は domain より厳しくしない。domain が通す境界の値（前後の空白を除いて 1 文字・100 文字、
+  // presentation は domain より厳しくしない（Issue #144）。domain が通す境界の値（前後の空白を除いて 1 文字・100 文字、
   //   絵文字は 1 文字と数える）を presentation も通し、domain と同じく trim した値で保存する。
   test.each([
     ["1 文字", " a ", "a"],
@@ -166,8 +166,8 @@ describe("PUT /api/todos/:id", () => {
     },
   );
 
-  // WHY 本番の PUT（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない
-  //   ことを、Postgres の Repository が呼ばれることで固定する。findById と save を差し替えるので DB には接続しない。
+  // WHY 本番の PUT（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない（Issue #59）
+  //   ことを、Postgres の Repository が呼ばれることで固定する。findById と save をを差し替えるので DB には接続しない。
   test("本番の PUT は Postgres の Repository に保存する", async () => {
     const todo = Todo.create("牛乳を買う");
     vi.spyOn(PostgresTodoRepository.prototype, "findById").mockResolvedValue(
@@ -247,7 +247,7 @@ describe("PUT /api/todos/:id", () => {
   );
 
   // 本文は RFC 9457 の Problem Details で、本文全体を toStrictEqual で検証する（WHY は create-todo.api.test.ts と同じ）。
-  //   errors は presentation の zod スキーマの誤り（形と、domain と同じキーで重ねた必須・長さ）に付く。
+  //   errors は presentation の zod スキーマの誤り（形と、domain と同じキーで重ねた必須・長さ。Issue #144）に付く。
   test.each<[string, string, ProblemBody]>([
     [
       "JSON でない",
@@ -348,7 +348,7 @@ describe("PUT /api/todos/:id", () => {
         ],
       },
     ],
-    // WHY 誤りを同時に置く: presentation は誤りを項目ごとにまとめて返す。
+    // WHY 誤りを同時に置く: presentation は誤りを項目ごとにまとめて返す（Issue #144）。
     [
       "title が長すぎ、completed が boolean でなく、定義されていない項目もある",
       JSON.stringify({ title: "a".repeat(101), completed: 1, extra: true }),

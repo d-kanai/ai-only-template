@@ -20,7 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const repoRoot = resolve(__dirname, "..", "..");
 const scriptPath = join(repoRoot, "scripts", "hooks", "check-commit-msg.sh");
 // WHY pnpm exec を使わない: pnpm exec は依存の状態によって install を走らせ、共有の .git/hooks を書き換えうる
-//   （LEARNINGS.md）。node_modules/.bin の lefthook を直接呼ぶ。
+//   （LEARNINGS.md の Issue #50）。node_modules/.bin の lefthook を直接呼ぶ。
 const lefthookBin = join(repoRoot, "node_modules", ".bin", "lefthook");
 
 const VALID = [

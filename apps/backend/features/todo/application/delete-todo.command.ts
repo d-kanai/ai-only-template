@@ -1,5 +1,6 @@
 import type { TodoRepository } from "../domain/todo-repository";
 
+// Todo を削除する（command: 状態を変える）。
 export class DeleteTodoCommand {
   constructor(private readonly repository: TodoRepository) {}
 

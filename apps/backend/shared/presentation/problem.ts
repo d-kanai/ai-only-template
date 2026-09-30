@@ -8,15 +8,15 @@ import {
 } from "../domain/error-key";
 import { problemDetail } from "./problem-detail.en";
 
-// エラー応答を RFC 9457（Problem Details for HTTP APIs。https://www.rfc-editor.org/rfc/rfc9457.html ）の形にする。
-// WHY RFC 9457 に準拠する: HTTP API のエラー本文の標準で、Spring の ProblemDetail・ASP.NET Core の
-//   ProblemDetails が実装し、Zalando の API ガイドラインが MUST にしている。
-//   独自の形だと、クライアントや汎用のツールが形を個別に知る必要がある。
+// エラー応答を RFC 9457（Problem Details for HTTP APIs。https://www.rfc-editor.org/rfc/rfc9457.html ）の形にする（Issue #126）。
+// WHY RFC 9457 に準拠する（ユーザー判断）: HTTP API のエラー本文の標準で、Spring の ProblemDetail・ASP.NET Core の
+//   ProblemDetails が実装し、Zalando の API ガイドラインが MUST にしている（一次情報は 2026-09-29 の work-logs）。
+//   独自の形（Issue #126 の前の、error の中に code・key・params と項目ごとの誤りを入れた形）だと、クライアントや汎用のツールが形を個別に知る必要がある。
 //   決定と採用しなかった案は ADR docs/adr/architecture/20260929-error-response-rfc9457.md。
 
 // WHY ここから再公開する: 画面（apps/frontend_customer）が backend から import してよいのは apps/backend/package.json の exports に
 //   書いたファイルだけで、shared/domain/error-key.ts は公開していない。画面の辞書はキーと params の形をこの型から作る
-//   （キーを足すと画面の辞書が型エラーで追従を求める）。exports を増やさずに済むよう、Problem と同じ
+//   （キーを足すと画面の辞書が型エラーで追従を求める。Issue #116）。exports を増やさずに済むよう、Problem と同じ
 //   このファイルから出す。
 export type { ErrorKey, ErrorKeyParams };
 
@@ -57,7 +57,7 @@ export type ProblemErrorInput = Omit<ProblemError, "detail">;
 // エラー時のレスポンス本文（Content-Type: application/problem+json）。全 API で同じ形にする。
 // 標準のメンバー（type・title・status・detail・instance）と、このアプリの拡張メンバー（key・params・errors）。
 // WHY 画面は key と params だけで分岐・翻訳する（detail を読まない）: detail は開発者向けの英語で、言い回しを変えても
-//   画面が壊れないよう契約に含めない（画面の文言は画面の辞書だけが持つ）。
+//   画面が壊れないよう契約に含めない（Issue #126。画面の文言は画面の辞書だけが持つ。Issue #116）。
 export type Problem = {
   type: ProblemType;
   // 種類ごとに固定の英語の短い要約。RFC 9457 の 3.1.3 節: 発生ごとに変えない（翻訳を除く）。翻訳はしない。
@@ -66,7 +66,7 @@ export type Problem = {
   status: number;
   // この発生に固有の説明（RFC 9457 の 3.1.4 節）。key と params から作る英語（problem-detail.en.ts）。
   detail: string;
-  // この発生を指す URI 参照。リクエストの URL のパス。クエリは含めない（リクエストログ（request-log.ts）と同じ方針でクエリの値は出さない。
+  // この発生を指す URI 参照。リクエストの URL のパス。クエリは含めない（リクエストログと同じ方針でクエリの値は出さない。Issue #85。
   //   パスの id は params.id と detail にも出るので、パスを隠す理由にはならない）。
   instance: string;
   // 何が起きたかを表す安定したキー（error-key.ts）。画面はこれを辞書で翻訳し、分岐にも使う。
@@ -74,8 +74,8 @@ export type Problem = {
   key: ErrorKey;
   // 文言に埋め込む値（上限の文字数・id など）。params の無いキーでは本文にキーごと出さない。
   params?: ErrorParams;
-  // presentation の zod スキーマ（リクエストの形と、domain と同じキーで重ねた必須・長さ）の誤りのときだけ付く、
-  //   項目ごとの誤りの一覧。
+  // presentation の zod スキーマ（リクエストの形と、domain と同じキーで重ねた必須・長さ。Issue #144）の誤りのときだけ付く、
+  //   項目ごとの誤りの一覧（Issue #88）。
   // WHY presentation の誤りだけ: domain の不変条件の誤り（DomainError）は key 1 つで、domain はリクエストの項目名を知らない
   //   （domain にリクエストの都合を持ち込まない）。項目ごとに返したい値の規則は presentation のスキーマで重ねる
   //   （.claude/rules/backend.md の presentation）。JSON として読めない誤りも項目が無いので付けない。
@@ -115,12 +115,13 @@ export class InvalidRequestError<K extends ErrorKey = ErrorKey> extends Error {
   }
 }
 
+// 応答の種類。DomainError の code と、想定外の例外（internal_error）。
 type ProblemCategory = DomainErrorCode | "internal_error";
 
 // WHY Record<ProblemCategory, ...> にする: DomainErrorCode に種類を足したとき、ここに type・title・status を書き忘れると
 //   型エラーになり、変換漏れを防げる。
 // WHY 関数の中に置く（モジュールの最上位の定数にしない）: 最上位の式は読み込み時にだけ評価される static な変異になり、
-//   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に評価すれば、変異をテストで検出できる。
+//   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に評価すれば、変異をテストで検出できる（Issue #55）。
 function problemKindOf(
   category: ProblemCategory,
 ): Pick<Problem, "type" | "title" | "status"> {
@@ -198,7 +199,7 @@ export function toProblemResponse(error: unknown, request: Request): Response {
   // WHY ログに残す: 想定外の例外は原因を調べる必要がある。レスポンスでは詳細を隠すので、
   //   サーバのログ（stderr の 1 行の JSON）にだけ残す。ログはすべて logger を通す（.claude/rules/backend.md の「ログ」）。
   //   Error は logger が { name, message } にする（stack は出さない）。
-  // WHY 英語の固定の文言: ログは開発者が読むもので、apps/backend の非テストコードには日本語を置かない。
+  // WHY 英語の固定の文言: ログは開発者が読むもので、apps/backend の非テストコードには日本語を置かない（Issue #116）。
   logger.error({ message: "unexpected error", error });
   // WHY 固定のキーと detail にする: 例外の message には内部の情報（接続先、SQL など）が含まれうるため、クライアントに返さない。
   return problemResponse(
@@ -211,9 +212,9 @@ export function toProblemResponse(error: unknown, request: Request): Response {
 }
 
 // presentation の各 api の handle（Route Handler）を包み、handler が投げた例外を toProblemResponse で Problem Details の
-//   Response にする。各 api は `readonly handle = withProblemResponse(async (request[, ctx]) => { ... })` と書く。
-// WHY 包む関数にする: 各 api が try { ... } catch (error) { return toProblemResponse(error, request); } を手書きすると
-//   書き忘れが起きる。Next の Route Handler には共通の catch が無い（Proxy は handler の例外を捕まえず、instrumentation の
+//   Response にする（Issue #141）。各 api は `readonly handle = withProblemResponse(async (request[, ctx]) => { ... })` と書く。
+// WHY 包む関数にする: 以前は 5 本の api が同じ try { ... } catch (error) { return toProblemResponse(error, request); } を
+//   手書きしていた。Next の Route Handler には共通の catch が無い（Proxy は handler の例外を捕まえず、instrumentation の
 //   onRequestError は記録するだけ）ので、1 本でも書き忘れると Problem Details ではない Next の素の 500 がクライアントに漏れる。
 //   書き忘れは規則 presentation-with-problem-response（rule-tests/architecture.test.ts）が止める。
 // WHY handle の意味（Route Handler そのもの）と形（アロー関数のプロパティ）は変えない: 戻り値は handler と同じ引数の関数なので、
@@ -221,7 +222,7 @@ export function toProblemResponse(error: unknown, request: Request): Response {
 //   包む対象はアロー関数のままなので、中の this はインスタンスを指し続ける。
 // WHY Args を型引数にして引数をそのまま透過する: (request) と (request, ctx: { params: Promise<...> }) の両方の handler を
 //   同じ関数で包み、ctx の型（動的セグメントの名前）を呼び出し側に残すため。先頭は Request に固定する（instance に使う）。
-// WHY parseJsonBody や await ctx.params を共通化しない: 本文の有無・動的セグメントの有無と、id と本文を
+// WHY parseJsonBody や await ctx.params を共通化しない（ユーザー判断）: 本文の有無・動的セグメントの有無と、id と本文を
 //   確かめる順番（update-todo.api.ts は id を先に見て 404 を優先する）が api ごとに違い、handler の中に書いた方が
 //   その api の処理を 1 か所で読める。ここは例外の変換だけを受け持つ。
 // WHY handler の呼び出しを try の中に置く（handler(...args).catch(...) にしない）: async でない handler が同期で throw
