@@ -11,7 +11,7 @@
 ## 決定
 - 書き込みの唯一の入口 `writeInTransaction(db, { table, rowId, operation }, async (tx) => entries)` を `apps/backend/shared/infra/write.ts` に置く。トランザクションを張り、コールバック（本体の書き込み）が返した記録を同じトランザクションの最後に `recordChange` で `change_logs` に書き、前に info `repository write start`、後に info `repository write done`（`durationMs` と `changes` の `tableName`・`rowId`・`operation`）、失敗なら warn `repository write failed`（`durationMs` と `error`。DB のエラーは message を出さず、pg のエラーの name・`sqlState`（SQLSTATE）・`constraint`（制約の名前）だけ）を出して同じ例外を投げ直す。
 - ログに値（`changes` の before / after）は出さない。`table` は Drizzle の表から `getTableName` で取る。
-- `*.postgres.ts` が `transaction` / `recordChange` を直接使うことと、書き込みがあるのに `write` を値で import しないことを `rule-tests/persistence.test.ts` が止める（`no-direct-transaction` / `no-direct-record-change` / `writes-through-write-in-transaction`）。ADR `architecture/20260930-change-logs-written-by-repository.md` の検査（`change-log` の import と、`recordChange(` を `transaction(` の中に書くこと）は、これに置き換えた。変更履歴の決定そのもの（何を・どの表に・同じトランザクションで）は変えない。
+- `*.postgres.ts` が `transaction` / `recordChange` を直接使うことと、書き込みがあるのに `write` を値で import しないことを `rule-tests/persistence.test.ts` が止める（`no-direct-transaction` / `no-direct-record-change` / `writes-through-write-in-transaction`）。`db` を受け手にした書き込み（`db.insert(` / `db.update(` / `db.delete(`。入口を import したうえでコールバックの外に書く抜け道）も `no-direct-db-write` が止める。ADR `architecture/20260930-change-logs-written-by-repository.md` の検査（`change-log` の import と、`recordChange(` を `transaction(` の中に書くこと）は、これに置き換えた。変更履歴の決定そのもの（何を・どの表に・同じトランザクションで）は変えない。
 
 ## 理由
 - 入口を 1 つにすれば、Repository は本体の書き込みと記録を返すだけで、ログと変更履歴が必ず付く。入口以外の書き方は検査で止まる（原則 7。文章の規則より機械の検査）。
@@ -26,5 +26,5 @@
 
 ## 影響
 - 良い点: Postgres の Repository の書き込みは、どれも前後のログ・所要時間・書いた行の一覧と変更履歴を同じ形で残す。新しい Repository も入口を通すだけで付く。
-- 悪い点: DB のエラー（drizzle-orm 0.45.3 の DrizzleQueryError）の message は SQL とパラメータの値を含み（`drizzle-orm/errors.js` のコンストラクタが `Failed query: <SQL>\nparams: <値>` を message にする）、元の pg のエラーの message もデータ例外（SQLSTATE 22 系。22P02 の `invalid input syntax for type uuid: "<入力>"`・22003 の `value "<入力>" is out of range`）は入力値を含む。そのため書き込みのログでは DB のエラーの message を出さず、SQLSTATE と制約の名前で失敗を見分ける（message の文言は追えない）。500 のときの `toProblemResponse` の `logger.error` には値が残る（別 Issue）。InMemory（テスト用）はログを出さない。検査は import と名前の字句で見るので、import したうえでコールバックの外で `this.db.insert(` を書くと見逃す（Repository のテストがログと記録を固定する）。
+- 悪い点: DB のエラー（drizzle-orm 0.45.3 の DrizzleQueryError）の message は SQL とパラメータの値を含み（`drizzle-orm/errors.js` のコンストラクタが `Failed query: <SQL>\nparams: <値>` を message にする）、元の pg のエラーの message もデータ例外（SQLSTATE 22 系。22P02 の `invalid input syntax for type uuid: "<入力>"`・22003 の `value "<入力>" is out of range`）は入力値を含む。そのため書き込みのログでは DB のエラーの message を出さず、SQLSTATE と制約の名前で失敗を見分ける（message の文言は追えない）。500 のときの `toProblemResponse` の `logger.error` には値が残る（別 Issue）。InMemory（テスト用）はログを出さない。検査は import と名前の字句で見るので、`const w = this.db` のような別名・`db?.insert(`・生の SQL（`execute(sql\`insert …\`)`）・`$client.query(…)` の書き込みは見逃す（Repository のテストがログと記録を固定する）。
 - 見直す条件: 例外のログから値を除く必要が出たとき、複数の書き込みをまたぐトランザクション（command 単位）が要るようになったとき（入口の形を command 側に広げる）、ログの量が問題になったとき。

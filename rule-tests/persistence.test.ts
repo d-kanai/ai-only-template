@@ -88,7 +88,8 @@ import { afterAll, describe, expect, it } from "vitest";
 //       しまう。書き込みは writeInTransaction がコールバックに渡す tx（とそれを受け取る private メソッドの writer）で行う。
 //     WHY 受け手の名前 `db`（語の境界）で見る: Repository は db をコンストラクタで受け取り `this.db` で使う（.claude/rules/backend.md）。
 //       `mydb`・`this.dbx` のような名前に db を含むだけの受け手は通す。
-//     限界: `const w = this.db; w.insert(…)` のような別名、`this["db"]`、分割代入した関数の呼び出しは見ない。
+//     限界: `const w = this.db; w.insert(…)` のような別名、`this["db"]`、分割代入した関数の呼び出し、`db?.insert(` / `db!.insert(`
+//       （`?.` / `!` は受け手の正規表現に一致しない）は見ない。文字列の中の `db.insert(` は違反と数える（安全側）。
 //   - aggregate-loads-all-children（Issue #189。ユーザー判断 2026-09-30）: insert のみの子表（`Changes` / `Events` で終わる名前）を
 //     import した *.postgres.ts で、(a) 親の `.from(<表>)` の chain に子表の `.leftJoin(` が無い（行ロック `.for(` の chain は除く）、
 //     (b) 子表だけを `.from(<子表>)` で読む、(c) `.limit(` / `.offset(` / `.selectDistinctOn(`、(d) `.where(` の引数に子表の列がある。
