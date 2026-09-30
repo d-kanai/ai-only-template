@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { now } from "@repo/shared/now";
 import { z } from "zod";
 import { DomainError } from "../../../shared/domain/domain-error";
 import {
@@ -56,7 +57,7 @@ function todoTitleSchema() {
 // Todo が持つ値のすべて（完全コンストラクタが検証する値）の規則 = Todo の不変条件。
 // WHY タイトル以外（id・完了状態・作成日時）も規則に含める: どの口から来た値も、すべてが規則を満たすことを 1 つの
 //   スキーマで宣言する。create の id は randomUUID で常に満たすが、reconstruct は DB の行（Postgres の uuid 型は
-//   版の桁が 0 の値も受け付ける）を、create の作成日時は引数（Invalid Date を渡せる）を受け取る。
+//   版の桁が 0 の値も受け付ける）を受け取る。create の作成日時（now()）も Date であることを型でしか保証しないので、同じく検証する。
 // WHY 項目ごとにキーを付ける: validate が最初の issue の message（= キー）を DomainError の key にする。
 //   zod の既定の文言（英語で zod の語彙を含む）を domain の外に出さない。キーの無い issue を作らないよう、検査を持つ
 //   zod のスキーマ・refine にはすべて keyedIssue / keyedRefine を渡す（z.object 自身は、値が型の上でオブジェクトなので
@@ -144,10 +145,17 @@ export class Todo {
     this.createdAt = valid.createdAt;
   }
 
-  // WHY createdAt を引数で受け取れるようにする: 一覧の並び順（作成日時の昇順）をテストで
-  //   決まった時刻で検証するため。通常は省略して現在時刻を使う。
-  static create(title: string, createdAt: Date = new Date()): Todo {
-    return new Todo({ id: randomUUID(), title, completed: false, createdAt });
+  // 新しい Todo を作る。id は randomUUID、作成日時は現在時刻（now()）、完了状態は未完了で始める。
+  // WHY 作成日時を引数で受け取らない: 「作ったときの時刻が入る」は Todo の生成ルールで、呼び出し側が時刻を渡せると
+  //   そのルールが呼び出し側に漏れ、任意の時刻の Todo を作れてしまう。テストで時刻を決めるときは、現在時刻の唯一の出口
+  //   now（apps/shared/now.ts）を vi.mock で差し替える（.claude/rules/testing.md）。
+  static create(title: string): Todo {
+    return new Todo({
+      id: randomUUID(),
+      title,
+      completed: false,
+      createdAt: now(),
+    });
   }
 
   // 永続化した値から Todo を組み立て直す（Repository の実装が読み込みに使う）。

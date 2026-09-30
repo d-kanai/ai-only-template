@@ -18,7 +18,7 @@ paths:
 - `page.tsx` は screen を返すだけ（`return <TodoScreen />`。動的セグメントは `await params` で取り出して props で渡す）。
 - `app/api/**/route.ts` は backend の api ファイルが export する HTTP メソッド名の関数を re-export するだけ（`export { GET } from "@repo/backend/features/todo/presentation/list-todos.api";`）。同じ URL の複数メソッドはそれぞれ別の api ファイルから re-export する。入力検証やレスポンスの組み立ては書かない。
 - `instrumentation.ts` は Next の規約で `apps/frontend_customer/` 直下に置く（起動時の環境変数の検証。`.claude/rules/env.md`）。直下のファイルは backend を参照しない（規則 `frontend-root-to-backend`）。起動時の検証の `env` とログの `logger` は、frontend と backend で共通の `apps/shared` から `@repo/shared/env`・`@repo/shared/logger` で使う（Issue #90。以前は backend の中にあり、この規則の例外だった）。
-- `proxy.ts`（Next の Proxy。旧 `middleware.ts` は使わない）も規約で直下に置く。画面アクセスと `/api/**` の呼び出しを 1 リクエスト 1 行の JSON で stdout に出すだけにし、1 行の中身は `shared/request-log/` の `buildRequestLog`（テストで固定）で組み立て、`logger.info` で出す。認可・リダイレクトなどのロジックは置かない。決定は ADR `docs/adr/architecture/20260929-request-log-in-proxy.md`、ブラウザのリクエスト一覧の実測は 2026-09-29 の work-logs「docs/ から移した記録」。限界: status と所要時間は取れない（Proxy は応答の前に動く）、プリフェッチは matcher で除く、ブラウザの戻る・進むで Next のルーターのキャッシュが使われると画面の行は出ない（出るのは画面が呼ぶ API の行だけ）、`client.ip` は `x-forwarded-for` を信じる値でクライアントが偽装できるので、信頼できるリバースプロキシがヘッダを付け直す前提で使う。
+- `proxy.ts`（Next の Proxy。旧 `middleware.ts` は使わない）も規約で直下に置く。画面アクセスと `/api/**` の呼び出しを 1 リクエスト 1 行の JSON で stdout に出すだけにし、1 行の中身は `shared/request-log/` の `buildRequestLog`（テストで固定）で組み立て、`logger.info` で出す。受信時刻は `@repo/shared/now` の `now()` で取る（現在時刻の唯一の出口。`new Date()` は書かない。規則 `now-single-source`、`.claude/rules/shared.md` の「now」）。認可・リダイレクトなどのロジックは置かない。決定は ADR `docs/adr/architecture/20260929-request-log-in-proxy.md`、ブラウザのリクエスト一覧の実測は 2026-09-29 の work-logs「docs/ から移した記録」。限界: status と所要時間は取れない（Proxy は応答の前に動く）、プリフェッチは matcher で除く、ブラウザの戻る・進むで Next のルーターのキャッシュが使われると画面の行は出ない（出るのは画面が呼ぶ API の行だけ）、`client.ip` は `x-forwarded-for` を信じる値でクライアントが偽装できるので、信頼できるリバースプロキシがヘッダを付け直す前提で使う。
 - WHY ルーティングを分ける: URL を変えてもコードを動かさずに済む（Next は構成について unopinionated で、`app/` の外にコードを置くのは公式の例の 1 つ）。
 
 ## features/<feature>/
@@ -37,7 +37,7 @@ paths:
 
 ## ログ
 - サーバ側（直下の `proxy.ts`・`instrumentation-node.ts`）のログは `@repo/shared/logger` を通す。`console.*` は書かない（Biome の `noConsole` と規則 `console-direct-access`。`.claude/rules/backend.md` の「ログ」）。
-- `features/`・`app/`・`shared/` のクライアントコード（ブラウザ）は logger も console も使わない（画面にはログを出さない）。logger・env はサーバ専用で、`app/`・`features/`・`shared/` から `apps/shared` は参照しない（規則 `screen-to-shared`。env・logger をブラウザのバンドルに持ち込まない）。
+- `features/`・`app/`・`shared/` のクライアントコード（ブラウザ）は logger も console も使わない（画面にはログを出さない）。logger・env はサーバ専用で、`app/`・`features/`・`shared/` から `apps/shared` は参照しない（規則 `screen-to-shared`。env・logger をブラウザのバンドルに持ち込まない。now も今は画面が現在時刻を読まないので同じく参照しない）。
   - WHY: ブラウザの console に出したものはサーバのログに残らず、利用者の開発者ツールにだけ見える。エラーは画面の表示（エラー状態）で扱う。
 
 ## SSR を前提にしない

@@ -26,7 +26,7 @@ paths:
 | 対象 | 方法 | 環境 |
 | --- | --- | --- |
 | `apps/backend/**/domain` | 純粋な単体テスト | Node |
-| `apps/shared/`（`env.ts`・`logger.ts`） | 純粋な単体テスト（一時ディレクトリの `.env`、`console` の spy） | Node |
+| `apps/shared/`（`env.ts`・`logger.ts`・`now.ts`） | 純粋な単体テスト（一時ディレクトリの `.env`、`console` の spy、`now` の `vi.mock`） | Node |
 | `apps/backend/**/application` | InMemory リポジトリを渡して検証 | Node |
 | `apps/backend/**/infra` の Postgres の実装（`*.postgres.ts`・`database.ts`） | 実 Postgres。`createTestDatabase()` でファイルごとの別スキーマ（`test_<UUID>`）にマイグレーションを当て、各テストの前に `TRUNCATE` | Node |
 | `apps/backend/**/presentation` | 空の InMemory で組み立てた handler（`new ListTodosApi(new ListTodosQuery(new InMemoryTodoRepository())).handle`）に `new Request()`（と `ctx`）を渡し、`Response` を検証。本番の handler（`export const GET` など）は、Postgres の Repository の prototype を spy して結線だけを確かめる | Node |
@@ -56,6 +56,9 @@ paths:
 - backend: InMemory リポジトリを query / command のコンストラクタに渡して組み立てる（Issue #123。`vi.mock` は使わない）。モックは最小限。WHY: モックは「こう呼ばれるはず」を書き込むので、実装とずれても緑のまま。
   - Postgres の実装はモックせず実 Postgres で（SQL の組み立て・uuid は差し替えると検証できない）。例外は api ファイルの本番の handler の結線の確認だけ（`PostgresTodoRepository.prototype` の spy。Repository の振る舞いは確かめず、Postgres の実装が呼ばれることだけを見る）。
   - InMemory で起こせない失敗の経路だけ、必要な分を差し替える（例: `list-todos.api.test.ts` の 500 は常に reject する `failingRepository` と、`console.error` の `vi.spyOn`）。
+- 時計（現在時刻）: `now`（`apps/shared/now.ts`。現在時刻の唯一の出口）を `vi.mock` で差し替え、`vi.mocked(now).mockReturnValue(date)` / `mockReturnValueOnce(date)` で時刻を決める（backend の「`vi.mock` は使わない」の例外）。backend のテストは `vi.mock("@repo/shared/now")`、`apps/shared` の中は `vi.mock("./now")`。`afterEach` で `vi.mocked(now).mockReset()` する。
+  - 自動モックの `now` は既定で `undefined` を返す（`Todo.create` は作成日時の不変条件で validation_error になり、返させ忘れに気づける）。ファイルのほかのテストが実時刻のままでよいときは `vi.mock("@repo/shared/now", { spy: true })` で本物を残し、時刻を決めるテストだけ `mockReturnValueOnce` する（`todo-repository.postgres.test.ts`）。
+  - WHY 時計だけ vi.mock: 時計はコンストラクタで渡す依存ではなく横断的な seam で、作成日時を引数で受け取ると Entity の生成ルールが呼び出し側に漏れる（`.claude/rules/shared.md` の「now」）。`vi.useFakeTimers` で `Date` を差し替えるのは `now.ts` 自身のテストだけ（本物が実時計を読むことを確かめる）。
 - 画面側の hook / screen: `vi.mock("@/features/todo/api/todo-api")` と `vi.mocked(listTodos).mockResolvedValue(...)`。WHY: 境界の `api/` で切ると HTTP やサーバの状態に依存しない。
 - `api/`: `vi.stubGlobal("fetch", vi.fn<typeof fetch>())` で、送った URL・メソッド・本文と応答の扱いを検証する。
 - 非同期の順序（古い応答が後から届く、画面を離れた後に失敗が届く）は、任意のタイミングで resolve できる `deferred()` で作る（各テストファイルの中に定義）。WHY: `mockResolvedValue` は即時に resolve し、タイマーは実行環境の速さに左右される。
