@@ -29,6 +29,7 @@ test("api ファイルをすべて読み込んでも、Repository に渡る db �
   vi.resetModules();
   const received: Database[] = [];
   // Repository を、受け取った db を記録するサブクラスに差し替える（api ファイルは Repository の実体を export しないため）。
+  // WHY モック: api ファイルは Repository の実体を export しないので、受け取った db を記録するサブクラスに差し替えて結線を確かめる
   vi.doMock("../infra/todo-repository.postgres", async (importOriginal) => {
     const actual =
       await importOriginal<
