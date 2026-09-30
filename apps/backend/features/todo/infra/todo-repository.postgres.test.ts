@@ -126,11 +126,15 @@ describe("PostgresTodoRepository", () => {
     expect(todos.map((todo) => todo.title)).toEqual(["小さい id", "大きい id"]);
   });
 
-  test("同じ id で save すると title と completed を上書きし（upsert）、行は増えない", async () => {
+  // WHY 読み込んでから変える: create した Todo（新規）を変えて save し直すと新規の 2 回目（一意制約違反）になる。
+  //   本番の update の command と同じく、findByIdOrThrow で読み込んだ Todo（origin を持つ）を変えて save する。
+  test("読み込んだ Todo を変えて save すると上書きされ、行は増えない", async () => {
     const todo = Todo.create("牛乳を買う");
     await repository().save(todo);
 
-    const updated = todo.rename("卵を買う").changeCompletion(true);
+    const updated = (await repository().findByIdOrThrow(todo.id))
+      .rename("卵を買う")
+      .changeCompletion(true);
     await repository().save(updated);
 
     await expect(repository().findAll()).resolves.toEqual([updated]);
@@ -249,14 +253,18 @@ describe("PostgresTodoRepository", () => {
     await expect(repository().findAll()).resolves.toEqual([]);
   });
 
-  // WHY: 新規（create した Todo）は読み込んだ値を持たないので全列を書く。同じインスタンスを 2 回 save しても
-  //   INSERT の主キー違反にしない（ON CONFLICT DO UPDATE）。
-  test("新規の Todo（create したもの）を 2 回 save しても 1 件だけ保持する", async () => {
+  // WHY 2 回目をエラーにする（upsert で黙って通さない）: 新規（create した Todo）を 2 回 save する呼び出しは無く、
+  //   あれば実装ミス。upsert は id が衝突した別の行も上書きする。素の INSERT なら Postgres の一意制約違反
+  //   （SQLSTATE 23505）で気づける。
+  test("新規の Todo（create したもの）を 2 回 save すると、2 回目はエラーになり行は 1 件のまま", async () => {
     const todo = Todo.create("牛乳を買う");
 
     await repository().save(todo);
-    await repository().save(todo);
+    const second = repository().save(todo);
 
+    await expect(second).rejects.toBeInstanceOf(Error);
+    // drizzle は失敗したクエリを DrizzleQueryError に包み、pg のエラー（SQLSTATE は code）を cause に入れる。
+    await expect(second).rejects.toMatchObject({ cause: { code: "23505" } });
     await expect(repository().findAll()).resolves.toEqual([todo]);
   });
 

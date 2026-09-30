@@ -34,7 +34,7 @@ export class InMemoryTodoRepository implements TodoRepository {
   }
 
   // Postgres の実装（todo-repository.postgres.ts の save）と同じ意味にする（Issue #165）:
-  //   新規（origin が undefined）は置く（同じ id があれば上書き）。読み込み済みは、読み込んだときから変わった項目
+  //   新規（origin が undefined）は置く（同じ id があればエラー。Postgres の一意制約違反と同じ）。読み込み済みは、読み込んだときから変わった項目
   //   （title・completed）だけを保持中の値に反映する。変わった項目が無ければ何もしない。保持していなければ not_found。
   // WHY 変わった項目が無いときは保持中かを確かめない: Postgres は SQL を発行しないので、消されたことに気づかない。
   //   ここで先に not_found にすると、テスト（InMemory）と本番（Postgres）で結果が変わる。
@@ -42,6 +42,10 @@ export class InMemoryTodoRepository implements TodoRepository {
   //   load で作り直すので使われない）。
   async save(todo: Todo): Promise<void> {
     if (todo.origin === undefined) {
+      // WHY 同じ id があればエラー: Postgres の INSERT の一意制約違反と同じ契約（新規を 2 回 save するのは実装ミス）。
+      if (this.todos.has(todo.id)) {
+        throw new Error(`todo already exists: ${todo.id}`);
+      }
       this.todos.set(todo.id, todo);
       return;
     }
