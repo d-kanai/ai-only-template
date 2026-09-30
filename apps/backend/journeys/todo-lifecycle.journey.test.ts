@@ -32,6 +32,8 @@ import {
   RenameTodoApi,
   type RenameTodoResponse,
 } from "../features/todo/presentation/rename-todo.api";
+import type { ChangeEntry } from "../shared/infra/change-log";
+import { changeLogs } from "../shared/infra/schema";
 import type { Problem } from "../shared/presentation/problem";
 import {
   createTestDatabase,
@@ -56,8 +58,8 @@ import {
 // WHY 1 テスト = 1 つの流れ（E2E と同じ）: 順序で状態を担保する。ステップごとにテストを分けると、前のテストの結果に依存する。
 
 // 実 Postgres（compose.yaml。`pnpm db:up` で起動）に対して実行する。テスト用のスキーマにマイグレーションを当て、
-//   各テストの前に todos と完了の履歴（todo_status_changes）を空にする（todo-repository.postgres.test.ts と同じ形。
-//   todo_status_changes は todos を外部キーで参照するので、同じ文で truncate する）。
+//   各テストの前に todos と完了の履歴（todo_status_changes）と変更履歴（change_logs。Issue #189）を空にする
+//   （todo-repository.postgres.test.ts と同じ形。todo_status_changes は todos を外部キーで参照するので、同じ文で truncate する）。
 // WHY 共通の補助にしない: ジャーニーは今 1 ファイルだけ。ファイルが増えて同じ準備が重なったら test-support/ に切り出す。
 let database: TestDatabase;
 
@@ -71,7 +73,9 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await database.db.execute(sql`truncate todo_status_changes, todos`);
+  await database.db.execute(
+    sql`truncate change_logs, todo_status_changes, todos`,
+  );
 });
 
 // 本番の api ファイルの最下部と同じ組み立てで、テスト用のスキーマの db を使う handler をそろえる。
@@ -123,6 +127,80 @@ function createdStatusRow(todo: CreateTodoResponse) {
     completed: false,
     changedAt: new Date(todo.createdAt),
   };
+}
+
+// 変更履歴（change_logs）の行を、id と occurred_at を除いた記録にして並べる。
+// WHY id と occurred_at を除く: id は DB が乱数で作り、occurred_at は要求を処理した時刻（shared/infra/change-log.test.ts が固定する）。
+// WHY 表・行・操作・変わった列の名前で並べる: 同じ要求の記録は同じ occurred_at で、DB が返す順は決まらない。期待値も同じ規則で並べる
+//   （changes のキーの順は jsonb が並べ替えるので、並べる鍵には値ではなく列の名前の集合を使う）。
+function logEntries(rows: readonly ChangeEntry[]): ChangeEntry[] {
+  return rows
+    .map(({ tableName, rowId, operation, changes, actorId }) => ({
+      tableName,
+      rowId,
+      operation,
+      changes,
+      actorId,
+    }))
+    .sort((a, b) => logKey(a).localeCompare(logKey(b)));
+}
+
+function logKey(entry: ChangeEntry): string {
+  return [
+    entry.tableName,
+    entry.rowId,
+    entry.operation,
+    Object.keys(entry.changes).sort().join(","),
+  ].join("|");
+}
+
+// 作った Todo の todos の insert の記録（全列。日時は ISO 8601 の文字列。ログインが無いので actorId は null）。
+function todoInsertLog(todo: CreateTodoResponse): ChangeEntry {
+  return {
+    tableName: "todos",
+    rowId: todo.id,
+    operation: "insert",
+    changes: {
+      id: { after: todo.id },
+      title: { after: todo.title },
+      completed: { after: todo.completed },
+      created_at: { after: todo.createdAt },
+    },
+    actorId: null,
+  };
+}
+
+// 完了の履歴の行の insert の記録（全列）。行の id は DB が作るので、select した行から作る。
+function statusInsertLog(
+  row: typeof todoStatusChanges.$inferSelect,
+): ChangeEntry {
+  return {
+    tableName: "todo_status_changes",
+    rowId: row.id,
+    operation: "insert",
+    changes: {
+      id: { after: row.id },
+      todo_id: { after: row.todoId },
+      position: { after: row.position },
+      completed: { after: row.completed },
+      changed_at: { after: row.changedAt.toISOString() },
+    },
+    actorId: null,
+  };
+}
+
+// 完了の履歴の行のうち、Todo と位置で 1 行を選ぶ（変更履歴の期待値を作るため）。
+function statusRowOf(
+  rows: readonly (typeof todoStatusChanges.$inferSelect)[],
+  todoId: string,
+  position: number,
+): typeof todoStatusChanges.$inferSelect {
+  const row = rows.find(
+    (candidate) =>
+      candidate.todoId === todoId && candidate.position === position,
+  );
+  expect(row).toBeDefined();
+  return row as typeof todoStatusChanges.$inferSelect;
 }
 
 const BASE_URL = "http://localhost";
@@ -196,6 +274,15 @@ test("Todo を 2 件作り、一覧で作成順に見え、1 件を改名して�
   await expect(
     database.db.select(STATUS_CHANGE_COLUMNS).from(todoStatusChanges),
   ).resolves.toStrictEqual([createdStatusRow(milk)]);
+  // 変更履歴（Issue #189）は、todos の行と完了の履歴の行の insert の 2 件（どちらも全列）。以降のステップで記録を足していく。
+  const milkStatusRows = await database.db.select().from(todoStatusChanges);
+  const expectedLogs = [
+    todoInsertLog(milk),
+    statusInsertLog(statusRowOf(milkStatusRows, milk.id, 0)),
+  ];
+  expect(logEntries(await database.db.select().from(changeLogs))).toStrictEqual(
+    logEntries(expectedLogs),
+  );
 
   await waitUntilAfter(milk.createdAt);
   const createdBread = await postTodo(
@@ -214,6 +301,15 @@ test("Todo を 2 件作り、一覧で作成順に見え、1 件を改名して�
       await database.db.select(STATUS_CHANGE_COLUMNS).from(todoStatusChanges)
     ).sort(byTodoAndPosition),
   ).toStrictEqual([...createdStatusRows].sort(byTodoAndPosition));
+  // 2 件目の作成で、変更履歴に 2 件目の todos と完了の履歴の insert が足される（1 件目の記録は変わらない）。
+  const breadStatusRows = await database.db.select().from(todoStatusChanges);
+  expectedLogs.push(
+    todoInsertLog(bread),
+    statusInsertLog(statusRowOf(breadStatusRows, bread.id, 0)),
+  );
+  expect(logEntries(await database.db.select().from(changeLogs))).toStrictEqual(
+    logEntries(expectedLogs),
+  );
 
   // 2. 一覧に作成順で並ぶ（作成の応答と同じ値）。
   const listed = await listTodos(bodylessRequest("GET", "/api/todos"));
@@ -246,6 +342,17 @@ test("Todo を 2 件作り、一覧で作成順に見え、1 件を改名して�
       await database.db.select(STATUS_CHANGE_COLUMNS).from(todoStatusChanges)
     ).sort(byTodoAndPosition),
   ).toStrictEqual([...createdStatusRows].sort(byTodoAndPosition));
+  // 変更履歴に、その Todo の todos の update（変わった title の前後だけ）が 1 件足される。
+  expectedLogs.push({
+    tableName: "todos",
+    rowId: milk.id,
+    operation: "update",
+    changes: { title: { before: "牛乳を買う", after: "豆乳を買う" } },
+    actorId: null,
+  });
+  expect(logEntries(await database.db.select().from(changeLogs))).toStrictEqual(
+    logEntries(expectedLogs),
+  );
 
   // 4. 同じ Todo を完了にする（改名が保存されていれば、完了の応答にも新しい名前が出る）。
   const completed = await putCompletion(
@@ -288,6 +395,23 @@ test("Todo を 2 件作り、一覧で作成順に見え、1 件を改名して�
   expect(completion?.changedAt.getTime()).toBeGreaterThanOrEqual(
     Date.parse(milk.createdAt),
   );
+  // 変更履歴に、todos の update（completed の前後）と、足された完了の履歴の行の insert の 2 件が足される。
+  const completedStatusRowsWithId = await database.db
+    .select()
+    .from(todoStatusChanges);
+  expectedLogs.push(
+    {
+      tableName: "todos",
+      rowId: milk.id,
+      operation: "update",
+      changes: { completed: { before: false, after: true } },
+      actorId: null,
+    },
+    statusInsertLog(statusRowOf(completedStatusRowsWithId, milk.id, 1)),
+  );
+  expect(logEntries(await database.db.select().from(changeLogs))).toStrictEqual(
+    logEntries(expectedLogs),
+  );
 
   // 5. 詳細に改名と完了が反映されている。
   const detail = await getTodo(
@@ -315,6 +439,23 @@ test("Todo を 2 件作り、一覧で作成順に見え、1 件を改名して�
   await expect(
     database.db.select(STATUS_CHANGE_COLUMNS).from(todoStatusChanges),
   ).resolves.toStrictEqual([createdStatusRow(bread)]);
+  // 変更履歴に、todos の delete（消す前の全列。改名と完了の後の値）が 1 件だけ足される。cascade で消えた完了の履歴の行は
+  //   記録しない。これまでの記録（消した Todo の insert・update も）は消えずに残る。
+  expectedLogs.push({
+    tableName: "todos",
+    rowId: milk.id,
+    operation: "delete",
+    changes: {
+      id: { before: milk.id },
+      title: { before: "豆乳を買う" },
+      completed: { before: true },
+      created_at: { before: milk.createdAt },
+    },
+    actorId: null,
+  });
+  expect(logEntries(await database.db.select().from(changeLogs))).toStrictEqual(
+    logEntries(expectedLogs),
+  );
 
   // 7. 一覧には残りの 1 件だけ（手を付けていない 2 件目はそのまま）。
   const listedAfterDelete = await listTodos(
@@ -348,6 +489,14 @@ test("空の title で作ろうとすると 400 で一覧は増えず、存在�
   await expect(database.db.select().from(todos)).resolves.toStrictEqual([
     rowOf(milk),
   ]);
+  // 変更履歴は作成の 2 件（todos と完了の履歴の insert）。失敗した要求はこれを増やさない。
+  const createdLogs = logEntries(await database.db.select().from(changeLogs));
+  expect(
+    createdLogs.map(({ tableName, operation }) => [tableName, operation]),
+  ).toStrictEqual([
+    ["todo_status_changes", "insert"],
+    ["todos", "insert"],
+  ]);
 
   // 1. 空の title は 400（Problem Details。項目ごとの誤りの errors 付き）で、行は増えない。
   await expectProblem(
@@ -371,6 +520,9 @@ test("空の title で作ろうとすると 400 で一覧は増えず、存在�
   await expect(database.db.select().from(todos)).resolves.toStrictEqual([
     rowOf(milk),
   ]);
+  expect(logEntries(await database.db.select().from(changeLogs))).toStrictEqual(
+    createdLogs,
+  );
 
   // 2. 一覧は増えていない。
   const listed = await listTodos(bodylessRequest("GET", "/api/todos"));
@@ -393,6 +545,9 @@ test("空の title で作ろうとすると 400 で一覧は増えず、存在�
   await expect(database.db.select().from(todos)).resolves.toStrictEqual([
     rowOf(milk),
   ]);
+  expect(logEntries(await database.db.select().from(changeLogs))).toStrictEqual(
+    createdLogs,
+  );
 
   // 4. 一覧は変わっていない（既存の Todo の名前も元のまま）。
   const listedAfterRename = await listTodos(

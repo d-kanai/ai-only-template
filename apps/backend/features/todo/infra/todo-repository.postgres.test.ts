@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { now } from "@repo/shared/now";
-import { asc, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import {
   afterAll,
   afterEach,
@@ -12,6 +12,8 @@ import {
   vi,
 } from "vitest";
 import { DomainError } from "../../../shared/domain/domain-error";
+import type { ChangeEntry } from "../../../shared/infra/change-log";
+import { changeLogs } from "../../../shared/infra/schema";
 import {
   createTestDatabase,
   type TestDatabase,
@@ -32,10 +34,10 @@ afterEach(() => {
 });
 
 // 実 Postgres（compose.yaml。`pnpm db:up` で起動）に対して実行する。
-// テスト用のスキーマにマイグレーション（drizzle/）を当て、各テストの前に todos と完了の履歴（todo_status_changes）を空にする
-//   （テスト同士が干渉しない）。
-// WHY 2 つの表を 1 文で truncate する: todo_status_changes は todos を外部キーで参照するので、todos だけの truncate は Postgres が
-//   拒否する（参照する表も同じ文で指定するか CASCADE が要る）。
+// テスト用のスキーマにマイグレーション（drizzle/）を当て、各テストの前に todos と完了の履歴（todo_status_changes）と
+//   変更履歴（change_logs。Issue #189）を空にする（テスト同士が干渉しない）。
+// WHY todos と todo_status_changes を 1 文で truncate する: todo_status_changes は todos を外部キーで参照するので、todos だけの
+//   truncate は Postgres が拒否する（参照する表も同じ文で指定するか CASCADE が要る）。change_logs は外部キーを持たない。
 let database: TestDatabase;
 
 beforeAll(async () => {
@@ -48,11 +50,53 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await database.db.execute(sql`truncate todo_status_changes, todos`);
+  await database.db.execute(
+    sql`truncate change_logs, todo_status_changes, todos`,
+  );
 });
 
-function repository(): PostgresTodoRepository {
-  return new PostgresTodoRepository(database.db);
+function repository(actorId?: string | null): PostgresTodoRepository {
+  return new PostgresTodoRepository(database.db, actorId);
+}
+
+// action の間に書かれた変更履歴（change_logs の行）を、id と occurred_at を除いた記録（ChangeEntry）にして返す。
+// WHY id と occurred_at を除く: id は DB が乱数で作り、occurred_at は now() の時刻（shared/infra/change-log.test.ts が固定する）。
+// WHY 表の名前と changes で並べる: 同じ save の記録は同じ occurred_at で、DB が返す順は決まらない。
+async function changeLogsWrittenBy(
+  action: () => Promise<unknown>,
+): Promise<ChangeEntry[]> {
+  const before = new Set(
+    (await database.db.select({ id: changeLogs.id }).from(changeLogs)).map(
+      (row) => row.id,
+    ),
+  );
+  await action();
+  const rows = await database.db.select().from(changeLogs);
+  return rows
+    .filter((row) => !before.has(row.id))
+    .map(({ id: _id, occurredAt: _occurredAt, ...entry }) => entry)
+    .sort(byTableAndChanges);
+}
+
+function byTableAndChanges(a: ChangeEntry, b: ChangeEntry): number {
+  return (
+    a.tableName.localeCompare(b.tableName) ||
+    JSON.stringify(a.changes).localeCompare(JSON.stringify(b.changes))
+  );
+}
+
+// 完了の履歴の行（todo_status_changes）の id。変更履歴の row_id と照らし合わせる。
+async function statusChangeId(todoId: string, position: number) {
+  const [row] = await database.db
+    .select({ id: todoStatusChanges.id })
+    .from(todoStatusChanges)
+    .where(
+      and(
+        eq(todoStatusChanges.todoId, todoId),
+        eq(todoStatusChanges.position, position),
+      ),
+    );
+  return row?.id;
 }
 
 // 完了の履歴の行（todo_status_changes）を、Todo ごと・足した順（position）に読む。行の id（uuid）は乱数なので除く。
@@ -596,6 +640,307 @@ describe("PostgresTodoRepository", () => {
     } finally {
       await database.db.execute(
         sql`alter table todo_status_changes drop constraint tmp_reject_all_history`,
+      );
+    }
+  });
+
+  // ここから下の変更履歴（change_logs。Issue #189）のテストは todo-repository.in-memory.test.ts と同じ契約で、同じテスト名に
+  //   そろえる。記録は Postgres では change_logs の行、InMemory では changeLogs。表の名前と changes のキーは DB の名前。
+  //   完了の履歴の行の id は DB が作るので、ここでは DB から読んで照らし合わせる。
+  test("新規の Todo を save すると、変更履歴に todos の insert（全列）と完了の履歴の insert（全列）の 2 件を記録する", async () => {
+    const todo = Todo.create("牛乳を買う");
+
+    const written = await changeLogsWrittenBy(() => repository().save(todo));
+
+    const statusId = await statusChangeId(todo.id, 0);
+    expect(written).toStrictEqual([
+      {
+        tableName: "todo_status_changes",
+        rowId: statusId,
+        operation: "insert",
+        changes: {
+          id: { after: statusId },
+          todo_id: { after: todo.id },
+          position: { after: 0 },
+          completed: { after: false },
+          changed_at: { after: todo.createdAt.toISOString() },
+        },
+        actorId: null,
+      },
+      {
+        tableName: "todos",
+        rowId: todo.id,
+        operation: "insert",
+        changes: {
+          id: { after: todo.id },
+          title: { after: "牛乳を買う" },
+          completed: { after: false },
+          created_at: { after: todo.createdAt.toISOString() },
+        },
+        actorId: null,
+      },
+    ]);
+  });
+
+  test("読み込んだ Todo の名前を変えて save すると、変更履歴に todos の update（title の前後だけ）の 1 件を記録する", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await repository().save(todo);
+    const loaded = await repository().findByIdOrThrow(todo.id);
+
+    const written = await changeLogsWrittenBy(() =>
+      repository().save(loaded.rename("卵を買う")),
+    );
+
+    expect(written).toStrictEqual([
+      {
+        tableName: "todos",
+        rowId: todo.id,
+        operation: "update",
+        changes: { title: { before: "牛乳を買う", after: "卵を買う" } },
+        actorId: null,
+      },
+    ]);
+  });
+
+  test("読み込んだ Todo を完了にして save すると、変更履歴に todos の update（completed の前後）と完了の履歴の insert の 2 件を記録する", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await repository().save(todo);
+    const completed = (
+      await repository().findByIdOrThrow(todo.id)
+    ).changeCompletion(true);
+
+    const written = await changeLogsWrittenBy(() =>
+      repository().save(completed),
+    );
+
+    const statusId = await statusChangeId(todo.id, 1);
+    expect(written).toStrictEqual([
+      {
+        tableName: "todo_status_changes",
+        rowId: statusId,
+        operation: "insert",
+        changes: {
+          id: { after: statusId },
+          todo_id: { after: todo.id },
+          position: { after: 1 },
+          completed: { after: true },
+          changed_at: {
+            after: completed.statusChanges[1]?.changedAt.toISOString(),
+          },
+        },
+        actorId: null,
+      },
+      {
+        tableName: "todos",
+        rowId: todo.id,
+        operation: "update",
+        changes: { completed: { before: false, after: true } },
+        actorId: null,
+      },
+    ]);
+  });
+
+  // 完了にして未完了に戻すと todos の列は変わらない（update の記録は無い）が、完了の履歴は 2 件増える。
+  test("読み込んだ Todo を完了にしてから未完了に戻して save すると、変更履歴に完了の履歴の insert の 2 件だけを記録する", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await repository().save(todo);
+    const toggled = (await repository().findByIdOrThrow(todo.id))
+      .changeCompletion(true)
+      .changeCompletion(false);
+
+    const written = await changeLogsWrittenBy(() => repository().save(toggled));
+
+    // WHY position で並べる: 2 件は同じ表で、changes の JSON の先頭（id。乱数）では順が決まらない。
+    expect(
+      written
+        .map(({ tableName, rowId, operation, changes }) => ({
+          tableName,
+          rowId,
+          operation,
+          position: changes.position,
+          completed: changes.completed,
+        }))
+        .sort((a, b) => Number(a.position?.after) - Number(b.position?.after)),
+    ).toStrictEqual([
+      {
+        tableName: "todo_status_changes",
+        rowId: await statusChangeId(todo.id, 1),
+        operation: "insert",
+        position: { after: 1 },
+        completed: { after: true },
+      },
+      {
+        tableName: "todo_status_changes",
+        rowId: await statusChangeId(todo.id, 2),
+        operation: "insert",
+        position: { after: 2 },
+        completed: { after: false },
+      },
+    ]);
+  });
+
+  // WHY 完了の履歴の行（外部キーの on delete cascade で消える）を 1 件ずつ記録しない: 親の todos の delete の記録 1 件で、
+  //   その Todo の履歴が消えたことが分かる（cascade の行は Repository の SQL に現れず、読むと文が増える）。
+  test("delete すると、変更履歴に todos の delete（消す前の全列）の 1 件だけを記録する", async () => {
+    const todo = Todo.create("牛乳を買う").changeCompletion(true);
+    await repository().save(todo);
+
+    const written = await changeLogsWrittenBy(() =>
+      repository().delete(todo.id),
+    );
+
+    expect(written).toStrictEqual([
+      {
+        tableName: "todos",
+        rowId: todo.id,
+        operation: "delete",
+        changes: {
+          id: { before: todo.id },
+          title: { before: "牛乳を買う" },
+          completed: { before: true },
+          created_at: { before: todo.createdAt.toISOString() },
+        },
+        actorId: null,
+      },
+    ]);
+  });
+
+  test("読み込んだ Todo を変えずに save しても、無い id を delete しても、変更履歴を記録しない", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await repository().save(todo);
+    const loaded = await repository().findByIdOrThrow(todo.id);
+
+    const written = await changeLogsWrittenBy(async () => {
+      await repository().save(loaded);
+      await repository().save(loaded.changeCompletion(false));
+      await repository().delete("00000000-0000-4000-8000-000000000000");
+    });
+
+    expect(written).toStrictEqual([]);
+  });
+
+  test("同じ Todo を 2 回読み、両方で完了状態を変えて save すると、2 回目の save は変更履歴を残さない", async () => {
+    const todo = Todo.create("牛乳を買う");
+    await repository().save(todo);
+    const a = await repository().findByIdOrThrow(todo.id);
+    const b = await repository().findByIdOrThrow(todo.id);
+    await repository().save(a.changeCompletion(true));
+
+    const written = await changeLogsWrittenBy(() =>
+      repository()
+        .save(b.rename("x").changeCompletion(true))
+        .catch(() => undefined),
+    );
+
+    expect(written).toStrictEqual([]);
+  });
+
+  test("actorId を渡して組み立てると、変更履歴の actorId にその id が入る", async () => {
+    const actorId = "11111111-1111-4111-8111-111111111111";
+    const todo = Todo.create("牛乳を買う");
+
+    const written = await changeLogsWrittenBy(async () => {
+      await repository(actorId).save(todo);
+      await repository(actorId).save(
+        (await repository(actorId).findByIdOrThrow(todo.id)).rename("x"),
+      );
+      await repository(actorId).delete(todo.id);
+    });
+
+    // 新規の save の 2 件（todos と完了の履歴の insert）、名前の変更の 1 件、delete の 1 件。
+    expect(written.map((entry) => entry.actorId)).toEqual([
+      actorId,
+      actorId,
+      actorId,
+      actorId,
+    ]);
+  });
+
+  // WHY 一時的な CHECK 制約で change_logs の INSERT を失敗させる（新規の save の原子性のテストと同じ手法）: 記録を本体と
+  //   別のトランザクション（またはトランザクションの外）で書くと、記録の失敗で本体だけが残り、変更が記録から漏れる。
+  //   本体の書き込みが失敗したとき（上の 2 回目の save）は、記録は本体の後に書くので書かれない。
+  // WHY not valid: 準備の save が書いた記録（既存の行）は制約を満たさないので、既存の行を検査せずに張る（新しい行だけに効く）。
+  // 制約は後始末（finally）で外す（残すと後のテストの save がすべて失敗する）。
+  test("変更履歴の INSERT が失敗すると、同じ save・delete の todos と完了の履歴の書き込みも戻る（1 つのトランザクション）", async () => {
+    const kept = Todo.create("卵を買う");
+    await repository().save(kept);
+    const loaded = await repository().findByIdOrThrow(kept.id);
+    await database.db.execute(
+      sql`alter table change_logs add constraint tmp_reject_all_logs check (table_name = '') not valid`,
+    );
+    try {
+      // WHY 1 つずつ呼んで待つ: まとめて呼ぶと、待つ前に reject した Promise が未処理の reject として Vitest の実行を失敗させる。
+      const writes = [
+        () => repository().save(Todo.create("牛乳を買う")),
+        () => repository().save(loaded.rename("x").changeCompletion(true)),
+        () => repository().delete(kept.id),
+      ];
+
+      for (const write of writes) {
+        await expect(write()).rejects.toMatchObject({
+          cause: { code: "23514" },
+        });
+      }
+      await expect(repository().findAll()).resolves.toEqual([loaded]);
+      await expect(statusChangeRows()).resolves.toStrictEqual([
+        {
+          todoId: kept.id,
+          position: 0,
+          completed: false,
+          changedAt: kept.createdAt,
+        },
+      ]);
+    } finally {
+      await database.db.execute(
+        sql`alter table change_logs drop constraint tmp_reject_all_logs`,
+      );
+    }
+  });
+
+  // WHY COMMIT の時点で失敗させる（遅延制約）: 記録を tx ではない接続（this.db）で書いても、上の CHECK 制約のテストは通る
+  //   （記録の失敗がコールバックの例外になり、本体が戻るため）。記録を同じトランザクションで書いていることは、本体と記録を
+  //   書き終えた後の COMMIT が失敗したときに、記録も残らないことで確かめる。遅延（deferrable initially deferred）の一意制約・
+  //   外部キーは COMMIT のときに検査される（CHECK は遅延できない）。
+  // 制約と表は後始末（finally）で外す（残すと後のテストの save・delete が失敗する）。
+  test("COMMIT で失敗した save・delete は、変更履歴も残さない（記録は本体と同じトランザクションで書く）", async () => {
+    const milk = Todo.create("牛乳を買う");
+    const egg = Todo.create("卵を買う");
+    await repository().save(milk);
+    await repository().save(egg);
+    const loadedEgg = await repository().findByIdOrThrow(egg.id);
+    const logsBefore = await database.db.select().from(changeLogs);
+    await database.db.execute(
+      sql`alter table todos add constraint tmp_unique_title unique (title) deferrable initially deferred`,
+    );
+    await database.db.execute(
+      sql`create table tmp_refs (todo_id uuid references todos (id) deferrable initially deferred)`,
+    );
+    await database.db.execute(sql`insert into tmp_refs values (${milk.id})`);
+    try {
+      // WHY 1 つずつ待つ: 同時に動かすと、遅延制約の検査が他方のトランザクションの終わりを待ち、順序で結果が変わりうる。
+      await expect(
+        repository().save(Todo.create("牛乳を買う")),
+      ).rejects.toMatchObject({ cause: { code: "23505" } });
+      await expect(
+        repository().save(loadedEgg.rename("牛乳を買う")),
+      ).rejects.toMatchObject({ cause: { code: "23505" } });
+      await expect(repository().delete(milk.id)).rejects.toMatchObject({
+        cause: { code: "23503" },
+      });
+
+      // 準備の 2 回の save の記録（4 件）だけが残り、失敗した 3 つの記録は無い。
+      const logsAfter = await database.db.select().from(changeLogs);
+      expect(logsAfter.map((row) => row.id).sort()).toEqual(
+        logsBefore.map((row) => row.id).sort(),
+      );
+      expect(logsBefore).toHaveLength(4);
+      await expect(repository().findAll()).resolves.toHaveLength(2);
+      await expect(repository().findById(milk.id)).resolves.toEqual(milk);
+      await expect(repository().findById(egg.id)).resolves.toEqual(egg);
+    } finally {
+      await database.db.execute(sql`drop table tmp_refs`);
+      await database.db.execute(
+        sql`alter table todos drop constraint tmp_unique_title`,
       );
     }
   });

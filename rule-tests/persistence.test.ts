@@ -31,7 +31,7 @@ import { afterAll, describe, expect, it } from "vitest";
 //     `get origin()` を持たない。
 //     WHY: Repository が差分を取るために、読み込んだとき（reconstruct）の値を Entity が持つ。
 //   - no-update-delete-on-append-only-tables（Issue #188）: *.postgres.ts で `.update(<表>)` / `.delete(<表>)` の引数の表の名前
-//     （識別子。`schema.x` のようなメンバーの参照は最後の名前）が `Changes` か `Events` で終わる（`db.` / `tx.` などの受け手は
+//     （識別子。`schema.x` のようなメンバーの参照は最後の名前）が `Changes` / `Events` / `Logs`（変更履歴。Issue #189）で終わる（`db.` / `tx.` などの受け手は
 //     問わない。`.` と名前と `(` と引数の間の空白・改行は可）。行は update / delete の名前の行。`.insert(` と `.select()` は通す。
 //     WHY: 遷移の履歴（todo_status_changes のような `*_changes` の子表）は insert のみの記録で、後から書き換える・消すと
 //       「いつ何に変わったか」が失われる。消えるのは親を消したときの外部キーの on delete cascade だけ（ADR
@@ -42,16 +42,32 @@ import { afterAll, describe, expect, it } from "vitest";
 //     限界: 表を別名の変数に入れ直す（`const t = todoStatusChanges; db.delete(t)`）・ブラケット（`db["delete"](…)`）・生の SQL
 //       （sql`delete from todo_status_changes`）は見ない。表の変数名が接尾辞に従っているかは、schema.ts で宣言した表なら
 //       次の append-only-table-naming が見る。
-//   - append-only-table-naming（Issue #188）: apps/backend/features/<f>/infra/schema.ts で、`pgTable("<表名>"` の表名が `_changes` か
-//     `_events` で終わるのに、それを受ける変数（`const <名前> =` の直後の pgTable）の名前が `Changes` / `Events` で終わらない
-//     （変数で受けていない `export default pgTable(…)` も違反）。行は pgTable の行。`pgTable(` と表名の間の空白・改行は可、
+//   - append-only-table-naming（Issue #188）: apps/backend/features/<f>/infra/schema.ts（と shared/infra/schema.ts）で、
+//     `pgTable("<表名>"` の表名が `_changes` / `_events` / `_logs` で終わるのに、それを受ける変数（`const <名前> =` の直後の
+//     pgTable）の名前が `Changes` / `Events` / `Logs` で終わらない（変数で受けていない `export default pgTable(…)` も違反）。行は pgTable の行。`pgTable(` と表名の間の空白・改行は可、
 //     表名の引用符は `"` / `'` / `` ` ``。
 //     WHY: no-update-delete-on-append-only-tables は変数名の接尾辞で insert のみの表を見分けるので、
 //       `export const statusLog = pgTable("todo_status_changes", …)` のように表名と変数名がずれると素通りする。表名（DB の命名）
 //       から変数名を縛れば、insert のみの表は必ずその検査にかかる。
-//     WHY schema.ts だけ: 表の宣言の置き場所は features/<f>/infra/schema.ts だけ（drizzle-kit の設定が読む glob。.claude/rules/backend.md）。
+//     WHY schema.ts だけ: 表の宣言の置き場所は features/<f>/infra/schema.ts と、横断の表の shared/infra/schema.ts だけ
+//       （drizzle-kit の設定が読む場所。.claude/rules/backend.md）。
 //     限界: 表名が `_changes` / `_events` で終わらない insert のみの表（命名の規約そのもの）、`pgSchema("s").table(…)`・
 //       pgTable を別名で import した宣言、型注釈付きの変数（`const x: T = pgTable(…)`。違反と数える）、分割代入は見ない。
+//   - writes-record-change-log（Issue #189）: *.postgres.ts に書き込み（`.insert(` / `.update(` / `.delete(`。`.` と名前と `(` の間の
+//     空白・改行は可）があるのに、shared/infra/change-log を値として import していない。行は書き込みの名前の行（書き込みごと）。
+//     WHY: 変更履歴（change_logs）は Repository が書き込みのたびに書く（DB のトリガーにしない。ADR
+//       docs/adr/architecture/20260930-change-logs-written-by-repository.md）。import が無ければ記録していない。
+//     限界: import していても、書き込みごとに recordChange を呼んでいるか（記録の漏れ）は見ない（Repository のテストが記録の行を固定する）。
+//   - record-change-in-transaction（Issue #189）: *.postgres.ts の `recordChange(` の呼び出しが、どの `transaction(` の括弧の中
+//     （コールバック）にも無い（字句の範囲。括弧を数えて対応する閉じを探す）。行は recordChange の行。
+//     WHY: 記録は本体の書き込みと同じトランザクションで書く。外で書くと、記録の失敗で本体だけが残り、変更が記録から漏れる。
+//     限界は recordChangeOutsideTransaction のコメント。
+//   - aggregate-loads-all-children（Issue #189。ユーザー判断 2026-09-30）: insert のみの子表（`Changes` / `Events` で終わる名前）を
+//     import した *.postgres.ts で、(a) 親の `.from(<表>)` の chain に子表の `.leftJoin(` が無い（行ロック `.for(` の chain は除く）、
+//     (b) 子表だけを `.from(<子表>)` で読む、(c) `.limit(`、(d) `.where(` の引数に子表の列がある。
+//     WHY: 集約は常に全体（全件の履歴）を読んで reconstruct の不変条件で検証する。WHY と限界は partialAggregateReads のコメント。
+// 変更履歴の表（change_logs。変数名 changeLogs）も insert のみ: no-update-delete-on-append-only-tables と append-only-table-naming は
+//   `Logs` / `_logs` も対象にし、append-only-table-naming は横断の表の置き場所 shared/infra/schema.ts も見る（Issue #189）。
 // コメントと文字列の扱い（限界）: 各行の `//` 以降を落としてから探す（「// .onConflictDoUpdate( は使わない」を違反と数えない）。
 //   文字列の中身は解釈しない。そのため、文字列の中の `//` の後ろは見逃し、文字列の中の `.onConflictDoUpdate(` は違反と数える。
 //   ブロックコメント（`/* … */`）の中はコードと同じに扱う（upsert は安全側で違反になるが、`get origin()` と changed-props の
@@ -69,7 +85,10 @@ type RuleId =
   | "save-uses-changed-props"
   | "entity-with-reconstruct-has-origin"
   | "no-update-delete-on-append-only-tables"
-  | "append-only-table-naming";
+  | "append-only-table-naming"
+  | "writes-record-change-log"
+  | "record-change-in-transaction"
+  | "aggregate-loads-all-children";
 
 type PersistenceViolation = { rule: RuleId; line: number };
 
@@ -85,17 +104,136 @@ function matchingLines(lines: string[], pattern: RegExp): number[] {
   );
 }
 
-// shared/infra/changed-props を値として import しているか（複数行の import も読む。`import type` は数えない）。
-function importsChangedProps(code: string): boolean {
+// shared/infra/<name> を値として import しているか（複数行の import も読む。`import type` は数えない）。
+function importsSharedInfra(code: string, name: string): boolean {
   const imports = code.matchAll(
     /\bimport\s+(type\s+)?[^;]*?\bfrom\s*(["'])([^"'\n]+)\2/g,
   );
+  // WHY 前後を区切る: `changed-props-x` や shared/infra でない `./changed-props` は別のモジュール。
+  const module = new RegExp(`(?:^|/)shared/infra/${name}(?:\\.[cm]?[jt]s)?$`);
   return [...imports].some(
     ([, typeOnly, , specifier = ""]) =>
-      typeOnly === undefined &&
-      // WHY 前後を区切る: `changed-props-x` や shared/infra でない `./changed-props` は別のモジュール。
-      /(?:^|\/)shared\/infra\/changed-props(?:\.[cm]?[jt]s)?$/.test(specifier),
+      typeOnly === undefined && module.test(specifier),
   );
+}
+
+// code の中の位置（0 始まり）が何行目か（1 始まり）。
+function lineAt(code: string, index: number): number {
+  return code.slice(0, index).split("\n").length;
+}
+
+// open の位置の `(` に対応する `)` の位置。閉じが無ければ code の長さ（最後まで中とみなす）。
+// WHY 括弧を数える: transaction( のコールバック・where( の引数は入れ子の括弧（関数の呼び出し・アロー関数）を含む。
+// 限界: 文字列・正規表現の中の括弧も数える（今の Repository の書き方には現れない）。
+function closingParen(code: string, open: number): number {
+  let depth = 0;
+  for (let index = open; index < code.length; index++) {
+    if (code[index] === "(") depth++;
+    if (code[index] === ")" && --depth === 0) return index;
+  }
+  return code.length;
+}
+
+// 書き込み（`.insert(` / `.update(` / `.delete(`。`.` と名前と `(` の間の空白・改行は可）の、名前の行番号（1 始まり）。
+function writeLines(code: string): number[] {
+  return [...code.matchAll(/\.\s*(insert|update|delete)\s*\(/g)].map(
+    ({ 0: whole, index }) =>
+      lineAt(code, index + whole.search(/insert|update|delete/)),
+  );
+}
+
+// `recordChange(` の呼び出しのうち、`transaction(` の括弧の中（コールバック）に無いものの行番号（1 始まり）。
+// WHY 字句の範囲で見る: 記録は本体の書き込みと同じトランザクションで書く（片方だけが残らない）。recordChange を
+//   トランザクションの外で呼ぶと、記録の失敗で本体だけが残り、本体の失敗の後に記録が残りうる。
+// 限界（行の順序と括弧からの推定）: transaction( のコールバックの中から呼んだ別のメソッドの中の recordChange( は、トランザクションの
+//   中で動いても違反と数える（書き方を「コールバックに直接書く」にそろえる）。逆に、コールバックの中で db（tx ではない）を
+//   渡した呼び出し（recordChange(this.db, …)）は見分けない（todo-repository.postgres.test.ts の「COMMIT で失敗した save・delete は、
+//   変更履歴も残さない」が、遅延制約で COMMIT を失敗させて実行で確かめる）。
+function recordChangeOutsideTransaction(code: string): number[] {
+  const transactions = [...code.matchAll(/\btransaction\s*\(/g)].map(
+    ({ 0: whole, index }) => {
+      const open = index + whole.length - 1;
+      return { open, close: closingParen(code, open) };
+    },
+  );
+  return [...code.matchAll(/\brecordChange\s*\(/g)].flatMap(({ index }) =>
+    transactions.some(({ open, close }) => open < index && index < close)
+      ? []
+      : [lineAt(code, index)],
+  );
+}
+
+// import の { … } で読んだ名前（`a as b` は b。`type` の印は除く）のうち、insert のみの子表（Changes / Events で終わる）。
+// WHY Logs を含めない: 変更履歴（changeLogs。Issue #189）は監査用の横断の表で、集約の子ではない（集約の読み出しで JOIN しない）。
+function importedChildTables(code: string): string[] {
+  return [...code.matchAll(/\bimport\s+(?:type\s+)?\{([^}]*)\}/g)].flatMap(
+    ({ 1: names = "" }) =>
+      names
+        .split(",")
+        .map(
+          (name) =>
+            name
+              .trim()
+              .split(/\s+as\s+/)
+              .at(-1)
+              ?.trim() ?? "",
+        )
+        .filter((name) => /(?:Changes|Events)$/.test(name)),
+  );
+}
+
+// 子表を import した *.postgres.ts の、集約を一部だけ読む書き方の行番号（1 始まり）。
+//   (a) 子表でない表の `.from(<表>)` の chain（`.from(` から次の `;` まで）に、import した子表ごとの `.leftJoin(<子表>` が無い。
+//       chain に `.for(`（行ロック）があれば対象外（save の存在確認。集約を組み立てない）。行は from の行。
+//   (b) 子表の `.from(<子表>)`（子表だけを読む）。行は from の行。
+//   (c) `.limit(`。
+//   (d) `.where(` の引数に子表の列（`<子表>.<列>`）がある。行は where の行。orderBy・select の中は可。
+// WHY: 集約は常に全体（全件の履歴）を読み、reconstruct の不変条件（最後の completed = completed など）で検証する。最新だけ・
+//   一部だけを読むと不変条件を検証できず、部分的な集約が domain に入る。LEFT JOIN の WHERE で子表の列を絞ると、履歴の無い
+//   親も外れる（INNER JOIN と同じになる）。
+// 限界（字句の推定）: from / leftJoin / where の引数が変数経由（`.where(where)` に子表の条件を渡す、表を別名の変数に入れ直す）
+//   なら見ない。leftJoin の結合条件（ON）で子表を絞る書き方、`;` を含む chain、`.for(` を含む chain での集約の読み出しは見逃す。
+//   子表の import が名前空間（`import * as schema`）なら対象外。
+function partialAggregateReads(code: string): number[] {
+  const children = importedChildTables(code);
+  if (children.length === 0) {
+    return [];
+  }
+  const isChild = (table: string) =>
+    children.includes(table.split(".").at(-1)?.trim() ?? "");
+  const lines: number[] = [];
+  // WHY 大文字で始まる名前の .from( を除く: `Array.from(…)`・`Buffer.from(…)` はクラスの static メソッドで、クエリではない。
+  for (const { 0: whole, 1: table = "", index } of code.matchAll(
+    /(?<!\b[A-Z][\w$]*\s*)\.\s*from\s*\(\s*([A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*)/g,
+  )) {
+    const line = lineAt(code, index + whole.search(/from/));
+    if (isChild(table)) {
+      lines.push(line);
+      continue;
+    }
+    const end = code.indexOf(";", index);
+    const chain = code.slice(index, end === -1 ? code.length : end);
+    const joinsAllChildren = children.every((child) =>
+      new RegExp(`\\.\\s*leftJoin\\s*\\(\\s*${child}\\b`).test(chain),
+    );
+    if (!joinsAllChildren && !/\.\s*for\s*\(/.test(chain)) {
+      lines.push(line);
+    }
+  }
+  for (const { index } of code.matchAll(/\.\s*limit\s*\(/g)) {
+    lines.push(lineAt(code, index + code.slice(index).search(/limit/)));
+  }
+  for (const { 0: whole, index } of code.matchAll(/\.\s*where\s*\(/g)) {
+    const open = index + whole.length - 1;
+    const args = code.slice(open, closingParen(code, open));
+    const filtersChild = children.some((child) =>
+      new RegExp(`\\b${child}\\s*\\.\\s*[A-Za-z_$]`).test(args),
+    );
+    if (filtersChild) {
+      lines.push(lineAt(code, index + whole.search(/where/)));
+    }
+  }
+  return lines;
 }
 
 // insert のみの表（名前が Changes / Events で終わる）への `.update(` / `.delete(` の、update / delete の名前の行番号（1 始まり）。
@@ -108,7 +246,7 @@ function appendOnlyTableWrites(lines: string[]): number[] {
   );
   return [...writes].flatMap(({ 0: whole, 1: table = "", index }) => {
     const name = table.split(".").at(-1)?.trim() ?? "";
-    if (!/(?:Changes|Events)$/.test(name)) {
+    if (!/(?:Changes|Events|Logs)$/.test(name)) {
       return [];
     }
     // `.` の後の空白・改行を飛ばした、update / delete の名前の位置で行を数える。
@@ -126,14 +264,14 @@ function appendOnlyTableNamingViolations(lines: string[]): number[] {
   const code = lines.join("\n");
   const tables = code.matchAll(/\bpgTable\s*\(\s*(["'`])([^"'`\n]*)\1/g);
   return [...tables].flatMap(({ 2: table = "", index }) => {
-    if (!/_(?:changes|events)$/.test(table)) {
+    if (!/_(?:changes|events|logs)$/.test(table)) {
       return [];
     }
     const before = code.slice(0, index);
     const variable =
       /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(before)?.[1] ??
       "";
-    return /(?:Changes|Events)$/.test(variable)
+    return /(?:Changes|Events|Logs)$/.test(variable)
       ? []
       : [before.split("\n").length];
   });
@@ -154,15 +292,29 @@ function findPersistenceViolations(
   ).map((line) => ({ rule: "no-upsert", line }));
 
   if (/\.postgres\.ts$/.test(path)) {
+    const code = lines.join("\n");
     violations.push(
       ...appendOnlyTableWrites(lines).map((line) => ({
         rule: "no-update-delete-on-append-only-tables" as const,
         line,
       })),
+      ...(importsSharedInfra(code, "change-log") ? [] : writeLines(code)).map(
+        (line) => ({ rule: "writes-record-change-log" as const, line }),
+      ),
+      ...recordChangeOutsideTransaction(code).map((line) => ({
+        rule: "record-change-in-transaction" as const,
+        line,
+      })),
+      ...partialAggregateReads(code).map((line) => ({
+        rule: "aggregate-loads-all-children" as const,
+        line,
+      })),
     );
   }
 
-  if (/^apps\/backend\/features\/[^/]+\/infra\/schema\.ts$/.test(path)) {
+  if (
+    /^apps\/backend\/(?:features\/[^/]+|shared)\/infra\/schema\.ts$/.test(path)
+  ) {
     violations.push(
       ...appendOnlyTableNamingViolations(lines).map((line) => ({
         rule: "append-only-table-naming" as const,
@@ -171,7 +323,10 @@ function findPersistenceViolations(
     );
   }
 
-  if (/\.postgres\.ts$/.test(path) && !importsChangedProps(lines.join("\n"))) {
+  if (
+    /\.postgres\.ts$/.test(path) &&
+    !importsSharedInfra(lines.join("\n"), "changed-props")
+  ) {
     const saveDefinitions = matchingLines(
       lines,
       /^\s*(?:(?:public|private|protected|override)\s+)*(?:async\s+)?save\s*[(<]/,
@@ -246,15 +401,23 @@ const POSTGRES = "apps/backend/features/x/infra/x-repository.postgres.ts";
 const IN_MEMORY = "apps/backend/features/x/infra/x-repository.in-memory.ts";
 const ENTITY = "apps/backend/features/x/domain/x.ts";
 const SCHEMA = "apps/backend/features/x/infra/schema.ts";
+const SHARED_SCHEMA = "apps/backend/shared/infra/schema.ts";
 const IMPORT_CHANGED_PROPS =
   'import { changedProps } from "../../../shared/infra/changed-props";';
+const IMPORT_CHANGE_LOG =
+  'import { recordChange } from "../../../shared/infra/change-log";';
+const IMPORT_CHILD = 'import { todoStatusChanges, todos } from "./schema";';
+// 書き込み（insert / update / delete）を含む例に change-log の import を最後の行に足す（writes-record-change-log を満たす）。
+// WHY 最後の行に足す: ほかの規則の例の行番号を変えずに、その規則だけを見る例にする（検査は import の位置を問わない）。
+const withChangeLog = (...lines: string[]) =>
+  source(...lines, IMPORT_CHANGE_LOG);
 
 describe("永続化の判定（findPersistenceViolations）: must pass", () => {
   it.each([
     [
       "*.postgres.ts の save が changed-props を import している（素の INSERT と差分の UPDATE）",
       POSTGRES,
-      source(
+      withChangeLog(
         IMPORT_CHANGED_PROPS,
         "export class XRepository {",
         "  async save(x: X): Promise<void> {",
@@ -295,7 +458,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
     [
       "コメントの中の .onConflictDoUpdate( / .onConflictDoNothing(",
       POSTGRES,
-      source(
+      withChangeLog(
         "// .onConflictDoUpdate( で上書きしない。",
         "await this.db.insert(xs).values(row); // .onConflictDoNothing() も使わない",
       ),
@@ -362,22 +525,24 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       source("q.onConflictDoUpdate({});"),
     ],
     [
-      "insert のみの表（*Changes / *Events）への insert と select、それ以外の表の update / delete",
+      "insert のみの表（*Changes / *Events / *Logs）への insert と select、それ以外の表の update / delete",
       POSTGRES,
-      source(
+      withChangeLog(
         "await tx.insert(todoStatusChanges).values(rows);",
         "await this.db.insert(orderEvents).values(rows);",
+        "await writer.insert(changeLogs).values(rows);",
         "await this.db.select().from(todoStatusChanges);",
         "await tx.update(todos).set(changed);",
         "await this.db.delete(todos).where(eq(todos.id, id));",
       ),
     ],
     [
-      "名前の途中に Changes / Events を含むだけの表（todoChangesLog / eventsArchive）",
+      "名前の途中に Changes / Events / Logs を含むだけの表（todoChangesLog / eventsArchive / logsArchive）",
       POSTGRES,
-      source(
+      withChangeLog(
         "await this.db.delete(todoChangesLog);",
         "await this.db.update(eventsArchive).set(row);",
+        "await this.db.delete(logsArchive);",
       ),
     ],
     [
@@ -392,7 +557,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
     [
       "コメントの中の .delete(todoStatusChanges)",
       POSTGRES,
-      source(
+      withChangeLog(
         "// this.db.delete(todoStatusChanges) は書かない（cascade で消える）。",
         "await this.db.delete(todos); // tx.update(todoStatusChanges) も書かない",
       ),
@@ -403,12 +568,23 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       source("this.statusChanges.delete(todoStatusChanges);"),
     ],
     [
-      "schema.ts の _changes / _events の表を Changes / Events で終わる変数で受ける",
+      "schema.ts の _changes / _events / _logs の表を Changes / Events / Logs で終わる変数で受ける",
       SCHEMA,
       source(
         'export const todoStatusChanges = pgTable("todo_status_changes", {',
         "});",
         "export const orderEvents = pgTable('order_events', {});",
+        "export const accessLogs = pgTable(`access_logs`, {});",
+      ),
+    ],
+    [
+      "shared/infra/schema.ts の change_logs を changeLogs で受ける（横断の表の置き場所）",
+      SHARED_SCHEMA,
+      source(
+        "export const changeLogs = pgTable(",
+        '  "change_logs",',
+        "  {},",
+        ");",
       ),
     ],
     [
@@ -422,12 +598,13 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       ),
     ],
     [
-      "_changes / _events で終わらない表は対象外（変数名は問わない）",
+      "_changes / _events / _logs で終わらない表は対象外（変数名は問わない）",
       SCHEMA,
       source(
         'export const todos = pgTable("todos", {});',
         'export const changeLog = pgTable("todo_changes_log", {});',
         'export const history = pgTable("todo_changesx", {});',
+        'export const audit = pgTable("todo_logsx", {});',
       ),
     ],
     [
@@ -440,6 +617,128 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       "apps/backend/features/x/infra/x-tables.ts",
       source('export const statusLog = pgTable("todo_status_changes", {});'),
     ],
+    [
+      "*.postgres.ts の書き込みが change-log を import し、recordChange( を transaction( のコールバックの中で呼ぶ（改行・入れ子の括弧を挟む）",
+      POSTGRES,
+      source(
+        IMPORT_CHANGED_PROPS,
+        "import {",
+        "  insertEntry,",
+        "  recordChange,",
+        '} from "../../../shared/infra/change-log.ts";',
+        "class A {",
+        "  async save(x: X) {",
+        "    await this.db.transaction(async (tx) => {",
+        "      const inserted = await this.insert(tx, x);",
+        "      await recordChange(tx, [insertEntry(xs, inserted, this.actorId)]);",
+        "    });",
+        "  }",
+        "  async delete(id: string) {",
+        "    await this.db.transaction(async (tx) => {",
+        "      const deleted = await tx.delete(xs).where(eq(xs.id, id)).returning();",
+        "      await recordChange(",
+        "        tx,",
+        "        deleted.map((row) => deleteEntry(xs, row, this.actorId)),",
+        "      );",
+        "    });",
+        "  }",
+        "}",
+      ),
+    ],
+    [
+      "書き込みの無い *.postgres.ts（読み取りだけ）は change-log の import 不要。update / insert / delete で始まる別の名前も書き込みではない",
+      POSTGRES,
+      source(
+        "const rows = await this.db.select().from(xs);",
+        "q.updateChanges(x); q.inserted(x); q.deleteLater(x);",
+      ),
+    ],
+    [
+      "コメントの中の書き込みと recordChange(（トランザクションの外）",
+      POSTGRES,
+      source(
+        "// await this.db.insert(xs).values(row); は change-log を import して書く",
+        "// recordChange(this.db, entries) はトランザクションの外で呼ばない",
+      ),
+    ],
+    [
+      "*.postgres.ts 以外（in-memory）の書き込みと、トランザクションの外の recordChange(",
+      IN_MEMORY,
+      source(
+        "this.todos.delete(id);",
+        "this.logs.push(...entries);",
+        "await recordChange(this.db, entries);",
+      ),
+    ],
+    [
+      "子表を import した *.postgres.ts の集約の読み出しが、leftJoin で子表の全件を読む（where は親の列、orderBy に子の position）",
+      POSTGRES,
+      source(
+        IMPORT_CHILD,
+        "const rows = await this.db",
+        "  .select({ todo: todos, change: { completed: todoStatusChanges.completed } })",
+        "  .from(todos)",
+        "  .leftJoin(todoStatusChanges, eq(todoStatusChanges.todoId, todos.id))",
+        "  .where(eq(todos.id, id))",
+        "  .orderBy(asc(todos.createdAt), asc(todoStatusChanges.position));",
+      ),
+    ],
+    [
+      "子表を import した *.postgres.ts の行ロック（.for(）の存在確認は、親だけを from で読んでよい",
+      POSTGRES,
+      source(
+        IMPORT_CHILD,
+        "const [row] = await writer",
+        "  .select()",
+        "  .from(todos)",
+        "  .where(eq(todos.id, todo.id))",
+        '  .for("key share");',
+      ),
+    ],
+    [
+      "子表を import していない *.postgres.ts の from( / limit( / where は対象外（*Logs は集約の子表ではない）",
+      POSTGRES,
+      source(
+        'import { changeLogs } from "../../../shared/infra/schema";',
+        "await this.db.select().from(xs).limit(1);",
+        "await this.db.select().from(changeLogs).where(eq(changeLogs.rowId, id)).limit(10);",
+        "await this.db.select().from(todoStatusChanges);",
+      ),
+    ],
+    [
+      "コメントの中の .from(todoStatusChanges) / .limit(1) / where の子表の列",
+      POSTGRES,
+      source(
+        IMPORT_CHILD,
+        "// this.db.select().from(todoStatusChanges).limit(1) は書かない",
+        "const rows = await this.db.select().from(todos).leftJoin(todoStatusChanges, on); // .where(eq(todoStatusChanges.position, 0))",
+      ),
+    ],
+    [
+      "クラスの static な from（Array.from / Buffer.from）はクエリではない",
+      POSTGRES,
+      source(
+        IMPORT_CHILD,
+        "return Array.from(grouped.values(), ({ row }) => toTodo(row));",
+        "const bytes = Buffer . from(text);",
+      ),
+    ],
+    [
+      "(a) 大文字を途中に含む小文字で始まる受け手（todoReader.from(todos)）はクエリとして見る",
+      POSTGRES,
+      source(
+        IMPORT_CHILD,
+        "const rows = await todoReader.from(todos).leftJoin(todoStatusChanges, on);",
+      ),
+    ],
+    [
+      "別名で import した子表（x as orderEvents）も leftJoin で読めばよい",
+      POSTGRES,
+      source(
+        'import { orders, orderEventsTable as orderEvents } from "./schema";',
+        "const rows = await this.db.select().from(orders).leftJoin(orderEvents, on).orderBy(orderEvents.position);",
+      ),
+    ],
   ])("%s は違反なし", (_name, path, text) => {
     expect(findPersistenceViolations(path, text)).toEqual([]);
   });
@@ -450,7 +749,7 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
     [
       ".onConflictDoUpdate(（chain の次の行）",
       POSTGRES,
-      source(
+      withChangeLog(
         IMPORT_CHANGED_PROPS,
         "await this.db",
         "  .insert(xs)",
@@ -462,7 +761,7 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
     [
       ".onConflictDoNothing()（同じ行）",
       POSTGRES,
-      source(
+      withChangeLog(
         IMPORT_CHANGED_PROPS,
         "await this.db.insert(xs).values(row).onConflictDoNothing();",
       ),
@@ -501,7 +800,7 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
     [
       "*.postgres.ts の async save( が changed-props を import していない",
       POSTGRES,
-      source(
+      withChangeLog(
         "export class XRepository {",
         "  async save(x: X): Promise<void> {",
         "    await this.db.update(xs).set(row);",
@@ -599,13 +898,13 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
     [
       "db.delete(todoStatusChanges)（insert のみの表の DELETE）",
       POSTGRES,
-      source("await this.db.delete(todoStatusChanges);"),
+      withChangeLog("await this.db.delete(todoStatusChanges);"),
       [{ rule: "no-update-delete-on-append-only-tables", line: 1 }],
     ],
     [
       "tx.update(todoStatusChanges)（トランザクションの中の UPDATE）",
       POSTGRES,
-      source(
+      withChangeLog(
         "await this.db.transaction(async (tx) => {",
         "  await tx.update(todoStatusChanges).set({ completed: true });",
         "});",
@@ -615,7 +914,7 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
     [
       "改行を挟んだ .delete( と表の名前（chain の次の行で .delete(、その次の行に表。行は delete の行）",
       POSTGRES,
-      source(
+      withChangeLog(
         "await this.db",
         "  .delete(",
         "    todoStatusChanges",
@@ -627,19 +926,19 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
     [
       "空白を挟んだ . update ( orderEvents )（*Events の表）",
       POSTGRES,
-      source("q . update ( orderEvents ).set(row);"),
+      withChangeLog("q . update ( orderEvents ).set(row);"),
       [{ rule: "no-update-delete-on-append-only-tables", line: 1 }],
     ],
     [
       "メンバーの参照（schema.todoStatusChanges）",
       POSTGRES,
-      source("await db.delete(schema.todoStatusChanges);"),
+      withChangeLog("await db.delete(schema.todoStatusChanges);"),
       [{ rule: "no-update-delete-on-append-only-tables", line: 1 }],
     ],
     [
       "1 行に 2 つ・複数の行（行の順に、見つけた数だけ返す）",
       POSTGRES,
-      source(
+      withChangeLog(
         "await db.update(aChanges).set(r); await db.delete(bEvents);",
         "await db.delete(todos);",
         "await db.delete(cChanges);",
@@ -674,6 +973,148 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
       "変数で受けない _changes の表（export default pgTable(…)）",
       SCHEMA,
       source('export default pgTable("todo_status_changes", {});'),
+      [{ rule: "append-only-table-naming", line: 1 }],
+    ],
+    [
+      "*.postgres.ts の insert / update / delete（改行・空白を挟む）が change-log を import していない（書き込みの行ごと）",
+      POSTGRES,
+      source(
+        "await tx.insert(xs).values(row);",
+        "await tx",
+        "  .update(xs)",
+        "  .set(row);",
+        "await this.db . delete (xs);",
+      ),
+      [
+        { rule: "writes-record-change-log", line: 1 },
+        { rule: "writes-record-change-log", line: 3 },
+        { rule: "writes-record-change-log", line: 5 },
+      ],
+    ],
+    [
+      "change-log を import type だけ・コメントの中だけ・名前が同じ別のモジュール（./change-log・shared/infra/change-log-x）で読む",
+      POSTGRES,
+      source(
+        'import type { ChangeEntry } from "../../../shared/infra/change-log";',
+        `// ${IMPORT_CHANGE_LOG}`,
+        'import { recordChange } from "./change-log";',
+        'import { x } from "../../../shared/infra/change-log-x";',
+        "await db.insert(xs).values(r);",
+      ),
+      [{ rule: "writes-record-change-log", line: 5 }],
+    ],
+    [
+      "recordChange( を transaction( の前・閉じの後・別のメソッド（transaction( の無い中）で呼ぶ",
+      POSTGRES,
+      source(
+        IMPORT_CHANGE_LOG,
+        "await recordChange(this.db, entries);",
+        "await this.db.transaction(async (tx) => {",
+        "  await tx.insert(xs).values(row);",
+        "});",
+        "await recordChange (tx, entries);",
+        "async function other(tx) {",
+        "  await recordChange(tx, entries);",
+        "}",
+      ),
+      [
+        { rule: "record-change-in-transaction", line: 2 },
+        { rule: "record-change-in-transaction", line: 6 },
+        { rule: "record-change-in-transaction", line: 8 },
+      ],
+    ],
+    [
+      "transaction( ではない名前（transactional( / myTransaction(）のコールバックの中の recordChange(",
+      POSTGRES,
+      source(
+        IMPORT_CHANGE_LOG,
+        "await this.transactional(async (tx) => {",
+        "  await recordChange(tx, entries);",
+        "});",
+        "await myTransaction(async (tx) => { await recordChange(tx, entries); });",
+      ),
+      [
+        { rule: "record-change-in-transaction", line: 3 },
+        { rule: "record-change-in-transaction", line: 5 },
+      ],
+    ],
+    [
+      "(a) 子表を import した *.postgres.ts で、親の from(todos) に子表の leftJoin が無い（innerJoin・別の表の leftJoin も）",
+      POSTGRES,
+      source(
+        IMPORT_CHILD,
+        "const a = await this.db.select().from(todos).where(eq(todos.id, id));",
+        "const b = await this.db.select().from(todos).innerJoin(todoStatusChanges, on);",
+        "const c = await this.db.select().from(schema.todos).leftJoin(others, on);",
+      ),
+      [
+        { rule: "aggregate-loads-all-children", line: 2 },
+        { rule: "aggregate-loads-all-children", line: 3 },
+        { rule: "aggregate-loads-all-children", line: 4 },
+      ],
+    ],
+    [
+      "(b)(d) 子表だけを from で読み（改行を挟んだ chain）、where で子表の列を絞る",
+      POSTGRES,
+      source(
+        IMPORT_CHILD,
+        "const rows = await this.db",
+        "  .select()",
+        "  .from(",
+        "    todoStatusChanges,",
+        "  )",
+        "  .where(eq(todoStatusChanges.todoId, id));",
+      ),
+      [
+        { rule: "aggregate-loads-all-children", line: 4 },
+        { rule: "aggregate-loads-all-children", line: 7 },
+      ],
+    ],
+    [
+      "(c) limit( で件数を絞る（leftJoin で読んでいても）",
+      POSTGRES,
+      source(
+        IMPORT_CHILD,
+        "const rows = await this.db.select().from(todos).leftJoin(todoStatusChanges, on)",
+        "  .limit(1);",
+      ),
+      [{ rule: "aggregate-loads-all-children", line: 3 }],
+    ],
+    [
+      "(d) where で子表の position / changedAt を絞る（and の奥・改行を挟む。orderBy の子表の列は可）",
+      POSTGRES,
+      source(
+        IMPORT_CHILD,
+        "const latest = await this.db.select().from(todos).leftJoin(todoStatusChanges, on).where(eq(todoStatusChanges.position, 0)).orderBy(todoStatusChanges.position);",
+        "const recent = await this.db",
+        "  .select()",
+        "  .from(todos)",
+        "  .leftJoin(todoStatusChanges, on)",
+        "  .where(",
+        "    and(eq(todos.id, id), gt(todoStatusChanges . changedAt, since)),",
+        "  );",
+      ),
+      [
+        { rule: "aggregate-loads-all-children", line: 2 },
+        { rule: "aggregate-loads-all-children", line: 7 },
+      ],
+    ],
+    [
+      "insert のみの表（*Logs）への update / delete",
+      POSTGRES,
+      withChangeLog(
+        "await writer.delete(changeLogs);",
+        "await tx.update(schema.accessLogs).set(row);",
+      ),
+      [
+        { rule: "no-update-delete-on-append-only-tables", line: 1 },
+        { rule: "no-update-delete-on-append-only-tables", line: 2 },
+      ],
+    ],
+    [
+      "_logs の表を Logs で終わらない変数で受ける（shared/infra/schema.ts も対象）",
+      SHARED_SCHEMA,
+      source('export const changeLog = pgTable("change_logs", {});'),
       [{ rule: "append-only-table-naming", line: 1 }],
     ],
     [
@@ -753,6 +1194,27 @@ describe("backend のソースの列挙と検査（fixture）", () => {
       "apps/backend/features/y/domain/y-repository.ts": source(
         "export interface YRepository {}",
       ),
+      // 変更履歴と集約の読み出しの規則（Issue #189）: 記録をトランザクションの外で書き、子表を import して親だけを読む。
+      "apps/backend/features/z/infra/z-repository.postgres.ts": source(
+        IMPORT_CHANGE_LOG,
+        'import { zChanges, zs } from "./schema";',
+        "await this.db.transaction(async (tx) => { await tx.insert(zs).values(r); });",
+        "await recordChange(this.db, entries);",
+        "const rows = await this.db.select().from(zs).limit(1);",
+      ),
+      // 規則を満たす Repository（change-log を import し、記録をトランザクションの中で書き、子表を leftJoin で読む）。
+      "apps/backend/features/z/infra/z-writer.postgres.ts": source(
+        IMPORT_CHANGE_LOG,
+        'import { zChanges, zs } from "./schema";',
+        "await this.db.transaction(async (tx) => {",
+        "  await tx.delete(zs);",
+        "  await recordChange(tx, entries);",
+        "});",
+        "const rows = await this.db.select().from(zs).leftJoin(zChanges, on);",
+      ),
+      "apps/backend/shared/infra/schema.ts": source(
+        'export const changeLog = pgTable("change_logs", {});',
+      ),
       // 対象外: テスト、features でない domain の reconstruct、.ts でないファイル、backend の外、node_modules の中。
       "apps/backend/features/y/infra/y-repository.postgres.test.ts": source(
         saveMethod,
@@ -787,7 +1249,10 @@ describe("backend のソースの列挙と検査（fixture）", () => {
         "apps/backend/features/y/infra/y-reader.postgres.ts",
         "apps/backend/features/y/infra/y-repository.in-memory.ts",
         "apps/backend/features/y/infra/y-repository.postgres.ts",
+        "apps/backend/features/z/infra/z-repository.postgres.ts",
+        "apps/backend/features/z/infra/z-writer.postgres.ts",
         "apps/backend/shared/domain/w.ts",
+        "apps/backend/shared/infra/schema.ts",
         "apps/backend/shared/infra/z.ts",
       ],
       violations: [
@@ -795,8 +1260,13 @@ describe("backend のソースの列挙と検査（fixture）", () => {
         "entity-with-reconstruct-has-origin: apps/backend/features/y/domain/y.ts:2",
         "append-only-table-naming: apps/backend/features/y/infra/schema.ts:2",
         "no-update-delete-on-append-only-tables: apps/backend/features/y/infra/y-reader.postgres.ts:2",
+        "writes-record-change-log: apps/backend/features/y/infra/y-reader.postgres.ts:2",
         "save-uses-changed-props: apps/backend/features/y/infra/y-repository.postgres.ts:2",
         "no-upsert: apps/backend/features/y/infra/y-repository.postgres.ts:4",
+        "record-change-in-transaction: apps/backend/features/z/infra/z-repository.postgres.ts:4",
+        "aggregate-loads-all-children: apps/backend/features/z/infra/z-repository.postgres.ts:5",
+        "aggregate-loads-all-children: apps/backend/features/z/infra/z-repository.postgres.ts:5",
+        "append-only-table-naming: apps/backend/shared/infra/schema.ts:1",
         "no-upsert: apps/backend/shared/infra/z.ts:2",
       ],
     });
@@ -812,7 +1282,7 @@ describe("backend のソースの列挙と検査（fixture）", () => {
 });
 
 describe("永続化（実ファイル）", () => {
-  it("upsert を使わず、*.postgres.ts の save は changed-props を import し、reconstruct を持つ Entity は origin を持ち、insert のみの表を update / delete せず、その表を Changes / Events で終わる変数で宣言する", () => {
+  it("upsert を使わず、*.postgres.ts の save は changed-props を import し、reconstruct を持つ Entity は origin を持ち、insert のみの表を update / delete せず、その表を Changes / Events / Logs で終わる変数で宣言し、書き込みは変更履歴をトランザクションの中で記録し、集約は子表の全件を JOIN で読む", () => {
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     const files = listBackendSources(repoRoot);
     expect(files).toContain(
@@ -820,6 +1290,7 @@ describe("永続化（実ファイル）", () => {
     );
     expect(files).toContain("apps/backend/features/todo/domain/todo.ts");
     expect(files).toContain("apps/backend/features/todo/infra/schema.ts");
+    expect(files).toContain("apps/backend/shared/infra/schema.ts");
     expect(collectPersistenceViolations(repoRoot)).toEqual([]);
   });
 });

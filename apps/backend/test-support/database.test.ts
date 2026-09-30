@@ -65,7 +65,7 @@ describe("createTestDatabase", () => {
     }
   });
 
-  test("migrate で drizzle/ のマイグレーションをテスト用のスキーマに当てる（todos 表ができる）", async () => {
+  test("migrate で drizzle/ のマイグレーションをテスト用のスキーマに当てる（todos・完了の履歴・変更履歴の表ができる）", async () => {
     const database = await createTestDatabase();
     try {
       await database.migrate();
@@ -74,6 +74,7 @@ describe("createTestDatabase", () => {
       );
       expect(tables.rows.map((row) => row.table_name)).toEqual([
         "__drizzle_migrations",
+        "change_logs",
         "todo_status_changes",
         "todos",
       ]);

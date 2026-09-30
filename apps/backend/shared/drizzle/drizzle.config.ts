@@ -38,8 +38,12 @@ export default defineConfig({
   // dialect: 接続先の DB の種類。compose.yaml の PostgreSQL 18。
   dialect: "postgresql",
   // schema: テーブル定義のファイル。feature ごとに apps/backend/features/<feature>/infra/schema.ts に置く（feature を足しても
-  //   ここを直さずに済むよう glob で指す。features/ の下だけを見る。backend/shared にはテーブルを置かない）。
-  schema: fromConfigDir("../../features/*/infra/schema.ts"),
+  //   ここを直さずに済むよう glob で指す）。feature をまたぐ横断の表（変更履歴の change_logs。Issue #189）だけは
+  //   apps/backend/shared/infra/schema.ts に置く（どの feature にも属さないため）。drizzle-kit は配列で複数の場所を受け取る。
+  schema: [
+    fromConfigDir("../../features/*/infra/schema.ts"),
+    fromConfigDir("../infra/schema.ts"),
+  ],
   // out: 生成したマイグレーション（SQL と meta/ のスナップショット）の置き場所。この設定ファイルと同じ
   //   apps/backend/shared/drizzle/（Issue #98。設定と生成物を 1 か所にまとめる）。コミットして、すべての環境で同じ SQL を当てる。
   out: fromConfigDir("."),
