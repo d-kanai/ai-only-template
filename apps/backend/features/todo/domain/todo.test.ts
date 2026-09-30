@@ -147,7 +147,7 @@ describe("Todo#rename", () => {
   });
 
   test("完了済みの Todo の名前を変えても、完了状態・id・作成日時は変わらない", () => {
-    // rename はタイトルだけを差し替える。{ ...this } の展開で他の値を引き継ぐので、
+    // rename はタイトルだけを差し替え、他の値は今の値（props()）から引き継ぐので、
     //   completed を未完了に戻す（false 固定にする）ような書き換えを検出するため、完了済みから始める。
     //   未完了から始めると、false 固定にしても結果が同じで見逃す。
     const completed = Todo.create("牛乳を買う").changeCompletion(true);
@@ -284,4 +284,59 @@ describe("Todo.reconstruct", () => {
       );
     },
   );
+});
+
+// origin: 読み込んだとき（reconstruct）の値。Repository の save が「変わった列だけ」を書くために差分を取る（Issue #165）。
+describe("Todo#origin", () => {
+  const VALUES = {
+    id: "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e",
+    title: "牛乳を買う",
+    completed: false,
+    createdAt: new Date("2026-09-28T00:00:00.000Z"),
+  };
+
+  test("create した Todo の origin は undefined（新規で、読み込んだ値が無い）", () => {
+    const todo = Todo.create("牛乳を買う");
+
+    expect(todo.origin).toBeUndefined();
+    expect(todo.rename("卵を買う").origin).toBeUndefined();
+    expect(todo.changeCompletion(true).origin).toBeUndefined();
+  });
+
+  // WHY 検証後の値（trim 後）: 差分は今の値（常に検証後）と比べる。引数のまま持つと、前後に空白のある行を読んで
+  //   何も変えずに save しただけで title が「変わった」ことになる。
+  test("reconstruct した Todo の origin は検証後の値（title は前後の空白を取り除いた値）", () => {
+    const todo = Todo.reconstruct({ ...VALUES, title: "  牛乳を買う \n" });
+
+    expect(todo.origin).toStrictEqual(VALUES);
+  });
+
+  test("rename・changeCompletion した Todo は元の origin を引き継ぐ（今の値は変わっても origin は読み込んだときのまま）", () => {
+    const loaded = Todo.reconstruct(VALUES);
+
+    const renamed = loaded.rename("卵を買う");
+    const completed = renamed.changeCompletion(true);
+
+    expect(renamed.title).toBe("卵を買う");
+    expect(completed.completed).toBe(true);
+    expect(renamed.origin).toBe(loaded.origin);
+    expect(completed.origin).toBe(loaded.origin);
+    expect(completed.origin).toStrictEqual(VALUES);
+  });
+
+  // WHY: origin は永続化のための付帯情報で、Todo の値ではない。列挙されるプロパティに出すと、値の等価（テストの toEqual）
+  //   が「読み込んだかどうか」で変わり、Todo を直列化したときにも混ざる。
+  test("origin は Todo の値（列挙されるプロパティ）に含めない", () => {
+    const todo = Todo.reconstruct(VALUES).rename("卵を買う");
+
+    expect(Object.keys(todo)).toEqual([
+      "id",
+      "title",
+      "completed",
+      "createdAt",
+    ]);
+    expect(todo).toEqual(
+      Todo.reconstruct({ ...VALUES, title: "卵を買う" }).rename("卵を買う"),
+    );
+  });
 });

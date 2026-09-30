@@ -88,26 +88,56 @@ export class Todo {
   readonly title: string;
   readonly completed: boolean;
   readonly createdAt: Date;
+  // 読み込んだとき（reconstruct）の値。新規（create）なら undefined。外からは origin（getter）で読む（Issue #165）。
+  // WHY Entity が持つ: Repository の save が「読み込んだときから変わった列だけ」を書き（別の列の同時更新を巻き戻さない）、
+  //   新規か読み込み済みかを見分けるため。「自分が読み込まれたときに何だったか」は Entity の事実で、差分をどの列・
+  //   どの SQL にするか（永続化の都合）は infra（Repository と shared/infra/changed-props.ts）に置く。
+  // WHY 遷移メソッドに「何を変えたか」を記録させない: 記録させると遷移メソッドを足すたびに書く必要があり、書き忘れた
+  //   変更は保存されない。読み込んだときの値と今の値を比べれば、どの遷移を通っても差分が取れる。
+  // WHY private フィールド（#）と getter にする（readonly の公開フィールドにしない）: 公開フィールドは列挙される
+  //   プロパティになり、値の等価（テストの toEqual）が「読み込んだかどうか」で変わり、直列化にも混ざる。origin は
+  //   永続化のための付帯情報で、Todo の値ではない。
+  readonly #origin: Readonly<TodoProps> | undefined;
 
-  private constructor(props: TodoProps) {
+  // origin: 検証した後の props（valid）から origin を決める関数。create は () => undefined、reconstruct は
+  //   (valid) => valid、rename / changeCompletion は () => this.#origin（引き継ぐ）。
+  private constructor(
+    props: TodoProps,
+    origin: (valid: TodoProps) => Readonly<TodoProps> | undefined,
+  ) {
     const valid = validate(todoPropsSchema(), props);
     this.id = valid.id;
     this.title = valid.title;
     this.completed = valid.completed;
     this.createdAt = valid.createdAt;
+    // WHY reconstruct は検証後の値（valid）を origin にする: 引数の値ではなく、今の値と同じ形（title は trim 後）で持つ。
+    //   引数のままだと、前後に空白のある行を読んで何も変えずに save しただけで title が「変わった」ことになる。
+    // WHY 値ではなく関数で受け取る: 検証後の値はコンストラクタの中でしか得られない。reconstruct で先に検証して渡すと、
+    //   検証が口ごとに増える（完全コンストラクタはコンストラクタの 1 か所だけで検証する）。関数なら、どの口も同じ形で
+    //   「valid から origin を決める」ことを書け、特別な値（番兵）で分岐せずに済む。
+    this.#origin = origin(valid);
+  }
+
+  get origin(): Readonly<TodoProps> | undefined {
+    return this.#origin;
   }
 
   // 新しい Todo を作る。id は randomUUID、作成日時は現在時刻（now()）、完了状態は未完了で始める。
   // WHY 作成日時を引数で受け取らない: 「作ったときの時刻が入る」は Todo の生成ルールで、呼び出し側が時刻を渡せると
   //   そのルールが呼び出し側に漏れ、任意の時刻の Todo を作れてしまう。テストで時刻を決めるときは、現在時刻の唯一の出口
   //   now（apps/shared/now.ts）を vi.mock で差し替える（.claude/rules/testing.md）。
+  // WHY origin は undefined: 新規で、読み込んだ値が無い。Repository の save は origin の有無で新規（INSERT）か
+  //   読み込み済み（変わった列だけの UPDATE）かを決める。
   static create(title: string): Todo {
-    return new Todo({
-      id: randomUUID(),
-      title,
-      completed: false,
-      createdAt: now(),
-    });
+    return new Todo(
+      {
+        id: randomUUID(),
+        title,
+        completed: false,
+        createdAt: now(),
+      },
+      () => undefined,
+    );
   }
 
   // 永続化した値から Todo を組み立て直す（Repository の実装が読み込みに使う）。
@@ -119,20 +149,37 @@ export class Todo {
   //   DomainError(validation_error) になる。それをどう扱うか（クライアントの誤りではないので 500）は
   //   Repository の実装が決める（infra/todo-repository.postgres.ts の toTodo）。
   // WHY 引数をオブジェクトにする: 同じ型（string / boolean）の引数が並ぶので、順番の取り違えを防ぐ。
+  // WHY 検証した後の値を origin にする: Repository の save が、読み込んだときから変わった列だけを書くため（Issue #165）。
   static reconstruct(values: TodoProps): Todo {
-    return new Todo(values);
+    return new Todo(values, (valid) => valid);
   }
 
-  // WHY 他の値（id・完了状態・作成日時）を { ...this } で引き継ぐ: タイトルだけを変える操作。
+  // タイトルだけを変える操作。他の値（id・完了状態・作成日時）と origin は引き継ぐ。
   //   引き継いだ値も含めてコンストラクタが全体を検証する。
+  // WHY origin を引き継ぐ: origin は「読み込んだときの値」で、遷移しても変わらない。引き継がないと、読み込んで変えた
+  //   Todo が新規（全列の INSERT ... ON CONFLICT）として保存され、別の列の同時更新を巻き戻す。
   rename(title: string): Todo {
-    return new Todo({ ...this, title });
+    return new Todo({ ...this.props(), title }, () => this.#origin);
   }
 
   // WHY toggle（反転）ではなく値を受け取る: API は「完了にする / 未完了に戻す」を completed の値で指定する。
   //   反転だと同じリクエストを 2 回送ったときに結果が変わる（冪等でなくなる）。
   // completed の規則（boolean であること）も含めて、コンストラクタが全体を検証する。
+  // origin は rename と同じく引き継ぐ。
   changeCompletion(completed: boolean): Todo {
-    return new Todo({ ...this, completed });
+    return new Todo({ ...this.props(), completed }, () => this.#origin);
+  }
+
+  // 今の値（コンストラクタに渡す props の形）。
+  // WHY { ...this } で展開せず項目を明示する: 展開はインスタンスの列挙されるプロパティをすべて拾うので、Todo に
+  //   値ではないもの（origin のような付帯情報）を公開フィールドで足したときに、それが props に混ざる。props は
+  //   不変条件の対象の項目だけにそろえる。
+  private props(): TodoProps {
+    return {
+      id: this.id,
+      title: this.title,
+      completed: this.completed,
+      createdAt: this.createdAt,
+    };
   }
 }

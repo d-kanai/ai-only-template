@@ -1,4 +1,5 @@
 import { asc, eq } from "drizzle-orm";
+import { changedProps } from "../../../shared/infra/changed-props";
 import type { Database } from "../../../shared/infra/database";
 import { Todo } from "../domain/todo";
 import { requireTodo, type TodoRepository } from "../domain/todo-repository";
@@ -42,7 +43,7 @@ function toTodo(row: TodoRow): Todo {
 // TodoRepository の Postgres 実装（Drizzle）。
 // WHY db（Database）をコンストラクタで受け取る: プールは getDatabase が globalThis に 1 つだけ持ち、api ファイルが
 //   `new PostgresTodoRepository(getDatabase().db)` と組み立てる（Issue #123）。テストはテスト用のスキーマの db を渡す。
-// WHY トランザクションを張らない: 今の command は書き込みが 1 文（save の INSERT ... ON CONFLICT か delete）だけで、
+// WHY トランザクションを張らない: 今の command は書き込みが 1 文（save の INSERT ... ON CONFLICT か UPDATE、または delete）だけで、
 //   Postgres は 1 文を原子的に実行する。複数の書き込みが要る command が出たら、その command にトランザクションを扱う依存を
 //   注入する（.claude/rules/backend.md の「永続化（Drizzle + Postgres）」。ADR architecture/20260929-constructor-injection-without-container.md）。
 export class PostgresTodoRepository implements TodoRepository {
@@ -76,10 +77,49 @@ export class PostgresTodoRepository implements TodoRepository {
     return requireTodo(await this.findById(id), id);
   }
 
-  // WHY upsert（INSERT ... ON CONFLICT DO UPDATE）: TodoRepository の save は「同じ id があれば上書き」を約束している。
-  //   先に存在を確かめてから INSERT / UPDATE を分けると、問い合わせが 2 回になり、間に別の保存が入る余地もできる。
-  // WHY 上書きするのは title と completed だけ: 作成日時は作った後で変わらない（Todo に変える操作が無い）。
+  // 新規（origin が undefined）は全列を INSERT、読み込み済みは読み込んだときから変わった列だけを UPDATE する（Issue #165）。
+  // WHY 読み込み済みは変わった列だけ: 全列を書くと、同じ Todo を同時に別の列で更新したとき（片方は完了、片方は名前の
+  //   変更）に、後から save した方が先の変更を読み込んだときの値に巻き戻す（lost update）。変わった列だけなら両方残る。
+  //   同じ列を同時に変えたときは後勝ち。ただし読み込んだときと同じ値に戻す変更は差分が無いので書かれず、他方の更新が
+  //   残る（楽観ロックの version 列は入れない。ユーザー判断）。
+  // WHY 差分は origin と今の値の比較（changedProps）で取る: Entity の遷移メソッドは何も記録しない（todo.ts の origin）。
   async save(todo: Todo): Promise<void> {
+    if (todo.origin === undefined) {
+      await this.insert(todo);
+      return;
+    }
+    // WHY 比べる列は title と completed だけ: Todo を変える操作（rename・changeCompletion）が変えるのはこの 2 つで、
+    //   id と作成日時は作った後で変わらない。
+    const changed = changedProps(
+      todo.origin,
+      { title: todo.title, completed: todo.completed },
+      ["title", "completed"],
+    );
+    // WHY 変わった列が無ければ SQL を発行しない: 空の SET は SQL にならず、書く必要も無い。そのため、読み込んだ後に
+    //   消された Todo でも、変えずに save したときは何もせず気づかない（戻しもしない）。
+    if (Object.keys(changed).length === 0) {
+      return;
+    }
+    // WHY .returning で更新した行を受け取る: 0 行（読み込んだ後に消された）を not_found にするため。drizzle-orm 0.45.3 の
+    //   node-postgres は、returning が無いと pg の QueryResult（rowCount は number | null）を、あると行の配列を返す
+    //   （node-postgres/session.js の execute）。配列なら null の場合を考えずに済む。
+    const [updated] = await this.db
+      .update(todos)
+      .set(changed)
+      .where(eq(todos.id, todo.id))
+      .returning({ id: todos.id });
+    // WHY 0 行なら not_found: 読み込んだ後に別のリクエストが消した Todo。以前の upsert は INSERT で消した Todo を
+    //   戻していた（PUT と DELETE の競合）。API は 404 を返す。
+    // WHY requireTodo を通す（DomainError をここで作らない）: findByIdOrThrow と同じ例外（code・key・params）を
+    //   1 か所（domain の requireTodo）で決める（.claude/rules/backend.md の「永続化」）。
+    requireTodo(updated === undefined ? undefined : todo, todo.id);
+  }
+
+  // WHY 新規も upsert（INSERT ... ON CONFLICT DO UPDATE）にする: 同じ新規のインスタンス（origin が undefined のまま）を
+  //   2 回 save すると、INSERT だけでは主キー違反で失敗する。2 回目は同じ値の上書きになるだけで、既存の行を
+  //   巻き戻す心配は無い（新規の id は randomUUID で、他のリクエストはまだ知らない）。
+  // WHY 上書きするのは title と completed だけ: 作成日時は作った後で変わらない（Todo に変える操作が無い）。
+  private async insert(todo: Todo): Promise<void> {
     await this.db
       .insert(todos)
       .values({

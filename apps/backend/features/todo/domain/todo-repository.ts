@@ -19,7 +19,11 @@ export interface TodoRepository {
   //   （Issue #123 の後のユーザー指示、2026-09-29）。例外の code・key・params をここで 1 つに決め、
   //   ユースケースごとの書き漏れ・書き違い（別の key や params を渡す）を無くす。実装は requireTodo を使う。
   findByIdOrThrow(id: string): Promise<Todo>;
-  // 同じ id があれば上書きする（作成と更新を 1 つにまとめる）。
+  // 作成と更新を 1 つにまとめる。新規（Todo.create から作った Todo。origin が undefined）は同じ id があれば上書きする。
+  //   読み込み済み（origin がある）は、読み込んだときから変わった項目だけを書く（別の項目の同時更新を巻き戻さない。
+  //   同じ項目の同時更新は後勝ち。ただし読み込んだときと同じ値に戻す変更は差分が無いので書かれず、他方の更新が残る）。
+  //   変わった項目が無ければ何もしない。読み込んだ後に消されていれば
+  //   DomainError("not_found", "todo.notFound", { id }) を投げる（Issue #165）。
   save(todo: Todo): Promise<void>;
   // 存在しない id でも何もしない（存在確認は呼び出し側が findById / findByIdOrThrow で行う）。
   delete(id: string): Promise<void>;
