@@ -27,8 +27,8 @@ paths:
 | `domain/` | Entity / Value Object / Repository の interface | 自 feature と shared の `domain`、`@repo/shared/now` だけ。パッケージは application と同じ制限（`node:crypto` などは可） |
 | `infra/` | Repository の Postgres の実装（テスト用の InMemory は `apps/backend/test-support/<feature>/`）、Drizzle のスキーマ `schema.ts`、プール（`shared/infra/database.ts`） | 自 feature と shared の `domain`・`infra`、application は infra が実装する port の `shared/application/transaction` だけ（Issue #220）、`@repo/shared/env`・`@repo/shared/logger`・`@repo/shared/now`。パッケージは `next` / `react` / `react-dom` 以外 |
 
-- 向き: `apps/frontend_customer/app/api → presentation → application → domain`。infra は domain の interface（Repository）と application の port（`TransactionRunner`）を実装する（依存性の逆転）。
-  - WHY infra の application は port 1 つだけ（Issue #220）: Issue #123 でコンテナを廃止してから、infra が application を参照する本番のコードは 0 件だった。層ごと許すと、infra から command（ユースケース）を参照でき、ユースケースの都合が永続化の実装に入り込む。名前で許すのは `rule-tests/architecture.test.ts` の `SHARED_TRANSACTION_PORT_MODULE`。他 feature・`apps/frontend_customer/`・層に属さない場所は参照しない。
+- 向き: `apps/frontend_customer/app/api → presentation → application → domain`。infra は domain の interface（Repository）と application の port（`TransactionRunner`）を実装する（依存性の逆転）。他 feature・`apps/frontend_customer/`・層に属さない場所は参照しない。
+  - WHY infra の application は port 1 つだけ（Issue #220）: Issue #123 でコンテナを廃止してから、infra が application を参照する本番のコードは 0 件だった。層ごと許すと、infra から command（ユースケース）を参照でき、ユースケースの都合が永続化の実装に入り込む。名前で許すのは `rule-tests/architecture.test.ts` の `SHARED_TRANSACTION_PORT_MODULE`。
   - WHY 許可の一覧にする: 禁止の一覧だと、書き忘れた参照先が黙って通る。
 - `apps/backend/shared/` が参照してよい自前コードは shared の中と `apps/shared`（`@repo/shared`）だけ（層の許可にも従う）。`next` / `react` / `react-dom` も不可。
 - `apps/shared` を使ってよい層: env は infra だけ、logger は presentation・infra、now はすべての層（`rule-tests/architecture.test.ts` の `SHARED_MODULES_BY_LAYER`）。WHY env・logger を domain・application に許さない: 外の世界（環境変数・stdout）に触る基盤で、domain・application から使うと infra を参照させない意味が無くなる。WHY now は許す: 現在時刻の Date を返すだけで環境変数・出力・DB に触らず、Entity の生成ルール（作成日時）は domain に置くため（`.claude/rules/shared.md` の「now」）。

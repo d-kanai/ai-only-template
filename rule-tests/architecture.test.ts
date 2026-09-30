@@ -695,7 +695,7 @@ const LAYERS_MAY_USE: Record<BackendLayer, ReadonlySet<BackendLayer>> = {
   // Repository の実装が同じ infra の schema、backend/shared/infra の database（Database の型）を使うので、infra 同士の参照も許す。
   // WHY application を層では許さない（Issue #220）: Issue #123 でコンテナを廃止してから、infra が application を参照する本番の
   //   コードは 0 件だった。infra が application を知ると、command（ユースケース）の都合が永続化の実装に入り込む。
-  //   infra が実装する port（shared/application/transaction）だけを名前で許す（下の SHARED_TRANSACTION_PORT_MODULE と infraAllows）。
+  //   infra が実装する port（shared/application/transaction）だけを名前で許す（下の SHARED_TRANSACTION_PORT_MODULE と backendMayUse）。
   infra: new Set(["domain", "infra"]),
 };
 
@@ -3739,6 +3739,12 @@ const RULE_EXAMPLES: Record<
         "../application/transaction-helper",
         "value",
       ],
+      // port の下の深いパス（transaction/x）も port ではない（完全一致だけを許す）。
+      [
+        "apps/backend/shared/infra/x.ts",
+        "../application/transaction/x",
+        "type",
+      ],
     ],
     allowed: [
       [
@@ -6400,6 +6406,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/backend/features/todo/internal/infra/bad-infra-application.ts": lines(
     'import type { CreateTodoCommand } from "../application/create-todo.command";',
     'import type { X } from "../../../../shared/application/x";',
+    'import type { Y } from "../../../../shared/application/transaction/x";',
   ),
   "apps/backend/features/todo/internal/application/bad-application-infra.ts":
     lines(
@@ -7203,6 +7210,7 @@ const MUST_REJECT_VIOLATIONS = [
   "domain: apps/backend/shared/domain/bad-shared-domain-application.ts → apps/backend/shared/application/transaction",
   "infra: apps/backend/features/todo/internal/infra/bad-infra-application.ts → apps/backend/features/todo/internal/application/create-todo.command",
   "infra: apps/backend/features/todo/internal/infra/bad-infra-application.ts → apps/backend/shared/application/x",
+  "infra: apps/backend/features/todo/internal/infra/bad-infra-application.ts → apps/backend/shared/application/transaction/x",
   "application: apps/backend/features/todo/internal/application/bad-application-infra.ts → apps/backend/shared/infra/database",
   "application: apps/backend/features/todo/internal/application/bad-application-infra.ts → apps/backend/shared/infra/transaction.postgres",
   ...[
