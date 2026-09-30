@@ -8,7 +8,10 @@ import type { Todo } from "./todo";
 // WHY すべて Promise を返す: InMemory の実装は同期で済むが、DB の実装は非同期になる。同じ形にそろえ、
 //   実装を差し替えても呼び出し側（application 層）を直さずに済むようにする。
 export interface TodoRepository {
-  // 並び順は保証しない（並べ替えは用途を知っている application 層が行う）。
+  // 作成日時の昇順で返す。作成日時が同じなら id の昇順（毎回同じ順になる）。
+  // WHY 並び順を Repository の契約にする: 一覧の順序は永続化が最も安く決められ（Postgres は ORDER BY）、application で
+  //   並べ替え直すと 2 か所で同じ規則を持つことになる。実装（Postgres / InMemory）が同じ順を返すことは、両方の
+  //   テストが同じ名前で固定する。
   findAll(): Promise<Todo[]>;
   // 見つからないときは undefined。「無いこと」をどう扱うか（404 にするか等）は呼び出し側が決める。
   // WHY findByIdOrThrow があっても残す: 「無いこと」を失敗ではなく結果として扱いたい呼び出し（存在確認だけしたい用途）

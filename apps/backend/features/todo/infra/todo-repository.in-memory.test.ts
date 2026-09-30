@@ -1,8 +1,23 @@
 // @vitest-environment node
-import { describe, expect, test } from "vitest";
+import { now } from "@repo/shared/now";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { DomainError } from "../../../shared/domain/domain-error";
 import { Todo } from "../domain/todo";
 import { InMemoryTodoRepository } from "./todo-repository.in-memory";
+
+// WHY 時計（now）を差し替える: 並び順のテストで作成日時を決めるため（Todo.create は now() から作成日時を入れる）。
+//   ほかのテストは実時刻のままでよいので spy: true で本物を残し、時刻を決めるテストだけ mockReturnValueOnce する。
+vi.mock("@repo/shared/now", { spy: true });
+
+afterEach(() => {
+  vi.mocked(now).mockReset();
+});
+
+// 作成日時を指定して Todo を作る（now() が次に返す時刻を決めてから create する）。
+function createTodoAt(title: string, createdAt: string): Todo {
+  vi.mocked(now).mockReturnValueOnce(new Date(createdAt));
+  return Todo.create(title);
+}
 
 describe("InMemoryTodoRepository", () => {
   test("空の状態では findAll が空配列を返す", async () => {
@@ -19,6 +34,50 @@ describe("InMemoryTodoRepository", () => {
 
     await expect(repository.findById(todo.id)).resolves.toEqual(todo);
     await expect(repository.findAll()).resolves.toEqual([todo]);
+  });
+
+  // 並び順は Repository の契約（todo-repository.ts の findAll）。Postgres のテストと同じ名前で固定する。
+  test("findAll は作成日時の昇順で返す（保存した順・id の順によらない）", async () => {
+    const repository = new InMemoryTodoRepository();
+    const newer = createTodoAt("新しい", "2026-09-28T10:00:00.000Z");
+    const older = createTodoAt("古い", "2026-09-28T09:00:00.000Z");
+    const middle = createTodoAt("真ん中", "2026-09-28T09:30:00.000Z");
+    // わざと新しい方から保存し、保存順ではなく作成日時で並ぶことを確かめる。
+    await repository.save(newer);
+    await repository.save(older);
+    await repository.save(middle);
+
+    const todos = await repository.findAll();
+
+    expect(todos.map((todo) => todo.title)).toEqual([
+      "古い",
+      "真ん中",
+      "新しい",
+    ]);
+  });
+
+  test("作成日時が同じ Todo は id の昇順で返す（保存した順によらず、毎回同じ順になる）", async () => {
+    const repository = new InMemoryTodoRepository();
+    const createdAt = "2026-09-28T09:00:00.000Z";
+    const a = createTodoAt("a", createdAt);
+    const b = createTodoAt("b", createdAt);
+    // id は randomUUID で決まるので、大小を見てから両方の順で保存し、どちらでも id の順に並ぶことを確かめる
+    //   （片方の順だけだと、常に -1 を返す比較でも保存順のまま通ってしまう）。
+    const [smaller, larger] = a.id < b.id ? [a, b] : [b, a];
+    await repository.save(larger);
+    await repository.save(smaller);
+    const reversed = new InMemoryTodoRepository();
+    await reversed.save(smaller);
+    await reversed.save(larger);
+
+    const todos = await repository.findAll();
+    const todosReversed = await reversed.findAll();
+
+    expect(todos.map((todo) => todo.id)).toEqual([smaller.id, larger.id]);
+    expect(todosReversed.map((todo) => todo.id)).toEqual([
+      smaller.id,
+      larger.id,
+    ]);
   });
 
   test("無い id の findById は undefined を返す", async () => {

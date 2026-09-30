@@ -19,7 +19,15 @@ export class InMemoryTodoRepository implements TodoRepository {
 
   async findAll(): Promise<Todo[]> {
     // 新しい配列を返す: 呼び出し側が配列を並べ替え・削除しても保持中のデータに影響させないため。
-    return Array.from(this.todos.values(), load);
+    // 並び順は Repository の契約（todo-repository.ts）: 作成日時の昇順、同じなら id の昇順。Postgres の
+    //   ORDER BY created_at, id と同じ規則で並べる（Map の挿入順には頼らない）。
+    return Array.from(this.todos.values(), load).sort(
+      (a, b) =>
+        a.createdAt.getTime() - b.createdAt.getTime() ||
+        // id は Map のキーなので同じ値は無く、等しい場合は起きない。
+        // Stryker disable next-line EqualityOperator: id は一意なので、< を <= にしても同じ順になる（等価な変異）。
+        (a.id < b.id ? -1 : 1),
+    );
   }
 
   async findById(id: string): Promise<Todo | undefined> {
