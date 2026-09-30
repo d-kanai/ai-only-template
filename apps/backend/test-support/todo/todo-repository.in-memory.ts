@@ -49,9 +49,9 @@ export class InMemoryTodoRepository implements TodoRepository {
     return stored === undefined ? undefined : load(stored);
   }
 
-  // WHY findById を通す（Map を直接読まない）: テストが findById を spy したときにも findByIdOrThrow 経由の問い合わせが記録される
+  // WHY findById を通す（Map を直接読まない）: テストが findById を spy したときにも findByIdForUpdate 経由の問い合わせが記録される
   //   ようにする（presentation のテストの「Repository が呼ばれない」）。行ロックは無い（InMemory の呼び出しは直列に動く）。
-  async findByIdOrThrow(id: string, _tx: Transaction): Promise<Todo> {
+  async findByIdForUpdate(id: string, _tx: Transaction): Promise<Todo> {
     return requireTodo(await this.findById(id), id);
   }
 
@@ -85,7 +85,7 @@ export class InMemoryTodoRepository implements TodoRepository {
     const { origin } = todo;
     if (origin === undefined) {
       throw new Error(
-        `update takes a loaded Todo (findByIdOrThrow), but got a new one: ${todo.id}`,
+        `update takes a loaded Todo (findByIdForUpdate), but got a new one: ${todo.id}`,
       );
     }
     const changed = changedProps(origin, {

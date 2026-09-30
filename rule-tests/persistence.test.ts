@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
-// 永続化の規則（.claude/rules/backend.md の「永続化」。Issue #165 / #172 / #177 / #188 / #189 / #205 / #215）を、backend のソースで
+// 永続化の規則（.claude/rules/backend.md の「永続化」。Issue #165 / #172 / #177 / #188 / #189 / #205 / #215 / #221）を、backend のソースで
 // 機械的に検査するテスト。対象は apps/backend/ の下のテスト以外の .ts（*.test.ts を除く）。
 // 違反にするもの:
 //   - no-upsert: `onConflictDoUpdate` / `onConflictDoNothing`（Drizzle の upsert）の名前がコードにあること。
@@ -105,9 +105,20 @@ import { afterAll, describe, expect, it } from "vitest";
 //       （`?.` / `!` は受け手の正規表現に一致しない）は見ない。文字列の中の `db.insert(` は違反と数える（安全側）。
 //   - aggregate-loads-all-children（Issue #189。ユーザー判断 2026-09-30）: insert のみの子表（`Changes` / `Events` で終わる名前）を
 //     import した *.postgres.ts で、(a) 親の `.from(<表>)` の chain に子表の `.leftJoin(` が無い（行ロック `.for(` の chain は除く。
-//     command の findByIdOrThrow が集約を読む前に根の行だけをロックする文。Issue #215）、
+//     command の findByIdForUpdate が集約を読む前に根の行だけをロックする文。Issue #215）、
 //     (b) 子表だけを `.from(<子表>)` で読む、(c) `.limit(` / `.offset(` / `.selectDistinctOn(`、(d) `.where(` の引数に子表の列がある。
 //     WHY: 集約は常に全体（全件の履歴）を読んで reconstruct の不変条件で検証する。WHY と限界は partialAggregateReads のコメント。
+//   - lock-method-name-for-update（Issue #221）: *.postgres.ts のクラスのメソッドで、本体に行ロック（`.for(`。`.` と名前と `(` の間の
+//     空白・改行は可）があるのに名前が `ForUpdate` で終わらない、または名前が `ForUpdate` で終わるのに本体に `.for(` が無い。
+//     行はメソッドの宣言の行。トランザクションの runner（REPOSITORY_RULES_EXEMPT）も対象にする（Repository かどうかに関わらず、
+//     ロックするメソッドの名前の規則）。
+//     WHY: ロックする読み込み（findByIdForUpdate）としない読み込み（findById）は、呼び出し側の前提（同じ行を変える command の直列化・
+//       tx が要ること・not_found のタイミング）が変わる。名前でロックが分からないと、query でロックを取る・command でロック無しに
+//       読んで lost update になる取り違えが起きる。逆に ForUpdate の名前でロックしなければ、名前が嘘になる。
+//     WHY 字句で見る（AST にしない）: 見るのはメソッドの名前と本体の `.for(` の有無だけ。本体の範囲は classMethods のコメント。
+//     限界: `.for(` を別の関数（クラスの外の関数・別のメソッド）の中に置いて呼ぶ書き方は、呼び出し側のメソッドの本体に `.for(` が
+//       出ないので見ない（呼ばれた側のメソッドは見る）。プロパティでの定義（`find = async () => …`）・ブラケット（`q["for"](…)`）・
+//       生の SQL（sql`… for update`）は見ない。文字列の中の `.for(` は数える（安全側）。
 // 変更履歴の表（change_logs。変数名 changeLogs）も insert のみ: no-update-delete-on-append-only-tables と append-only-table-naming は
 //   `Logs` / `_logs` も対象にし、append-only-table-naming は横断の表の置き場所 shared/infra/schema.ts も見る（Issue #189）。
 // コメントと文字列の扱い（限界）: 各行の `//` 以降を落としてから探す（「// .onConflictDoUpdate( は使わない」を違反と数えない）。
@@ -133,7 +144,8 @@ type RuleId =
   | "no-direct-transaction"
   | "no-direct-record-change"
   | "no-direct-db-write"
-  | "aggregate-loads-all-children";
+  | "aggregate-loads-all-children"
+  | "lock-method-name-for-update";
 
 type PersistenceViolation = { rule: RuleId; line: number };
 
@@ -197,6 +209,56 @@ function closingParen(code: string, open: number): number {
     if (code[index] === ")" && --depth === 0) return index;
   }
   return code.length;
+}
+
+// open の位置の `{` に対応する `}` の位置。閉じが無ければ code の長さ（最後まで中とみなす）。
+// 限界: closingParen と同じく、文字列・正規表現の中の括弧も数える。
+function closingBrace(code: string, open: number): number {
+  let depth = 0;
+  for (let index = open; index < code.length; index++) {
+    if (code[index] === "{") depth++;
+    if (code[index] === "}" && --depth === 0) return index;
+  }
+  return code.length;
+}
+
+// 行の先頭のメソッドの宣言（修飾子・async・get / set の後の名前と、`(` か型引数の `<`）。
+// WHY 行の先頭だけを見る: Biome の整形では、メソッドの宣言は 1 行ずつ行の先頭（インデントの後）から始まる。
+const METHOD_DECLARATION =
+  /^[ \t]*(?:(?:public|private|protected|static|override|abstract)\s+)*(?:async\s+)?(?:\*\s*)?(?:(?:get|set)\s+)?([A-Za-z_$][\w$]*)\s*[(<]/gm;
+
+// クラスのメソッドの名前・宣言の行番号（1 始まり）・本体（lock-method-name-for-update）。
+// 本体は、宣言から次のメソッドの宣言まで（最後のメソッドはクラスの閉じ括弧の手前まで）とみなす（字句の推定）。
+// WHY クラスの直下（波括弧の深さ 0）の行だけを宣言と見る: メソッドの本体の中の行の先頭の呼び出し（`requireTodo(…)`・`if (`・
+//   `for (`）は深さが 1 以上なので、宣言と取り違えない。
+// 限界: 文字列の中の `class` や不揃いの波括弧、クラスの中のクラス（外のメソッドの本体に含めて見る）は見分けない。
+function classMethods(
+  code: string,
+): { name: string; line: number; body: string }[] {
+  return [...code.matchAll(/\bclass\b[^{;]*\{/g)].flatMap(
+    ({ 0: whole, index }) => {
+      const open = index + whole.length - 1;
+      const classBody = code.slice(open + 1, closingBrace(code, open));
+      const depthAt = (at: number) =>
+        (classBody.slice(0, at).match(/\{/g)?.length ?? 0) -
+        (classBody.slice(0, at).match(/\}/g)?.length ?? 0);
+      const declarations = [...classBody.matchAll(METHOD_DECLARATION)].filter(
+        ({ index: at }) => depthAt(at) === 0,
+      );
+      return declarations.map(({ 1: name = "", index: at }, i) => ({
+        name,
+        line: lineAt(code, open + 1 + at),
+        body: classBody.slice(at, declarations[i + 1]?.index),
+      }));
+    },
+  );
+}
+
+// 行ロック（`.for(`）の有無と、名前が ForUpdate で終わるかが食い違うメソッドの、宣言の行番号（1 始まり）。
+function lockMethodNameViolations(code: string): number[] {
+  return classMethods(code).flatMap(({ name, line, body }) =>
+    /\.\s*for\s*\(/.test(body) === /ForUpdate$/.test(name) ? [] : [line],
+  );
 }
 
 // 書き込み（`.insert(` / `.update(` / `.delete(`。`.` と名前と `(` の間の空白・改行は可）の、名前の行番号（1 始まり）。
@@ -280,7 +342,7 @@ function importedChildTables(code: string): string[] {
 
 // 子表を import した *.postgres.ts の、集約を一部だけ読む書き方の行番号（1 始まり）。
 //   (a) 子表でない表の `.from(<表>)` の chain（`.from(` から次の `;` まで）に、import した子表ごとの `.leftJoin(<子表>` が無い。
-//       chain に `.for(`（行ロック）があれば対象外（command の findByIdOrThrow が集約を読む前に根の行だけをロックする文。集約を
+//       chain に `.for(`（行ロック）があれば対象外（command の findByIdForUpdate が集約を読む前に根の行だけをロックする文。集約を
 //       組み立てない。Issue #215）。行は from の行。
 //   (b) 子表の `.from(<子表>)`（子表だけを読む）。行は from の行。
 //   (c) `.limit(` / `.offset(`（件数を絞る・飛ばす）、`.selectDistinctOn(`（親ごとに 1 行だけを読む）。行はその名前の行。
@@ -435,6 +497,16 @@ function findPersistenceViolations(
       })),
       ...partialAggregateReads(code).map((line) => ({
         rule: "aggregate-loads-all-children" as const,
+        line,
+      })),
+    );
+  }
+
+  // WHY isRepository でなく *.postgres.ts すべて: 行ロックの名前の規則は Repository かどうかに関わらない（runner も対象）。
+  if (/\.postgres\.ts$/.test(path)) {
+    violations.push(
+      ...lockMethodNameViolations(lines.join("\n")).map((line) => ({
+        rule: "lock-method-name-for-update" as const,
         line,
       })),
     );
@@ -895,7 +967,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       ),
     ],
     [
-      "子表を import した *.postgres.ts の行ロック（.for(。findByIdOrThrow が集約を読む前に根の行だけをロックする文）は、親だけを from で読んでよい",
+      "子表を import した *.postgres.ts の行ロック（.for(。findByIdForUpdate が集約を読む前に根の行だけをロックする文）は、親だけを from で読んでよい",
       POSTGRES,
       source(
         IMPORT_CHILD,
@@ -948,6 +1020,54 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       source(
         'import { orders, orderEventsTable as orderEvents } from "./schema";',
         "const rows = await this.db.select().from(orders).leftJoin(orderEvents, on).orderBy(orderEvents.position);",
+      ),
+    ],
+    [
+      "lock-method-name-for-update: 行ロック（.for(）をするメソッドの名前が ForUpdate で終わる（複数行の引数・修飾子も。本体の行頭の呼び出し・if はメソッドの宣言ではない）",
+      POSTGRES,
+      source(
+        "export class XRepository {",
+        "  async findByIdForUpdate(id: string, tx: Transaction): Promise<X> {",
+        "    requireX(id);",
+        "    if (id) {}",
+        '    await writer.select().from(xs).where(eq(xs.id, id)).for("update");',
+        "  }",
+        "  private async lockForUpdate(",
+        "    id: string,",
+        "  ): Promise<void> {",
+        "    await writer",
+        "      .select()",
+        "      .from(xs)",
+        '      .for("update");',
+        "  }",
+        "}",
+      ),
+    ],
+    [
+      "lock-method-name-for-update: ロックしないメソッドの本体は次のメソッドの宣言までで、後ろの ForUpdate のメソッドの .for( を含まない",
+      POSTGRES,
+      source(
+        "export class XRepository {",
+        "  constructor(private readonly db: Database) {}",
+        "  async findById(id: string): Promise<X | undefined> {",
+        "    for (const x of xs) {}",
+        "    xs.forEach((x) => x);",
+        '    // .for("update") は findByIdForUpdate だけが付ける',
+        "  }",
+        "  async findByIdForUpdate(id: string, tx: Transaction): Promise<X> {",
+        '    await writer.select().from(xs).for("update");',
+        "  }",
+        "}",
+      ),
+    ],
+    [
+      "lock-method-name-for-update: *.postgres.ts でないファイル（in-memory）は対象外",
+      IN_MEMORY,
+      source(
+        "class InMemoryXRepository {",
+        '  async findById(id: string) { return q.for("update"); }',
+        "  async findByIdForUpdate(id: string) {}",
+        "}",
       ),
     ],
   ])("%s は違反なし", (_name, path, text) => {
@@ -1437,6 +1557,97 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
       source("return this.db.transaction((tx) => work(tx));"),
       [{ rule: "no-direct-transaction", line: 1 }],
     ],
+    [
+      "lock-method-name-for-update: 行ロック（.for(）をするメソッドの名前が ForUpdate で終わらない（findByIdLocked）",
+      POSTGRES,
+      source(
+        "export class XRepository {",
+        "  async findByIdLocked(id: string, tx: Transaction): Promise<X> {",
+        '    await writer.select().from(xs).where(eq(xs.id, id)).for("update");',
+        "  }",
+        "}",
+      ),
+      [{ rule: "lock-method-name-for-update", line: 2 }],
+    ],
+    [
+      "lock-method-name-for-update: 名前が ForUpdate で終わるのに本体に .for( が無い（名前が嘘になる）",
+      POSTGRES,
+      source(
+        "export class XRepository {",
+        "  async findByIdForUpdate(id: string): Promise<X> {",
+        "    return selectXs(this.db, eq(xs.id, id));",
+        "  }",
+        "}",
+      ),
+      [{ rule: "lock-method-name-for-update", line: 2 }],
+    ],
+    [
+      "lock-method-name-for-update: 複数行の宣言・修飾子（private / static）・. と for と ( の間の改行と空白",
+      POSTGRES,
+      source(
+        "export class XRepository {",
+        "  private async findLocked(",
+        "    id: string,",
+        "  ): Promise<X> {",
+        "    await writer.select().from(xs).",
+        '      for ("share");',
+        "  }",
+        "  static lock(id: string) {",
+        '    return q .for("update");',
+        "  }",
+        "}",
+      ),
+      [
+        { rule: "lock-method-name-for-update", line: 2 },
+        { rule: "lock-method-name-for-update", line: 8 },
+      ],
+    ],
+    [
+      "lock-method-name-for-update: ロックが前のメソッドにあり、後ろの ForUpdate のメソッドには無い（本体を次の宣言で区切る）",
+      POSTGRES,
+      source(
+        "export class XRepository {",
+        "  async load(id: string) {",
+        '    await writer.select().from(xs).for("update");',
+        "  }",
+        "  async findByIdForUpdate(id: string) {",
+        "    return selectXs(writer, eq(xs.id, id));",
+        "  }",
+        "}",
+      ),
+      [
+        { rule: "lock-method-name-for-update", line: 2 },
+        { rule: "lock-method-name-for-update", line: 5 },
+      ],
+    ],
+    [
+      "lock-method-name-for-update: ForUpdate で終わらない似た名前（forUpdateX・findForUpdates）と、2 つ目のクラスのメソッド",
+      POSTGRES,
+      source(
+        "class A {",
+        '  async forUpdateX() { await q.for("update"); }',
+        "}",
+        "class B {",
+        '  async findForUpdates() { await q.for("update"); }',
+        "}",
+      ),
+      [
+        { rule: "lock-method-name-for-update", line: 2 },
+        { rule: "lock-method-name-for-update", line: 5 },
+      ],
+    ],
+    [
+      "lock-method-name-for-update: トランザクションの runner（Repository の規則の対象外）も対象",
+      RUNNER,
+      source(
+        "export class PostgresTransactionRunner {",
+        "  async run(id: string) {",
+        '    await q.for("update");',
+        "  }",
+        "}",
+      ),
+      [{ rule: "lock-method-name-for-update", line: 2 }],
+    ],
   ])("%s は違反", (_name, path, text, expected) => {
     expect(findPersistenceViolations(path, text)).toEqual(expected);
   });
@@ -1475,6 +1686,18 @@ describe("backend のソースの列挙と検査（fixture）", () => {
       "apps/backend/features/y/internal/infra/y-repository.postgres.ts": source(
         updateMethod,
         "q.onConflictDoUpdate({});",
+      ),
+      // 行ロックのメソッドの名前（Issue #221）: ロックして ForUpdate で終わる（可）・ロックして終わらない・終わるのにロックしない。
+      "apps/backend/features/y/internal/infra/y-lock.postgres.ts": source(
+        "export class YLock {",
+        "  async findByIdForUpdate(id: string) {",
+        '    await writerOf(tx).select().from(ys).for("update");',
+        "  }",
+        "  async findByIdLocked(id: string) {",
+        '    await writerOf(tx).select().from(ys).for("update");',
+        "  }",
+        "  async findLockedForUpdate(id: string) {}",
+        "}",
       ),
       "apps/backend/features/y/internal/infra/y-reader.postgres.ts": source(
         "export class YReader {}",
@@ -1563,6 +1786,7 @@ describe("backend のソースの列挙と検査（fixture）", () => {
         "apps/backend/features/y/internal/domain/y-repository.ts",
         "apps/backend/features/y/internal/domain/y.ts",
         "apps/backend/features/y/internal/infra/schema.ts",
+        "apps/backend/features/y/internal/infra/y-lock.postgres.ts",
         "apps/backend/features/y/internal/infra/y-reader.postgres.ts",
         "apps/backend/features/y/internal/infra/y-repository.in-memory.ts",
         "apps/backend/features/y/internal/infra/y-repository.postgres.ts",
@@ -1579,6 +1803,8 @@ describe("backend のソースの列挙と検査（fixture）", () => {
         "no-upsert: apps/backend/features/x/internal/infra/x-repository.in-memory.ts:4",
         "entity-with-reconstruct-has-origin: apps/backend/features/y/internal/domain/y.ts:2",
         "append-only-table-naming: apps/backend/features/y/internal/infra/schema.ts:2",
+        "lock-method-name-for-update: apps/backend/features/y/internal/infra/y-lock.postgres.ts:5",
+        "lock-method-name-for-update: apps/backend/features/y/internal/infra/y-lock.postgres.ts:8",
         "no-update-delete-on-append-only-tables: apps/backend/features/y/internal/infra/y-reader.postgres.ts:2",
         "writes-through-writer: apps/backend/features/y/internal/infra/y-reader.postgres.ts:2",
         "no-direct-db-write: apps/backend/features/y/internal/infra/y-reader.postgres.ts:2",
@@ -1607,7 +1833,7 @@ describe("backend のソースの列挙と検査（fixture）", () => {
 });
 
 describe("永続化（実ファイル）", () => {
-  it("upsert を使わず、*.postgres.ts の update は changed-props を import し、reconstruct を持つ Entity は origin を持ち、insert のみの表を update / delete せず、その表を Changes / Events / Logs で終わる変数で宣言し、書き込みは writerOf で得た Writer を通し（transaction と recordChange を直接呼ばず、change-log を import しない）、集約は子表の全件を JOIN で読む", () => {
+  it("upsert を使わず、*.postgres.ts の update は changed-props を import し、reconstruct を持つ Entity は origin を持ち、insert のみの表を update / delete せず、その表を Changes / Events / Logs で終わる変数で宣言し、書き込みは writerOf で得た Writer を通し（transaction と recordChange を直接呼ばず、change-log を import しない）、集約は子表の全件を JOIN で読み、行ロックをするメソッドの名前は ForUpdate で終わる", () => {
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     const files = listBackendSources(repoRoot);
     expect(files).toContain(

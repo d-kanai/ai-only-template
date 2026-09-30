@@ -8,8 +8,8 @@ export class GetTodoQuery {
   async execute(id: string): Promise<Todo> {
     // WHY 無ければ not_found（undefined を返さず例外にする）: 「無い」ことを API で 404 にするのはこのユースケースの仕様。
     //   呼び出し側（presentation）に undefined の判定を書かせず、DomainError の変換 1 か所で 404 にそろえる。
-    //   not_found の DomainError の作り方は domain の requireTodo が 1 か所で持つ（findByIdOrThrow と同じ例外）。
-    // WHY findByIdOrThrow ではなく findById（Issue #215）: findByIdOrThrow は command 用で、トランザクションの中で行をロックして読む。
+    //   not_found の DomainError の作り方は domain の requireTodo が 1 か所で持つ（findByIdForUpdate と同じ例外）。
+    // WHY findByIdForUpdate ではなく findById（Issue #215）: findByIdForUpdate は command 用で、トランザクションの中で行をロックして読む。
     //   query はトランザクションを張らず、ロックも取らない（command がロックしている間も待たずに読める）。
     return requireTodo(await this.repository.findById(id), id);
   }

@@ -93,7 +93,7 @@ function spiedRepository() {
   return {
     repository,
     findById: vi.spyOn(repository, "findById"),
-    findByIdOrThrow: vi.spyOn(repository, "findByIdOrThrow"),
+    findByIdForUpdate: vi.spyOn(repository, "findByIdForUpdate"),
     insert: vi.spyOn(repository, "insert"),
     update: vi.spyOn(repository, "update"),
     delete: vi.spyOn(repository, "delete"),
@@ -151,7 +151,7 @@ describe("PUT /api/todos/:id/completion", () => {
   });
 
   // WHY 本番の PUT（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない（Issue #59）
-  //   ことを、Postgres の Repository が呼ばれることで固定する。runner の run と findByIdOrThrow と update を差し替えるので DB には接続しない。
+  //   ことを、Postgres の Repository が呼ばれることで固定する。runner の run と findByIdForUpdate と update を差し替えるので DB には接続しない。
   test("本番の PUT は Postgres の runner が張ったトランザクションで、Postgres の Repository に保存する", async () => {
     const todo = Todo.create("牛乳を買う");
     // WHY runner の run を差し替える: 本番の組み立ての PostgresTransactionRunner が DB に接続しないよう、work を呼ぶだけにする。
@@ -161,7 +161,7 @@ describe("PUT /api/todos/:id/completion", () => {
       .mockImplementation((work) => work(inMemoryTransaction));
     vi.spyOn(
       PostgresTodoRepository.prototype,
-      "findByIdOrThrow",
+      "findByIdForUpdate",
     ).mockResolvedValue(todo);
     const update = vi
       .spyOn(PostgresTodoRepository.prototype, "update")
@@ -185,7 +185,7 @@ describe("PUT /api/todos/:id/completion", () => {
 
   // WHY 本番の PUT の通知をログの行で確かめる: 組み立てで渡す関数（notification の expose の notify）は api ファイルの中の
   //   値で、外から差し替えも参照もできない。notify は通知をログ（console.log の JSON 1 行）に出すので、本番の PUT で完了にした
-  //   後にその行が出れば、notification の expose につながっていることが分かる。runner の run と findByIdOrThrow と update を
+  //   後にその行が出れば、notification の expose につながっていることが分かる。runner の run と findByIdForUpdate と update を
   //   差し替えるので DB には接続しない。
   test("本番の PUT は、未完了の Todo を完了にすると notification の expose で Todo completed: <id> を通知する（ログの 1 行）", async () => {
     const todo = Todo.create("牛乳を買う");
@@ -194,7 +194,7 @@ describe("PUT /api/todos/:id/completion", () => {
     );
     vi.spyOn(
       PostgresTodoRepository.prototype,
-      "findByIdOrThrow",
+      "findByIdForUpdate",
     ).mockResolvedValue(todo);
     vi.spyOn(PostgresTodoRepository.prototype, "update").mockResolvedValue();
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -257,7 +257,7 @@ describe("PUT /api/todos/:id/completion", () => {
 
       await expectProblem(response, notFoundProblem(id));
       expect(spies.findById).not.toHaveBeenCalled();
-      expect(spies.findByIdOrThrow).not.toHaveBeenCalled();
+      expect(spies.findByIdForUpdate).not.toHaveBeenCalled();
       expect(spies.insert).not.toHaveBeenCalled();
       expect(spies.update).not.toHaveBeenCalled();
       expect(spies.delete).not.toHaveBeenCalled();

@@ -40,13 +40,13 @@ describe("DeleteTodoCommand", () => {
   });
 
   // WHY 読み込み（行ロック）と削除を同じ tx で行う（Issue #215）: 確かめてから消すまでの間に、別の要求がその Todo を変えられない。
-  test("findByIdOrThrow と delete を、runner の run が渡した同じ tx で、run の中（COMMIT の前）で行う", async () => {
+  test("findByIdForUpdate と delete を、runner の run が渡した同じ tx で、run の中（COMMIT の前）で行う", async () => {
     const { repository, todo } = await setup();
     const events: string[] = [];
     const find = vi
-      .spyOn(repository, "findByIdOrThrow")
+      .spyOn(repository, "findByIdForUpdate")
       .mockImplementation(async () => {
-        events.push("findByIdOrThrow");
+        events.push("findByIdForUpdate");
         return todo;
       });
     const remove = vi
@@ -61,7 +61,7 @@ describe("DeleteTodoCommand", () => {
 
     expect(find.mock.calls).toEqual([[todo.id, inMemoryTransaction]]);
     expect(remove.mock.calls).toEqual([[todo.id, inMemoryTransaction]]);
-    expect(events).toEqual(["findByIdOrThrow", "delete", "commit"]);
+    expect(events).toEqual(["findByIdForUpdate", "delete", "commit"]);
   });
 
   test("無い id なら、その id を params に持つ DomainError(not_found, todo.notFound) を投げる", async () => {

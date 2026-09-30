@@ -69,7 +69,7 @@ function spiedRepository() {
   return {
     repository,
     findById: vi.spyOn(repository, "findById"),
-    findByIdOrThrow: vi.spyOn(repository, "findByIdOrThrow"),
+    findByIdForUpdate: vi.spyOn(repository, "findByIdForUpdate"),
     insert: vi.spyOn(repository, "insert"),
     update: vi.spyOn(repository, "update"),
     delete: vi.spyOn(repository, "delete"),
@@ -135,7 +135,7 @@ describe("GET /api/todos/:id", () => {
 
       await expectProblem(response, notFoundProblem(id));
       expect(spies.findById).not.toHaveBeenCalled();
-      expect(spies.findByIdOrThrow).not.toHaveBeenCalled();
+      expect(spies.findByIdForUpdate).not.toHaveBeenCalled();
       expect(spies.insert).not.toHaveBeenCalled();
       expect(spies.update).not.toHaveBeenCalled();
       expect(spies.delete).not.toHaveBeenCalled();

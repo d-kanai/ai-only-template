@@ -1,6 +1,6 @@
 // トランザクションを表す brand の型（Issue #215。ADR docs/adr/architecture/20260930-transaction-from-application.md）。
 // command（application）が張ったトランザクションを、Repository の書き込み（insert / update / delete）と読み込み
-//   （findByIdOrThrow）に渡すときの型。トランザクションを張る口 TransactionRunner は shared/application/transaction.ts
+//   （findByIdForUpdate）に渡すときの型。トランザクションを張る口 TransactionRunner は shared/application/transaction.ts
 //   （Issue #220 でここから移した）。
 // WHY この型だけを domain に置く: domain の TodoRepository（interface）の引数に要り、domain は application を参照できない
 //   （rule-tests/architecture.test.ts の domain）。runner（トランザクションの範囲を決める口）は command の関心なので application に
