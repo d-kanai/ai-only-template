@@ -36,11 +36,15 @@ import { afterAll, describe, expect, it } from "vitest";
 //   - db-tests-in-infra-only: apps/backend/test-support/database（実 Postgres。createTestDatabase。Issue #181 で
 //     apps/backend/shared/infra/database.test-support から移した）を import する（`from` / `import "…"` / `import("…")`。
 //     `import type` も）のは、apps/backend/**/infra/ の直下のテスト、apps/backend/test-support/ の直下のテスト（test-support 自身のテスト）、
-//     vitest.global-setup.ts だけ。application / presentation / domain のテスト・frontend のテストからの import は違反。
+//     apps/backend/journeys/ の直下のジャーニーテスト（*.journey.test.ts。Issue #187）、vitest.global-setup.ts だけ。
+//     application / presentation / domain のテスト・frontend のテストからの import は違反。
 //     参照先は書き方によらず解決して比べる（相対パスは参照元のディレクトリから、`@repo/backend/…` は apps/backend/、`@/…` は
 //     apps/frontend_customer/。拡張子は除く）。WHY: 書き方（`../../../test-support/database`・`@repo/backend/test-support/database`・
 //     `./database`）の文字列で比べると、置き場所が同じでも書き方を変えるだけで素通りする。
 //     WHY: DB ありのテストは infra に分け、ユースケースと HTTP のテストは DB に接続しない（ユーザー判断 2026-09-30）。
+//     WHY ジャーニーテストは許す（Issue #187）: 複数の API を実 Postgres の上で業務の流れに沿って順に呼ぶテストの種類で、
+//       層ごとの単体テスト（DB に接続しない）とは置き場所（apps/backend/journeys/）で分けている。形（*.journey.test.ts だけ・
+//       InMemory と vi.mock の禁止・API 2 つ以上・test-support/database の import）は rule-tests/journey.test.ts が見る。
 //     WHY import type も違反: 型だけでも DB の準備を前提にしたテストの形が application / presentation に入り込む入口になる。
 // 検査の対象: apps/ の下のテストファイル（*.test.ts / *.test.tsx）と、リポジトリ直下の vitest.global-setup.ts。
 //   apps/shared（`vi.mock("./now")`）と frontend（`vi.mock("@/features/.../api/...")`）の vi.mock は vi-mock-only-now の対象外。
@@ -116,12 +120,16 @@ const TEST_DATABASE_MODULE = "apps/backend/test-support/database";
 //   （features/infra/application/）、別の層の下の infra/（features/x/application/infra/）は通さない。
 // WHY apps/backend/test-support/ の直下のテストも許す: test-support/database.ts 自身のテスト（database.test.ts）が、テスト用の
 //   スキーマの作成と後始末を実 Postgres で確かめる。
+// WHY apps/backend/journeys/ の直下の *.journey.test.ts も許す（Issue #187）: ジャーニーテストは実 Postgres で API の流れを確かめる。
+//   名前に .journey の無いテスト（journeys/x.test.ts）と、feature の下の journeys/（features/x/journeys/）は通さない。
+//   置き場所を apps/backend/journeys/ の 1 か所にそろえ、そこに置けるのがジャーニーだけであることは rule-tests/journey.test.ts が見る。
 function mayImportTestDatabase(path: string): boolean {
   return (
     path === "vitest.global-setup.ts" ||
     /^apps\/backend\/(?:(?:features\/[^/]+|shared)\/infra|test-support)\/[^/]+\.test\.tsx?$/.test(
       path,
-    )
+    ) ||
+    /^apps\/backend\/journeys\/[^/]+\.journey\.test\.ts$/.test(path)
   );
 }
 
@@ -234,6 +242,7 @@ const INFRA_TEST =
   "apps/backend/features/x/infra/x-repository.postgres.test.ts";
 const SHARED_INFRA_TEST = "apps/backend/shared/infra/database.test.ts";
 const TEST_SUPPORT = "../../../test-support/database";
+const JOURNEY_TEST = "apps/backend/journeys/x.journey.test.ts";
 
 describe("テストダブルの判定（findTestDoubleViolations）: must pass", () => {
   it.each([
@@ -344,6 +353,16 @@ describe("テストダブルの判定（findTestDoubleViolations）: must pass",
       "test-support 自身のテストから ./database を import",
       "apps/backend/test-support/database.test.ts",
       source('import { createTestDatabase } from "./database";'),
+    ],
+    [
+      "apps/backend/journeys/ のジャーニーテストから ../test-support/database を import",
+      JOURNEY_TEST,
+      source(
+        "import {",
+        "  createTestDatabase,",
+        "  type TestDatabase,",
+        '} from "../test-support/database";',
+      ),
     ],
     [
       "vitest.global-setup.ts から test-support/database を import",
@@ -585,6 +604,26 @@ describe("テストダブルの判定（findTestDoubleViolations）: must reject
       [{ rule: "db-tests-in-infra-only", line: 1 }],
     ],
     [
+      "apps/backend/journeys/ の .journey の無いテストから import",
+      "apps/backend/journeys/x.test.ts",
+      source('import { createTestDatabase } from "../test-support/database";'),
+      [{ rule: "db-tests-in-infra-only", line: 1 }],
+    ],
+    [
+      "feature の下の journeys/ のジャーニーテストから import（apps/backend/journeys/ の直下だけ）",
+      "apps/backend/features/x/journeys/x.journey.test.ts",
+      source(`import { createTestDatabase } from "${TEST_SUPPORT}";`),
+      [{ rule: "db-tests-in-infra-only", line: 1 }],
+    ],
+    [
+      "apps/backend/journeys/ の下の入れ子のジャーニーテストから import",
+      "apps/backend/journeys/nested/x.journey.test.ts",
+      source(
+        'import { createTestDatabase } from "../../test-support/database";',
+      ),
+      [{ rule: "db-tests-in-infra-only", line: 1 }],
+    ],
+    [
       "vitest.global-setup.ts と名前だけ違う別のファイル（.mts）から import",
       "vitest.global-setup.mts",
       source(
@@ -662,6 +701,12 @@ describe("テストファイルの列挙と検査（fixture）", () => {
       "vitest.global-setup.ts": source(
         'import { cleanupTestSchemas } from "./apps/backend/test-support/database";',
       ),
+      [JOURNEY_TEST]: source(
+        'import { createTestDatabase } from "../test-support/database";',
+      ),
+      "apps/backend/journeys/y.test.ts": source(
+        'import { createTestDatabase } from "../test-support/database";',
+      ),
       "apps/frontend_customer/features/x/x.hook.test.ts": source(
         'vi.mock("@/features/x/api/x-api");',
       ),
@@ -689,6 +734,8 @@ describe("テストファイルの列挙と検査（fixture）", () => {
         "apps/backend/features/x/domain/y.test.ts",
         "apps/backend/features/x/infra/x-repository.postgres.test.ts",
         "apps/backend/features/x/presentation/x.api.test.ts",
+        "apps/backend/journeys/x.journey.test.ts",
+        "apps/backend/journeys/y.test.ts",
         "apps/backend/shared/infra/database.test.ts",
         "apps/backend/test-support/database.test.ts",
         "apps/frontend_customer/features/x/x-screen.test.tsx",
@@ -702,6 +749,7 @@ describe("テストファイルの列挙と検査（fixture）", () => {
         "vi-mock-only-now: apps/backend/features/x/domain/y.test.ts:2",
         "db-tests-in-infra-only: apps/backend/features/x/presentation/x.api.test.ts:2",
         "vi-mock-only-now: apps/backend/features/x/presentation/x.api.test.ts:5",
+        "db-tests-in-infra-only: apps/backend/journeys/y.test.ts:1",
         "db-tests-in-infra-only: apps/frontend_customer/features/x/x-screen.test.tsx:1",
       ],
     });
@@ -717,7 +765,7 @@ describe("テストファイルの列挙と検査（fixture）", () => {
 });
 
 describe("テストダブル（実ファイル）", () => {
-  it("backend のテストの vi.mock は @repo/shared/now だけ、test-support/database の import は infra のテスト・test-support のテスト・global-setup だけ", () => {
+  it("backend のテストの vi.mock は @repo/shared/now だけ、test-support/database の import は infra のテスト・test-support のテスト・ジャーニーテスト・global-setup だけ", () => {
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     const files = listTestDoubleTargets(repoRoot);
     expect(files).toContain("apps/backend/features/todo/domain/todo.test.ts");
@@ -726,6 +774,9 @@ describe("テストダブル（実ファイル）", () => {
     );
     expect(files).toContain("vitest.global-setup.ts");
     expect(files).toContain("apps/backend/test-support/database.test.ts");
+    expect(files).toContain(
+      "apps/backend/journeys/todo-lifecycle.journey.test.ts",
+    );
     expect(collectTestDoubleViolations(repoRoot)).toEqual([]);
   });
 });
