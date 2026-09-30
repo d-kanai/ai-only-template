@@ -73,6 +73,10 @@ import {
 //   describe-feature の test.for）。シナリオの関数の変数は、そのシナリオの step だけが共有する。
 // WHY .feature に書いた値（Todo の名前）を step の実装に固定値で書かない: 値は When / Given の step の引数（{string}）で受け取り、
 //   変数に入れて後続の step が使う（reviewer の指摘、Issue #200）。.feature の値を書き換えても、step の実装を直さずに通る。
+// WHY 状態コード・応答の本文・DB の行の検証をこのファイルに閉じ、.feature には業務の言葉だけを書く（Issue #217）: .feature は
+//   業務の仕様として開発者でない人も読むので、「状態 201」「DB の todos」のような技術の言葉を書かない（rule-tests/api-journey.test.ts
+//   の api-journey-business-language）。そのため状態コード（201 / 200 / 204 / 400 / 404）は .feature の値（{int}）で受け取らず、
+//   各 step の中に書く（その step が何を確かめるかの技術の中身で、.feature の読者が変える値ではない）。
 // WHY Stryker では実行しない（vitest.stryker.config.mts が除く）: step が別々の test なので、Stryker が変異を通る test だけに
 //   絞って実行すると、前の step（作成など）を飛ばして後の step だけが動き、前提の値が無いことで失敗して killed と数えられうる。
 
@@ -317,16 +321,16 @@ describeFeature(feature, ({ Background, Scenario }) => {
     });
 
     Then(
-      "状態 {int} で、未完了の Todo {string} が返る",
-      async (_ctx: TestContext, status: number, title: string) => {
-        expect(response.status).toBe(status);
+      "未完了の Todo {string} が作られる",
+      async (_ctx: TestContext, title: string) => {
+        expect(response.status).toBe(201);
         milk = (await response.json()) as CreateTodoResponse;
         expect(milk).toMatchObject({ title, completed: false });
       },
     );
 
     And(
-      "DB の todos は {string} の 1 行になる",
+      "Todo は {string} の 1 件だけになる",
       async (_ctx: TestContext, title: string) => {
         await expect(database.db.select().from(todos)).resolves.toStrictEqual([
           rowOf({ ...milk, title }),
@@ -334,25 +338,27 @@ describeFeature(feature, ({ Background, Scenario }) => {
       },
     );
 
-    And("DB の完了の履歴は作成時の未完了の 1 行になる", async () => {
-      await expect(
-        database.db.select(STATUS_CHANGE_COLUMNS).from(todoStatusChanges),
-      ).resolves.toStrictEqual([createdStatusRow(milk)]);
-    });
-
+    // WHY 名前を受け取って 1 件目と照らす: .feature の値を固定値で持たず、どの Todo の履歴を見ているかを .feature の名前に合わせる。
     And(
-      "DB の変更履歴は todos と完了の履歴の insert の 2 件になる",
-      async () => {
-        const statusRows = await database.db.select().from(todoStatusChanges);
-        expectedLogs.push(
-          todoInsertLog(milk),
-          statusInsertLog(statusRowOf(statusRows, milk.id, 0)),
-        );
-        expect(
-          logEntries(await database.db.select().from(changeLogs)),
-        ).toStrictEqual(logEntries(expectedLogs));
+      "{string} の完了の履歴は作成時の未完了の 1 件になる",
+      async (_ctx: TestContext, title: string) => {
+        expect(milk.title).toBe(title);
+        await expect(
+          database.db.select(STATUS_CHANGE_COLUMNS).from(todoStatusChanges),
+        ).resolves.toStrictEqual([createdStatusRow(milk)]);
       },
     );
+
+    And("変更の記録は Todo と完了の履歴の作成の 2 件になる", async () => {
+      const statusRows = await database.db.select().from(todoStatusChanges);
+      expectedLogs.push(
+        todoInsertLog(milk),
+        statusInsertLog(statusRowOf(statusRows, milk.id, 0)),
+      );
+      expect(
+        logEntries(await database.db.select().from(changeLogs)),
+      ).toStrictEqual(logEntries(expectedLogs));
+    });
 
     When(
       "作成日時が進むのを待って Todo {string} を作る",
@@ -365,22 +371,22 @@ describeFeature(feature, ({ Background, Scenario }) => {
     );
 
     Then(
-      "2 件目も状態 {int} で、未完了の Todo {string} が返る",
-      async (_ctx: TestContext, status: number, title: string) => {
-        expect(response.status).toBe(status);
+      "2 件目も未完了の Todo {string} として作られる",
+      async (_ctx: TestContext, title: string) => {
+        expect(response.status).toBe(201);
         bread = (await response.json()) as CreateTodoResponse;
         expect(bread).toMatchObject({ title, completed: false });
       },
     );
 
     // WHY 作成日時で並べる: select の並び順は SQL で決めないと決まらない。2 件は waitUntilAfter で作成日時が違う。
-    And("DB の todos は作成順の 2 行になる", async () => {
+    And("Todo は作成順の 2 件になる", async () => {
       await expect(
         database.db.select().from(todos).orderBy(todos.createdAt),
       ).resolves.toStrictEqual([rowOf(milk), rowOf(bread)]);
     });
 
-    And("DB の完了の履歴は 2 件とも作成時の未完了の行になる", async () => {
+    And("完了の履歴は 2 件とも作成時の未完了になる", async () => {
       createdStatusRows = [createdStatusRow(milk), createdStatusRow(bread)];
       expect(
         (
@@ -391,33 +397,27 @@ describeFeature(feature, ({ Background, Scenario }) => {
       ).toStrictEqual([...createdStatusRows].sort(byTodoAndPosition));
     });
 
-    And(
-      "DB の変更履歴に 2 件目の todos と完了の履歴の insert が足される",
-      async () => {
-        const statusRows = await database.db.select().from(todoStatusChanges);
-        expectedLogs.push(
-          todoInsertLog(bread),
-          statusInsertLog(statusRowOf(statusRows, bread.id, 0)),
-        );
-        expect(
-          logEntries(await database.db.select().from(changeLogs)),
-        ).toStrictEqual(logEntries(expectedLogs));
-      },
-    );
+    And("変更の記録に 2 件目の Todo と完了の履歴の作成が足される", async () => {
+      const statusRows = await database.db.select().from(todoStatusChanges);
+      expectedLogs.push(
+        todoInsertLog(bread),
+        statusInsertLog(statusRowOf(statusRows, bread.id, 0)),
+      );
+      expect(
+        logEntries(await database.db.select().from(changeLogs)),
+      ).toStrictEqual(logEntries(expectedLogs));
+    });
 
-    When("Todo の一覧を取得する", async () => {
+    When("Todo の一覧を見る", async () => {
       response = await handlers.listTodos(bodylessRequest("GET", "/api/todos"));
     });
 
-    Then(
-      "状態 {int} で、2 件が作成順に並ぶ",
-      async (_ctx: TestContext, status: number) => {
-        expect(response.status).toBe(status);
-        await expect(response.json()).resolves.toStrictEqual({
-          todos: [milk, bread],
-        } satisfies ListTodosResponse);
-      },
-    );
+    Then("一覧に 2 件が作成順に並ぶ", async () => {
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toStrictEqual({
+        todos: [milk, bread],
+      } satisfies ListTodosResponse);
+    });
 
     When(
       "1 件目を {string} に改名する",
@@ -431,9 +431,9 @@ describeFeature(feature, ({ Background, Scenario }) => {
     );
 
     Then(
-      "状態 {int} で、title が {string} になった 1 件目が返る",
-      async (_ctx: TestContext, status: number, title: string) => {
-        expect(response.status).toBe(status);
+      "1 件目のタイトルが {string} に変わる",
+      async (_ctx: TestContext, title: string) => {
+        expect(response.status).toBe(200);
         await expect(response.json()).resolves.toStrictEqual({
           ...milk,
           title,
@@ -441,7 +441,7 @@ describeFeature(feature, ({ Background, Scenario }) => {
       },
     );
 
-    And("DB の todos は 1 件目の title だけが変わる", async () => {
+    And("Todo は 1 件目のタイトルだけが変わる", async () => {
       await expect(
         database.db.select().from(todos).orderBy(todos.createdAt),
       ).resolves.toStrictEqual([
@@ -450,7 +450,7 @@ describeFeature(feature, ({ Background, Scenario }) => {
       ]);
     });
 
-    And("DB の完了の履歴は改名では変わらない", async () => {
+    And("完了の履歴は改名では変わらない", async () => {
       expect(
         (
           await database.db
@@ -460,21 +460,18 @@ describeFeature(feature, ({ Background, Scenario }) => {
       ).toStrictEqual([...createdStatusRows].sort(byTodoAndPosition));
     });
 
-    And(
-      "DB の変更履歴に 1 件目の title の update が 1 件足される",
-      async () => {
-        expectedLogs.push({
-          tableName: "todos",
-          rowId: milk.id,
-          operation: "update",
-          changes: { title: { before: milk.title, after: renamedTitle } },
-          actorId: null,
-        });
-        expect(
-          logEntries(await database.db.select().from(changeLogs)),
-        ).toStrictEqual(logEntries(expectedLogs));
-      },
-    );
+    And("変更の記録に 1 件目のタイトルの変更が 1 件足される", async () => {
+      expectedLogs.push({
+        tableName: "todos",
+        rowId: milk.id,
+        operation: "update",
+        changes: { title: { before: milk.title, after: renamedTitle } },
+        actorId: null,
+      });
+      expect(
+        logEntries(await database.db.select().from(changeLogs)),
+      ).toStrictEqual(logEntries(expectedLogs));
+    });
 
     When("1 件目を完了にする", async () => {
       response = await handlers.putCompletion(
@@ -486,19 +483,16 @@ describeFeature(feature, ({ Background, Scenario }) => {
     });
 
     // 改名が保存されていれば、完了の応答にも新しい名前が出る。
-    Then(
-      "状態 {int} で、完了になった 1 件目が返る",
-      async (_ctx: TestContext, status: number) => {
-        expect(response.status).toBe(status);
-        await expect(response.json()).resolves.toStrictEqual({
-          ...milk,
-          title: renamedTitle,
-          completed: true,
-        } satisfies ChangeTodoCompletionResponse);
-      },
-    );
+    Then("1 件目が完了になる", async () => {
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toStrictEqual({
+        ...milk,
+        title: renamedTitle,
+        completed: true,
+      } satisfies ChangeTodoCompletionResponse);
+    });
 
-    And("DB の todos は 1 件目だけが完了になる", async () => {
+    And("Todo は 1 件目だけが完了になる", async () => {
       await expect(
         database.db.select().from(todos).orderBy(todos.createdAt),
       ).resolves.toStrictEqual([
@@ -508,7 +502,7 @@ describeFeature(feature, ({ Background, Scenario }) => {
     });
 
     // 完了の日時は API が now() で決めるので、値は作成日時以上であることだけを見る。
-    And("DB の完了の履歴に 1 件目の完了の行が 1 行足される", async () => {
+    And("完了の履歴に 1 件目の完了が 1 件足される", async () => {
       const rows = (
         await database.db.select(STATUS_CHANGE_COLUMNS).from(todoStatusChanges)
       ).sort(byTodoAndPosition);
@@ -532,7 +526,7 @@ describeFeature(feature, ({ Background, Scenario }) => {
     });
 
     And(
-      "DB の変更履歴に 1 件目の completed の update と完了の履歴の insert が足される",
+      "変更の記録に 1 件目の完了への変更と完了の履歴の作成が足される",
       async () => {
         const statusRows = await database.db.select().from(todoStatusChanges);
         expectedLogs.push(
@@ -556,24 +550,21 @@ describeFeature(feature, ({ Background, Scenario }) => {
       expect(notifications).toStrictEqual([`Todo completed: ${milk.id}`]);
     });
 
-    When("1 件目の詳細を取得する", async () => {
+    When("1 件目の詳細を見る", async () => {
       response = await handlers.getTodo(
         bodylessRequest("GET", `/api/todos/${milk.id}`),
         context(milk.id),
       );
     });
 
-    Then(
-      "状態 {int} で、改名と完了が反映された詳細が返る",
-      async (_ctx: TestContext, status: number) => {
-        expect(response.status).toBe(status);
-        await expect(response.json()).resolves.toStrictEqual({
-          ...milk,
-          title: renamedTitle,
-          completed: true,
-        } satisfies GetTodoResponse);
-      },
-    );
+    Then("改名と完了が反映された詳細が見える", async () => {
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toStrictEqual({
+        ...milk,
+        title: renamedTitle,
+        completed: true,
+      } satisfies GetTodoResponse);
+    });
 
     When("1 件目を削除する", async () => {
       response = await handlers.deleteTodo(
@@ -582,80 +573,69 @@ describeFeature(feature, ({ Background, Scenario }) => {
       );
     });
 
-    Then(
-      "状態 {int} で、本文は空になる",
-      async (_ctx: TestContext, status: number) => {
-        expect(response.status).toBe(status);
-        await expect(response.text()).resolves.toBe("");
-      },
-    );
+    // 削除の応答は 204 で本文が空。
+    Then("1 件目が削除される", async () => {
+      expect(response.status).toBe(204);
+      await expect(response.text()).resolves.toBe("");
+    });
 
-    And("DB の todos は 2 件目の 1 行だけになる", async () => {
+    And("Todo は 2 件目の 1 件だけになる", async () => {
       await expect(database.db.select().from(todos)).resolves.toStrictEqual([
         rowOf(bread),
       ]);
     });
 
     // 削除した Todo の完了の履歴も消える（外部キーの on delete cascade）。
-    And("DB の完了の履歴は 2 件目の作成時の 1 行だけになる", async () => {
+    And("完了の履歴は 2 件目の作成時の 1 件だけになる", async () => {
       await expect(
         database.db.select(STATUS_CHANGE_COLUMNS).from(todoStatusChanges),
       ).resolves.toStrictEqual([createdStatusRow(bread)]);
     });
 
     // cascade で消えた完了の履歴の行は記録しない。これまでの記録（消した Todo の insert・update も）は消えずに残る。
-    And(
-      "DB の変更履歴に 1 件目の todos の delete が 1 件だけ足される",
-      async () => {
-        expectedLogs.push({
-          tableName: "todos",
-          rowId: milk.id,
-          operation: "delete",
-          changes: {
-            id: { before: milk.id },
-            title: { before: renamedTitle },
-            completed: { before: true },
-            created_at: { before: milk.createdAt },
-          },
-          actorId: null,
-        });
-        expect(
-          logEntries(await database.db.select().from(changeLogs)),
-        ).toStrictEqual(logEntries(expectedLogs));
-      },
-    );
+    And("変更の記録に 1 件目の削除が 1 件だけ足される", async () => {
+      expectedLogs.push({
+        tableName: "todos",
+        rowId: milk.id,
+        operation: "delete",
+        changes: {
+          id: { before: milk.id },
+          title: { before: renamedTitle },
+          completed: { before: true },
+          created_at: { before: milk.createdAt },
+        },
+        actorId: null,
+      });
+      expect(
+        logEntries(await database.db.select().from(changeLogs)),
+      ).toStrictEqual(logEntries(expectedLogs));
+    });
 
-    When("削除の後に Todo の一覧を取得する", async () => {
+    When("削除の後に Todo の一覧を見る", async () => {
       response = await handlers.listTodos(bodylessRequest("GET", "/api/todos"));
     });
 
-    Then(
-      "状態 {int} で、2 件目だけが並ぶ",
-      async (_ctx: TestContext, status: number) => {
-        expect(response.status).toBe(status);
-        await expect(response.json()).resolves.toStrictEqual({
-          todos: [bread],
-        } satisfies ListTodosResponse);
-      },
-    );
+    Then("一覧に 2 件目だけが並ぶ", async () => {
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toStrictEqual({
+        todos: [bread],
+      } satisfies ListTodosResponse);
+    });
 
-    When("削除した 1 件目の詳細を取得する", async () => {
+    When("削除した 1 件目の詳細を見る", async () => {
       response = await handlers.getTodo(
         bodylessRequest("GET", `/api/todos/${milk.id}`),
         context(milk.id),
       );
     });
 
-    Then(
-      "状態 {int} で、削除した 1 件目の not found の Problem Details が返る",
-      async (_ctx: TestContext, status: number) => {
-        expect(response.status).toBe(status);
-        await expectProblem(
-          response,
-          notFoundProblem(milk.id, `/api/todos/${milk.id}`),
-        );
-      },
-    );
+    // 存在しないことは 404 の Problem Details（not found）で伝わる。
+    Then("削除した 1 件目は存在しないと伝えられる", async () => {
+      await expectProblem(
+        response,
+        notFoundProblem(milk.id, `/api/todos/${milk.id}`),
+      );
+    });
   });
 
   Scenario("不正な入力は保存されない", ({ Given, When, Then, And }) => {
@@ -687,61 +667,56 @@ describeFeature(feature, ({ Background, Scenario }) => {
       },
     );
 
-    When("空の title で Todo を作る", async () => {
+    When("タイトルが空の Todo を作る", async () => {
       response = await handlers.postTodo(
         jsonRequest("POST", "/api/todos", { title: "" }),
       );
     });
 
-    Then(
-      "状態 {int} で、title が空という Problem Details が返る",
-      async (_ctx: TestContext, status: number) => {
-        await expectProblem(response, {
-          type: "/problems/validation-error",
-          title: "Validation error",
-          status,
-          detail: "Title must not be empty.",
-          instance: "/api/todos",
-          key: "todo.title.empty",
-          errors: [
-            {
-              pointer: "#/title",
-              key: "todo.title.empty",
-              detail: "Title must not be empty.",
-            },
-          ],
-        });
-      },
-    );
+    // 拒否は 400 の Problem Details（validation error。title が空のキー）で伝わる。
+    Then("タイトルが空という理由で拒否される", async () => {
+      await expectProblem(response, {
+        type: "/problems/validation-error",
+        title: "Validation error",
+        status: 400,
+        detail: "Title must not be empty.",
+        instance: "/api/todos",
+        key: "todo.title.empty",
+        errors: [
+          {
+            pointer: "#/title",
+            key: "todo.title.empty",
+            detail: "Title must not be empty.",
+          },
+        ],
+      });
+    });
 
-    And("DB の todos は作られていた 1 行のまま変わらない", async () => {
+    And("Todo は作られていた 1 件のまま変わらない", async () => {
       await expect(database.db.select().from(todos)).resolves.toStrictEqual([
         rowOf(milk),
       ]);
     });
 
-    And("DB の変更履歴は作成の 2 件のまま変わらない", async () => {
+    And("変更の記録は作成の 2 件のまま変わらない", async () => {
       expect(
         logEntries(await database.db.select().from(changeLogs)),
       ).toStrictEqual(createdLogs);
     });
 
-    When("失敗の後に Todo の一覧を取得する", async () => {
+    When("拒否の後に Todo の一覧を見る", async () => {
       response = await handlers.listTodos(bodylessRequest("GET", "/api/todos"));
     });
 
-    Then(
-      "状態 {int} で、作られていた 1 件だけが並ぶ",
-      async (_ctx: TestContext, status: number) => {
-        expect(response.status).toBe(status);
-        await expect(response.json()).resolves.toStrictEqual({
-          todos: [milk],
-        } satisfies ListTodosResponse);
-      },
-    );
+    Then("一覧に作られていた 1 件だけが並ぶ", async () => {
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toStrictEqual({
+        todos: [milk],
+      } satisfies ListTodosResponse);
+    });
 
     When(
-      "存在しない id の Todo を {string} に改名する",
+      "存在しない Todo を {string} に改名する",
       async (_ctx: TestContext, title: string) => {
         missingId = randomUUID();
         response = await handlers.putTitle(
@@ -751,19 +726,16 @@ describeFeature(feature, ({ Background, Scenario }) => {
       },
     );
 
-    Then(
-      "状態 {int} で、その id の not found の Problem Details が返る",
-      async (_ctx: TestContext, status: number) => {
-        expect(response.status).toBe(status);
-        await expectProblem(
-          response,
-          notFoundProblem(missingId, `/api/todos/${missingId}/title`),
-        );
-      },
-    );
+    // 存在しないことは 404 の Problem Details（not found。要求した id）で伝わる。
+    Then("改名しようとした Todo は存在しないと伝えられる", async () => {
+      await expectProblem(
+        response,
+        notFoundProblem(missingId, `/api/todos/${missingId}/title`),
+      );
+    });
 
     And(
-      "DB の todos は改名の失敗の後も作られていた 1 行のまま変わらない",
+      "Todo は改名の失敗の後も作られていた 1 件のまま変わらない",
       async () => {
         await expect(database.db.select().from(todos)).resolves.toStrictEqual([
           rowOf(milk),
@@ -771,27 +743,21 @@ describeFeature(feature, ({ Background, Scenario }) => {
       },
     );
 
-    And(
-      "DB の変更履歴は改名の失敗の後も作成の 2 件のまま変わらない",
-      async () => {
-        expect(
-          logEntries(await database.db.select().from(changeLogs)),
-        ).toStrictEqual(createdLogs);
-      },
-    );
+    And("変更の記録は改名の失敗の後も作成の 2 件のまま変わらない", async () => {
+      expect(
+        logEntries(await database.db.select().from(changeLogs)),
+      ).toStrictEqual(createdLogs);
+    });
 
-    When("改名の失敗の後に Todo の一覧を取得する", async () => {
+    When("改名の失敗の後に Todo の一覧を見る", async () => {
       response = await handlers.listTodos(bodylessRequest("GET", "/api/todos"));
     });
 
-    Then(
-      "状態 {int} で、元の名前のまま 1 件だけが並ぶ",
-      async (_ctx: TestContext, status: number) => {
-        expect(response.status).toBe(status);
-        await expect(response.json()).resolves.toStrictEqual({
-          todos: [milk],
-        } satisfies ListTodosResponse);
-      },
-    );
+    Then("一覧に元の名前のまま 1 件だけが並ぶ", async () => {
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toStrictEqual({
+        todos: [milk],
+      } satisfies ListTodosResponse);
+    });
   });
 });
