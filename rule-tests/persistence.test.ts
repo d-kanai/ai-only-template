@@ -17,7 +17,10 @@ import { afterAll, describe, expect, it } from "vitest";
 // 永続化の save の規則（.claude/rules/backend.md の「永続化」の `save`。Issue #165 / #172 / #177）を、backend のソースで
 // 機械的に検査するテスト。対象は apps/backend/ の下のテスト以外の .ts（*.test.ts を除く）。
 // 違反にするもの:
-//   - no-upsert: `.onConflictDoUpdate(` / `.onConflictDoNothing(`（Drizzle の upsert）。
+//   - no-upsert: `onConflictDoUpdate` / `onConflictDoNothing`（Drizzle の upsert）の名前がコードにあること。
+//     WHY `.` と `(` を要求しない（名前だけを語の境界で探す）: 変数に入れ直す（`const f = q.onConflictDoUpdate`）・
+//       ブラケット（`q["onConflictDoUpdate"](…)`）・`.` の後で改行する書き方も拾う。`onConflictDoUpdateLater` のような
+//       名前の一部が一致するだけの別の名前は通す。
 //     WHY: save は新規なら素の INSERT（2 回目は一意制約違反で気づく）、読み込み済みなら変わった列だけの UPDATE。upsert は
 //       2 回目の save や id の衝突を黙って通し、全列を書いて同時更新の他方の変更を巻き戻す（lost update）。
 //   - save-uses-changed-props: *.postgres.ts に save のメソッド定義（行の先頭が `save(` / `async save(`。`public` などの修飾子も可）が
@@ -32,6 +35,11 @@ import { afterAll, describe, expect, it } from "vitest";
 //   ブロックコメント（`/* … */`）の中はコードと同じに扱う（upsert は安全側で違反になるが、`get origin()` と changed-props の
 //   import は、ブロックコメントの中にあるだけで満たしたと見なす）。生の SQL（sql`… ON CONFLICT …`）、`save = async (…) =>`
 //   のようなプロパティでの定義、import した changedProps を実際に呼んでいるかは見ない。
+// 判定の粒度の限界:
+//   - `get origin()` の有無はファイル単位で見る（1 ファイルに class が 2 つあると、片方だけが origin を持っていても通る）。
+//   - `static async reconstruct(` / `static reconstruct = …` のような書き方の reconstruct は見ない。
+//   - `import { type changedProps } from "…/changed-props"`（inline の type）も値の import と数える（`import type` だけを除く）。
+//   - 行頭が `save(` の行は定義と見なすので、行頭の素の呼び出し（`save(x);`）も定義として数える（安全側）。
 // WHY 文字列で判定する（AST にしない）: 見るのはメソッド名・import の参照先・getter の有無だけで、行単位の正規表現で足りる。
 
 type RuleId =
@@ -77,7 +85,7 @@ function findPersistenceViolations(
   const lines = codeLines(source);
   const violations: PersistenceViolation[] = matchingLines(
     lines,
-    /\.\s*onConflictDo(?:Update|Nothing)\s*\(/,
+    /\bonConflictDo(?:Update|Nothing)\b/,
   ).map((line) => ({ rule: "no-upsert", line }));
 
   if (/\.postgres\.ts$/.test(path) && !importsChangedProps(lines.join("\n"))) {
@@ -302,6 +310,24 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
       POSTGRES,
       source("q . onConflictDoNothing ( );"),
       [{ rule: "no-upsert", line: 1 }],
+    ],
+    [
+      "変数に入れ直して呼ぶ（const f = q.onConflictDoUpdate; f({})）",
+      POSTGRES,
+      source("const f = q.onConflictDoUpdate;", "f({});"),
+      [{ rule: "no-upsert", line: 1 }],
+    ],
+    [
+      'ブラケットで呼ぶ（q["onConflictDoUpdate"](…)）',
+      POSTGRES,
+      source('q["onConflictDoUpdate"]({ target: xs.id, set: row });'),
+      [{ rule: "no-upsert", line: 1 }],
+    ],
+    [
+      ". の後で改行する（q.\\n  onConflictDoUpdate(）",
+      POSTGRES,
+      source("q.", "  onConflictDoUpdate({});"),
+      [{ rule: "no-upsert", line: 2 }],
     ],
     [
       "*.postgres.ts 以外（in-memory / shared/infra / application）の upsert",

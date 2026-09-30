@@ -44,6 +44,10 @@ import { afterAll, describe, expect, it } from "vitest";
 //   文字列の中身は解釈しない。そのため、文字列の中の `//`（`"http://…"`）の後ろは見逃し、文字列の中の `vi.mock(` は違反と数える。
 //   ブロックコメント（`/* vi.mock("x") */`）の中も違反と数える（安全側）。`vi` を別名で import する・`vi["mock"]` と書く・
 //   require で読むのは見ない。
+// 判定の粒度の限界:
+//   - database.test-support を `vi.importActual(…)` / `require(…)` / テンプレートリテラルの `import(`…`)` で読む書き方は見ない。
+//   - `const m = vi.mock; m(…)` / `vi.mock.call(…)` / `vi?.mock(` / `vi.mock?.(` のような呼び方は見ない。
+//   - 同じ行に呼び出しが 2 つあると、直前の 1 つの `// WHY モック:` で両方とも通る（WHY は行単位で見る）。
 // WHY 文字列で判定する（AST にしない）: 見るのは `vi.mock(` の第 1 引数と import の参照先の文字列だけで、行単位の正規表現で足りる。
 
 type RuleId = "vi-mock-only-now" | "db-tests-in-infra-only";
@@ -100,12 +104,14 @@ function findViMockViolations(
 
 // database.test-support を import してよいファイルか。
 // WHY infra の直下のテストだけ: 実 Postgres のテストは Repository（*.postgres.ts）と database.ts の隣に置く（testing.md の表）。
-//   features/<f>/infra と shared/infra の両方を `(.+/)?infra/` で拾い、infra の下の入れ子や、名前が infra の feature の
-//   別の層（features/infra/application/）は通さない。
+//   features/<f>/infra と shared/infra の 2 か所だけを許し、infra の下の入れ子、名前が infra の feature の別の層
+//   （features/infra/application/）、別の層の下の infra/（features/x/application/infra/）は通さない。
 function mayImportTestDatabase(path: string): boolean {
   return (
     path === "vitest.global-setup.ts" ||
-    /^apps\/backend\/(?:.+\/)?infra\/[^/]+\.test\.tsx?$/.test(path)
+    /^apps\/backend\/(?:features\/[^/]+|shared)\/infra\/[^/]+\.test\.tsx?$/.test(
+      path,
+    )
   );
 }
 
@@ -504,6 +510,12 @@ describe("テストダブルの判定（findTestDoubleViolations）: must reject
       "名前が infra の feature の application のテストから import",
       "apps/backend/features/infra/application/x.test.ts",
       source(`import { createTestDatabase } from "${TEST_SUPPORT}";`),
+      [{ rule: "db-tests-in-infra-only", line: 1 }],
+    ],
+    [
+      "別の層の下の infra/ のテストから import（features/x/application/infra/）",
+      "apps/backend/features/x/application/infra/x.test.ts",
+      source(`import { createTestDatabase } from "../${TEST_SUPPORT}";`),
       [{ rule: "db-tests-in-infra-only", line: 1 }],
     ],
     [

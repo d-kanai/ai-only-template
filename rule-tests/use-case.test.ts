@@ -19,7 +19,8 @@ import { afterAll, describe, expect, it } from "vitest";
 //   （改名・完了の切り替え）が混ざる。ユースケースが違うなら command を分ける（Issue #175）。api 側は rule-tests/api-request.test.ts が
 //   リクエストの `.optional()` を止めるが、command の入力の型は api を通さずにも書けるので、command 側でも止める。
 // 違反にするもの（規則）:
-//   - no-optional-input-field: `type <Name>Input = { ... }`（export の有無は問わない。名前が Input で終わる型）の `{ ... }` の中の
+//   - no-optional-input-field: `type <Name>Input = { ... }`（export の有無は問わない。名前が Input で終わる型。型引数
+//     `<Name>Input<T>` と `Readonly<{ ... }>` も）の `{ ... }` の中の
 //     任意の項目（`<name>?:`）。`{ ... }` の範囲は括弧の対応で決めるので、入れ子のオブジェクトの型の中の `?:` も数える（安全側）。
 //     Input 以外の型（`Result` など）の `?:` は見ない。
 //   - no-undefined-branch-on-input: `input.<name>` と `undefined` / `null` の比較（`!==` / `===` / `!=` / `==`、左右どちら向きも。
@@ -30,7 +31,10 @@ import { afterAll, describe, expect, it } from "vitest";
 //   `x?:`・`input.x !== undefined` は数える。ブロックコメントの中も数える（安全側）。`interface <Name>Input`、`Partial<...>`、
 //   `x: string | undefined`、別名の型を経由した入力（`type RenameInput = Base & {...}` の Base 側）、任意のメソッド（`x?(): void`）、
 //   `input` 以外の名前の引数・分割代入（`{ title }`）の比較、`typeof input.x === "undefined"`・`"x" in input`・`input.x ?? y`・
-//   `if (input.x)` のような別の書き方の分岐は見えない。
+//   `if (input.x)` のような別の書き方の分岐、`input["x"] !== undefined`・`input.x !== void 0` は見えない。型引数の既定値のある
+//   Input（`<T = string>`。`=` で止まる）、Readonly 以外で包んだ Input、Input の型を付けずに引数に直接書いた型
+//   （`execute(input: { title?: string })`）も見えない。逆に、Input の中の関数の型の任意の引数（`(x?: string) => void`）は
+//   任意の項目と数える（誤検知。Input に関数を持たせる書き方は無い想定）。
 
 type RuleId = "no-optional-input-field" | "no-undefined-branch-on-input";
 
@@ -63,7 +67,11 @@ function closingBraceOf(code: string, open: number): number {
 function findUseCaseViolations(text: string): UseCaseViolation[] {
   const code = stripLineComments(text);
   const violations: UseCaseViolation[] = [];
-  for (const type of code.matchAll(/\btype\s+[\w$]*Input\s*=\s*\{/g)) {
+  // WHY `Input\b[^=]*=`: 型引数（`PageInput<T>`）を挟んでも拾う。`\b` で `InputResult` のような名前の途中の Input を外す。
+  // WHY `(?:Readonly<\s*)?`: `Readonly<{ ... }>` で包んだ Input も拾う。
+  for (const type of code.matchAll(
+    /\btype\s+[\w$]*Input\b[^=]*=\s*(?:Readonly<\s*)?\{/g,
+  )) {
     const open = type.index + type[0].length - 1;
     const body = code.slice(open, closingBraceOf(code, open));
     for (const field of body.matchAll(/[\w$"']\s*\?\s*:/g)) {
@@ -155,6 +163,8 @@ describe("command の入力の判定（findUseCaseViolations）: must pass", () 
         "  warning?: string;",
         "};",
         "type Props = { note?: string };",
+        // 名前の途中に Input があるだけの型（Input で終わらない）。
+        "type InputResult = { next?: string };",
       ),
     ],
     [
@@ -223,6 +233,21 @@ describe("command の入力の判定（findUseCaseViolations）: must reject", (
         { rule: "no-optional-input-field", line: 1 },
         { rule: "no-optional-input-field", line: 2 },
         { rule: "no-optional-input-field", line: 4 },
+      ],
+    ],
+    [
+      "Readonly<{ ... }> とジェネリクスの Input",
+      source(
+        "export type RenameXInput = Readonly<{",
+        "  title?: string;",
+        "}>;",
+        "export type PageInput<T> = {",
+        "  cursor?: T;",
+        "};",
+      ),
+      [
+        { rule: "no-optional-input-field", line: 2 },
+        { rule: "no-optional-input-field", line: 5 },
       ],
     ],
     [
