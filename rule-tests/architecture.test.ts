@@ -1533,8 +1533,9 @@ function findHardcodedTextViolations(
 //   - 初期化子が無い handle（コンストラクタで代入する）、メソッド・getter・setter の handle。
 //     WHY: 包んでいるかを宣言の 1 か所で読めない。メソッドは this が外れる形でもある（.claude/rules/backend.md）。
 //   - 名前は識別子と文字列リテラル（"handle"）で見る。static も、クラス式（const A = class { ... }）も、入れ子の関数の中のクラスも見る。
-// WHY 呼び出す関数を名前（withProblemResponse の識別子）だけで見る（import 元を確かめない）: import の規則は別の規則
-//   （presentation など）が見る。同じ名前の別の関数をファイルの中で定義して呼ぶと通る（見逃す方向の限界。レビューで見る）。
+// WHY 呼び出す関数を名前（withProblemResponse の識別子）だけで見る（import 元を確かめない）: 同じ名前の別の関数（ファイルの中で
+//   定義したもの、presentation の別モジュールから import したもの）で包むと通る（見逃す方向の限界。レビューで見る）。
+//   逆に、別名で import したもの（import { withProblemResponse as w }）や型アサーションを付けたもの（... as any）は違反になる（多く検出する方向）。
 // 対象: apps/backend の下の presentation/ の下（入れ子も。置き場所の規則は presentation/nested/x.api.ts を許す）の
 //   *.api.<拡張子>（8 つの拡張子。テストは除く）。WHY 拡張子を .ts に限らない: .api.mts などにすると素通りするため。
 // 限界（見逃す方向）: クラスの外の Route Handler（export async function GET、オブジェクトリテラルの handle）、handle 以外の

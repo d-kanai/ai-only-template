@@ -51,12 +51,13 @@ paths:
 
 ## 規則を足す・変えるとき
 - `RULES` と `RULE_EXAMPLES`、置き場所の規則（`BACKEND_PLACEMENT` と `PLACEMENT_EXAMPLES`、`SHARED_PLACEMENT` と `SHARED_PLACEMENT_EXAMPLES`）、fixture の `MUST_REJECT_FILES` / `MUST_REJECT_VIOLATIONS` / `MUST_PASS_FILES` を同じ変更で直す。本番コードに新しい import の形（層の組み合わせや書き方）を足したときも、must-pass に同じ形を足す。
+- `presentation-with-problem-response` を変えるとき（判定 `findUnwrappedHandles`、対象の列挙 `listProblemResponseCheckedFiles`）は、判定例 `PROBLEM_RESPONSE_EXAMPLES`・列挙のテスト・fixture を同じ変更で直す。
 - ハードコードの文言の規則を変えるとき（属性の一覧 `VISIBLE_TEXT_ATTRIBUTES`、辞書の例外 `I18N_MESSAGES`（`*.messages.ts`）と `defineMessages` の引数の判定（`isDefineMessagesCall`）、日本語の判定 `JAPANESE`）は、`HARDCODED_TEXT_EXAMPLES`・「ハードコードの文言の抽出」のテスト・fixture を同じ変更で直す。
 - `.claude/rules/backend.md`・`frontend.md`・`shared.md` の規則の文と、テストの規則を突き合わせる。
 
 ## 限界（見逃す方向と多く検出する方向）
 - 見逃す: 正規表現リテラルやテンプレートリテラルの入れ子でコメント・文字列の区切りを誤認しうる、`${}` の中の `import()`、``import(`@repo/backend/${name}`)``（静的に決められない）、`}` の直後に同じ行で続けた `export ... from`。
-- 多く検出する: 型の位置の `import("x").T` は値の参照として数える。
+- 多く検出する: 型の位置の `import("x").T` は値の参照として数える。`presentation-with-problem-response` は別名で import した `withProblemResponse`（`import { withProblemResponse as w }`）や型アサーションを付けた呼び出し（`withProblemResponse(...) as any`）も違反にする（名前だけで見るため）。
 - `frontend-to-backend-specifier`・`frontend-to-shared-specifier` と `backend-exports`・`shared-exports` は `apps/frontend_customer/`・`apps/backend/`・`apps/shared/`・`apps/e2e/`・リポジトリ直下のファイルしか見ない（`scripts/*.ts` のテスト以外などは見ない。今は該当なし）。足すときは `listReferencingFiles` と fixture も直す。
 - ハードコードの文言: ASCII の文字列を変数に入れてから JSX に渡す（`const s = "x"; <p>{s}</p>`）、JSX の子に式で書く（`<p>{"x"}</p>`）、一覧に無い props（`<Dialog heading="x" />`）、三項演算子の中（`title={c ? "A" : "B"}`）は見逃す（日本語なら (3) で止まる。「ハードコードの文言の抽出」のテストで固定）。`apps/shared/`・`apps/e2e/`・リポジトリ直下は対象外。逆に、一覧の属性の文言ではない値（`title="-"`）は多く検出する。`typescript/unstable/*` は TypeScript を上げると形が変わりうる（版は完全固定なので、上げたときにこのテストの失敗で気づく）。tsgo を閉じるときに stderr に `context canceled` が出ることがあるが、結果には関係しない。
 - 環境変数の抽出の限界（分割代入など）は `.claude/rules/env.md`、console の抽出の限界（`node:console` の import、`${}` の中）は「console の参照の抽出」のテストで固定。詳細と WHY は `rule-tests/architecture.test.ts` のコメントと、「参照の抽出」「参照先の正規化」「環境変数の直参照の抽出」のテスト。
