@@ -41,7 +41,7 @@ paths:
 - `apps/backend/tsconfig.json` は Next の plugin・jsx・DOM の型を持たない（backend 単体の型チェック。`Response#json()` は `unknown` なのでテストでは `as` で型を付ける）。`pnpm typecheck` が検査する。
 
 ## presentation（api ファイル）
-- 1 API = 1 ファイルにし、その API のリクエスト / レスポンスの型（DTO）もそのファイルで定義して export する。複数の API が同じ形（`TodoDto` など）を返しても各ファイルで定義する（共通の型ファイルを置かない）。
+- 1 API = 1 ファイルにし、その API のリクエスト / レスポンスの型（DTO）もそのファイルで定義して export する。複数の API が同じ形の Todo を返しても各ファイルの Response 型に直接書く（共通の型ファイルや別名の型を置かない。domain の `Todo` を `toResponse` で各 API の Response に直接写す。Issue #139）。
   - WHY: api ファイルを 1 つ開けば契約と処理がすべて見える（ユーザー判断）。形を変えるときに複数ファイルを直す手間より優先する。
 - handler は `(request: Request) => Promise<Response>`。動的セグメントがあれば `(request, ctx: { params: Promise<{ id: string }> })` で、`await ctx.params` は api ファイル側で行う。
 - 各 api ファイルはクラス `<Verb><Noun>Api`（`ListTodosApi`・`GetTodoApi`・`CreateTodoApi`・`UpdateTodoApi`・`DeleteTodoApi`）を export する。コンストラクタで query / command を受け取り（型は `Pick<CreateTodoCommand, "execute">` のように execute だけ）、`handle` を Route Handler にする（Issue #123。ユーザー判断）。
@@ -107,7 +107,7 @@ paths:
 - 強制は 2 系統（`env.ts` の `process.env` と同じ設計）: Biome の `suspicious/noConsole`（`allow` なし。`overrides` で `logger.ts` とテストだけ off。`.claude/rules/lint.md`）と、`rule-tests/architecture.test.ts` の規則 `console-direct-access`（`.claude/rules/architecture-check.md`）。決定は ADR `docs/adr/architecture/20260929-logger-single-exit.md`、片方だけが拾う書き方と限界は `.claude/rules/architecture-check.md` と `rule-tests/architecture.test.ts` のテスト。
 
 ## 命名
-- ディレクトリ・ファイルは kebab-case。型は PascalCase（`TodoDto`）。
+- ディレクトリ・ファイルは kebab-case。型は PascalCase（`ListTodosResponse`）。
 - api ファイル・query・command は `<verb>-<noun>`（`list-todos`・`get-todo`・`create-todo`・`update-todo`・`delete-todo`）に役割の接尾辞（`.api.ts`・`.query.ts`・`.command.ts`・`.in-memory.ts`・`.postgres.ts`・`.test.ts`）。クラス名は `<Verb><Noun>` に役割（`ListTodosApi`・`ListTodosQuery`・`CreateTodoCommand`）。Repository の実装は `<名前>-repository.<実装>.ts`（規則 `presentation` がファイル名 `*-repository.postgres` で組み立てに使う実装を見分ける）。
 
 ## 後で別プロセスに分けるとき

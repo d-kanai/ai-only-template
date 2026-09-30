@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toErrorMessage } from "@/features/todo/api/api-error";
 import {
   getTodo,
-  type TodoDto,
+  type Todo,
   type UpdateTodoRequest,
   updateTodo,
 } from "@/features/todo/api/todo-api";
@@ -16,7 +16,7 @@ type Failure = { reason: unknown };
 // 詳細画面の状態とイベント。見た目（todo-detail-screen.tsx）はこの戻り値を描くだけにする。
 export function useTodoDetailScreen(todoId: string) {
   // 取得前・取得失敗（not_found など）を「Todo がない」として区別できるよう null を使う。
-  const [todo, setTodo] = useState<TodoDto | null>(null);
+  const [todo, setTodo] = useState<Todo | null>(null);
   // 保存前の編集中の値。todo.title（保存済みの値）とは別に持ち、見出しは保存済みの値を出す。
   const [title, setTitle] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -67,7 +67,7 @@ export function useTodoDetailScreen(todoId: string) {
   // 反映すると、新しい Todo の画面に前の Todo の内容やエラーが出てしまうため。
   // 呼び出し側（saveTitle）も null なら編集中の title を書き換えないので、新しい Todo の title も保たれる。
   const update = useCallback(
-    async (request: UpdateTodoRequest): Promise<TodoDto | null> => {
+    async (request: UpdateTodoRequest): Promise<Todo | null> => {
       const generation = todoGenerationRef.current;
       const isStale = () => generation !== todoGenerationRef.current;
       try {

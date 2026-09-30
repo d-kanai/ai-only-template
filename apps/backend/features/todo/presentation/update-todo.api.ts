@@ -30,21 +30,21 @@ export type UpdateTodoRequest = z.infer<
   ReturnType<typeof updateTodoRequestSchema>
 >;
 
-// 同じ形の TodoDto を各 *.api.ts に書いている（WHY は list-todos.api.ts の TodoDto のコメント）。
-export type TodoDto = {
+// 同じ形の Response を各 *.api.ts に書く。
+//   WHY: 1 API = 1 ファイルで契約をそのファイルだけで読めるようにする。共通の dto.ts を作らない（ユーザー判断）。
+//   Issue #139 で共通の DTO 型の別名もやめ、domain の Todo を各 API の Response に直接写す。
+export type UpdateTodoResponse = {
   id: string;
   title: string;
   completed: boolean;
-  // ISO 8601 文字列。
+  // ISO 8601 文字列。JSON にそのまま載せられるよう Date ではなく string にしている。
   createdAt: string;
 };
-
-export type UpdateTodoResponse = TodoDto;
 
 // Next 16 では動的セグメントの params が Promise で渡される（get-todo.api.ts の Context のコメント）。
 type Context = { params: Promise<{ id: string }> };
 
-function toTodoDto(todo: Todo): TodoDto {
+function toResponse(todo: Todo): UpdateTodoResponse {
   return {
     id: todo.id,
     title: todo.title,
@@ -73,7 +73,7 @@ export class UpdateTodoApi {
       const id = parseUuidParam(rawId, "todo.notFound", { id: rawId });
       const input = await parseJsonBody(request, updateTodoRequestSchema());
       const todo = await this.updateTodo.execute({ id, ...input });
-      const body: UpdateTodoResponse = toTodoDto(todo);
+      const body: UpdateTodoResponse = toResponse(todo);
       return Response.json(body);
     } catch (error) {
       return toProblemResponse(error, request);

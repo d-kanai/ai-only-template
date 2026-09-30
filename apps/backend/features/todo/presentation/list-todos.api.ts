@@ -8,20 +8,19 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 
 // WHY DTO をこのファイルで定義する: 1 API = 1 ファイルで、その API の契約（リクエスト / レスポンスの形）を
 //   同じファイルで読めるようにするため。画面側は `import type` でこの型を参照し、形のずれを型チェックで検出する。
-//   TodoDto は他の *.api.ts にも同じ形で書いている（共通の dto.ts を作らないのはユーザー判断）。
-export type TodoDto = {
-  id: string;
-  title: string;
-  completed: boolean;
-  // ISO 8601 文字列。JSON にそのまま載せられるよう Date ではなく string にしている。
-  createdAt: string;
-};
-
+//   同じ形の Response を他の *.api.ts にも書く（共通の dto.ts を作らないのはユーザー判断。Issue #139 で共通の DTO 型の別名もやめ、
+//   domain の Todo を各 API の Response に直接写す）。
 export type ListTodosResponse = {
-  todos: TodoDto[];
+  todos: {
+    id: string;
+    title: string;
+    completed: boolean;
+    // ISO 8601 文字列。JSON にそのまま載せられるよう Date ではなく string にしている。
+    createdAt: string;
+  }[];
 };
 
-function toTodoDto(todo: Todo): TodoDto {
+function toResponseItem(todo: Todo): ListTodosResponse["todos"][number] {
   return {
     id: todo.id,
     title: todo.title,
@@ -47,7 +46,7 @@ export class ListTodosApi {
   readonly handle = async (request: Request): Promise<Response> => {
     try {
       const todos = await this.listTodos.execute();
-      const body: ListTodosResponse = { todos: todos.map(toTodoDto) };
+      const body: ListTodosResponse = { todos: todos.map(toResponseItem) };
       return Response.json(body);
     } catch (error) {
       return toProblemResponse(error, request);

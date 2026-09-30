@@ -91,7 +91,7 @@ const NOT_UUID_IDS = [
 ] as const;
 
 describe("PUT /api/todos/:id", () => {
-  test("title と completed を更新し、200 と更新後の TodoDto を返す", async () => {
+  test("title と completed を更新し、200 と更新後の Todo（UpdateTodoResponse）を返す", async () => {
     const { todo, PUT } = await setup();
 
     const response = await PUT(
@@ -166,7 +166,7 @@ describe("PUT /api/todos/:id", () => {
     });
   });
 
-  test("本文が空のオブジェクト（{}）なら何も変えず、200 と今の TodoDto を返す", async () => {
+  test("本文が空のオブジェクト（{}）なら何も変えず、200 と今の Todo（UpdateTodoResponse）を返す", async () => {
     const { todo, PUT } = await setup();
 
     const response = await PUT(putRequest(todo.id, "{}"), context(todo.id));

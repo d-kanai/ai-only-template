@@ -67,7 +67,7 @@ describe("GET /api/todos", () => {
     expect(findAll).toHaveBeenCalledTimes(1);
   });
 
-  test("作成した Todo を TodoDto の形で、作成した順（作成日時の昇順）に返す", async () => {
+  test("作成した Todo を ListTodosResponse の形で、作成した順（作成日時の昇順）に返す", async () => {
     const { repository, GET } = setup();
     const first = Todo.create("牛乳を買う");
     const second = Todo.create("卵を買う").changeCompletion(true);

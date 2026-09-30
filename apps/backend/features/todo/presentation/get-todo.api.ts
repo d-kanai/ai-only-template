@@ -7,22 +7,22 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 
 // GET /api/todos/:id: Todo を 1 件返す。無ければ 404。
 
-// 同じ形の TodoDto を各 *.api.ts に書いている（WHY は list-todos.api.ts の TodoDto のコメント）。
-export type TodoDto = {
+// 同じ形の Response を各 *.api.ts に書く。
+//   WHY: 1 API = 1 ファイルで契約をそのファイルだけで読めるようにする。共通の dto.ts を作らない（ユーザー判断）。
+//   Issue #139 で共通の DTO 型の別名もやめ、domain の Todo を各 API の Response に直接写す。
+export type GetTodoResponse = {
   id: string;
   title: string;
   completed: boolean;
-  // ISO 8601 文字列。
+  // ISO 8601 文字列。JSON にそのまま載せられるよう Date ではなく string にしている。
   createdAt: string;
 };
-
-export type GetTodoResponse = TodoDto;
 
 // Route Handler の第 2 引数。Next 16 では動的セグメントの params が Promise で渡される
 // （node_modules/next/dist/docs/01-app/01-getting-started/15-route-handlers.md の「Route Context Helper」）。
 type Context = { params: Promise<{ id: string }> };
 
-function toTodoDto(todo: Todo): TodoDto {
+function toResponse(todo: Todo): GetTodoResponse {
   return {
     id: todo.id,
     title: todo.title,
@@ -46,7 +46,7 @@ export class GetTodoApi {
       //   （画面から見て「無い Todo」と同じ契約）。
       const id = parseUuidParam(rawId, "todo.notFound", { id: rawId });
       const todo = await this.getTodo.execute(id);
-      const body: GetTodoResponse = toTodoDto(todo);
+      const body: GetTodoResponse = toResponse(todo);
       return Response.json(body);
     } catch (error) {
       // 無い id は GetTodoQuery が、uuid の形でない id は parseUuidParam が DomainError(not_found) を投げ、ここで 404 に変換される。

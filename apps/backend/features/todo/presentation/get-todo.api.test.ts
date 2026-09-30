@@ -81,7 +81,7 @@ const NOT_UUID_IDS = [
 ] as const;
 
 describe("GET /api/todos/:id", () => {
-  test("200 と TodoDto を返す", async () => {
+  test("200 と Todo（GetTodoResponse）を返す", async () => {
     const { repository, GET } = setup();
     const todo = Todo.create("牛乳を買う");
     await repository.save(todo);

@@ -28,18 +28,18 @@ export type CreateTodoRequest = z.infer<
   ReturnType<typeof createTodoRequestSchema>
 >;
 
-// 同じ形の TodoDto を各 *.api.ts に書いている（WHY は list-todos.api.ts の TodoDto のコメント）。
-export type TodoDto = {
+// 同じ形の Response を各 *.api.ts に書く。
+//   WHY: 1 API = 1 ファイルで契約をそのファイルだけで読めるようにする。共通の dto.ts を作らない（ユーザー判断）。
+//   Issue #139 で共通の DTO 型の別名もやめ、domain の Todo を各 API の Response に直接写す。
+export type CreateTodoResponse = {
   id: string;
   title: string;
   completed: boolean;
-  // ISO 8601 文字列。
+  // ISO 8601 文字列。JSON にそのまま載せられるよう Date ではなく string にしている。
   createdAt: string;
 };
 
-export type CreateTodoResponse = TodoDto;
-
-function toTodoDto(todo: Todo): TodoDto {
+function toResponse(todo: Todo): CreateTodoResponse {
   return {
     id: todo.id,
     title: todo.title,
@@ -59,7 +59,7 @@ export class CreateTodoApi {
     try {
       const input = await parseJsonBody(request, createTodoRequestSchema());
       const todo = await this.createTodo.execute(input);
-      const body: CreateTodoResponse = toTodoDto(todo);
+      const body: CreateTodoResponse = toResponse(todo);
       return Response.json(body, { status: 201 });
     } catch (error) {
       return toProblemResponse(error, request);
