@@ -27,7 +27,7 @@ import { afterAll, describe, expect, it } from "vitest";
 //     あるのに、shared/infra/changed-props を値として import していない（`import type` は数えない）。
 //     WHY: 読み込み済みの save は、読み込んだときの値（origin）と今の値を changedProps で比べて変わった列だけを書く。
 //       自前の比較や全列の UPDATE に戻ると lost update が再発する。
-//   - entity-with-reconstruct-has-origin: apps/backend/features/<f>/domain/ の下で `static reconstruct(` を持つファイルが
+//   - entity-with-reconstruct-has-origin: apps/backend/features/<f>/internal/domain/ の下で `static reconstruct(` を持つファイルが
 //     `get origin()` を持たない。
 //     WHY: Repository が差分を取るために、読み込んだとき（reconstruct）の値を Entity が持つ。
 //   - no-update-delete-on-append-only-tables（Issue #188）: *.postgres.ts で `.update(<表>)` / `.delete(<表>)` の引数の表の名前
@@ -42,14 +42,14 @@ import { afterAll, describe, expect, it } from "vitest";
 //     限界: 表を別名の変数に入れ直す（`const t = todoStatusChanges; db.delete(t)`）・ブラケット（`db["delete"](…)`）・生の SQL
 //       （sql`delete from todo_status_changes`）は見ない。表の変数名が接尾辞に従っているかは、schema.ts で宣言した表なら
 //       次の append-only-table-naming が見る。
-//   - append-only-table-naming（Issue #188）: apps/backend/features/<f>/infra/schema.ts（と shared/infra/schema.ts）で、
+//   - append-only-table-naming（Issue #188）: apps/backend/features/<f>/internal/infra/schema.ts（と shared/infra/schema.ts）で、
 //     `pgTable("<表名>"` の表名が `_changes` / `_events` / `_logs` で終わるのに、それを受ける変数（`const <名前> =` の直後の
 //     pgTable）の名前が `Changes` / `Events` / `Logs` で終わらない（変数で受けていない `export default pgTable(…)` も違反）。行は pgTable の行。`pgTable(` と表名の間の空白・改行は可、
 //     表名の引用符は `"` / `'` / `` ` ``。
 //     WHY: no-update-delete-on-append-only-tables は変数名の接尾辞で insert のみの表を見分けるので、
 //       `export const statusLog = pgTable("todo_status_changes", …)` のように表名と変数名がずれると素通りする。表名（DB の命名）
 //       から変数名を縛れば、insert のみの表は必ずその検査にかかる。
-//     WHY schema.ts だけ: 表の宣言の置き場所は features/<f>/infra/schema.ts と、横断の表の shared/infra/schema.ts だけ
+//     WHY schema.ts だけ: 表の宣言の置き場所は features/<f>/internal/infra/schema.ts と、横断の表の shared/infra/schema.ts だけ
 //       （drizzle-kit の設定が読む場所。.claude/rules/backend.md）。
 //     限界: 表名が `_changes` / `_events` で終わらない insert のみの表（命名の規約そのもの）、`pgSchema("s").table(…)`・
 //       pgTable を別名で import した宣言、型注釈付きの変数（`const x: T = pgTable(…)`。違反と数える）、分割代入は見ない。
@@ -341,7 +341,9 @@ function findPersistenceViolations(
   }
 
   if (
-    /^apps\/backend\/(?:features\/[^/]+|shared)\/infra\/schema\.ts$/.test(path)
+    /^apps\/backend\/(?:features\/[^/]+\/internal|shared)\/infra\/schema\.ts$/.test(
+      path,
+    )
   ) {
     violations.push(
       ...appendOnlyTableNamingViolations(lines).map((line) => ({
@@ -367,10 +369,10 @@ function findPersistenceViolations(
     );
   }
 
-  // WHY domain の下の入れ子も対象にする: 規則の文書は features/<f>/domain/*.ts だが、入れ子に Entity を置いたときに黙って
+  // WHY domain の下の入れ子も対象にする: 規則の文書は features/<f>/internal/domain/*.ts だが、入れ子に Entity を置いたときに黙って
   //   外れないよう広めに取る（今は入れ子のディレクトリは無い）。
   if (
-    /^apps\/backend\/features\/[^/]+\/domain\/.+\.ts$/.test(path) &&
+    /^apps\/backend\/features\/[^/]+\/internal\/domain\/.+\.ts$/.test(path) &&
     !lines.some((line) => /\bget\s+origin\s*\(\s*\)/.test(line))
   ) {
     violations.push(
@@ -425,15 +427,17 @@ const repoRoot = join(import.meta.dirname, "..");
 // テストの入力を行の配列で書き、1 行目を 1 として違反の行番号を読みやすくする。
 const source = (...lines: string[]) => lines.join("\n");
 
-const POSTGRES = "apps/backend/features/x/infra/x-repository.postgres.ts";
-const IN_MEMORY = "apps/backend/features/x/infra/x-repository.in-memory.ts";
-const ENTITY = "apps/backend/features/x/domain/x.ts";
-const SCHEMA = "apps/backend/features/x/infra/schema.ts";
+const POSTGRES =
+  "apps/backend/features/x/internal/infra/x-repository.postgres.ts";
+const IN_MEMORY =
+  "apps/backend/features/x/internal/infra/x-repository.in-memory.ts";
+const ENTITY = "apps/backend/features/x/internal/domain/x.ts";
+const SCHEMA = "apps/backend/features/x/internal/infra/schema.ts";
 const SHARED_SCHEMA = "apps/backend/shared/infra/schema.ts";
 const IMPORT_CHANGED_PROPS =
-  'import { changedProps } from "../../../shared/infra/changed-props";';
+  'import { changedProps } from "../../../../shared/infra/changed-props";';
 const IMPORT_WRITE =
-  'import { writeInTransaction } from "../../../shared/infra/write";';
+  'import { writeInTransaction } from "../../../../shared/infra/write";';
 const IMPORT_CHILD = 'import { todoStatusChanges, todos } from "./schema";';
 // 書き込み（insert / update / delete）を含む例に write の import を最後の行に足す（writes-through-write-in-transaction を満たす）。
 // WHY 最後の行に足す: ほかの規則の例の行番号を変えずに、その規則だけを見る例にする（検査は import の位置を問わない）。
@@ -459,7 +463,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       source(
         "import {",
         "  changedProps,",
-        '} from "../../../shared/infra/changed-props.ts";',
+        '} from "../../../../shared/infra/changed-props.ts";',
         "class XRepository {",
         "  save(x: X) {}",
         "}",
@@ -517,7 +521,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
     ],
     [
       "reconstruct も origin も無い domain のファイル",
-      "apps/backend/features/x/domain/x-repository.ts",
+      "apps/backend/features/x/internal/domain/x-repository.ts",
       source(
         "export interface XRepository {",
         "  save(x: X): Promise<void>;",
@@ -534,7 +538,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
     ],
     [
       "テストファイル（*.test.ts）は対象外",
-      "apps/backend/features/x/infra/x-repository.postgres.test.ts",
+      "apps/backend/features/x/internal/infra/x-repository.postgres.test.ts",
       source(
         "async save(x) {}",
         "q.onConflictDoUpdate({});",
@@ -550,6 +554,18 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       "backend の外（frontend）は対象外",
       "apps/frontend_customer/features/x/x.ts",
       source("q.onConflictDoUpdate({});"),
+    ],
+    // Issue #208: feature の層は internal/ の下だけ。internal/ を挟まない旧の置き場所（置き場所の規則 backend-placement が
+    //   違反にする）は、domain・schema.ts の規則の対象外。
+    [
+      "internal/ を挟まない features/x/domain/ の reconstruct は entity-with-reconstruct-has-origin の対象外",
+      "apps/backend/features/x/domain/x.ts",
+      source("export class X {", "  static reconstruct(v: V) {}", "}"),
+    ],
+    [
+      "internal/ を挟まない features/x/infra/schema.ts は append-only-table-naming の対象外",
+      "apps/backend/features/x/infra/schema.ts",
+      source('export const statusLog = pgTable("todo_status_changes", {});'),
     ],
     [
       "insert のみの表（*Changes / *Events / *Logs）への insert と select、それ以外の表の update / delete",
@@ -641,7 +657,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
     ],
     [
       "schema.ts でないファイル（schema.test.ts・infra の別のファイル）は append-only-table-naming の対象外",
-      "apps/backend/features/x/infra/x-tables.ts",
+      "apps/backend/features/x/internal/infra/x-tables.ts",
       source('export const statusLog = pgTable("todo_status_changes", {});'),
     ],
     [
@@ -649,11 +665,11 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       POSTGRES,
       source(
         IMPORT_CHANGED_PROPS,
-        'import { deleteEntry, insertEntry } from "../../../shared/infra/change-log";',
+        'import { deleteEntry, insertEntry } from "../../../../shared/infra/change-log";',
         "import {",
         "  type Transaction,",
         "  writeInTransaction,",
-        '} from "../../../shared/infra/write.ts";',
+        '} from "../../../../shared/infra/write.ts";',
         "class A {",
         "  async save(x: X) {",
         '    await writeInTransaction(this.db, { table: xs, rowId: x.id, operation: "insert" }, async (tx) => {',
@@ -766,7 +782,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       "子表を import していない *.postgres.ts の from( / limit( / where は対象外（*Logs は集約の子表ではない）",
       POSTGRES,
       source(
-        'import { changeLogs } from "../../../shared/infra/schema";',
+        'import { changeLogs } from "../../../../shared/infra/schema";',
         "await this.db.select().from(xs).limit(1);",
         "await this.db.select().from(changeLogs).where(eq(changeLogs.rowId, id)).limit(10);",
         "await this.db.select().from(todoStatusChanges);",
@@ -911,7 +927,7 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
       "changed-props を import type だけで読む（関数を呼べない）",
       POSTGRES,
       source(
-        'import type { changedProps } from "../../../shared/infra/changed-props";',
+        'import type { changedProps } from "../../../../shared/infra/changed-props";',
         "class A {",
         "  async save(x: X) {}",
         "}",
@@ -923,7 +939,7 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
       POSTGRES,
       source(
         'import { changedProps } from "./changed-props";',
-        'import { diff } from "../../../shared/infra/changed-props-x";',
+        'import { diff } from "../../../../shared/infra/changed-props-x";',
         "class A {",
         "  async save(x: X) {}",
         "}",
@@ -958,7 +974,7 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
     ],
     [
       "domain の下の入れ子の Entity",
-      "apps/backend/features/x/domain/nested/y.ts",
+      "apps/backend/features/x/internal/domain/nested/y.ts",
       source("export class Y {", "  static reconstruct(v: V) {}", "}"),
       [{ rule: "entity-with-reconstruct-has-origin", line: 2 }],
     ],
@@ -1062,12 +1078,12 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
       "write を import type だけ・コメントの中だけ・名前が同じ別のモジュール（./write・shared/infra/write-x・shared/infra/writer）で読む。change-log の import では満たさない",
       POSTGRES,
       source(
-        'import type { Transaction } from "../../../shared/infra/write";',
+        'import type { Transaction } from "../../../../shared/infra/write";',
         `// ${IMPORT_WRITE}`,
         'import { writeInTransaction } from "./write";',
-        'import { x } from "../../../shared/infra/write-x";',
-        'import { y } from "../../../shared/infra/writer";',
-        'import { insertEntry } from "../../../shared/infra/change-log";',
+        'import { x } from "../../../../shared/infra/write-x";',
+        'import { y } from "../../../../shared/infra/writer";',
+        'import { insertEntry } from "../../../../shared/infra/change-log";',
         "await tx.insert(xs).values(r);",
       ),
       [{ rule: "writes-through-write-in-transaction", line: 7 }],
@@ -1116,8 +1132,8 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
       "*.postgres.ts で recordChange を直接使う（import・別名の import・writeInTransaction のコールバックの中の呼び出し・名前空間の参照）",
       POSTGRES,
       withWrite(
-        'import { recordChange } from "../../../shared/infra/change-log";',
-        'import { recordChange as rc } from "../../../shared/infra/change-log";',
+        'import { recordChange } from "../../../../shared/infra/change-log";',
+        'import { recordChange as rc } from "../../../../shared/infra/change-log";',
         "await writeInTransaction(this.db, target, async (tx) => {",
         "  await recordChange(tx, entries);",
         "  return [];",
@@ -1276,11 +1292,11 @@ describe("backend のソースの列挙と検査（fixture）", () => {
   it("apps/backend の下のテスト以外の .ts を対象にし、違反を「規則: パス:行」で返す", () => {
     const root = fixture({
       [POSTGRES]: source(IMPORT_CHANGED_PROPS, saveMethod),
-      "apps/backend/features/y/infra/y-repository.postgres.ts": source(
+      "apps/backend/features/y/internal/infra/y-repository.postgres.ts": source(
         saveMethod,
         "q.onConflictDoUpdate({});",
       ),
-      "apps/backend/features/y/infra/y-reader.postgres.ts": source(
+      "apps/backend/features/y/internal/infra/y-reader.postgres.ts": source(
         "export class YReader {}",
         "await this.db.delete(yChanges);",
       ),
@@ -1292,19 +1308,19 @@ describe("backend のソースの列挙と検査（fixture）", () => {
         "  static reconstruct(v: V) {}",
         "}",
       ),
-      "apps/backend/features/y/domain/y.ts": reconstructOnly,
+      "apps/backend/features/y/internal/domain/y.ts": reconstructOnly,
       [SCHEMA]: source(
         'export const xStatusChanges = pgTable("x_status_changes", {});',
       ),
-      "apps/backend/features/y/infra/schema.ts": source(
+      "apps/backend/features/y/internal/infra/schema.ts": source(
         'export const ys = pgTable("ys", {});',
         'export const yLog = pgTable("y_events", {});',
       ),
-      "apps/backend/features/y/domain/y-repository.ts": source(
+      "apps/backend/features/y/internal/domain/y-repository.ts": source(
         "export interface YRepository {}",
       ),
       // 書き込みの入口と集約の読み出しの規則（Issue #189・#205）: transaction と recordChange を直接呼び、子表を import して親だけを読む。
-      "apps/backend/features/z/infra/z-repository.postgres.ts": source(
+      "apps/backend/features/z/internal/infra/z-repository.postgres.ts": source(
         IMPORT_WRITE,
         'import { zChanges, zs } from "./schema";',
         "await this.db.transaction(async (tx) => { await tx.insert(zs).values(r); });",
@@ -1312,7 +1328,7 @@ describe("backend のソースの列挙と検査（fixture）", () => {
         "const rows = await this.db.select().from(zs).limit(1);",
       ),
       // 規則を満たす Repository（write を import し、writeInTransaction のコールバックで書き、子表を leftJoin で読む）。
-      "apps/backend/features/z/infra/z-writer.postgres.ts": source(
+      "apps/backend/features/z/internal/infra/z-writer.postgres.ts": source(
         IMPORT_WRITE,
         'import { zChanges, zs } from "./schema";',
         "await writeInTransaction(this.db, target, async (tx) => {",
@@ -1331,16 +1347,15 @@ describe("backend のソースの列挙と検査（fixture）", () => {
         'export const changeLog = pgTable("change_logs", {});',
       ),
       // 対象外: テスト、features でない domain の reconstruct、.ts でないファイル、backend の外、node_modules の中。
-      "apps/backend/features/y/infra/y-repository.postgres.test.ts": source(
-        saveMethod,
-        "q.onConflictDoUpdate({});",
-        "await this.db.delete(yChanges);",
-      ),
-      "apps/backend/features/y/infra/y-repository.in-memory.ts": source(
-        "this.yEvents.delete(id);",
-        "q.update(yEvents);",
-      ),
-      "apps/backend/features/y/domain/y.test.ts": reconstructOnly,
+      "apps/backend/features/y/internal/infra/y-repository.postgres.test.ts":
+        source(
+          saveMethod,
+          "q.onConflictDoUpdate({});",
+          "await this.db.delete(yChanges);",
+        ),
+      "apps/backend/features/y/internal/infra/y-repository.in-memory.ts":
+        source("this.yEvents.delete(id);", "q.update(yEvents);"),
+      "apps/backend/features/y/internal/domain/y.test.ts": reconstructOnly,
       "apps/backend/shared/domain/w.ts": reconstructOnly,
       "apps/backend/shared/drizzle/0000_x.sql":
         "INSERT ... ON CONFLICT DO UPDATE;",
@@ -1354,36 +1369,36 @@ describe("backend のソースの列挙と検査（fixture）", () => {
       violations: collectPersistenceViolations(root),
     }).toEqual({
       files: [
-        "apps/backend/features/x/domain/x.ts",
-        "apps/backend/features/x/infra/schema.ts",
-        "apps/backend/features/x/infra/x-repository.in-memory.ts",
-        "apps/backend/features/x/infra/x-repository.postgres.ts",
-        "apps/backend/features/y/domain/y-repository.ts",
-        "apps/backend/features/y/domain/y.ts",
-        "apps/backend/features/y/infra/schema.ts",
-        "apps/backend/features/y/infra/y-reader.postgres.ts",
-        "apps/backend/features/y/infra/y-repository.in-memory.ts",
-        "apps/backend/features/y/infra/y-repository.postgres.ts",
-        "apps/backend/features/z/infra/z-repository.postgres.ts",
-        "apps/backend/features/z/infra/z-writer.postgres.ts",
+        "apps/backend/features/x/internal/domain/x.ts",
+        "apps/backend/features/x/internal/infra/schema.ts",
+        "apps/backend/features/x/internal/infra/x-repository.in-memory.ts",
+        "apps/backend/features/x/internal/infra/x-repository.postgres.ts",
+        "apps/backend/features/y/internal/domain/y-repository.ts",
+        "apps/backend/features/y/internal/domain/y.ts",
+        "apps/backend/features/y/internal/infra/schema.ts",
+        "apps/backend/features/y/internal/infra/y-reader.postgres.ts",
+        "apps/backend/features/y/internal/infra/y-repository.in-memory.ts",
+        "apps/backend/features/y/internal/infra/y-repository.postgres.ts",
+        "apps/backend/features/z/internal/infra/z-repository.postgres.ts",
+        "apps/backend/features/z/internal/infra/z-writer.postgres.ts",
         "apps/backend/shared/domain/w.ts",
         "apps/backend/shared/infra/schema.ts",
         "apps/backend/shared/infra/write.ts",
         "apps/backend/shared/infra/z.ts",
       ],
       violations: [
-        "no-upsert: apps/backend/features/x/infra/x-repository.in-memory.ts:4",
-        "entity-with-reconstruct-has-origin: apps/backend/features/y/domain/y.ts:2",
-        "append-only-table-naming: apps/backend/features/y/infra/schema.ts:2",
-        "no-update-delete-on-append-only-tables: apps/backend/features/y/infra/y-reader.postgres.ts:2",
-        "writes-through-write-in-transaction: apps/backend/features/y/infra/y-reader.postgres.ts:2",
-        "no-direct-db-write: apps/backend/features/y/infra/y-reader.postgres.ts:2",
-        "save-uses-changed-props: apps/backend/features/y/infra/y-repository.postgres.ts:2",
-        "no-upsert: apps/backend/features/y/infra/y-repository.postgres.ts:4",
-        "no-direct-transaction: apps/backend/features/z/infra/z-repository.postgres.ts:3",
-        "no-direct-record-change: apps/backend/features/z/infra/z-repository.postgres.ts:4",
-        "aggregate-loads-all-children: apps/backend/features/z/infra/z-repository.postgres.ts:5",
-        "aggregate-loads-all-children: apps/backend/features/z/infra/z-repository.postgres.ts:5",
+        "no-upsert: apps/backend/features/x/internal/infra/x-repository.in-memory.ts:4",
+        "entity-with-reconstruct-has-origin: apps/backend/features/y/internal/domain/y.ts:2",
+        "append-only-table-naming: apps/backend/features/y/internal/infra/schema.ts:2",
+        "no-update-delete-on-append-only-tables: apps/backend/features/y/internal/infra/y-reader.postgres.ts:2",
+        "writes-through-write-in-transaction: apps/backend/features/y/internal/infra/y-reader.postgres.ts:2",
+        "no-direct-db-write: apps/backend/features/y/internal/infra/y-reader.postgres.ts:2",
+        "save-uses-changed-props: apps/backend/features/y/internal/infra/y-repository.postgres.ts:2",
+        "no-upsert: apps/backend/features/y/internal/infra/y-repository.postgres.ts:4",
+        "no-direct-transaction: apps/backend/features/z/internal/infra/z-repository.postgres.ts:3",
+        "no-direct-record-change: apps/backend/features/z/internal/infra/z-repository.postgres.ts:4",
+        "aggregate-loads-all-children: apps/backend/features/z/internal/infra/z-repository.postgres.ts:5",
+        "aggregate-loads-all-children: apps/backend/features/z/internal/infra/z-repository.postgres.ts:5",
         "append-only-table-naming: apps/backend/shared/infra/schema.ts:1",
         "no-upsert: apps/backend/shared/infra/z.ts:2",
       ],
@@ -1404,10 +1419,14 @@ describe("永続化（実ファイル）", () => {
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     const files = listBackendSources(repoRoot);
     expect(files).toContain(
-      "apps/backend/features/todo/infra/todo-repository.postgres.ts",
+      "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
     );
-    expect(files).toContain("apps/backend/features/todo/domain/todo.ts");
-    expect(files).toContain("apps/backend/features/todo/infra/schema.ts");
+    expect(files).toContain(
+      "apps/backend/features/todo/internal/domain/todo.ts",
+    );
+    expect(files).toContain(
+      "apps/backend/features/todo/internal/infra/schema.ts",
+    );
     expect(files).toContain("apps/backend/shared/infra/schema.ts");
     expect(collectPersistenceViolations(repoRoot)).toEqual([]);
   });

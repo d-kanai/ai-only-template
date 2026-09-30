@@ -153,7 +153,7 @@ function findColumnTypeViolations(text: string): ColumnTypeViolation[] {
 
 // 検査の対象: apps/backend の下の infra/schema.ts（node_modules は除く）。リポジトリ相対の / 区切りで、名前順。
 // WHY features と shared の両方: drizzle-kit の設定（apps/backend/shared/drizzle/drizzle.config.ts）が読むのは
-//   features/*/infra/schema.ts だけだが、shared/infra に置いたスキーマも同じ既定に従わせる（置いた時点で止める）。
+//   features/*/internal/infra/schema.ts だけだが、shared/infra に置いたスキーマも同じ既定に従わせる（置いた時点で止める）。
 // WHY root を引数で受け取る: 本番（リポジトリ直下）と fixture（一時ディレクトリ）で同じ列挙を通すため。
 function listSchemaFiles(root: string): string[] {
   const backend = join(root, "apps/backend");
@@ -501,14 +501,14 @@ describe("スキーマの列挙と検査（fixture）", () => {
 
   it("apps/backend の features と shared の infra/schema.ts だけを対象にし、違反を「規則: パス:行」で返す", () => {
     const result = violationsOfFixture({
-      "apps/backend/features/a/infra/schema.ts": source(
+      "apps/backend/features/a/internal/infra/schema.ts": source(
         IMPORT,
         'export const a = pg.pgTable("a", {',
         '  title: pg.varchar("title", { length: 100 }),',
         '  at: pg.timestamp("at"),',
         "});",
       ),
-      "apps/backend/features/b/infra/schema.ts": source(
+      "apps/backend/features/b/internal/infra/schema.ts": source(
         IMPORT,
         'export const b = pg.pgTable("b", { id: pg.uuid("id").primaryKey() });',
       ),
@@ -517,21 +517,21 @@ describe("スキーマの列挙と検査（fixture）", () => {
         'export const s = pg.pgTable("s", { raw: pg.json("raw") });',
       ),
       // 対象外: infra/schema.ts でないファイル、infra 以外の schema.ts、テスト、node_modules、apps/backend の外。
-      "apps/backend/features/c/infra/other.ts": varcharColumn,
-      "apps/backend/features/c/domain/schema.ts": varcharColumn,
-      "apps/backend/features/c/infra/schema.test.ts": varcharColumn,
+      "apps/backend/features/c/internal/infra/other.ts": varcharColumn,
+      "apps/backend/features/c/internal/domain/schema.ts": varcharColumn,
+      "apps/backend/features/c/internal/infra/schema.test.ts": varcharColumn,
       "apps/backend/node_modules/x/infra/schema.ts": varcharColumn,
       "apps/frontend_customer/features/x/infra/schema.ts": varcharColumn,
     });
     expect(result).toEqual({
       files: [
-        "apps/backend/features/a/infra/schema.ts",
-        "apps/backend/features/b/infra/schema.ts",
+        "apps/backend/features/a/internal/infra/schema.ts",
+        "apps/backend/features/b/internal/infra/schema.ts",
         "apps/backend/shared/infra/schema.ts",
       ],
       violations: [
-        "varchar: apps/backend/features/a/infra/schema.ts:3",
-        "timestamp-without-timezone: apps/backend/features/a/infra/schema.ts:4",
+        "varchar: apps/backend/features/a/internal/infra/schema.ts:3",
+        "timestamp-without-timezone: apps/backend/features/a/internal/infra/schema.ts:4",
         "json: apps/backend/shared/infra/schema.ts:2",
       ],
     });
@@ -549,7 +549,7 @@ describe("DB の列の型（実ファイル）", () => {
   it("apps/backend の infra/schema.ts はすべて列の型の既定に従う", () => {
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     expect(listSchemaFiles(repoRoot)).toContain(
-      "apps/backend/features/todo/infra/schema.ts",
+      "apps/backend/features/todo/internal/infra/schema.ts",
     );
     expect(collectSchemaViolations(repoRoot)).toEqual([]);
   });

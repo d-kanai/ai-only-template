@@ -1,17 +1,17 @@
 import type {
   ChangeTodoCompletionRequest,
   ChangeTodoCompletionResponse,
-} from "@repo/backend/features/todo/presentation/change-todo-completion.api";
+} from "@repo/backend/features/todo/internal/presentation/change-todo-completion.api";
 import type {
   CreateTodoRequest,
   CreateTodoResponse,
-} from "@repo/backend/features/todo/presentation/create-todo.api";
-import type { GetTodoResponse } from "@repo/backend/features/todo/presentation/get-todo.api";
-import type { ListTodosResponse } from "@repo/backend/features/todo/presentation/list-todos.api";
+} from "@repo/backend/features/todo/internal/presentation/create-todo.api";
+import type { GetTodoResponse } from "@repo/backend/features/todo/internal/presentation/get-todo.api";
+import type { ListTodosResponse } from "@repo/backend/features/todo/internal/presentation/list-todos.api";
 import type {
   RenameTodoRequest,
   RenameTodoResponse,
-} from "@repo/backend/features/todo/presentation/rename-todo.api";
+} from "@repo/backend/features/todo/internal/presentation/rename-todo.api";
 import type { Problem } from "@repo/backend/shared/presentation/problem";
 import { commonMessages } from "@/shared/i18n/common.messages";
 import { isMessageKey } from "@/shared/i18n/i18n";

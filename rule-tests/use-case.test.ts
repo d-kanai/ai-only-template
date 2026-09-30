@@ -14,7 +14,7 @@ import { dirname, join, sep } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 // 「1 ユースケース = 1 API = 1 command」（.claude/rules/backend.md、Issue #175・#177）を、application の command / query
-// （apps/backend/features/*/application/*.command.ts・*.query.ts）の入力で機械的に検査するテスト。
+// （apps/backend/features/*/internal/application/*.command.ts・*.query.ts）の入力で機械的に検査するテスト。
 // WHY 検査する: 入力の任意の項目は「指定されたときだけ変える」分岐を command に生み、1 つの command に複数のユースケース
 //   （改名・完了の切り替え）が混ざる。ユースケースが違うなら command を分ける（Issue #175）。api 側は rule-tests/api-request.test.ts が
 //   リクエストの `.optional()` を止めるが、command の入力の型は api を通さずにも書けるので、command 側でも止める。
@@ -99,7 +99,7 @@ function findUseCaseViolations(text: string): UseCaseViolation[] {
   return violations.sort((a, b) => a.line - b.line);
 }
 
-// 検査の対象: apps/backend/features/<f>/application/ の直下の *.command.ts / *.query.ts（テストは除く）。
+// 検査の対象: apps/backend/features/<f>/internal/application/ の直下の *.command.ts / *.query.ts（テストは除く）。
 //   リポジトリ相対の / 区切りで、名前順。
 // WHY root を引数で受け取る: 本番（リポジトリ直下）と fixture（一時ディレクトリ）で同じ列挙を通すため。
 function listUseCaseFiles(root: string): string[] {
@@ -116,7 +116,7 @@ function listUseCaseFiles(root: string): string[] {
     .map((path) => `apps/backend/features/${path.split(sep).join("/")}`)
     .filter((path) =>
       // `*.command.test.ts` は `.command.ts` で終わらないので、この形だけでテストは外れる。
-      /^apps\/backend\/features\/[^/]+\/application\/[^/]+\.(?:command|query)\.ts$/.test(
+      /^apps\/backend\/features\/[^/]+\/internal\/application\/[^/]+\.(?:command|query)\.ts$/.test(
         path,
       ),
     )
@@ -329,34 +329,40 @@ describe("command / query の列挙と検査（fixture）", () => {
     "if (input.title !== undefined) rename();",
   );
 
-  it("features/<f>/application/*.command.ts・*.query.ts だけを対象にし、違反を「規則: パス:行: 行の内容」で返す", () => {
+  it("features/<f>/internal/application/*.command.ts・*.query.ts だけを対象にし、違反を「規則: パス:行: 行の内容」で返す", () => {
     const root = fixture({
-      "apps/backend/features/x/application/rename-x.command.ts": source(
-        "export type RenameXInput = {",
-        "  id: string;",
-        "  title: string;",
-        "};",
-        "const current = await this.repository.findByIdOrThrow(input.id);",
-      ),
-      "apps/backend/features/x/application/update-x.command.ts": source(
-        "export type UpdateXInput = {",
-        "  id: string;",
-        "  title?: string;",
-        "};",
-        "if (input.title !== undefined) current = current.rename(input.title);",
-      ),
-      "apps/backend/features/x/application/list-x.query.ts": source(
+      "apps/backend/features/x/internal/application/rename-x.command.ts":
+        source(
+          "export type RenameXInput = {",
+          "  id: string;",
+          "  title: string;",
+          "};",
+          "const current = await this.repository.findByIdOrThrow(input.id);",
+        ),
+      "apps/backend/features/x/internal/application/update-x.command.ts":
+        source(
+          "export type UpdateXInput = {",
+          "  id: string;",
+          "  title?: string;",
+          "};",
+          "if (input.title !== undefined) current = current.rename(input.title);",
+        ),
+      "apps/backend/features/x/internal/application/list-x.query.ts": source(
         "export type ListXResult = { next?: string };",
         "const items = await this.repository.findAll();",
       ),
       // 対象外: command のテスト、application の command / query 以外、入れ子、domain・presentation、shared、frontend。
-      "apps/backend/features/x/application/update-x.command.test.ts":
+      "apps/backend/features/x/internal/application/update-x.command.test.ts":
         partialUpdate,
-      "apps/backend/features/x/application/helper.ts": partialUpdate,
-      "apps/backend/features/x/application/nested/y.command.ts": partialUpdate,
-      "apps/backend/features/x/domain/x.ts": partialUpdate,
-      "apps/backend/features/x/presentation/update-x.api.ts": partialUpdate,
+      "apps/backend/features/x/internal/application/helper.ts": partialUpdate,
+      "apps/backend/features/x/internal/application/nested/y.command.ts":
+        partialUpdate,
+      "apps/backend/features/x/internal/domain/x.ts": partialUpdate,
+      "apps/backend/features/x/internal/presentation/update-x.api.ts":
+        partialUpdate,
       "apps/backend/shared/application/y.command.ts": partialUpdate,
+      // Issue #208: internal/ を挟まない旧の置き場所（置き場所の規則 backend-placement が違反にする）。
+      "apps/backend/features/x/application/old.command.ts": partialUpdate,
       "apps/frontend_customer/features/x/application/y.command.ts":
         partialUpdate,
     });
@@ -365,13 +371,13 @@ describe("command / query の列挙と検査（fixture）", () => {
       violations: collectUseCaseViolations(root),
     }).toEqual({
       files: [
-        "apps/backend/features/x/application/list-x.query.ts",
-        "apps/backend/features/x/application/rename-x.command.ts",
-        "apps/backend/features/x/application/update-x.command.ts",
+        "apps/backend/features/x/internal/application/list-x.query.ts",
+        "apps/backend/features/x/internal/application/rename-x.command.ts",
+        "apps/backend/features/x/internal/application/update-x.command.ts",
       ],
       violations: [
-        "no-optional-input-field: apps/backend/features/x/application/update-x.command.ts:3: title?: string;",
-        "no-undefined-branch-on-input: apps/backend/features/x/application/update-x.command.ts:5: if (input.title !== undefined) current = current.rename(input.title);",
+        "no-optional-input-field: apps/backend/features/x/internal/application/update-x.command.ts:3: title?: string;",
+        "no-undefined-branch-on-input: apps/backend/features/x/internal/application/update-x.command.ts:5: if (input.title !== undefined) current = current.rename(input.title);",
       ],
     });
   });
@@ -390,10 +396,10 @@ describe("1 ユースケース = 1 command（実ファイル）", () => {
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     const files = listUseCaseFiles(repoRoot);
     expect(files).toContain(
-      "apps/backend/features/todo/application/rename-todo.command.ts",
+      "apps/backend/features/todo/internal/application/rename-todo.command.ts",
     );
     expect(files).toContain(
-      "apps/backend/features/todo/application/list-todos.query.ts",
+      "apps/backend/features/todo/internal/application/list-todos.query.ts",
     );
     expect(collectUseCaseViolations(repoRoot)).toEqual([]);
   });

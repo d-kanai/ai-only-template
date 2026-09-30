@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { now } from "@repo/shared/now";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { Todo } from "../../features/todo/domain/todo";
+import { Todo } from "../../features/todo/internal/domain/todo";
 import { DomainError } from "../../shared/domain/domain-error";
 import type { ChangeEntry } from "../../shared/infra/change-log";
 import { InMemoryTodoRepository } from "./todo-repository.in-memory";
@@ -21,7 +21,7 @@ function createTodoAt(title: string, createdAt: string): Todo {
 }
 
 // action の間に repository が積んだ変更履歴（changeLogs）を、id と occurredAt を除いた記録（ChangeEntry）にして返す。
-//   features/todo/infra/todo-repository.postgres.test.ts の同名の補助と同じく、表の名前と changes で並べる。
+//   features/todo/internal/infra/todo-repository.postgres.test.ts の同名の補助と同じく、表の名前と changes で並べる。
 async function changeLogsWrittenBy(
   repository: InMemoryTodoRepository,
   action: () => Promise<unknown>,
@@ -156,7 +156,7 @@ describe("InMemoryTodoRepository", () => {
     await expect(repository.findAll()).resolves.toEqual([]);
   });
 
-  // ここから下の save のテストは features/todo/infra/todo-repository.postgres.test.ts と同じ契約で、同じテスト名にそろえる（Issue #165）。
+  // ここから下の save のテストは features/todo/internal/infra/todo-repository.postgres.test.ts と同じ契約で、同じテスト名にそろえる（Issue #165）。
   //   InMemory は application のテストで Postgres の代わりに使うので、同時更新・削除との競合でも同じ結果になることを確かめる。
   test("同じ Todo を 2 回読み、片方で完了にして save、もう片方で名前を変えて save すると、両方の変更が残る（別の列の同時更新を巻き戻さない）", async () => {
     const repository = new InMemoryTodoRepository();
@@ -269,7 +269,7 @@ describe("InMemoryTodoRepository", () => {
     await expect(repository.findAll()).resolves.toEqual([todo]);
   });
 
-  // ここから下の完了の履歴（Issue #188）のテストは features/todo/infra/todo-repository.postgres.test.ts と同じ契約で、同じテスト名にそろえる。
+  // ここから下の完了の履歴（Issue #188）のテストは features/todo/internal/infra/todo-repository.postgres.test.ts と同じ契約で、同じテスト名にそろえる。
   //   DB の行（todo_status_changes）を直接見る確認と、DB だけのテスト（外部キーの cascade）は Postgres だけ。
   test("新規の Todo を save すると完了の履歴（作成日時に未完了の 1 件）も保存され、読み出した Todo が同じ履歴を持つ", async () => {
     const repository = new InMemoryTodoRepository();
@@ -422,7 +422,7 @@ describe("InMemoryTodoRepository", () => {
     expect((await repository.findAll())[0]?.origin).toStrictEqual(values);
   });
 
-  // ここから下の変更履歴（Issue #189）のテストは features/todo/infra/todo-repository.postgres.test.ts と同じ契約で、同じテスト名にそろえる。
+  // ここから下の変更履歴（Issue #189）のテストは features/todo/internal/infra/todo-repository.postgres.test.ts と同じ契約で、同じテスト名にそろえる。
   test("新規の Todo を save すると、変更履歴に todos の insert（全列）と完了の履歴の insert（全列）の 2 件を記録する", async () => {
     const repository = new InMemoryTodoRepository();
     const todo = Todo.create("牛乳を買う");

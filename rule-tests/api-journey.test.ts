@@ -457,8 +457,8 @@ const source = (...lines: string[]) => lines.join("\n");
 
 const API_JOURNEY = "apps/backend/api-journeys/x.api-journey.test.ts";
 const FEATURE = "apps/backend/api-journeys/x.feature";
-const CREATE_API = "../features/x/presentation/create-x.api";
-const LIST_API = "../features/x/presentation/list-x.api";
+const CREATE_API = "../features/x/internal/presentation/create-x.api";
+const LIST_API = "../features/x/internal/presentation/list-x.api";
 // API ジャーニーの必須の import（実 DB と 2 つの api）。must reject の例は、これに違反を 1 つ足すか、どれかを欠く。
 const DATABASE_IMPORT =
   'import { createTestDatabase } from "../test-support/database";';
@@ -483,16 +483,16 @@ describe("API ジャーニーの置き場所（isMisplacedApiJourneyFile）", ()
     ["apps/backend/api-journeys/ の直下の *.feature（Gherkin）", FEATURE],
     [
       "apps/backend/ の層の下の普通のテスト",
-      "apps/backend/features/x/presentation/x.api.test.ts",
+      "apps/backend/features/x/internal/presentation/x.api.test.ts",
     ],
-    ["apps/backend/ のソース", "apps/backend/features/x/domain/x.ts"],
+    ["apps/backend/ のソース", "apps/backend/features/x/internal/domain/x.ts"],
     [
       "名前に journey を含むが *.journey.test.* ではないファイル",
-      "apps/backend/features/journey/domain/journey.test.ts",
+      "apps/backend/features/journey/internal/domain/journey.test.ts",
     ],
     [
       "名前に feature を含むが .feature で終わらないファイル（api-journeys/ の外）",
-      "apps/backend/features/feature/domain/x.feature.ts",
+      "apps/backend/features/feature/internal/domain/x.feature.ts",
     ],
   ])("%s は違反なし", (_name, path) => {
     expect(isMisplacedApiJourneyFile(path)).toBe(false);
@@ -585,23 +585,23 @@ describe("API ジャーニーの中身（findApiJourneyViolations）: must pass"
         "  CreateXApi,",
         "  type CreateXResponse,",
         `} from "${CREATE_API}";`,
-        'import { ListXApi } from "@repo/backend/features/x/presentation/list-x.api.ts";',
+        'import { ListXApi } from "@repo/backend/features/x/internal/presentation/list-x.api.ts";',
       ),
     ],
     [
       "別の feature の api を 1 つずつ（feature をまたぐ流れ）",
       source(
         DATABASE_IMPORT,
-        'import { CreateXApi } from "../features/x/presentation/create-x.api";',
-        'import { CreateYApi } from "../features/y/presentation/create-y.api";',
+        'import { CreateXApi } from "../features/x/internal/presentation/create-x.api";',
+        'import { CreateYApi } from "../features/y/internal/presentation/create-y.api";',
       ),
     ],
     [
       "Postgres の Repository・command / query を import（InMemory ではない）",
       source(
         ...REQUIRED_IMPORTS,
-        'import { PostgresXRepository } from "../features/x/infra/x-repository.postgres";',
-        'import { CreateXCommand } from "../features/x/application/create-x.command";',
+        'import { PostgresXRepository } from "../features/x/internal/infra/x-repository.postgres";',
+        'import { CreateXCommand } from "../features/x/internal/application/create-x.command";',
       ),
     ],
     [
@@ -609,9 +609,9 @@ describe("API ジャーニーの中身（findApiJourneyViolations）: must pass"
       source(
         ...REQUIRED_IMPORTS,
         '// vi.mock("@repo/shared/now") は使わない。',
-        '/* vi.doMock("./x"); import { InMemoryXRepository } from "../features/x/infra/x-repository.in-memory"; */',
+        '/* vi.doMock("./x"); import { InMemoryXRepository } from "../features/x/internal/infra/x-repository.in-memory"; */',
         '// import { vi } from "vitest";',
-        'const url = "http://localhost"; // import "../features/x/infra/x-repository.in-memory";',
+        'const url = "http://localhost"; // import "../features/x/internal/infra/x-repository.in-memory";',
       ),
     ],
     [
@@ -673,7 +673,7 @@ describe("API ジャーニーの中身（findApiJourneyViolations）: must pass"
   it("API ジャーニーでないファイル（層の下のテスト）は中身を見ない", () => {
     expect(
       findApiJourneyViolations(
-        "apps/backend/features/x/presentation/x.api.test.ts",
+        "apps/backend/features/x/internal/presentation/x.api.test.ts",
         source(
           'import { vi } from "vitest";',
           "const renameX = new RenameXApi(command).handle;",
@@ -689,7 +689,7 @@ describe("API ジャーニーの中身（findApiJourneyViolations）: must rejec
       "InMemory の Repository を値で import",
       source(
         ...REQUIRED_IMPORTS,
-        'import { InMemoryXRepository } from "../features/x/infra/x-repository.in-memory";',
+        'import { InMemoryXRepository } from "../features/x/internal/infra/x-repository.in-memory";',
       ),
       [{ rule: "api-journey-no-in-memory", line: 4 }],
     ],
@@ -697,7 +697,7 @@ describe("API ジャーニーの中身（findApiJourneyViolations）: must rejec
       "InMemory を import type で（型だけでも違反）",
       source(
         ...REQUIRED_IMPORTS,
-        'import type { InMemoryXRepository } from "../features/x/infra/x-repository.in-memory";',
+        'import type { InMemoryXRepository } from "../features/x/internal/infra/x-repository.in-memory";',
       ),
       [{ rule: "api-journey-no-in-memory", line: 4 }],
     ],
@@ -705,7 +705,7 @@ describe("API ジャーニーの中身（findApiJourneyViolations）: must rejec
       "InMemory を inline の type・拡張子付き・@repo/backend/ で",
       source(
         ...REQUIRED_IMPORTS,
-        'import { type InMemoryXRepository } from "@repo/backend/features/x/infra/x-repository.in-memory.ts";',
+        'import { type InMemoryXRepository } from "@repo/backend/features/x/internal/infra/x-repository.in-memory.ts";',
       ),
       [{ rule: "api-journey-no-in-memory", line: 4 }],
     ],
@@ -713,11 +713,11 @@ describe("API ジャーニーの中身（findApiJourneyViolations）: must rejec
       "InMemory を dynamic import()・副作用の import・export … from（複数行）",
       source(
         ...REQUIRED_IMPORTS,
-        'const m = await import("../features/x/infra/x-repository.in-memory");',
-        'import "../features/x/infra/x-repository.in-memory";',
+        'const m = await import("../features/x/internal/infra/x-repository.in-memory");',
+        'import "../features/x/internal/infra/x-repository.in-memory";',
         "export {",
         "  InMemoryXRepository,",
-        '} from "../features/x/infra/x-repository.in-memory";',
+        '} from "../features/x/internal/infra/x-repository.in-memory";',
       ),
       [
         { rule: "api-journey-no-in-memory", line: 4 },
@@ -883,7 +883,7 @@ describe("API ジャーニーの中身（findApiJourneyViolations）: must rejec
         DATABASE_IMPORT,
         `import { CreateXApi } from "${CREATE_API}";`,
         `import { CreateXApi as ApiWithExtension } from "${CREATE_API}.ts";`,
-        'import { CreateXApi as Api } from "@repo/backend/features/x/presentation/create-x.api";',
+        'import { CreateXApi as Api } from "@repo/backend/features/x/internal/presentation/create-x.api";',
       ),
       [{ rule: "api-journey-uses-multiple-apis" }],
     ],
@@ -893,7 +893,7 @@ describe("API ジャーニーの中身（findApiJourneyViolations）: must rejec
         DATABASE_IMPORT,
         CREATE_API_IMPORT,
         `import type { ListXResponse } from "${LIST_API}";`,
-        'import { type GetXResponse } from "../features/x/presentation/get-x.api";',
+        'import { type GetXResponse } from "../features/x/internal/presentation/get-x.api";',
       ),
       [{ rule: "api-journey-uses-multiple-apis" }],
     ],
@@ -913,9 +913,9 @@ describe("API ジャーニーの中身（findApiJourneyViolations）: must rejec
       source(
         DATABASE_IMPORT,
         CREATE_API_IMPORT,
-        'import { a } from "../features/x/presentation/list-x.api.test";',
-        'import { b } from "../features/x/presentation/x.api-helper";',
-        'import { c } from "../features/x/presentation/api";',
+        'import { a } from "../features/x/internal/presentation/list-x.api.test";',
+        'import { b } from "../features/x/internal/presentation/x.api-helper";',
+        'import { c } from "../features/x/internal/presentation/api";',
       ),
       [{ rule: "api-journey-uses-multiple-apis" }],
     ],
@@ -965,7 +965,7 @@ describe("API ジャーニーの中身（findApiJourneyViolations）: must rejec
       "違反が重なる（行のある違反を行の順に、その後にファイル全体の違反）",
       source(
         'import { vi } from "vitest";',
-        'import { InMemoryXRepository } from "../features/x/infra/x-repository.in-memory";',
+        'import { InMemoryXRepository } from "../features/x/internal/infra/x-repository.in-memory";',
         CREATE_API_IMPORT,
         "const createX = new CreateXApi(command).handle;",
         "await createX(request);",
@@ -1100,7 +1100,7 @@ describe("API ジャーニーの列挙と検査（fixture）", () => {
       "apps/backend/api-journeys/single-api.api-journey.test.ts": source(
         DATABASE_IMPORT,
         CREATE_API_IMPORT,
-        'import { InMemoryXRepository } from "../features/x/infra/x-repository.in-memory";',
+        'import { InMemoryXRepository } from "../features/x/internal/infra/x-repository.in-memory";',
       ),
       // 置き場所の違反: 名前に .api-journey の無いテスト、補助の .ts、廃止した TS だけのジャーニー。
       "apps/backend/api-journeys/x.test.ts": source(...REQUIRED_IMPORTS),
@@ -1131,11 +1131,12 @@ describe("API ジャーニーの列挙と検査（fixture）", () => {
       "apps/frontend_customer/x.feature": "Feature: front\n",
       // 対象外: 層の下のテスト（vi.mock があっても API ジャーニーではない）、名前に feature を含むだけのソース、
       //   node_modules と . で始まるディレクトリの中。
-      "apps/backend/features/x/presentation/x.api.test.ts": source(
+      "apps/backend/features/x/internal/presentation/x.api.test.ts": source(
         'import { vi } from "vitest";',
         "await renameX(request);",
       ),
-      "apps/backend/features/x/domain/x.feature.ts": "export const a = 1;\n",
+      "apps/backend/features/x/internal/domain/x.feature.ts":
+        "export const a = 1;\n",
       "apps/backend/node_modules/x/x.api-journey.test.ts": "",
       "apps/backend/node_modules/x/x.feature": "",
       "apps/frontend_customer/.next/x.feature": "",

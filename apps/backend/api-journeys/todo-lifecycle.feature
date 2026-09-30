@@ -30,6 +30,7 @@ Feature: Todo のライフサイクル
     And DB の todos は 1 件目だけが完了になる
     And DB の完了の履歴に 1 件目の完了の行が 1 行足される
     And DB の変更履歴に 1 件目の completed の update と完了の履歴の insert が足される
+    And 1 件目の完了の通知が 1 件だけ送られる
     When 1 件目の詳細を取得する
     Then 状態 200 で、改名と完了が反映された詳細が返る
     When 1 件目を削除する

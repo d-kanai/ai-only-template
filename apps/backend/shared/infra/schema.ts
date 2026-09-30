@@ -8,7 +8,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { CHANGE_OPERATIONS } from "../domain/change-operation";
 
-// feature をまたぐ表の定義（Drizzle のスキーマ）。feature の表は features/<feature>/infra/schema.ts に置く。
+// feature をまたぐ表の定義（Drizzle のスキーマ）。feature の表は features/<feature>/internal/infra/schema.ts に置く。
 // WHY shared/infra に置く: change_logs はすべての feature の表の変更を 1 か所に積む横断の表で、どの feature にも属さない。
 //   drizzle-kit の設定（shared/drizzle/drizzle.config.ts の schema）はこのファイルも読む。
 

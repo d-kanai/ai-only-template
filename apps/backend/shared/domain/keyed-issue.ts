@@ -1,7 +1,7 @@
 import type { ErrorKey, ErrorKeyParams, ParamlessErrorKey } from "./error-key";
 
 // zod のスキーマ・refine の引数（{ error } / { error, params }）を、ErrorKey（と params）から作る（Issue #116）。
-// WHY error にキーを入れる: zod は error の文字列を issue の message にする。domain の validate（features/todo/domain/todo.ts）は
+// WHY error にキーを入れる: zod は error の文字列を issue の message にする。domain の validate（features/todo/internal/domain/todo.ts）は
 //   それを DomainError の key に、presentation の toProblemError（shared/presentation/json-body.ts）は Problem の errors の key に戻す。
 //   domain は自然言語の文言を持たない（画面がキーを辞書で翻訳する）。
 // WHY shared/domain に置く（Issue #144 で todo.ts から移した）: presentation のリクエストのスキーマも、domain と同じ規則

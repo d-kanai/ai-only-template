@@ -22,12 +22,12 @@ function featureNames(): string[] {
     .map((entry) => entry.name);
 }
 
-// features/<feature>/<layer>/ の中で、名前が suffix で終わるファイルの絶対パス。
+// features/<feature>/internal/<layer>/ の中で、名前が suffix で終わるファイルの絶対パス。
 // WHY 絶対パス: vi.doMock と import() はこのテストファイルからの相対で解決されるので、api ファイルが書く
 //   "../infra/<x>-repository.postgres" と同じモジュールを指すよう、ファイルの実体のパスで渡す。
 function filesIn(features: string[], layer: string, suffix: string): string[] {
   return features.flatMap((feature) => {
-    const dir = new URL(`${feature}/${layer}/`, FEATURES_DIR);
+    const dir = new URL(`${feature}/internal/${layer}/`, FEATURES_DIR);
     // WHY 無い層を飛ばす: api や Postgres の Repository を持たない feature もありうる（数の検証は下の toBeGreaterThan）。
     if (!existsSync(dir)) return [];
     return readdirSync(dir)

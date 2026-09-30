@@ -115,7 +115,7 @@ export default {
   jsonReporter: { fileName: "reports/mutation/mutation.json" },
 
   // ignoreStatic: static な変異（モジュールの読み込み時にだけ実行される変異）を数えない（status が Ignored になる）。
-  //   static な変異とは、モジュールの最上位で評価される式（apps/backend/features/todo/infra/schema.ts の列定義など）の変異。
+  //   static な変異とは、モジュールの最上位で評価される式（apps/backend/features/todo/internal/infra/schema.ts の列定義など）の変異。
   //   Stryker はテストごとのカバレッジで「その変異を通るテスト」を選べないため、既定（false）では環境を読み込み直して
   //   全テストを実行する（公式 https://stryker-mutator.io/docs/stryker-js/configuration/ の ignoreStatic、
   //   https://stryker-mutator.io/docs/mutation-testing-elements/static-mutants/ ）。
@@ -133,7 +133,7 @@ export default {
   //   評価する関数の中に置く（todo-repository.postgres.ts の isUuid、problem.ts の problemKindOf、todo-api.ts の todosPath、
   //   apps/backend/test-support/database.ts の testSchemaPrefix）。最上位の定数のままだと、既定の実行では killed になる変異も
   //   ignoreStatic で数えなくなるため（reviewer 指摘。Issue #55 で 18 件が該当した）。
-  //   残る static（数えないもの）: features/todo/infra/schema.ts の todos の 10 件（下の実測）と、Issue #188 / #189 で加わった
+  //   残る static（数えないもの）: features/todo/internal/infra/schema.ts の todos の 10 件（下の実測）と、Issue #188 / #189 で加わった
   //   todo_status_changes の宣言（11 件）・shared/infra/schema.ts（change_logs。14 件）・shared/domain/change-operation.ts
   //   （操作の一覧の定数）。件数は Issue #202 の --mutate の実測（change-operation.ts は未計測）。後者の等価の確認は未実施
   //   （.claude/rules/testing.md）。

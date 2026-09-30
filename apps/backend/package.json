@@ -2,7 +2,7 @@
   "name": "@repo/backend",
   "private": true,
   "exports": {
-    "./features/todo/presentation/*.api": "./features/todo/presentation/*.api.ts",
+    "./features/todo/internal/presentation/*.api": "./features/todo/internal/presentation/*.api.ts",
     "./shared/presentation/problem": "./shared/presentation/problem.ts"
   },
   "scripts": {
