@@ -1244,6 +1244,13 @@ const RULES: Rule[] = [
 //   参照しないこと・イメージに入らないことは rule-tests/test-support.test.ts が見る（層のファイルから参照すると層の規則にもかかる）。
 //   直下だけに許し、features/<f>/test-support/ や shared/test-support/ は違反のままにする（置き場所を 1 か所にそろえる）。
 const BACKEND_TEST_SUPPORT_DIR = /^apps\/backend\/test-support\//;
+// Issue #219: API 仕様（apps/backend/api-specs/<feature>/ の <api>.feature と <api>.api-spec.test.ts）の step が共有する補助。
+// WHY support.ts だけを許す: API 仕様の組み立て（本番と同じ Repository → command / query → Api）と DB の読み出しを step の間で
+//   共有する置き場所で、テストだけが使う（層のコードではない）。名前を support.ts の 1 つに固定し（rule-tests/api-spec.test.ts の
+//   api-spec-placement と同じ）、api-specs/ を層に属さないコードの置き場所にさせない。api-specs/ の直下・入れ子・ほかの名前は違反。
+// WHY test-support/ に置かない: test-support/ はテストダブルと DB 基盤の置き場所で、API 仕様だけの補助を混ぜない（Issue #219 の判断）。
+const BACKEND_API_SPECS_SUPPORT =
+  /^apps\/backend\/api-specs\/[^/]+\/support\.ts$/;
 // Issue #208: モジュールの公開の入口。features/<f>/expose/ の直下のファイルだけ（下にディレクトリを作らない）。
 // WHY 直下だけ: expose は他のモジュールへ公開するものの一覧で、1 階層で見渡せるようにする（中身は internal/ に置く）。
 //   深くしたくなったら、この規則を変える。
@@ -1255,12 +1262,13 @@ const BACKEND_DRIZZLE_CONFIG =
 
 const BACKEND_PLACEMENT = {
   id: "backend-placement",
-  name: "apps/backend/ のソースファイルは apps/backend/features/<f>/internal/ か apps/backend/shared/ の domain/・application/・presentation/・infra/ のどれかの下か、モジュールの公開の入口 apps/backend/features/<f>/expose/ の直下か、テストだけが使う apps/backend/test-support/ の下に置く（apps/backend/shared/drizzle/drizzle.config.ts だけ例外）",
+  name: "apps/backend/ のソースファイルは apps/backend/features/<f>/internal/ か apps/backend/shared/ の domain/・application/・presentation/・infra/ のどれかの下か、モジュールの公開の入口 apps/backend/features/<f>/expose/ の直下か、テストだけが使う apps/backend/test-support/ の下か、API 仕様の補助 apps/backend/api-specs/<feature>/support.ts に置く（apps/backend/shared/drizzle/drizzle.config.ts だけ例外）",
   isMisplaced: (file: string) =>
     isUnder(file, BACKEND_ROOT) &&
     !BACKEND_LAYER_DIR.test(file) &&
     !BACKEND_EXPOSE_FILE.test(file) &&
     !BACKEND_TEST_SUPPORT_DIR.test(file) &&
+    !BACKEND_API_SPECS_SUPPORT.test(file) &&
     !BACKEND_DRIZZLE_CONFIG.test(file),
 };
 
@@ -4457,6 +4465,15 @@ const PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/backend/test-support-x/x.ts",
     "apps/backend/my-test-support/x.ts",
     "apps/backend/test-support.ts",
+    // Issue #219: API 仕様の補助は apps/backend/api-specs/<feature>/ の直下の support.ts だけ。api-specs/ の直下・ほかの名前・
+    //   入れ子・前方一致だけが同じ別ディレクトリ・feature の下の api-specs/ は違反。
+    "apps/backend/api-specs/x.ts",
+    "apps/backend/api-specs/support.ts",
+    "apps/backend/api-specs/todo/helper.ts",
+    "apps/backend/api-specs/todo/support.mts",
+    "apps/backend/api-specs/todo/nested/support.ts",
+    "apps/backend/api-specs-x/todo/support.ts",
+    "apps/backend/features/todo/api-specs/todo/support.ts",
   ],
   placed: [
     "apps/backend/features/todo/internal/domain/todo.ts",
@@ -4473,6 +4490,8 @@ const PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     // Issue #181: テストだけが使うコードの置き場所（直下の test-support/。入れ子も可）。
     "apps/backend/test-support/database.ts",
     "apps/backend/test-support/nested/x.mts",
+    // Issue #219: API 仕様の step が共有する補助（apps/backend/api-specs/<feature>/support.ts）。
+    "apps/backend/api-specs/todo/support.ts",
     "apps/frontend_customer/features/todo/lib/x.ts",
     // backend の規則の対象外（apps/e2e は E2E の workspace パッケージ @repo/e2e。Issue #84）。
     "apps/e2e/database.ts",

@@ -28,6 +28,10 @@ gha-creds-*.json
 #   イメージに test-support が無いことは .github/workflows/deploy.yml が確かめる。
 # 書き方: **/ を付け、パスのどこにある test-support ディレクトリも外す（下の行を ! で戻さない）。
 **/test-support
+# API 仕様（apps/backend/api-specs/。.feature・step・support.ts。Issue #219）。support.ts はテストでない名前のソースだが、
+#   vitest を import するテストだけが使うコードなので、test-support と同じくイメージに入れない。rule-tests/test-support.test.ts の
+#   dockerignore-excludes が api-specs の下のファイルがこれで外れることを確かめる。
+**/api-specs
 # テスト（*.test.ts / *.test.tsx。Issue #181）。
 # WHY: 上の **/test-support で外したコードをテストが import している。テストがコンテキストに残ると、next build の型チェック
 #   （apps/frontend_customer/tsconfig.json の include は **/*.ts・**/*.tsx でテストも含む）が「Cannot find module '@/test-support/i18n'」
