@@ -174,13 +174,14 @@ backend の feature を 1 つのモジュールとし、他のモジュールと
 | 小数・金額 | `numeric(p, s)` | 常に書く（精度は意味そのもの） |
 | 真偽 | `boolean` | — |
 | 日時 | `timestamp` の `withTimezone: true`（timestamptz） | — |
-| id | `uuid` | — |
+| id | `uuid`。すべての表（子表・履歴表も）に uuid の `id` の primaryKey（サロゲートキー `id: uuid("id").primaryKey()`）。自然キー・複合キーは一意制約（`unique` / `uniqueIndex`）で表す | — |
 | JSON | `jsonb` | — |
 
 - 長さは domain が持ち、DB は型だけにする。WHY: 2 か所に上限を書くと片方だけ直してずれる。DB の制約違反は 500 になり、domain の 400（`errors[]` 付き。ADR `docs/adr/architecture/20260930-presentation-overlaps-domain-validation.md`）に負ける。
 - WHY `varchar(255)` を既定にしない: Postgres では `text` / `varchar(n)` / `char(n)` に性能の差は無く、長さ制約は保存時の検査だけ（公式: https://www.postgresql.org/docs/current/datatype-character.html 「There is no performance difference among these three types ... In most situations text or character varying should be used instead.」）。長さを書くと上限を変えるたびにマイグレーションが要る。
 - WHY timezone 無しの `timestamp` を使わない: サーバ・DB のタイムゾーン設定で時刻の意味が変わる（TZ=UTC 前提。Issue #116）。
 - WHY `serial` / `bigserial` を使わない: id は `uuid`（アプリが `randomUUID` で作る）。WHY `json` を使わない: `json` は入力の文字列をそのまま保持して処理のたびに解析し直す。`jsonb` は分解した形で保持して処理が速く、インデックスも張れる（https://www.postgresql.org/docs/current/datatype-json.html ）。
+- WHY すべての表に uuid の `id` の主キー（Issue #213）: どの表の 1 行も id で指せ、変更の記録（`change_logs` の `row_id` は uuid）・削除・参照が表によらず一様になる。複合主キーだけの表（`primaryKey({ columns: [...] })`）にしない。`rule-tests/schema.test.ts` の `surrogate-key` が、`pgTable(` の列の定義の直下に `id: uuid("id")` と `.primaryKey()` のチェーン（`.defaultRandom()` などの有無は問わない）が無い表を止める。例外（`// WHY ...:`）は認めない（理由は一意制約で足りる）。列の定義を変数・スプレッド・関数で渡すと中を見ずに違反にする（`id` を直接書く）。
 - インデックスは、検索するクエリが決まってから足す。
 - 検査が違反にするもの: `varchar(` / `char(`、`timestamp(` で `withTimezone: true` が無いもの、`serial(` / `bigserial(` / `smallserial(`、`json(`。既定から外れる理由があるときは、その列の直前の行（空行を挟まない `//` の連続）に `// WHY 長さ: <理由>`（varchar / char）・`// WHY タイムゾーン: <理由>`・`// WHY 連番: <理由>`・`// WHY json: <理由>` を書くと通る。見出しは規則ごとに分け、別の理由の WHY では通らない。
 
