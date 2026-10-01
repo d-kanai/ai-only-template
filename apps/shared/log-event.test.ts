@@ -25,6 +25,7 @@ describe("LOG_EVENT_NAMES（event.name の一覧）", () => {
       "api_request",
       "db_write",
       "db_pool_error",
+      "db_backfill",
       "server_error",
       "app_start_failed",
       "notification",

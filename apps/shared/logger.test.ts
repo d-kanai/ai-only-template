@@ -226,6 +226,33 @@ const CASES: Record<
       error: { type: "Error", message: "connection terminated" },
     },
   },
+  db_backfill: {
+    input: withExtra(
+      {
+        message: "backfill failed",
+        event: { name: "db_backfill", phase: "failed", duration_ms: 5 },
+        file: { name: "0001_todo_status_changes.sql" },
+        affected_rows: 0,
+        db: { response: { status_code: "23505" } },
+        error: new Error("duplicate key value violates unique constraint"),
+      },
+      { sql: SENTINEL },
+    ),
+    method: "error",
+    expected: {
+      severity: "ERROR",
+      time: NOW,
+      message: "backfill failed",
+      event: { name: "db_backfill", phase: "failed", duration_ms: 5 },
+      file: { name: "0001_todo_status_changes.sql" },
+      affected_rows: 0,
+      db: { response: { status_code: "23505" } },
+      error: {
+        type: "Error",
+        message: "duplicate key value violates unique constraint",
+      },
+    },
+  },
   server_error: {
     input: withExtra(
       {
@@ -421,6 +448,17 @@ describe("logger.emit: severity と出力先（種類と phase が決める）",
       },
       "warn",
       "WARNING",
+    ],
+    [
+      "db_backfill の done",
+      {
+        message: "backfill done",
+        event: { name: "db_backfill", phase: "done", duration_ms: 1 },
+        file: { name: "0001_todo_status_changes.sql" },
+        affected_rows: 2,
+      },
+      "log",
+      "INFO",
     ],
     [
       "notification の failed",

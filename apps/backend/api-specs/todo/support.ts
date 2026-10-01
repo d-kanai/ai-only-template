@@ -101,13 +101,13 @@ export type StoredTodo = {
   title: string;
   completed: boolean;
   createdAt: Date;
-  // 完了の履歴（足した順）。空なら履歴の無い「壊れた Todo」になる。
+  // 完了の履歴（足した順。1 件以上）。最後の completed を completed と違う値にすると、履歴のずれた「壊れた Todo」になる。
   statusChanges: readonly { completed: boolean; changedAt: Date }[];
 };
 
 // 前提の Todo を表に直接入れる。
 // WHY API を通さない: 作成日時は API が now() で決めるので、「同じ日時に作られた」「作成日時の古い順」を作れない（時計は
-//   差し替えない。vi は使わない）。不変条件を満たさない行（完了の履歴の無い Todo）も API では作れない。
+//   差し替えない。vi は使わない）。不変条件を満たさない行（完了の履歴がずれた Todo）も API では作れない。
 // 変更の記録（change_logs）は書かない（Writer を通らない）。記録を見る step はこの関数で前提を作らない。
 export async function storeTodo(db: Database, todo: StoredTodo): Promise<void> {
   await db.insert(todos).values({
@@ -116,15 +116,13 @@ export async function storeTodo(db: Database, todo: StoredTodo): Promise<void> {
     completed: todo.completed,
     createdAt: todo.createdAt,
   });
-  if (todo.statusChanges.length > 0) {
-    await db.insert(todoStatusChanges).values(
-      todo.statusChanges.map((change, position) => ({
-        todoId: todo.id,
-        position,
-        ...change,
-      })),
-    );
-  }
+  await db.insert(todoStatusChanges).values(
+    todo.statusChanges.map((change, position) => ({
+      todoId: todo.id,
+      position,
+      ...change,
+    })),
+  );
 }
 
 const BASE_URL = "http://localhost";

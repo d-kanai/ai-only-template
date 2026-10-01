@@ -178,11 +178,13 @@ describeFeature(feature, ({ Scenario }) => {
   });
 
   Scenario("異常系", ({ And }) => {
-    // 完了の履歴の無い Todo は不変条件の違反で、クライアントには直せないサーバ側の誤り（500。todo-repository.postgres.ts の toTodo）。
+    // 完了の履歴の最後が todos.completed と違う Todo は不変条件の違反で、クライアントには直せないサーバ側の誤り（500。
+    //   todo-repository.postgres.ts の toTodo）。履歴の無い Todo（デプロイの途中で古い版が作ったもの）は Repository が補って読むので
+    //   壊れていない（Issue #194。repairMissingHistory）。
     // WHY 正しい Todo も 1 件置く: 壊れた 1 件を黙って外して残りを返す実装を通さない。
     // 例外は toProblemResponse が logger.emit（server_error。ERROR なので console.error）で標準エラーに 1 行出す（vi を使わないので抑えない）。
     And(
-      "壊れた Todo（完了の履歴が無いもの）が 1 件でもあると、一覧は取得できず、サーバの誤りとして伝えられる",
+      "壊れた Todo（完了の履歴が、今の完了かどうかと食い違うもの）が 1 件でもあると、一覧は取得できず、サーバの誤りとして伝えられる",
       async () => {
         const createdAt = new Date("2026-09-01T00:00:00.000Z");
         await storeTodo(
@@ -199,7 +201,7 @@ describeFeature(feature, ({ Scenario }) => {
             "パンを買う",
             createdAt,
           ),
-          statusChanges: [],
+          statusChanges: [{ completed: true, changedAt: createdAt }],
         });
 
         const response = await listTodos();
