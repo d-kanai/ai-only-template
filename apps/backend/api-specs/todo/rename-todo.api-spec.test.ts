@@ -67,21 +67,28 @@ const MISSING_ID = "00000000-0000-4000-8000-000000000000";
 const feature = await loadFeature("./rename-todo.feature");
 
 describeFeature(feature, ({ Scenario }) => {
-  Scenario("レスポンス", ({ And }) => {
+  // WHY 更新の step は保存された Todo の行を見る: 更新 = 名前を変える Todo 自身の振る舞い（Issue #249）。返る内容はレスポンスの
+  //   step が見る。
+  Scenario("更新", ({ And }) => {
+    // WHY ほかの Todo を置く: 条件（where）の欠けた UPDATE ですべての Todo の名前を変える誤りを見分ける。作成日時を古くして、
+    //   行の順（作成日時の順）で先頭に来るようにする。
     // 変更の記録には、変わった列（title）の変更前と変更後だけの記録が 1 件だけ残る（shared/infra/writer.ts の update。前提は
     //   ビルダーで入れたので記録を残さない）。
     // WHY 変更の記録をこの step で見る: .feature に書かない（create-todo.api-spec.test.ts の冒頭）。名前を変える操作の結果を確かめる
     //   step に置く。
-    And("名前を変えると、新しいタイトルの Todo が返る", async () => {
+    And("新しいタイトルが保存され、ほかの Todo は変わらない", async () => {
+      const bread = await aTodo(database.db)
+        .title("パンを買う")
+        .createdAt(new Date("2026-09-01T00:00:00.000Z"))
+        .build();
       const milk = await aTodo(database.db).title("牛乳を買う").build();
 
-      const response = await putTitle(milk.id, { title: "豆乳を買う" });
+      await putTitle(milk.id, { title: "豆乳を買う" });
 
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toStrictEqual({
-        ...todoResponseOf(milk),
-        title: "豆乳を買う",
-      } satisfies RenameTodoResponse);
+      await expect(todoRows(database.db)).resolves.toStrictEqual([
+        todoRowOf(bread),
+        todoRowOf({ ...milk, title: "豆乳を買う" }),
+      ]);
       await expect(logEntries(database.db)).resolves.toStrictEqual([
         {
           tableName: "todos",
@@ -102,55 +109,26 @@ describeFeature(feature, ({ Scenario }) => {
         .createdAt(new Date("2026-09-01T00:00:00.000Z"))
         .build();
 
-      const response = await putTitle(milk.id, { title: "豆乳を買う" });
+      await putTitle(milk.id, { title: "豆乳を買う" });
 
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toStrictEqual({
-        id: milk.id,
-        title: "豆乳を買う",
-        completed: true,
-        createdAt: "2026-09-01T00:00:00.000Z",
-      } satisfies RenameTodoResponse);
+      await expect(todoRows(database.db)).resolves.toStrictEqual([
+        {
+          id: milk.id,
+          title: "豆乳を買う",
+          completed: true,
+          createdAt: new Date("2026-09-01T00:00:00.000Z"),
+        },
+      ]);
     });
 
     And("タイトルの前後の空白は除かれる", async () => {
       const milk = await aTodo(database.db).title("牛乳を買う").build();
 
-      const response = await putTitle(milk.id, { title: " 豆乳を買う\t" });
+      await putTitle(milk.id, { title: " 豆乳を買う\t" });
 
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toMatchObject({
-        title: "豆乳を買う",
-      });
-    });
-  });
-
-  Scenario("記録", ({ And }) => {
-    // WHY ほかの Todo を置く: 条件（where）の欠けた UPDATE ですべての Todo の名前を変える誤りを見分ける。作成日時を古くして、
-    //   行の順（作成日時の順）で先頭に来るようにする。
-    And("新しいタイトルが保存され、ほかの Todo は変わらない", async () => {
-      const bread = await aTodo(database.db)
-        .title("パンを買う")
-        .createdAt(new Date("2026-09-01T00:00:00.000Z"))
-        .build();
-      const milk = await aTodo(database.db).title("牛乳を買う").build();
-
-      await putTitle(milk.id, { title: "豆乳を買う" });
-
-      await expect(todoRows(database.db)).resolves.toStrictEqual([
-        todoRowOf(bread),
-        todoRowOf({ ...milk, title: "豆乳を買う" }),
+      await expect(todoRows(database.db)).resolves.toMatchObject([
+        { title: "豆乳を買う" },
       ]);
-    });
-
-    And("名前を変えても、完了の履歴は増えない", async () => {
-      const milk = await aTodo(database.db).title("牛乳を買う").build();
-
-      await putTitle(milk.id, { title: "豆乳を買う" });
-
-      await expect(statusRows(database.db)).resolves.toStrictEqual(
-        statusRowsOf(milk),
-      );
     });
 
     // 差分の無い変更は書かない（changedProps が空なら Writer は SQL も記録も出さない）。応答は成功。Todo の行に加えて、
@@ -162,6 +140,38 @@ describeFeature(feature, ({ Scenario }) => {
 
       expect(response.status).toBe(200);
       await expectUnchanged(milk);
+    });
+  });
+
+  Scenario("レスポンス", ({ And }) => {
+    // WHY 完了の Todo を古い作成日時で置く: 応答の完了かどうか・作成日時を、既定値や今の日時で埋める誤りを見分ける。
+    // WHY 前後に空白のあるタイトルで変える: 要求のタイトルを（空白を除く前のまま）返す誤りを見分ける。
+    And("名前を変えると、新しいタイトルの Todo が返る", async () => {
+      const milk = await aTodo(database.db)
+        .title("牛乳を買う")
+        .completed(true)
+        .createdAt(new Date("2026-09-01T00:00:00.000Z"))
+        .build();
+
+      const response = await putTitle(milk.id, { title: " 豆乳を買う\t" });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toStrictEqual({
+        ...todoResponseOf(milk),
+        title: "豆乳を買う",
+      } satisfies RenameTodoResponse);
+    });
+  });
+
+  Scenario("記録", ({ And }) => {
+    And("名前を変えても、完了の履歴は増えない", async () => {
+      const milk = await aTodo(database.db).title("牛乳を買う").build();
+
+      await putTitle(milk.id, { title: "豆乳を買う" });
+
+      await expect(statusRows(database.db)).resolves.toStrictEqual(
+        statusRowsOf(milk),
+      );
     });
   });
 

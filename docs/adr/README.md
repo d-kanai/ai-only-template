@@ -106,6 +106,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-30 | backend に、実 Postgres で複数の API を業務の流れの順に呼ぶジャーニーテストを足し、単体・ジャーニー・E2E の 3 段にする | 採用 | [20260930-backend-journey-tests.md](quality/20260930-backend-journey-tests.md) |
 | 2026-09-30 | ジャーニーテストを Gherkin の .feature と step の対だけで書き、vitest-cucumber で Vitest の中で実行し、呼び名を API ジャーニー（apps/backend/api-journeys/）に変える | 採用 | [20260930-gherkin-journeys-with-vitest-cucumber.md](quality/20260930-gherkin-journeys-with-vitest-cucumber.md) |
 | 2026-09-30 | API 1 つごとの仕様を Gherkin の .feature に業務の言葉で書き、実 DB で本番の組み立てを通して確かめる（API 仕様。apps/backend/api-specs/） | 採用 | [20260930-api-spec-in-feature.md](quality/20260930-api-spec-in-feature.md) |
+| 2026-10-01 | 書き込みの API 仕様は、メインの変更（作成 / 更新 / 削除）とレスポンスを別の Scenario に分け、見出しを一覧の順に並べる | 採用 | [20261001-api-spec-mutation-heading.md](quality/20261001-api-spec-mutation-heading.md) |
 
 ### workflow/
 開発プロセス・環境・AI エージェントの運用
