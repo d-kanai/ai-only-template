@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";
-import type { CreateTodoResponse } from "../../features/todo/internal/presentation/create-todo.api";
+import type { CreateTodoResponse } from "../../../features/todo/internal/presentation/create-todo.api";
 import {
   createTestDatabase,
   type TestDatabase,
-} from "../../test-support/database";
+} from "../../../test-support/database";
 import {
   createTodoApi,
   emptyTodos,

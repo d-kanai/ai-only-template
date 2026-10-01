@@ -36,7 +36,7 @@ export default {
     // configFile: pnpm test と同じ vitest.config.mts（jsdom、tsconfigPaths、apps/e2e/** の除外）を継承した
     //   vitest.stryker.config.mts でテストを動かす（Issue #200）。既定でも vitest.config.* を探すが、どの設定で動くかを明示する。
     //   WHY 継承した別の設定にする: vitest.config.mts との違いは、Gherkin の .feature の step を書いた API ジャーニー
-    //   （apps/backend/api-journeys/*.api-journey.test.ts）を除くことだけ。step 1 つが Vitest の test 1 つになり、Stryker が変異を通る
+    //   （apps/backend/spec/journey/*.api-journey.test.ts）を除くことだけ。step 1 つが Vitest の test 1 つになり、Stryker が変異を通る
     //   test だけに絞ると、前提の step 抜きで後の step が失敗して killed と数えられうる（詳細は vitest.stryker.config.mts）。
     //   Vitest の coverage（100% のしきい値）は Stryker の実行では効かない。vitest-runner が coverage.enabled: false を
     //   強制し、Stryker 自身の perTest カバレッジ分析を使うため（公式 https://stryker-mutator.io/docs/stryker-js/vitest-runner/

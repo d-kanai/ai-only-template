@@ -1,34 +1,34 @@
 import { asc, eq, sql } from "drizzle-orm";
 import { expect } from "vitest";
-import { ChangeTodoCompletionCommand } from "../../features/todo/internal/application/change-todo-completion.command";
-import { CreateTodoCommand } from "../../features/todo/internal/application/create-todo.command";
-import { DeleteTodoCommand } from "../../features/todo/internal/application/delete-todo.command";
-import { GetTodoQuery } from "../../features/todo/internal/application/get-todo.query";
-import { ListTodosQuery } from "../../features/todo/internal/application/list-todos.query";
-import { RenameTodoCommand } from "../../features/todo/internal/application/rename-todo.command";
+import { ChangeTodoCompletionCommand } from "../../../features/todo/internal/application/change-todo-completion.command";
+import { CreateTodoCommand } from "../../../features/todo/internal/application/create-todo.command";
+import { DeleteTodoCommand } from "../../../features/todo/internal/application/delete-todo.command";
+import { GetTodoQuery } from "../../../features/todo/internal/application/get-todo.query";
+import { ListTodosQuery } from "../../../features/todo/internal/application/list-todos.query";
+import { RenameTodoCommand } from "../../../features/todo/internal/application/rename-todo.command";
 import {
   todoStatusChanges,
   todos,
-} from "../../features/todo/internal/infra/schema";
-import { PostgresTodoRepository } from "../../features/todo/internal/infra/todo-repository.postgres";
-import { ChangeTodoCompletionApi } from "../../features/todo/internal/presentation/change-todo-completion.api";
+} from "../../../features/todo/internal/infra/schema";
+import { PostgresTodoRepository } from "../../../features/todo/internal/infra/todo-repository.postgres";
+import { ChangeTodoCompletionApi } from "../../../features/todo/internal/presentation/change-todo-completion.api";
 import {
   CreateTodoApi,
   type CreateTodoResponse,
-} from "../../features/todo/internal/presentation/create-todo.api";
-import { DeleteTodoApi } from "../../features/todo/internal/presentation/delete-todo.api";
-import { GetTodoApi } from "../../features/todo/internal/presentation/get-todo.api";
-import { ListTodosApi } from "../../features/todo/internal/presentation/list-todos.api";
-import { RenameTodoApi } from "../../features/todo/internal/presentation/rename-todo.api";
-import type { ChangeEntry } from "../../shared/infra/change-log";
-import type { Database } from "../../shared/infra/database";
-import { changeLogs } from "../../shared/infra/schema";
-import { PostgresTransactionRunner } from "../../shared/infra/transaction.postgres";
-import type { Problem } from "../../shared/presentation/problem";
+} from "../../../features/todo/internal/presentation/create-todo.api";
+import { DeleteTodoApi } from "../../../features/todo/internal/presentation/delete-todo.api";
+import { GetTodoApi } from "../../../features/todo/internal/presentation/get-todo.api";
+import { ListTodosApi } from "../../../features/todo/internal/presentation/list-todos.api";
+import { RenameTodoApi } from "../../../features/todo/internal/presentation/rename-todo.api";
+import type { ChangeEntry } from "../../../shared/infra/change-log";
+import type { Database } from "../../../shared/infra/database";
+import { changeLogs } from "../../../shared/infra/schema";
+import { PostgresTransactionRunner } from "../../../shared/infra/transaction.postgres";
+import type { Problem } from "../../../shared/presentation/problem";
 
-// Todo の API 仕様（api-specs/todo/*.api-spec.test.ts。Issue #219）が共有する補助: API ごとの組み立て・要求の作り方・DB の読み出し・
+// Todo の API 仕様（spec/api/todo/*.api-spec.test.ts。Issue #219）が共有する補助: API ごとの組み立て・要求の作り方・DB の読み出し・
 //   期待値の作り方・失敗の本文。
-// WHY api-specs の中に置く（test-support/ に置かない）: API 仕様のためだけの補助。test-support/ はテストダブル・DB の基盤・テストデータ
+// WHY spec/api の中に置く（test-support/ に置かない）: API 仕様のためだけの補助。test-support/ はテストダブル・DB の基盤・テストデータ
 //   ビルダー（前提の行を入れる aTodo。test-support/todo/todo-builder.ts）を置く場所で、ほかのテストからも使う。
 // WHY 6 つの API 仕様で 1 つにまとめる: 組み立て（本番と同じ部品の並び）・要求の形・DB の行の読み方は API ごとに変わらず、
 //   ファイルごとに書くと、本番の組み立てが変わったときに直し漏れる。
@@ -36,7 +36,7 @@ import type { Problem } from "../../shared/presentation/problem";
 //   対象の 1 つだけにし、前提の用意を対象でない API の組み合わせに依存させない（理由の詳細は todo-builder.ts の冒頭）。そのため
 //   ここには前提を API で作る関数を置かない。step も support.ts も対象でない API の handler を呼ばないことは
 //   rule-tests/api-spec.test.ts（api-spec-own-api-only・api-spec-support-no-api-call・api-spec-support-assembler-per-api）が止める。
-// 既知の重複: api-journeys/todo-lifecycle.api-journey.test.ts にも同じ種類の関数（組み立て・jsonRequest・logEntries など）がある。
+// 既知の重複: spec/journey/todo-lifecycle.api-journey.test.ts にも同じ種類の関数（組み立て・jsonRequest・logEntries など）がある。
 //   ジャーニーは Issue #219・#240 では触らない（担当外）ので、今は重複を許す。
 
 // API ごとの組み立て。本番の api ファイルの最下部と同じ組み立てで、渡した db（テスト用のスキーマ）を使う handler を返す。

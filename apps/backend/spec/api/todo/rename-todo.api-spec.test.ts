@@ -1,13 +1,13 @@
 // @vitest-environment node
 import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";
-import type { RenameTodoResponse } from "../../features/todo/internal/presentation/rename-todo.api";
-import type { ChangeEntry } from "../../shared/infra/change-log";
+import type { RenameTodoResponse } from "../../../features/todo/internal/presentation/rename-todo.api";
+import type { ChangeEntry } from "../../../shared/infra/change-log";
 import {
   createTestDatabase,
   type TestDatabase,
-} from "../../test-support/database";
-import { aTodo, type BuiltTodo } from "../../test-support/todo/todo-builder";
+} from "../../../test-support/database";
+import { aTodo, type BuiltTodo } from "../../../test-support/todo/todo-builder";
 import {
   context,
   emptyTodos,

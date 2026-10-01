@@ -4,46 +4,46 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, expect, type TestContext } from "vitest";
-import { ChangeTodoCompletionCommand } from "../features/todo/internal/application/change-todo-completion.command";
-import { CreateTodoCommand } from "../features/todo/internal/application/create-todo.command";
-import { DeleteTodoCommand } from "../features/todo/internal/application/delete-todo.command";
-import { GetTodoQuery } from "../features/todo/internal/application/get-todo.query";
-import { ListTodosQuery } from "../features/todo/internal/application/list-todos.query";
-import { RenameTodoCommand } from "../features/todo/internal/application/rename-todo.command";
+import { ChangeTodoCompletionCommand } from "../../features/todo/internal/application/change-todo-completion.command";
+import { CreateTodoCommand } from "../../features/todo/internal/application/create-todo.command";
+import { DeleteTodoCommand } from "../../features/todo/internal/application/delete-todo.command";
+import { GetTodoQuery } from "../../features/todo/internal/application/get-todo.query";
+import { ListTodosQuery } from "../../features/todo/internal/application/list-todos.query";
+import { RenameTodoCommand } from "../../features/todo/internal/application/rename-todo.command";
 import {
   todoStatusChanges,
   todos,
-} from "../features/todo/internal/infra/schema";
-import { PostgresTodoRepository } from "../features/todo/internal/infra/todo-repository.postgres";
+} from "../../features/todo/internal/infra/schema";
+import { PostgresTodoRepository } from "../../features/todo/internal/infra/todo-repository.postgres";
 import {
   ChangeTodoCompletionApi,
   type ChangeTodoCompletionResponse,
-} from "../features/todo/internal/presentation/change-todo-completion.api";
+} from "../../features/todo/internal/presentation/change-todo-completion.api";
 import {
   CreateTodoApi,
   type CreateTodoResponse,
-} from "../features/todo/internal/presentation/create-todo.api";
-import { DeleteTodoApi } from "../features/todo/internal/presentation/delete-todo.api";
+} from "../../features/todo/internal/presentation/create-todo.api";
+import { DeleteTodoApi } from "../../features/todo/internal/presentation/delete-todo.api";
 import {
   GetTodoApi,
   type GetTodoResponse,
-} from "../features/todo/internal/presentation/get-todo.api";
+} from "../../features/todo/internal/presentation/get-todo.api";
 import {
   ListTodosApi,
   type ListTodosResponse,
-} from "../features/todo/internal/presentation/list-todos.api";
+} from "../../features/todo/internal/presentation/list-todos.api";
 import {
   RenameTodoApi,
   type RenameTodoResponse,
-} from "../features/todo/internal/presentation/rename-todo.api";
-import type { ChangeEntry } from "../shared/infra/change-log";
-import { changeLogs } from "../shared/infra/schema";
-import { PostgresTransactionRunner } from "../shared/infra/transaction.postgres";
-import type { Problem } from "../shared/presentation/problem";
+} from "../../features/todo/internal/presentation/rename-todo.api";
+import type { ChangeEntry } from "../../shared/infra/change-log";
+import { changeLogs } from "../../shared/infra/schema";
+import { PostgresTransactionRunner } from "../../shared/infra/transaction.postgres";
+import type { Problem } from "../../shared/presentation/problem";
 import {
   createTestDatabase,
   type TestDatabase,
-} from "../test-support/database";
+} from "../../test-support/database";
 
 // API ジャーニーテスト（Issue #187 / #200。.claude/rules/testing.md の「API ジャーニーテスト」、ADR
 //   docs/adr/quality/20260930-backend-journey-tests.md と docs/adr/quality/20260930-gherkin-journeys-with-vitest-cucumber.md）:
