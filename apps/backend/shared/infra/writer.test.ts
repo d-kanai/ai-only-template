@@ -16,7 +16,7 @@ import {
   createTestDatabase,
   type TestDatabase,
 } from "../../test-support/database";
-import type { Transaction } from "../domain/transaction";
+import type { Transaction } from "../application/transaction";
 import { changeLogs } from "./schema";
 import {
   type DrizzleTransaction,

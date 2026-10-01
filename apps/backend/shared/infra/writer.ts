@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { logger } from "@repo/shared/logger";
 import { DrizzleQueryError, eq, getTableName, type Table } from "drizzle-orm";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
+import type { Transaction } from "../application/transaction";
 import type { ChangeOperation } from "../domain/change-operation";
-import type { Transaction } from "../domain/transaction";
 import {
   type ChangeEntry,
   deleteEntry,
@@ -274,7 +274,7 @@ export class PostgresWriter implements Writer {
   }
 }
 
-// Writer を domain の Transaction にする（PostgresTransactionRunner が work に渡す値）。
+// Writer を Transaction（shared/application/transaction の brand の型）にする（PostgresTransactionRunner が work に渡す値）。
 // WHY cast をここに閉じる: Transaction は domain の brand の型で、infra の実体（Writer）を application・domain に見せない。
 //   作るのはこの関数、取り出すのは writerOf だけにする。
 export function transactionOf(writer: PostgresWriter): Transaction {
