@@ -186,7 +186,14 @@ function writeStartLine(table: string, rowIds: string[], operation: string) {
   };
 }
 
-function writeDoneLine(table: string, rowIds: string[], operation: string) {
+// changes は書いた行ごとの記録で、before / after は schema.ts の列の分類表（todosColumns など。Issue #216）でマスクした値。
+//   sides は rowIds と同じ順の行ごとの { before, after }（DB の列名 → 値。insert の before・delete の after は null）。
+function writeDoneLine(
+  table: string,
+  rowIds: string[],
+  operation: string,
+  sides: { before: object | null; after: object | null }[],
+) {
   return {
     ...writeStartLine(table, rowIds, operation),
     message: "db write done",
@@ -195,7 +202,12 @@ function writeDoneLine(table: string, rowIds: string[], operation: string) {
       phase: "done",
       duration_ms: expect.any(Number),
     },
-    changes: rowIds.map((rowId) => ({ table, row_id: rowId, operation })),
+    changes: rowIds.map((rowId, index) => ({
+      table,
+      row_id: rowId,
+      operation,
+      ...sides[index],
+    })),
   };
 }
 
@@ -1194,8 +1206,9 @@ describe("PostgresTodoRepository", () => {
   });
 
   // 書き込みのログ（Issue #205・#215）は Postgres だけ（InMemory はログを出さない）。ログを出すのは shared/infra/writer.ts の
-  //   Writer で、文ごとに前後の 2 行を出す。changes は書いた行ごとの記録（値は出さない）。
-  test("新規の Todo を insert すると、todos の INSERT と完了の履歴の INSERT のそれぞれに、前後のログ（表・行の id・insert）を出す", async () => {
+  //   Writer で、文ごとに前後の 2 行を出す。changes は書いた行ごとの記録で、before / after の値は schema.ts の列の分類表で
+  //   マスクする（Issue #216）。todos.title（利用者が書く自由文）は sensitive で ***、ほかの列（id・完了状態・日時・位置）は値のまま。
+  test("新規の Todo を insert すると、todos の INSERT と完了の履歴の INSERT のそれぞれに、前後のログ（表・行の id・insert）を出し、changes の after は title だけを *** にする", async () => {
     const todo = Todo.create("牛乳を買う").changeCompletion(true);
 
     const logs = await writeLogsBy(() => insert(todo));
@@ -1204,15 +1217,39 @@ describe("PostgresTodoRepository", () => {
       (await statusChangeId(todo.id, 0)) as string,
       (await statusChangeId(todo.id, 1)) as string,
     ];
+    const historyRow = (position: number) => ({
+      before: null,
+      after: {
+        id: history[position],
+        todo_id: todo.id,
+        position,
+        completed: todo.statusChanges[position]?.completed,
+        changed_at: todo.statusChanges[position]?.changedAt.toISOString(),
+      },
+    });
     expect(logs).toStrictEqual({
       info: [
         writeStartLine("todos", [todo.id], "insert"),
-        writeDoneLine("todos", [todo.id], "insert"),
+        writeDoneLine("todos", [todo.id], "insert", [
+          {
+            before: null,
+            after: {
+              id: todo.id,
+              title: "***",
+              completed: true,
+              created_at: todo.createdAt.toISOString(),
+            },
+          },
+        ]),
         writeStartLine("todo_status_changes", history, "insert"),
-        writeDoneLine("todo_status_changes", history, "insert"),
+        writeDoneLine("todo_status_changes", history, "insert", [
+          historyRow(0),
+          historyRow(1),
+        ]),
       ],
       warn: [],
     });
+    expect(JSON.stringify(logs)).not.toContain("牛乳");
   });
 
   test("読み込んだ Todo を変えて update すると、todos の UPDATE と完了の履歴の INSERT のそれぞれに、前後のログを出す", async () => {
@@ -1228,12 +1265,31 @@ describe("PostgresTodoRepository", () => {
     expect(logs).toStrictEqual({
       info: [
         writeStartLine("todos", [todo.id], "update"),
-        writeDoneLine("todos", [todo.id], "update"),
+        // update は変わった列だけ。title は前後とも ***、completed は値のまま。
+        writeDoneLine("todos", [todo.id], "update", [
+          {
+            before: { title: "***", completed: false },
+            after: { title: "***", completed: true },
+          },
+        ]),
         writeStartLine("todo_status_changes", history, "insert"),
-        writeDoneLine("todo_status_changes", history, "insert"),
+        writeDoneLine("todo_status_changes", history, "insert", [
+          {
+            before: null,
+            after: {
+              id: history[0],
+              todo_id: todo.id,
+              position: 1,
+              completed: true,
+              changed_at: changed.statusChanges[1]?.changedAt.toISOString(),
+            },
+          },
+        ]),
       ],
       warn: [],
     });
+    expect(JSON.stringify(logs)).not.toContain("牛乳");
+    expect(JSON.stringify(logs)).not.toContain("卵");
   });
 
   test("delete すると、書き込みの前後に todos・id・delete のログを出す（無い id は後のログの changes が空）", async () => {
@@ -1249,9 +1305,20 @@ describe("PostgresTodoRepository", () => {
     expect(logs).toStrictEqual({
       info: [
         writeStartLine("todos", [todo.id], "delete"),
-        writeDoneLine("todos", [todo.id], "delete"),
+        // delete は消した行の全列の before（title は ***）。cascade で消えた履歴の行は記録しない。
+        writeDoneLine("todos", [todo.id], "delete", [
+          {
+            before: {
+              id: todo.id,
+              title: "***",
+              completed: false,
+              created_at: todo.createdAt.toISOString(),
+            },
+            after: null,
+          },
+        ]),
         writeStartLine("todos", [missing], "delete"),
-        { ...writeDoneLine("todos", [missing], "delete"), changes: [] },
+        { ...writeDoneLine("todos", [missing], "delete", []), changes: [] },
       ],
       warn: [],
     });

@@ -124,7 +124,7 @@ function isCardNumber(digits: string): boolean {
 // WHY stack は出さない（スキーマに無い）: 1 行が長くなり、サーバのファイルのパスなど内部の情報も含むため。
 // WHY Error でない値は { type: typeof } にする（値を出さない）: throw は文字列・オブジェクトなど何でも投げられ、中身が何か
 //   分からない（利用者の入力を含みうる）。type（文字列）を持つオブジェクトだけはそのまま渡す（Writer が DB のエラーを
-//   message の無い { type: <pg のエラーの name> } で渡す。apps/backend/shared/infra/writer.ts）。
+//   { type: <pg のエラーの name>, message: <引用符の部分を *** にした pg の message> } で渡す。apps/backend/shared/infra/writer.ts）。
 // WHY 入力の型を unknown にする（z.preprocess）: 呼び出し側は catch で受けた unknown をそのまま渡す。変換は logger の中で行う。
 function errorField() {
   return z.preprocess(
@@ -199,7 +199,8 @@ export const LOG_EVENT_SCHEMAS = {
   page_request: requestSchema("page_request"),
   api_request: requestSchema("api_request"),
   // 書き込みの 1 文ごとの前後と失敗（apps/backend/shared/infra/writer.ts）。表名・操作・行の id・制約の名前・SQLSTATE は DB と
-  //   コードが決める名前で、利用者の値を含まない。DB のエラーの message（SQL と値を含む）は Writer が渡さない。
+  //   コードが決める名前で、利用者の値を含まない。DB のエラーの message は、Writer が pg のエラーの message の引用符の部分
+  //   （入力値が入る）を *** にしてから error に渡す（DrizzleQueryError の message（SQL と値）は渡さない）。
   db_write: z.object({
     message: freeText(),
     event: z.object({
@@ -216,13 +217,26 @@ export const LOG_EVENT_SCHEMAS = {
     // WHY .readonly(): 呼び出し側（Writer）は行の id を readonly の配列で持つ。入力の型を readonly にして、渡すための写しを要らなくする。
     row_ids: z.array(z.string()).readonly().optional(),
     constraint: z.string().optional(),
+    // DB のエラー（DrizzleQueryError）の params（SQL に渡した値）。
+    // WHY 要素をすべて sensitive にする（配列ごと落とさない）: 値は行の値そのもので、どれが個人情報かは分からない。個数（何個の
+    //   値を渡した文か）だけは調査の手がかりに残す。Writer は生の params を渡し、ここで必ず *** になる。
+    //   .readonly() は row_ids と同じ（Writer は readonly の配列のまま渡す）。
+    params: z.array(sensitive(z.unknown())).readonly().optional(),
     error: errorField().optional(),
+    // 後のログの、書いた行ごとの記録。before / after は DB の列名 → 値（insert の before・delete の after は null）。
+    // WHY before / after に sensitive の印を付けない: どの列が個人情報かは表ごとに違い、このスキーマは表を知らない。Writer が
+    //   schema.ts の列の分類表（public / sensitive。apps/backend/shared/infra/column-classification.ts）で sensitive の列と分類の
+    //   無い列を *** にしてから渡す（分類は表の定義の隣で決め、書き忘れは型と rule-tests/schema.test.ts の
+    //   column-classification が止める）。
+    // WHY 必須（nullable）にする（optional にしない）: Writer は必ず渡す。省けると「値が無い」と「渡し忘れ」を見分けられない。
     changes: z
       .array(
         z.object({
           table: z.string(),
           row_id: z.string(),
           operation: z.string(),
+          before: z.record(z.string(), z.unknown()).nullable(),
+          after: z.record(z.string(), z.unknown()).nullable(),
         }),
       )
       .optional(),

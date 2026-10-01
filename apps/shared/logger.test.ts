@@ -174,7 +174,17 @@ const CASES: Record<
         event: { name: "db_write", phase: "done", duration_ms: 3 },
         db: { collection: { name: "todos" }, operation: { name: "update" } },
         row_id: "t-1",
-        changes: [{ table: "todos", row_id: "t-1", operation: "update" }],
+        // before / after は Writer が列の分類表でマスクしてから渡す（スキーマは値をそのまま出す）。params は値をすべて *** にする。
+        changes: [
+          {
+            table: "todos",
+            row_id: "t-1",
+            operation: "update",
+            before: { title: "***", completed: false },
+            after: { title: "***", completed: true },
+          },
+        ],
+        params: [SENTINEL, 1],
       },
       { before: { title: SENTINEL } },
     ),
@@ -186,7 +196,16 @@ const CASES: Record<
       event: { name: "db_write", phase: "done", duration_ms: 3 },
       db: { collection: { name: "todos" }, operation: { name: "update" } },
       row_id: "t-1",
-      changes: [{ table: "todos", row_id: "t-1", operation: "update" }],
+      params: ["***", "***"],
+      changes: [
+        {
+          table: "todos",
+          row_id: "t-1",
+          operation: "update",
+          before: { title: "***", completed: false },
+          after: { title: "***", completed: true },
+        },
+      ],
     },
   },
   db_pool_error: {

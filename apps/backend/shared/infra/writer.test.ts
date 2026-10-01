@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { now } from "@repo/shared/now";
 import { DrizzleQueryError, sql } from "drizzle-orm";
-import { pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { integer, pgTable, text, uuid } from "drizzle-orm/pg-core";
 import {
   afterAll,
   afterEach,
@@ -17,6 +17,7 @@ import {
   type TestDatabase,
 } from "../../test-support/database";
 import type { Transaction } from "../application/transaction";
+import { classifyColumns } from "./column-classification";
 import { changeLogs } from "./schema";
 import {
   type DrizzleTransaction,
@@ -41,6 +42,20 @@ const items = pgTable("items", {
   id: uuid("id").primaryKey(),
   itemName: text("item_name").notNull(),
 });
+// 列の分類（Issue #216）。本番の表は schema.ts の隣に置く（rule-tests/schema.test.ts の column-classification）。item_name は
+//   利用者が書く自由文の想定で sensitive（ログの before / after で ***）、id は public（値のまま）。
+classifyColumns(items, { id: "public", itemName: "sensitive" });
+
+// 分類を登録していない表（fail closed: ログの before / after は全列 ***）。amount は integer で、形の違う値を渡すと
+//   データ例外（22P02）になり、pg の message に入力値が入る（失敗のログのマスクを確かめる）。
+const notes = pgTable("notes", {
+  id: uuid("id").primaryKey(),
+  body: text("body").notNull(),
+  amount: integer("amount"),
+});
+
+// 番兵の値（個人情報の代わり）。ログの JSON のどこにも出ないことを確かめる。
+const SENTINEL = "番兵-alice@example.com";
 
 const ID = "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e";
 const OTHER_ID = "11111111-1111-4111-8111-111111111111";
@@ -58,6 +73,9 @@ beforeAll(async () => {
   await database.db.execute(
     sql`create table items (id uuid primary key, item_name text not null)`,
   );
+  await database.db.execute(
+    sql`create table notes (id uuid primary key, body text not null, amount integer)`,
+  );
 });
 
 afterAll(async () => {
@@ -65,7 +83,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await database.db.execute(sql`truncate change_logs, items`);
+  await database.db.execute(sql`truncate change_logs, items, notes`);
   vi.mocked(now).mockReturnValue(TIMESTAMP);
 });
 
@@ -160,11 +178,18 @@ describe("PostgresWriter の insert", () => {
     ]);
     const rows = { row_id: ID };
     expect(linesBeforeInsert).toStrictEqual([startLine("insert", rows)]);
-    // WHY changes に値（before / after）を出さない: 個人情報を含みうる。値は change_logs に残る。
+    // WHY changes に before / after を出し、分類が sensitive の列（item_name）だけ *** にする（Issue #216）: 何がどう変わったかを
+    //   ログで追え、個人情報は出さない。change_logs の表には生の値（牛乳）が残る（上）。insert は before が null。
     expect(logs.info()).toStrictEqual([
       startLine("insert", rows),
       doneLine("insert", rows, 12, [
-        { table: "items", row_id: ID, operation: "insert" },
+        {
+          table: "items",
+          row_id: ID,
+          operation: "insert",
+          before: null,
+          after: { id: ID, item_name: "***" },
+        },
       ]),
     ]);
     expect(logs.warn()).toStrictEqual([]);
@@ -200,8 +225,20 @@ describe("PostgresWriter の insert", () => {
     expect(logs.info()).toStrictEqual([
       startLine("insert", ids),
       doneLine("insert", ids, 3, [
-        { table: "items", row_id: ID, operation: "insert" },
-        { table: "items", row_id: OTHER_ID, operation: "insert" },
+        {
+          table: "items",
+          row_id: ID,
+          operation: "insert",
+          before: null,
+          after: { id: ID, item_name: "***" },
+        },
+        {
+          table: "items",
+          row_id: OTHER_ID,
+          operation: "insert",
+          before: null,
+          after: { id: OTHER_ID, item_name: "***" },
+        },
       ]),
     ]);
   });
@@ -298,8 +335,15 @@ describe("PostgresWriter の update", () => {
     const rows = { row_id: ID };
     expect(logs.info()).toStrictEqual([
       startLine("update", rows),
+      // update は渡した列だけの before / after（変更履歴の changes と同じ列）。
       doneLine("update", rows, 5, [
-        { table: "items", row_id: ID, operation: "update" },
+        {
+          table: "items",
+          row_id: ID,
+          operation: "update",
+          before: { item_name: "***" },
+          after: { item_name: "***" },
+        },
       ]),
     ]);
   });
@@ -427,8 +471,15 @@ describe("PostgresWriter の delete", () => {
     const rows = { row_id: ID };
     expect(logs.info()).toStrictEqual([
       startLine("delete", rows),
+      // delete は消した行の全列の before と、null の after。
       doneLine("delete", rows, 1, [
-        { table: "items", row_id: ID, operation: "delete" },
+        {
+          table: "items",
+          row_id: ID,
+          operation: "delete",
+          before: { id: ID, item_name: "***" },
+          after: null,
+        },
       ]),
     ]);
   });
@@ -532,15 +583,22 @@ describe("PostgresWriter の共通の振る舞い", () => {
     }
   });
 
-  // WHY DB のエラーは message を出さない: drizzle-orm の DrizzleQueryError の message は「Failed query: <SQL>\nparams: <値>」で、
-  //   行の値（個人情報を含みうる）がログに出る。元の pg のエラーの message も、データ例外（SQLSTATE 22 系。22P02 の
-  //   invalid input syntax for type uuid: "<入力>" など）は入力値を含む。何の失敗かは SQLSTATE（db.response.status_code）と
-  //   制約の名前（constraint）で分かる。
+  // WHY DB のエラーの message・params をそのまま出さない（Issue #216）: drizzle-orm の DrizzleQueryError の message は
+  //   「Failed query: <SQL>\nparams: <値>」で、行の値（個人情報を含みうる）がログに出る。元の pg のエラーの message も、データ例外
+  //   （SQLSTATE 22 系。22P02 の invalid input syntax for type uuid: "<入力>" など）は入力値を含む。
+  //   - params: 値はすべて ***（個数だけ分かる）。logger のスキーマ（db_write の params）が sensitive で落とす。
+  //   - message: pg のエラーの message の引用符（"..."）の部分を Writer が *** にしてから出す（最初の " から最後の " まで）。
+  //   何の失敗かは SQLSTATE（db.response.status_code）・制約の名前（constraint）・message の残りで分かる。
   // 失敗のログの行（DB のエラーの項目だけを変える）。statusCode が無ければ db.response を出さない。
   function failedLine(
     operation: string,
     durationMs: number,
-    failure: { statusCode?: string; rest: object },
+    failure: {
+      collection?: string;
+      statusCode?: string;
+      rowId?: string;
+      rest: object;
+    },
   ) {
     return {
       severity: "WARNING",
@@ -548,80 +606,98 @@ describe("PostgresWriter の共通の振る舞い", () => {
       message: "db write failed",
       event: { name: "db_write", phase: "failed", duration_ms: durationMs },
       db: {
-        collection: { name: "items" },
+        collection: { name: failure.collection ?? "items" },
         operation: { name: operation },
         ...(failure.statusCode === undefined
           ? {}
           : { response: { status_code: failure.statusCode } }),
       },
-      row_id: ID,
+      row_id: failure.rowId ?? ID,
       ...failure.rest,
     };
   }
 
-  test("DB のエラー（一意制約違反）のとき、失敗のログは pg のエラーの name（error.type）・SQLSTATE（23505）・制約の名前だけを出し、message（SQL と値）を出さない", async () => {
-    const row = { id: ID, itemName: "牛乳" };
+  test("DB のエラー（一意制約違反）のとき、失敗のログは pg のエラーの name・引用符の部分を *** にした message・SQLSTATE（23505）・制約の名前と、値を *** にした params を出す（行の値を出さない）", async () => {
+    const row = { id: ID, itemName: SENTINEL };
     await database.db.insert(items).values(row);
     const logs = captureLogs();
     fixElapsed(3000, 3004);
 
     await expect(
       inWriter((writer) => writer.insert(items, [row])),
-    ).rejects.toMatchObject({ cause: { code: "23505" } });
+    ).rejects.toMatchObject({
+      cause: {
+        code: "23505",
+        message: 'duplicate key value violates unique constraint "items_pkey"',
+      },
+    });
 
     expect(logs.warn()).toStrictEqual([
       failedLine("insert", 4, {
         statusCode: "23505",
-        rest: { constraint: "items_pkey", error: { type: "error" } },
+        rest: {
+          constraint: "items_pkey",
+          params: ["***", "***"],
+          error: {
+            type: "error",
+            message: 'duplicate key value violates unique constraint "***"',
+          },
+        },
       }),
     ]);
-    expect(JSON.stringify(logs.warn())).not.toContain("牛乳");
+    expect(JSON.stringify(logs.warn())).not.toContain(SENTINEL);
   });
 
-  // 22P02 の pg の message は「invalid input syntax for type uuid: "<入力>"」で、入力値をそのまま含む。ここでは入力値が delete の
-  //   id なので row_id には出る（呼び出し側が渡した id で、以前の writeInTransaction と同じ。Repository に来る id は presentation が
-  //   uuid の形を確かめた値）が、error・db・constraint には出ないことを確かめる。
-  test("DB のエラー（データ例外 22P02。uuid の形でない値）のとき、失敗のログの error・db・constraint に pg の message（入力値）を含まない", async () => {
-    const input = "牛乳-not-a-uuid";
+  // 22P02 の pg の message は「invalid input syntax for type integer: "<入力>"」で、入力値をそのまま含む（実測。入力に " を含めても
+  //   pg は逃がさずに "<入力>" と書く）。番兵の値を integer の列に渡し、message と params のどちらにも出ないことを確かめる。
+  test('DB のエラー（データ例外 22P02）のとき、pg の message の入力値（引用符の中。入力が " を含んでも）と params の値をログに出さない', async () => {
+    const input = `${SENTINEL}" tail "x`;
     const logs = captureLogs();
     fixElapsed(0, 2);
 
     await expect(
-      inWriter((writer) => writer.delete(items, input)),
+      inWriter((writer) =>
+        writer.insert(notes, [
+          { id: ID, body: SENTINEL, amount: input as unknown as number },
+        ]),
+      ),
     ).rejects.toMatchObject({
       cause: {
         code: "22P02",
-        message: `invalid input syntax for type uuid: "${input}"`,
+        message: `invalid input syntax for type integer: "${input}"`,
       },
     });
 
-    const [line] = logs.warn();
-    expect({ ...line, row_id: undefined }).toStrictEqual({
-      ...failedLine("delete", 2, {
+    expect(logs.warn()).toStrictEqual([
+      failedLine("insert", 2, {
+        collection: "notes",
         statusCode: "22P02",
-        rest: { error: { type: "error" } },
+        rest: {
+          params: ["***", "***", "***"],
+          error: {
+            type: "error",
+            message: 'invalid input syntax for type integer: "***"',
+          },
+        },
       }),
-      row_id: undefined,
-    });
-    expect(line.row_id).toBe(input);
+    ]);
+    const json = JSON.stringify(logs.warn());
+    expect(json).not.toContain(SENTINEL);
+    expect(json).not.toContain("tail");
   });
 
-  // 想定外の形の DrizzleQueryError（cause が Error でない・code / constraint が文字列でない）。cause が Error でなければ元の例外を、
-  //   code / constraint が文字列でなければその項目を出さない。drizzle の delete を差し替えて投げさせる。
+  // 想定外の形の DrizzleQueryError（cause が Error でない・code / constraint が文字列でない）と、引用符の数の違う message。
+  //   drizzle の delete を差し替えて投げさせる。
   test.each([
     [
-      "cause が無いときは、元の DrizzleQueryError をそのまま出す",
-      new DrizzleQueryError("select 1", [], undefined),
-      {
-        rest: {
-          error: { type: "Error", message: "Failed query: select 1\nparams: " },
-        },
-      },
+      "cause が無いときは、DrizzleQueryError の name と params（***）だけを出す（message は SQL と値を含むので出さない）",
+      new DrizzleQueryError("select $1", [SENTINEL], undefined),
+      { rest: { params: ["***"], error: { type: "Error" } } },
     ],
     [
-      "cause が code・constraint を持たない Error のときは、cause の name だけを出す",
+      "cause が code・constraint を持たない Error のときは、cause の name と message を出す",
       new DrizzleQueryError("select 1", [], new Error("boom")),
-      { rest: { error: { type: "Error" } } },
+      { rest: { params: [], error: { type: "Error", message: "boom" } } },
     ],
     [
       "cause の code・constraint が文字列でないときは、db.response・constraint を出さない",
@@ -630,7 +706,35 @@ describe("PostgresWriter の共通の振る舞い", () => {
         [],
         Object.assign(new Error("boom"), { code: 23505, constraint: 1 }),
       ),
-      { rest: { error: { type: "Error" } } },
+      { rest: { params: [], error: { type: "Error", message: "boom" } } },
+    ],
+    [
+      "message の引用符が 1 つだけなら、その後ろをすべて *** にする",
+      new DrizzleQueryError(
+        "select 1",
+        [],
+        new Error(`invalid value: "${SENTINEL}`),
+      ),
+      {
+        rest: {
+          params: [],
+          error: { type: "Error", message: 'invalid value: "***' },
+        },
+      },
+    ],
+    [
+      'message の引用符が 3 つ以上なら、最初の " から最後の " までを 1 つの *** にし、外側は残す',
+      new DrizzleQueryError(
+        "select 1",
+        [],
+        new Error(`null value in column "a" of relation "${SENTINEL}" end`),
+      ),
+      {
+        rest: {
+          params: [],
+          error: { type: "Error", message: 'null value in column "***" end' },
+        },
+      },
     ],
   ])("DB のエラーの %s", async (_label, thrown, expected) => {
     const logs = captureLogs();
@@ -646,6 +750,89 @@ describe("PostgresWriter の共通の振る舞い", () => {
     ).rejects.toBe(thrown);
 
     expect(logs.warn()).toStrictEqual([failedLine("delete", 1, expected)]);
+    expect(JSON.stringify(logs.warn())).not.toContain(SENTINEL);
+  });
+});
+
+describe("PostgresWriter の db_write の changes（before / after）のマスク", () => {
+  // fail closed（Issue #216）: 分類を登録していない表は、どの列が個人情報か分からないので、id も含めて全列の値を *** にする。
+  //   change_logs の表には生の値を残す（監査。マスクはログだけ）。null は null のまま。
+  test("分類を登録していない表の insert / update / delete は、before / after の全列の値を *** にする（change_logs には生の値）", async () => {
+    const logs = captureLogs();
+
+    await inWriter(async (writer) => {
+      await writer.insert(notes, [{ id: ID, body: SENTINEL, amount: 3 }]);
+      await writer.update(notes, ID, { body: "卵", amount: null });
+      await writer.delete(notes, ID);
+    });
+
+    const changes = logs
+      .info()
+      .filter((line) => line.event.phase === "done")
+      .map((line) => line.changes);
+    expect(changes).toStrictEqual([
+      [
+        {
+          table: "notes",
+          row_id: ID,
+          operation: "insert",
+          before: null,
+          after: { id: "***", body: "***", amount: "***" },
+        },
+      ],
+      [
+        {
+          table: "notes",
+          row_id: ID,
+          operation: "update",
+          before: { body: "***", amount: "***" },
+          after: { body: "***", amount: null },
+        },
+      ],
+      [
+        {
+          table: "notes",
+          row_id: ID,
+          operation: "delete",
+          before: { id: "***", body: "***", amount: null },
+          after: null,
+        },
+      ],
+    ]);
+    expect(JSON.stringify(logs.info())).not.toContain(SENTINEL);
+    // WHY 操作の順に並べ直す: 3 件は同じ occurred_at（時計を固定）で、select の順は決まらない。
+    const order = ["insert", "update", "delete"];
+    expect(
+      (await changeLogRows())
+        .map(({ operation, changes }) => ({ operation, changes }))
+        .sort(
+          (a, b) => order.indexOf(a.operation) - order.indexOf(b.operation),
+        ),
+    ).toEqual([
+      {
+        operation: "insert",
+        changes: {
+          id: { after: ID },
+          body: { after: SENTINEL },
+          amount: { after: 3 },
+        },
+      },
+      {
+        operation: "update",
+        changes: {
+          body: { before: SENTINEL, after: "卵" },
+          amount: { before: 3, after: null },
+        },
+      },
+      {
+        operation: "delete",
+        changes: {
+          id: { before: ID },
+          body: { before: "卵" },
+          amount: { before: null },
+        },
+      },
+    ]);
   });
 });
 

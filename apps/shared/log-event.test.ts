@@ -154,3 +154,76 @@ describe("maskFreeText / freeText（自由文の最後の網）", () => {
     expect(freeText().safeParse(1).success).toBe(false);
   });
 });
+
+// db_write（apps/backend/shared/infra/writer.ts の書き込みのログ）の changes と params の形（Issue #216）。
+describe("db_write の changes（before / after）と params", () => {
+  const done = {
+    message: "db write done",
+    event: { name: "db_write", phase: "done", duration_ms: 1 },
+    db: { collection: { name: "todos" }, operation: { name: "update" } },
+    row_id: "t-1",
+  } as const;
+
+  // WHY before / after に sensitive の印を付けない: どの列が個人情報かは表ごとに違い、このスキーマは表を知らない。マスクは
+  //   Writer が schema.ts の列の分類表（public / sensitive）で済ませてから渡す（apps/backend/shared/infra/column-classification.ts）。
+  test("changes の各要素は table・row_id・operation と、列名 → 値の before / after（insert は before が null、delete は after が null）を持ち、値はそのまま出す", () => {
+    const changes = [
+      {
+        table: "todos",
+        row_id: "t-1",
+        operation: "update",
+        before: { title: "***", completed: false },
+        after: { title: "***", completed: true },
+      },
+      {
+        table: "todos",
+        row_id: "t-2",
+        operation: "insert",
+        before: null,
+        after: { id: "t-2", created_at: "2026-10-01T00:00:00.000Z" },
+      },
+      {
+        table: "todos",
+        row_id: "t-3",
+        operation: "delete",
+        before: { id: "t-3" },
+        after: null,
+      },
+    ];
+
+    expect(LOG_EVENT_SCHEMAS.db_write.parse({ ...done, changes })).toEqual({
+      ...done,
+      changes,
+    });
+  });
+
+  // WHY before / after を必須にする: Writer は必ず渡す（無い側は null）。省くと値の有無と「渡し忘れ」を見分けられない。
+  test("changes の要素に before / after が無ければ parse に失敗する", () => {
+    expect(
+      LOG_EVENT_SCHEMAS.db_write.safeParse({
+        ...done,
+        changes: [{ table: "todos", row_id: "t-1", operation: "update" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  // WHY params は値をすべて *** にする（個数だけ残す）: DB のエラー（DrizzleQueryError）の params は SQL に渡した行の値そのもの。
+  //   どの値が個人情報かは分からないので、構造（配列）で sensitive にする。個数は「何個の値を渡した文か」の手がかりになる。
+  test("params は配列の要素をすべて ***（null も）にし、個数は残す", () => {
+    const failed = {
+      ...done,
+      message: "db write failed",
+      event: { name: "db_write", phase: "failed", duration_ms: 1 },
+    } as const;
+
+    expect(
+      LOG_EVENT_SCHEMAS.db_write.parse({
+        ...failed,
+        params: ["alice@example.com", 3, null, { a: 1 }],
+      }),
+    ).toEqual({ ...failed, params: ["***", "***", "***", "***"] });
+    expect(LOG_EVENT_SCHEMAS.db_write.parse({ ...failed, params: [] })).toEqual(
+      { ...failed, params: [] },
+    );
+  });
+});
