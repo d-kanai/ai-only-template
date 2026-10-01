@@ -146,7 +146,11 @@ async function changeLogsWrittenBy(
     .sort(byTableAndChanges);
 }
 
-function byTableAndChanges(a: ChangeEntry, b: ChangeEntry): number {
+// WHY 引数を表名と changes だけにする: 期待値（rowId が undefined になりうる組み立て途中の値）も同じ順に並べるため。
+function byTableAndChanges(
+  a: Pick<ChangeEntry, "tableName" | "changes">,
+  b: Pick<ChangeEntry, "tableName" | "changes">,
+): number {
   return (
     a.tableName.localeCompare(b.tableName) ||
     JSON.stringify(a.changes).localeCompare(JSON.stringify(b.changes))
@@ -1462,6 +1466,152 @@ describe("PostgresTodoRepository", () => {
     await expect(repository().findAll()).resolves.toEqual([kept]);
   });
 
+  // 完了の履歴が DB に無い Todo（Issue #194）: デプロイで migrate（履歴の backfill）から新しい版への切り替えまでの間に、古い版の
+  //   アプリが履歴を書かずに作った Todo。backfill と同じ規則（作成日時に未完了、完了済みなら作成日時に完了をもう 1 件）で補って
+  //   読み、次の update で補った履歴を書く（repair on write）。行は Todo を通さずに insert する（古い版のアプリの書き方）。
+  const WITHOUT_HISTORY = {
+    id: "00000000-0000-4000-8000-0000000000aa",
+    title: "牛乳を買う",
+    createdAt: new Date("2026-09-28T00:00:00.000Z"),
+  };
+
+  // 補った履歴（backfill と同じ規則）。
+  function repairedHistory(completed: boolean) {
+    const created = { completed: false, changedAt: WITHOUT_HISTORY.createdAt };
+    const done = { completed: true, changedAt: WITHOUT_HISTORY.createdAt };
+    return completed ? [created, done] : [created];
+  }
+
+  async function storeWithoutHistory(completed: boolean) {
+    await database.db.insert(todos).values({ ...WITHOUT_HISTORY, completed });
+  }
+
+  test.each([
+    ["未完了", false],
+    ["完了済み", true],
+  ] as const)(
+    "完了の履歴が DB に無い %s の Todo を、findAll・findById・findByIdForUpdate は補った履歴（backfill と同じ規則）で返し、origin の履歴は DB のまま（空）にする",
+    async (_label, completed) => {
+      await storeWithoutHistory(completed);
+      const statusChanges = repairedHistory(completed);
+      const expected = Todo.reconstruct({
+        ...WITHOUT_HISTORY,
+        completed,
+        statusChanges,
+      });
+
+      const loaded = [
+        await repository().findById(WITHOUT_HISTORY.id),
+        await load(WITHOUT_HISTORY.id),
+        ...(await repository().findAll()),
+      ];
+
+      expect(loaded).toEqual([expected, expected, expected]);
+      for (const todo of loaded) {
+        expect(todo?.statusChanges).toStrictEqual(statusChanges);
+        expect(todo?.origin).toStrictEqual({
+          ...WITHOUT_HISTORY,
+          completed,
+          statusChanges: [],
+        });
+      }
+      // 読むだけでは書かない（補った履歴は update のときに書く）。
+      await expect(statusChangeRows()).resolves.toStrictEqual([]);
+    },
+  );
+
+  // WHY 変更履歴（change_logs）も見る: 補った履歴は Writer を通して書くので、他の書き込みと同じく記録が残る（直した行を後で追える）。
+  test.each([
+    ["未完了", false],
+    ["完了済み", true],
+  ] as const)(
+    "完了の履歴が DB に無い %s の Todo の名前を変えて update すると、補った履歴を position 0 から書き、変更履歴に履歴の insert と todos の update を記録する",
+    async (_label, completed) => {
+      await storeWithoutHistory(completed);
+      const renamed = (await load(WITHOUT_HISTORY.id)).rename("卵を買う");
+
+      const written = await changeLogsWrittenBy(() => update(renamed));
+
+      const rows = repairedHistory(completed).map((change, position) => ({
+        todoId: WITHOUT_HISTORY.id,
+        position,
+        ...change,
+      }));
+      await expect(statusChangeRows()).resolves.toStrictEqual(rows);
+      const inserts = await Promise.all(
+        rows.map(async (row) => {
+          const statusId = await statusChangeId(row.todoId, row.position);
+          return {
+            tableName: "todo_status_changes",
+            rowId: statusId,
+            operation: "insert",
+            changes: {
+              id: { after: statusId },
+              todo_id: { after: row.todoId },
+              position: { after: row.position },
+              completed: { after: row.completed },
+              changed_at: { after: row.changedAt.toISOString() },
+            },
+            actorId: null,
+          };
+        }),
+      );
+      expect(written).toStrictEqual(
+        [
+          ...inserts,
+          {
+            tableName: "todos",
+            rowId: WITHOUT_HISTORY.id,
+            operation: "update",
+            changes: { title: { before: "牛乳を買う", after: "卵を買う" } },
+            actorId: null,
+          },
+        ].sort(byTableAndChanges),
+      );
+      // 書いた後は DB の履歴をそのまま読む（origin の履歴も DB と同じになり、次の update は補った分を書き直さない）。
+      const reloaded = await repository().findById(WITHOUT_HISTORY.id);
+      expect(reloaded).toEqual(renamed);
+      expect(reloaded?.origin?.statusChanges).toStrictEqual(
+        repairedHistory(completed),
+      );
+    },
+  );
+
+  test("完了の履歴が DB に無い未完了の Todo を完了にして update すると、補った 1 件と完了の 1 件を position 0・1 で書く", async () => {
+    await storeWithoutHistory(false);
+    const completed = (await load(WITHOUT_HISTORY.id)).changeCompletion(true);
+
+    await update(completed);
+
+    expect(completed.statusChanges).toHaveLength(2);
+    await expect(statusChangeRows()).resolves.toStrictEqual(
+      completed.statusChanges.map((change, position) => ({
+        todoId: WITHOUT_HISTORY.id,
+        position,
+        ...change,
+      })),
+    );
+    await expect(repository().findById(WITHOUT_HISTORY.id)).resolves.toEqual(
+      completed,
+    );
+  });
+
+  // WHY 普通の Todo も置く: 1 件の補いが一覧の他の Todo（履歴のある Todo）を巻き込まず、作成日時の順も保つことを確かめる。
+  test("完了の履歴が DB に無い Todo と普通の Todo が混ざっていても、findAll は両方を作成日時の順に返す", async () => {
+    await storeWithoutHistory(true);
+    const normal = Todo.create("卵を買う");
+    await insert(normal);
+
+    await expect(repository().findAll()).resolves.toEqual([
+      Todo.reconstruct({
+        ...WITHOUT_HISTORY,
+        completed: true,
+        statusChanges: repairedHistory(true),
+      }),
+      normal,
+    ]);
+  });
+
   // DB の行が Todo の不変条件を満たさない（手で入れた行・規則を変えたのに移行していない行）ときの扱い（Issue #94）。
   // WHY DomainError ではなく Error を投げる（= API は 500）: DomainError(validation_error) は presentation で 400 になり、
   //   「リクエストを直せば通る」とクライアントに伝える。DB のデータの不整合はクライアントには直せないサーバ側の誤り。
@@ -1545,31 +1695,25 @@ describe("PostgresTodoRepository", () => {
     },
   );
 
-  // 完了の履歴の不変条件（Issue #188）: 履歴の無い行（Issue #188 より前の行を移行していない・手で入れた行）と、最後の履歴の
-  //   completed が todos.completed と違う行。
-  test.each([
-    ["完了の履歴が無い", []],
-    [
-      "最後の履歴の completed が todos.completed と違う",
-      [{ position: 0, completed: true }],
-    ],
-  ] as const)(
-    "完了の履歴が不変条件を満たさない行（%s）の findById・findAll は、DomainError ではない Error を投げる",
-    async (_label, history) => {
-      const row = invalidRow({});
-      await database.db.insert(todos).values(row);
-      for (const change of history) {
-        await database.db
-          .insert(todoStatusChanges)
-          .values({ todoId: row.id, changedAt: row.createdAt, ...change });
-      }
-      const error = corruptedRowError(
-        row.id,
-        new DomainError("validation_error", "todo.statusChanges.invalid"),
-      );
+  // 完了の履歴の不変条件（Issue #188）: 履歴はあるが、最後の履歴の completed が todos.completed と違う行。
+  // 履歴の無い行は読める（Repository が補う。上の「完了の履歴が DB に無い」のテスト。Issue #194）ので、500 にするのは
+  //   「履歴があるのにずれている」行だけ。
+  test("完了の履歴が todos.completed とずれている行（最後の履歴の completed が違う）の findById・findByIdForUpdate・findAll は、DomainError ではない Error を投げる", async () => {
+    const row = invalidRow({});
+    await database.db.insert(todos).values(row);
+    await database.db.insert(todoStatusChanges).values({
+      todoId: row.id,
+      position: 0,
+      completed: true,
+      changedAt: row.createdAt,
+    });
+    const error = corruptedRowError(
+      row.id,
+      new DomainError("validation_error", "todo.statusChanges.invalid"),
+    );
 
-      await expect(repository().findById(row.id)).rejects.toEqual(error);
-      await expect(repository().findAll()).rejects.toEqual(error);
-    },
-  );
+    await expect(repository().findById(row.id)).rejects.toEqual(error);
+    await expect(load(row.id)).rejects.toEqual(error);
+    await expect(repository().findAll()).rejects.toEqual(error);
+  });
 });
