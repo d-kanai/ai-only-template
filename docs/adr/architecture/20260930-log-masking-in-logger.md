@@ -11,8 +11,9 @@
 ## 決定
 - マスクは logger（`apps/shared/logger.ts`）の中で行う（DB の行の値だけは、表を知っている書き込みの口 Writer が分類表で行う）。呼び出し側は生の値を渡すだけで、マスクの判断をしない。3 段構え:
   1. 種類ごとの zod スキーマ（allowlist）: `apps/shared/log-event.ts` の `LOG_EVENT_SCHEMAS`（`event.name` の 8 種類ごとに `z.object`）。logger は `event.name` でスキーマを選んで `safeParse` し、その結果だけを出す。一覧に無いキーは落ちる（fail closed）。parse に失敗したら生の event は出さず、固定の項目だけの `logger_error` の 1 行にする。
-  2. 印: `sensitive(schema)`（`transform` で値を常に `***`。`url.query` の値・`referer`・`client.address` など）と、DB の列の分類表（各 `schema.ts` で表の隣に `<表名>Columns = classifyColumns(<表>, { ... })`。列ごとに `"public"` / `"sensitive"`。全列の網羅を型で強制し、`rule-tests/schema.test.ts` の規則 `column-classification` が分類表の無い表を止める）。`db_write` の `changes` の before / after は、書き込みの唯一の口 Writer がこの表で public でない列の値を `***` にしてから logger に渡す（表が無い・列が表に無いときも `***` に倒す。`apps/shared` の logger は DB の表を参照できないので、表を知っている Writer が行う）。DB のエラーの `params` は sensitive（値を `***`）として出す。
+  2. 印: `sensitive(schema)`（`transform` で値を常に `***`。`url.query` の値・`referer`・`client.address`、DB のエラーの `params` の各要素など）と、DB の列の分類表（各 `schema.ts` で表の隣に `export const <名前>Columns = classifyColumns(<名前>, { ... })`。キーは Drizzle のプロパティ名で、列ごとに `"public"` / `"sensitive"`。全列の網羅を引数の型で強制し、`rule-tests/schema.test.ts` の規則 `column-classification` が分類表の無い表を止める）。`db_write` の `changes`（`{ table, row_id, operation, before, after }`。before / after は DB の列名 → 値）は、書き込みの唯一の口 Writer が `maskRow` で public 以外の列の値を `***` にしてから logger に渡す（分類の無い表は全列 `***`、`null` は `null` のまま。`apps/shared` の logger は DB の表を参照できないので、表を知っている Writer が行う）。今の分類は `todos.title` だけが sensitive。
   3. 自由文の正規表現（最後の網）: `freeText()` の印を付けた項目（`message`・`url.path`・`error.message` など）だけに、メール・JWT・Bearer・Luhn に合う 13〜19 桁の番号を `***` にする線形の正規表現をかける（入れ子の量指定子を使わない。長さの上限で切る）。
+- DB のエラー（DrizzleQueryError）: SQL と値を含む drizzle の message は出さない。Writer が `error` を pg のエラー（cause）の `{ type, message }` にし、message は最初の `"` から最後の `"` までを `"***"` にしてから（入力値は引用符の中に入る）さらに `freeText` を通す。`params` は全要素を `***` にして個数だけ残す。cause が Error でなければ `{ type }` と `params` だけ。
 - 口は `logger.emit(event)` の 1 つにし、`logger.info / warn / error` は廃止する。重大度は種類（と `event.phase`）が決める（`severityOf`）。`LogEvent` は種類ごとのスキーマの入力の型の union（`event.name` で判別）で、種類ごとの必須項目が無い・一覧に無い名前の呼び出しは型チェックで落ちる。
 - `change_logs` の表には生の値を残す（監査の用途）。マスクするのはログに出すときだけ。
 - `apps/shared` に依存 `zod` だけを許す（`rule-tests/architecture.test.ts` の `SHARED_ALLOWED_PACKAGES`。版は backend と同じ）。
@@ -35,7 +36,7 @@
 - マスクをハッシュ / HMAC にする: 突き合わせが要るようになったら `sensitive()` の置換を差し替える。仮名化しても個人データのまま。
 
 ## 影響
-- 良い点: 呼び出し側がマスクを忘れても、スキーマに無い項目は出ず、sensitive の項目は `***` になる。リクエストのクエリ（値は `***`）、`db_write` の `changes` の before / after（分類表で public の列だけ値）、DB のエラーの `params`（値は `***`）を出せるようになる。種類ごとの形の違反は型チェックと実行時（`logger_error`）の両方で止まる。
+- 良い点: 呼び出し側がマスクを忘れても、スキーマに無い項目は出ず、sensitive の項目は `***` になる。リクエストのクエリ（値は `***`）、`db_write` の `changes` の before / after（分類表で public の列だけ値）、DB のエラーの `params`（値は `***`。個数は残る）と pg の message（引用符の中は `***`）を出せるようになる。種類ごとの形の違反は型チェックと実行時（`logger_error`）の両方で止まる。
 - 悪い点・制約:
   - `LogEvent` は `z.input` の union にする（`z.infer` = 出力の型だと sensitive の項目が `"***"` 型になり、生の値を渡せない）。
   - `http.request.id` と `server.address` には `freeText` をかけない（E2E の `e2e-<Date.now()>` の 13 桁が Luhn に合うことがあり、id が `***` になって E2E が不安定になる）。
@@ -44,4 +45,6 @@
   - Error でない値の throw は `{ type: typeof 値 }` にする（中身が分からず利用者の入力を含みうるので値を出さない）。
   - `LOG_EVENT_SCHEMAS` は最上位の値なので Stryker の static な変異になり、ignoreStatic で検査から外れる。項目と印は `logger.test.ts` の種類ごとの行の丸ごとの比較（番兵の値を含む）で固定する。
   - `null` はそのまま出す（値が無いことは個人情報ではない）。
+  - DB のエラーの message は引用符の中をまとめて `***` にするので、引用符の中の識別子（not-null 違反の列名など）も消える（制約名は `constraint`、表名は `db.collection.name` に別に出る）。組ごとに置き換えないのは、pg が入力値の中の `"` を逃がさずに書き、組ごとだと一部が残るため（2026-10-01 の work-logs）。
+  - `change_logs` は Writer を通らない（`recordChange` が直接書く）ので、その分類（`changes` が sensitive）は今はログに使われない。
 - 見直す条件: 突き合わせのためにハッシュが要るとき、自由文の見逃しが問題になったとき（Cloud DLP を重ねる）、リクエストの本文（JSON）をログに出すとき（別 Issue）、ログの量・費用が問題になったとき。

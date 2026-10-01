@@ -132,7 +132,7 @@ API 1 つ（`apps/backend/features/<feature>/internal/presentation/<api>.api.ts`
   - `apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.hook.ts` の依存配列 5 か所（`reloadTodos` は依存の無い useCallback で作り直されず、それを依存に持つ effect・`mutateAndReload`・`toggleTodo`・`removeTodo` も作り直されない）。
   - `apps/frontend_customer/features/todo/screens/todo-detail-screen/todo-detail-screen.hook.ts` の世代の `+=`（`-=` でも毎回別の値になる）。
   - `apps/backend/test-support/todo/todo-repository.in-memory.ts` の findAll の id の比較 `<`（id は Map のキーで一意なので `<=` でも同じ順）。
-- 残る static は `apps/backend/features/todo/internal/infra/schema.ts` のテーブル宣言だけ（等価の理由は `stryker.config.mjs`）。Issue #189 で `apps/backend/shared/infra/schema.ts`（`change_logs` の宣言）と `apps/backend/shared/domain/change-operation.ts`（操作の一覧の定数）も加わった（件数と等価の確認は未実施）。
+- 残る static は `apps/backend/features/todo/internal/infra/schema.ts` のテーブル宣言だけ（等価の理由は `stryker.config.mjs`）。Issue #189 で `apps/backend/shared/infra/schema.ts`（`change_logs` の宣言）と `apps/backend/shared/domain/change-operation.ts`（操作の一覧の定数）も加わった（件数と等価の確認は未実施）。 Issue #216 で、`schema.ts`（features と shared/infra）の列の分類表（`<名前>Columns = classifyColumns(...)`）と `apps/shared/log-event.ts` の `LOG_EVENT_SCHEMAS`（種類ごとのスキーマとマスクの印）も最上位の値として `ignoreStatic` で対象外になる。どちらも変異の代わりに行の丸ごとの比較で固定する（実ファイルの分類表は `todo-repository.postgres.test.ts` の `db_write` の行の before / after（`title` だけ `***`）、マスクの仕組みは `writer.test.ts` の架空の表の行、`LOG_EVENT_SCHEMAS` は `logger.test.ts` の種類ごとの行。番兵の値を含む）。
 - テストで `@repo/backend/...`・`@repo/shared/...` から値を import すると、その変異はテストに届かない。backend・apps/shared の振る舞いはそれぞれの中のテスト（相対 import）で確かめる。
 
 ## E2E（Playwright）

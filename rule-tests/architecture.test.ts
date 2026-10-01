@@ -1326,9 +1326,9 @@ const FRONTEND_PLACEMENT = {
 const PLACEMENT_RULES = [BACKEND_PLACEMENT, FRONTEND_PLACEMENT];
 
 // apps/shared（@repo/shared。Issue #90）に置いてよいのは、名前を決めたファイルだけ（env.ts・logger.ts・now.ts とそのテスト、
-//   logger の event.name の一覧 log-event.ts（Issue #209）、package.json・tsconfig.json）。
-// WHY log-event.ts にテストを置かない（一覧に log-event.test.ts を足さない）: 型と定数だけのファイルで、一覧の値と型の縛りは
-//   それを使う logger のテスト（logger.test.ts）が固定する。
+//   logger の event.name の一覧と種類ごとのスキーマ・マスクの印の log-event.ts（Issue #209・#216）とそのテスト、package.json・tsconfig.json）。
+// WHY log-event.test.ts を置く（Issue #216 で足した）: Issue #209 では型と定数だけのファイルでテストを置かなかったが、#216 で
+//   マスクの印（sensitive / freeText）と正規表現が入り、その仕様を隣のテストに置く。行の丸ごとの形は logger.test.ts が固定する。
 // WHY 何でも置ける場所にしない: 「frontend と backend の両方で使う」ものは多く、共通の置き場所を自由にすると、feature の
 //   コードや DB・React に依存するコードが集まり、層の規則（backend の 4 層・画面側の境界）の外で依存が育つ。
 //   置いてよいのは横断的な基盤（環境変数の入口・ログの出口・現在時刻の出口）だけにし、足すときはこの一覧・exports（SHARED_EXPORTS）・
@@ -3717,7 +3717,7 @@ const RULE_EXAMPLES: Record<
         "../domain/domain-error",
         "value",
       ],
-      // ログの唯一の出口（Issue #85。Issue #90 で apps/shared に移した）。problem.ts が想定外の例外を logger.error で残す。
+      // ログの唯一の出口（Issue #85。Issue #90 で apps/shared に移した）。problem.ts が想定外の例外を logger.emit（server_error）で残す。
       //   feature の presentation からも使える。相対パスで書いても参照先は同じ（書き方は backend-relative-only が見る）。
       [
         "apps/backend/shared/presentation/problem.ts",
@@ -4939,7 +4939,7 @@ const CONSOLE_ACCESS_EXAMPLES: {
     ],
     [
       "apps/backend/features/todo/internal/infra/x.ts",
-      'logger.error({ message: "x" });',
+      'logger.emit({ message: "x", event: { name: "server_error" } });',
     ],
     // テストと、対象外の場所・種類のファイル。
     ["apps/backend/features/todo/internal/infra/x.test.ts", "console.log(1);"],
@@ -5459,7 +5459,7 @@ const HARDCODED_TEXT_EXAMPLES: Record<
       ],
       [
         "apps/backend/shared/presentation/x.ts",
-        'logger.error({ message: "request failed" });',
+        'logger.emit({ message: "request failed", event: { name: "server_error" } });',
       ],
       // backend は JSX のテキスト・属性を見ない（日本語だけを見る）。
       [
@@ -7567,7 +7567,7 @@ const MUST_PASS_FILES: Record<string, string> = {
     '} from "../domain/domain-error";',
     // Issue #85: 想定外の例外はログの唯一の出口（Issue #90 で apps/shared に移した logger）で残す。
     'import { logger } from "@repo/shared/logger";',
-    'logger.error({ message: "x" });',
+    'logger.emit({ message: "x", event: { name: "server_error" } });',
   ),
   // console を直接書いてよいのは logger.ts だけ（Issue #85。Issue #90 で apps/shared に移した）。
   "apps/shared/logger.ts": lines(
@@ -7855,7 +7855,7 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { now } from "@repo/shared/now";',
     'import { type NextRequest, NextResponse } from "next/server";',
     'import { buildRequestLog } from "@/shared/request-log/request-log";',
-    "logger.info(buildRequestLog({ receivedAt: now() }));",
+    "logger.emit(buildRequestLog({ receivedAt: now() }));",
   ),
   // now-single-source: 現在時刻は apps/shared/now.ts だけが読み、ほかは now() を使う（backend の 4 層すべてと frontend 直下）。
   "apps/shared/now.ts": lines(
