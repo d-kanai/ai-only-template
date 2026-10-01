@@ -3,7 +3,7 @@ import {
   requireTodo,
   type TodoRepository,
 } from "../../features/todo/internal/domain/todo-repository";
-import type { Transaction } from "../../shared/domain/transaction";
+import type { Transaction } from "../../shared/application/transaction";
 import { changedProps } from "../../shared/infra/changed-props";
 
 // TodoRepository の InMemory 実装。プロセスが終わるとデータは消える。

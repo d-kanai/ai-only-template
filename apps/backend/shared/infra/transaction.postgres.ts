@@ -1,5 +1,7 @@
-import type { TransactionRunner } from "../application/transaction";
-import type { Transaction } from "../domain/transaction";
+import type {
+  Transaction,
+  TransactionRunner,
+} from "../application/transaction";
 import type { Database } from "./database";
 import { PostgresWriter, transactionOf } from "./writer";
 
@@ -13,7 +15,7 @@ import { PostgresWriter, transactionOf } from "./writer";
 //   no-direct-transaction。このファイルは Repository ではないので対象外）。command が張った 1 つのトランザクションの中で、
 //   読み込み（findByIdForUpdate の FOR UPDATE）と書き込み（insert / update / delete）を行う。
 // WHY work に渡す tx は Writer（記録する書き込みの口）: Repository は writerOf(tx) で Writer を取り出して書き、Writer が文ごとに
-//   変更履歴とログを残す（shared/infra/writer.ts）。domain の Transaction の brand で包み、application・domain には中を見せない。
+//   変更履歴とログを残す（shared/infra/writer.ts）。Transaction の brand（shared/application/transaction）で包み、application・domain には中を見せない。
 // WHY actorId（変更した利用者の id）を持つ（既定は null）: 変更履歴の actor は要求の文脈で、要求ごとに組み立てる runner が
 //   Writer に渡す。ログインが無い今は本番の組み立てが渡さず、常に null。
 export class PostgresTransactionRunner implements TransactionRunner {
