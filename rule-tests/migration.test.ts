@@ -31,6 +31,14 @@ import { afterAll, describe, expect, it } from "vitest";
 //     `INSERT … VALUES`・`UPDATE`・`DELETE` は見ない（今は INSERT … SELECT だけを使う）。
 //     `WHERE NOT EXISTS` の並びの字句で見るので、`WHERE t.completed AND NOT EXISTS (…)` のように条件の途中の NOT EXISTS は
 //     違反にする（誤検出。NOT EXISTS を WHERE の先頭に書く）。文字列リテラルの中の `where not exists` は通してしまう（見逃し）。
+//   - no-public-schema-qualifier: apps/backend/shared/drizzle/ の下の *.sql の文に、表のスキーマ修飾 `"public".`
+//     （引用符なしの `public.` も。大文字小文字と `.` の前後の空白は問わない）がある（Issue #192）。
+//     WHY: drizzle-kit 0.31.11 の generate は schema.ts の `.references()` を `REFERENCES "public"."todos"` と書く。
+//     createTestDatabase() はテストファイルごとの別スキーマ（search_path）にマイグレーションを当てるので、public を指す SQL は
+//     テストのスキーマの表を指さず、外部キーが public の表を参照して壊れる。外部キーは --custom の SQL にスキーマなしで書く
+//     （.claude/skills/db-migration/SKILL.md）。
+//     読み方: idempotent-insert-select と同じくコメントを消して文に分ける（コメントの中の WHY の説明で落とさない）。
+//     限界: 文字列リテラルの中の `public.` も違反にする（誤検出。今の SQL には無い）。`"public"` 以外のスキーマの修飾は見ない。
 //   - backfill-after-traffic: .github/workflows/deploy.yml に `pnpm,db:backfill` を run に持つステップが無い、そのステップが
 //     トラフィックの切替（run に `update-traffic`）のステップより前にある、run に `--wait` が無い、run に失敗を打ち消すつなぎ
 //     （`||`・`; exit 0`・末尾の `&`・`| cat`）がある、ステップに `continue-on-error:`（`false` 以外）がある。
@@ -67,6 +75,16 @@ function findNonIdempotentInserts(sql: string): number[] {
       /\bon\s+conflict\b[^;]*?\bdo\s+nothing\b/i.test(statement);
     return guarded ? [] : [index + 1];
   });
+}
+
+// ---- no-public-schema-qualifier ----
+
+// 表をスキーマ名 public で修飾した文（1 始まりの文の番号）。
+// WHY `\bpublic`: `is_public.`・`"is_public".` のように名前の一部の public は修飾ではない（`_` は単語の文字なので境界にならない）。
+function findPublicSchemaQualifiers(sql: string): number[] {
+  return sqlStatements(sql).flatMap((statement, index) =>
+    /(?:"public"|\bpublic)\s*\.\s*["\w]/i.test(statement) ? [index + 1] : [],
+  );
 }
 
 // ---- backfill-after-traffic ----
@@ -214,7 +232,13 @@ function collectMigrationViolations(root: string): string[] {
   const steps = findBackfillStepViolations(workflow).map(
     (message) => `backfill-after-traffic: ${DEPLOY_WORKFLOW}: ${message}`,
   );
-  return [...inserts, ...names, ...steps];
+  const qualifiers = listDrizzleSqlFiles(root).flatMap((path) =>
+    findPublicSchemaQualifiers(readFileSync(join(root, path), "utf8")).map(
+      (n) =>
+        `no-public-schema-qualifier: ${path} の ${n} 文目が表を "public". で修飾している`,
+    ),
+  );
+  return [...inserts, ...qualifiers, ...names, ...steps];
 }
 
 const repoRoot = join(import.meta.dirname, "..");
@@ -307,6 +331,50 @@ describe("INSERT … SELECT の冪等（findNonIdempotentInserts）", () => {
     ["小文字と改行", "insert\ninto\nx\nselect\n1\nfrom t", [1]],
   ])("%s は違反", (_name, sql, expected) => {
     expect(findNonIdempotentInserts(sql)).toEqual(expected);
+  });
+});
+
+describe("public のスキーマ修飾（findPublicSchemaQualifiers）", () => {
+  it.each([
+    [
+      "修飾なしの外部キー（0002 の形）",
+      'ALTER TABLE "c" ADD CONSTRAINT "c_fk" FOREIGN KEY ("p_id") REFERENCES "p"("id") ON DELETE cascade;',
+    ],
+    [
+      'コメントの中の "public".（WHY の説明）',
+      lines(
+        '-- drizzle-kit は REFERENCES "public"."p" と書く',
+        "/* public.p */",
+        'CREATE TABLE "c" ("id" uuid);',
+      ),
+    ],
+    [
+      "public を含む別の名前（列 is_public・表 publications）",
+      'CREATE TABLE "publications" ("is_public" boolean, "public_id" uuid);',
+    ],
+    ["空", ""],
+  ])("%s は違反なし", (_name, sql) => {
+    expect(findPublicSchemaQualifiers(sql)).toEqual([]);
+  });
+
+  it.each([
+    [
+      "drizzle-kit が .references() から生成する形",
+      lines(
+        'CREATE TABLE "c" ("id" uuid);--> statement-breakpoint',
+        'ALTER TABLE "c" ADD CONSTRAINT "c_fk" FOREIGN KEY ("p_id") REFERENCES "public"."p"("id");',
+      ),
+      [2],
+    ],
+    ["引用符なし", "insert into public.p select 1;", [1]],
+    ["大文字と空白", 'SELECT 1 FROM "PUBLIC" . "p";', [1]],
+    [
+      "複数の文",
+      'SELECT 1 FROM "public"."a";\nSELECT 1 FROM public.b;',
+      [1, 2],
+    ],
+  ])("%s は違反", (_name, sql, expected) => {
+    expect(findPublicSchemaQualifiers(sql)).toEqual(expected);
   });
 });
 
@@ -488,7 +556,7 @@ describe("列挙と検査（fixture）", () => {
     return root;
   }
 
-  it("drizzle の *.sql（backfill/ を含む）・backfill/ の名前・deploy.yml を検査し、違反を規則ごとに返す", () => {
+  it("drizzle の *.sql（backfill/ を含む）・backfill/ の名前・deploy.yml を検査し、違反を規則ごとに返す（冪等・public の修飾・名前・ステップの順）", () => {
     const root = fixture({
       [`${DRIZZLE_DIR}/0000_create.sql`]: "CREATE TABLE x (a int);",
       [`${DRIZZLE_DIR}/0001_data.sql`]: "INSERT INTO x SELECT 1 FROM t;",
@@ -496,7 +564,7 @@ describe("列挙と検査（fixture）", () => {
       [`${DRIZZLE_DIR}/drizzle.config.ts`]:
         "// INSERT INTO x SELECT 1 FROM t;\n",
       [`${BACKFILL_DIR}/0001_ok.sql`]:
-        "INSERT INTO x SELECT 1 FROM t ON CONFLICT DO NOTHING;",
+        'INSERT INTO x SELECT 1 FROM "public"."t" ON CONFLICT DO NOTHING;',
       [`${BACKFILL_DIR}/0002_bad.sql`]:
         "INSERT INTO x SELECT 1 FROM t WHERE NOT EXISTS (SELECT 1);\nINSERT INTO y SELECT 1 FROM t;",
       [`${BACKFILL_DIR}/notes.md`]: "INSERT INTO x SELECT 1 FROM t;",
@@ -527,6 +595,7 @@ describe("列挙と検査（fixture）", () => {
       violations: [
         `idempotent-insert-select: ${DRIZZLE_DIR}/0001_data.sql の 1 文目の INSERT … SELECT に WHERE NOT EXISTS も ON CONFLICT DO NOTHING も無い`,
         `idempotent-insert-select: ${BACKFILL_DIR}/0002_bad.sql の 2 文目の INSERT … SELECT に WHERE NOT EXISTS も ON CONFLICT DO NOTHING も無い`,
+        `no-public-schema-qualifier: ${BACKFILL_DIR}/0001_ok.sql の 1 文目が表を "public". で修飾している`,
         `backfill-file-name: ${BACKFILL_DIR}/nested は NNNN_<name>.sql でない`,
         `backfill-file-name: ${BACKFILL_DIR}/notes.md は NNNN_<name>.sql でない`,
         `backfill-after-traffic: ${DEPLOY_WORKFLOW}: backfill のステップが update-traffic のステップより前にある`,
@@ -551,7 +620,7 @@ describe("列挙と検査（fixture）", () => {
 });
 
 describe("マイグレーションと backfill（実ファイル）", () => {
-  it("drizzle の SQL は冪等、backfill/ の名前は NNNN_<name>.sql、deploy.yml は切替の後に backfill を流す", () => {
+  it("drizzle の SQL は冪等で public の修飾が無く、backfill/ の名前は NNNN_<name>.sql、deploy.yml は切替の後に backfill を流す", () => {
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     expect(listDrizzleSqlFiles(repoRoot)).toEqual(
       expect.arrayContaining([
