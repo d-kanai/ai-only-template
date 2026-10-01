@@ -7,6 +7,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { CHANGE_OPERATIONS } from "../domain/change-operation";
+import { classifyColumns } from "./column-classification";
 
 // feature をまたぐ表の定義（Drizzle のスキーマ）。feature の表は features/<feature>/internal/infra/schema.ts に置く。
 // WHY shared/infra に置く: change_logs はすべての feature の表の変更を 1 か所に積む横断の表で、どの feature にも属さない。
@@ -62,3 +63,18 @@ export const changeLogs = pgTable(
     ),
   ],
 );
+
+// change_logs の列の分類（Issue #216。rule-tests/schema.test.ts の column-classification がすべての表に求める）。
+// WHY changes だけ sensitive: 元の表の行の値（todos.title など）をそのまま持つ。actor_id（変更した利用者の id）は、ほかの表の
+//   id と同じくアプリが決める識別子で、ログの相関（誰の変更か）に使うので public。
+// 今は change_logs を Writer の insert / update / delete で書かない（recordChange が直接 INSERT する）ので、この分類が書き込みの
+//   ログに使われることは無い。表を足したときに分類を書く規則を例外なしにするため、ここにも置く。
+export const changeLogsColumns = classifyColumns(changeLogs, {
+  id: "public",
+  tableName: "public",
+  rowId: "public",
+  operation: "public",
+  changes: "sensitive",
+  actorId: "public",
+  occurredAt: "public",
+});

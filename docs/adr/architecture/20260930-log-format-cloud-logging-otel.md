@@ -1,7 +1,7 @@
 # ログの 1 行は Cloud Logging の特別フィールドと OTel semconv の名前（入れ子）にし、種類を event.name の固定の一覧で全行に出す
 
 - 日付: 2026-09-30
-- 状態: 採用
+- 状態: 置き換え（→ architecture/20260930-log-masking-in-logger.md）
 - 関連: Issue #209 / `.claude/rules/backend.md` / `.claude/rules/frontend.md` / `.claude/rules/shared.md` / `.claude/rules/env.md` / `apps/shared/logger.ts` / `apps/shared/log-event.ts` / `apps/frontend_customer/shared/request-log/request-log.ts` / `apps/backend/shared/infra/write.ts` / ADR `architecture/20260929-logger-single-exit.md` / ADR `architecture/20260929-request-log-in-proxy.md` / ADR `architecture/20260930-repository-write-log.md`
 
 ## 背景

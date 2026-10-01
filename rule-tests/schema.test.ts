@@ -51,6 +51,22 @@ import { describe, expect, it } from "vitest";
 //   型引数の中のカンマ（`$type<Record<string, X>>()`）は要素の区切りと取り違える（ほかの列なら影響しない。id の列の `$type` は
 //   許可の一覧に無いので、どのみち違反）。import した uuid を関数の引数などで同じ名前に隠す（shadowing）と見分けられず通る。
 //   列名を省いた `id: uuid().primaryKey()`（Drizzle はキー名を列名に使える）も違反にする（`uuid("id")` と書く。reviewer の probe）。
+//
+// 列の分類表（Issue #216）: 規則 column-classification。`pgTable(` ごとに、表を受ける変数（`const <名前> = pgTable(`）の名前に
+//   Columns を付けた分類表 `export const <名前>Columns = classifyColumns(<名前>, { ... })` が同じファイルに無ければ違反（違反の行は
+//   `pgTable(` の行）。classifyColumns は `column-classification`（apps/backend/shared/infra/column-classification.ts）からの
+//   名前の import（値。`import type`・inline の `type`・別名 `x as classifyColumns`・ほかのモジュールは不可）に限る。
+//   表を変数で受けない `pgTable(`（`export default pgTable(`）も違反。例外（`// WHY <見出し>:`）は認めない。
+// WHY すべての表に分類表: 書き込みのログ（shared/infra/writer.ts の db_write）は changes の before / after に行の値を出し、分類が
+//   sensitive の列と分類の無い列を *** にする。分類が無い表は全列 ***（fail closed）で漏れはしないが、ログで追えない表が黙って
+//   増える。表を足した時点で、どの列が個人情報かを決めさせる（列の網羅は classifyColumns の引数の型が tsc で強制する）。
+// WHY 名前を `<表の変数>Columns` に固定し、classifyColumns の第 1 引数も見る: 分類表と表の組を字句で決めるため。別の表を渡した
+//   分類表（`todosColumns = classifyColumns(others, …)`）は、todos の分類が無いのと同じ。
+// WHY export を求める: 分類表は schema.ts の外（テスト・調査）から表と並べて読めるようにする。export の無い const は使われない
+//   値として Biome（noUnusedVariables）に消されうる。
+// 限界（字句の推定）: classifyColumns を別の関数で包む・変数に入れ直す・分類のオブジェクトを変数で渡す書き方は見分けず、形が
+//   合えば通る（中身の網羅は型が見る）。別名 `import { classifyColumns as c }` で `c(` と呼ぶと違反になる（安全側）。
+//   classifyColumns を同じ名前で shadowing（引数・ローカルの関数）しても見分けない。
 
 // 列の型の規則（WHY の見出しで例外を認める）。
 type ColumnTypeRuleId =
@@ -61,7 +77,7 @@ type ColumnTypeRuleId =
   | "json";
 
 // surrogate-key は例外を認めないので、WHY_LABEL を持つ ColumnTypeRuleId と分ける。
-type RuleId = ColumnTypeRuleId | "surrogate-key";
+type RuleId = ColumnTypeRuleId | "surrogate-key" | "column-classification";
 
 type ColumnTypeViolation = { rule: RuleId; line: number };
 
@@ -357,6 +373,59 @@ function findSurrogateKeyViolations(text: string): ColumnTypeViolation[] {
   return violations;
 }
 
+// `column-classification` から値として名前で import した classifyColumns があるか（`classifyColumns as x` の別名は不可、
+// `x as classifyColumns` も不可。import type と inline の type も不可）。パスは元のテキストで見る（masked では文字列が空白）。
+// WHY masked で import の位置がコメントでないことを見る: コメントアウトした import（`// import { classifyColumns } ...`）を数えない。
+function importsClassifyColumns(text: string, masked: string): boolean {
+  const imports = text.matchAll(
+    /import\s*\{([^}]*)\}\s*from\s*["']([^"']*)["']/g,
+  );
+  for (const match of imports) {
+    const [, specifiers = "", path = ""] = match;
+    if (!masked.startsWith("import", match.index)) continue;
+    if (!/(?:^|\/)column-classification$/.test(path)) continue;
+    if (specifiers.split(",").some((s) => s.trim() === "classifyColumns")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// `pgTable(` の呼び出し（masked の関数名の位置 index）の表を受ける変数の名前（`const <名前> = pgTable(` / `= pg.pgTable(`）。
+// 変数で受けていなければ undefined。
+function tableVariableOf(masked: string, index: number): string | undefined {
+  return new RegExp(
+    `\\b(?:const|let|var)\\s+(${IDENTIFIER})\\s*=\\s*(?:${IDENTIFIER}\\s*\\.\\s*)?$`,
+  ).exec(masked.slice(0, index))?.[1];
+}
+
+// 各 `pgTable(` について、`export const <名前>Columns = classifyColumns(<名前>,` が同じファイルに無ければ違反（違反の行は
+// `pgTable` の名前の行）。classifyColumns が column-classification からの import でなければ、すべての表が違反。
+function findColumnClassificationViolations(
+  text: string,
+): ColumnTypeViolation[] {
+  const masked = maskCommentsAndStrings(text);
+  const imported = importsClassifyColumns(text, masked);
+  const violations: ColumnTypeViolation[] = [];
+  for (const call of builderCalls(masked, pgCoreImports(text))) {
+    // WHY `?? call.name`: surrogate-key と同じく、pg-core 以外から import した `pgTable(` も表として検査する（安全側）。
+    if ((call.builder ?? call.name) !== "pgTable") continue;
+    const table = tableVariableOf(masked, call.index);
+    // WHY $ を逃がす: 識別子は $ を含められ（IDENTIFIER）、正規表現では行末の意味になる。
+    const name = table?.replaceAll("$", "\\$");
+    const classified =
+      imported &&
+      name !== undefined &&
+      new RegExp(
+        `\\bexport\\s+const\\s+${name}Columns\\s*=\\s*classifyColumns\\s*\\(\\s*${name}\\s*,`,
+      ).test(masked);
+    if (classified) continue;
+    const line = masked.slice(0, call.index).split("\n").length;
+    violations.push({ rule: "column-classification", line });
+  }
+  return violations;
+}
+
 // 検査の対象: apps/backend の下の infra/schema.ts（node_modules は除く）。リポジトリ相対の / 区切りで、名前順。
 // WHY features と shared の両方: drizzle-kit の設定（apps/backend/shared/drizzle/drizzle.config.ts）が読むのは
 //   features/*/internal/infra/schema.ts だけだが、shared/infra に置いたスキーマも同じ既定に従わせる（置いた時点で止める）。
@@ -378,11 +447,12 @@ function listSchemaFiles(root: string): string[] {
     .sort();
 }
 
-// 1 ファイルのすべての規則の違反を行の順に返す（同じ行は列の型 → surrogate-key の順。sort は安定）。
+// 1 ファイルのすべての規則の違反を行の順に返す（同じ行は列の型 → surrogate-key → column-classification の順。sort は安定）。
 function findSchemaViolations(text: string): ColumnTypeViolation[] {
   return [
     ...findColumnTypeViolations(text),
     ...findSurrogateKeyViolations(text),
+    ...findColumnClassificationViolations(text),
   ].sort((a, b) => a.line - b.line);
 }
 
@@ -1062,6 +1132,207 @@ describe("サロゲートキーの判定（findSurrogateKeyViolations）: must r
   });
 });
 
+// --- 列の分類表（column-classification。Issue #216） ---
+const CLASSIFY_IMPORT =
+  'import { classifyColumns } from "../../../../shared/infra/column-classification";';
+const TODOS =
+  'export const todos = pgTable("todos", { id: uuid("id").primaryKey(), title: text("title") });';
+const TODOS_COLUMNS =
+  'export const todosColumns = classifyColumns(todos, { id: "public", title: "sensitive" });';
+
+describe("列の分類表の判定（findColumnClassificationViolations）: must pass", () => {
+  it.each([
+    [
+      "表の隣に export const <表>Columns = classifyColumns(<表>, { ... })",
+      source(TABLE_IMPORT, CLASSIFY_IMPORT, TODOS, TODOS_COLUMNS),
+    ],
+    [
+      "同じディレクトリからの import（shared/infra/schema.ts）と、pg.pgTable（名前空間）",
+      source(
+        IMPORT,
+        'import { classifyColumns, type ColumnClass } from "./column-classification";',
+        'export const logs = pg.pgTable("logs", { id: pg.uuid("id").primaryKey() });',
+        'export const logsColumns = classifyColumns(logs, { id: "public" });',
+      ),
+    ],
+    [
+      "複数の表それぞれに分類表（複数行の呼び出し・第 3 引数のある pgTable）",
+      source(
+        TABLE_IMPORT,
+        CLASSIFY_IMPORT,
+        TODOS,
+        "export const todoStatusChanges = pgTable(",
+        '  "todo_status_changes",',
+        '  { id: uuid("id").primaryKey() },',
+        "  (table) => [],",
+        ");",
+        TODOS_COLUMNS,
+        "export const todoStatusChangesColumns = classifyColumns(",
+        "  todoStatusChanges,",
+        '  { id: "public" },',
+        ");",
+      ),
+    ],
+    [
+      "変数名に $ を含む表",
+      source(
+        TABLE_IMPORT,
+        CLASSIFY_IMPORT,
+        'export const $t = pgTable("t", { id: uuid("id").primaryKey() });',
+        'export const $tColumns = classifyColumns($t, { id: "public" });',
+      ),
+    ],
+    [
+      "pgTable の無いファイル（コメント・文字列の pgTable( は表ではない）",
+      source("// pgTable( は書かない", 'const s = "pgTable(";'),
+    ],
+  ])("%s", (_name, text) => {
+    expect(findColumnClassificationViolations(text)).toEqual([]);
+  });
+});
+
+describe("列の分類表の判定（findColumnClassificationViolations）: must reject", () => {
+  it.each<[string, string, ColumnTypeViolation[]]>([
+    [
+      "分類表が無い",
+      source(TABLE_IMPORT, CLASSIFY_IMPORT, TODOS),
+      [{ rule: "column-classification", line: 3 }],
+    ],
+    [
+      "2 つの表の片方だけに分類表がある（無い表だけが違反）",
+      source(
+        TABLE_IMPORT,
+        CLASSIFY_IMPORT,
+        TODOS,
+        'export const others = pgTable("others", { id: uuid("id").primaryKey() });',
+        TODOS_COLUMNS,
+      ),
+      [{ rule: "column-classification", line: 4 }],
+    ],
+    [
+      "分類表の名前が <表>Columns でない（todoColumns）",
+      source(
+        TABLE_IMPORT,
+        CLASSIFY_IMPORT,
+        TODOS,
+        'export const todoColumns = classifyColumns(todos, { id: "public", title: "sensitive" });',
+      ),
+      [{ rule: "column-classification", line: 3 }],
+    ],
+    [
+      "分類表が別の表を渡している（todosColumns = classifyColumns(others, …)）",
+      source(
+        TABLE_IMPORT,
+        CLASSIFY_IMPORT,
+        TODOS,
+        'export const todosColumns = classifyColumns(others, { id: "public" });',
+      ),
+      [{ rule: "column-classification", line: 3 }],
+    ],
+    [
+      "分類表を export していない",
+      source(
+        TABLE_IMPORT,
+        CLASSIFY_IMPORT,
+        TODOS,
+        'const todosColumns = classifyColumns(todos, { id: "public", title: "sensitive" });',
+      ),
+      [{ rule: "column-classification", line: 3 }],
+    ],
+    [
+      "satisfies だけの分類表（classifyColumns で登録しない）",
+      source(
+        TABLE_IMPORT,
+        CLASSIFY_IMPORT,
+        TODOS,
+        'export const todosColumns = { id: "public", title: "sensitive" } satisfies Record<keyof typeof todos.$inferSelect, string>;',
+      ),
+      [{ rule: "column-classification", line: 3 }],
+    ],
+    [
+      "分類表がコメントアウトされている",
+      source(TABLE_IMPORT, CLASSIFY_IMPORT, TODOS, `// ${TODOS_COLUMNS}`),
+      [{ rule: "column-classification", line: 3 }],
+    ],
+    [
+      "分類表が文字列の中にある",
+      source(
+        TABLE_IMPORT,
+        CLASSIFY_IMPORT,
+        TODOS,
+        `const s = \`${TODOS_COLUMNS}\`;`,
+      ),
+      [{ rule: "column-classification", line: 3 }],
+    ],
+    [
+      "classifyColumns を import していない（ローカルの関数）",
+      source(
+        TABLE_IMPORT,
+        "const classifyColumns = (t: unknown, c: unknown) => c;",
+        TODOS,
+        TODOS_COLUMNS,
+      ),
+      [{ rule: "column-classification", line: 3 }],
+    ],
+    [
+      "classifyColumns の import がコメントアウトされている",
+      source(TABLE_IMPORT, `// ${CLASSIFY_IMPORT}`, TODOS, TODOS_COLUMNS),
+      [{ rule: "column-classification", line: 3 }],
+    ],
+    [
+      "classifyColumns を import type で import している",
+      source(
+        TABLE_IMPORT,
+        'import type { classifyColumns } from "../../../../shared/infra/column-classification";',
+        TODOS,
+        TODOS_COLUMNS,
+      ),
+      [{ rule: "column-classification", line: 3 }],
+    ],
+    [
+      "classifyColumns を inline の type で import している",
+      source(
+        TABLE_IMPORT,
+        'import { type classifyColumns } from "../../../../shared/infra/column-classification";',
+        TODOS,
+        TODOS_COLUMNS,
+      ),
+      [{ rule: "column-classification", line: 3 }],
+    ],
+    [
+      "別の名前を classifyColumns の別名で import している",
+      source(
+        TABLE_IMPORT,
+        'import { maskRow as classifyColumns } from "../../../../shared/infra/column-classification";',
+        TODOS,
+        TODOS_COLUMNS,
+      ),
+      [{ rule: "column-classification", line: 3 }],
+    ],
+    [
+      "classifyColumns を別のモジュール（前方一致の column-classification-x）から import している",
+      source(
+        TABLE_IMPORT,
+        'import { classifyColumns } from "./column-classification-x";',
+        TODOS,
+        TODOS_COLUMNS,
+      ),
+      [{ rule: "column-classification", line: 3 }],
+    ],
+    [
+      "pgTable を変数で受けていない（export default）",
+      source(
+        TABLE_IMPORT,
+        CLASSIFY_IMPORT,
+        'export default pgTable("t", { id: uuid("id").primaryKey() });',
+      ),
+      [{ rule: "column-classification", line: 3 }],
+    ],
+  ])("%s は違反", (_name, text, expected) => {
+    expect(findColumnClassificationViolations(text)).toEqual(expected);
+  });
+});
+
 // --- 列挙 → 読み取り → 判定を通した fixture テスト ---
 // WHY: 判定が正しくても、対象の列挙（infra/schema.ts の見つけ方）が漏れれば見逃す。一時ディレクトリに架空のツリーを置き、
 //   本番と同じ collectSchemaViolations に通して、違反の集合を丸ごと比較する（見逃しも余分な検出も失敗にする）。
@@ -1091,7 +1362,7 @@ describe("スキーマの列挙と検査（fixture）", () => {
     'export const t = pg.pgTable("t", { title: pg.varchar("title") });',
   );
 
-  it("apps/backend の features と shared の infra/schema.ts だけを対象にし、すべての規則（列の型と surrogate-key）の違反を「規則: パス:行」の行の順で返す", () => {
+  it("apps/backend の features と shared の infra/schema.ts だけを対象にし、すべての規則（列の型・surrogate-key・column-classification）の違反を「規則: パス:行」の行の順で返す", () => {
     const result = violationsOfFixture({
       "apps/backend/features/a/internal/infra/schema.ts": source(
         IMPORT,
@@ -1100,9 +1371,12 @@ describe("スキーマの列挙と検査（fixture）", () => {
         '  at: pg.timestamp("at"),',
         "});",
       ),
+      // 違反の無いファイル（uuid の id と分類表）。
       "apps/backend/features/b/internal/infra/schema.ts": source(
         IMPORT,
+        'import { classifyColumns } from "../../../../shared/infra/column-classification";',
         'export const b = pg.pgTable("b", { id: pg.uuid("id").primaryKey() });',
+        'export const bColumns = classifyColumns(b, { id: "public" });',
       ),
       "apps/backend/shared/infra/schema.ts": source(
         IMPORT,
@@ -1123,9 +1397,11 @@ describe("スキーマの列挙と検査（fixture）", () => {
       ],
       violations: [
         "surrogate-key: apps/backend/features/a/internal/infra/schema.ts:2",
+        "column-classification: apps/backend/features/a/internal/infra/schema.ts:2",
         "varchar: apps/backend/features/a/internal/infra/schema.ts:3",
         "timestamp-without-timezone: apps/backend/features/a/internal/infra/schema.ts:4",
         "json: apps/backend/shared/infra/schema.ts:2",
+        "column-classification: apps/backend/shared/infra/schema.ts:2",
       ],
     });
   });
@@ -1138,8 +1414,8 @@ describe("スキーマの列挙と検査（fixture）", () => {
   });
 });
 
-describe("DB の列の型とサロゲートキー（実ファイル）", () => {
-  it("apps/backend の infra/schema.ts はすべて列の型の既定に従い、すべての表が uuid の id の primaryKey を持つ", () => {
+describe("DB の列の型・サロゲートキー・列の分類表（実ファイル）", () => {
+  it("apps/backend の infra/schema.ts はすべて列の型の既定に従い、すべての表が uuid の id の primaryKey と列の分類表を持つ", () => {
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     expect(listSchemaFiles(repoRoot)).toContain(
       "apps/backend/features/todo/internal/infra/schema.ts",

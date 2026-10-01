@@ -40,7 +40,7 @@ type LoggedRequest = {
       header: { accept: string | null; referer: string | null };
     };
   };
-  url: { path: string; query_keys: string[] };
+  url: { path: string; query: Record<string, string> };
 };
 
 // stdout のうちリクエストログの行だけを取り出す。JSON でない行（Next の起動メッセージ）と、リクエストログ以外の JSON の行
@@ -143,7 +143,9 @@ test("画面を開くと page_request の行が 1 つ、画面が呼ぶ /api/tod
     ]);
   const [, pageLine, apiLine] = loggedRequests();
   expect(pageLine.http.request.header.accept).toContain("text/html");
-  expect(apiLine.http.request.header.referer).toBe(`${baseURL}/`);
+  // WHY referer は *** : ブラウザが付けた referer（画面の URL。クエリを含みうる）は logger がマスクする（Issue #216。
+  //   apps/shared/log-event.ts）。値があったこと（null でないこと）だけが行に残る。
+  expect(apiLine.http.request.header.referer).toBe("***");
 
   // リンクを押したときのクライアント遷移（RSC の取得）は page_request の行になる。表示されたリンクのプリフェッチ
   //   （next-router-prefetch ヘッダ付き）は proxy.ts の matcher の missing で除くので、押す前に /todo/<id> の行は無い。
@@ -164,7 +166,7 @@ test("画面を開くと page_request の行が 1 つ、画面が呼ぶ /api/tod
 
 // WHY traceparent も付ける: trace の値のプロジェクト ID は proxy.ts が env.GCP_PROJECT_ID から渡す（Issue #209）。proxy.ts は
 //   カバレッジの対象外なので、その結線（env の値が行に入ること）はここで確かめる。解析の規則は request-log.test.ts が固定する。
-test("x-request-id と traceparent を付けて呼ぶと、その値が行の http.request.id・trace と応答ヘッダに入り、クエリは値を出さない", async ({
+test("x-request-id と traceparent を付けて呼ぶと、その値が行の http.request.id・trace と応答ヘッダに入り、クエリの値は *** にマスクして出す", async ({
   request,
 }) => {
   const requestId = `e2e-${Date.now()}`;
@@ -188,7 +190,7 @@ test("x-request-id と traceparent を付けて呼ぶと、その値が行の ht
     message: "GET /api/todos",
     event: { name: "api_request" },
     http: { request: { id: requestId } },
-    url: { path: "/api/todos", query_keys: ["token"] },
+    url: { path: "/api/todos", query: { token: "***" } },
     "logging.googleapis.com/trace": `projects/${env.GCP_PROJECT_ID}/traces/${traceId}`,
     "logging.googleapis.com/spanId": "00f067aa0ba902b7",
     "logging.googleapis.com/trace_sampled": true,

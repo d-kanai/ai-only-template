@@ -64,7 +64,7 @@ describe("buildRequestLog: 5W1H の各項目", () => {
           body: { size: 12 },
         },
       },
-      url: { path: "/todo/abc", query_keys: ["tab", "sort"] },
+      url: { path: "/todo/abc", query: { tab: "detail", sort: "asc" } },
       client: { address: "203.0.113.5" },
       user_agent: { original: "Mozilla/5.0 (X11; Linux x86_64)" },
       server: { address: "localhost:3100" },
@@ -92,7 +92,7 @@ describe("buildRequestLog: 5W1H の各項目", () => {
           body: { size: null },
         },
       },
-      url: { path: "/api/todos", query_keys: [] },
+      url: { path: "/api/todos", query: {} },
       client: { address: null },
       user_agent: { original: null },
       server: { address: null },
@@ -174,8 +174,13 @@ describe("buildRequestLog: event.name の判定（/api/** は api_request、そ�
   });
 });
 
-describe("buildRequestLog: url.path と url.query_keys（クエリの値は出さない）", () => {
-  test("クエリの値はどの項目にも出さず、キーだけを出現順に出す", () => {
+// WHY 値もそのまま出す（ここではマスクしない）: マスクはログの唯一の出口 logger（apps/shared/log-event.ts の page_request /
+//   api_request のスキーマ）が行い、url.query の値は *** に、キーは自由文の網（メールアドレスなど）を通して出す（Issue #216）。
+//   ここで値を落とすと、logger のスキーマでマスクされていることを確かめる意味が無くなり、マスクの判断が 2 か所に分かれる。
+//   画面側の shared/ は apps/shared を参照できない（規則 screen-to-shared）ので、マスクの済んだ行の形は logger.test.ts と
+//   E2E（apps/e2e/request-log.spec.ts。stdout にクエリの値が出ないこと）で確かめる。
+describe("buildRequestLog: url.path と url.query（キーと値の組。マスクは logger が行う）", () => {
+  test("クエリをキーと値の組（デコードした値）にして、出現順に出す", () => {
     const log = buildRequestLog(
       input({
         url: "http://localhost/api/todos?email=secret%40example.com&token=s3cr3t",
@@ -183,27 +188,28 @@ describe("buildRequestLog: url.path と url.query_keys（クエリの値は出�
     );
     expect(log.url).toEqual({
       path: "/api/todos",
-      query_keys: ["email", "token"],
+      query: { email: "secret@example.com", token: "s3cr3t" },
     });
-    const line = JSON.stringify(log);
-    expect(line).not.toContain("secret");
-    expect(line).not.toContain("s3cr3t");
+    expect(Object.keys(log.url.query)).toEqual(["email", "token"]);
   });
 
-  test("同じキーが複数回あっても 1 回だけ出す", () => {
-    expect(
-      buildRequestLog(input({ url: "http://localhost/?a=1&b=2&a=3" })).url
-        .query_keys,
-    ).toEqual(["a", "b"]);
+  // WHY 後の値を使う: 値は logger が *** にするので、どの値を残すかは行の中身に影響しない。キーの種類と順（最初に出た位置）が
+  //   分かれば足りる。
+  test("同じキーが複数回あっても 1 回だけ出す（位置は最初に出た所、値は後のもの）", () => {
+    const { query } = buildRequestLog(
+      input({ url: "http://localhost/?a=1&b=2&a=3" }),
+    ).url;
+    expect(query).toEqual({ a: "3", b: "2" });
+    expect(Object.keys(query)).toEqual(["a", "b"]);
   });
 
   test("値の無いキー・空のクエリ・フラグメントを扱う", () => {
     expect(
       buildRequestLog(input({ url: "http://localhost/x?flag#frag" })),
-    ).toMatchObject({ url: { path: "/x", query_keys: ["flag"] } });
+    ).toMatchObject({ url: { path: "/x", query: { flag: "" } } });
     expect(
-      buildRequestLog(input({ url: "http://localhost/x?" })).url.query_keys,
-    ).toEqual([]);
+      buildRequestLog(input({ url: "http://localhost/x?" })).url.query,
+    ).toEqual({});
   });
 });
 

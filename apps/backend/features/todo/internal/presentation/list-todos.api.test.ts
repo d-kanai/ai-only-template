@@ -99,7 +99,7 @@ describe("GET /api/todos", () => {
   });
 
   test("一覧の取得で想定外の例外が起きたら、500 と内部の情報を含まない /problems/internal-error を返し、例外をログに残す", async () => {
-    // toProblemResponse が想定外の例外を logger.error（中で console.error）に出す。テストの出力を汚さないよう抑制し、
+    // toProblemResponse が想定外の例外を logger.emit（server_error。ERROR なので中で console.error）に出す。テストの出力を汚さないよう抑制し、
     //   例外の type と message が 1 行に入ったことだけを確かめる（行の形は logger.test.ts で固定している）。
     const consoleError = vi
       .spyOn(console, "error")

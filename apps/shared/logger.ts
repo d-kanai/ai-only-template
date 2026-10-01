@@ -18,114 +18,116 @@
 // WHY 中で console.log / console.warn / console.error を使う（process.stdout.write にしない）: 呼び出し側のテストが
 //   vi.spyOn(console, ...) で「ログに残したこと」を確かめられるようにする。
 
-import type { LogEventName } from "./log-event";
+import {
+  LOG_EVENT_NAMES,
+  LOG_EVENT_SCHEMAS,
+  type LogEvent,
+  type LogEventName,
+  type ParsedLogEvent,
+  type Severity,
+  severityOf,
+} from "./log-event";
 import { now } from "./now";
 
-export type LogLevel = "info" | "warn" | "error";
+// WHY 型を ./log-event.ts から export し直す: 呼び出し側（とテスト）は logger から LogEvent を読み、log-event.ts は公開しない
+//   （apps/shared/package.json の exports に ./log-event を置かない。.claude/rules/shared.md）。
+export type { LogEvent };
 
-// 1 行に載せる出来事（logger の引数。以下 entry）。キーと値はそのまま JSON にする（Error は { type, message } に変える）。
-// WHY message と event.name を型で必須にする: message は Logs Explorer の一覧に出る表示の行（Cloud Logging の特別フィールド）、
-//   event.name はログの種類（./log-event.ts の一覧）。どちらかが無い行は、一覧で何の行か分からず、種類で引いても拾えない。
-//   書き忘れを実行時でなく型チェックで止める（logger.test.ts の @ts-expect-error が型を緩めると落ちる）。
-// WHY event を入れ子のオブジェクトにする（"event.name" の平らなキーにしない）: Logs Explorer で jsonPayload.event.name と
-//   書ける。平らなキーにすると jsonPayload."event.name" のように引用符が要る。段階（phase）や所要時間（duration_ms）も
-//   event の中に置き、種類ごとの項目を 1 か所にまとめる。
-// WHY 任意のキーを許す（[key: string]: unknown）: 種類ごとに載せる項目（http・db・error など）が違い、ここで全部を型にすると
-//   logger が呼び出し側の事情を知ることになる。項目の名前は各呼び出し側のテストが行を丸ごと比べて固定する。
-export type LogEvent = {
-  message: string;
-  event: { name: LogEventName; [key: string]: unknown };
-  // 出来事の時刻（RFC 3339）。無ければ logger が現在時刻を入れる（下の toLine）。
-  time?: string;
-  [key: string]: unknown;
-};
+// parse に失敗した（event がスキーマに合わない・event.name が一覧に無い）ときに出す文言。
+const SCHEMA_MISMATCH_MESSAGE =
+  "logger: event does not match the schema of its event.name";
+// event の読み取り（getter など）が例外を投げたときに出す文言。
+const UNREADABLE_MESSAGE = "logger: reading the event threw an exception";
 
-// level に対する Cloud Logging の LogSeverity の名前（https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#logseverity ）。
-// WHY warn を WARNING にする: LogSeverity に WARN は無く、WARNING が正しい名前。一覧に無い値は重大度として読まれない
-//   （DEFAULT になる）。
+// severity に対する console のメソッド。
+// WHY severity ごとに console のメソッドを分ける: INFO は stdout（console.log）、WARNING / ERROR は stderr（console.warn /
+//   console.error）。実行環境が stderr を異常の出力として扱えるようにする。
 // WHY 対応表を関数の中に置く（最上位の定数にしない）: 最上位の値は Stryker の static な変異になり、ignoreStatic で検査から外れる
 //   （.claude/rules/testing.md の mutation testing）。
-function severityOf(level: LogLevel): "INFO" | "WARNING" | "ERROR" {
-  const severities = {
-    info: "INFO",
-    warn: "WARNING",
-    error: "ERROR",
-  } as const satisfies Record<LogLevel, string>;
-  return severities[level];
+function writerOf(severity: Severity): (line: string) => void {
+  const writers = {
+    INFO: (line: string) => console.log(line),
+    WARNING: (line: string) => console.warn(line),
+    ERROR: (line: string) => console.error(line),
+  } satisfies Record<Severity, (line: string) => void>;
+  return writers[severity];
 }
 
-// WHY level ごとに console のメソッドを分ける: info は stdout（console.log）、warn / error は stderr（console.warn /
-//   console.error）。実行環境が stderr を異常の出力として扱えるようにする。
-const WRITERS: Record<LogLevel, (line: string) => void> = {
-  info: (line) => console.log(line),
-  warn: (line) => console.warn(line),
-  error: (line) => console.error(line),
-};
-
-// JSON.stringify で JSON にできなかったとき（循環参照・BigInt・toJSON が例外を投げるなど）に出す文言。
-const UNSERIALIZABLE_MESSAGE =
-  "logger: event could not be serialized to JSON (circular reference, BigInt, etc.)";
-
-// JSON.stringify の replacer。Error は { type, message } にする。
-// WHY 変換する: Error の name / message / stack は列挙できないプロパティなので、そのまま JSON.stringify すると {} になり、
-//   何が起きたかが行に残らない。
-// WHY type と message の名前: OTel semconv の exception.type / exception.message、ECS の error.type / error.message と同じにする
-//   （Error の name を type に入れる）。
-// WHY stack は出さない: 1 行が長くなり、サーバのファイルのパスなど内部の情報も含むため。原因の特定は type と message で
-//   足りる前提（足りなくなったら、出す内容をここで決め直す。Error Reporting に拾わせるには stack が要る。別 Issue）。
-function replaceError(_key: string, value: unknown): unknown {
-  return value instanceof Error
-    ? { type: value.name, message: value.message }
-    : value;
+// event.name に対するスキーマ。一覧に無い名前なら undefined。
+// WHY Object.hasOwn: "toString" のような Object.prototype のプロパティの名前で、スキーマでない値を引かないようにする。
+// WHY 型を z.ZodType の safeParse の形に広げる: スキーマの union のままだと、呼び出しのシグネチャが種類ごとに違い 1 つに
+//   まとまらない（どの種類でも「unknown を受けて成否と値を返す」ことだけを使う）。
+function schemaOf(
+  name: unknown,
+):
+  | { safeParse: (value: unknown) => { success: boolean; data?: unknown } }
+  | undefined {
+  return typeof name === "string" && Object.hasOwn(LOG_EVENT_SCHEMAS, name)
+    ? LOG_EVENT_SCHEMAS[name as LogEventName]
+    : undefined;
 }
 
-function toLine(level: LogLevel, entry: LogEvent): string {
-  const severity = severityOf(level);
+// logger 自身が出す logger_error の 1 行。項目は固定（文言・event.name と、一覧にある名前なら失敗した種類の名前）で、
+//   呼び出し側の event の値を含めない。
+// WHY event.name を専用の logger_error にする（元の event.name を使わない）: 元の名前（db_write など）で出すと、その種類で
+//   引いたときに種類ごとの項目（db など）の無い行が混ざる。専用の名前なら「ログを出せなかった」ことを 1 つの条件で引け、
+//   アラートにもできる。
+function loggerErrorLine(
+  time: string,
+  message: string,
+  failedName?: LogEventName,
+): { severity: Severity; line: string } {
+  return {
+    severity: "ERROR",
+    line: JSON.stringify({
+      severity: "ERROR",
+      time,
+      message,
+      event: { name: "logger_error", failed_name: failedName },
+    }),
+  };
+}
+
+function knownName(name: unknown): LogEventName | undefined {
+  return LOG_EVENT_NAMES.find((known) => known === name);
+}
+
+function toLine(event: LogEvent): { severity: Severity; line: string } {
   // WHY now() から取る: 現在時刻の唯一の出口（now.ts）を通し、テストが時刻を差し替えて行を丸ごと比べられるようにする。
   // WHY toISOString: RFC 3339 の文字列（UTC の Z 付き）で、Cloud Logging の特別フィールド time が受け付ける形。
   const time = now().toISOString();
   try {
-    // WHY { severity, time, message, event, ...rest } の順: 先頭に severity・time・message・event を置き、呼び出し側のキーの順に
-    //   よらず、どの行も同じ並びで読めるようにする。後の ...rest は値を上書きするが、既にあるキーの位置は変えない。
-    //   time は entry にあればそれを使う（リクエストの受信時刻など、出来事の時刻を優先する）。entry の time が undefined なら
-    //   現在時刻に戻す（spread で undefined に上書きされ、行から time が消えるのを防ぐ）。
-    // WHY 後から severity を代入し直す: severity は entry にあっても呼んだメソッドのものにする（出力先と重大度を食い違わせない）。
-    //   既にあるキーへの代入なので、並びは先頭のまま。
-    // WHY 分割代入と spread も try の中: entry の getter が例外を投げても、下の catch で「失敗した旨の 1 行」にして呼び出し側に
-    //   伝えない。
-    const { message, event, ...rest } = entry;
-    const line: Record<string, unknown> = {
+    // WHY スキーマで parse した結果だけを出す（Issue #216）: 一覧に無いキーは落ち（allowlist）、sensitive の項目は ***、自由文は
+    //   正規表現を通る。呼び出し側は生の値を渡すだけで、マスクの判断はここ（と log-event.ts）に閉じる。
+    // WHY parse の失敗で例外にしない（safeParse）: ログの失敗で本来の処理（応答を返すなど）を止めない。生の event は出さない
+    //   （どの項目が sensitive かを決められない形なので）。
+    const name: unknown = event.event?.name;
+    const result = schemaOf(name)?.safeParse(event);
+    if (!result?.success) {
+      return loggerErrorLine(time, SCHEMA_MISMATCH_MESSAGE, knownName(name));
+    }
+    const parsed = result.data as ParsedLogEvent;
+    const severity = severityOf(parsed);
+    // WHY { severity, time, message, event, ...rest } の順: 先頭に severity・time・message・event を置き、どの行も同じ並びで
+    //   読めるようにする。残りはスキーマに書いた順（parse の結果の順）。rest に time があれば（リクエストの受信時刻など、
+    //   出来事の時刻）それで上書きする。既にあるキーへの上書きなので、並びは先頭のまま。
+    const { message, event: kind, ...rest } = parsed;
+    return {
       severity,
-      time,
-      message,
-      event,
-      ...rest,
+      line: JSON.stringify({ severity, time, message, event: kind, ...rest }),
     };
-    line.severity = severity;
-    line.time ??= time;
-    return JSON.stringify(line, replaceError);
   } catch {
-    // WHY 例外で落とさない: ログの失敗で本来の処理（応答を返すなど）を止めない。entry の中身は出せないので、失敗した旨だけを
-    //   同じ形（severity・time・message・event.name）の 1 行で残す。
-    // WHY event.name を専用の logger_error にする（元の event.name を使わない）: 元の entry の読み取り自体が例外を投げうる（getter）
-    //   ので、元の名前を確実に取れない。また元の名前（db_write など）で出すと、その種類で引いたときに種類ごとの項目（db など）の
-    //   無い行が混ざる。専用の名前なら「ログを出せなかった」ことを 1 つの条件で引け、アラートにもできる。
-    const name: LogEventName = "logger_error";
-    return JSON.stringify({
-      severity,
-      time,
-      message: UNSERIALIZABLE_MESSAGE,
-      event: { name },
-    });
+    // WHY 例外で落とさない: event の getter が例外を投げても、呼び出し側に伝えず、読めなかった旨の 1 行を残す。元の event の
+    //   読み取り自体が例外を投げうるので、失敗した種類の名前も出さない。
+    return loggerErrorLine(time, UNREADABLE_MESSAGE);
   }
 }
 
-function write(level: LogLevel, entry: LogEvent): void {
-  WRITERS[level](toLine(level, entry));
-}
-
+// WHY 口を emit の 1 つにする（info / warn / error を置かない。Issue #216）: 重大度は種類（と phase）が決める（log-event.ts の
+//   severityOf）。呼び出し側が選べると、同じ種類の行が呼び出し側ごとに違う重大度になる。
 export const logger = {
-  info: (entry: LogEvent): void => write("info", entry),
-  warn: (entry: LogEvent): void => write("warn", entry),
-  error: (entry: LogEvent): void => write("error", entry),
+  emit: (event: LogEvent): void => {
+    const { severity, line } = toLine(event);
+    writerOf(severity)(line);
+  },
 };

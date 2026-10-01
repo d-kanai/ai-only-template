@@ -20,7 +20,7 @@ type Reader = Pick<Database, "select">;
 //   DomainError(validation_error) のまま投げると presentation の toProblemResponse が 400 にし、「リクエストを直せば
 //   通る」とクライアントに伝えてしまう。保存済みのデータの不整合（規則を変えたのに移行していない、手で入れた行）は
 //   クライアントには直せないサーバ側の誤りで、直すのは運用（データの移行。スキル db-migration）。500 なら
-//   toProblemResponse が logger.error で 1 行残すので、どの行が何に違反したかをログで追える。
+//   toProblemResponse が logger.emit（server_error）で 1 行残すので、どの行が何に違反したかをログで追える。
 // WHY message に id と違反の理由を入れる: logger は Error を { type, message } にし、cause は出さない。
 //   クライアントへの本文は固定のキー（server.internalError と固定の英語の detail。toProblemResponse）なので、ここに書いた内容は外に出ない。
 // WHY 行を読み飛ばさない（一覧から黙って外さない）: データが消えたように見え、不整合に気づけない。
@@ -41,7 +41,7 @@ function toTodo(
   } catch (error) {
     // reconstruct が投げるのは不変条件の違反（DomainError）だけ（todo.ts の validate）。その message はキーと params
     //   （例: todo.title.tooLong {"max":100}）で、どの規則に違反したかがログで分かる。
-    // WHY 英語の文言: ログ（toProblemResponse の logger.error）に出る開発者向けの文字列で、クライアントには返さない。
+    // WHY 英語の文言: ログ（toProblemResponse の logger.emit の server_error）に出る開発者向けの文字列で、クライアントには返さない。
     //   apps/backend の非テストコードには自然言語の日本語を置かない（Issue #116。画面の文言は画面の辞書だけが持つ）。
     throw new Error(
       `stored Todo (id: ${row.id}) violates the invariants: ${(error as Error).message}`,

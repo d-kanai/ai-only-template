@@ -11,7 +11,9 @@ import {
   recordChange,
   updateEntries,
 } from "./change-log";
+import { maskRow } from "./column-classification";
 import type { Database } from "./database";
+import type { Changes } from "./schema";
 
 // 書き込みの唯一の口（Writer。Issue #215。ADR docs/adr/architecture/20260930-transaction-from-application.md）。Repository
 //   （*.postgres.ts）は行の変換だけを書き、insert / update / delete をこの Writer に渡す。Writer は 1 文ごとに次を横断的に行う:
@@ -185,22 +187,26 @@ export class PostgresWriter implements Writer {
   }
 
   // statement（本体の 1 文と記録の組み立て）を実行し、記録を同じトランザクションの change_logs に書く。前後に 1 行ずつ logger で
-  //   ログを出し、失敗なら warn を出して同じ例外を投げ直す。
+  //   ログを出し、失敗なら失敗の 1 行を出して同じ例外を投げ直す。
   // ログの形（Issue #209。ADR docs/adr/architecture/20260930-log-format-cloud-logging-otel.md。どれも event.name は db_write で、
   //   db.collection.name（表名）・db.operation.name（操作）・行の id（1 行なら row_id、複数なら row_ids）を持つ）:
-  //   - 前: info "db write start"（event.phase は start）
-  //   - 後: info "db write done"（event.phase は done）。event.duration_ms（所要時間）と changes（記録の table・row_id・operation）
-  //   - 失敗: warn "db write failed"（event.phase は failed）。event.duration_ms と error（logger が { type, message } にする）。
-  //     DB のエラーなら error は pg のエラーの name だけの { type } で、db.response.status_code（SQLSTATE）と constraint（制約の名前）を
+  //   - 前: "db write start"（event.phase は start。INFO）
+  //   - 後: "db write done"（event.phase は done。INFO）。event.duration_ms（所要時間）と changes（記録の table・row_id・operation と、
+  //     列の分類表でマスクした before / after。下の loggedChanges）
+  //   - 失敗: "db write failed"（event.phase は failed。WARNING）。event.duration_ms と error（logger が { type, message } にする）。
+  //     DB のエラーなら error は pg のエラーの { type, message }（message は引用符の部分を *** にしたもの）で、
+  //     db.response.status_code（SQLSTATE）・constraint（制約の名前）・params（SQL に渡した値。logger が値をすべて *** にする）を
   //     出す（下の failureFields）
   // WHY db.* の名前: OTel semconv の DB の属性（db.collection.name・db.operation.name・db.response.status_code。
   //   https://opentelemetry.io/docs/specs/semconv/registry/attributes/db/ ）にそろえ、入れ子のオブジェクトにする（Logs Explorer で
   //   jsonPayload.db.collection.name と書ける）。操作の名前は OTel の例（SELECT など）と違い、変更履歴と同じ insert / update / delete。
   // WHY 段階を event.phase に入れる（event.name を db_write_start などに分けない）: 1 回の書き込みの前後を event.name="db_write" の
   //   1 つの条件で引け、種類の一覧（apps/shared/log-event.ts）を段階の数だけ増やさずに済む。
-  // WHY changes に値（before / after）を出さない: 個人情報を含みうる。値は change_logs に残る（リクエストログがクエリの値を
-  //   出さないのと同じ方針。ADR docs/adr/architecture/20260929-request-log-in-proxy.md）。
-  // WHY 失敗を warn にする（error にしない）: 500 になる想定外の例外は presentation の toProblemResponse が logger.error で別に残す。
+  // WHY changes に値（before / after）を出し、列の分類でマスクする（Issue #216。以前（Issue #205〜#215）は値を出さなかった）:
+  //   ログだけで「何がどう変わったか」を追えるようにし、障害の調査で本番の change_logs を読む回数を減らす。個人情報を含みうる
+  //   列（todos.title など）は schema.ts の分類表で sensitive にし、*** にする。change_logs の表には生の値を残す（監査）。
+  // 重大度（INFO / WARNING）は logger が event.name と phase で決める（apps/shared/log-event.ts の severityOf。Issue #216）。失敗が
+  //   ERROR でなく WARNING なのは、500 になる想定外の例外は presentation の toProblemResponse が server_error（ERROR）で別に残すため。
   // 限界: 後のログは文と記録を書き終えた時点で出す（COMMIT の前）。後から COMMIT が失敗した（遅延制約など）ときは、このログは
   //   done のまま残り、失敗は toProblemResponse の 500 のログで分かる（トランザクションを張るのは runner で、Writer は COMMIT を
   //   見ない）。
@@ -216,7 +222,7 @@ export class PostgresWriter implements Writer {
     //   row_id で引ける。複数行の insert（完了の履歴）は 1 文で書いた行をすべて並べる。
     const rows =
       rowIds.length === 1 ? { row_id: rowIds[0] } : { row_ids: rowIds };
-    logger.info({
+    logger.emit({
       message: "db write start",
       event: { name: "db_write", phase: "start" },
       db,
@@ -231,7 +237,7 @@ export class PostgresWriter implements Writer {
       await recordChange(this.tx, entries);
     } catch (error) {
       const failure = failureFields(error);
-      logger.warn({
+      logger.emit({
         message: "db write failed",
         event: {
           name: "db_write",
@@ -249,11 +255,12 @@ export class PostgresWriter implements Writer {
         },
         ...rows,
         constraint: failure.constraint,
+        params: failure.params,
         error: failure.error,
       });
       throw error;
     }
-    logger.info({
+    logger.emit({
       message: "db write done",
       event: {
         name: "db_write",
@@ -262,16 +269,43 @@ export class PostgresWriter implements Writer {
       },
       db,
       ...rows,
-      // WHY snake_case の { table, row_id, operation } にする（ChangeEntry の tableName・rowId をそのまま出さない）: ログのキーは
-      //   OTel の名前にそろえた snake_case で、行の中で表記を混ぜない。
-      changes: entries.map(({ tableName, rowId, operation }) => ({
-        table: tableName,
-        row_id: rowId,
-        operation,
-      })),
+      changes: loggedChanges(table, entries),
     });
     return result;
   }
+}
+
+// 後のログの changes: 記録（ChangeEntry）ごとの { table, row_id, operation, before, after }。before / after は記録の changes
+//   （DB の列名 → { before?, after? }）を側ごとの「DB の列名 → 値」に分け、列の分類表（column-classification.ts）でマスクする。
+//   側の値が 1 列も無ければ null（insert の before・delete の after）。
+// WHY snake_case の { table, row_id, operation } にする（ChangeEntry の tableName・rowId をそのまま出さない）: ログのキーは
+//   OTel の名前にそろえた snake_case で、行の中で表記を混ぜない。
+// WHY 側ごとの「列 → 値」にする（記録の「列 → { before, after }」のまま出さない）: マスクを行（列 → 値）の 1 つの関数（maskRow）で
+//   済ませ、Logs Explorer で jsonPayload.changes.after.completed のように側と列で引ける。
+// WHY table（Writer が書いた表）でマスクする: 記録はすべてこの表の行（1 文 = 1 つの表）。分類は表のオブジェクトで引く。
+function loggedChanges(table: Table, entries: readonly ChangeEntry[]) {
+  return entries.map(({ tableName, rowId, operation, changes }) => ({
+    table: tableName,
+    row_id: rowId,
+    operation,
+    before: maskedSide(table, changes, "before"),
+    after: maskedSide(table, changes, "after"),
+  }));
+}
+
+function maskedSide(
+  table: Table,
+  changes: Changes,
+  side: "before" | "after",
+): Record<string, unknown> | null {
+  const values = Object.entries(changes).filter(([, change]) => side in change);
+  if (values.length === 0) {
+    return null;
+  }
+  return maskRow(
+    table,
+    Object.fromEntries(values.map(([name, change]) => [name, change[side]])),
+  );
 }
 
 // Writer を Transaction（shared/application/transaction の brand の型）にする（PostgresTransactionRunner が work に渡す値）。
@@ -293,34 +327,61 @@ export function writerOf(tx: Transaction): Writer {
   return tx;
 }
 
-// 失敗のログに載せる例外。DB のエラー（drizzle-orm の DrizzleQueryError）は、元の pg のエラー（cause）の name（error.type）と、
-//   SQLSTATE（statusCode → db.response.status_code）・制約の名前（constraint。pg の DatabaseError のプロパティ）だけにし、message は
-//   出さない。それ以外（Error など）はそのまま（logger が { type, message } にする）。
-// WHY DB のエラーの message を出さない: DrizzleQueryError の message は「Failed query: <SQL>\nparams: <値>」（drizzle-orm 0.45.3 の
-//   errors.js）で、行の値（個人情報を含みうる）がログに出る。元の pg のエラーの message も、データ例外（SQLSTATE 22 系）は入力値を
-//   含む（22P02 の invalid input syntax for type uuid: "<入力>"、22003 の value "<入力>" is out of range。Issue #205 の reviewer の
-//   実測）。changes に値を出さないのと同じ方針。
-// WHY SQLSTATE と constraint を出す: message が無くても、何の失敗か（23505 の一意制約違反・23503 の外部キー違反など）と、どの制約かを
-//   引ける。どちらも DB が決める名前・コードで、入力値を含まない。文字列でないとき（想定外）は出さない。
-// WHY cause が Error でなければ元の例外を出す: drizzle は pg の例外を cause に入れるが、想定外の形で何も出さないよりは
-//   元の例外を残す（値が出うるのは、この想定外のときだけ）。
+// 失敗のログに載せる例外。DB のエラー（drizzle-orm の DrizzleQueryError）は、元の pg のエラー（cause）の name（error.type）と
+//   引用符の部分を *** にした message（maskQuoted）、SQLSTATE（statusCode → db.response.status_code）・制約の名前（constraint。
+//   pg の DatabaseError のプロパティ）、SQL に渡した値（params。logger のスキーマが値をすべて *** にする）にする。それ以外
+//   （Error など）はそのまま（logger が { type, message } にする）。
+// WHY DrizzleQueryError の message を出さない: 「Failed query: <SQL>\nparams: <値>」（drizzle-orm 0.45.3 の errors.js）で、行の値
+//   （個人情報を含みうる）がそのまま入る。値は params として構造で渡し、logger に *** にさせる（Issue #216）。
+// WHY pg の message は引用符の部分を *** にして出す（Issue #216。以前（Issue #205）は message を出さなかった）: 何が起きたかの文
+//   （duplicate key value violates unique constraint・invalid input syntax for type uuid など）は調査に要る。一方でデータ例外
+//   （SQLSTATE 22 系）の message は入力値を "..." で囲んで含む（22P02 の invalid input syntax for type uuid: "<入力>"、22003 の
+//   value "<入力>" is out of range for type integer。2026-10-01 に実 Postgres で実測）。logger の freeText（メール・トークンなど
+//   既知の形だけを *** にする）では任意の入力値は消えないので、Writer が先に引用符の部分を消す。
+// WHY SQLSTATE と constraint を出す: message の制約の名前（引用符の中）は *** になるので、何の失敗か（23505・23503 など）とどの
+//   制約かはこの 2 つで引く。どちらも DB が決める名前・コードで、入力値を含まない。文字列でないとき（想定外）は出さない。
+// WHY cause が Error でなければ DrizzleQueryError の name（type）と params だけを出す: drizzle は pg の例外を cause に入れるが、
+//   想定外の形のときに DrizzleQueryError の message（SQL と値）を出さない（fail closed）。
 function failureFields(error: unknown): {
   error: unknown;
   statusCode?: string;
   constraint?: string;
+  params?: readonly unknown[];
 } {
-  if (!(error instanceof DrizzleQueryError && error.cause instanceof Error)) {
+  if (!(error instanceof DrizzleQueryError)) {
     return { error };
   }
-  const { name, code, constraint } = error.cause as Error & {
+  if (!(error.cause instanceof Error)) {
+    return { error: { type: error.name }, params: error.params };
+  }
+  const { name, message, code, constraint } = error.cause as Error & {
     code?: unknown;
     constraint?: unknown;
   };
   return {
-    error: { type: name },
+    error: { type: name, message: maskQuoted(message) },
     statusCode: typeof code === "string" ? code : undefined,
     constraint: typeof constraint === "string" ? constraint : undefined,
+    params: error.params,
   };
+}
+
+// message の最初の " から最後の " までを "***" にする（" が 1 つだけならその後ろをすべて *** にする。" が無ければそのまま）。
+// WHY 最初から最後までを 1 つにまとめる（"..." の組ごとに置き換えない）: pg は入力値の中の " を逃がさずに "<入力>" と書く
+//   （入力 ab"cd x → invalid input syntax for type uuid: "ab"cd x"。2026-10-01 実測）。組ごとに置き換えると "ab" だけが消え、
+//   cd x が残る。入力値はどれも " で囲まれるので、最初と最後の " の間に必ず収まる。
+// 限界: 引用符の中の識別子（列名・制約名・表名）も消える（not-null 違反の列名など）。制約名は constraint、表名は db.collection.name に
+//   別に出る。引用符で囲まない形の入力値は消えない（実測した 22003 の numeric field overflow などは値を含まない。logger の freeText が
+//   最後の網）。
+function maskQuoted(message: string): string {
+  const first = message.indexOf('"');
+  if (first === -1) {
+    return message;
+  }
+  const last = message.lastIndexOf('"');
+  return last === first
+    ? `${message.slice(0, first)}"***`
+    : `${message.slice(0, first)}"***"${message.slice(last + 1)}`;
 }
 
 // startedAt（performance.now()）からの経過時間（ミリ秒の整数に四捨五入）。
