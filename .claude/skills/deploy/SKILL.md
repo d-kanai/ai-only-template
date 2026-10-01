@@ -17,7 +17,8 @@ Terraform は環境のディレクトリ（`infra/envs/stg` か `infra/envs/prod
 - Environment の Variables（`GCP_WIF_PROVIDER` など）が無いあいだ、deploy.yml は最初のステップで notice を出し、以降のステップをスキップする（ジョブは緑）。
 
 ## 通常のデプロイ（main へのマージ → stg）
-`.github/workflows/deploy.yml` が Environment `stg` で自動で動く: 2 イメージ（runtime / migrate）を build・push → migrate ジョブの実行（`--wait`）→ service のデプロイ → `update-traffic --to-latest`（トラフィックを最新のリビジョンへ）。
+`.github/workflows/deploy.yml` が Environment `stg` で自動で動く: 2 イメージ（runtime / migrate）を build・push → migrate ジョブの実行（`--wait`）→ service のデプロイ → `update-traffic --to-latest`（トラフィックを最新のリビジョンへ）→ 同じ migrate ジョブで backfill（`--args=pnpm,db:backfill`。データの移行。Issue #194）。
+- backfill は切替の後に流す（WHY: 切替の前だと、切替までの間に旧アプリが書いた行が漏れる）。失敗してもアプリは切替済みのまま動く（履歴の無い Todo は Repository が補って読み書きする）。下の「backfill が失敗したとき・再実行」。
 - migrate が失敗したら service はデプロイされない（古いコードのまま動き続ける）。下の「migrate が失敗したとき」。
 - 実行は環境ごとの concurrency（`deploy-stg` / `deploy-prod`）で 1 本ずつ（途中で止めない）。
 - マイグレーションは、1 つ前のコードでも動く形（列の追加は先、削除は次のリリース）で書く。WHY: migrate の後、service が切り替わるまでのあいだは古いコードが新しいスキーマで動く。ロールバックでも同じ（スキーマは戻さない）。prod は手動なので、stg より何リリースも前のコードが動いていることがある。prod へのデプロイでは、その間のマイグレーションがまとめて当たり、prod で今動いているコードが新しいスキーマで動く（「1 つ前のコード」は prod で今動いているコードのこと）。
@@ -43,6 +44,13 @@ Actions の「Deploy」→「Run workflow」で `main` と環境（`prod` / `stg
 2. 原因（SQL・接続・Secret）を直す。コードの問題なら PR で直して main にマージする（deploy.yml が stg で最初からやり直す。prod はその後に手動実行）。
 3. 同じイメージで再実行するだけなら: `gcloud run jobs execute frontend-customer-migrate --wait`。成功したら、service のデプロイは Actions の「Re-run failed jobs」か手動デプロイで行う。
 - ジョブは再試行しない（`max_retries = 0`。WHY は `infra/modules/app/run.tf`）。
+
+## backfill が失敗したとき・再実行（データの移行。Issue #194）
+1. ログを見る: 上の「migrate が失敗したとき」と同じ `gcloud logging read …`（同じジョブ）。`jsonPayload.event.name="db_backfill"` の `event.phase="failed"` の行に、ファイル（`file.name`）・SQLSTATE（`db.response.status_code`）・例外が出る。失敗したファイルは ROLLBACK 済みで、後のファイルは流れていない。
+2. 原因を直す。SQL の誤りなら PR で直して main にマージする（deploy.yml が stg で最初からやり直し、切替の後に backfill を流す）。
+3. 手動で流し直す（SQL は冪等なので何度流してもよい）: `gcloud run jobs execute frontend-customer-migrate --region asia-northeast1 --wait --args=pnpm,db:backfill`。
+   - `--args` はこの実行 1 回だけコンテナの CMD（`pnpm db:migrate`）を置き換える。ジョブの定義は変わらない（`--args` を付けない実行は今までどおり migrate）。ENTRYPOINT は置き換えないので、コマンドの先頭（`pnpm`）から書く。
+   - 未確認: Cloud Run の実機で `--args=pnpm,db:backfill` が `pnpm db:backfill` として動くこと（ローカルの `pnpm db:backfill` と backfill.test.ts の script の実行では確かめた。初回の stg のデプロイで確かめる）。
 
 ## 構成を変える（Terraform）
 リソースは `infra/modules/app` を変え、`cd infra/envs/stg && terraform plan -var="project_id=..."` で差分を読んで `terraform apply` → 同じことを `infra/envs/prod` で（stg → prod の順）。イメージとトラフィックの差分は出ない（`lifecycle.ignore_changes`）。

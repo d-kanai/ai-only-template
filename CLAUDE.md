@@ -55,7 +55,7 @@
 | `.claude/skills/<name>/SKILL.md` | 説明は常時、本文は呼び出したとき | 手順 |
 | `docs/adr/` | 読み込まれない（必要なら自分で読む） | ADR（決定の記録。1 決定 1 ファイル、不変。命名 `<分類>/yyyymmdd-<topic>.md`、分類は `architecture`（構造・境界・設計パターン）/ `tech-stack`（言語・ツールの選定）/ `quality`（品質ゲート・テスト方針）/ `workflow`（開発プロセス・環境・エージェント運用）、形式は `rule-tests/instructions.test.ts` が検査する。一覧は `docs/adr/README.md`） |
 | `docs/work-logs/` | 読み込まれない | 日ごとの作業ログ |
-| `rule-tests/` | 読み込まれない | ルール検査テスト 17 本（`api-journey` / `api-request` / `api-spec` / `architecture` / `domain-validation` / `instructions` / `lint` / `package` / `persistence` / `pnpm-workspace` / `schema` / `settings` / `test-doubles` / `test-support` / `typecheck` / `use-case` / `work-logs-check` の `*.test.ts`。Issue #86、`schema` は Issue #145、`api-request` は Issue #175、`domain-validation` / `persistence` / `test-doubles` / `use-case` は Issue #177、`test-support` は Issue #181、`api-journey` は Issue #187、`api-spec` は Issue #219） |
+| `rule-tests/` | 読み込まれない | ルール検査テスト 18 本（`api-journey` / `api-request` / `api-spec` / `architecture` / `domain-validation` / `instructions` / `lint` / `migration` / `package` / `persistence` / `pnpm-workspace` / `schema` / `settings` / `test-doubles` / `test-support` / `typecheck` / `use-case` / `work-logs-check` の `*.test.ts`。Issue #86、`schema` は Issue #145、`api-request` は Issue #175、`domain-validation` / `persistence` / `test-doubles` / `use-case` は Issue #177、`test-support` は Issue #181、`api-journey` は Issue #187、`api-spec` は Issue #219、`migration` は Issue #194） |
 
 ### .claude/rules（パス依存）
 | ファイル | 触ったときに読まれる主なファイル | 内容 |

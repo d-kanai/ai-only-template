@@ -19,7 +19,8 @@
     "db:down": "docker compose down",
     "db:psql": "docker compose exec db psql -U app -d app",
     "db:generate": "pnpm --filter @repo/backend --fail-if-no-match db:generate",
-    "db:migrate": "pnpm --filter @repo/backend --fail-if-no-match db:migrate"
+    "db:migrate": "pnpm --filter @repo/backend --fail-if-no-match db:migrate",
+    "db:backfill": "pnpm --filter @repo/backend --fail-if-no-match db:backfill"
   },
   "devDependencies": {
     "@amiceli/vitest-cucumber": "8.0.0",
