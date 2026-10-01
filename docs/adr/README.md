@@ -122,4 +122,5 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-29 | CI の完了をポーリングで待たず、PR に auto-merge（merge commit）を付けて終える | 採用 | [20260929-merge-with-auto-merge.md](workflow/20260929-merge-with-auto-merge.md) |
 | 2026-09-29 | docs/ の記録を廃止し、決定は ADR（docs/adr）、実測は work-logs、一次情報は規則の WHY に置く | 採用 | [20260929-replace-docs-with-adr.md](workflow/20260929-replace-docs-with-adr.md) |
 | 2026-09-29 | Usage limit の節約のため、1 Issue = 1 セッション・wake の削減・軽い worker・reviewer と fault injection の最小化を運用にする | 採用 | [20260929-save-usage-limit.md](workflow/20260929-save-usage-limit.md) |
+| 2026-10-01 | 1 Issue = 1 セッションをやめ、Claude Code Projects のスレッドは業務の単位で分け、開発は 1 つのスレッドで続ける | 採用 | [20261001-project-threads-by-business-area.md](workflow/20261001-project-threads-by-business-area.md) |
 | 2026-10-01 | スキーマの変更はデプロイの切替の前、データの移行（backfill）は切替の後に冪等な SQL で流す | 採用 | [20261001-backfill-after-traffic-switch.md](workflow/20261001-backfill-after-traffic-switch.md) |

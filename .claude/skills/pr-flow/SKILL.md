@@ -12,7 +12,7 @@ main は常にマージ可能に保つ。main への直接コミット・push �
 
 ## 手順
 1. **Issue**: 無ければ作る（目的・完了条件を書く）。type ラベルを 1 つ付ける: `gh issue create --label <type>`（`feat` / `fix` / `docs` / `chore` / `refactor`）。
-   - 1 Issue = 1 PR = 1 セッション。大きければ Issue を分け、Issue が終わったら `/clear` で新しいセッションにする。WHY: PR の差分とレビューを小さく保ち、長いセッションで毎ターン送る全コンテキストの消費を抑える（ADR `docs/adr/workflow/20260929-save-usage-limit.md`）。
+   - 1 Issue = 1 PR。大きければ Issue を分ける。WHY: PR の差分とレビューを小さく保つ。セッションは Issue ごとに分けない（開発は同じスレッドで続ける。`.claude/general/orchestration.md`、ADR `docs/adr/workflow/20261001-project-threads-by-business-area.md`）。
    - Projects への追加と Status の変更は GitHub 側のワークフローが行う。Projects の API は呼ばない（`github-settings.md`）。
 2. **ブランチ**: main の最新から切る。`git checkout main && git pull && git checkout -b <type>/<Issue番号>-<内容>`（例: `feat/12-branch-rules`）。type は Issue のラベルと同じ。
 3. **実装**: テストから書く（CLAUDE.md の Test Driven）。作業の分担は `.claude/agents/`（worker / worker-light / researcher / reviewer。使い分けは `.claude/general/orchestration.md`）。worker が完了するごとにコミットし、未コミットを長く残さない。
