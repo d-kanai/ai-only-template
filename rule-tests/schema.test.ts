@@ -17,7 +17,7 @@ import { describe, expect, it } from "vitest";
 // Issue #145）を、Drizzle のスキーマ（apps/backend/**/infra/schema.ts）で機械的に検査するテスト。
 // WHY 検査する: 「文字列は text、長さは domain が持つ」は文章だけだと、varchar(255) を書き慣れた人や AI が既定のように書き、
 //   domain（zod）と DB の 2 か所に上限ができてずれる。DB の制約違反は 500 になり、domain の 400（errors[] 付き）に負ける。
-// 違反にするもの（規則 → 例外を認める WHY の見出し）:
+// 列の型で違反にするもの（規則 → 例外を認める WHY の見出し）:
 //   - varchar: `varchar(`（長さ付きでも無しでも）→ `// WHY 長さ:`
 //   - char: `char(`（固定長）→ `// WHY 長さ:`
 //   - timestamp-without-timezone: `timestamp(` で引数に `withTimezone: true` が無い → `// WHY タイムゾーン:`
@@ -31,18 +31,37 @@ import { describe, expect, it } from "vitest";
 // 限界: pg-core の関数を変数に入れ直して呼ぶ（`const v = varchar; v("x")`）、options を変数や spread で渡す
 //   （`timestamp("x", tz)`）と見えない（後者は withTimezone が見えないので違反になる = 安全側）。import の別名（`varchar as v`）と
 //   名前空間（`pg.varchar`）は拾う。
+//
+// サロゲートキー（Issue #213）: 規則 surrogate-key。`pgTable(` ごとに、第 2 引数（列の定義のオブジェクト）の直下に
+//   `id: uuid("id").primaryKey()` が無ければ違反（違反の行は `pgTable(` の行）。`.primaryKey()` の前後のチェーン
+//   （`.defaultRandom()`・`.$type<Id>()` など）は問わない。uuid / pgTable は import の別名と名前空間（`pg.uuid(`）も同じく扱う。
+//   複合主キー（第 3 引数の `primaryKey({ columns: [...] })`）だけの表、id が uuid でない（`serial` / `text`）表、
+//   id が uuid でも `.primaryKey()` の無い表、DB の列名が "id" でない表も違反。
+// WHY すべての表（子表・履歴表も）に uuid の id の主キー: どの表の 1 行も id で指せ、変更の記録（change_logs の row_id は uuid）・
+//   削除・参照が表によらず一様になる。自然キー・複合キー（例: todo_status_changes の (todo_id, position)）は一意制約（`unique` /
+//   `uniqueIndex`）で表す。
+// WHY 例外（`// WHY <見出し>:`）を認めない: 主キーの形を表ごとに変える理由は一意制約で足り、例外を作るとそこだけ一様でなくなる。
+// 限界（字句の推定）: 第 2 引数が変数・スプレッド（`{ ...base }`）・関数（`(t) => ({ ... })`）だと中を見ず、id を直接書いていなければ
+//   違反にする（安全側）。キーを引用符で書く（`"id":`）・uuid の引数にコメントを挟むと見分けられず違反になる。
+//   `pgTableCreator` で作った関数や `pgSchema(...).table(` は `pgTable(` でないので見ない。
+//   型引数の中のカンマ（`$type<Record<string, X>>()`）は要素の区切りと取り違える（id の列に付けると違反になる。ほかの列なら影響しない）。
+//   列名を省いた `id: uuid().primaryKey()`（Drizzle はキー名を列名に使える）も違反にする（`uuid("id")` と書く。reviewer の probe）。
 
-type RuleId =
+// 列の型の規則（WHY の見出しで例外を認める）。
+type ColumnTypeRuleId =
   | "varchar"
   | "char"
   | "timestamp-without-timezone"
   | "serial"
   | "json";
 
+// surrogate-key は例外を認めないので、WHY_LABEL を持つ ColumnTypeRuleId と分ける。
+type RuleId = ColumnTypeRuleId | "surrogate-key";
+
 type ColumnTypeViolation = { rule: RuleId; line: number };
 
 // pg-core の関数名 → 違反の規則。timestamp は引数を見て決めるので別に扱う。
-const FORBIDDEN_BUILDERS: Record<string, RuleId> = {
+const FORBIDDEN_BUILDERS: Record<string, ColumnTypeRuleId> = {
   varchar: "varchar",
   char: "char",
   serial: "serial",
@@ -52,7 +71,7 @@ const FORBIDDEN_BUILDERS: Record<string, RuleId> = {
 };
 
 // 例外を認める WHY の見出し（`// WHY <見出し>: <理由>`）。
-const WHY_LABEL: Record<RuleId, string> = {
+const WHY_LABEL: Record<ColumnTypeRuleId, string> = {
   varchar: "長さ",
   char: "長さ",
   "timestamp-without-timezone": "タイムゾーン",
@@ -100,15 +119,52 @@ function pgCoreAliases(text: string): Map<string, string> {
   return aliases;
 }
 
-// masked[open] の "(" に対応する ")" までの中身（閉じが無ければ末尾まで）。
-function argumentsOf(masked: string, open: number): string {
+// 呼び出しの名前を pg-core の元の名前に戻す: `pg.uuid(` は名前のまま、`u(` は import の別名を元の名前に戻す。
+function builderName(
+  isMember: boolean,
+  name: string,
+  aliases: Map<string, string>,
+): string {
+  return isMember ? name : (aliases.get(name) ?? name);
+}
+
+// masked[open] の括弧（`(` / `{` / `[`）に対応する閉じ括弧の位置（閉じが無ければ末尾 = masked.length）。
+// WHY 3 種を同じ深さで数える: 列の定義 `{ ... }` の中の `(` `[` と、引数の中の `{` を同じ規則で読み飛ばす。
+function closingIndex(masked: string, open: number): number {
   let depth = 0;
   for (let index = open; index < masked.length; index += 1) {
-    if (masked[index] === "(") depth += 1;
-    if (masked[index] === ")") depth -= 1;
-    if (depth === 0) return masked.slice(open + 1, index);
+    if ("([{".includes(masked[index] ?? "")) depth += 1;
+    if (")]}".includes(masked[index] ?? "")) depth -= 1;
+    if (depth === 0) return index;
   }
-  return masked.slice(open + 1);
+  return masked.length;
+}
+
+// masked[open] の "(" に対応する ")" までの中身（閉じが無ければ末尾まで）。
+function argumentsOf(masked: string, open: number): string {
+  return masked.slice(open + 1, closingIndex(masked, open));
+}
+
+// masked の [start, end) を、括弧の外（深さ 0）のカンマで区切った範囲の一覧（引数・オブジェクトの要素）。
+// 限界: `<` `>` は数えないので、型引数の中のカンマ（`$type<Record<string, X>>()`）でも区切る。
+function splitTopLevel(
+  masked: string,
+  start: number,
+  end: number,
+): { start: number; end: number }[] {
+  const parts: { start: number; end: number }[] = [];
+  let partStart = start;
+  for (let index = start; index < end; index += 1) {
+    const char = masked[index] ?? "";
+    if ("([{".includes(char)) {
+      index = closingIndex(masked, index);
+    } else if (char === ",") {
+      parts.push({ start: partStart, end: index });
+      partStart = index + 1;
+    }
+  }
+  parts.push({ start: partStart, end });
+  return parts;
 }
 
 // 違反の行（0 始まり）の直前に続く `//` の行に「// WHY <見出し>: <理由>」があるか。
@@ -135,8 +191,7 @@ function findColumnTypeViolations(text: string): ColumnTypeViolation[] {
   for (const call of masked.matchAll(/(\.\s*)?([A-Za-z_$][\w$]*)\s*\(/g)) {
     const [whole, member, name = ""] = call;
     const open = call.index + whole.length - 1;
-    // `pg.varchar(` は名前のまま、`vc(` は import の別名を元の名前に戻す。
-    const builder = member ? name : (aliases.get(name) ?? name);
+    const builder = builderName(member !== undefined, name, aliases);
     const rule =
       builder === "timestamp"
         ? /\bwithTimezone\s*:\s*true\b/.test(argumentsOf(masked, open))
@@ -147,6 +202,85 @@ function findColumnTypeViolations(text: string): ColumnTypeViolation[] {
     const lineIndex = masked.slice(0, call.index).split("\n").length - 1;
     if (hasWhyAbove(lines, lineIndex, WHY_LABEL[rule])) continue;
     violations.push({ rule, line: lineIndex + 1 });
+  }
+  return violations;
+}
+
+const IDENTIFIER = "[A-Za-z_$][\\w$]*";
+
+// 列の定義の 1 要素（masked の [start, end)）が `id: uuid("id")<.メソッド()...>` で、チェーンに `.primaryKey()` を含むか。
+function isSurrogateKeyColumn(
+  text: string,
+  masked: string,
+  entry: { start: number; end: number },
+  aliases: Map<string, string>,
+): boolean {
+  const value = masked.slice(entry.start, entry.end);
+  // キーは素の `id` だけ（`"id":` の引用符付きはコメントと同じく潰れて見えない = 安全側で違反）。
+  const head = new RegExp(
+    `^\\s*id\\s*:\\s*(?:${IDENTIFIER}\\s*(\\.)\\s*)?(${IDENTIFIER})\\s*\\(`,
+  ).exec(value);
+  if (!head) return false;
+  const [whole, member, name = ""] = head;
+  if (builderName(member !== undefined, name, aliases) !== "uuid") return false;
+  const open = entry.start + whole.length - 1;
+  const close = closingIndex(masked, open);
+  // DB の列名は元のテキスト（文字列は masked では空白）で見る。`"id"` / `'id'` だけ。
+  if (!/^\s*(["'])id\1\s*$/.test(text.slice(open + 1, close))) return false;
+  // `uuid("id")` に続くメソッドのチェーンをたどる（型引数 `.$type<Id>()` も 1 つの呼び出し）。
+  const chainCall = new RegExp(
+    `^\\s*\\.\\s*(${IDENTIFIER})\\s*(?:<[^()]*>)?\\s*\\(`,
+  );
+  let cursor = close + 1;
+  for (
+    let call = chainCall.exec(masked.slice(cursor, entry.end));
+    call;
+    call = chainCall.exec(masked.slice(cursor, entry.end))
+  ) {
+    if (call[1] === "primaryKey") return true;
+    cursor = closingIndex(masked, cursor + call[0].length - 1) + 1;
+  }
+  return false;
+}
+
+// `pgTable(` の "(" の位置から、第 2 引数（列の定義）のオブジェクトの直下の要素の範囲の一覧。
+// 第 2 引数がオブジェクトのリテラルでない（変数・関数・無い）ときは中を見ず空を返す（= id が無い = 違反。安全側）。
+function columnEntries(
+  masked: string,
+  open: number,
+): { start: number; end: number }[] {
+  const columns = splitTopLevel(
+    masked,
+    open + 1,
+    closingIndex(masked, open),
+  )[1];
+  if (columns === undefined) return [];
+  const objectStart =
+    columns.start + masked.slice(columns.start, columns.end).search(/\S|$/);
+  if (masked[objectStart] !== "{") return [];
+  return splitTopLevel(
+    masked,
+    objectStart + 1,
+    closingIndex(masked, objectStart),
+  );
+}
+
+// 各 `pgTable(` の第 2 引数（列の定義のオブジェクト）の直下に `id: uuid("id")....primaryKey()...` が無ければ違反
+// （違反の行は `pgTable` の名前の行）。例外（WHY の見出し）は認めない。
+function findSurrogateKeyViolations(text: string): ColumnTypeViolation[] {
+  const masked = maskCommentsAndStrings(text);
+  const aliases = pgCoreAliases(text);
+  const violations: ColumnTypeViolation[] = [];
+  for (const call of masked.matchAll(/(\.\s*)?([A-Za-z_$][\w$]*)\s*\(/g)) {
+    const [whole, member = "", name = ""] = call;
+    if (builderName(member !== "", name, aliases) !== "pgTable") continue;
+    const open = call.index + whole.length - 1;
+    const hasSurrogateKey = columnEntries(masked, open).some((entry) =>
+      isSurrogateKeyColumn(text, masked, entry, aliases),
+    );
+    if (hasSurrogateKey) continue;
+    const line = masked.slice(0, call.index + member.length).split("\n").length;
+    violations.push({ rule: "surrogate-key", line });
   }
   return violations;
 }
@@ -172,10 +306,18 @@ function listSchemaFiles(root: string): string[] {
     .sort();
 }
 
+// 1 ファイルのすべての規則の違反を行の順に返す（同じ行は列の型 → surrogate-key の順。sort は安定）。
+function findSchemaViolations(text: string): ColumnTypeViolation[] {
+  return [
+    ...findColumnTypeViolations(text),
+    ...findSurrogateKeyViolations(text),
+  ].sort((a, b) => a.line - b.line);
+}
+
 // 違反を「<規則>: <パス>:<行>」で返す。
 function collectSchemaViolations(root: string): string[] {
   return listSchemaFiles(root).flatMap((path) =>
-    findColumnTypeViolations(readFileSync(join(root, path), "utf8")).map(
+    findSchemaViolations(readFileSync(join(root, path), "utf8")).map(
       ({ rule, line }) => `${rule}: ${path}:${line}`,
     ),
   );
@@ -470,6 +612,252 @@ describe("列の型の判定（findColumnTypeViolations）: must reject", () => 
   });
 });
 
+const TABLE_IMPORT =
+  'import { pgTable, primaryKey, serial, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";';
+
+describe("サロゲートキーの判定（findSurrogateKeyViolations）: must pass", () => {
+  it.each([
+    [
+      'id: uuid("id").primaryKey()（名前で import）',
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", {',
+        '  id: uuid("id").primaryKey(),',
+        '  title: text("title").notNull(),',
+        "});",
+      ),
+    ],
+    [
+      ".primaryKey() の後ろに .defaultRandom() が続く",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", { id: uuid("id").primaryKey().defaultRandom() });',
+      ),
+    ],
+    [
+      ".primaryKey() の前に別のメソッド（型引数付き）がある",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", { id: uuid("id").$type<Id>().primaryKey() });',
+      ),
+    ],
+    [
+      "名前空間（pg.pgTable / pg.uuid）",
+      source(
+        IMPORT,
+        'export const t = pg.pgTable("t", { id: pg.uuid("id").primaryKey() });',
+      ),
+    ],
+    [
+      "import の別名（pgTable as table / uuid as u）",
+      source(
+        'import { pgTable as table, uuid as u } from "drizzle-orm/pg-core";',
+        "export const t = table('t', { id: u('id').primaryKey() });",
+      ),
+    ],
+    [
+      "複数行のチェーンと、id の前のコメント・ほかの列",
+      source(
+        TABLE_IMPORT,
+        "export const t = pgTable(",
+        '  "t",',
+        "  {",
+        '    title: text("title").notNull(),',
+        "    // 行の id。",
+        '    id: uuid("id")',
+        "      .primaryKey()",
+        "      .defaultRandom(),",
+        "  },",
+        '  (table) => [uniqueIndex("t_title_index").on(table.title)],',
+        ");",
+      ),
+    ],
+    [
+      "1 つのファイルの複数の表がすべて id を持つ",
+      source(
+        TABLE_IMPORT,
+        'export const a = pgTable("a", { id: uuid("id").primaryKey() });',
+        'export const b = pgTable("b", { id: uuid("id").primaryKey(), aId: uuid("a_id").notNull() });',
+      ),
+    ],
+    [
+      "コメント・文字列の中の pgTable( は表の定義ではない",
+      source(
+        '// pgTable("x", { title: text("title") }) とは書かない。',
+        'const note = "pgTable(\\"y\\", {})";',
+      ),
+    ],
+    [
+      "pgTable を呼ばないオブジェクト（列の定義でない）は見ない",
+      source(TABLE_IMPORT, 'const c = { title: text("title") };'),
+    ],
+  ])("%s は違反なし", (_name, text) => {
+    expect(findSurrogateKeyViolations(text)).toEqual([]);
+  });
+});
+
+describe("サロゲートキーの判定（findSurrogateKeyViolations）: must reject", () => {
+  it.each<[string, string, ColumnTypeViolation[]]>([
+    [
+      "id の列が無い",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", { title: text("title").notNull() });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "複合主キー（primaryKey({ columns: [...] })）だけ",
+      source(
+        TABLE_IMPORT,
+        "export const t = pgTable(",
+        '  "t",',
+        '  { todoId: uuid("todo_id").notNull(), position: integer("position").notNull() },',
+        "  (table) => [primaryKey({ columns: [table.todoId, table.position] })],",
+        ");",
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "id が serial",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", { id: serial("id").primaryKey() });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "id が text",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", { id: text("id").primaryKey() });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "id が uuid を名前に含む別の関数（myUuid）",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", { id: myUuid("id").primaryKey() });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "id は uuid だが .primaryKey() が無い",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", { id: uuid("id").notNull().defaultRandom() });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "id は uuid だが主キーは第 3 引数の primaryKey({ columns: [table.id] })",
+      source(
+        TABLE_IMPORT,
+        "export const t = pgTable(",
+        '  "t",',
+        '  { id: uuid("id").notNull() },',
+        "  (table) => [primaryKey({ columns: [table.id] })],",
+        ");",
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      ".primaryKey() がコメントの中だけ",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", {',
+        '  id: uuid("id"), // .primaryKey()',
+        "});",
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      ".primaryKey を呼んでいない（プロパティの参照だけ）",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", { id: uuid("id").primaryKey });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "uuid の primaryKey の列が id 以外の名前（キーが todoId）",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", { todoId: uuid("id").primaryKey() });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "キーは id だが DB の列名が id でない",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", { id: uuid("row_id").primaryKey() });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "id が入れ子のオブジェクトの中（表の列ではない）",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", { meta: { id: uuid("id").primaryKey() } });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "id が第 3 引数の中だけ",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", { title: text("title") }, () => ({ id: uuid("id").primaryKey() }));',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "列の定義が変数（中は見ない = 安全側で違反）",
+      source(TABLE_IMPORT, 'export const t = pgTable("t", columns);'),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "列の定義のスプレッドの中の id は見ない（id を直接書く）",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", { ...base, title: text("title") });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "名前空間（pg.pgTable）で id が無い",
+      source(
+        IMPORT,
+        'export const t = pg.pgTable("t", { title: pg.text("title") });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "import の別名（pgTable as table）で id が無い",
+      source(
+        'import { pgTable as table, text } from "drizzle-orm/pg-core";',
+        'export const t = table("t", { title: text("title") });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "複数の表のうち id の無い表だけを、その pgTable( の行で返す",
+      source(
+        TABLE_IMPORT,
+        'export const a = pgTable("a", { id: uuid("id").primaryKey() });',
+        "export const b = pgTable(",
+        '  "b",',
+        '  { title: text("title") },',
+        ");",
+      ),
+      [{ rule: "surrogate-key", line: 3 }],
+    ],
+  ])("%s は違反", (_name, text, expected) => {
+    expect(findSurrogateKeyViolations(text)).toEqual(expected);
+  });
+});
+
 // --- 列挙 → 読み取り → 判定を通した fixture テスト ---
 // WHY: 判定が正しくても、対象の列挙（infra/schema.ts の見つけ方）が漏れれば見逃す。一時ディレクトリに架空のツリーを置き、
 //   本番と同じ collectSchemaViolations に通して、違反の集合を丸ごと比較する（見逃しも余分な検出も失敗にする）。
@@ -499,7 +887,7 @@ describe("スキーマの列挙と検査（fixture）", () => {
     'export const t = pg.pgTable("t", { title: pg.varchar("title") });',
   );
 
-  it("apps/backend の features と shared の infra/schema.ts だけを対象にし、違反を「規則: パス:行」で返す", () => {
+  it("apps/backend の features と shared の infra/schema.ts だけを対象にし、すべての規則（列の型と surrogate-key）の違反を「規則: パス:行」の行の順で返す", () => {
     const result = violationsOfFixture({
       "apps/backend/features/a/internal/infra/schema.ts": source(
         IMPORT,
@@ -514,7 +902,7 @@ describe("スキーマの列挙と検査（fixture）", () => {
       ),
       "apps/backend/shared/infra/schema.ts": source(
         IMPORT,
-        'export const s = pg.pgTable("s", { raw: pg.json("raw") });',
+        'export const s = pg.pgTable("s", { id: pg.uuid("id").primaryKey(), raw: pg.json("raw") });',
       ),
       // 対象外: infra/schema.ts でないファイル、infra 以外の schema.ts、テスト、node_modules、apps/backend の外。
       "apps/backend/features/c/internal/infra/other.ts": varcharColumn,
@@ -530,6 +918,7 @@ describe("スキーマの列挙と検査（fixture）", () => {
         "apps/backend/shared/infra/schema.ts",
       ],
       violations: [
+        "surrogate-key: apps/backend/features/a/internal/infra/schema.ts:2",
         "varchar: apps/backend/features/a/internal/infra/schema.ts:3",
         "timestamp-without-timezone: apps/backend/features/a/internal/infra/schema.ts:4",
         "json: apps/backend/shared/infra/schema.ts:2",
@@ -545,8 +934,8 @@ describe("スキーマの列挙と検査（fixture）", () => {
   });
 });
 
-describe("DB の列の型（実ファイル）", () => {
-  it("apps/backend の infra/schema.ts はすべて列の型の既定に従う", () => {
+describe("DB の列の型とサロゲートキー（実ファイル）", () => {
+  it("apps/backend の infra/schema.ts はすべて列の型の既定に従い、すべての表が uuid の id の primaryKey を持つ", () => {
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     expect(listSchemaFiles(repoRoot)).toContain(
       "apps/backend/features/todo/internal/infra/schema.ts",
