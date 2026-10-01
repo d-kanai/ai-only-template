@@ -339,6 +339,7 @@ describeFeature(feature, ({ Background, Scenario }) => {
     );
 
     // WHY 名前を受け取って 1 件目と照らす: .feature の値を固定値で持たず、どの Todo の履歴を見ているかを .feature の名前に合わせる。
+    // 変更の記録は、Todo と完了の履歴の作成（insert）の 2 件になる（冒頭の WHY のとおり .feature には書かない）。
     And(
       "{string} の完了の履歴は作成時の未完了の 1 件になる",
       async (_ctx: TestContext, title: string) => {
@@ -346,19 +347,16 @@ describeFeature(feature, ({ Background, Scenario }) => {
         await expect(
           database.db.select(STATUS_CHANGE_COLUMNS).from(todoStatusChanges),
         ).resolves.toStrictEqual([createdStatusRow(milk)]);
+        const statusRows = await database.db.select().from(todoStatusChanges);
+        expectedLogs.push(
+          todoInsertLog(milk),
+          statusInsertLog(statusRowOf(statusRows, milk.id, 0)),
+        );
+        expect(
+          logEntries(await database.db.select().from(changeLogs)),
+        ).toStrictEqual(logEntries(expectedLogs));
       },
     );
-
-    And("変更の記録は Todo と完了の履歴の作成の 2 件になる", async () => {
-      const statusRows = await database.db.select().from(todoStatusChanges);
-      expectedLogs.push(
-        todoInsertLog(milk),
-        statusInsertLog(statusRowOf(statusRows, milk.id, 0)),
-      );
-      expect(
-        logEntries(await database.db.select().from(changeLogs)),
-      ).toStrictEqual(logEntries(expectedLogs));
-    });
 
     When(
       "作成日時が進むのを待って Todo {string} を作る",
@@ -386,6 +384,7 @@ describeFeature(feature, ({ Background, Scenario }) => {
       ).resolves.toStrictEqual([rowOf(milk), rowOf(bread)]);
     });
 
+    // 変更の記録に、2 件目の Todo と完了の履歴の作成（insert）が足される。
     And("完了の履歴は 2 件とも作成時の未完了になる", async () => {
       createdStatusRows = [createdStatusRow(milk), createdStatusRow(bread)];
       expect(
@@ -395,9 +394,6 @@ describeFeature(feature, ({ Background, Scenario }) => {
             .from(todoStatusChanges)
         ).sort(byTodoAndPosition),
       ).toStrictEqual([...createdStatusRows].sort(byTodoAndPosition));
-    });
-
-    And("変更の記録に 2 件目の Todo と完了の履歴の作成が足される", async () => {
       const statusRows = await database.db.select().from(todoStatusChanges);
       expectedLogs.push(
         todoInsertLog(bread),
@@ -450,6 +446,7 @@ describeFeature(feature, ({ Background, Scenario }) => {
       ]);
     });
 
+    // 変更の記録に、1 件目のタイトルの変更（変わった列 title だけの update）が 1 件足される。
     And("完了の履歴は改名では変わらない", async () => {
       expect(
         (
@@ -458,9 +455,6 @@ describeFeature(feature, ({ Background, Scenario }) => {
             .from(todoStatusChanges)
         ).sort(byTodoAndPosition),
       ).toStrictEqual([...createdStatusRows].sort(byTodoAndPosition));
-    });
-
-    And("変更の記録に 1 件目のタイトルの変更が 1 件足される", async () => {
       expectedLogs.push({
         tableName: "todos",
         rowId: milk.id,
@@ -502,6 +496,7 @@ describeFeature(feature, ({ Background, Scenario }) => {
     });
 
     // 完了の日時は API が now() で決めるので、値は作成日時以上であることだけを見る。
+    // 変更の記録に、1 件目の completed の update と完了の履歴の insert が足される。
     And("完了の履歴に 1 件目の完了が 1 件足される", async () => {
       const rows = (
         await database.db.select(STATUS_CHANGE_COLUMNS).from(todoStatusChanges)
@@ -523,27 +518,21 @@ describeFeature(feature, ({ Background, Scenario }) => {
       expect(completion?.changedAt.getTime()).toBeGreaterThanOrEqual(
         Date.parse(milk.createdAt),
       );
+      const statusRows = await database.db.select().from(todoStatusChanges);
+      expectedLogs.push(
+        {
+          tableName: "todos",
+          rowId: milk.id,
+          operation: "update",
+          changes: { completed: { before: false, after: true } },
+          actorId: null,
+        },
+        statusInsertLog(statusRowOf(statusRows, milk.id, 1)),
+      );
+      expect(
+        logEntries(await database.db.select().from(changeLogs)),
+      ).toStrictEqual(logEntries(expectedLogs));
     });
-
-    And(
-      "変更の記録に 1 件目の完了への変更と完了の履歴の作成が足される",
-      async () => {
-        const statusRows = await database.db.select().from(todoStatusChanges);
-        expectedLogs.push(
-          {
-            tableName: "todos",
-            rowId: milk.id,
-            operation: "update",
-            changes: { completed: { before: false, after: true } },
-            actorId: null,
-          },
-          statusInsertLog(statusRowOf(statusRows, milk.id, 1)),
-        );
-        expect(
-          logEntries(await database.db.select().from(changeLogs)),
-        ).toStrictEqual(logEntries(expectedLogs));
-      },
-    );
 
     // 作成・改名では通知せず、未完了 → 完了に変わった 1 件目の分だけ（id だけの英語。Issue #208）。
     And("1 件目の完了の通知が 1 件だけ送られる", () => {
@@ -586,14 +575,12 @@ describeFeature(feature, ({ Background, Scenario }) => {
     });
 
     // 削除した Todo の完了の履歴も消える（外部キーの on delete cascade）。
+    // 変更の記録には 1 件目の削除（delete）が 1 件だけ足される。cascade で消えた完了の履歴の行は記録しない。これまでの記録
+    //   （消した Todo の insert・update も）は消えずに残る。
     And("完了の履歴は 2 件目の作成時の 1 件だけになる", async () => {
       await expect(
         database.db.select(STATUS_CHANGE_COLUMNS).from(todoStatusChanges),
       ).resolves.toStrictEqual([createdStatusRow(bread)]);
-    });
-
-    // cascade で消えた完了の履歴の行は記録しない。これまでの記録（消した Todo の insert・update も）は消えずに残る。
-    And("変更の記録に 1 件目の削除が 1 件だけ足される", async () => {
       expectedLogs.push({
         tableName: "todos",
         rowId: milk.id,
@@ -692,13 +679,11 @@ describeFeature(feature, ({ Background, Scenario }) => {
       });
     });
 
+    // 変更の記録も作成の 2 件のまま増えない。
     And("Todo は作られていた 1 件のまま変わらない", async () => {
       await expect(database.db.select().from(todos)).resolves.toStrictEqual([
         rowOf(milk),
       ]);
-    });
-
-    And("変更の記録は作成の 2 件のまま変わらない", async () => {
       expect(
         logEntries(await database.db.select().from(changeLogs)),
       ).toStrictEqual(createdLogs);
@@ -734,20 +719,18 @@ describeFeature(feature, ({ Background, Scenario }) => {
       );
     });
 
+    // 変更の記録も作成の 2 件のまま増えない。
     And(
       "Todo は改名の失敗の後も作られていた 1 件のまま変わらない",
       async () => {
         await expect(database.db.select().from(todos)).resolves.toStrictEqual([
           rowOf(milk),
         ]);
+        expect(
+          logEntries(await database.db.select().from(changeLogs)),
+        ).toStrictEqual(createdLogs);
       },
     );
-
-    And("変更の記録は改名の失敗の後も作成の 2 件のまま変わらない", async () => {
-      expect(
-        logEntries(await database.db.select().from(changeLogs)),
-      ).toStrictEqual(createdLogs);
-    });
 
     When("改名の失敗の後に Todo の一覧を見る", async () => {
       response = await handlers.listTodos(bodylessRequest("GET", "/api/todos"));
