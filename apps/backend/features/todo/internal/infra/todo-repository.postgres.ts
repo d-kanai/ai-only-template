@@ -41,7 +41,7 @@ function toTodo(
         createdAt: row.createdAt,
         statusChanges: repaired,
       },
-      // 補ったときだけ、origin の履歴を DB の状態（補う前の空）にする。補った履歴は「まだ DB に無い」ので、次の update が
+      // 補ったときだけ、origin の履歴を DB の状態（補う前の履歴。空、または最後が todos.completed と食い違う履歴）にする。補った履歴は「まだ DB に無い」ので、次の update が
       //   「DB の履歴の件数」の position から INSERT する（repair on write。Todo.reconstruct の stored）。
       // WHY 補っていないときは渡さない: origin は検証後の値（zod が作り直した readonly の配列）にし、DB から読んだ生の配列を
       //   origin に持たせない（ほかの読み出しと同じ前提を保つ）。
