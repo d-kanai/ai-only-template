@@ -98,6 +98,27 @@ async function histories(): Promise<History[]> {
   return rows;
 }
 
+// Todo の完了の履歴の不変条件（features/todo の todo.ts の isConsistentHistory と同じ規則）を満たさない Todo の id（昇順）。
+//   履歴が 0 件、日時が作成日時から昇順でない、最後の completed が todos.completed と違う。
+async function violations(): Promise<string[]> {
+  const { rows } = await database.pool.query<{
+    id: string;
+    completed: boolean;
+    createdAt: Date;
+  }>(`select id, completed, created_at as "createdAt" from todos order by id`);
+  const all = await histories();
+  return rows
+    .filter(({ id, completed, createdAt }) => {
+      const history = all.filter((row) => row.todoId === id);
+      const ascending = history.every(
+        (row, index) =>
+          row.changedAt >= (history[index - 1]?.changedAt ?? createdAt),
+      );
+      return !ascending || history.at(-1)?.completed !== completed;
+    })
+    .map(({ id }) => id);
+}
+
 // 一時ディレクトリに SQL ファイルを置き、そのディレクトリを返す。
 function fixtureDirectory(files: Record<string, string>): string {
   const directory = mkdtempSync(join(fixtureRoot, "dir-"));
@@ -194,11 +215,58 @@ describe("backfill の SQL（shared/drizzle/backfill/）: Todo の完了の履�
       join(backfillDirectory(), "0001_todo_status_changes.sql"),
       "utf8",
     ).split("--> statement-breakpoint");
-    expect(statements).toHaveLength(2);
+    expect(statements).toHaveLength(3);
 
     await database.pool.query(String(statements[1]));
 
     expect(await histories()).toEqual([]);
+  });
+
+  // 最後の履歴が todos.completed と食い違う Todo（Issue #237）: 履歴を知らない旧リビジョンが、backfill で履歴が付いた後に
+  //   todos.completed だけを変えた Todo。3 文目が末尾に「最後の履歴の日時に、今の completed」を 1 件足す。
+  // WHY 日時を最後の履歴の日時にする: 変えた日時の記録が無いので、不変条件（日時は昇順）の下限にする（Repository の repairHistory と同じ）。
+  // WHY 2 件以上の履歴の例にする: 2 文目（1 件目だけの完了済み）では足されず、3 文目だけが足すことを確かめる。
+  test("最後の履歴が今の完了かどうかと食い違う Todo に、最後の履歴の日時で今の completed の 1 件を足し、2 回流しても増えない", async () => {
+    await insertTodo(OPEN, false);
+    await insertHistory(OPEN, 0, false, CREATED_AT);
+    await insertHistory(OPEN, 1, true, LATER);
+    await insertTodo(DONE, true);
+    await insertHistory(DONE, 0, false, CREATED_AT);
+    await insertHistory(DONE, 1, true, CREATED_AT);
+    await insertHistory(DONE, 2, false, LATER);
+    const expected = [
+      { todoId: OPEN, position: 0, completed: false, changedAt: CREATED_AT },
+      { todoId: OPEN, position: 1, completed: true, changedAt: LATER },
+      { todoId: OPEN, position: 2, completed: false, changedAt: LATER },
+      { todoId: DONE, position: 0, completed: false, changedAt: CREATED_AT },
+      { todoId: DONE, position: 1, completed: true, changedAt: CREATED_AT },
+      { todoId: DONE, position: 2, completed: false, changedAt: LATER },
+      { todoId: DONE, position: 3, completed: true, changedAt: LATER },
+    ];
+
+    await runBackfills(database.pool, backfillDirectory());
+    expect(await histories()).toEqual(expected);
+
+    await runBackfills(database.pool, backfillDirectory());
+    expect(await histories()).toEqual(expected);
+  });
+
+  // WHY 3 種類を混ぜて 1 回だけ流す: 1 文目〜3 文目が互いの結果を前提にしても（1 文目で足した 1 件目を 2 文目が見る、など）、
+  //   1 回で Todo の不変条件（履歴が 1 件以上・日時は作成日時から昇順・最後の completed が今の completed）を満たす形にそろうこと。
+  //   不変条件は domain（features/todo の todo.ts）が持つが、shared の infra から feature の domain は import しない
+  //   （rule-tests/architecture.test.ts）ので、同じ規則を violations で数える。
+  test("履歴 0 件・1 件目だけ・食い違う Todo を混ぜて 1 回流すと、不変条件を満たさない Todo が残らない", async () => {
+    await insertTodo(OPEN, true);
+    await insertTodo(DONE, true);
+    await insertHistory(DONE, 0, false, CREATED_AT);
+    await insertTodo(HAS_HISTORY, false);
+    await insertHistory(HAS_HISTORY, 0, false, CREATED_AT);
+    await insertHistory(HAS_HISTORY, 1, true, LATER);
+    expect(await violations()).toEqual([OPEN, DONE, HAS_HISTORY].sort());
+
+    await runBackfills(database.pool, backfillDirectory());
+
+    expect(await violations()).toEqual([]);
   });
 
   test("2 回流しても行は増えない（冪等）", async () => {
@@ -248,6 +316,44 @@ describe("backfill の SQL（shared/drizzle/backfill/）: Todo の完了の履�
 
     expect(await histories()).toEqual([
       { todoId: OPEN, position: 0, completed: false, changedAt: LATER },
+    ]);
+  });
+
+  // 3 文目（食い違いの補い。Issue #237）も 1 文目と同じく、アプリ（repair on write）との同時実行で履歴を 2 重にしない。
+  // WHY アプリは todos を変えずに履歴だけを書く: todos の行が変わらないので、backfill はロックが取れた後に行を読み直さず
+  //   （READ COMMITTED の再評価が起きない）、文の開始時のスナップショットのまま (todo_id, 最後の position + 1) を INSERT する。
+  //   ON CONFLICT DO NOTHING が無ければ、アプリが COMMIT した同じ position と一意制約の違反（23505）になる。
+  test("食い違う Todo の行をアプリがロックして履歴を補い COMMIT するまで待ち、その後に流れて、履歴を 2 重にしない", async () => {
+    await insertTodo(OPEN, false);
+    await insertHistory(OPEN, 0, false, CREATED_AT);
+    await insertHistory(OPEN, 1, true, CREATED_AT);
+    const app = await database.pool.connect();
+    let backfill: Promise<void> | undefined;
+    try {
+      await app.query("begin");
+      await app.query("select id from todos where id = $1 for update", [OPEN]);
+      const { rows } = await app.query<{ pid: number }>(
+        "select pg_backend_pid() as pid",
+      );
+      backfill = runBackfills(database.pool, backfillDirectory());
+      await waitUntilBlockedBy(Number(rows[0]?.pid));
+      await app.query(
+        "insert into todo_status_changes (todo_id, position, completed, changed_at) values ($1, 2, false, $2)",
+        [OPEN, LATER],
+      );
+      await app.query("commit");
+      await backfill;
+    } finally {
+      // WHY finally で終わらせる: 上の 1 文目のテストと同じ。
+      await app.query("rollback");
+      app.release();
+      await Promise.allSettled([backfill]);
+    }
+
+    expect(await histories()).toEqual([
+      { todoId: OPEN, position: 0, completed: false, changedAt: CREATED_AT },
+      { todoId: OPEN, position: 1, completed: true, changedAt: CREATED_AT },
+      { todoId: OPEN, position: 2, completed: false, changedAt: LATER },
     ]);
   });
 

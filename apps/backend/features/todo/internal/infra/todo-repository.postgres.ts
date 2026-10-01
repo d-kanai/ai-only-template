@@ -25,13 +25,13 @@ type Reader = Pick<Database, "select">;
 //   クライアントへの本文は固定のキー（server.internalError と固定の英語の detail。toProblemResponse）なので、ここに書いた内容は外に出ない。
 // WHY 行を読み飛ばさない（一覧から黙って外さない）: データが消えたように見え、不整合に気づけない。
 // WHY cause に元の DomainError を持たせる: 例外を調べるとき（テスト・デバッガ）に元の例外をたどれるようにする。
-// statusChanges: その Todo の完了の履歴（足した順）。履歴の行が無ければ空配列で、repairMissingHistory が補う（Issue #194）。
-//   履歴があるのに不変条件を満たさない（最後の completed が todos.completed と違うなど）なら、不変条件の違反として扱う。
+// statusChanges: その Todo の完了の履歴（足した順）。履歴の行が無い（空配列）・最後の completed が todos.completed と違うなら、
+//   repairHistory が補う（Issue #194・#237）。補っても不変条件を満たさない（履歴の日時の並びが壊れている）なら、不変条件の違反として扱う。
 function toTodo(
   row: TodoRow,
   statusChanges: readonly TodoStatusChange[],
 ): Todo {
-  const repaired = repairMissingHistory(row, statusChanges);
+  const repaired = repairHistory(row, statusChanges);
   try {
     return Todo.reconstruct(
       {
@@ -42,7 +42,7 @@ function toTodo(
         statusChanges: repaired,
       },
       // 補ったときだけ、origin の履歴を DB の状態（補う前の空）にする。補った履歴は「まだ DB に無い」ので、次の update が
-      //   position 0 から INSERT する（repair on write。Todo.reconstruct の stored）。
+      //   「DB の履歴の件数」の position から INSERT する（repair on write。Todo.reconstruct の stored）。
       // WHY 補っていないときは渡さない: origin は検証後の値（zod が作り直した readonly の配列）にし、DB から読んだ生の配列を
       //   origin に持たせない（ほかの読み出しと同じ前提を保つ）。
       repaired === statusChanges ? undefined : { statusChanges },
@@ -59,40 +59,55 @@ function toTodo(
   }
 }
 
-// 完了の履歴が DB に 1 件も無い Todo の履歴を補う（Issue #194）。履歴があれば、そのまま返す（ずれていても直さない）。
-// WHY 補う: デプロイは migrate（履歴の backfill）→ 新しい版への切り替えの順で、その間は古い版のアプリが履歴を書かずに Todo を
-//   作る。backfill は切り替えの後にもう一度（冪等に）流すが、それまでの間に新しい版がその Todo を読むと不変条件の違反（500）になり、
-//   1 件でも一覧（findAll）ごと読めなくなる。新しい版は backfill の前のデータを読めなければならない。
-// WHY backfill と同じ規則（作成日時に未完了の 1 件、完了済みなら作成日時に完了をもう 1 件）:
-//   apps/backend/shared/drizzle/0002_todo_status_changes_foreign_key_and_backfill.sql と同じ値にし、補って書いた行と backfill が
-//   書いた行を区別できないようにする（どちらが先に直しても同じ履歴になる）。完了した日時は記録が無いので作成日時（不変条件の下限）。
-// WHY 履歴が 1 件以上あれば補わない: 「履歴があるのにずれている」（最後の completed が todos.completed と違うなど）は古い版の
-//   アプリの書き方では起きず、データの誤りなので、今までどおり不変条件の違反（500。toTodo）にして気づけるようにする。
+// 旧リビジョン（完了の履歴を知らない版）の書き込みで不変条件を満たさなくなった Todo の履歴を補う。補う必要が無ければ、
+//   受け取った配列をそのまま返す（toTodo は参照の一致で「補ったか」を見る）。
+//   - 履歴が DB に 1 件も無い（Issue #194）: 作成日時に未完了の 1 件、完了済みなら作成日時に完了をもう 1 件。
+//   - 最後の履歴の completed が todos.completed と違う（Issue #237）: 末尾に「最後の履歴の日時に、今の completed になった」1 件。
+// WHY 補う: デプロイは migrate → 新しい版への切り替え → backfill の順で、切り替えまでの間（と切り替えの時に処理中だった要求）は
+//   古い版のアプリが履歴を書かずに Todo を作り、todos.completed だけを変える。backfill は切り替えの後に（冪等に）流すが、それまでの間に
+//   新しい版がその Todo を読むと不変条件の違反（500）になり、1 件でも一覧（findAll）ごと読めなくなる。新しい版は backfill の前の
+//   データを読めなければならない。
+// WHY 食い違いも補う（Issue #237。#194 では「履歴が 0 件」だけを補い、食い違いは 500 にしていた）: backfill（または 0002 の
+//   マイグレーション）で履歴が付いた後に、古い版が todos.completed だけを変えると、履歴は空でないのに最後の completed が今の値と
+//   食い違う。これは古い版の書き方で起きる（データの誤りではない）ので、500 のままでは一覧が直らない（Codex のレビューの P1）。
+// WHY backfill と同じ規則: apps/backend/shared/drizzle/backfill/0001_todo_status_changes.sql（0 件は 1.・2. 文目、食い違いは 3. 文目）と
+//   同じ値にし、補って書いた行と backfill が書いた行を区別できないようにする（どちらが先に直しても同じ履歴になる）。
+// WHY 変わった日時を「最後の履歴の日時」にする: 古い版は変えた日時を記録しないので分からない。不変条件（日時は昇順）を満たす
+//   下限が最後の履歴の日時（0 件のときに作成日時を使うのと同じ考え方）。
+// WHY 並びの壊れた履歴（日時が作成日時より前・逆順）は直さない: 古い版のアプリの書き方では起きず（手で入れた行などのデータの誤り）、
+//   どの日時が正しいか backfill と同じ規則では決められないので、今までどおり不変条件の違反（500。toTodo）にして気づけるようにする。
 // WHY 読むときに DB へ書かない（補った履歴は update のときに書く）: query（findAll / findById）はトランザクションの外で読むだけで、
 //   書き込みは command のトランザクションと Writer（変更履歴・ログ）に集める。補った履歴は origin に含めない（toTodo）ので、
 //   その Todo を command が update すると、補った分が増えた履歴として Writer 経由で INSERT される（repair on write）。
-// WHY infra に置く（domain に置かない）: 「行が無い」は保存の仕方（todos と todo_status_changes の 2 表に分けた）の都合で、
-//   Todo の規則ではない。domain の不変条件（履歴は 1 件以上）は緩めない。
+// WHY infra に置く（domain に置かない）: 「行が無い」「todos.completed だけが変わった」は保存の仕方（todos と todo_status_changes の
+//   2 表に分けた）と古い版の都合で、Todo の規則ではない。domain の不変条件（履歴は 1 件以上・最後の completed が今の値）は緩めない。
 // WHY InMemory（test-support/todo/todo-repository.in-memory.ts）には置かない: InMemory は Todo（不変条件を満たす値）を保持する
-//   ので、履歴の無い Todo は存在しえない。
-function repairMissingHistory(
+//   ので、履歴の無い・食い違う Todo は存在しえない。
+function repairHistory(
   row: TodoRow,
   statusChanges: readonly TodoStatusChange[],
 ): readonly TodoStatusChange[] {
-  if (statusChanges.length > 0) {
+  const last = statusChanges.at(-1);
+  if (last === undefined) {
+    const created = { completed: false, changedAt: row.createdAt };
+    return row.completed
+      ? [created, { completed: true, changedAt: row.createdAt }]
+      : [created];
+  }
+  if (last.completed === row.completed) {
     return statusChanges;
   }
-  const created = { completed: false, changedAt: row.createdAt };
-  return row.completed
-    ? [created, { completed: true, changedAt: row.createdAt }]
-    : [created];
+  return [
+    ...statusChanges,
+    { completed: row.completed, changedAt: last.changedAt },
+  ];
 }
 
 // todos と完了の履歴を LEFT JOIN した行（Todo 1 件につき履歴の件数の行。履歴の無い Todo は change が null の 1 行）を、
 //   Todo ごとにまとめて Todo にする。返す順は、各 Todo が最初に現れた順（= SELECT の ORDER BY の順）。
 // WHY Map でまとめる: 同じ Todo の行は ORDER BY（todos の列が先、position が後）で連続し、Map は最初に入れた順を保つので、
 //   一覧の順（作成日時・id）と履歴の順（position）の両方を SELECT の並びのまま保てる。
-// change が null（LEFT JOIN で履歴が 1 件も無い）なら履歴は空配列で、toTodo が補う（repairMissingHistory）。
+// change が null（LEFT JOIN で履歴が 1 件も無い）なら履歴は空配列で、toTodo が補う（repairHistory）。
 function toTodos(
   rows: readonly {
     todo: TodoRow;
@@ -122,7 +137,7 @@ function toTodos(
 //   1 文なら 1 つのスナップショットなので、分離レベルに頼らずに済む（.claude/rules/backend.md の「永続化」）。
 //   todo-repository.postgres.test.ts が Pool の query の回数（1 回）で固定する。
 // WHY LEFT JOIN（INNER JOIN にしない）: 履歴の無い行（デプロイの途中で古い版のアプリが作った行）を一覧から黙って外さず、
-//   読む（repairMissingHistory が補う。Issue #194）。
+//   読む（repairHistory が補う。Issue #194）。
 // WHY ORDER BY は作成日時・id・position の順: 作成日時が同じ行が複数あると作成日時だけでは Postgres が返す順が決まらない
 //   （行の物理的な位置や実行計画で変わりうる）ので、一意な id を第 2 キーにして毎回同じ順にする（ListTodosQuery の並べ替えは
 //   安定ソートなので、この順が一覧の順になる）。todos の列を先に並べると同じ Todo の行が連続する（toTodos がまとめる）。

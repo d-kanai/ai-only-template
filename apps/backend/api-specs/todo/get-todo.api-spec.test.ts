@@ -145,12 +145,13 @@ describeFeature(feature, ({ Scenario }) => {
       );
     });
 
-    // 完了の履歴の最後が todos.completed と違う Todo は不変条件の違反で、クライアントには直せないサーバ側の誤り（500。
-    //   todo-repository.postgres.ts の toTodo）。履歴の無い Todo（デプロイの途中で古い版が作ったもの）は Repository が補って読むので
-    //   壊れていない（Issue #194。repairMissingHistory）。
+    // 完了の履歴の日時が作成日時より前の Todo は不変条件の違反で、クライアントには直せないサーバ側の誤り（500。
+    //   todo-repository.postgres.ts の toTodo）。履歴の無い Todo・最後の履歴が todos.completed と食い違う Todo（デプロイの途中で
+    //   古い版が作った・completed だけを変えたもの）は Repository が補って読むので壊れていない（Issue #194・#237。repairHistory）。
+    //   補っても直らない並びの壊れた履歴だけが 500 になる。
     // 例外は toProblemResponse が logger.emit（server_error。ERROR なので console.error）で標準エラーに 1 行出す（vi を使わないので抑えない）。
     And(
-      "壊れた Todo（完了の履歴が、今の完了かどうかと食い違うもの）は、サーバの誤りとして伝えられる",
+      "壊れた Todo（完了の履歴の日時が、作られた日時より前のもの）は、サーバの誤りとして伝えられる",
       async () => {
         const id = "00000000-0000-4000-8000-000000000001";
         const createdAt = new Date("2026-09-01T00:00:00.000Z");
@@ -159,7 +160,12 @@ describeFeature(feature, ({ Scenario }) => {
           title: "牛乳を買う",
           completed: false,
           createdAt,
-          statusChanges: [{ completed: true, changedAt: createdAt }],
+          statusChanges: [
+            {
+              completed: false,
+              changedAt: new Date("2026-08-31T00:00:00.000Z"),
+            },
+          ],
         });
 
         const response = await getTodo(id);
