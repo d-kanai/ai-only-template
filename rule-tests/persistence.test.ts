@@ -82,7 +82,7 @@ import { afterAll, describe, expect, it } from "vitest";
 //       だけにする。Repository が直接張ると、command の範囲の外に別のトランザクションができ、読み込み（行ロック）と書き込みが
 //       同じトランザクションにならない。runner のファイルは Repository ではないので、この規則を含む *.postgres.ts の規則の対象外
 //       （下の REPOSITORY_RULES_EXEMPT）。
-//     WHY `/` の直後は数えない: import のパス（`…/shared/domain/transaction`・`…/shared/infra/transaction.postgres`）は名前ではない。
+//     WHY `/` の直後は数えない: import のパス（`…/shared/application/transaction`・`…/shared/infra/transaction.postgres`）は名前ではない。
 //     WHY `.` と `(` を要求しない（no-upsert と同じ）: 変数に入れ直す・ブラケットで呼ぶ書き方も拾う。`transactional(`・
 //       `myTransaction(`・`transactions`・型の `Transaction`（大文字）は別の名前として通す。
 //     限界: 文字列の中の `transaction`（ログの文言など）も違反と数える（安全側）。`db["trans" + "action"]` のような組み立ては見ない。
@@ -848,7 +848,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       POSTGRES,
       source(
         IMPORT_CHANGED_PROPS,
-        'import type { Transaction } from "../../../../shared/domain/transaction";',
+        'import type { Transaction } from "../../../../shared/application/transaction";',
         "import {",
         "  writerOf,",
         '} from "../../../../shared/infra/writer.ts";',
@@ -891,7 +891,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       "transaction / recordChange で始まる・終わる・含むだけの別の名前（transactional( / myTransaction( / transactions / recordChanges( / recordChangeLater(）と型の Transaction、import のパスの transaction",
       POSTGRES,
       source(
-        'import type { Transaction } from "../../../../shared/domain/transaction";',
+        'import type { Transaction } from "../../../../shared/application/transaction";',
         'import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";',
         "await this.transactional(async (tx) => {});",
         "await myTransaction(async (tx) => {});",
@@ -925,7 +925,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       "トランザクションの runner（shared/infra/transaction.postgres.ts）は *.postgres.ts でも db.transaction( を呼んでよい（Repository の規則の対象外）",
       RUNNER,
       source(
-        'import type { Transaction } from "../domain/transaction";',
+        'import type { Transaction } from "../application/transaction";',
         "return this.db.transaction((tx) =>",
         "  work(transactionOf(new PostgresWriter(tx, this.actorId))),",
         ");",
@@ -1740,7 +1740,7 @@ describe("backend のソースの列挙と検査（fixture）", () => {
       // 規則を満たす Repository（writer を import し、writerOf(tx) で得た Writer で書き、子表を leftJoin で読む）。
       "apps/backend/features/z/internal/infra/z-writer.postgres.ts": source(
         IMPORT_WRITER,
-        'import type { Transaction } from "../../../../shared/domain/transaction";',
+        'import type { Transaction } from "../../../../shared/application/transaction";',
         'import { zChanges, zs } from "./schema";',
         "const writer = writerOf(tx);",
         "await writer.delete(zs, id);",

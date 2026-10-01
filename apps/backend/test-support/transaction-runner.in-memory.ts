@@ -1,5 +1,7 @@
-import type { TransactionRunner } from "../shared/application/transaction";
-import type { Transaction } from "../shared/domain/transaction";
+import type {
+  Transaction,
+  TransactionRunner,
+} from "../shared/application/transaction";
 
 // TransactionRunner の InMemory 実装（テスト用。Issue #215）。command のテストと、api ファイルのテストの組み立てで
 //   InMemory の Repository と一緒に渡す。本番は PostgresTransactionRunner（shared/infra/transaction.postgres.ts）。
@@ -16,7 +18,7 @@ export class InMemoryTransactionRunner implements TransactionRunner {
 
 // InMemory の runner が work に渡す Transaction。InMemory の Repository は受け取るだけで使わない。
 // WHY export する: テストが Repository に直接 Todo を置く（`repository.insert(todo, inMemoryTransaction)`）ときに使う。
-// WHY cast: domain の Transaction は brand の型で、infra の実体（Postgres の Writer）以外は作れない。InMemory は中身の要らない
+// WHY cast: Transaction（shared/application/transaction）は brand の型で、infra の実体（Postgres の Writer）以外は作れない。InMemory は中身の要らない
 //   印だけを渡す（本番のコードは test-support を参照できないので、この値が本番に混ざることはない。rule-tests/test-support.test.ts）。
 //   Postgres の Repository に渡すと writerOf が Error にする（shared/infra/writer.ts）。
 export const inMemoryTransaction = Object.freeze({}) as unknown as Transaction;

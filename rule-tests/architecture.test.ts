@@ -697,6 +697,8 @@ function isOwnFeatureApiFile(ref: Reference): boolean {
 // WHY backend/shared の中も層で縛る: backend/shared も domain / presentation などの層に分かれており、その中で
 //   domain → presentation のような逆向きの依存を作ると、feature の中と同じく依存の向きが崩れるため。
 const LAYERS_MAY_USE: Record<BackendLayer, ReadonlySet<BackendLayer>> = {
+  // application は層では許さない。トランザクションの印の型と port のモジュール（shared/application/transaction）だけを名前で、
+  //   型だけ許す（Issue #230。下の SHARED_TRANSACTION_PORT_MODULE と backendMayUse）。
   domain: new Set(["domain"]),
   application: new Set(["domain", "application"]),
   // presentation の infra は Postgres の Repository の実装と backend/shared/infra/database・transaction.postgres だけ、feature の
@@ -716,11 +718,13 @@ const SHARED_DATABASE_MODULE = "apps/backend/shared/infra/database";
 //   presentation から使わせない（書き込みは Repository が runner の tx から取り出す）。
 const SHARED_TRANSACTION_RUNNER_MODULE =
   "apps/backend/shared/infra/transaction.postgres";
-// トランザクションを張る口（TransactionRunner の interface。Issue #220 で shared/domain から移した）。infra が実装する port で、
-//   infra が参照してよい唯一の application（shared/infra/transaction.postgres が implements する）。
-// WHY application に置く: トランザクションの範囲を決めるのは command（application）の関心で、domain（Entity・Repository の
-//   interface）は使わない。domain の TodoRepository が引数に取る brand の型 Transaction だけは shared/domain/transaction に残す。
-// WHY 名前で 1 つだけ許す: application の層ごと許すと、infra から command（ユースケース）を参照できてしまう。
+// トランザクションを張る口（TransactionRunner の interface）と印の型（Transaction の brand）のモジュール。Issue #220 で port を
+//   shared/domain から移して型と分け、Issue #230 で 1 ファイルに戻した（ユーザー判断）。infra が実装する port で、infra と domain が
+//   参照してよい唯一の application（shared/infra/transaction.postgres が implements し、domain の TodoRepository が Transaction を
+//   引数に取る。どちらも import type だけ。backendMayUse）。
+// WHY application に置く: トランザクションの範囲を決めるのは command（application）の関心。印の型だけのために domain に別の
+//   ファイルを置くより、型と port を 1 か所にまとめ、domain からの型だけの参照を例外にする（Issue #230）。
+// WHY 名前で 1 つだけ許す: application の層ごと許すと、infra・domain から command（ユースケース）を参照できてしまう。
 const SHARED_TRANSACTION_PORT_MODULE =
   "apps/backend/shared/application/transaction";
 
@@ -799,11 +803,14 @@ function backendMayUse(ref: Reference): boolean {
   const sameFeatureOrShared =
     target.scope === self.scope || target.scope === BACKEND_SHARED_SCOPE;
   // Issue #220: infra は application の層を許さず（LAYERS_MAY_USE）、infra が実装する port だけを名前で許す。
-  // Issue #224: port は型だけ（import type / export type）。interface の実装に型以外は要らない。値の import・re-export・
-  //   dynamic import（typeOnly が false）を許すと、port のモジュールに実行時の export が増えたときに infra が application の
-  //   ロジックを実行時に取り込める（Codex のレビュー、PR #223）。
+  // Issue #230（ユーザー判断）: domain も同じモジュールだけを型で許す。印の型 Transaction を port と同じファイル
+  //   （shared/application/transaction）に置いたので、Repository の interface（domain）がその型を引数に取るには参照が要る。
+  //   domain の層としては application を許さない（LAYERS_MAY_USE）ので、このモジュールの型だけの例外にする。
+  // Issue #224: port は型だけ（import type / export type）。interface の実装と引数の型に型以外は要らない。値の import・
+  //   re-export・dynamic import（typeOnly が false）を許すと、port のモジュールに実行時の export が増えたときに infra・domain が
+  //   application のロジックを実行時に取り込める（Codex のレビュー、PR #223）。
   if (
-    self.layer === "infra" &&
+    (self.layer === "infra" || self.layer === "domain") &&
     ref.typeOnly &&
     ref.to === SHARED_TRANSACTION_PORT_MODULE
   ) {
@@ -1018,8 +1025,10 @@ const RULES: Rule[] = [
   {
     // 「domain は Next・React・DB に依存させない」「依存してよい先は backend/shared だけ」
     //   自 feature の domain/ の中の参照（Repository の interface が Entity を参照するなど）は許す。
+    //   application は、トランザクションの印の型と port のモジュール（apps/backend/shared/application/transaction）を
+    //   import type で参照するときだけ（Issue #230。ユーザー判断。Repository の interface が引数に Transaction を取る）。
     id: "domain",
-    name: "apps/backend/features/<f>/internal/domain/ が参照してよい自前コードは自 feature と apps/backend/shared/ の domain/ だけで、next・react も参照しない",
+    name: "apps/backend/features/<f>/internal/domain/ が参照してよい自前コードは自 feature と apps/backend/shared/ の domain/ と apps/backend/shared/application/transaction（トランザクションの印の型。import type だけ）だけで、next・react も参照しない",
     appliesTo: (from) => backendLayerOf(from)?.layer === "domain",
     isViolation: violatesBackendLayer,
   },
@@ -1028,8 +1037,8 @@ const RULES: Rule[] = [
     // WHY 層の許可の一覧（domain / application の規則）と別の規則にする: 許可の一覧はパッケージを next / react / react-dom 以外
     //   すべて許すので、DB のパッケージはそこでは止まらない。DB への依存は infra に閉じ込める（schema.ts・Repository の実装・
     //   database.ts）という別の観点なので、1 規則 = 1 テストで独立に検査する。
-    // WHY backend/shared の domain / application も含める: feature をまたぐ型と interface（トランザクションの型 Transaction は
-    //   shared/domain、口 TransactionRunner は shared/application。Issue #215・#220）が Drizzle の型に依存すると、domain・application
+    // WHY backend/shared の domain / application も含める: feature をまたぐ型と interface（トランザクションの型 Transaction と
+    //   口 TransactionRunner は shared/application/transaction。Issue #215・#220・#230）が Drizzle の型に依存すると、domain・application
     //   から DB が見えてしまうため。
     // 型だけの参照（import type）も違反にする: 型でも DB の形が domain に入り込み、DB を差し替えると domain を直すことになる。
     id: "core-to-persistence",
@@ -3118,14 +3127,29 @@ const RULE_EXAMPLES: Record<
   },
   domain: {
     violating: [
-      // Issue #220: トランザクションの口（TransactionRunner）は backend/shared の application。domain からは参照しない
-      //   （domain が使うのは brand の型 Transaction だけで、shared/domain/transaction に残した）。
+      // Issue #230: domain から backend/shared の application へは、トランザクションの印の型と口のモジュール
+      //   （shared/application/transaction）を型だけ（import type）で参照するときだけ許す。値の import・re-export と、
+      //   shared/application の別モジュール・port の下の深いパスは違反のまま（型だけでも）。
       [
         "apps/backend/features/todo/internal/domain/x.ts",
         "../../../../shared/application/transaction",
+        "value",
+      ],
+      [
+        "apps/backend/shared/domain/x.ts",
+        "../application/transaction",
+        "re-export",
+      ],
+      [
+        "apps/backend/features/todo/internal/domain/x.ts",
+        "../../../../shared/application/x",
         "type",
       ],
-      ["apps/backend/shared/domain/x.ts", "../application/transaction", "type"],
+      [
+        "apps/backend/shared/domain/x.ts",
+        "../application/transaction/x",
+        "type",
+      ],
       [
         "apps/backend/features/todo/internal/domain/x.ts",
         "next/server",
@@ -3220,6 +3244,14 @@ const RULE_EXAMPLES: Record<
         "value",
       ],
       ["apps/backend/shared/domain/x.ts", "@repo/shared/now", "value"],
+      // Issue #230: トランザクションの印の型 Transaction（shared/application/transaction）は型だけ参照してよい
+      //   （Repository の interface の引数。Issue #220 では違反の例だった）。feature の domain と backend/shared の domain の両方。
+      [
+        "apps/backend/features/todo/internal/domain/todo-repository.ts",
+        "../../../../shared/application/transaction",
+        "type",
+      ],
+      ["apps/backend/shared/domain/x.ts", "../application/transaction", "type"],
       // next / react / DB 以外のパッケージは使ってよい（Todo の不変条件を zod のスキーマで宣言する。Issue #88）。
       ["apps/backend/features/todo/internal/domain/x.ts", "zod", "value"],
     ],
@@ -3365,13 +3397,7 @@ const RULE_EXAMPLES: Record<
         "../../../../shared/domain/domain-error",
         "value",
       ],
-      // Issue #215: brand の型 Transaction は backend/shared の domain。
-      [
-        "apps/backend/features/todo/internal/application/x.command.ts",
-        "../../../../shared/domain/transaction",
-        "type",
-      ],
-      // Issue #220: トランザクションを張る口（TransactionRunner）は backend/shared の application。
+      // Issue #220・#230: トランザクションを張る口（TransactionRunner）と印の型（Transaction）は backend/shared の application。
       [
         "apps/backend/features/todo/internal/application/x.command.ts",
         "../../../../shared/application/transaction",
@@ -6431,9 +6457,16 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/backend/shared/domain/bad-shared-domain-infra.ts": lines(
     'import type { Database } from "../infra/database";',
   ),
-  // Issue #220: domain はトランザクションの口（TransactionRunner。backend/shared の application）を参照しない。
-  "apps/backend/shared/domain/bad-shared-domain-application.ts": lines(
-    'import type { TransactionRunner } from "../application/transaction";',
+  // Issue #230: domain が参照してよい application は shared/application/transaction（印の型と port）を型だけ。値の import・
+  //   re-export、backend/shared/application の別モジュール、port の下の深いパスは違反（型だけの参照は MUST_PASS_FILES の
+  //   good-shared-domain-transaction.ts と todo-repository.ts）。
+  "apps/backend/features/todo/internal/domain/bad-domain-application.ts": lines(
+    'import { Transaction } from "../../../../shared/application/transaction";',
+    'import type { X } from "../../../../shared/application/x";',
+    'import type { Y } from "../../../../shared/application/transaction/x";',
+  ),
+  "apps/backend/shared/domain/bad-shared-domain-port-value.ts": lines(
+    'export { TransactionRunner } from "../application/transaction";',
   ),
   // Issue #220: infra が参照してよい application は shared/application/transaction（port）だけ。自 feature の command と
   //   backend/shared/application の別モジュールは違反（型だけでも）。
@@ -7243,7 +7276,10 @@ const MUST_REJECT_VIOLATIONS = [
   "domain: apps/backend/features/todo/internal/domain/bad-domain-infra.ts → apps/backend/shared/infra/database",
   "domain: apps/backend/features/todo/internal/domain/bad-domain-infra.ts → apps/backend/test-support/database",
   "domain: apps/backend/shared/domain/bad-shared-domain-infra.ts → apps/backend/shared/infra/database",
-  "domain: apps/backend/shared/domain/bad-shared-domain-application.ts → apps/backend/shared/application/transaction",
+  "domain: apps/backend/features/todo/internal/domain/bad-domain-application.ts → apps/backend/shared/application/transaction",
+  "domain: apps/backend/features/todo/internal/domain/bad-domain-application.ts → apps/backend/shared/application/x",
+  "domain: apps/backend/features/todo/internal/domain/bad-domain-application.ts → apps/backend/shared/application/transaction/x",
+  "domain: apps/backend/shared/domain/bad-shared-domain-port-value.ts → apps/backend/shared/application/transaction",
   "infra: apps/backend/features/todo/internal/infra/bad-infra-application.ts → apps/backend/features/todo/internal/application/create-todo.command",
   "infra: apps/backend/features/todo/internal/infra/bad-infra-application.ts → apps/backend/shared/application/x",
   "infra: apps/backend/features/todo/internal/infra/bad-infra-application.ts → apps/backend/shared/application/transaction/x",
@@ -7532,12 +7568,19 @@ const MUST_PASS_FILES: Record<string, string> = {
   "apps/backend/features/todo/internal/domain/todo-repository.ts": lines(
     'import type { Todo } from "./todo";',
     'import { Todo as T } from "./todo";',
+    // Issue #230: Repository の interface の引数に取る印の型 Transaction は、shared/application/transaction から型だけ参照する。
+    'import type { Transaction } from "../../../../shared/application/transaction";',
+  ),
+  // Issue #230: backend/shared の domain からも、shared/application/transaction は型だけ参照できる（Issue #220 では違反の例
+  //   bad-shared-domain-application.ts だった）。
+  "apps/backend/shared/domain/good-shared-domain-transaction.ts": lines(
+    'import type { TransactionRunner } from "../application/transaction";',
+    'export type { Transaction } from "../application/transaction";',
   ),
   "apps/backend/features/todo/internal/application/create-todo.command.ts":
     lines(
-      // Issue #220: トランザクションを張る口は backend/shared の application、brand の型 Transaction は domain。
-      'import type { TransactionRunner } from "../../../../shared/application/transaction";',
-      'import type { Transaction } from "../../../../shared/domain/transaction";',
+      // Issue #220・#230: トランザクションを張る口と brand の型 Transaction は、どちらも backend/shared の application。
+      'import type { Transaction, TransactionRunner } from "../../../../shared/application/transaction";',
       'import { Todo } from "../domain/todo";',
       'import type { TodoRepository } from "../domain/todo-repository";',
     ),
@@ -7665,10 +7708,9 @@ const MUST_PASS_FILES: Record<string, string> = {
     ),
   // Issue #57: 永続化（Drizzle + Postgres）。backend の infra からパッケージ（drizzle-orm / pg）への参照、
   //   自 feature の infra → backend/shared/infra。
-  // Issue #220: runner の実装は、port（shared/application/transaction）を実装し、brand の型（shared/domain/transaction）を使う。
+  // Issue #220・#230: runner の実装は、port と brand の型（どちらも shared/application/transaction）を型で使う。
   "apps/backend/shared/infra/transaction.postgres.ts": lines(
-    'import type { TransactionRunner } from "../application/transaction";',
-    'import type { Transaction } from "../domain/transaction";',
+    'import type { Transaction, TransactionRunner } from "../application/transaction";',
     'import type { Database } from "./database";',
     'import { PostgresWriter, transactionOf } from "./writer";',
   ),
@@ -7877,8 +7919,8 @@ const MUST_PASS_FILES: Record<string, string> = {
     lines(
       'import { asc, eq } from "drizzle-orm";',
       'import type { Database } from "../../../../shared/infra/database";',
-      // Issue #220: brand の型 Transaction（domain）と、infra が実装する port（shared/application/transaction）は型で参照できる。
-      'import type { Transaction } from "../../../../shared/domain/transaction";',
+      // Issue #220・#230: brand の型 Transaction と、infra が実装する port（どちらも shared/application/transaction）は型で参照できる。
+      'import type { Transaction } from "../../../../shared/application/transaction";',
       'import type { TransactionRunner } from "../../../../shared/application/transaction";',
       'import { Todo } from "../domain/todo";',
       'import type { TodoRepository } from "../domain/todo-repository";',

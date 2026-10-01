@@ -12,8 +12,8 @@ import {
   test,
   vi,
 } from "vitest";
+import type { Transaction } from "../../../../shared/application/transaction";
 import { DomainError } from "../../../../shared/domain/domain-error";
-import type { Transaction } from "../../../../shared/domain/transaction";
 import type { ChangeEntry } from "../../../../shared/infra/change-log";
 import { changeLogs } from "../../../../shared/infra/schema";
 import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";

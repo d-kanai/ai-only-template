@@ -1,5 +1,5 @@
 import { asc, eq, type SQL } from "drizzle-orm";
-import type { Transaction } from "../../../../shared/domain/transaction";
+import type { Transaction } from "../../../../shared/application/transaction";
 import { changedProps } from "../../../../shared/infra/changed-props";
 import type { Database } from "../../../../shared/infra/database";
 import { writerOf } from "../../../../shared/infra/writer";
