@@ -9,4 +9,5 @@
   - worker は対象ファイルのテストだけ実行する。全体の `pnpm test` はオーケストレータが最後に 1 回。
 - 結果の確認: worker の報告を鵜呑みにしない。ロジックのある変更は reviewer に差分と観点を絞って検証させる。機械的な変更（改名・文書・参照の更新だけ）は reviewer を省き、自分でテスト実行・差分確認をして PR の「検証内容」にその旨を書く。報告は各定義の報告フォーマットで短く返させる（メインのコンテキストに戻るため）。
 - 指示ファイル（CLAUDE.md / `.claude/**` / LEARNINGS.md）の変更は専用の Issue でセッションの最初に行い、作業中のセッションでは変えない。WHY: 変えると再読み込みでプロンプトキャッシュが効かなくなる。
+- Claude Code Projects: スレッドは業務の単位（開発・マーケティング・経理など）で分ける。開発は同じスレッドで続け、そのスレッドの Claude がオーケストレータになって Issue をまたいで依存・順番を調整する。WHY: スレッドごとに独立したセッションでコンテキストは共有されず、開発をスレッドに分けるとオーケストレータの調整が切れる（ユーザー判断 2026-10-01。ADR `docs/adr/workflow/20261001-project-threads-by-business-area.md`）。
 - 禁止: サブエージェントの git commit / push / PR 作成 / マージ。PreToolUse フック `scripts/hooks/guard-git.sh`（`.claude/settings.json`）が `agent_type` で判定して拒否する。
