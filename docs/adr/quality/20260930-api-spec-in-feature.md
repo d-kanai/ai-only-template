@@ -13,6 +13,7 @@
 - step は `*` だけにし、`*` の 1 行 = 1 つの振る舞い = 1 つのテストにする。Given / When / Then は step の実装の中で完結させる。
 - `.feature` の言葉は API ジャーニーと同じ禁止語の一覧（`rule-tests/feature-business-language.ts`）で業務の言葉に限る（固定の見出しの行は除く）。
 - step の実装は実 Postgres（`apps/backend/test-support/database`）で、本番の組み立て（api ファイルの Api のクラス）を通して API を呼び、応答と DB の行を確かめる。テストダブル（`vi`）と InMemory の Repository は使わない。組み立ては同じディレクトリの `support.ts` に共有してよく、step のファイルは対の api を import で参照し（型だけでもよい）、`support.ts` が自 feature の api を値で import する。
+- step の実装は対の `.feature` を `loadFeature("./<api>.feature")`（第 2 引数なし）でだけ読み、言語・タグの設定（`setVitestCucumberConfiguration`・`loadFeature` の第 2 引数）、`.feature` の `@` のタグ、`Scenario.skip` / `.only` を使わない。WHY: vitest-cucumber 8.0.0 では言語の設定で別の言語のキーワード（`機能:` / `シナリオ:` / `前提`）が通って形の検査をすり抜け、タグと skip は Scenario を skipped にしたまま成功で終わる（Issue #219 の reviewer の実測）。
 - presentation の単体テスト（InMemory）は残す。
 - 置き場所・対・見出し・step・禁止語・step の実装の import は `rule-tests/api-spec.test.ts` で止める（規則の本文は `.claude/rules/testing.md`）。
 

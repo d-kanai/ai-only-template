@@ -37,9 +37,11 @@ import { containsForbiddenWord } from "./feature-business-language";
 //     ディレクトリ名の違い・api の名前の違いも）。置き場所の違反のファイルは見ない。
 //     WHY: 人が読む仕様を API ごとに漏れなく持つ（Issue #219。API を足したら仕様も足す）。.feature だけでは何も実行されず、step の
 //       ファイルだけでは読む仕様が無い。api の無い仕様は、消した・改名した API の仕様が残ったもの。
-//     限界: step のファイルが loadFeature に渡すパスが対の .feature かは見ない。presentation の下のサブディレクトリの api ファイルと、
+//     step のファイルが対の .feature を読むことは api-spec-load-feature が見る。
+//     限界: presentation の下のサブディレクトリの api ファイルと、
 //       apps/backend/shared/presentation/ の api ファイルは対の対象外（今は無い）。
-//   以下は .feature（api-specs/<feature>/ の直下の *.feature）の中身の規則。行ごとに見る（行は 1 始まり）:
+//   以下は .feature（api-specs/<feature>/ の直下の *.feature）の中身の規則。行ごとに見る（行は 1 始まり。行の区切りは \r\n・\r・\n。
+//   vitest-cucumber は readline で読み、単独の \r でも行を分けるので同じにする。reviewer の指摘）:
 //   - api-spec-scenario-heading: `Scenario:` の見出し（`:` の後ろの前後の空白を除いた文字）が SCENARIO_HEADINGS（レスポンス /
 //     ソート / 検索 / 記録 / 副作用 / 異常系）のどれでもなければ違反。同じ見出しの 2 つ目以降も違反（1 つの .feature に 1 回）。
 //     WHY: API ごとに同じ観点の見出しで振る舞いを分けると、読む人がどの API でも同じ場所を拾い読みでき、観点の抜けも見出しで分かる。
@@ -49,7 +51,13 @@ import { containsForbiddenWord } from "./feature-business-language";
 //     `Scenarios:` の行と、`# language:` の行は違反。
 //     WHY: 形を「Feature の下に固定の見出しの Scenario と `*` の step」の 1 通りにし、見出しの一覧の検査を逃れる書き方（Example は
 //       Scenario の別名）を止める。Background（共通の前提）と Outline（例の表）は、`*` の 1 行で前提から確かめまで完結させる形と
-//       合わない。`# language:` はキーワードを別の言語に変え、この検査がキーワードを見分けられなくなる。
+//       合わない。
+//     WHY `# language:` も止める: vitest-cucumber 8.0.0 の parser は `#` の行を読み飛ばし、言語は loadFeature の第 2 引数
+//       （`{ language }`）と setVitestCucumberConfiguration で決まる（reviewer の実測、Issue #219。言語を変える口は api-spec-load-feature で
+//       止める）。この行自体は実行に効かないが、Gherkin の慣習では言語の指定なので、別の言語のキーワードで書く意図を持ち込ませない。
+//   - api-spec-tag: `@` で始まる行（タグ。字下げの後）は違反。
+//     WHY: vitest-cucumber は既定の excludeTags（`@ignore` など）が付いた Scenario を skip にし、仕様が黙って外れたまま緑になる
+//       （reviewer の実測、Issue #219）。タグで振る舞いを分ける場面は無い（見出しの一覧で分ける）ので、タグそのものを使わない。
 //   - api-spec-step-star: step が `*` 以外のキーワード（`Given` / `When` / `Then` / `And` / `But` で始まる行）なら違反。`*` の行が
 //     1 つも無い Scenario も違反（行は Scenario の行）。
 //     WHY: `*` の 1 行 = 1 つの振る舞い = 1 つのテストにし、Given / When / Then は step の実装の中で完結させる（ユーザー判断）。
@@ -75,19 +83,36 @@ import { containsForbiddenWord } from "./feature-business-language";
 //     WHY: step のファイルと仕様の対象の API の対応を import で確かめる。組み立ては support.ts に任せてよい（Issue #219 の判断）ので、
 //       型（応答の型）だけの参照も認める。本番の組み立てを通すことは、api-spec-uses-real-database・api-spec-no-in-memory と、次の
 //       api-spec-support-assembles-apis で担保する。
+//   - api-spec-load-feature: `loadFeature("./<api>.feature")`（対の .feature を第 2 引数なしで読む。引用符は " か '。名前空間の
+//     `x.loadFeature(` も同じ）の呼び出しが 1 つ以上要る（無ければファイル全体の違反）。それ以外の形の loadFeature の呼び出し
+//     （第 2 引数・別のパス・テンプレートリテラル・変数）、`loadFeature as` の別名の import、setVitestCucumberConfiguration・
+//     loadFeatureFromText・defineFeature の名前（import も呼び出しも）は、その行の違反。
+//     WHY: step のファイルが対の .feature を実行することを、名前の対（api-spec-pair）だけでなく読み込みの形で確かめる。言語は
+//       loadFeature の第 2 引数と setVitestCucumberConfiguration で変わり（`language: "ja"` と `機能:` / `シナリオ:` / `前提` で
+//       見出し・キーワード・step の 3 規則を同時にすり抜けることを reviewer が実測）、loadFeatureFromText・defineFeature は .feature の
+//       ファイルを読まない。
+//   - api-spec-no-skip: `.skip` / `.only` / `.skipIf` / `.runIf`（`Scenario.skip(`・`describeFeature.skip(`・`it.skipIf(` など。直前が `.`
+//     のスプレッドは除く）と、タグの絞り込み includeTags / excludeTags の名前は、その行の違反。
+//     WHY: skip した Scenario は skipped のまま Vitest が成功で終わり（reviewer の実測）、only はほかの Scenario を黙って止める。
+//       タグの絞り込みも Scenario を外しうる（未実測）。Biome の noSkippedTests / noFocusedTests は `Scenario.skip(` / `Scenario.only(`
+//       を止めない（Issue #219 で biome lint を実測。it / describe / test の名前だけを見る）。
 //   以下は補助（api-specs/<feature>/ の直下の support.ts）の中身の規則:
+//   - api-spec-no-vi は support.ts にも当てる（step が組み立てを任せる先で vi を使わせない。reviewer の任意の指摘）。
 //   - api-spec-support-assembles-apis: 自 feature の api（apps/backend/features/<feature>/internal/presentation/<名前>.api）を少なくとも
 //     1 つ値として import する（`import type`・inline の type だけ・dynamic `import()`・`export … from` は数えない）。
 //     WHY: step のファイルは組み立てを support.ts に任せ、api を型だけで参照してよい。support.ts が本番の api ファイル（Api のクラス）を
 //       値で使わなければ、仕様が本番の組み立てを通さない（Api のクラスを通さず command を直接呼ぶ）形でも通ってしまう。
 // コメントの扱い: .ts は行コメントとブロックコメントの中を見ない（文字列は残す。architecture.test.ts の stripComments と同じ）。
+//   loadFeature・skip の検査は文字列の中も見ない（blankStrings。loadFeature の引数の文字列だけは対の形かを読む）。
 // 限界（字句の推定。rule-tests/api-journey.test.ts と同じ方式）:
 //   - .feature: 行ごとに見るので、docstring（`"""`）の中も行の種類を区別しない（中の `#` の行はコメント、`Given` で始まる行は
 //     step として扱う）。Feature の見出しの有無・Scenario の数（0 でも通る）・`*` の文が振る舞い 1 つかは見ない。禁止語は一覧の語だけ
 //     （複数形・全角の英数字・一覧に無い技術の言葉は見ない）。
 //   - step の実装: vi の import を require・変数を渡す `import(x)`・vitest のサブパスや別のモジュールの再公開で行うのは見ない。
+//     loadFeature・skip は名前で見るので、`x["skip"](`・変数に入れ直した関数（`const s = Scenario.skip`）・vitest-cucumber の
+//     関数を別のモジュールで包んで呼ぶ書き方は見ない（逆に、同じ名前の別の関数・プロパティ `.only` も違反にする）。
 //     `*` の step ごとに前提から確かめまで完結しているか・DB の行を確かめているかは見ない（reviewer が見る）。
-//   - support.ts は api の値の import だけを見る（vi・InMemory の import は見ない。Issue #219 の指定は step のファイル）。値で import した
+//   - support.ts は api の値の import と vi の import だけを見る（InMemory の import は見ない）。値で import した
 //     api のクラスを実際に組み立てに使っているか・どの api を step に渡しているかは見ない。step のファイルの api の import は型だけでも
 //     通るので、step が対の api を実際に呼んでいるかは見ない（reviewer が見る）。step のファイルが support.ts 経由で
 //     test-support/database を使っても、step のファイル自身に値の import が無ければ違反になる（直接 import する）。
@@ -99,13 +124,16 @@ type ApiSpecRuleId =
   | "api-spec-pair"
   | "api-spec-scenario-heading"
   | "api-spec-keyword"
+  | "api-spec-tag"
   | "api-spec-step-star"
   | "api-spec-business-language"
   | "api-spec-no-vi"
   | "api-spec-no-in-memory"
   | "api-spec-uses-real-database"
   | "api-spec-uses-own-api"
-  | "api-spec-support-assembles-apis";
+  | "api-spec-support-assembles-apis"
+  | "api-spec-load-feature"
+  | "api-spec-no-skip";
 
 // line: ソースの中の位置で決まる違反だけ持つ（1 始まり）。note: 対の違反で、無いファイル（対の相手）を示す。
 type ApiSpecViolation = { rule: ApiSpecRuleId; line?: number; note?: string };
@@ -186,10 +214,11 @@ function findPairViolations(
 
 // .feature の 1 行の種類。skip: コメント・空行・Feature の見出し（どの規則も見ない）。language: `# language:` の行。
 //   scenario: `Scenario:` の見出し。keyword: 使わないキーワード（Outline・Rule・Background など）。keyword-step: `*` 以外の step。
-//   star: `*` の step。text: それ以外（説明の行・表の行・docstring）。
+//   tag: `@` で始まるタグの行。star: `*` の step。text: それ以外（説明の行・表の行・docstring）。
 type FeatureLineKind =
   | "skip"
   | "language"
+  | "tag"
   | "scenario"
   | "keyword"
   | "keyword-step"
@@ -203,6 +232,9 @@ function featureLineKind(line: string): FeatureLineKind {
   }
   if (/^\s*(?:#|$)/.test(line) || /^\s*Feature\s*:/.test(line)) {
     return "skip";
+  }
+  if (/^\s*@/.test(line)) {
+    return "tag";
   }
   if (/^\s*Scenario\s*:/.test(line)) {
     return "scenario";
@@ -223,6 +255,7 @@ function featureLineKind(line: string): FeatureLineKind {
 // 1 行の種類ごとの違反（`*` の数えと Scenario の区切りは呼び出し側）。
 const RULE_OF_LINE_KIND: Partial<Record<FeatureLineKind, ApiSpecRuleId>> = {
   language: "api-spec-keyword",
+  tag: "api-spec-tag",
   keyword: "api-spec-keyword",
   "keyword-step": "api-spec-step-star",
 };
@@ -250,8 +283,10 @@ function headingViolations(
 
 // .feature の中身の違反（行の順。同じ行なら見出し・キーワード・step・言葉の順）。
 function findFeatureContentViolations(source: string): ApiSpecViolation[] {
-  // WHY \r?\n で分ける: CRLF のファイルを \n だけで分けると行末に \r が残り、見出しが一覧と一致しなくなる。
-  const lines = source.split(/\r?\n/);
+  // WHY \r\n・\r・\n のどれでも分ける: vitest-cucumber は readline で読み、単独の \r でも行を分ける（reviewer の指摘、Issue #219）。
+  //   \n だけで分けると、\r で区切った行が 1 行に隠れて（Feature の行の後ろに続けると丸ごと見ない）検査を逃れる。CRLF の行末に \r が
+  //   残ると見出しが一覧と一致しなくなる。
+  const lines = source.split(/\r\n|\r|\n/);
   const violations: ApiSpecViolation[] = [];
   const seenHeadings = new Set<string>();
   // 今いる Scenario（行と `*` の数）。Scenario の外（Feature の直下・Background などの後）は undefined。
@@ -403,29 +438,91 @@ function reachesVi(ref: ImportRef): boolean {
 // 実 Postgres のテスト用の DB を用意するモジュール（リポジトリ相対、拡張子なし）。
 const TEST_DATABASE_MODULE = "apps/backend/test-support/database";
 
+// 文字列の中身を空白にする（改行と長さは残し、位置と行番号を変えない）。stripComments の後に使う（api-journey.test.ts と同じ）。
+// WHY: 文字列の中の `.skip(`・`loadFeature(`・`setVitestCucumberConfiguration` を呼び出しと数えない。
+function blankStrings(code: string): string {
+  return code.replace(
+    /"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`/g,
+    (literal) => literal.replace(/[^\n]/g, " "),
+  );
+}
+
+// loadFeature の違反（api-spec-load-feature）。code はコメントを消したもの、paired は対の .feature の相対パス（"./<api>.feature"）。
+// lines: 対の形でない loadFeature の呼び出し・別名の import・ほかの読み込み口と設定の行。hasPairedCall: 対の形の呼び出しがあるか。
+// 対の形 = `loadFeature("./<api>.feature")`（引用符は " か '、第 2 引数なし。名前空間の `x.loadFeature(` も同じに見る）。
+function findLoadFeatureViolations(
+  code: string,
+  paired: string,
+): { lines: ApiSpecViolation[]; hasPairedCall: boolean } {
+  const blanked = blankStrings(code);
+  const calls = [...blanked.matchAll(/\bloadFeature\s*\(/g)].map((match) => {
+    const args = /^loadFeature\s*\(\s*(["'])([^"'\n]*)\1\s*\)/.exec(
+      code.slice(match.index),
+    );
+    return { index: match.index, paired: args?.[2] === paired };
+  });
+  // WHY 別名の import・ほかの口・設定を止める: 別名で呼ぶと上の形の検査を逃れ、loadFeatureFromText・defineFeature は .feature の
+  //   ファイルを読まず、setVitestCucumberConfiguration は言語（language）とタグの絞り込みを全体で変える。
+  const others = [
+    ...blanked.matchAll(
+      /\bloadFeature\s+as\b|\b(?:setVitestCucumberConfiguration|loadFeatureFromText|defineFeature)\b/g,
+    ),
+  ].map((match) => match.index);
+  return {
+    lines: [
+      ...calls.filter((call) => !call.paired).map((call) => call.index),
+      ...others,
+    ].map((index) => ({
+      rule: "api-spec-load-feature",
+      line: lineAt(code, index),
+    })),
+    hasPairedCall: calls.some((call) => call.paired),
+  };
+}
+
+// skip の違反（api-spec-no-skip）。`.skip` / `.only` / `.skipIf` / `.runIf`（vitest-cucumber の Scenario・Background・
+//   describeFeature と、vitest の it・test のどちらも）と、タグの絞り込み（includeTags / excludeTags）の位置ごとに 1 件。
+// WHY 直前が . のもの（スプレッドの `...only`）を除く: `{ ...todo }` のようなスプレッドを呼び出しと取り違えない。
+// WHY .todo を入れない: 既にある振る舞いを外さない（新しい保留のテストを足すだけ）うえ、`response.todo` のような Todo の
+//   プロパティと見分けられない。
+function findSkipViolations(code: string): ApiSpecViolation[] {
+  return [
+    ...blankStrings(code).matchAll(
+      /(?<!\.)\.\s*(?:skip|only|skipIf|runIf)\b|\b(?:includeTags|excludeTags)\b/g,
+    ),
+  ].map((match) => ({
+    rule: "api-spec-no-skip",
+    line: lineAt(code, match.index),
+  }));
+}
+
 // step の実装（isSpecStepFile のファイル）の中身の違反。行のあるものを行の順に、その後にファイル全体の違反を返す。
 function findStepContentViolations(
   path: string,
   source: string,
 ): ApiSpecViolation[] {
-  const imports = extractImports(stripComments(source));
-  const lineLevel = imports
-    .flatMap((ref): ApiSpecViolation[] => [
+  const code = stripComments(source);
+  const imports = extractImports(code);
+  const [, feature, api] =
+    /^apps\/backend\/api-specs\/([^/]+)\/([^/]+)\.api-spec\.test\.ts$/.exec(
+      path,
+    ) ?? [];
+  const loadFeature = findLoadFeatureViolations(code, `./${api}.feature`);
+  const lineLevel = [
+    ...imports.flatMap((ref): ApiSpecViolation[] => [
       ...(/\.in-memory$/.test(moduleBaseName(ref.specifier))
         ? [{ rule: "api-spec-no-in-memory" as const, line: ref.line }]
         : []),
       ...(ref.specifier === "vitest" && reachesVi(ref)
         ? [{ rule: "api-spec-no-vi" as const, line: ref.line }]
         : []),
-    ])
-    .sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
+    ]),
+    ...loadFeature.lines,
+    ...findSkipViolations(code),
+  ].sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
   const valueModules = imports
     .filter((ref) => ref.kind === "value")
     .map((ref) => resolveSpecifier(path, ref.specifier));
-  const [, feature, api] =
-    /^apps\/backend\/api-specs\/([^/]+)\/([^/]+)\.api-spec\.test\.ts$/.exec(
-      path,
-    ) ?? [];
   const ownApi = `apps/backend/features/${feature}/internal/presentation/${api}.api`;
   // WHY 型だけの import も数える: 対の API との対応を見る規則で、組み立ては support.ts に任せてよい（冒頭の説明）。
   const staticModules = imports
@@ -439,10 +536,13 @@ function findStepContentViolations(
     ...(staticModules.includes(ownApi)
       ? []
       : [{ rule: "api-spec-uses-own-api" as const }]),
+    ...(loadFeature.hasPairedCall
+      ? []
+      : [{ rule: "api-spec-load-feature" as const }]),
   ];
 }
 
-// 補助（isSpecSupportFile のファイル）の中身の違反。自 feature の api を 1 つも値で import しなければ違反（ファイル全体）。
+// 補助（isSpecSupportFile のファイル）の中身の違反。vi の import（行）と、自 feature の api を 1 つも値で import しない（ファイル全体）。
 function findSupportContentViolations(
   path: string,
   source: string,
@@ -452,10 +552,19 @@ function findSupportContentViolations(
   const isOwnApi = (module: string | undefined) =>
     module?.startsWith(presentation) === true &&
     /^[^/]+\.api$/.test(module.slice(presentation.length));
-  const assembles = extractImports(stripComments(source))
+  const imports = extractImports(stripComments(source));
+  const assembles = imports
     .filter((ref) => ref.kind === "value")
     .some((ref) => isOwnApi(resolveSpecifier(path, ref.specifier)));
-  return assembles ? [] : [{ rule: "api-spec-support-assembles-apis" }];
+  // WHY support.ts にも no-vi を当てる（reviewer の任意の指摘、Issue #219）: step は組み立てを support.ts に任せるので、ここで vi を
+  //   使うと step の no-vi を素通りしてテストダブルが入る。
+  const vi = imports
+    .filter((ref) => ref.specifier === "vitest" && reachesVi(ref))
+    .map(
+      (ref): ApiSpecViolation => ({ rule: "api-spec-no-vi", line: ref.line }),
+    )
+    .sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
+  return assembles ? vi : [...vi, { rule: "api-spec-support-assembles-apis" }];
 }
 
 // path の違反。置き場所が違えば置き場所の違反だけを返し（中身は見ない）、.feature・step・support.ts なら中身を見る。ほかは []。
@@ -543,6 +652,8 @@ const DATABASE_IMPORT =
 const OWN_API_IMPORT =
   'import { CreateXApi } from "../../features/x/internal/presentation/create-x.api";';
 const REQUIRED_IMPORTS = [DATABASE_IMPORT, OWN_API_IMPORT];
+// step の実装の必須の loadFeature（対の .feature を第 2 引数なしで読む）。中身の例は末尾にこれを足して判定する（行番号を変えない）。
+const LOAD_FEATURE = 'const feature = await loadFeature("./create-x.feature");';
 
 describe("API 仕様の置き場所（isMisplacedApiSpecFile）", () => {
   it.each([
@@ -777,6 +888,20 @@ describe(".feature の中身（findApiSpecViolations）: must pass", () => {
     ],
     ["Scenario の無い .feature（Feature だけ）", "Feature: x\n"],
     [
+      "改行が CR だけ（単独の \\r も行の区切り。vitest-cucumber の readline と同じ）",
+      ["Feature: x", "  Scenario: レスポンス", "    * Todo が作られる"].join(
+        "\r",
+      ),
+    ],
+    [
+      "行の途中の @（タグの行ではない）",
+      source(
+        "Feature: x",
+        "  Scenario: レスポンス",
+        "    * 宛先の @ の後ろが届く",
+      ),
+    ],
+    [
       "改行が CRLF（見出しの行末の \\r を一覧との違いにしない）",
       [
         "Feature: x",
@@ -928,6 +1053,32 @@ describe(".feature の中身（findApiSpecViolations）: must reject", () => {
         { rule: "api-spec-business-language", line: 5 },
       ],
     ],
+    [
+      "単独の CR で区切った行も 1 行ずつ見る（見出し・step・禁止語）",
+      ["Feature: x", "  Scenario: 一覧", "    Given DB が空"].join("\r"),
+      [
+        { rule: "api-spec-scenario-heading", line: 2 },
+        { rule: "api-spec-step-star", line: 2 },
+        { rule: "api-spec-step-star", line: 3 },
+        { rule: "api-spec-business-language", line: 3 },
+      ],
+    ],
+    [
+      "@ のタグの行（@ignore・字下げ・複数のタグ・Feature の前）",
+      source(
+        "@ignore",
+        "Feature: x",
+        "  @skip @wip",
+        "  Scenario: レスポンス",
+        "    * a",
+        "    @only",
+      ),
+      [
+        { rule: "api-spec-tag", line: 1 },
+        { rule: "api-spec-tag", line: 3 },
+        { rule: "api-spec-tag", line: 6 },
+      ],
+    ],
   ])("%s は違反", (_name, text, expected) => {
     expect(findApiSpecViolations(FEATURE, text)).toEqual(expected);
   });
@@ -1000,7 +1151,9 @@ describe("step の実装の中身（findApiSpecViolations）: must pass", () => 
       ),
     ],
   ])("%s は違反なし", (_name, text) => {
-    expect(findApiSpecViolations(STEPS, text)).toEqual([]);
+    expect(findApiSpecViolations(STEPS, source(text, LOAD_FEATURE))).toEqual(
+      [],
+    );
   });
 
   it("api ファイルは中身を見ない", () => {
@@ -1101,7 +1254,9 @@ describe("step の実装の中身（findApiSpecViolations）: must reject", () =
       ],
     ],
   ])("%s は違反", (_name, text, expected) => {
-    expect(findApiSpecViolations(STEPS, text)).toEqual(expected);
+    expect(findApiSpecViolations(STEPS, source(text, LOAD_FEATURE))).toEqual(
+      expected,
+    );
   });
 
   it("置き場所が違えば置き場所の違反だけを返す（中身は見ない）", () => {
@@ -1114,12 +1269,125 @@ describe("step の実装の中身（findApiSpecViolations）: must reject", () =
   });
 });
 
+describe("step の実装の loadFeature と skip（findApiSpecViolations）", () => {
+  it.each([
+    [
+      "対の .feature を第 2 引数なしで読む",
+      source(...REQUIRED_IMPORTS, LOAD_FEATURE),
+    ],
+    [
+      "単一引用符・括弧の内側の空白・名前空間の import 経由",
+      source(
+        ...REQUIRED_IMPORTS,
+        'import * as vc from "@amiceli/vitest-cucumber";',
+        "const feature = await vc.loadFeature( './create-x.feature' );",
+      ),
+    ],
+    [
+      "コメント・文字列の中の setVitestCucumberConfiguration・別のパスの loadFeature・.skip(・@ignore",
+      source(
+        ...REQUIRED_IMPORTS,
+        LOAD_FEATURE,
+        '// setVitestCucumberConfiguration({ language: "ja" }); loadFeature("./x.feature"); Scenario.skip("a");',
+        'const note = "Scenario.only( と includeTags は使わない";',
+      ),
+    ],
+    [
+      "skip・only を名前の一部に含むだけの識別子（skipped・.skipper・onlyOne）・スプレッド（...only）・.todo のプロパティ",
+      source(
+        ...REQUIRED_IMPORTS,
+        LOAD_FEATURE,
+        "const skipped = list.skipper(onlyOne);",
+        "const x = { ...only, ...skip, todo: body.todo };",
+      ),
+    ],
+  ])("%s は違反なし", (_name, text) => {
+    expect(findApiSpecViolations(STEPS, text)).toEqual([]);
+  });
+
+  it.each([
+    [
+      "loadFeature が無い（ファイル全体）",
+      source(...REQUIRED_IMPORTS),
+      [{ rule: "api-spec-load-feature" }],
+    ],
+    [
+      "第 2 引数（language）を渡す",
+      source(
+        ...REQUIRED_IMPORTS,
+        'const feature = await loadFeature("./create-x.feature", { language: "ja" });',
+      ),
+      [
+        { rule: "api-spec-load-feature", line: 3 },
+        { rule: "api-spec-load-feature" },
+      ],
+    ],
+    [
+      "対でないパス（別の api・./ の無いもの・親のディレクトリ・テンプレートリテラル・変数）",
+      source(
+        ...REQUIRED_IMPORTS,
+        'await loadFeature("./list-x.feature");',
+        'await loadFeature("create-x.feature");',
+        'await loadFeature("../x/create-x.feature");',
+        "await loadFeature(`./create-x.feature`);",
+        "await loadFeature(path);",
+      ),
+      [
+        ...[3, 4, 5, 6, 7].map((line) => ({
+          rule: "api-spec-load-feature" as const,
+          line,
+        })),
+        { rule: "api-spec-load-feature" },
+      ],
+    ],
+    [
+      "対の loadFeature があっても、ほかの形の loadFeature・設定・別の読み込み口・別名の import は違反",
+      source(
+        ...REQUIRED_IMPORTS,
+        LOAD_FEATURE,
+        'const other = await loadFeature("./create-x.feature", options);',
+        'import { setVitestCucumberConfiguration } from "@amiceli/vitest-cucumber";',
+        'setVitestCucumberConfiguration({ language: "ja" });',
+        'import { loadFeature as lf } from "@amiceli/vitest-cucumber";',
+        'const f = loadFeatureFromText("Feature: x");',
+        'defineFeature("x", () => {});',
+      ),
+      [4, 5, 6, 7, 8, 9].map((line) => ({
+        rule: "api-spec-load-feature",
+        line,
+      })),
+    ],
+    [
+      "skip・only・skipIf・runIf（Scenario・Feature・Background・it・空白を挟むもの・?.）とタグの絞り込み",
+      source(
+        ...REQUIRED_IMPORTS,
+        LOAD_FEATURE,
+        'Scenario.skip("レスポンス", () => {});',
+        'Scenario.only("レスポンス", () => {});',
+        "describeFeature.skip(feature, () => {});",
+        "Background . skip(() => {});",
+        'it.skipIf(true)("a", () => {});',
+        'Scenario?.skip("a", () => {});',
+        'it.runIf(false)("a", () => {});',
+        'describeFeature(feature, () => {}, { excludeTags: ["x"] });',
+        'describeFeature(feature, () => {}, { includeTags: ["x"] });',
+      ),
+      [4, 5, 6, 7, 8, 9, 10, 11, 12].map((line) => ({
+        rule: "api-spec-no-skip",
+        line,
+      })),
+    ],
+  ])("%s は違反", (_name, text, expected) => {
+    expect(findApiSpecViolations(STEPS, text)).toEqual(expected);
+  });
+});
+
 describe("補助 support.ts の中身（findApiSpecViolations）", () => {
   it.each([
     [
-      "自 feature の api を 1 つ値で import（vi・drizzle など api 以外の import もあってよい。vi は見ない）",
+      "自 feature の api を 1 つ値で import（vitest の expect・drizzle など api 以外の import もあってよい）",
       source(
-        'import { vi } from "vitest";',
+        'import { expect } from "vitest";',
         'import { sql } from "drizzle-orm";',
         'import { CreateXApi } from "../../features/x/internal/presentation/create-x.api";',
       ),
@@ -1171,6 +1439,22 @@ describe("補助 support.ts の中身（findApiSpecViolations）", () => {
       { rule: "api-spec-support-assembles-apis" },
     ]);
   });
+
+  it("vitest から vi を import すれば、その行の違反（step と同じ判定。api を組み立てていても）", () => {
+    expect(
+      findApiSpecViolations(
+        SUPPORT,
+        source(
+          'import { CreateXApi } from "../../features/x/internal/presentation/create-x.api";',
+          'import { expect, vi } from "vitest";',
+          'const m = await import("vitest");',
+        ),
+      ),
+    ).toEqual([
+      { rule: "api-spec-no-vi", line: 2 },
+      { rule: "api-spec-no-vi", line: 3 },
+    ]);
+  });
 });
 
 // --- 列挙 → 読み取り → 判定を通した fixture テスト ---
@@ -1206,6 +1490,7 @@ describe("API 仕様の列挙と検査（fixture）", () => {
       DATABASE_IMPORT,
       `import type { A } from "../../features/x/internal/presentation/${name}.api";`,
       ...extra,
+      `const feature = await loadFeature("./${name}.feature");`,
     );
 
   it("api-specs/ の下・外の *.api-spec.test.*・api ファイルを対象にし、違反を「規則: パス(:行)（無いファイル）」で返す", () => {
@@ -1215,7 +1500,7 @@ describe("API 仕様の列挙と検査（fixture）", () => {
       [`${specs}/create-x.feature`]: goodFeature,
       [`${specs}/create-x.api-spec.test.ts`]: stepsFor("create-x"),
       [`${specs}/support.ts`]: source(
-        'import { vi } from "vitest";',
+        'import { expect } from "vitest";',
         `import { CreateXApi } from "../../features/x/internal/presentation/create-x.api";`,
       ),
       // 補助の違反: 自 feature の api を型だけで import（組み立てていない）。
@@ -1228,10 +1513,12 @@ describe("API 仕様の列挙と検査（fixture）", () => {
         "Feature: x",
         "  Scenario: 一覧",
         "    Given DB が空",
+        "  @ignore",
       ),
       [`${specs}/list-x.api-spec.test.ts`]: stepsFor(
         "list-x",
         'import { vi } from "vitest";',
+        'Scenario.skip("a", () => {});',
       ),
       // 対の違反: api だけ（.feature と step が無い）、.feature だけ、api の無い step。
       [`${presentation}/delete-x.api.ts`]: "export class DeleteXApi {}\n",
@@ -1278,10 +1565,12 @@ describe("API 仕様の列挙と検査（fixture）", () => {
         "api-spec-placement: apps/backend/api-specs/support.ts",
         "api-spec-placement: apps/backend/api-specs/x/helper.ts",
         "api-spec-no-vi: apps/backend/api-specs/x/list-x.api-spec.test.ts:3",
+        "api-spec-no-skip: apps/backend/api-specs/x/list-x.api-spec.test.ts:4",
         "api-spec-scenario-heading: apps/backend/api-specs/x/list-x.feature:2",
         "api-spec-step-star: apps/backend/api-specs/x/list-x.feature:2",
         "api-spec-step-star: apps/backend/api-specs/x/list-x.feature:3",
         "api-spec-business-language: apps/backend/api-specs/x/list-x.feature:3",
+        "api-spec-tag: apps/backend/api-specs/x/list-x.feature:4",
         "api-spec-placement: apps/backend/api-specs/x/nested/create-x.feature",
         "api-spec-pair: apps/backend/api-specs/x/rename-x.api-spec.test.ts（対の apps/backend/features/x/internal/presentation/rename-x.api.ts が無い）",
         "api-spec-support-assembles-apis: apps/backend/api-specs/y/support.ts",

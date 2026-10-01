@@ -80,6 +80,10 @@ import { containsForbiddenWord } from "./feature-business-language";
 //     限界（両方の規則）: 行ごとに見るので、docstring（`"""` で囲んだ複数行の値）の中も行の種類を区別しない（中の `#` の行は
 //       コメントとして禁止語を見ず、`When` で始まる行は When として仕切りを求める）。全角の数字・英字（`２０１`・`ＤＢ`）は禁止語として
 //       見ない（正規表現は半角だけ）。複数形（ids・APIs）・一覧に無い技術の言葉も見ない。
+//   - api-journey-tag（Issue #219 の reviewer の指摘）: `@` で始まる行（タグ。字下げの後）は違反。
+//     WHY: vitest-cucumber は既定の excludeTags（`@ignore` など）が付いた Scenario を skip にし、流れが黙って外れたまま緑になる
+//       （reviewer の実測）。タグで流れを分ける場面は無いので、タグそのものを使わない。
+//   行の区切りは \r\n・\r・\n（vitest-cucumber の readline と同じ。単独の \r で行を隠させない。Issue #219 の reviewer の指摘）。
 //   以下は API ジャーニー（apps/backend/api-journeys/ の直下の *.api-journey.test.ts）の中身の規則:
 //   - api-journey-no-in-memory: *.in-memory（InMemory の Repository）を import しない（`import type` も・`import()` も・`export … from` も）。
 //     WHY: ジャーニーは本番と同じ部品（Postgres の Repository）で API のつながりを確かめる。InMemory で組むと単体テストと同じになる。
@@ -112,6 +116,11 @@ import { containsForbiddenWord } from "./feature-business-language";
 //       type が付いたもの（`{ type A }`）は数えない（handler を呼べない）。
 //   - api-journey-uses-real-database: apps/backend/test-support/database（createTestDatabase）を値として import する。
 //     WHY: 実 DB で流れを確かめるのが API ジャーニーの目的。型だけの import（TestDatabase）では実 DB を用意しない。
+//   - api-journey-no-skip（Issue #219 の reviewer の指摘）: `.skip` / `.only` / `.skipIf` / `.runIf`（`Scenario.skip(`・
+//     `describeFeature.skip(`・`it.skipIf(` など。直前が `.` のスプレッドは除く。文字列の中は見ない）と、タグの絞り込み
+//     includeTags / excludeTags の名前は、その行の違反。
+//     WHY: skip した Scenario は skipped のまま Vitest が成功で終わり（reviewer の実測）、only はほかの Scenario を黙って止める。
+//       Biome の noSkippedTests / noFocusedTests は `Scenario.skip(` / `Scenario.only(` を止めない（Issue #219 で実測）。
 // コメントの扱い: 行コメントとブロックコメントの中は見ない（文字列は残す。architecture.test.ts の stripComments と同じ）。
 //   コメントの中の import・呼び出し・`db.select(` は、違反にも必須にも数えない。
 // 限界（文字列の一致と行の順序で推定する）:
@@ -141,7 +150,9 @@ type ApiJourneyRuleId =
   | "api-journey-handler-naming"
   | "api-journey-asserts-db-after-mutation"
   | "api-journey-uses-multiple-apis"
-  | "api-journey-uses-real-database";
+  | "api-journey-uses-real-database"
+  | "api-journey-tag"
+  | "api-journey-no-skip";
 
 // line: ソースの中の位置で決まる違反だけ持つ（1 始まり）。ファイル全体で決まる違反（置き場所・必須の import）は持たない。
 type ApiJourneyViolation = { rule: ApiJourneyRuleId; line?: number };
@@ -370,6 +381,18 @@ function findMissingDbReadViolations(code: string): ApiJourneyViolation[] {
     }));
 }
 
+// skip の違反（api-journey-no-skip）。rule-tests/api-spec.test.ts の findSkipViolations と同じ判定（WHY もそちら）。
+function findSkipViolations(code: string): ApiJourneyViolation[] {
+  return [
+    ...blankStrings(code).matchAll(
+      /(?<!\.)\.\s*(?:skip|only|skipIf|runIf)\b|\b(?:includeTags|excludeTags)\b/g,
+    ),
+  ].map((match) => ({
+    rule: "api-journey-no-skip",
+    line: lineAt(code, match.index),
+  }));
+}
+
 // 実 Postgres のテスト用の DB を用意するモジュール（リポジトリ相対、拡張子なし）。
 const TEST_DATABASE_MODULE = "apps/backend/test-support/database";
 
@@ -417,6 +440,7 @@ function findApiJourneyContentViolations(
     ...vitestImports,
     ...findHandlerNamingViolations(code),
     ...findMissingDbReadViolations(code),
+    ...findSkipViolations(code),
   ].sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
   return [...lineLevel, ...fileLevel];
 }
@@ -428,13 +452,26 @@ function isSectionDivider(line: string): boolean {
   return /^\s*# ─{5} [^\s─](?:.*[^\s─])? ─{5}$/.test(line);
 }
 
-// .feature（isFeatureFile のファイル）の中身の違反（行の順。同じ行なら business-language が先）。
+// .feature の区画（シナリオ・Background・それ以外）を、line が見出しなら切り替えて返す。見出しでなければ今の区画のまま。
+type FeatureSection = "scenario" | "background" | "other";
+function nextSection(line: string, current: FeatureSection): FeatureSection {
+  if (/^\s*(?:Scenario(?: Outline| Template)?|Example)\s*:/.test(line)) {
+    return "scenario";
+  }
+  if (/^\s*Background\s*:/.test(line)) {
+    return "background";
+  }
+  return /^\s*(?:Feature|Rule)\s*:/.test(line) ? "other" : current;
+}
+
+// .feature（isFeatureFile のファイル）の中身の違反（行の順。同じ行なら tag・business-language・section-divider の順）。
 function findFeatureContentViolations(source: string): ApiJourneyViolation[] {
-  // WHY \r?\n で分ける: CRLF のファイルを \n だけで分けると行末に \r が残り、仕切りの `─{5}$` が一致せず、すべての When が
-  //   仕切りの違反になる（reviewer の実測、Issue #217）。
-  const lines = source.split(/\r?\n/);
+  // WHY \r\n・\r・\n のどれでも分ける: CRLF のファイルを \n だけで分けると行末に \r が残り、仕切りの `─{5}$` が一致せず、すべての
+  //   When が仕切りの違反になる（reviewer の実測、Issue #217）。単独の \r も分ける: vitest-cucumber は readline で読み、\r でも行を
+  //   分けるので、\n だけで分けると \r で区切った行が 1 行に隠れて検査を逃れる（reviewer の指摘、Issue #219）。
+  const lines = source.split(/\r\n|\r|\n/);
   // 今いる区画。シナリオの中の When だけが仕切りを要る。Feature / Rule の見出しでシナリオの外に戻る。
-  let section: "scenario" | "background" | "other" = "other";
+  let section: FeatureSection = "other";
   return lines.flatMap((line, index): ApiJourneyViolation[] => {
     const lineNumber = index + 1;
     // WHY 行頭（字下げの後）の # だけをコメントにする: Gherkin のコメントは行全体だけで、行の途中の # は文の一部。
@@ -443,13 +480,10 @@ function findFeatureContentViolations(source: string): ApiJourneyViolation[] {
     if (/^\s*(?:#|$)/.test(line) && !isSectionDivider(line)) {
       return [];
     }
-    if (/^\s*(?:Scenario(?: Outline| Template)?|Example)\s*:/.test(line)) {
-      section = "scenario";
-    } else if (/^\s*Background\s*:/.test(line)) {
-      section = "background";
-    } else if (/^\s*(?:Feature|Rule)\s*:/.test(line)) {
-      section = "other";
-    }
+    section = nextSection(line, section);
+    const tag: ApiJourneyViolation[] = /^\s*@/.test(line)
+      ? [{ rule: "api-journey-tag", line: lineNumber }]
+      : [];
     const wording: ApiJourneyViolation[] = containsForbiddenWord(line)
       ? [{ rule: "api-journey-business-language", line: lineNumber }]
       : [];
@@ -459,7 +493,7 @@ function findFeatureContentViolations(source: string): ApiJourneyViolation[] {
       !isSectionDivider(lines[index - 1] ?? "")
         ? [{ rule: "api-journey-section-divider", line: lineNumber }]
         : [];
-    return [...wording, ...divider];
+    return [...tag, ...wording, ...divider];
   });
 }
 
@@ -1464,6 +1498,88 @@ describe(".feature の仕切り（api-journey-section-divider）: must reject", 
   });
 });
 
+describe("タグ・skip・行の区切り（api-journey-tag / api-journey-no-skip。Issue #219 の reviewer の指摘）", () => {
+  it.each([
+    [
+      ".feature の改行が CR だけ（単独の \\r も行の区切り）",
+      FEATURE,
+      [...FEATURE_HEAD, DIVIDER, '    When Todo "牛乳を買う" を作る'].join(
+        "\r",
+      ),
+    ],
+    [
+      ".feature の行の途中の @",
+      FEATURE,
+      source(
+        ...FEATURE_HEAD,
+        DIVIDER,
+        "    When 宛先の @ の後ろに Todo を作る",
+      ),
+    ],
+    [
+      "step のコメント・文字列の中の .skip( / .only(・スプレッド（...only）・名前の一部（skipped・.skipper）",
+      API_JOURNEY,
+      source(
+        ...JOURNEY_HEAD,
+        '// Scenario.skip("a", () => {});',
+        'const note = "Scenario.only( と excludeTags は使わない";',
+        "const skipped = { ...only, ...todo, s: list.skipper() };",
+      ),
+    ],
+  ])("%s は違反なし", (_name, path, text) => {
+    expect(findApiJourneyViolations(path, text)).toEqual([]);
+  });
+
+  it.each([
+    [
+      ".feature の単独の CR で区切った行も 1 行ずつ見る",
+      FEATURE,
+      ["Feature: x", "  Scenario: y", "    When 状態 201 を返す"].join("\r"),
+      [
+        { rule: "api-journey-business-language", line: 3 },
+        { rule: "api-journey-section-divider", line: 3 },
+      ],
+    ],
+    [
+      ".feature の @ のタグの行（@ignore・字下げ・複数のタグ・Feature の前）",
+      FEATURE,
+      source(
+        "@ignore",
+        "Feature: x",
+        "  @skip @wip",
+        "  Scenario: y",
+        "    Given Todo が 1 件ある",
+      ),
+      [
+        { rule: "api-journey-tag", line: 1 },
+        { rule: "api-journey-tag", line: 3 },
+      ],
+    ],
+    [
+      "step の skip・only・skipIf・runIf（Scenario・Background・describeFeature・it・空白・?.）とタグの絞り込み",
+      API_JOURNEY,
+      source(
+        ...JOURNEY_HEAD,
+        'Scenario.skip("a", () => {});',
+        'Scenario.only("a", () => {});',
+        "Background . skip(() => {});",
+        "describeFeature.skip(feature, () => {});",
+        'it.skipIf(true)("a", () => {});',
+        'it.runIf(false)("a", () => {});',
+        'Scenario?.skip("a", () => {});',
+        'describeFeature(feature, () => {}, { excludeTags: ["x"] });',
+        'describeFeature(feature, () => {}, { includeTags: ["x"] });',
+      ),
+      [6, 7, 8, 9, 10, 11, 12, 13, 14].map((line) => ({
+        rule: "api-journey-no-skip",
+        line,
+      })),
+    ],
+  ])("%s は違反", (_name, path, text, expected) => {
+    expect(findApiJourneyViolations(path, text)).toEqual(expected);
+  });
+});
+
 // --- 列挙 → 読み取り → 判定を通した fixture テスト ---
 // WHY: 判定が正しくても、対象の列挙（api-journeys/ の下と、外に置くと違反になる名前の見つけ方）が漏れれば見逃す。一時ディレクトリに
 //   架空のツリーを置き、本番と同じ collectApiJourneyViolations に通して、違反の集合を丸ごと比較する（見逃しも余分な検出も失敗にする）。
@@ -1495,6 +1611,7 @@ describe("API ジャーニーの列挙と検査（fixture）", () => {
         ...REQUIRED_IMPORTS,
         'import { vi } from "vitest";',
         'vi.mock("@repo/shared/now");',
+        'Scenario.only("a", () => {});',
       ),
       "apps/backend/api-journeys/no-db-check.feature": "Feature: no-check\n",
       "apps/backend/api-journeys/no-db-check.api-journey.test.ts": source(
@@ -1514,6 +1631,7 @@ describe("API ジャーニーの列挙と検査（fixture）", () => {
         "    When Todo を作る",
         "    Then 状態 201 で返る",
         "    When Todo の一覧を見る",
+        "  @ignore",
       ),
       "apps/backend/api-journeys/wording.api-journey.test.ts": source(
         ...REQUIRED_IMPORTS,
@@ -1604,6 +1722,7 @@ describe("API ジャーニーの列挙と検査（fixture）", () => {
         "api-journey-feature-pair: apps/backend/api-journeys/b.api-journey.test.ts",
         "api-journey-placement: apps/backend/api-journeys/helper.ts",
         "api-journey-no-vi: apps/backend/api-journeys/mock.api-journey.test.ts:4",
+        "api-journey-no-skip: apps/backend/api-journeys/mock.api-journey.test.ts:6",
         "api-journey-placement: apps/backend/api-journeys/nested/y.api-journey.test.ts",
         "api-journey-placement: apps/backend/api-journeys/nested/z.feature",
         "api-journey-handler-naming: apps/backend/api-journeys/no-db-check.api-journey.test.ts:6",
@@ -1615,6 +1734,7 @@ describe("API ジャーニーの列挙と検査（fixture）", () => {
         "api-journey-uses-multiple-apis: apps/backend/api-journeys/single-api.api-journey.test.ts",
         "api-journey-business-language: apps/backend/api-journeys/wording.feature:5",
         "api-journey-section-divider: apps/backend/api-journeys/wording.feature:6",
+        "api-journey-tag: apps/backend/api-journeys/wording.feature:7",
         "api-journey-placement: apps/backend/api-journeys/x.test.ts",
         "api-journey-placement: apps/backend/api-specs/todo/x.api-journey.test.ts",
         "api-journey-placement: apps/backend/features/todo/out.feature",
