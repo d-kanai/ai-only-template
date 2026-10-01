@@ -78,41 +78,21 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("記録", ({ And }) => {
     // WHY ほかの Todo を置く: 条件（where）の欠けた DELETE ですべてを消す誤り・別の Todo を消す取り違えを見分ける。
+    // 変更の記録（.feature には書かない。create-todo.api-spec.test.ts の冒頭）: 削除の前の記録（2 件の Todo の作成の 4 件。消した
+    //   Todo の分も）は消えずに残り（insert のみの監査）、消した Todo の消す前の全列の before が 1 件だけ足される（cascade で
+    //   消えた完了の履歴の行は記録しない）。
     And("削除した Todo は無くなり、ほかの Todo は残る", async () => {
       const milk = await createTodo(apis, "牛乳を買う");
       const bread = await createTodo(apis, "パンを買う");
+      const created = await logEntries(database.db);
 
       await deleteTodo(milk.id);
 
       await expect(todoRows(database.db)).resolves.toStrictEqual([
         rowOf(bread),
       ]);
-    });
-
-    // 外部キーの on delete cascade で消える（履歴の DELETE は書かない。schema.ts の todoStatusChanges）。ほかの Todo の履歴は残る。
-    And("削除した Todo の完了の履歴も無くなる", async () => {
-      const milk = await createTodo(apis, "牛乳を買う");
-      const bread = await createTodo(apis, "パンを買う");
-
-      await deleteTodo(milk.id);
-
-      await expect(statusRows(database.db)).resolves.toStrictEqual([
-        {
-          todoId: bread.id,
-          position: 0,
-          completed: false,
-          changedAt: new Date(bread.createdAt),
-        },
-      ]);
-    });
-
-    // 消す前の全列の before が 1 件（cascade で消えた完了の履歴の行は記録しない）。
-    And("変更の記録に、削除した Todo の内容が残る", async () => {
-      const milk = await createTodo(apis, "牛乳を買う");
-      const created = await logEntries(database.db);
-
-      await deleteTodo(milk.id);
-
+      // WHY 件数も見る: 作成の記録が無い（空）と、「消えずに残る」が何も確かめないまま通る。
+      expect(created).toHaveLength(4);
       await expect(logEntries(database.db)).resolves.toStrictEqual(
         sortedLogs([
           ...created,
@@ -132,18 +112,21 @@ describeFeature(feature, ({ Scenario }) => {
       );
     });
 
-    // 変更の記録は insert のみ（監査）。消した Todo の作成の記録も残る。
-    And("削除の前の変更の記録は、消えずに残る", async () => {
+    // 外部キーの on delete cascade で消える（履歴の DELETE は書かない。schema.ts の todoStatusChanges）。ほかの Todo の履歴は残る。
+    And("削除した Todo の完了の履歴も無くなる", async () => {
       const milk = await createTodo(apis, "牛乳を買う");
-      const created = await logEntries(database.db);
+      const bread = await createTodo(apis, "パンを買う");
 
       await deleteTodo(milk.id);
 
-      const logs = await logEntries(database.db);
-      expect(
-        logs.filter((entry) => entry.operation !== "delete"),
-      ).toStrictEqual(created);
-      expect(created).toHaveLength(2);
+      await expect(statusRows(database.db)).resolves.toStrictEqual([
+        {
+          todoId: bread.id,
+          position: 0,
+          completed: false,
+          changedAt: new Date(bread.createdAt),
+        },
+      ]);
     });
   });
 

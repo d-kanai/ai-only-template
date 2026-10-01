@@ -1038,6 +1038,23 @@ describe(".feature の中身（findApiSpecViolations）: must reject", () => {
       ],
     ],
     [
+      "`*` の step の変更の記録（Writer が自動で残す技術の仕組み。変更の記録・変更履歴・change log の区切りと単数形）",
+      source(
+        "Feature: x",
+        "  Scenario: 記録",
+        "    * 変更の記録に作成が残る",
+        "    * 変更履歴は増えない",
+        "    * change-log が 1 件足される",
+        "    * Change Logs は残る",
+      ),
+      [
+        { rule: "api-spec-business-language", line: 3 },
+        { rule: "api-spec-business-language", line: 4 },
+        { rule: "api-spec-business-language", line: 5 },
+        { rule: "api-spec-business-language", line: 6 },
+      ],
+    ],
+    [
       "見出し以外のキーワードの行・Given の行も禁止語を見る（同じ行なら規則の順）",
       source(
         "Feature: x",

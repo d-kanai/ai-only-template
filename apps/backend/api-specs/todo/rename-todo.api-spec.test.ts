@@ -85,8 +85,11 @@ const feature = await loadFeature("./rename-todo.feature");
 
 describeFeature(feature, ({ Scenario }) => {
   Scenario("レスポンス", ({ And }) => {
+    // 変更の記録には、変わった列（title）の変更前と変更後だけの記録が 1 件足される（shared/infra/writer.ts の update）。
+    // WHY 変更の記録をこの step で見る: .feature に書かない（create-todo.api-spec.test.ts の冒頭）。記録の step 「新しいタイトルが
+    //   保存され…」は前提を storeTodo（変更の記録を書かない）で作るので、名前を変える操作を createTodo だけで用意するこの step に置く。
     And("名前を変えると、新しいタイトルの Todo が返る", async () => {
-      const milk = await createTodo(apis, "牛乳を買う");
+      const { todo: milk, logs } = await createWithLogs("牛乳を買う");
 
       const response = await putTitle(milk.id, { title: "豆乳を買う" });
 
@@ -95,6 +98,18 @@ describeFeature(feature, ({ Scenario }) => {
         ...milk,
         title: "豆乳を買う",
       } satisfies RenameTodoResponse);
+      await expect(logEntries(database.db)).resolves.toStrictEqual(
+        sortedLogs([
+          ...logs,
+          {
+            tableName: "todos",
+            rowId: milk.id,
+            operation: "update",
+            changes: { title: { before: "牛乳を買う", after: "豆乳を買う" } },
+            actorId: null,
+          },
+        ]),
+      );
     });
 
     // WHY 完了にしてから変える: 未完了のままだと、完了かどうかを既定値（未完了）で上書きする誤りを見分けられない。
@@ -163,28 +178,9 @@ describeFeature(feature, ({ Scenario }) => {
       ]);
     });
 
-    // 変わった列（title）だけの記録が 1 件足される（shared/infra/writer.ts の update）。
-    And("変更の記録に、タイトルの変更前と変更後が残る", async () => {
-      const { todo: milk, logs } = await createWithLogs("牛乳を買う");
-
-      await putTitle(milk.id, { title: "豆乳を買う" });
-
-      await expect(logEntries(database.db)).resolves.toStrictEqual(
-        sortedLogs([
-          ...logs,
-          {
-            tableName: "todos",
-            rowId: milk.id,
-            operation: "update",
-            changes: { title: { before: "牛乳を買う", after: "豆乳を買う" } },
-            actorId: null,
-          },
-        ]),
-      );
-    });
-
-    // 差分の無い変更は書かない（changedProps が空なら Writer は SQL も記録も出さない）。応答は成功。
-    And("同じタイトルに変えると、変更の記録は増えない", async () => {
+    // 差分の無い変更は書かない（changedProps が空なら Writer は SQL も記録も出さない）。応答は成功。Todo の行に加えて、
+    //   変更の記録が増えないことも見る（expectUnchanged。.feature には書かない）。
+    And("同じタイトルに変えても、何も変わらない", async () => {
       const { todo: milk, logs } = await createWithLogs("牛乳を買う");
 
       const response = await putTitle(milk.id, { title: "牛乳を買う" });

@@ -28,6 +28,10 @@ import {
 //   呼んで確かめる。WHY（テストダブル無し・`*` を And で定義・各 step の前に表を空にする）は list-todos.api-spec.test.ts の冒頭。
 // WHY 応答に加えて DB の行も見る: 応答が正しくても永続化がずれる誤り（列の取り違え・履歴や変更の記録の書き忘れ）は応答だけでは
 //   見逃す（API ジャーニーと同じ方針。Issue #187）。拒否した要求は何も書かないこと（表と変更の記録が空のまま）も見る。
+// WHY 変更の記録（change_logs）は .feature に書かず、同じ操作の結果を確かめる step の中で確かめる（ユーザー指示 2026-10-01）:
+//   変更の記録は Writer（shared/infra/writer.ts）が文ごとに自動で残す技術の仕組みで、業務の仕様ではない（.feature の禁止語。
+//   rule-tests/feature-business-language.ts）。記録の書き忘れ・中身のずれを見逃さないよう、検証そのものは step の実装に残す。
+//   ほかの api-spec（rename / change-todo-completion / delete）も同じ。
 
 let database: TestDatabase;
 let apis: TodoApis;
@@ -105,12 +109,17 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("記録", ({ And }) => {
     // 行の全列（id・タイトル・完了かどうか・作成日時）が応答と同じ。作成日時は行では Date（schema.ts の mode "date"）。
+    // 変更の記録も、Todo と完了の履歴の作成（insert）の 2 件だけが残る（冒頭の WHY のとおり .feature には書かない）。
     And("作った Todo が、返った内容のとおりに保存される", async () => {
       const milk = await createTodo(apis, "牛乳を買う");
 
       await expect(todoRows(database.db)).resolves.toStrictEqual([
         { ...milk, createdAt: new Date(milk.createdAt) },
       ]);
+      const created = await statusRowOf(database.db, milk.id, 0);
+      await expect(logEntries(database.db)).resolves.toStrictEqual(
+        sortedLogs([todoInsertLog(milk), statusInsertLog(created)]),
+      );
     });
 
     // 作成日時に未完了（Todo.create）。
@@ -125,15 +134,6 @@ describeFeature(feature, ({ Scenario }) => {
           changedAt: new Date(milk.createdAt),
         },
       ]);
-    });
-
-    And("変更の記録に、Todo と完了の履歴の作成が残る", async () => {
-      const milk = await createTodo(apis, "牛乳を買う");
-
-      const created = await statusRowOf(database.db, milk.id, 0);
-      await expect(logEntries(database.db)).resolves.toStrictEqual(
-        sortedLogs([todoInsertLog(milk), statusInsertLog(created)]),
-      );
     });
   });
 

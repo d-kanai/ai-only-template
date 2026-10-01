@@ -174,12 +174,29 @@ describeFeature(feature, ({ Scenario }) => {
       ]);
     });
 
+    // 変更の記録には、作成の 2 件に、todos の completed の update と、完了の履歴の insert（全列）が足される
+    //   （.feature には書かない。create-todo.api-spec.test.ts の冒頭）。
     And("完了にすると、完了の履歴に「完了」が 1 件足される", async () => {
       const milk = await createTodo(apis, "牛乳を買う");
+      const created = await logEntries(database.db);
 
       await putCompletion(milk.id, { completed: true });
 
       await expectAddedStatus(milk, [true]);
+      const completion = await statusRowOf(database.db, milk.id, 1);
+      await expect(logEntries(database.db)).resolves.toStrictEqual(
+        sortedLogs([
+          ...created,
+          {
+            tableName: "todos",
+            rowId: milk.id,
+            operation: "update",
+            changes: { completed: { before: false, after: true } },
+            actorId: null,
+          } satisfies ChangeEntry,
+          statusInsertLog(completion),
+        ]),
+      );
     });
 
     And("未完了に戻すと、完了の履歴に「未完了」が 1 件足される", async () => {
@@ -198,29 +215,6 @@ describeFeature(feature, ({ Scenario }) => {
       await putCompletion(milk.id, { completed: true });
 
       await expect(statusRows(database.db)).resolves.toStrictEqual(before);
-    });
-
-    // 作成の 2 件に、todos の completed の update と、完了の履歴の insert（全列）が足される。
-    And("変更の記録に、完了かどうかの変更と履歴の追加が残る", async () => {
-      const milk = await createTodo(apis, "牛乳を買う");
-      const created = await logEntries(database.db);
-
-      await putCompletion(milk.id, { completed: true });
-
-      const completion = await statusRowOf(database.db, milk.id, 1);
-      await expect(logEntries(database.db)).resolves.toStrictEqual(
-        sortedLogs([
-          ...created,
-          {
-            tableName: "todos",
-            rowId: milk.id,
-            operation: "update",
-            changes: { completed: { before: false, after: true } },
-            actorId: null,
-          } satisfies ChangeEntry,
-          statusInsertLog(completion),
-        ]),
-      );
     });
   });
 

@@ -1344,6 +1344,12 @@ describe(".feature の業務の言葉（api-journey-business-language）: must r
     ["表名 todos", "Then todos は 1 件になる"],
     ["表名 todo_status_changes", "Then todo_status_changes は 1 件になる"],
     ["表名 change_logs", "Then change_logs は 2 件になる"],
+    ["change log（空白区切り・単数形）", "Then Change log が 1 件足される"],
+    [
+      "変更の記録（Writer が自動で残す技術の仕組み）",
+      "Then 変更の記録が 1 件足される",
+    ],
+    ["変更履歴", "Then 変更履歴は 2 件になる"],
     ["id", "Then その ID の Todo は無い"],
     ["uuid", "Then UUID の Todo は無い"],
     ["not found（空白なし）", "Then NotFound と伝えられる"],
