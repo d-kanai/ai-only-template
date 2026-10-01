@@ -109,8 +109,9 @@ import { containsForbiddenWord } from "./feature-business-language";
 //       を止めない（Issue #219 で biome lint を実測。it / describe / test の名前だけを見る）。
 //   以下は補助（api-specs/<feature>/ の直下の support.ts）の中身の規則:
 //   - api-spec-no-vi は support.ts にも当てる（step が組み立てを任せる先で vi を使わせない。reviewer の任意の指摘）。
-//   - api-spec-support-no-api-call（Issue #240）: support.ts の中で handler を呼ばない。`.handle(`（`?.handle(`・空白を挟むものも）と、
-//     名前が `Api` で終わる関数・メソッドの呼び出し（`createTodoApi(db)`・`createTodoApi<T>(db)`・`x.postTodoApi(`。`new <名前>Api(` と
+//   - api-spec-support-no-api-call（Issue #240）: support.ts の中で handler を呼ばない。`.handle(`（`?.handle(`・`.handle.call(` /
+//     `.apply(` / `.bind(`・空白を挟むものも）と、名前が `Api` で終わる関数・メソッドの呼び出し（`createTodoApi(db)`・`createTodoApi<T>(db)`・
+//     `createTodoApi?.(db)`・`x.postTodoApi(`。`new <名前>Api(` と
 //     `function <名前>Api(` の宣言は除く）は、その行の違反。
 //     WHY: 前提を API で作る口（以前の createTodo・changeCompletion）を support.ts に置かせない。step の api-spec-own-api-only は
 //       import の名前しか見ないので、support.ts の関数が中でほかの API を呼ぶと素通りする。
@@ -141,7 +142,9 @@ import { containsForbiddenWord } from "./feature-business-language";
 //   - 対象の API だけ（api-spec-own-api-only・api-spec-support-no-api-call・api-spec-support-assembler-per-api。Issue #240）: 名前で見るので、
 //     support.ts が組み立て関数を `Api` で終わらない名前で再公開する（`export { createTodoApi as post }`・`export const post = createTodoApi`）、
 //     組み立て関数の中で handler を変数に入れ直して呼ぶ（`const h = new XApi(…).handle; await h(req)`）、文字列のキーで呼ぶ
-//     （`x["handle"](`）、command / query を直接 new して呼ぶ（handler を通らずに前提を作る）、step が support.ts を経ずに
+//     （`x["handle"](`）、組み立て関数を support.ts の中で別名にして呼ぶ（`const post = createXApi; post(db)(req)`）、型引数の
+//     入れ子（`createXApi<Array<T>>(db)`。`<[^<>()]*>` が入れ子を読めない）、step の `require("./support")`、
+//     command / query を直接 new して呼ぶ（handler を通らずに前提を作る）、step が support.ts を経ずに
 //     Postgres の Repository などで前提を書く書き方は見ない（reviewer が見る）。囲む関数は直前の `function` の宣言で推定するので、
 //     ネストした関数・アロー関数・クラスのメソッドの中の `new <名前>Api(` は外側の関数で数える（名前が合わなければ違反になる側に倒れる）。
 // WHY 文字列で判定する（AST にしない）: 見るのはパス・行の先頭のキーワード・import の参照先だけで、正規表現で足りる
@@ -650,14 +653,15 @@ function findStepContentViolations(
 }
 
 // support.ts が handler を呼ぶ・組み立て関数（Api で終わる名前）を呼ぶ行（api-spec-support-no-api-call）。code はコメントを消したもの。
-// `.handle(`（`?.handle(`・空白を挟むものも）と、`<名前>Api(`（型引数 `<...>` を挟むもの・メソッドの `x.<名前>Api(` も）のうち
-//   `new <名前>Api(`（組み立て）と `function <名前>Api(`（組み立て関数の宣言）以外。文字列の中は見ない（blankStrings）。
+// `.handle(`（`?.handle(`・`.handle.call(` / `.apply(` / `.bind(`・空白を挟むものも）と、`<名前>Api(`（型引数 `<...>` を挟むもの・
+//   optional call の `<名前>Api?.(`・メソッドの `x.<名前>Api(` も）のうち `new <名前>Api(`（組み立て）と `function <名前>Api(`（組み立て関数の
+//   宣言）以外。文字列の中は見ない（blankStrings）。
 function findSupportApiCallViolations(code: string): ApiSpecViolation[] {
   const blanked = blankStrings(code);
   return [
-    ...blanked.matchAll(/\.\s*handle\s*\(/g),
+    ...blanked.matchAll(/\.\s*handle\s*(?:\.\s*(?:call|apply|bind)\s*)?\(/g),
     ...blanked.matchAll(
-      /(?<!\bnew\s+)(?<!\bfunction\s+)(?<![\w$])[A-Za-z_$][\w$]*Api\s*(?:<[^<>()]*>)?\s*\(/g,
+      /(?<!\bnew\s+)(?<!\bfunction\s+)(?<![\w$])[A-Za-z_$][\w$]*Api\s*(?:<[^<>()]*>)?\s*(?:\?\.)?\s*\(/g,
     ),
   ].map((match) => ({
     rule: "api-spec-support-no-api-call",
@@ -1811,7 +1815,7 @@ describe("補助 support.ts の組み立て（findApiSpecViolations）: must pas
 describe("補助 support.ts の組み立て（findApiSpecViolations）: must reject", () => {
   it.each<[string, string, ApiSpecViolation[]]>([
     [
-      "handler を呼ぶ（.handle(・?.handle(・空白を挟む）",
+      "handler を呼ぶ（.handle(・?.handle(・空白を挟む・.handle.call( / .apply( / .bind(）",
       source(
         ...SUPPORT_IMPORTS,
         "export function createXApi(db: Database) {",
@@ -1820,12 +1824,18 @@ describe("補助 support.ts の組み立て（findApiSpecViolations）: must rej
         "export async function seed(api?: CreateXApi) {",
         "  await api?.handle(request);",
         "  await api.handle (request);",
+        "  await api.handle.call(undefined, request);",
+        "  await api.handle.apply(api, [request]);",
+        "  api.handle.bind(api)(request);",
         "}",
       ),
-      [4, 7, 8].map((line) => ({ rule: "api-spec-support-no-api-call", line })),
+      [4, 7, 8, 9, 10, 11].map((line) => ({
+        rule: "api-spec-support-no-api-call",
+        line,
+      })),
     ],
     [
-      "組み立て関数・Api で終わる名前を呼ぶ（型引数付き・メソッド・Api のクラスを new せずに呼ぶ）",
+      "組み立て関数・Api で終わる名前を呼ぶ（型引数付き・optional call・メソッド・Api のクラスを new せずに呼ぶ）",
       source(
         ...SUPPORT_IMPORTS,
         "export async function createTodo(db: Database) {",
@@ -1833,9 +1843,10 @@ describe("補助 support.ts の組み立て（findApiSpecViolations）: must rej
         "  const list = listXApi<T>(db);",
         "  await apis.postXApi(request);",
         "  return CreateXApi(db);",
+        "  const get = getXApi?.(db);",
         "}",
       ),
-      [4, 5, 6, 7].map((line) => ({
+      [4, 5, 6, 7, 8].map((line) => ({
         rule: "api-spec-support-no-api-call",
         line,
       })),

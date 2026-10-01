@@ -68,7 +68,6 @@ describeFeature(feature, ({ Scenario }) => {
       } satisfies ListTodosResponse);
     });
 
-    // 作成の応答（id・タイトル・完了かどうか・作成日時）と同じ内容が一覧に出る。
     // 表の Todo（id・タイトル・完了かどうか・作成日時）と同じ内容が一覧に出る。作成日時は ISO 8601 の文字列。
     And("各 Todo は、タイトル・完了かどうか・作成日時を持つ", async () => {
       const milk = await aTodo(database.db).title("牛乳を買う").build();
