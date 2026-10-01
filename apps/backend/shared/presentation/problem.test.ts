@@ -216,7 +216,7 @@ describe("toProblemResponse", () => {
     });
   });
 
-  test("想定外の例外は logger.error で、event.name（server_error）と例外の type・message を含む 1 行の JSON としてサーバのログ（stderr）に残す", () => {
+  test("想定外の例外は logger.emit で、event.name（server_error）と例外の type・message を含む ERROR の 1 行の JSON としてサーバのログ（stderr）に残す", () => {
     // logger（apps/shared/logger.ts。Issue #90 で移した）は error を console.error に 1 行の文字列で渡す。
     const consoleError = vi
       .spyOn(console, "error")
@@ -340,7 +340,7 @@ describe("withProblemResponse", () => {
     });
   });
 
-  test("handler が想定外の例外で reject すると、500 の Problem を返し、logger.error でサーバのログに残す", async () => {
+  test("handler が想定外の例外で reject すると、500 の Problem を返し、logger.emit（server_error）でサーバのログに残す", async () => {
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);

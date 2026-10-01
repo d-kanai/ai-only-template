@@ -79,7 +79,8 @@ function inWriter<T>(
   );
 }
 
-// logger（@repo/shared/logger）は info を console.log、warn を console.warn に 1 行の JSON で渡す。出力を黙らせて行を読む。
+// logger（@repo/shared/logger）は INFO（db_write の start / done）を console.log、WARNING（failed）を console.warn に 1 行の JSON で
+//   渡す。出力を黙らせて行を読む。
 function captureLogs() {
   const info = vi.spyOn(console, "log").mockImplementation(() => undefined);
   const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -377,7 +378,7 @@ describe("PostgresWriter の update", () => {
 
   // WHY Error（DomainError の not_found にしない）: 呼び出し側（Repository）は同じトランザクションで行を FOR UPDATE で読んでから
   //   update するので、行が無いのは呼び出し側の実装ミス（500）。
-  test("id の行が無ければ、表と id を message に持つ Error を投げ、失敗のログ（warn）を出し、変更履歴を書かない", async () => {
+  test("id の行が無ければ、表と id を message に持つ Error を投げ、失敗のログ（WARNING）を出し、変更履歴を書かない", async () => {
     const logs = captureLogs();
     fixElapsed(0, 2);
     const error = new Error(`items has no row to update: ${ID}`);

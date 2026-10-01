@@ -20,7 +20,7 @@ export async function verifyEnvAtStartup(): Promise<void> {
     // WHY 英語: サーバのログは運用者向けで、画面の辞書（shared/i18n/）の対象外。運用者向けの文言は英語にそろえる（Issue #116）。
     // WHY event.name を app_start_failed にする（Issue #209。apps/shared/log-event.ts）: 起動できなかった理由（環境変数・TZ）を
     //   1 つの種類で引ける。デプロイ直後に新しいリビジョンが立ち上がらないときに最初に見る行。
-    logger.error({
+    logger.emit({
       message: "Environment variable validation failed at startup",
       event: { name: "app_start_failed" },
       error,
@@ -40,7 +40,7 @@ export async function verifyEnvAtStartup(): Promise<void> {
 export function verifyTimeZoneAtStartup(): void {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (timeZone !== "UTC") {
-    logger.error({
+    logger.emit({
       message: "The server time zone must be UTC; start the server with TZ=UTC",
       event: { name: "app_start_failed" },
       // WHY snake_case: ログのキーは OTel semconv に倣って snake_case にそろえる（.claude/rules/backend.md の「ログ」）。

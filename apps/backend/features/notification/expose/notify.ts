@@ -17,13 +17,13 @@ const sendNotification = new SendNotificationCommand(
 //   呼び出し側が await も catch もしなかったときに reject が未処理になり、Node 24 は未処理の reject でプロセスを終了する
 //   （--unhandled-rejections の既定 throw）。Promise は expose の外に出さず、ここで受ける。
 // WHY 失敗はログに出して呼び出し側へ伝えない: 通知は完了に付随する処理で、失敗しても完了（保存済み）は取り消さない。
-//   失敗に気づけるよう error の 1 行で残す（Error は logger が { type, message } にする）。
+//   失敗に気づけるよう ERROR の 1 行（notification の failed は logger が ERROR にする）で残す（Error は logger が { type, message } にする）。
 // WHY event.name を notification（phase: failed）にする（server_error にしない。Issue #209）: server_error は HTTP の境界の 500
 //   （toProblemResponse）の行で、通知の失敗は応答を 500 にしない（完了は成功している）。notification で引けば送信と失敗が
 //   並び、失敗だけは phase（と severity の ERROR）で絞れる（db_write の phase と同じ形）。
 export function notify(message: string): void {
   sendNotification.execute({ message }).catch((error: unknown) => {
-    logger.error({
+    logger.emit({
       message: "notification failed",
       event: { name: "notification", phase: "failed" },
       error,

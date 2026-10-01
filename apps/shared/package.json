@@ -5,5 +5,8 @@
     "./env": "./env.ts",
     "./logger": "./logger.ts",
     "./now": "./now.ts"
+  },
+  "dependencies": {
+    "zod": "4.6.5"
   }
 }

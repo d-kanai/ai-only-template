@@ -78,6 +78,9 @@ const E2E_ROOT = "apps/e2e";
 //   から移した）。置き場所の規則（SHARED_PLACEMENT）、"@repo/shared/..." の書き方（frontend-to-shared-specifier）、画面側から
 //   参照しない（screen-to-shared）、exports（SHARED_EXPORTS）、環境変数の直参照・console の例外（env.ts・logger.ts）の対象。
 const SHARED_ROOT = "apps/shared";
+// apps/shared が使ってよい（node: 以外の）パッケージ。規則 shared-self-contained の許可（名前の完全一致。サブパスは含めない）。
+// WHY zod（Issue #216）: logger のスキーマ（apps/shared/log-event.ts）。足すときは Issue で決め、.claude/rules/shared.md と同じ変更で直す。
+const SHARED_ALLOWED_PACKAGES = new Set(["zod"]);
 
 // WHY テストを対象外にする: テストは組み立てのために規則の外側を参照する（例: presentation のテストが
 //   test-support の InMemory リポジトリを new して query / command のコンストラクタに渡す。.claude/rules/testing.md の「置き方と環境」）。
@@ -1126,21 +1129,27 @@ const RULES: Rule[] = [
     // WHY: apps/shared は frontend 直下（Next の起動時・Proxy）と backend の両方が読み込む基盤。ここから backend や画面側を
     //   参照すると、frontend 直下から backend を参照させない規則（frontend-root-to-backend）や層の規則を、apps/shared を経由して
     //   すり抜けられる。フレームワーク・DB に依存すると、env・logger を使うすべての場所にその依存が入る。
-    // WHY パッケージは node: の付いた Node の組み込みだけ（"apps/shared/package.json の dependencies に無いものは違反" にしない）:
-    //   apps/shared は依存を持たないパッケージ（.claude/rules/dependencies.md）で、今は node: 以外を使う理由が無い。dependencies を
-    //   読んで許す形にすると、依存を足すだけで何でも通り、置いてよいものの判断（shared.md）がレビューに出ない。zod などを足すときは
-    //   Issue で決めて、ここの許可を同じ変更で広げる。"fs" のような node: の付かない組み込みの名前は、パッケージ名と区別できないので不可。
+    // WHY パッケージは node: の付いた Node の組み込みと、名前で許した zod だけ（"apps/shared/package.json の dependencies に無いものは
+    //   違反" にしない）: dependencies を読んで許す形にすると、依存を足すだけで何でも通り、置いてよいものの判断（shared.md）が
+    //   レビューに出ない。パッケージを足すときは Issue で決めて、ここの許可（SHARED_ALLOWED_PACKAGES）を同じ変更で広げる。
+    //   "fs" のような node: の付かない組み込みの名前は、パッケージ名と区別できないので不可。
+    // WHY zod を許す（Issue #216）: logger（logger.ts）が種類ごとの行の形を zod のスキーマ（log-event.ts）で parse し、一覧に無いキーを
+    //   落とし、個人情報を *** にする。backend も同じ版の zod を使う（入力検証。.claude/rules/dependencies.md）。
+    // WHY "zod" の 1 つだけ（サブパスの "zod/v4"・"zod/mini" を許さない）: 書き方を 1 つにし、別の入口（別の API）が混ざらないようにする。
     // WHY FRAMEWORK_PACKAGES・PERSISTENCE_PACKAGES も明示して書く: 下の「node: 以外は違反」だけでも止まるが、将来パッケージの許可を
     //   広げたときにも React・Next・DB だけは止め続けるため。
     id: "shared-self-contained",
-    name: "apps/shared/ の中は apps/shared/ の自前コードと Node の組み込み（node:）だけを参照する（backend・frontend、next・react、DB、ほかのパッケージを参照しない）",
+    name: "apps/shared/ の中は apps/shared/ の自前コードと Node の組み込み（node:）と zod だけを参照する（backend・frontend、next・react、DB、ほかのパッケージを参照しない）",
     appliesTo: (from) => isUnder(from, SHARED_ROOT),
     isViolation: (ref) =>
       ref.own
         ? !isUnder(ref.to, SHARED_ROOT)
         : usesFramework(ref) ||
           usesPersistence(ref) ||
-          !ref.specifier.startsWith("node:"),
+          !(
+            ref.specifier.startsWith("node:") ||
+            SHARED_ALLOWED_PACKAGES.has(ref.specifier)
+          ),
   },
   {
     // 「画面・部品の辞書（<name>.messages.ts）は、その画面・部品の隣に置き、同じディレクトリのファイルだけが使う」（Issue #125。
@@ -1334,6 +1343,8 @@ const SHARED_FILES = new Set(
     "logger.ts",
     "logger.test.ts",
     "log-event.ts",
+    // Issue #216: log-event.ts に種類ごとのスキーマとマスクの印（正規表現）が入り、その仕様を隣のテストに置く。
+    "log-event.test.ts",
     "now.ts",
     "now.test.ts",
     "package.json",
@@ -1343,7 +1354,7 @@ const SHARED_FILES = new Set(
 
 const SHARED_PLACEMENT = {
   id: "shared-placement",
-  name: "apps/shared/ に置いてよいのは env.ts・logger.ts・now.ts とそのテスト（env.test.ts・logger.test.ts・now.test.ts）、log-event.ts、package.json・tsconfig.json だけ",
+  name: "apps/shared/ に置いてよいのは env.ts・logger.ts・log-event.ts・now.ts とそのテスト（env.test.ts・logger.test.ts・log-event.test.ts・now.test.ts）、package.json・tsconfig.json だけ",
   isMisplaced: (file: string) =>
     isUnder(file, SHARED_ROOT) && !SHARED_FILES.has(file),
 };
@@ -3960,9 +3971,14 @@ const RULE_EXAMPLES: Record<
       ["apps/shared/env.ts", "next/server", "type"],
       ["apps/shared/env.ts", "drizzle-orm/pg-core", "type"],
       ["apps/shared/env.ts", "pg", "value"],
-      // node: 以外のパッケージ（依存を持たないパッケージ。"node:" の付かない組み込みの名前も不可）。
-      ["apps/shared/env.ts", "zod", "value"],
+      // node: と zod 以外のパッケージ（"node:" の付かない組み込みの名前も不可）。zod もサブパスと、前方一致だけが同じ別の
+      //   パッケージは不可（Issue #216）。
       ["apps/shared/env.ts", "fs", "value"],
+      ["apps/shared/log-event.ts", "zod/v4", "value"],
+      ["apps/shared/log-event.ts", "zod/mini", "type"],
+      ["apps/shared/log-event.ts", "zodiac", "value"],
+      ["apps/shared/log-event.ts", "zod-validation-error", "value"],
+      ["apps/shared/log-event.ts", "@zod/core", "value"],
     ],
     allowed: [
       // 同じディレクトリのファイル（相対パス・自パッケージ名）と Node の組み込み（node:）。
@@ -3970,6 +3986,9 @@ const RULE_EXAMPLES: Record<
       ["apps/shared/logger.ts", "@repo/shared/env", "value"],
       ["apps/shared/env.ts", "node:fs", "value"],
       ["apps/shared/env.ts", "node:crypto", "value"],
+      // 名前で許したパッケージ（zod。Issue #216）。値・型だけのどちらも。
+      ["apps/shared/log-event.ts", "zod", "value"],
+      ["apps/shared/logger.ts", "zod", "type"],
       // apps/shared の外のファイルは、この規則の対象外。
       ["apps/backend/shared/infra/database.ts", "pg", "value"],
       ["apps/frontend_customer/app/page.tsx", "react", "value"],
@@ -4586,8 +4605,7 @@ const SHARED_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/shared/now-helper.ts",
     "apps/shared/now.test-support.ts",
     "apps/shared/log-events.ts",
-    // Issue #209: log-event.ts のテストは logger.test.ts に置く（一覧に無い）。
-    "apps/shared/log-event.test.ts",
+    "apps/shared/log-events.test.ts",
     // Issue #181: backend・frontend の直下で許した test-support/ も、apps/shared では決めた名前の外。
     "apps/shared/test-support/now.ts",
     "apps/shared/env.js",
@@ -4603,6 +4621,8 @@ const SHARED_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/shared/logger.ts",
     "apps/shared/logger.test.ts",
     "apps/shared/log-event.ts",
+    // Issue #216: スキーマとマスクの印の仕様（Issue #209 では logger.test.ts に置き、一覧に無かった）。
+    "apps/shared/log-event.test.ts",
     "apps/shared/now.ts",
     "apps/shared/now.test.ts",
     "apps/shared/package.json",
@@ -6798,7 +6818,8 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import { useState } from "react";',
     'import type { NodePgDatabase } from "drizzle-orm/node-postgres";',
     'export { TodoScreen } from "@/features/todo";',
-    'const z = import("zod");',
+    'const z = import("zod/v4");',
+    'import { z as zod } from "zod";',
     'import { existsSync } from "node:fs";',
     'import { logger } from "./logger";',
   ),
@@ -6954,7 +6975,7 @@ const MUST_REJECT_VIOLATIONS = [
     "react",
     "drizzle-orm/node-postgres",
     "apps/frontend_customer/features/todo",
-    "zod",
+    "zod/v4",
   ].map((to) => `shared-self-contained: apps/shared/env.ts → ${to}`),
   "console-direct-access: apps/shared/lib/logger.ts:1",
   "domain: apps/backend/features/todo/internal/domain/bad-domain-shared.ts → apps/shared/logger",

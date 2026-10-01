@@ -202,7 +202,7 @@ export function toProblemResponse(error: unknown, request: Request): Response {
   // WHY 英語の固定の文言: ログは開発者が読むもので、apps/backend の非テストコードには日本語を置かない（Issue #116）。
   // WHY event.name を server_error にする（Issue #209。apps/shared/log-event.ts）: API の想定外の例外（500）を 1 つの種類で引け、
   //   アラートの条件にできる。DomainError など 400 / 404 の行は出さないので、この名前の行はすべてサーバ側の不具合の候補。
-  logger.error({
+  logger.emit({
     message: "unexpected error",
     event: { name: "server_error" },
     error,

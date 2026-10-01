@@ -10,7 +10,7 @@ import type { NotificationSender } from "../domain/notification-sender";
 // WHY 名前を <interface>.<実装>.ts にする: todo の todo-repository.postgres.ts（PostgresTodoRepository）と同じ命名。
 export class LogNotificationSender implements NotificationSender {
   async send(message: string): Promise<void> {
-    logger.info({
+    logger.emit({
       message: "notification",
       event: { name: "notification" },
       notification: message,

@@ -20,7 +20,7 @@ import { buildRequestLog } from "@/shared/request-log/request-log";
 //   応答に x-request-id を付け、リクエストに x-locale を足すだけにする。このファイルは next start / next dev の中でだけ動くので
 //   カバレッジの対象外にし（vitest.config.mts）、結線は E2E（apps/e2e/request-log.spec.ts）で確かめる。
 // 限界（.claude/rules/frontend.md）: 応答の前に動くので status と所要時間は取れない。
-// WHY 第 2 引数（NextFetchEvent）を受け取らない: event.waitUntil を使わないため（下の logger.info の WHY）。
+// WHY 第 2 引数（NextFetchEvent）を受け取らない: event.waitUntil を使わないため（下の logger.emit の WHY）。
 export function proxy(request: NextRequest): NextResponse {
   const log = buildRequestLog({
     method: request.method,
@@ -35,13 +35,15 @@ export function proxy(request: NextRequest): NextResponse {
     //   止めている（欠けていればリクエストを受ける前にプロセスが終わる）。
     projectId: env.GCP_PROJECT_ID,
   });
-  // WHY logger.info（info は stdout）に同期で 1 行: 出力先は stdout の NDJSON だけにし（ログの収集は実行環境に任せる）、
+  // WHY logger.emit に同期で 1 行: 出力先は stdout の NDJSON だけにし（ログの収集は実行環境に任せる）、
   //   ライブラリを入れない（Issue #80）。stdout への書き込みは同期で終わるので event.waitUntil は使わない。
-  //   logger が先頭に severity（"INFO"）を付ける。time は log の受信時刻がそのまま使われる（1 行の形は ADR
-  //   docs/adr/architecture/20260930-log-format-cloud-logging-otel.md）。
-  // WHY ここで型が縛られる: log.event.name（page_request / api_request）が一覧（apps/shared/log-event.ts）に無ければ、logger.info の
-  //   引数の型（LogEvent）に合わず pnpm typecheck が落ちる（request-log.ts は画面側で一覧の型を import できない）。
-  logger.info(log);
+  //   logger が先頭に severity（page_request / api_request は "INFO" で stdout）を付ける。time は log の受信時刻がそのまま
+  //   使われる（1 行の形は ADR docs/adr/architecture/20260930-log-format-cloud-logging-otel.md）。
+  // WHY 生の値を渡す: クエリの値・referer・接続元のアドレスは logger が種類ごとのスキーマで *** にする（Issue #216。
+  //   apps/shared/log-event.ts）。
+  // WHY ここで型が縛られる: log の形（event.name が一覧にあること・必須の項目）が logger のスキーマの入力（LogEvent）に合わなければ
+  //   pnpm typecheck が落ちる（request-log.ts は画面側で apps/shared の型を import できない）。
+  logger.emit(log);
   // WHY 応答ヘッダに x-request-id: ブラウザの開発者ツールや呼び出し側から、応答と stdout の行を突き合わせられるようにする。
   //   NextResponse.next({ headers }) ではなく、応答を作ってから set する（next-response.md の next()）。
   // WHY /api/** にはロケールを載せない: API は画面の文言を返さず（Problem Details の key と params を画面が翻訳する。detail は翻訳しない英語）、ロケールを使わない（Issue #116・#126）。

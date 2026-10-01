@@ -15,7 +15,7 @@ const TIMESTAMP = new Date("2026-09-30T09:00:00.000Z");
 
 describe("LogNotificationSender", () => {
   // WHY 行を丸ごと比べる: message・event.name（出来事の種類）と notification（送った本文）のキー名・severity も、ログを読む側の契約。
-  test("メッセージを info の 1 行（message: notification、event.name: notification、notification: 本文）でログに出す", async () => {
+  test("メッセージを INFO の 1 行（message: notification、event.name: notification、notification: 本文）でログに出す", async () => {
     vi.mocked(now).mockReturnValue(TIMESTAMP);
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
 

@@ -185,12 +185,12 @@ export class PostgresWriter implements Writer {
   }
 
   // statement（本体の 1 文と記録の組み立て）を実行し、記録を同じトランザクションの change_logs に書く。前後に 1 行ずつ logger で
-  //   ログを出し、失敗なら warn を出して同じ例外を投げ直す。
+  //   ログを出し、失敗なら失敗の 1 行を出して同じ例外を投げ直す。
   // ログの形（Issue #209。ADR docs/adr/architecture/20260930-log-format-cloud-logging-otel.md。どれも event.name は db_write で、
   //   db.collection.name（表名）・db.operation.name（操作）・行の id（1 行なら row_id、複数なら row_ids）を持つ）:
-  //   - 前: info "db write start"（event.phase は start）
-  //   - 後: info "db write done"（event.phase は done）。event.duration_ms（所要時間）と changes（記録の table・row_id・operation）
-  //   - 失敗: warn "db write failed"（event.phase は failed）。event.duration_ms と error（logger が { type, message } にする）。
+  //   - 前: "db write start"（event.phase は start。INFO）
+  //   - 後: "db write done"（event.phase は done。INFO）。event.duration_ms（所要時間）と changes（記録の table・row_id・operation）
+  //   - 失敗: "db write failed"（event.phase は failed。WARNING）。event.duration_ms と error（logger が { type, message } にする）。
   //     DB のエラーなら error は pg のエラーの name だけの { type } で、db.response.status_code（SQLSTATE）と constraint（制約の名前）を
   //     出す（下の failureFields）
   // WHY db.* の名前: OTel semconv の DB の属性（db.collection.name・db.operation.name・db.response.status_code。
@@ -200,7 +200,8 @@ export class PostgresWriter implements Writer {
   //   1 つの条件で引け、種類の一覧（apps/shared/log-event.ts）を段階の数だけ増やさずに済む。
   // WHY changes に値（before / after）を出さない: 個人情報を含みうる。値は change_logs に残る（リクエストログがクエリの値を
   //   出さないのと同じ方針。ADR docs/adr/architecture/20260929-request-log-in-proxy.md）。
-  // WHY 失敗を warn にする（error にしない）: 500 になる想定外の例外は presentation の toProblemResponse が logger.error で別に残す。
+  // 重大度（INFO / WARNING）は logger が event.name と phase で決める（apps/shared/log-event.ts の severityOf。Issue #216）。失敗が
+  //   ERROR でなく WARNING なのは、500 になる想定外の例外は presentation の toProblemResponse が server_error（ERROR）で別に残すため。
   // 限界: 後のログは文と記録を書き終えた時点で出す（COMMIT の前）。後から COMMIT が失敗した（遅延制約など）ときは、このログは
   //   done のまま残り、失敗は toProblemResponse の 500 のログで分かる（トランザクションを張るのは runner で、Writer は COMMIT を
   //   見ない）。
@@ -216,7 +217,7 @@ export class PostgresWriter implements Writer {
     //   row_id で引ける。複数行の insert（完了の履歴）は 1 文で書いた行をすべて並べる。
     const rows =
       rowIds.length === 1 ? { row_id: rowIds[0] } : { row_ids: rowIds };
-    logger.info({
+    logger.emit({
       message: "db write start",
       event: { name: "db_write", phase: "start" },
       db,
@@ -231,7 +232,7 @@ export class PostgresWriter implements Writer {
       await recordChange(this.tx, entries);
     } catch (error) {
       const failure = failureFields(error);
-      logger.warn({
+      logger.emit({
         message: "db write failed",
         event: {
           name: "db_write",
@@ -253,7 +254,7 @@ export class PostgresWriter implements Writer {
       });
       throw error;
     }
-    logger.info({
+    logger.emit({
       message: "db write done",
       event: {
         name: "db_write",

@@ -11,14 +11,24 @@
 //   書ける。平らなキーは引用符が要る。
 // WHY ヘッダ由来の項目を null にする（省略しない）: どの行も同じキーを持たせ、集計側で「無かった」と「出し忘れ」を区別するため。
 //   trace の 3 つだけは例外で、traceparent が無ければキーごと出さない（下の traceFields の WHY）。
-// WHY apps/shared の型（LogEventName）を import しない: apps/frontend_customer/shared/ から apps/shared は参照しない（規則
-//   screen-to-shared）。event.name の値が一覧（apps/shared/log-event.ts）にあることは、この値を logger.info に渡す proxy.ts の
-//   型チェックが見る（一覧に無い名前なら pnpm typecheck が落ちる）。
-export type RequestLog = {
-  // Logs Explorer の一覧に出る 1 行（Cloud Logging の特別フィールド）。"<METHOD> <path>"（クエリは含めない。下の url の WHY）。
+// WHY 値をマスクせずに入れる（Issue #216）: マスクはログの唯一の出口 logger が、種類ごとのスキーマ（apps/shared/log-event.ts の
+//   page_request / api_request）で行う。url.query の値・referer・client.address は *** に、message・url.path・url.query のキーは
+//   自由文の網（メールアドレスなど）を通して出る。ここで落とすとマスクの判断が 2 か所に分かれる。
+// WHY apps/shared の型（LogEvent）を import しない: apps/frontend_customer/shared/ から apps/shared は参照しない（規則
+//   screen-to-shared）。この形が logger のスキーマの入力に合うこと（event.name が一覧にあること・必須の項目）は、この値を
+//   logger.emit に渡す proxy.ts の型チェックが見る（合わなければ pnpm typecheck が落ちる）。
+// WHY event.name ごとの union にする（{ name: "page_request" | "api_request" } の 1 つの型にしない）: logger.emit の引数は
+//   event.name で判別する union で、TypeScript は入れ子の項目（event.name）が union の値を、union の各要素に分けて照合しない。
+//   種類ごとの型の union にすれば、それぞれが page_request / api_request の形に合う。
+export type RequestLog =
+  | RequestLogOf<"page_request">
+  | RequestLogOf<"api_request">;
+
+type RequestLogOf<Name extends "page_request" | "api_request"> = {
+  // Logs Explorer の一覧に出る 1 行（Cloud Logging の特別フィールド）。"<METHOD> <path>"（クエリは含めない。クエリは url.query に分け、値を logger がマスクする）。
   message: string;
   // What: ログの種類。/api/** は api_request（ブラウザからの API route 呼び出し）、それ以外は page_request（画面アクセス）
-  event: { name: "page_request" | "api_request" };
+  event: { name: Name };
   // When: 受信時刻（RFC 3339、UTC）。logger はこの time を現在時刻より優先する
   time: string;
   http: {
@@ -36,9 +46,9 @@ export type RequestLog = {
       body: { size: number | null };
     };
   };
-  // What: パスと、クエリのキーだけ。WHY 値を出さない: 検索語・メールアドレスなどの個人情報をログに残さないため
-  //   （query_keys は OTel に無い名前。OTel の url.query は値を含むので使わない）
-  url: { path: string; query_keys: string[] };
+  // What: パスと、クエリのキーと値の組（値は logger が *** にする。上の WHY）。
+  //   OTel semconv の url.query は文字列（"a=1&b=2"）だが、キーを残して値だけをマスクできるよう、キーと値の組のオブジェクトにする。
+  url: { path: string; query: Record<string, string> };
   // Who: 接続元。address は x-forwarded-for の先頭 → x-real-ip → null
   client: { address: string | null };
   user_agent: { original: string | null };
@@ -78,9 +88,8 @@ export function buildRequestLog(input: RequestLogInput): RequestLog {
   // WHY Headers に揃える: Headers は名前の大文字・小文字を区別せずに引け、record（テスト）でも同じ読み方になる。
   const headers = new Headers(input.headers);
   const url = new URL(input.url);
-  return {
+  const fields = {
     message: `${input.method} ${url.pathname}`,
-    event: { name: requestEventName(url.pathname) },
     time: input.receivedAt.toISOString(),
     http: {
       request: {
@@ -96,8 +105,9 @@ export function buildRequestLog(input: RequestLogInput): RequestLog {
     },
     url: {
       path: url.pathname,
-      // WHY 重複を除く: ?a=1&a=2 のような同じキーの繰り返しは、キーの種類を見る用途では 1 つで足りる。
-      query_keys: [...new Set(url.searchParams.keys())],
+      // WHY Object.fromEntries（同じキーは後の値で上書き）: 値は logger が *** にするので、同じキーの繰り返し（?a=1&a=2）は
+      //   キーの種類が分かれば足りる。配列にすると行の形がキーごとに変わる。
+      query: Object.fromEntries(url.searchParams),
     },
     client: { address: clientIp(headers) },
     user_agent: { original: headers.get("user-agent") },
@@ -105,6 +115,11 @@ export function buildRequestLog(input: RequestLogInput): RequestLog {
     user: { id: null },
     ...traceFields(headers.get("traceparent"), input.projectId),
   };
+  // WHY 種類ごとに組み立てる（event: { name: isApiPath(...) ? "api_request" : "page_request" } と 1 つに書かない）: 上の RequestLog の WHY。union の値の
+  //   event.name では、どちらの種類の形かを型で決められない。
+  return isApiPath(url.pathname)
+    ? { ...fields, event: { name: "api_request" } }
+    : { ...fields, event: { name: "page_request" } };
 }
 
 // traceparent から trace の 3 つのキーを作る。形が違えば何も出さない（空のオブジェクト）。
@@ -147,10 +162,8 @@ function isAllZero(hex: string): boolean {
 
 // WHY "/api" 自体と "/api/" で始まるものだけ: Route Handler は app/api/ の下にあり、"/apis" や "/api-docs" のような
 //   前方一致だけが同じパスは画面として扱う（apps/frontend_customer/app/ の構成と同じ区切り）。
-function requestEventName(pathname: string): RequestLog["event"]["name"] {
-  return pathname === "/api" || pathname.startsWith("/api/")
-    ? "api_request"
-    : "page_request";
+function isApiPath(pathname: string): boolean {
+  return pathname === "/api" || pathname.startsWith("/api/");
 }
 
 // WHY x-forwarded-for の先頭: プロキシを経るごとに右に追記されるので、先頭が最初の接続元（クライアント）になる。
