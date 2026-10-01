@@ -217,13 +217,15 @@ export class Todo {
   // 完了の履歴（statusChanges）も DB の行（子表 todo_status_changes）から受け取り、不変条件で検証する（Issue #188）。
   // WHY 検証した後の値を origin にする: Repository の update が、読み込んだときから変わった列だけを書くため（Issue #165）。
   // stored: 保存先に今ある値が values と違う項目（Issue #194）。渡した項目だけ origin をその値にする（他の項目は検証後の値）。
-  //   使うのは、Repository が保存先に無い完了の履歴を補って読むとき（infra/todo-repository.postgres.ts の repairMissingHistory）。
-  //   今の値（values）は補った履歴で不変条件を満たし、origin の履歴は保存先の状態（空）になるので、次の update が補った履歴を
+  //   使うのは、Repository が保存先に足りない完了の履歴を補って読むとき（infra/todo-repository.postgres.ts の repairHistory。
+  //   Issue #194・#237）。今の値（values）は補った履歴で不変条件を満たし、origin の履歴は保存先の状態（空、または最後の completed が
+  //   todos.completed と食い違う履歴）になるので、次の update が補った履歴を
   //   「読み込んだときより後ろに増えた分」として書く（repair on write。update のロジックは変えずに済む）。
-  // WHY 項目を statusChanges に限る: 補う必要があるのは、デプロイの途中で古い版のアプリが書いた「履歴の無い Todo」だけ。
+  // WHY 項目を statusChanges に限る: 補う必要があるのは、デプロイの途中で古い版のアプリが書いた「履歴の無い Todo」と
+  //   「todos.completed だけを変えた Todo」の履歴だけ。
   //   todos の列（title・completed）を origin でずらすと、変えていない列を update が書き、別の要求の変更を巻き戻しうる。
   // WHY stored を検証しない: origin は永続化のための付帯情報で、Todo の値ではない（不変条件の対象は今の値）。保存先の状態は
-  //   不変条件を満たさない（履歴が空）からこそ渡される。
+  //   不変条件を満たさない（履歴が空・食い違う）からこそ渡される。
   // WHY 引数で受ける（Repository が origin を後から書き換える口を作らない）: origin は private で、コンストラクタの中でだけ決まる。
   //   書き換えの口を開けると、読み込んだ後のどの時点でも origin を変えられ、update の差分の前提が崩れる。
   static reconstruct(

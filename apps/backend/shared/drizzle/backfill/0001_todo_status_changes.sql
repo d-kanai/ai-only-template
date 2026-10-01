@@ -7,8 +7,9 @@
 --   rule-tests/migration.test.ts が、INSERT ... SELECT に WHERE NOT EXISTS か ON CONFLICT DO NOTHING があることを確かめる。
 -- WHY 作成日時にするか: Todo の不変条件は「履歴が 1 件以上で、最後の completed が今の completed と同じ」で、記録の無い日時は
 --   分からないので、不変条件の下限（作成日時）にする（0002 と同じ）。
--- 新しいアプリ（切替の後）との同時実行（Issue #194）:
---   アプリは履歴の無い Todo を読むと履歴を補い（repair on read）、次の update で (todo_id, position 0..) を INSERT する
+-- 新しいアプリ（切替の後）との同時実行（Issue #194・#237）:
+--   アプリは履歴の無い・最後の completed が食い違う Todo を読むと履歴を補い（repair on read。todo-repository.postgres.ts の
+--   repairHistory）、次の update で (todo_id, 補った position ..) を INSERT する
 --   （repair on write。todos の行は findByIdForUpdate の FOR UPDATE でロックしている）。この SQL が同じ Todo に同時に INSERT すると、
 --   (todo_id, position) の一意制約（0001_add_todo_status_changes.sql の todo_status_changes_todo_id_position_index）の違反で
 --   どちらかが失敗する。アプリ側が失敗すると利用者には 500 になるので、譲るのは backfill の側にする（アプリは upsert を使わない規則。
@@ -45,5 +46,27 @@ SELECT t."id", 1, true, t."created_at" FROM "todos" t
 WHERE NOT EXISTS (SELECT 1 FROM "todo_status_changes" s WHERE s."todo_id" = t."id" AND s."position" <> 0)
   AND EXISTS (SELECT 1 FROM "todo_status_changes" s0 WHERE s0."todo_id" = t."id" AND s0."position" = 0)
   AND t."completed"
+FOR UPDATE OF t
+ON CONFLICT ("todo_id", "position") DO NOTHING;
+--> statement-breakpoint
+-- 3. 最後の履歴（position が最大）の completed が todos.completed と食い違う Todo に、「最後の履歴の日時に、今の completed になった」を
+--   末尾（最後の position + 1）に足す（Issue #237）。
+-- WHY: 履歴を知らない旧リビジョンは、backfill（または 0002）で履歴が付いた後にも todos.completed だけを変える（切替の前の書き込みと、
+--   切替の時に処理中だった要求）。1. と 2. は「履歴が 0 件」「1 件目だけ」しか見ないので、この Todo は直らず、読むと不変条件の違反
+--   （500）になり一覧ごと読めなかった（Codex のレビューの P1）。
+-- WHY 日時を最後の履歴の日時にする: 変えた日時は記録が無く分からないので、不変条件（日時は昇順）の下限にする（1. と 2. が作成日時を
+--   使うのと同じ考え方。Repository の repairHistory と同じ値）。
+-- WHY 最後の履歴を NOT EXISTS（後ろの position が無い行）で選ぶ（max(position) の集約や GROUP BY にしない）: FOR UPDATE は集約・
+--   GROUP BY のある SELECT に付けられない（Postgres の制約）。
+-- WHY 冪等: 足した後は最後の completed が todos.completed と同じになるので、流し直しても選ばれない。ON CONFLICT は冪等のためではなく、
+--   ロック待ちの間にアプリが同じ position に補った履歴を COMMIT したとき（1. の説明と同じ）に、それを黙って捨てるため。
+-- WHY 0002 のマイグレーションには足さない: マイグレーションは切替の前に当たり、その時点の履歴はマイグレーション自身が作った
+--   ものだけ（食い違いを作る旧リビジョンの書き込みは、履歴が付いた後＝マイグレーションの後に起きる）。
+-- 限界: 履歴の並びが壊れている（日時が作成日時より前・逆順）Todo は直さない（どの日時が正しいか決められない。読むと 500 のまま）。
+INSERT INTO "todo_status_changes" ("todo_id", "position", "completed", "changed_at")
+SELECT t."id", l."position" + 1, t."completed", l."changed_at" FROM "todos" t
+JOIN "todo_status_changes" l ON l."todo_id" = t."id"
+WHERE NOT EXISTS (SELECT 1 FROM "todo_status_changes" n WHERE n."todo_id" = t."id" AND n."position" > l."position")
+  AND l."completed" <> t."completed"
 FOR UPDATE OF t
 ON CONFLICT ("todo_id", "position") DO NOTHING;

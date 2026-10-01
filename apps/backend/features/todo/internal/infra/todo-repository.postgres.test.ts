@@ -1695,25 +1695,215 @@ describe("PostgresTodoRepository", () => {
     },
   );
 
-  // 完了の履歴の不変条件（Issue #188）: 履歴はあるが、最後の履歴の completed が todos.completed と違う行。
-  // 履歴の無い行は読める（Repository が補う。上の「完了の履歴が DB に無い」のテスト。Issue #194）ので、500 にするのは
-  //   「履歴があるのにずれている」行だけ。
-  test("完了の履歴が todos.completed とずれている行（最後の履歴の completed が違う）の findById・findByIdForUpdate・findAll は、DomainError ではない Error を投げる", async () => {
-    const row = invalidRow({});
-    await database.db.insert(todos).values(row);
-    await database.db.insert(todoStatusChanges).values({
-      todoId: row.id,
-      position: 0,
-      completed: true,
-      changedAt: row.createdAt,
-    });
-    const error = corruptedRowError(
-      row.id,
-      new DomainError("validation_error", "todo.statusChanges.invalid"),
-    );
+  // 完了の履歴の並びが壊れている行（履歴の日時が作成日時より前・逆順）。Repository は補わない（backfill と同じ規則で直せない。
+  //   どの日時が正しいか分からない）ので、不変条件の違反（500）のまま気づけるようにする。食い違い（最後の completed が
+  //   todos.completed と違う）は補うので 500 にならない（下の「最後の履歴が todos.completed と食い違う」のテスト。Issue #237）。
+  // 2 番目（逆順で食い違いもある行）: 食い違いを補っても並びは直らないので、補いが壊れた並びを隠さないことを確かめる。
+  test.each([
+    [
+      "日時が作成日時より前",
+      true,
+      [
+        { completed: false, changedAt: new Date("2026-09-27T00:00:00.000Z") },
+        { completed: true, changedAt: new Date("2026-09-28T00:00:00.000Z") },
+      ],
+    ],
+    [
+      "日時が逆順で、最後の completed も違う",
+      false,
+      [
+        { completed: false, changedAt: new Date("2026-09-28T05:00:00.000Z") },
+        { completed: true, changedAt: new Date("2026-09-28T01:00:00.000Z") },
+      ],
+    ],
+  ] as const)(
+    "完了の履歴の並びが壊れている行（%s）の findById・findByIdForUpdate・findAll は、DomainError ではない Error を投げる",
+    async (_label, completed, history) => {
+      const row = invalidRow({});
+      await database.db.insert(todos).values({ ...row, completed });
+      await database.db.insert(todoStatusChanges).values(
+        history.map((change, position) => ({
+          todoId: row.id,
+          position,
+          ...change,
+        })),
+      );
+      const error = corruptedRowError(
+        row.id,
+        new DomainError("validation_error", "todo.statusChanges.invalid"),
+      );
 
-    await expect(repository().findById(row.id)).rejects.toEqual(error);
-    await expect(load(row.id)).rejects.toEqual(error);
-    await expect(repository().findAll()).rejects.toEqual(error);
+      await expect(repository().findById(row.id)).rejects.toEqual(error);
+      await expect(load(row.id)).rejects.toEqual(error);
+      await expect(repository().findAll()).rejects.toEqual(error);
+    },
+  );
+
+  // 最後の履歴が todos.completed と食い違う Todo（Issue #237）: 履歴を知らない旧リビジョンが、backfill で履歴が付いた後に
+  //   todos.completed だけを変えた Todo（切替の前の書き込み、切替の後に処理中だった要求）。末尾に「最後の履歴の日時に、今の
+  //   completed になった」1 件を補って読み、次の update で書く（repair on write）。行は Todo を通さずに insert する。
+  const MISMATCHED = {
+    id: "00000000-0000-4000-8000-0000000000bb",
+    title: "牛乳を買う",
+    createdAt: new Date("2026-09-28T00:00:00.000Z"),
+  };
+  const LAST_CHANGED_AT = new Date("2026-09-28T03:00:00.000Z");
+
+  async function storeMismatched(
+    completed: boolean,
+    history: readonly { completed: boolean; changedAt: Date }[],
+  ) {
+    await database.db.insert(todos).values({ ...MISMATCHED, completed });
+    await database.db.insert(todoStatusChanges).values(
+      history.map((change, position) => ({
+        todoId: MISMATCHED.id,
+        position,
+        ...change,
+      })),
+    );
+  }
+
+  // WHY 2 件目の例（履歴 2 件、最後の日時が作成日時より後）: 補う日時が「作成日時」ではなく「最後の履歴の日時」であることを
+  //   見分ける（1 件目の例は両方が同じ値）。
+  test.each([
+    [
+      "履歴 [未完了] で完了済み",
+      true,
+      [{ completed: false, changedAt: MISMATCHED.createdAt }],
+      { completed: true, changedAt: MISMATCHED.createdAt },
+    ],
+    [
+      "履歴 [未完了, 完了] で未完了",
+      false,
+      [
+        { completed: false, changedAt: MISMATCHED.createdAt },
+        { completed: true, changedAt: LAST_CHANGED_AT },
+      ],
+      { completed: false, changedAt: LAST_CHANGED_AT },
+    ],
+  ] as const)(
+    "最後の履歴が todos.completed と食い違う Todo（%s）を、findAll・findById・findByIdForUpdate は末尾に「最後の履歴の日時に今の completed」を補って返し、origin の履歴は DB のままにする",
+    async (_label, completed, history, repaired) => {
+      await storeMismatched(completed, history);
+      const statusChanges = [...history, repaired];
+      const expected = Todo.reconstruct({
+        ...MISMATCHED,
+        completed,
+        statusChanges,
+      });
+
+      const loaded = [
+        await repository().findById(MISMATCHED.id),
+        await load(MISMATCHED.id),
+        ...(await repository().findAll()),
+      ];
+
+      expect(loaded).toEqual([expected, expected, expected]);
+      for (const todo of loaded) {
+        expect(todo?.statusChanges).toStrictEqual(statusChanges);
+        expect(todo?.origin).toStrictEqual({
+          ...MISMATCHED,
+          completed,
+          statusChanges: history,
+        });
+      }
+      // 読むだけでは書かない（補った履歴は update のときに書く）。
+      await expect(statusChangeRows()).resolves.toStrictEqual(
+        history.map((change, position) => ({
+          todoId: MISMATCHED.id,
+          position,
+          ...change,
+        })),
+      );
+    },
+  );
+
+  test("最後の履歴が todos.completed と食い違う Todo の名前を変えて update すると、補った 1 件を position 1 に書き、変更履歴に履歴の insert と todos の update を記録する", async () => {
+    await storeMismatched(true, [
+      { completed: false, changedAt: MISMATCHED.createdAt },
+    ]);
+    const renamed = (await load(MISMATCHED.id)).rename("卵を買う");
+
+    const written = await changeLogsWrittenBy(() => update(renamed));
+
+    await expect(statusChangeRows()).resolves.toStrictEqual([
+      {
+        todoId: MISMATCHED.id,
+        position: 0,
+        completed: false,
+        changedAt: MISMATCHED.createdAt,
+      },
+      {
+        todoId: MISMATCHED.id,
+        position: 1,
+        completed: true,
+        changedAt: MISMATCHED.createdAt,
+      },
+    ]);
+    const statusId = await statusChangeId(MISMATCHED.id, 1);
+    const expected: ChangeEntry[] = [
+      {
+        tableName: "todo_status_changes",
+        rowId: statusId,
+        operation: "insert",
+        changes: {
+          id: { after: statusId },
+          todo_id: { after: MISMATCHED.id },
+          position: { after: 1 },
+          completed: { after: true },
+          changed_at: { after: MISMATCHED.createdAt.toISOString() },
+        },
+        actorId: null,
+      },
+      {
+        tableName: "todos",
+        rowId: MISMATCHED.id,
+        operation: "update",
+        changes: { title: { before: "牛乳を買う", after: "卵を買う" } },
+        actorId: null,
+      },
+    ];
+    expect(written).toStrictEqual(expected.sort(byTableAndChanges));
+    // 書いた後は DB の履歴をそのまま読む（origin の履歴も DB と同じになり、次の update は補った分を書き直さない）。
+    const reloaded = await repository().findById(MISMATCHED.id);
+    expect(reloaded).toEqual(renamed);
+    expect(reloaded?.origin?.statusChanges).toStrictEqual(
+      renamed.statusChanges,
+    );
+  });
+
+  test("最後の履歴が todos.completed と食い違う完了済みの Todo を未完了に戻して update すると、補った 1 件（position 1）と未完了の 1 件（position 2）を書く", async () => {
+    await storeMismatched(true, [
+      { completed: false, changedAt: MISMATCHED.createdAt },
+    ]);
+    const reopenedAt = new Date("2026-09-29T00:00:00.000Z");
+    vi.mocked(now).mockReturnValueOnce(reopenedAt);
+    const reopened = (await load(MISMATCHED.id)).changeCompletion(false);
+
+    await update(reopened);
+
+    await expect(statusChangeRows()).resolves.toStrictEqual([
+      {
+        todoId: MISMATCHED.id,
+        position: 0,
+        completed: false,
+        changedAt: MISMATCHED.createdAt,
+      },
+      {
+        todoId: MISMATCHED.id,
+        position: 1,
+        completed: true,
+        changedAt: MISMATCHED.createdAt,
+      },
+      {
+        todoId: MISMATCHED.id,
+        position: 2,
+        completed: false,
+        changedAt: reopenedAt,
+      },
+    ]);
+    await expect(repository().findById(MISMATCHED.id)).resolves.toEqual(
+      reopened,
+    );
   });
 });
