@@ -29,9 +29,11 @@ import { afterAll, describe, expect, it } from "vitest";
 //     限界: 文字列リテラルの中の `--`・`;` を区別しない（backfill の SQL に文字列の中の `--` は無い想定）。`WHERE NOT EXISTS` が
 //     どの副問い合わせの条件か（同じ行を見ているか）は見ない（backfill.test.ts の「2 回流しても行は増えない」が実 DB で確かめる）。
 //     `INSERT … VALUES`・`UPDATE`・`DELETE` は見ない（今は INSERT … SELECT だけを使う）。
+//     `WHERE NOT EXISTS` の並びの字句で見るので、`WHERE t.completed AND NOT EXISTS (…)` のように条件の途中の NOT EXISTS は
+//     違反にする（誤検出。NOT EXISTS を WHERE の先頭に書く）。文字列リテラルの中の `where not exists` は通してしまう（見逃し）。
 //   - backfill-after-traffic: .github/workflows/deploy.yml に `pnpm,db:backfill` を run に持つステップが無い、そのステップが
 //     トラフィックの切替（run に `update-traffic`）のステップより前にある、run に `--wait` が無い、run に失敗を打ち消すつなぎ
-//     （`||`・`; exit 0`・末尾の `&`・`| cat`）がある。
+//     （`||`・`; exit 0`・末尾の `&`・`| cat`）がある、ステップに `continue-on-error:`（`false` 以外）がある。
 //     WHY --wait も: 待たないと backfill の失敗でステップが赤にならず、データの移行が終わっていないことに気づけない。
 //     限界: ステップは「行頭が `- key:` の行」で区切り、コメントの行（`#` で始まる）は除いて読む（rule-tests/test-support.test.ts の
 //     deploy-verifies-images と同じ読み方）。ステップの if・ジョブの名前・環境は見ない。
@@ -122,8 +124,18 @@ function swallowsFailure(run: string): boolean {
   );
 }
 
+// ステップに `continue-on-error:` があり、値が false でないか（`true`・式 `${{ … }}` も失敗を打ち消しうるので違反にする）。
+// WHY: 付けると backfill が失敗しても job が緑のまま終わる（rule-tests/typecheck.test.ts・work-logs-check.test.ts と同じ判定）。
+function continuesOnError(step: string[]): boolean {
+  return step.some((line) => {
+    const match = /^continue-on-error:\s*(.*)$/.exec(stepLine(line));
+    return match !== null && match[1]?.trim() !== "false";
+  });
+}
+
 function findBackfillStepViolations(yaml: string): string[] {
-  const runs = readSteps(yaml).map(runOf);
+  const steps = readSteps(yaml);
+  const runs = steps.map(runOf);
   const backfill = runs.findIndex((run) => run.includes("pnpm,db:backfill"));
   if (backfill === -1) return ["pnpm,db:backfill を実行するステップが無い"];
   const traffic = runs.findIndex((run) => run.includes("update-traffic"));
@@ -139,6 +151,9 @@ function findBackfillStepViolations(yaml: string): string[] {
       : ["backfill の run に --wait が無い"]),
     ...(swallowsFailure(run)
       ? ["backfill の run に失敗を打ち消すつなぎがある"]
+      : []),
+    ...(continuesOnError(steps[backfill] ?? [])
+      ? ["backfill のステップに continue-on-error がある"]
       : []),
   ];
 }
@@ -339,6 +354,10 @@ describe("backfill のステップの位置（findBackfillStepViolations）", ()
         ),
       ),
     ],
+    [
+      "continue-on-error: false",
+      workflow(traffic, lines(backfill, "        continue-on-error: false")),
+    ],
   ])("%s は違反なし", (_name, yaml) => {
     expect(findBackfillStepViolations(yaml)).toEqual([]);
   });
@@ -374,6 +393,19 @@ describe("backfill のステップの位置（findBackfillStepViolations）", ()
       "名前だけで run に pnpm,db:backfill が無い",
       workflow(traffic, step("Run backfill", "echo pnpm db:backfill")),
       ["pnpm,db:backfill を実行するステップが無い"],
+    ],
+    [
+      "continue-on-error: true（失敗しても job が緑）",
+      workflow(traffic, lines(backfill, "        continue-on-error: true")),
+      ["backfill のステップに continue-on-error がある"],
+    ],
+    [
+      "continue-on-error が式",
+      workflow(
+        traffic,
+        lines(backfill, `        continue-on-error: $\{{ vars.X == 'y' }}`),
+      ),
+      ["backfill のステップに continue-on-error がある"],
     ],
     [
       "--wait が無い",

@@ -15,10 +15,13 @@ ALTER TABLE "todo_status_changes" ADD CONSTRAINT "todo_status_changes_todo_id_to
 --    __drizzle_migrations の最後の created_at と journal の when を比べるだけ（pg-core/dialect.js）なので、stg など当て済みの DB では
 --    再実行されない。書き換えは新しい DB（テスト・新しい環境）のため。デプロイの切替までに旧アプリが作った行は、切替の後の backfill
 --    （shared/drizzle/backfill/0001_todo_status_changes.sql）が補う。
+--    2 文目の AND EXISTS（position 0 がある）: 1 件目の無い完了済みの Todo に (id, 1, true) だけを入れない（backfill の 2. と同じ。
+--    WHY は backfill の SQL のコメント）。
 INSERT INTO "todo_status_changes" ("todo_id", "position", "completed", "changed_at")
 SELECT "id", 0, false, "created_at" FROM "todos"
 WHERE NOT EXISTS (SELECT 1 FROM "todo_status_changes" s WHERE s."todo_id" = "todos"."id");--> statement-breakpoint
 INSERT INTO "todo_status_changes" ("todo_id", "position", "completed", "changed_at")
 SELECT "id", 1, true, "created_at" FROM "todos"
 WHERE NOT EXISTS (SELECT 1 FROM "todo_status_changes" s WHERE s."todo_id" = "todos"."id" AND s."position" <> 0)
+  AND EXISTS (SELECT 1 FROM "todo_status_changes" s0 WHERE s0."todo_id" = "todos"."id" AND s0."position" = 0)
   AND "completed";

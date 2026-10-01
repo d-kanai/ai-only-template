@@ -12,8 +12,10 @@ Issue #188 で Todo の完了の履歴を子表 `todo_status_changes` に移し�
 - データの移行は `apps/backend/shared/drizzle/backfill/NNNN_<内容>.sql` に冪等な SQL（`INSERT … SELECT … WHERE NOT EXISTS` / `ON CONFLICT … DO NOTHING`）で置き、切替の後（Route traffic to latest revision の後の Run backfill）に migrate のジョブを `--args=pnpm,db:backfill` で実行して流す。`pnpm db:backfill`（`apps/backend/shared/infra/backfill.ts`）は名前順にすべてのファイルを、ファイルごとに 1 つのトランザクションで流し、適用の記録表は持たない（毎回すべて流す）。
 - 切替から backfill を流し終えるまでの間は、新しいアプリの Repository が履歴の無い Todo を backfill と同じ規則で補って読み（repair on read）、origin の履歴は DB の状態（空）にして、次の update で Writer 経由で INSERT する（repair on write。`Todo.reconstruct(values, stored?)`）。
 - backfill と repair on write が同じ Todo に同時に INSERT するときは backfill が譲る: `FOR UPDATE OF t` で todos の行をロックしてアプリのトランザクション（`findByIdForUpdate` の FOR UPDATE）と直列化し、`ON CONFLICT (todo_id, position) DO NOTHING` で、ロック待ちの間にアプリが COMMIT した履歴（READ COMMITTED の文の開始時のスナップショットの NOT EXISTS では見えない）を捨てる。
-- 既存のマイグレーションの INSERT も冪等（`WHERE NOT EXISTS`）に書き換える（新しい DB 向け）。
-- 検査: `rule-tests/migration.test.ts`（drizzle の SQL の `INSERT … SELECT` の冪等、deploy.yml の backfill のステップが切替の後、backfill のファイル名）と `apps/backend/shared/infra/backfill.test.ts`（実 Postgres で 2 回流しても増えない・アプリがロック中は待って 2 重にしない・script を子プロセスで実行して終了コード）。
+- 完了の 2 件目を足す文（2 文目）は「position 0 があり、ほかの position が無い」完了済みの Todo だけに足す。WHY: READ COMMITTED では文ごとにスナップショットを取るので、1 文目と 2 文目の間に旧アプリが作って完了にした Todo（履歴 0 件）が 2 文目にだけ見える。position 0 を確かめないと履歴が [完了] の 1 件になり、不変条件は満たすので repair on read でも流し直しでも直らず、未完了に戻す update が position 1 の一意制約の違反（23505）で 500 になり続ける（reviewer が実 Postgres で再現）。0 件の行は次の backfill か repair on read でそろう。
+- `FOR UPDATE OF t` を外すと、同時実行で deadlock（40P01）になった（2026-10-01 実測）。原因は推定で、backfill の INSERT が一意索引に入った後に外部キーの検査（todos の行の KEY SHARE）でアプリの FOR UPDATE を待ち、アプリの INSERT が backfill の未コミットの行を待つ循環。
+- 既存のマイグレーションの INSERT も冪等（`WHERE NOT EXISTS`）に書き換え、2 文目に同じ position 0 の条件を足す（新しい DB 向け）。
+- 検査: `rule-tests/migration.test.ts`（drizzle の SQL の `INSERT … SELECT` の冪等、deploy.yml の backfill のステップが切替の後で `--wait` を持ち、失敗を打ち消すつなぎと `continue-on-error` が無い、backfill のファイル名）と `apps/backend/shared/infra/backfill.test.ts`（実 Postgres で 2 回流しても増えない・アプリがロック中は待って 2 重にしない・script を子プロセスで実行して終了コード・2 文目だけを流しても履歴 0 件の完了済み Todo に足さない）。
 
 ## 理由
 - 切替の後なら旧アプリは書かないので、そこで流せば漏れが残らない。冪等にしておけば、流し直し・毎回の実行で行が重ならず、記録表が要らない。

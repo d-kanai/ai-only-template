@@ -17,6 +17,9 @@
 --     進む。逆にこの SQL がロック中なら、アプリの findByIdForUpdate が待ち、この COMMIT の後に読むので履歴がある。
 --   - ON CONFLICT (todo_id, position) DO NOTHING: READ COMMITTED では NOT EXISTS の副問い合わせは文の開始時のスナップショットを
 --     見るので、ロック待ちの間にアプリが COMMIT した履歴を見逃して INSERT しうる。その 1 件を黙って捨てる（アプリが補った履歴が正）。
+--   FOR UPDATE OF t を外すと、同時実行で deadlock（40P01）になった（2026-10-01 実測）。原因は推定: backfill の INSERT が一意索引に
+--     入った後、外部キーの検査（todos の行の KEY SHARE）でアプリの FOR UPDATE を待ち、アプリの INSERT が backfill の未コミットの
+--     行（同じ (todo_id, position)）を待つ循環。先に todos の行をロックすれば、この順の待ちは起きない。
 --   限界: 1 つのトランザクションで対象のすべての todos の行をロックするので、流している間、同じ Todo を変えるアプリの要求は待つ。
 --     行が増えて待ちが問題になったら、範囲（id の区間）ごとにファイル・トランザクションを分ける。
 
@@ -26,13 +29,21 @@ SELECT t."id", 0, false, t."created_at" FROM "todos" t
 WHERE NOT EXISTS (SELECT 1 FROM "todo_status_changes" s WHERE s."todo_id" = t."id")
 FOR UPDATE OF t
 ON CONFLICT ("todo_id", "position") DO NOTHING;
-
+--> statement-breakpoint
 -- 2. 完了済みの Todo のうち、履歴が 1 件目（position 0）だけのものに「作成日時に完了」を足す。
 -- WHY 「1 件目だけ」に限るか: 履歴が 2 件以上ある Todo はアプリが書いた履歴を持つので変えない。1 件目だけで完了済みなのは、
 --   上の 1. で足した直後の行（と、0002 の 1 件目の後に止まった行）で、最後の completed を今の completed にそろえる。
+-- WHY position 0 があることも確かめる（AND EXISTS。reviewer の指摘）: READ COMMITTED では文ごとにスナップショットを取るので、
+--   1. と 2. の間に旧アプリが「作って完了にした」Todo（履歴 0 件・completed = true）が 2. にだけ見える。position 0 を確かめないと
+--   (id, 1, true) だけが入り、履歴が [完了] の 1 件になる。それは不変条件を満たすので repair on read の対象にならず、流し直しても
+--   直らず、未完了に戻す update が position 1 の INSERT で一意制約の違反（23505）→ 500 になり続ける。0 件の行はここでは足さず、
+--   次の backfill の 1. → 2. か、repair on read（2 件を補う）でそろう。
+-- 1. の後ろの区切りの印の行は、drizzle のマイグレーションと同じ書き方の文の区切り（SQL としてはコメント）。backfill.test.ts が
+--   2. だけを流すテストに使う。
 INSERT INTO "todo_status_changes" ("todo_id", "position", "completed", "changed_at")
 SELECT t."id", 1, true, t."created_at" FROM "todos" t
 WHERE NOT EXISTS (SELECT 1 FROM "todo_status_changes" s WHERE s."todo_id" = t."id" AND s."position" <> 0)
+  AND EXISTS (SELECT 1 FROM "todo_status_changes" s0 WHERE s0."todo_id" = t."id" AND s0."position" = 0)
   AND t."completed"
 FOR UPDATE OF t
 ON CONFLICT ("todo_id", "position") DO NOTHING;

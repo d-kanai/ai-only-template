@@ -184,6 +184,23 @@ describe("backfill の SQL（shared/drizzle/backfill/）: Todo の完了の履�
   });
 
   // WHY 冪等にする: 適用の記録表を持たず、デプロイのたびに全ファイルを流す（.claude/rules/backend.md の「永続化」）。
+  // WHY 2 文目だけを流す: READ COMMITTED では文ごとにスナップショットを取るので、1 文目と 2 文目の間に旧アプリが作って完了にした
+  //   Todo（履歴 0 件・完了済み）は 2 文目にだけ見える。そのとき (id, 1, true) だけを入れると、履歴が [完了] の 1 件になり、
+  //   不変条件は満たすので repair on read でも backfill の流し直しでも直らず、未完了に戻す update が 23505 で 500 になり続ける。
+  //   文の区切りは SQL のファイルの「--> statement-breakpoint」の行（drizzle のマイグレーションと同じ書き方）。
+  test("履歴 0 件の完了済み Todo に、2 文目（完了の 2 件目を足す文）だけを流しても足さない", async () => {
+    await insertTodo(DONE, true);
+    const statements = readFileSync(
+      join(backfillDirectory(), "0001_todo_status_changes.sql"),
+      "utf8",
+    ).split("--> statement-breakpoint");
+    expect(statements).toHaveLength(2);
+
+    await database.pool.query(String(statements[1]));
+
+    expect(await histories()).toEqual([]);
+  });
+
   test("2 回流しても行は増えない（冪等）", async () => {
     await insertTodo(OPEN, false);
     await insertTodo(DONE, true);

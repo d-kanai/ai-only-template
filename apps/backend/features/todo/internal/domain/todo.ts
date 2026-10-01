@@ -230,7 +230,12 @@ export class Todo {
     values: TodoProps,
     stored?: Pick<TodoProps, "statusChanges">,
   ): Todo {
-    return new Todo(values, (valid) => ({ ...valid, ...stored }));
+    // WHY statusChanges だけを明示して取る（{ ...valid, ...stored } にしない）: 型の外から余分なキー（title など）が来ても、
+    //   todos の列の origin をずらさない構造にする（上の「項目を statusChanges に限る」）。
+    return new Todo(values, (valid) => ({
+      ...valid,
+      statusChanges: stored?.statusChanges ?? valid.statusChanges,
+    }));
   }
 
   // タイトルだけを変える操作。他の値は transition が引き継ぎ、引き継いだ値も含めてコンストラクタが全体を検証する。

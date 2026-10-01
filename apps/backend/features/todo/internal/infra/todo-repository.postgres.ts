@@ -31,6 +31,7 @@ function toTodo(
   row: TodoRow,
   statusChanges: readonly TodoStatusChange[],
 ): Todo {
+  const repaired = repairMissingHistory(row, statusChanges);
   try {
     return Todo.reconstruct(
       {
@@ -38,11 +39,13 @@ function toTodo(
         title: row.title,
         completed: row.completed,
         createdAt: row.createdAt,
-        statusChanges: repairMissingHistory(row, statusChanges),
+        statusChanges: repaired,
       },
-      // origin の履歴は DB の状態（補う前）にする。補った履歴は「まだ DB に無い」ので、次の update が position 0 から
-      //   INSERT する（repair on write。Todo.reconstruct の stored）。
-      { statusChanges },
+      // 補ったときだけ、origin の履歴を DB の状態（補う前の空）にする。補った履歴は「まだ DB に無い」ので、次の update が
+      //   position 0 から INSERT する（repair on write。Todo.reconstruct の stored）。
+      // WHY 補っていないときは渡さない: origin は検証後の値（zod が作り直した readonly の配列）にし、DB から読んだ生の配列を
+      //   origin に持たせない（ほかの読み出しと同じ前提を保つ）。
+      repaired === statusChanges ? undefined : { statusChanges },
     );
   } catch (error) {
     // reconstruct が投げるのは不変条件の違反（DomainError）だけ（todo.ts の validate）。その message はキーと params
