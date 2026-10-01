@@ -1439,7 +1439,7 @@ describe("PostgresTodoRepository", () => {
     };
   }
 
-  // WHY message は英語: ログ（toProblemResponse の logger.error）に出る開発者向けの文字列で、apps/backend の非テストコードには
+  // WHY message は英語: ログ（toProblemResponse の logger.emit の server_error）に出る開発者向けの文字列で、apps/backend の非テストコードには
   //   自然言語の日本語を置かない（Issue #116）。cause の DomainError の message はキーと params（describeErrorKey）。
   function corruptedRowError(id: string, cause: DomainError): Error {
     return new Error(

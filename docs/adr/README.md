@@ -71,7 +71,8 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-29 | backend の入力検証と不変条件は zod で書く（presentation は形、domain は値の規則） | 置き換え（→ architecture/20260930-presentation-overlaps-domain-validation.md） | [20260929-zod-for-backend-validation.md](architecture/20260929-zod-for-backend-validation.md) |
 | 2026-09-30 | 全モデルの変更履歴（監査）は汎用の change_logs 表に、Repository が本体と同じトランザクションで書く | 置き換え（→ architecture/20260930-transaction-from-application.md） | [20260930-change-logs-written-by-repository.md](architecture/20260930-change-logs-written-by-repository.md) |
 | 2026-09-30 | 集約の読み出しは、insert のみの子表を必ず全件 JOIN で読む（最新だけ・一部だけを読まない） | 採用 | [20260930-aggregate-loads-all-children.md](architecture/20260930-aggregate-loads-all-children.md) |
-| 2026-09-30 | ログの 1 行は Cloud Logging の特別フィールドと OTel semconv の名前（入れ子）にし、種類を event.name の固定の一覧で全行に出す | 採用 | [20260930-log-format-cloud-logging-otel.md](architecture/20260930-log-format-cloud-logging-otel.md) |
+| 2026-09-30 | ログの 1 行は Cloud Logging の特別フィールドと OTel semconv の名前（入れ子）にし、種類を event.name の固定の一覧で全行に出す | 置き換え（→ architecture/20260930-log-masking-in-logger.md） | [20260930-log-format-cloud-logging-otel.md](architecture/20260930-log-format-cloud-logging-otel.md) |
+| 2026-09-30 | 個人情報のマスクは logger の中で 3 段構え（種類ごとの zod スキーマ・sensitive の印と列の分類表・自由文の正規表現）で行い、口は logger.emit の 1 つにする | 採用 | [20260930-log-masking-in-logger.md](architecture/20260930-log-masking-in-logger.md) |
 | 2026-09-30 | backend の feature をモジュールとし、直下を公開の入口 expose/ と中身 internal/ に分け、他のモジュールは presentation の組み立てで expose だけを使う | 採用 | [20260930-modular-monolith-expose-internal.md](architecture/20260930-modular-monolith-expose-internal.md) |
 | 2026-09-30 | 現在時刻は apps/shared/now.ts の now() だけから取り、Entity の作成日時は引数で受け取らずに生成時に自動で入れる | 採用 | [20260930-now-single-source.md](architecture/20260930-now-single-source.md) |
 | 2026-09-30 | 1 ユースケース = 1 API = 1 command にし、複数の項目を任意で受けて command の中で分岐する部分更新 API は作らない | 採用 | [20260930-one-api-per-use-case.md](architecture/20260930-one-api-per-use-case.md) |
