@@ -8,6 +8,6 @@
   - 調査が先に要るなら researcher を投げ、結果を待ってから worker を起動する。単発のファクト確認（1 ファイル・1 シンボル）は委譲せず自分で見る。
   - worker は対象ファイルのテストだけ実行する。全体の `pnpm test` はオーケストレータが最後に 1 回。
 - 結果の確認: worker の報告を鵜呑みにしない。ロジックのある変更は reviewer に差分と観点を絞って検証させる。機械的な変更（改名・文書・参照の更新だけ）は reviewer を省き、自分でテスト実行・差分確認をして PR の「検証内容」にその旨を書く。報告は各定義の報告フォーマットで短く返させる（メインのコンテキストに戻るため）。
-- 指示ファイル（CLAUDE.md / `.claude/**` / LEARNINGS.md）の変更は専用の Issue にまとめ、ほかの Issue の作業の途中では変えない（開発のスレッドは同じでよい）。WHY: 変えると再読み込みでプロンプトキャッシュが効かなくなるので、変える回数を減らす。開発は同じスレッドで続けるので、「セッションの最初」には合わせられない（ADR `docs/adr/workflow/20261001-project-threads-by-business-area.md`）。
-- Claude Code Projects: スレッドは業務の単位（開発・マーケティング・経理など）で分ける。開発は同じスレッドで続け、そのスレッドの Claude がオーケストレータになって Issue をまたいで依存・順番を調整する。WHY: スレッドごとに独立したセッションでコンテキストは共有されず、開発をスレッドに分けるとオーケストレータの調整が切れる（ユーザー判断 2026-10-01。ADR `docs/adr/workflow/20261001-project-threads-by-business-area.md`）。
+- 指示ファイル（CLAUDE.md / `.claude/**` / LEARNINGS.md）の変更は専用の Issue にまとめ、ほかの Issue の作業の途中では変えない。WHY: 変えると再読み込みでプロンプトキャッシュが効かなくなるので、変える回数を減らす。区切りを「セッションの最初」ではなく Issue にするのは、関連する Issue を同じスレッドで続けることがあるため（ADR `docs/adr/workflow/20261001-project-threads-per-task.md`）。
+- Claude Code Projects: 開発もタスク（Issue）ごとに別スレッドにするのが基本。スレッドの Claude がオーケストレータになる。内容が関連していて、同じスレッドでコンテキストを引き継いだほうがよいときだけ、既存のスレッドで続けてよい。開発以外の業務（マーケティング・経理など）も別スレッドにする。WHY: スレッドごとに PR とマージの経過が見やすい（ユーザー判断 2026-10-01）。スレッドのコンテキストは共有されないので、スレッドをまたぐ依存は Issue に書く（ADR `docs/adr/workflow/20261001-project-threads-per-task.md`）。
 - 禁止: サブエージェントの git commit / push / PR 作成 / マージ。PreToolUse フック `scripts/hooks/guard-git.sh`（`.claude/settings.json`）が `agent_type` で判定して拒否する。

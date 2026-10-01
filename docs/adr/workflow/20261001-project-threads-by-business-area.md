@@ -1,7 +1,7 @@
 # 1 Issue = 1 セッションをやめ、Claude Code Projects のスレッドは業務の単位で分け、開発は 1 つのスレッドで続ける
 
 - 日付: 2026-10-01
-- 状態: 採用
+- 状態: 置き換え（→ workflow/20261001-project-threads-per-task.md）
 - 関連: Issue #242 / `.claude/general/orchestration.md` / `.claude/general/workflow.md` / スキル `pr-flow`
 
 ## 背景
