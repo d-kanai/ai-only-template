@@ -6,32 +6,30 @@ import {
   createTestDatabase,
   type TestDatabase,
 } from "../../test-support/database";
+import { aTodo } from "../../test-support/todo/todo-builder";
 import {
   bodylessRequest,
-  changeCompletion,
   context,
-  createTodo,
   emptyTodos,
   expectProblem,
+  getTodoApi,
   internalErrorProblem,
-  jsonRequest,
   notFoundProblem,
-  storeTodo,
-  type TodoApis,
-  todoApis,
+  removeTodoRow,
+  todoResponseOf,
 } from "./support";
 
 // API 仕様（Issue #219）: get-todo.feature の `*` の step を、実 Postgres の上で本番と同じ組み立ての handler（GetTodoApi.handle）を
-//   呼んで確かめる。WHY（テストダブル無し・`*` を And で定義・各 step の前に表を空にする）は list-todos.api-spec.test.ts の冒頭。
+//   呼んで確かめる。WHY（テストダブル無し・`*` を And で定義・各 step の前に表を空にする・前提はビルダーで作る）は
+//   list-todos.api-spec.test.ts の冒頭。
 
 let database: TestDatabase;
-let apis: TodoApis;
+let handler: ReturnType<typeof getTodoApi>;
 
 beforeAll(async () => {
   database = await createTestDatabase();
   await database.migrate();
-  // 詳細の API は通知しない。前提（完了にする）で呼ばれる通知は見ないので捨てる。
-  apis = todoApis(database.db, () => undefined);
+  handler = getTodoApi(database.db);
 });
 
 afterAll(async () => {
@@ -43,7 +41,7 @@ beforeEach(async () => {
 });
 
 async function getTodo(id: string): Promise<Response> {
-  return apis.getTodo(bodylessRequest("GET", `/api/todos/${id}`), context(id));
+  return handler(bodylessRequest("GET", `/api/todos/${id}`), context(id));
 }
 
 // uuid の形だが、どの Todo も指さない id。
@@ -53,51 +51,48 @@ const feature = await loadFeature("./get-todo.feature");
 
 describeFeature(feature, ({ Scenario }) => {
   Scenario("レスポンス", ({ And }) => {
-    // 作成の応答（id・タイトル・完了かどうか・作成日時）と同じ内容が返る。
-    // WHY 2 件作って 1 件目を見る: 指定した Todo を返すこと（先頭や最後の 1 件を返す誤り）を見分ける。
+    // 表の Todo（id・タイトル・完了かどうか・作成日時）と同じ内容が返る。作成日時は ISO 8601 の文字列。
+    // WHY 2 件入れて 1 件目を見る: 指定した Todo を返すこと（先頭や最後の 1 件を返す誤り）を見分ける。
     And(
       "作った Todo の詳細を見ると、タイトル・完了かどうか・作成日時が返る",
       async () => {
-        const milk = await createTodo(apis, "牛乳を買う");
-        await createTodo(apis, "パンを買う");
+        const milk = await aTodo(database.db).title("牛乳を買う").build();
+        await aTodo(database.db).title("パンを買う").build();
 
         const response = await getTodo(milk.id);
 
         expect(response.status).toBe(200);
         await expect(response.json()).resolves.toStrictEqual(
-          milk satisfies GetTodoResponse,
+          todoResponseOf(milk) satisfies GetTodoResponse,
         );
       },
     );
 
     And("完了にした Todo は、完了として返る", async () => {
-      const milk = await createTodo(apis, "牛乳を買う");
-      await changeCompletion(apis, milk.id, true);
+      const milk = await aTodo(database.db)
+        .title("牛乳を買う")
+        .completed(true)
+        .build();
 
       const response = await getTodo(milk.id);
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
-        ...milk,
+        ...todoResponseOf(milk),
         completed: true,
       } satisfies GetTodoResponse);
     });
 
+    // 名前を変えた後の Todo = 表のタイトルが新しいものになった Todo（完了の履歴は名前の変更で増えない）。名前の変更の API は通さず、
+    //   その後の状態をビルダーで作る（冒頭の WHY）。名前の変更が表に書く内容は rename-todo の仕様が確かめる。
     And("名前を変えた Todo は、新しいタイトルで返る", async () => {
-      const milk = await createTodo(apis, "牛乳を買う");
-      const renamed = await apis.putTitle(
-        jsonRequest("PUT", `/api/todos/${milk.id}/title`, {
-          title: "豆乳を買う",
-        }),
-        context(milk.id),
-      );
-      expect(renamed.status).toBe(200);
+      const milk = await aTodo(database.db).title("豆乳を買う").build();
 
       const response = await getTodo(milk.id);
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
-        ...milk,
+        ...todoResponseOf(milk),
         title: "豆乳を買う",
       } satisfies GetTodoResponse);
     });
@@ -106,7 +101,7 @@ describeFeature(feature, ({ Scenario }) => {
   Scenario("異常系", ({ And }) => {
     // WHY 別の Todo を 1 件置く: 空のときだけ「無い」と返す実装を通さない。
     And("存在しない Todo は、存在しないと伝えられる", async () => {
-      await createTodo(apis, "牛乳を買う");
+      await aTodo(database.db).title("牛乳を買う").build();
 
       const response = await getTodo(MISSING_ID);
 
@@ -129,13 +124,10 @@ describeFeature(feature, ({ Scenario }) => {
       },
     );
 
+    // 削除の後の状態（行が無い）を、削除の API を通さずに作る（support.ts の removeTodoRow）。
     And("削除した Todo は、存在しないと伝えられる", async () => {
-      const milk = await createTodo(apis, "牛乳を買う");
-      const deleted = await apis.deleteTodo(
-        bodylessRequest("DELETE", `/api/todos/${milk.id}`),
-        context(milk.id),
-      );
-      expect(deleted.status).toBe(204);
+      const milk = await aTodo(database.db).title("牛乳を買う").build();
+      await removeTodoRow(database.db, milk.id);
 
       const response = await getTodo(milk.id);
 
@@ -153,20 +145,16 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "壊れた Todo（完了の履歴の日時が、作られた日時より前のもの）は、サーバの誤りとして伝えられる",
       async () => {
-        const id = "00000000-0000-4000-8000-000000000001";
-        const createdAt = new Date("2026-09-01T00:00:00.000Z");
-        await storeTodo(database.db, {
-          id,
-          title: "牛乳を買う",
-          completed: false,
-          createdAt,
-          statusChanges: [
+        const { id } = await aTodo(database.db)
+          .title("牛乳を買う")
+          .createdAt(new Date("2026-09-01T00:00:00.000Z"))
+          .statusChanges([
             {
               completed: false,
               changedAt: new Date("2026-08-31T00:00:00.000Z"),
             },
-          ],
-        });
+          ])
+          .build();
 
         const response = await getTodo(id);
 

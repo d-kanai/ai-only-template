@@ -36,6 +36,7 @@ import { afterAll, describe, expect, it } from "vitest";
 //   - db-tests-in-infra-only: apps/backend/test-support/database（実 Postgres。createTestDatabase。Issue #181 で
 //     apps/backend/shared/infra/database.test-support から移した）を import する（`from` / `import "…"` / `import("…")`。
 //     `import type` も）のは、apps/backend/**/infra/ の直下のテスト、apps/backend/test-support/ の直下のテスト（test-support 自身のテスト）、
+//     apps/backend/test-support/<feature>/ の直下のテストデータビルダーのテスト（*-builder.test.ts。Issue #240）、
 //     apps/backend/api-journeys/ の直下の API ジャーニーテスト（*.api-journey.test.ts。Issue #187 / #200）、
 //     apps/backend/api-specs/<feature>/ の直下の API 仕様テスト（*.api-spec.test.ts。Issue #219）、vitest.global-setup.ts だけ。
 //     application / presentation / domain のテスト・frontend のテストからの import は違反。
@@ -128,6 +129,10 @@ const TEST_DATABASE_MODULE = "apps/backend/test-support/database";
 //   API の流れを確かめる。名前に .api-journey の無いテスト（api-journeys/x.test.ts・廃止した TS だけのジャーニーの x.journey.test.ts）と、
 //   feature の下の api-journeys/（features/x/api-journeys/）・旧名の journeys/ は通さない。置き場所を apps/backend/api-journeys/ の
 //   1 か所にそろえ、そこに置けるのが API ジャーニーと .feature だけであることは rule-tests/api-journey.test.ts が見る。
+// WHY apps/backend/test-support/<feature>/ の直下の *-builder.test.ts も許す（Issue #240）: テストデータビルダー（todo-builder.ts など。
+//   前提の行を表に直接入れる）のテストは、入った行を実 Postgres で確かめる。ビルダーは feature ごとに test-support/<feature>/ に置く
+//   （InMemory と同じ）。同じ場所のビルダーでないテスト（*.in-memory.test.ts など）・2 段以上の入れ子は通さない（DB に接続しない
+//   テストに DB を持ち込ませない）。
 // WHY apps/backend/api-specs/<feature>/ の直下の *.api-spec.test.ts も許す（Issue #219）: API 仕様テストは API 1 つの振る舞いを実 Postgres
 //   で本番の組み立てを通して確かめる。名前に .api-spec の無いテスト（api-specs/x/y.test.ts）・api-specs/ の直下や入れ子・api-specs/ の外
 //   （presentation の隣）は通さない。置き場所と形は rule-tests/api-spec.test.ts が見る。
@@ -135,6 +140,9 @@ function mayImportTestDatabase(path: string): boolean {
   return (
     path === "vitest.global-setup.ts" ||
     /^apps\/backend\/(?:(?:features\/[^/]+\/internal|shared)\/infra|test-support)\/[^/]+\.test\.tsx?$/.test(
+      path,
+    ) ||
+    /^apps\/backend\/test-support\/[^/]+\/[^/]+-builder\.test\.ts$/.test(
       path,
     ) ||
     /^apps\/backend\/api-journeys\/[^/]+\.api-journey\.test\.ts$/.test(path) ||
@@ -363,6 +371,11 @@ describe("テストダブルの判定（findTestDoubleViolations）: must pass",
       "test-support 自身のテストから ./database を import",
       "apps/backend/test-support/database.test.ts",
       source('import { createTestDatabase } from "./database";'),
+    ],
+    [
+      "test-support/<feature>/ のテストデータビルダーのテストから ../database を import（Issue #240）",
+      "apps/backend/test-support/x/x-builder.test.ts",
+      source('import { createTestDatabase } from "../database";'),
     ],
     [
       "apps/backend/api-journeys/ の API ジャーニーテストから ../test-support/database を import",
@@ -597,8 +610,26 @@ describe("テストダブルの判定（findTestDoubleViolations）: must reject
       ],
     ],
     [
-      "test-support の下の入れ子のテストから import（test-support の直下だけ）",
+      "test-support の下の入れ子のテストから import（test-support の直下とビルダーのテストだけ）",
       "apps/backend/test-support/nested/x.test.ts",
+      source('import { createTestDatabase } from "../database";'),
+      [{ rule: "db-tests-in-infra-only", line: 1 }],
+    ],
+    [
+      "test-support/<feature>/ のビルダーでないテスト（InMemory のテスト）から import",
+      "apps/backend/test-support/x/x-repository.in-memory.test.ts",
+      source('import { createTestDatabase } from "../database";'),
+      [{ rule: "db-tests-in-infra-only", line: 1 }],
+    ],
+    [
+      "test-support の 2 段下のビルダーのテストから import",
+      "apps/backend/test-support/x/y/x-builder.test.ts",
+      source('import { createTestDatabase } from "../../database";'),
+      [{ rule: "db-tests-in-infra-only", line: 1 }],
+    ],
+    [
+      "名前が builder だけ（-builder の前が空）のテストから import",
+      "apps/backend/test-support/x/-builder.test.ts",
       source('import { createTestDatabase } from "../database";'),
       [{ rule: "db-tests-in-infra-only", line: 1 }],
     ],
@@ -841,7 +872,7 @@ describe("テストファイルの列挙と検査（fixture）", () => {
 });
 
 describe("テストダブル（実ファイル）", () => {
-  it("backend のテストの vi.mock は @repo/shared/now だけ、test-support/database の import は infra のテスト・test-support のテスト・API ジャーニーテスト・API 仕様テスト・global-setup だけ", () => {
+  it("backend のテストの vi.mock は @repo/shared/now だけ、test-support/database の import は infra のテスト・test-support のテスト（直下とテストデータビルダー）・API ジャーニーテスト・API 仕様テスト・global-setup だけ", () => {
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     const files = listTestDoubleTargets(repoRoot);
     expect(files).toContain(

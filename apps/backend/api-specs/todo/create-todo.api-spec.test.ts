@@ -7,7 +7,7 @@ import {
   type TestDatabase,
 } from "../../test-support/database";
 import {
-  createTodo,
+  createTodoApi,
   emptyTodos,
   expectProblem,
   jsonRequest,
@@ -17,8 +17,6 @@ import {
   statusInsertLog,
   statusRowOf,
   statusRows,
-  type TodoApis,
-  todoApis,
   todoInsertLog,
   todoRows,
   validationProblem,
@@ -32,15 +30,16 @@ import {
 //   変更の記録は Writer（shared/infra/writer.ts）が文ごとに自動で残す技術の仕組みで、業務の仕様ではない（.feature の禁止語。
 //   rule-tests/feature-business-language.ts）。記録の書き忘れ・中身のずれを見逃さないよう、検証そのものは step の実装に残す。
 //   ほかの api-spec（rename / change-todo-completion / delete）も同じ。
+// 前提の Todo が要る step は、ほかの api-spec と同じくテストデータビルダー（aTodo）で作る（list-todos.api-spec.test.ts の冒頭）。
+//   今の step はどれも空の状態から作るので、前提は無い。
 
 let database: TestDatabase;
-let apis: TodoApis;
+let handler: ReturnType<typeof createTodoApi>;
 
 beforeAll(async () => {
   database = await createTestDatabase();
   await database.migrate();
-  // 作成の API は通知しない。
-  apis = todoApis(database.db, () => undefined);
+  handler = createTodoApi(database.db);
 });
 
 afterAll(async () => {
@@ -52,7 +51,14 @@ beforeEach(async () => {
 });
 
 async function postTodo(body: unknown): Promise<Response> {
-  return apis.postTodo(jsonRequest("POST", "/api/todos", body));
+  return handler(jsonRequest("POST", "/api/todos", body));
+}
+
+// Todo を作り、作った Todo（応答の本文）を返す。
+async function createTodo(title: string): Promise<CreateTodoResponse> {
+  const response = await postTodo({ title });
+  expect(response.status).toBe(201);
+  return (await response.json()) as CreateTodoResponse;
 }
 
 // 拒否した要求の後、Todo・完了の履歴・変更の記録のどれにも行が無い。
@@ -111,7 +117,7 @@ describeFeature(feature, ({ Scenario }) => {
     // 行の全列（id・タイトル・完了かどうか・作成日時）が応答と同じ。作成日時は行では Date（schema.ts の mode "date"）。
     // 変更の記録も、Todo と完了の履歴の作成（insert）の 2 件だけが残る（冒頭の WHY のとおり .feature には書かない）。
     And("作った Todo が、返った内容のとおりに保存される", async () => {
-      const milk = await createTodo(apis, "牛乳を買う");
+      const milk = await createTodo("牛乳を買う");
 
       await expect(todoRows(database.db)).resolves.toStrictEqual([
         { ...milk, createdAt: new Date(milk.createdAt) },
@@ -124,7 +130,7 @@ describeFeature(feature, ({ Scenario }) => {
 
     // 作成日時に未完了（Todo.create）。
     And("完了の履歴に、作成時の「未完了」が 1 件残る", async () => {
-      const milk = await createTodo(apis, "牛乳を買う");
+      const milk = await createTodo("牛乳を買う");
 
       await expect(statusRows(database.db)).resolves.toStrictEqual([
         {
@@ -245,7 +251,7 @@ describeFeature(feature, ({ Scenario }) => {
 
     // JSON として読めない本文。項目が無いので errors は付かない。
     And("内容が読み取れない形式だと、拒否され、何も保存されない", async () => {
-      const response = await apis.postTodo(
+      const response = await handler(
         rawRequest("POST", "/api/todos", "{title:"),
       );
 
