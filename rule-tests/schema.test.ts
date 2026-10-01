@@ -44,7 +44,8 @@ import { describe, expect, it } from "vitest";
 // 限界（字句の推定）: 第 2 引数が変数・スプレッド（`{ ...base }`）・関数（`(t) => ({ ... })`）だと中を見ず、id を直接書いていなければ
 //   違反にする（安全側）。キーを引用符で書く（`"id":`）・uuid の引数にコメントを挟むと見分けられず違反になる。
 //   `pgTableCreator` で作った関数や `pgSchema(...).table(` は `pgTable(` でないので見ない。
-//   型引数の中のカンマ（`$type<Record<string, X>>()`）は要素の区切りと取り違える。
+//   型引数の中のカンマ（`$type<Record<string, X>>()`）は要素の区切りと取り違える（id の列に付けると違反になる。ほかの列なら影響しない）。
+//   列名を省いた `id: uuid().primaryKey()`（Drizzle はキー名を列名に使える）も違反にする（`uuid("id")` と書く。reviewer の probe）。
 
 // 列の型の規則（WHY の見出しで例外を認める）。
 type ColumnTypeRuleId =
