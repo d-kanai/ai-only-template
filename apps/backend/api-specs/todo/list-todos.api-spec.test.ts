@@ -6,17 +6,14 @@ import {
   createTestDatabase,
   type TestDatabase,
 } from "../../test-support/database";
+import { aTodo } from "../../test-support/todo/todo-builder";
 import {
   bodylessRequest,
-  changeCompletion,
-  createTodo,
   emptyTodos,
   expectProblem,
   internalErrorProblem,
-  type StoredTodo,
-  storeTodo,
-  type TodoApis,
-  todoApis,
+  listTodosApi,
+  todoResponseOf,
 } from "./support";
 
 // API 仕様（Issue #219）: list-todos.feature の `*` の step を、実 Postgres の上で本番と同じ組み立ての handler（ListTodosApi.handle）を
@@ -27,15 +24,18 @@ import {
 //   （node_modules/@amiceli/vitest-cucumber の parser の lang.json で "and": ["* ", "And "]。2026-09-30 に実測）。
 // WHY 各 step の前に表を空にする（beforeEach）: vitest-cucumber は step 1 つを Vitest の test 1 つとして実行する。ファイルの
 //   最上位の beforeEach はすべての test（= step）の前に動くので、どの step も空の状態から自分で前提を用意する（前の step に依存しない）。
+// WHY 前提の Todo はテストデータビルダー（aTodo。test-support/todo/todo-builder.ts）で表に直接入れ、step が呼ぶ API は仕様の対象の 1 つ
+//   だけにする（ユーザー判断 2026-10-01、Issue #240）: 前提の用意を対象でない API（作成・完了など）に依存させず、作成日時を決めた Todo・
+//   壊れた Todo も同じ書き方で作る。ほかの API の handler を呼ばないことは rule-tests/api-spec.test.ts の api-spec-own-api-only が止める。
+//   ほかの api-spec も同じ。
 
 let database: TestDatabase;
-let apis: TodoApis;
+let handler: ReturnType<typeof listTodosApi>;
 
 beforeAll(async () => {
   database = await createTestDatabase();
   await database.migrate();
-  // 一覧の API は通知しない。前提（完了にする）で呼ばれる通知は見ないので捨てる。
-  apis = todoApis(database.db, () => undefined);
+  handler = listTodosApi(database.db);
 });
 
 afterAll(async () => {
@@ -47,32 +47,12 @@ beforeEach(async () => {
 });
 
 async function listTodos(): Promise<Response> {
-  return apis.listTodos(bodylessRequest("GET", "/api/todos"));
+  return handler(bodylessRequest("GET", "/api/todos"));
 }
 
-// 一覧の 1 件の期待値（表に直接入れた Todo から）。作成日時は ISO 8601 の文字列で返る。
-function itemOf(todo: StoredTodo): ListTodosResponse["todos"][number] {
-  return {
-    id: todo.id,
-    title: todo.title,
-    completed: todo.completed,
-    createdAt: todo.createdAt.toISOString(),
-  };
-}
-
-// 未完了のまま作られた Todo（完了の履歴は作成時の未完了の 1 件）。
-function uncompletedTodo(
-  id: string,
-  title: string,
-  createdAt: Date,
-): StoredTodo {
-  return {
-    id,
-    title,
-    completed: false,
-    createdAt,
-    statusChanges: [{ completed: false, changedAt: createdAt }],
-  };
+// 作成日時と id を決めた未完了の Todo（完了の履歴は作成時の未完了の 1 件。ビルダーの既定）。
+function uncompletedTodo(id: string, title: string, createdAt: Date) {
+  return aTodo(database.db).id(id).title(title).createdAt(createdAt);
 }
 
 const feature = await loadFeature("./list-todos.feature");
@@ -89,26 +69,29 @@ describeFeature(feature, ({ Scenario }) => {
     });
 
     // 作成の応答（id・タイトル・完了かどうか・作成日時）と同じ内容が一覧に出る。
+    // 表の Todo（id・タイトル・完了かどうか・作成日時）と同じ内容が一覧に出る。作成日時は ISO 8601 の文字列。
     And("各 Todo は、タイトル・完了かどうか・作成日時を持つ", async () => {
-      const milk = await createTodo(apis, "牛乳を買う");
+      const milk = await aTodo(database.db).title("牛乳を買う").build();
 
       const response = await listTodos();
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
-        todos: [milk],
+        todos: [todoResponseOf(milk)],
       } satisfies ListTodosResponse);
     });
 
     And("完了にした Todo も一覧に含まれる", async () => {
-      const milk = await createTodo(apis, "牛乳を買う");
-      await changeCompletion(apis, milk.id, true);
+      const milk = await aTodo(database.db)
+        .title("牛乳を買う")
+        .completed(true)
+        .build();
 
       const response = await listTodos();
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
-        todos: [{ ...milk, completed: true }],
+        todos: [todoResponseOf({ ...milk, completed: true })],
       } satisfies ListTodosResponse);
     });
   });
@@ -116,30 +99,27 @@ describeFeature(feature, ({ Scenario }) => {
   Scenario("ソート", ({ And }) => {
     // WHY 新しいものから表に入れる: 入れた順のまま返す実装でも通らないように、入れた順と作成日時の順を逆にする。
     And("作成した順（古いものが先）に並ぶ", async () => {
-      const oldest = uncompletedTodo(
-        "00000000-0000-4000-8000-000000000003",
-        "牛乳を買う",
-        new Date("2026-09-01T00:00:00.000Z"),
-      );
-      const middle = uncompletedTodo(
-        "00000000-0000-4000-8000-000000000002",
-        "パンを買う",
-        new Date("2026-09-02T00:00:00.000Z"),
-      );
-      const newest = uncompletedTodo(
+      const newest = await uncompletedTodo(
         "00000000-0000-4000-8000-000000000001",
         "卵を買う",
         new Date("2026-09-03T00:00:00.000Z"),
-      );
-      for (const todo of [newest, oldest, middle]) {
-        await storeTodo(database.db, todo);
-      }
+      ).build();
+      const oldest = await uncompletedTodo(
+        "00000000-0000-4000-8000-000000000003",
+        "牛乳を買う",
+        new Date("2026-09-01T00:00:00.000Z"),
+      ).build();
+      const middle = await uncompletedTodo(
+        "00000000-0000-4000-8000-000000000002",
+        "パンを買う",
+        new Date("2026-09-02T00:00:00.000Z"),
+      ).build();
 
       const response = await listTodos();
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
-        todos: [itemOf(oldest), itemOf(middle), itemOf(newest)],
+        todos: [oldest, middle, newest].map(todoResponseOf),
       } satisfies ListTodosResponse);
     });
 
@@ -148,26 +128,23 @@ describeFeature(feature, ({ Scenario }) => {
     //   （id の昇順）で並ぶことを、入れた順（id の順と違う）と比べて確かめる。
     And("同じ日時に作られた Todo は、毎回同じ順で並ぶ", async () => {
       const createdAt = new Date("2026-09-01T00:00:00.000Z");
-      const first = uncompletedTodo(
-        "00000000-0000-4000-8000-000000000001",
-        "牛乳を買う",
-        createdAt,
-      );
-      const second = uncompletedTodo(
-        "00000000-0000-4000-8000-000000000002",
-        "パンを買う",
-        createdAt,
-      );
-      const third = uncompletedTodo(
+      const third = await uncompletedTodo(
         "00000000-0000-4000-8000-000000000003",
         "卵を買う",
         createdAt,
-      );
-      for (const todo of [third, first, second]) {
-        await storeTodo(database.db, todo);
-      }
+      ).build();
+      const first = await uncompletedTodo(
+        "00000000-0000-4000-8000-000000000001",
+        "牛乳を買う",
+        createdAt,
+      ).build();
+      const second = await uncompletedTodo(
+        "00000000-0000-4000-8000-000000000002",
+        "パンを買う",
+        createdAt,
+      ).build();
       const expected = {
-        todos: [itemOf(first), itemOf(second), itemOf(third)],
+        todos: [first, second, third].map(todoResponseOf),
       } satisfies ListTodosResponse;
 
       for (const response of [await listTodos(), await listTodos()]) {
@@ -188,27 +165,23 @@ describeFeature(feature, ({ Scenario }) => {
       "壊れた Todo（完了の履歴の日時が、作られた日時より前のもの）が 1 件でもあると、一覧は取得できず、サーバの誤りとして伝えられる",
       async () => {
         const createdAt = new Date("2026-09-01T00:00:00.000Z");
-        await storeTodo(
-          database.db,
-          uncompletedTodo(
-            "00000000-0000-4000-8000-000000000001",
-            "牛乳を買う",
-            createdAt,
-          ),
-        );
-        await storeTodo(database.db, {
-          ...uncompletedTodo(
-            "00000000-0000-4000-8000-000000000002",
-            "パンを買う",
-            createdAt,
-          ),
-          statusChanges: [
+        await uncompletedTodo(
+          "00000000-0000-4000-8000-000000000001",
+          "牛乳を買う",
+          createdAt,
+        ).build();
+        await uncompletedTodo(
+          "00000000-0000-4000-8000-000000000002",
+          "パンを買う",
+          createdAt,
+        )
+          .statusChanges([
             {
               completed: false,
               changedAt: new Date("2026-08-31T00:00:00.000Z"),
             },
-          ],
-        });
+          ])
+          .build();
 
         const response = await listTodos();
 

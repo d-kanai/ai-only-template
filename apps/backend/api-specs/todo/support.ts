@@ -1,4 +1,4 @@
-import { asc, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { expect } from "vitest";
 import { ChangeTodoCompletionCommand } from "../../features/todo/internal/application/change-todo-completion.command";
 import { CreateTodoCommand } from "../../features/todo/internal/application/create-todo.command";
@@ -26,42 +26,78 @@ import { changeLogs } from "../../shared/infra/schema";
 import { PostgresTransactionRunner } from "../../shared/infra/transaction.postgres";
 import type { Problem } from "../../shared/presentation/problem";
 
-// Todo の API 仕様（api-specs/todo/*.api-spec.test.ts。Issue #219）が共有する補助: 組み立て・前提の用意・要求の作り方・DB の読み出し・
-//   失敗の本文。
-// WHY api-specs の中に置く（test-support/ に置かない）: API 仕様のためだけの補助で、test-support/ はテストダブルと DB の基盤
-//   （createTestDatabase）を置く場所。
+// Todo の API 仕様（api-specs/todo/*.api-spec.test.ts。Issue #219）が共有する補助: API ごとの組み立て・要求の作り方・DB の読み出し・
+//   期待値の作り方・失敗の本文。
+// WHY api-specs の中に置く（test-support/ に置かない）: API 仕様のためだけの補助。test-support/ はテストダブル・DB の基盤・テストデータ
+//   ビルダー（前提の行を入れる aTodo。test-support/todo/todo-builder.ts）を置く場所で、ほかのテストからも使う。
 // WHY 6 つの API 仕様で 1 つにまとめる: 組み立て（本番と同じ部品の並び）・要求の形・DB の行の読み方は API ごとに変わらず、
 //   ファイルごとに書くと、本番の組み立てが変わったときに直し漏れる。
-// 既知の重複: api-journeys/todo-lifecycle.api-journey.test.ts にも同じ種類の関数（api・jsonRequest・logEntries など）がある。
-//   ジャーニーはこの Issue では触らない（担当外）ので、今は重複を許す。
+// WHY 前提の Todo は API で作らずビルダー（aTodo）で表に直接入れる（ユーザー判断 2026-10-01、Issue #240）: step が呼ぶ API を自分の仕様の
+//   対象の 1 つだけにし、前提の用意を対象でない API の組み合わせに依存させない（理由の詳細は todo-builder.ts の冒頭）。そのため
+//   ここには前提を API で作る関数を置かない。step も support.ts も対象でない API の handler を呼ばないことは
+//   rule-tests/api-spec.test.ts（api-spec-own-api-only・api-spec-support-no-api-call・api-spec-support-assembler-per-api）が止める。
+// 既知の重複: api-journeys/todo-lifecycle.api-journey.test.ts にも同じ種類の関数（組み立て・jsonRequest・logEntries など）がある。
+//   ジャーニーは Issue #219・#240 では触らない（担当外）ので、今は重複を許す。
 
-// 本番の api ファイルの最下部と同じ組み立てで、渡した db（テスト用のスキーマ）を使う handler をそろえる。
+// API ごとの組み立て。本番の api ファイルの最下部と同じ組み立てで、渡した db（テスト用のスキーマ）を使う handler を返す。
 // WHY 本番の export（GET / POST など）を使わない: 本番は getDatabase()（.env の public スキーマ）を使い、テストファイルごとの
 //   スキーマ（createTestDatabase）に向けられない。
-// WHY 名前を HTTP メソッドで始める（postTodo・putTitle など）: API ジャーニーと同じ名前にそろえ、変更系（post / put / delete）と
-//   読み取り系（get / list）が名前で分かるようにする。
-// WHY 通知は関数を受け取る: 本番の notify（notification の expose）はログに出すだけで、仕様から結果を読めない（vi は使わない）。
-//   記録する関数を渡せば「完了の通知が 1 件」を確かめられる。
-export function todoApis(db: Database, notify: (message: string) => void) {
-  const repository = new PostgresTodoRepository(db);
-  const transactions = new PostgresTransactionRunner(db);
-  return {
-    postTodo: new CreateTodoApi(new CreateTodoCommand(repository, transactions))
-      .handle,
-    listTodos: new ListTodosApi(new ListTodosQuery(repository)).handle,
-    getTodo: new GetTodoApi(new GetTodoQuery(repository)).handle,
-    putTitle: new RenameTodoApi(new RenameTodoCommand(repository, transactions))
-      .handle,
-    putCompletion: new ChangeTodoCompletionApi(
-      new ChangeTodoCompletionCommand(repository, transactions, notify),
-    ).handle,
-    deleteTodo: new DeleteTodoApi(
-      new DeleteTodoCommand(repository, transactions),
-    ).handle,
-  };
+// WHY API ごとに 1 つの関数にする（すべての handler をまとめて返さない）: step は自分の仕様の対象の組み立て（<api> の camelCase + Api。
+//   rename-todo なら renameTodoApi）だけを import し、ほかの API の handler を手に入れない（rule-tests/api-spec.test.ts の
+//   api-spec-own-api-only が import の名前で、api-spec-support-assembler-per-api が 1 つの関数に Api を 1 つだけ new する形で止める）。
+// WHY 名前を Api のクラス名の先頭を小文字にしたものにする: 規則が api ファイルの名前（kebab-case）とクラス名の両方から同じ名前を導いて
+//   照合できる（.claude/rules/backend.md の「命名」で両者は対になる）。
+export function createTodoApi(db: Database) {
+  return new CreateTodoApi(
+    new CreateTodoCommand(
+      new PostgresTodoRepository(db),
+      new PostgresTransactionRunner(db),
+    ),
+  ).handle;
 }
 
-export type TodoApis = ReturnType<typeof todoApis>;
+export function listTodosApi(db: Database) {
+  return new ListTodosApi(new ListTodosQuery(new PostgresTodoRepository(db)))
+    .handle;
+}
+
+export function getTodoApi(db: Database) {
+  return new GetTodoApi(new GetTodoQuery(new PostgresTodoRepository(db)))
+    .handle;
+}
+
+export function renameTodoApi(db: Database) {
+  return new RenameTodoApi(
+    new RenameTodoCommand(
+      new PostgresTodoRepository(db),
+      new PostgresTransactionRunner(db),
+    ),
+  ).handle;
+}
+
+// WHY 通知は関数を受け取る: 本番の notify（notification の expose）はログに出すだけで、仕様から結果を読めない（vi は使わない）。
+//   記録する関数を渡せば「完了の通知が 1 件」を確かめられる。
+export function changeTodoCompletionApi(
+  db: Database,
+  notify: (message: string) => void,
+) {
+  return new ChangeTodoCompletionApi(
+    new ChangeTodoCompletionCommand(
+      new PostgresTodoRepository(db),
+      new PostgresTransactionRunner(db),
+      notify,
+    ),
+  ).handle;
+}
+
+export function deleteTodoApi(db: Database) {
+  return new DeleteTodoApi(
+    new DeleteTodoCommand(
+      new PostgresTodoRepository(db),
+      new PostgresTransactionRunner(db),
+    ),
+  ).handle;
+}
 
 // Todo・完了の履歴・変更の記録を空にする。
 // WHY 各 step の前（beforeEach）に呼ぶ: .feature の `*` の 1 行は前の行に依存しない（step ごとに空の状態から用意する）。
@@ -71,59 +107,54 @@ export async function emptyTodos(db: Database): Promise<void> {
   await db.execute(sql`truncate change_logs, todo_status_changes, todos`);
 }
 
-// 前提の Todo を作成の API で作る（本番と同じ経路。変更の記録も残る）。
-export async function createTodo(
-  apis: TodoApis,
-  title: string,
-): Promise<CreateTodoResponse> {
-  const response = await apis.postTodo(
-    jsonRequest("POST", "/api/todos", { title }),
-  );
-  expect(response.status).toBe(201);
-  return (await response.json()) as CreateTodoResponse;
+// 削除された後の状態（todos の行が無く、完了の履歴も外部キーの cascade で無い）を作る。「削除した Todo」の前提に使う。
+// WHY 削除の API を通さない: 前提を対象でない API で作らない（冒頭）。削除の後に残るものは行が無いことだけなので、行を消せば同じ状態。
+export async function removeTodoRow(db: Database, id: string): Promise<void> {
+  await db.delete(todos).where(eq(todos.id, id));
 }
 
-// 前提の Todo を完了にする・未完了に戻す（本番と同じ経路）。
-export async function changeCompletion(
-  apis: TodoApis,
-  id: string,
-  completed: boolean,
-): Promise<void> {
-  const response = await apis.putCompletion(
-    jsonRequest("PUT", `/api/todos/${id}/completion`, { completed }),
-    context(id),
-  );
-  expect(response.status).toBe(200);
-}
-
-export type StoredTodo = {
+// 前提の Todo の値（test-support/todo/todo-builder.ts の build() が返す BuiltTodo と同じ形）。
+// WHY BuiltTodo を import しない: support.ts はテストでない名前のソースなので、rule-tests/test-support.test.ts の
+//   production-imports-test-support が test-support の import を（型だけでも）止める。形が同じなので、step は build() の返り値を
+//   そのまま渡せる（構造的な型）。
+type TodoValues = {
   id: string;
   title: string;
   completed: boolean;
   createdAt: Date;
-  // 完了の履歴（足した順。1 件以上）。日時を createdAt より前にすると、並びの壊れた「壊れた Todo」になる（最後の completed を
-  //   completed と違う値にした Todo は Repository が補って読むので壊れた Todo にならない。Issue #237）。
   statusChanges: readonly { completed: boolean; changedAt: Date }[];
 };
 
-// 前提の Todo を表に直接入れる。
-// WHY API を通さない: 作成日時は API が now() で決めるので、「同じ日時に作られた」「作成日時の古い順」を作れない（時計は
-//   差し替えない。vi は使わない）。不変条件を満たさない行（完了の履歴の並びが壊れた Todo）も API では作れない。
-// 変更の記録（change_logs）は書かない（Writer を通らない）。記録を見る step はこの関数で前提を作らない。
-export async function storeTodo(db: Database, todo: StoredTodo): Promise<void> {
-  await db.insert(todos).values({
+// 前提の Todo を API の応答の Todo の形にする（作成日時は ISO 8601 の文字列。6 つの API の応答の Todo は同じ形）。
+// WHY 期待値をこの 1 つの関数で作る: 応答の形（日時を文字列にする）を step ごとに書くと、形が変わったときに直し漏れる。step は
+//   `satisfies <対の api の応答の型>` で対の api の型と合うことを確かめる。
+export function todoResponseOf(todo: TodoValues) {
+  return {
+    id: todo.id,
+    title: todo.title,
+    completed: todo.completed,
+    createdAt: todo.createdAt.toISOString(),
+  };
+}
+
+// 前提の Todo の todos の行（todoRows で読む形。作成日時は Date）。
+export function todoRowOf(todo: TodoValues) {
+  return {
     id: todo.id,
     title: todo.title,
     completed: todo.completed,
     createdAt: todo.createdAt,
-  });
-  await db.insert(todoStatusChanges).values(
-    todo.statusChanges.map((change, position) => ({
-      todoId: todo.id,
-      position,
-      ...change,
-    })),
-  );
+  };
+}
+
+// 前提の Todo の完了の履歴の行（statusRows で読む形。position は履歴の添字）。
+export function statusRowsOf(todo: TodoValues) {
+  return todo.statusChanges.map((change, position) => ({
+    todoId: todo.id,
+    position,
+    completed: change.completed,
+    changedAt: change.changedAt,
+  }));
 }
 
 const BASE_URL = "http://localhost";

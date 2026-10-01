@@ -1266,7 +1266,7 @@ const BACKEND_TEST_SUPPORT_DIR = /^apps\/backend\/test-support\//;
 // WHY support.ts だけを許す: API 仕様の組み立て（本番と同じ Repository → command / query → Api）と DB の読み出しを step の間で
 //   共有する置き場所で、テストだけが使う（層のコードではない）。名前を support.ts の 1 つに固定し（rule-tests/api-spec.test.ts の
 //   api-spec-placement と同じ）、api-specs/ を層に属さないコードの置き場所にさせない。api-specs/ の直下・入れ子・ほかの名前は違反。
-// WHY test-support/ に置かない: test-support/ はテストダブルと DB 基盤の置き場所で、API 仕様だけの補助を混ぜない（Issue #219 の判断）。
+// WHY test-support/ に置かない: test-support/ はテストダブル・DB 基盤・テストデータビルダー（Issue #240）の置き場所で、API 仕様だけの補助を混ぜない（Issue #219 の判断）。
 const BACKEND_API_SPECS_SUPPORT =
   /^apps\/backend\/api-specs\/[^/]+\/support\.ts$/;
 // Issue #208: モジュールの公開の入口。features/<f>/expose/ の直下のファイルだけ（下にディレクトリを作らない）。

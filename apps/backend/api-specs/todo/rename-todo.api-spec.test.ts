@@ -1,44 +1,43 @@
 // @vitest-environment node
 import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";
-import type { CreateTodoResponse } from "../../features/todo/internal/presentation/create-todo.api";
 import type { RenameTodoResponse } from "../../features/todo/internal/presentation/rename-todo.api";
 import type { ChangeEntry } from "../../shared/infra/change-log";
 import {
   createTestDatabase,
   type TestDatabase,
 } from "../../test-support/database";
+import { aTodo, type BuiltTodo } from "../../test-support/todo/todo-builder";
 import {
-  changeCompletion,
   context,
-  createTodo,
   emptyTodos,
   expectProblem,
   jsonRequest,
   logEntries,
   notFoundProblem,
   rawRequest,
-  sortedLogs,
+  renameTodoApi,
   statusRows,
-  storeTodo,
-  type TodoApis,
-  todoApis,
+  statusRowsOf,
+  todoResponseOf,
+  todoRowOf,
   todoRows,
   validationProblem,
 } from "./support";
 
 // API 仕様（Issue #219）: rename-todo.feature の `*` の step を、実 Postgres の上で本番と同じ組み立ての handler（RenameTodoApi.handle）を
-//   呼んで確かめる。WHY（テストダブル無し・`*` を And で定義・各 step の前に表を空にする）は list-todos.api-spec.test.ts の冒頭、
-//   応答に加えて DB の行も見る WHY は create-todo.api-spec.test.ts の冒頭。
+//   呼んで確かめる。WHY（テストダブル無し・`*` を And で定義・各 step の前に表を空にする・前提はビルダーで作る）は
+//   list-todos.api-spec.test.ts の冒頭、応答に加えて DB の行も見る WHY は create-todo.api-spec.test.ts の冒頭。
+// 前提をビルダーで作るので変更の記録（change_logs）は前提の分を含まず、名前の変更が残した記録だけになる（記録が空のままなら何も
+//   書いていない）。
 
 let database: TestDatabase;
-let apis: TodoApis;
+let handler: ReturnType<typeof renameTodoApi>;
 
 beforeAll(async () => {
   database = await createTestDatabase();
   await database.migrate();
-  // 名前の変更は通知しない。前提（完了にする）で呼ばれる通知は見ないので捨てる。
-  apis = todoApis(database.db, () => undefined);
+  handler = renameTodoApi(database.db);
 });
 
 afterAll(async () => {
@@ -50,32 +49,16 @@ beforeEach(async () => {
 });
 
 async function putTitle(id: string, body: unknown): Promise<Response> {
-  return apis.putTitle(
+  return handler(
     jsonRequest("PUT", `/api/todos/${id}/title`, body),
     context(id),
   );
 }
 
-// 作った Todo の todos の行（作成日時は行では Date）。
-function rowOf(todo: CreateTodoResponse) {
-  return { ...todo, createdAt: new Date(todo.createdAt) };
-}
-
-// Todo を作り、作成までの変更の記録（todos と完了の履歴の insert）を控える。拒否・差分の無い変更の後に記録が増えないことを見るため。
-async function createWithLogs(
-  title: string,
-): Promise<{ todo: CreateTodoResponse; logs: ChangeEntry[] }> {
-  const todo = await createTodo(apis, title);
-  return { todo, logs: await logEntries(database.db) };
-}
-
-// 拒否した要求の後、Todo の行と変更の記録が要求の前のまま。
-async function expectUnchanged(
-  todo: CreateTodoResponse,
-  logs: ChangeEntry[],
-): Promise<void> {
-  await expect(todoRows(database.db)).resolves.toStrictEqual([rowOf(todo)]);
-  await expect(logEntries(database.db)).resolves.toStrictEqual(logs);
+// 拒否した要求・差分の無い変更の後、Todo の行が前提のままで、変更の記録が無い（前提はビルダーで入れたので記録は空から始まる）。
+async function expectUnchanged(todo: BuiltTodo): Promise<void> {
+  await expect(todoRows(database.db)).resolves.toStrictEqual([todoRowOf(todo)]);
+  await expect(logEntries(database.db)).resolves.toStrictEqual([]);
 }
 
 // uuid の形だが、どの Todo も指さない id。
@@ -85,50 +68,53 @@ const feature = await loadFeature("./rename-todo.feature");
 
 describeFeature(feature, ({ Scenario }) => {
   Scenario("レスポンス", ({ And }) => {
-    // 変更の記録には、変わった列（title）の変更前と変更後だけの記録が 1 件足される（shared/infra/writer.ts の update）。
-    // WHY 変更の記録をこの step で見る: .feature に書かない（create-todo.api-spec.test.ts の冒頭）。記録の step 「新しいタイトルが
-    //   保存され…」は前提を storeTodo（変更の記録を書かない）で作るので、名前を変える操作を createTodo だけで用意するこの step に置く。
+    // 変更の記録には、変わった列（title）の変更前と変更後だけの記録が 1 件だけ残る（shared/infra/writer.ts の update。前提は
+    //   ビルダーで入れたので記録を残さない）。
+    // WHY 変更の記録をこの step で見る: .feature に書かない（create-todo.api-spec.test.ts の冒頭）。名前を変える操作の結果を確かめる
+    //   step に置く。
     And("名前を変えると、新しいタイトルの Todo が返る", async () => {
-      const { todo: milk, logs } = await createWithLogs("牛乳を買う");
+      const milk = await aTodo(database.db).title("牛乳を買う").build();
 
       const response = await putTitle(milk.id, { title: "豆乳を買う" });
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
-        ...milk,
+        ...todoResponseOf(milk),
         title: "豆乳を買う",
       } satisfies RenameTodoResponse);
-      await expect(logEntries(database.db)).resolves.toStrictEqual(
-        sortedLogs([
-          ...logs,
-          {
-            tableName: "todos",
-            rowId: milk.id,
-            operation: "update",
-            changes: { title: { before: "牛乳を買う", after: "豆乳を買う" } },
-            actorId: null,
-          },
-        ]),
-      );
+      await expect(logEntries(database.db)).resolves.toStrictEqual([
+        {
+          tableName: "todos",
+          rowId: milk.id,
+          operation: "update",
+          changes: { title: { before: "牛乳を買う", after: "豆乳を買う" } },
+          actorId: null,
+        } satisfies ChangeEntry,
+      ]);
     });
 
-    // WHY 完了にしてから変える: 未完了のままだと、完了かどうかを既定値（未完了）で上書きする誤りを見分けられない。
+    // WHY 完了の Todo を変える: 未完了のままだと、完了かどうかを既定値（未完了）で上書きする誤りを見分けられない。
+    // WHY 作成日時を古い日時に決める: 今の日時で上書きする誤りを、作成日時の違いで見分ける。
     And("名前を変えても、完了かどうかと作成日時は変わらない", async () => {
-      const milk = await createTodo(apis, "牛乳を買う");
-      await changeCompletion(apis, milk.id, true);
+      const milk = await aTodo(database.db)
+        .title("牛乳を買う")
+        .completed(true)
+        .createdAt(new Date("2026-09-01T00:00:00.000Z"))
+        .build();
 
       const response = await putTitle(milk.id, { title: "豆乳を買う" });
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
-        ...milk,
+        id: milk.id,
         title: "豆乳を買う",
         completed: true,
+        createdAt: "2026-09-01T00:00:00.000Z",
       } satisfies RenameTodoResponse);
     });
 
     And("タイトルの前後の空白は除かれる", async () => {
-      const milk = await createTodo(apis, "牛乳を買う");
+      const milk = await aTodo(database.db).title("牛乳を買う").build();
 
       const response = await putTitle(milk.id, { title: " 豆乳を買う\t" });
 
@@ -140,60 +126,49 @@ describeFeature(feature, ({ Scenario }) => {
   });
 
   Scenario("記録", ({ And }) => {
-    // WHY ほかの Todo を置く: 条件（where）の欠けた UPDATE ですべての Todo の名前を変える誤りを見分ける。作成日時を古くして表に
-    //   直接入れ、一覧の順（作成日時の順）で先頭に来るようにする。
+    // WHY ほかの Todo を置く: 条件（where）の欠けた UPDATE ですべての Todo の名前を変える誤りを見分ける。作成日時を古くして、
+    //   行の順（作成日時の順）で先頭に来るようにする。
     And("新しいタイトルが保存され、ほかの Todo は変わらない", async () => {
-      const bread = {
-        id: "00000000-0000-4000-8000-000000000001",
-        title: "パンを買う",
-        completed: false,
-        createdAt: new Date("2026-09-01T00:00:00.000Z"),
-      };
-      await storeTodo(database.db, {
-        ...bread,
-        statusChanges: [{ completed: false, changedAt: bread.createdAt }],
-      });
-      const milk = await createTodo(apis, "牛乳を買う");
+      const bread = await aTodo(database.db)
+        .title("パンを買う")
+        .createdAt(new Date("2026-09-01T00:00:00.000Z"))
+        .build();
+      const milk = await aTodo(database.db).title("牛乳を買う").build();
 
       await putTitle(milk.id, { title: "豆乳を買う" });
 
       await expect(todoRows(database.db)).resolves.toStrictEqual([
-        bread,
-        rowOf({ ...milk, title: "豆乳を買う" }),
+        todoRowOf(bread),
+        todoRowOf({ ...milk, title: "豆乳を買う" }),
       ]);
     });
 
     And("名前を変えても、完了の履歴は増えない", async () => {
-      const milk = await createTodo(apis, "牛乳を買う");
+      const milk = await aTodo(database.db).title("牛乳を買う").build();
 
       await putTitle(milk.id, { title: "豆乳を買う" });
 
-      await expect(statusRows(database.db)).resolves.toStrictEqual([
-        {
-          todoId: milk.id,
-          position: 0,
-          completed: false,
-          changedAt: new Date(milk.createdAt),
-        },
-      ]);
+      await expect(statusRows(database.db)).resolves.toStrictEqual(
+        statusRowsOf(milk),
+      );
     });
 
     // 差分の無い変更は書かない（changedProps が空なら Writer は SQL も記録も出さない）。応答は成功。Todo の行に加えて、
-    //   変更の記録が増えないことも見る（expectUnchanged。.feature には書かない）。
+    //   変更の記録が無いことも見る（expectUnchanged。.feature には書かない）。
     And("同じタイトルに変えても、何も変わらない", async () => {
-      const { todo: milk, logs } = await createWithLogs("牛乳を買う");
+      const milk = await aTodo(database.db).title("牛乳を買う").build();
 
       const response = await putTitle(milk.id, { title: "牛乳を買う" });
 
       expect(response.status).toBe(200);
-      await expectUnchanged(milk, logs);
+      await expectUnchanged(milk);
     });
   });
 
   Scenario("異常系", ({ And }) => {
     // WHY 別の Todo を 1 件置く: 空のときだけ「無い」と返す実装を通さない。
     And("存在しない Todo は、存在しないと伝えられる", async () => {
-      const { todo: milk, logs } = await createWithLogs("牛乳を買う");
+      const milk = await aTodo(database.db).title("牛乳を買う").build();
 
       const response = await putTitle(MISSING_ID, { title: "豆乳を買う" });
 
@@ -201,7 +176,7 @@ describeFeature(feature, ({ Scenario }) => {
         response,
         notFoundProblem(MISSING_ID, `/api/todos/${MISSING_ID}/title`),
       );
-      await expectUnchanged(milk, logs);
+      await expectUnchanged(milk);
     });
 
     // 指す値の形（uuid）を内容より先に確かめる（rename-todo.api.ts の handle）: 存在しえない Todo への要求は、内容を直しても
@@ -211,7 +186,7 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "Todo を指す値の形が正しくないときは、送った内容に誤りがあっても、存在しないと伝えられる",
       async () => {
-        const response = await apis.putTitle(
+        const response = await handler(
           rawRequest("PUT", "/api/todos/missing/title", "{title:"),
           context("missing"),
         );
@@ -226,7 +201,7 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "タイトルが空だと、空という理由で拒否され、タイトルは変わらない",
       async () => {
-        const { todo: milk, logs } = await createWithLogs("牛乳を買う");
+        const milk = await aTodo(database.db).title("牛乳を買う").build();
 
         const response = await putTitle(milk.id, { title: " " });
 
@@ -244,14 +219,14 @@ describeFeature(feature, ({ Scenario }) => {
             ],
           }),
         );
-        await expectUnchanged(milk, logs);
+        await expectUnchanged(milk);
       },
     );
 
     And(
       "101 文字のタイトルは、長すぎるという理由で拒否され、タイトルは変わらない",
       async () => {
-        const { todo: milk, logs } = await createWithLogs("牛乳を買う");
+        const milk = await aTodo(database.db).title("牛乳を買う").build();
 
         const response = await putTitle(milk.id, { title: "🍎".repeat(101) });
 
@@ -271,13 +246,13 @@ describeFeature(feature, ({ Scenario }) => {
             ],
           }),
         );
-        await expectUnchanged(milk, logs);
+        await expectUnchanged(milk);
       },
     );
 
     // 完了かどうかの変更は別の API（/completion）。黙って捨てずに拒否し、名前も変えない（json-body.ts の requestBodySchema）。
     And("完了かどうかを一緒に送ると、拒否され、何も変わらない", async () => {
-      const { todo: milk, logs } = await createWithLogs("牛乳を買う");
+      const milk = await aTodo(database.db).title("牛乳を買う").build();
 
       const response = await putTitle(milk.id, {
         title: "豆乳を買う",
@@ -300,7 +275,7 @@ describeFeature(feature, ({ Scenario }) => {
           ],
         }),
       );
-      await expectUnchanged(milk, logs);
+      await expectUnchanged(milk);
     });
   });
 });

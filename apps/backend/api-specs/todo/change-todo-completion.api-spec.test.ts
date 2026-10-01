@@ -2,16 +2,15 @@
 import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";
 import type { ChangeTodoCompletionResponse } from "../../features/todo/internal/presentation/change-todo-completion.api";
-import type { CreateTodoResponse } from "../../features/todo/internal/presentation/create-todo.api";
 import type { ChangeEntry } from "../../shared/infra/change-log";
 import {
   createTestDatabase,
   type TestDatabase,
 } from "../../test-support/database";
+import { aTodo, type BuiltTodo } from "../../test-support/todo/todo-builder";
 import {
-  changeCompletion,
+  changeTodoCompletionApi,
   context,
-  createTodo,
   emptyTodos,
   expectProblem,
   jsonRequest,
@@ -21,19 +20,20 @@ import {
   statusInsertLog,
   statusRowOf,
   statusRows,
-  storeTodo,
-  type TodoApis,
-  todoApis,
+  statusRowsOf,
+  todoResponseOf,
+  todoRowOf,
   todoRows,
   validationProblem,
 } from "./support";
 
 // API 仕様（Issue #219）: change-todo-completion.feature の `*` の step を、実 Postgres の上で本番と同じ組み立ての handler
-//   （ChangeTodoCompletionApi.handle）を呼んで確かめる。WHY（テストダブル無し・`*` を And で定義・各 step の前に表を空にする）は
-//   list-todos.api-spec.test.ts の冒頭、応答に加えて DB の行も見る WHY は create-todo.api-spec.test.ts の冒頭。
+//   （ChangeTodoCompletionApi.handle）を呼んで確かめる。WHY（テストダブル無し・`*` を And で定義・各 step の前に表を空にする・前提は
+//   ビルダーで作る）は list-todos.api-spec.test.ts の冒頭、応答に加えて DB の行も見る WHY は create-todo.api-spec.test.ts の冒頭。
+// 前提をビルダーで作るので、変更の記録（change_logs）と通知は前提の分を含まず、完了の変更が残したものだけになる。
 
 let database: TestDatabase;
-let apis: TodoApis;
+let handler: ReturnType<typeof changeTodoCompletionApi>;
 // 完了の通知の口に渡されたメッセージ（呼ばれた順）。
 // WHY 本番の notify（notification の expose）ではなく記録する関数を渡す: notify はログに出すだけで、仕様から結果を読めない
 //   （vi は使わない）。notify につながっていることは change-todo-completion.api.test.ts の「本番の PUT」のテストが見る。
@@ -42,7 +42,7 @@ const notifications: string[] = [];
 beforeAll(async () => {
   database = await createTestDatabase();
   await database.migrate();
-  apis = todoApis(database.db, (message) => {
+  handler = changeTodoCompletionApi(database.db, (message) => {
     notifications.push(message);
   });
 });
@@ -57,48 +57,41 @@ beforeEach(async () => {
 });
 
 async function putCompletion(id: string, body: unknown): Promise<Response> {
-  return apis.putCompletion(
+  return handler(
     jsonRequest("PUT", `/api/todos/${id}/completion`, body),
     context(id),
   );
 }
 
-// 完了の Todo を用意する（作って完了にする）。用意で送られた通知は、確かめる対象ではないので消す。
-async function completedTodo(title: string): Promise<CreateTodoResponse> {
-  const todo = await createTodo(apis, title);
-  await changeCompletion(apis, todo.id, true);
-  notifications.length = 0;
-  return { ...todo, completed: true };
+// 未完了の Todo（履歴は作成時の未完了の 1 件）と、完了の Todo（履歴は作成時の未完了と完了の 2 件）。ビルダーの既定の履歴。
+function uncompletedTodo(title: string): Promise<BuiltTodo> {
+  return aTodo(database.db).title(title).build();
 }
 
-// 完了の履歴の 1 件目（作成時の未完了）。
-function createdStatus(todo: CreateTodoResponse) {
-  return {
-    todoId: todo.id,
-    position: 0,
-    completed: false,
-    changedAt: new Date(todo.createdAt),
-  };
+function completedTodo(title: string): Promise<BuiltTodo> {
+  return aTodo(database.db).title(title).completed(true).build();
 }
 
-// 完了の履歴の position 番目を、日時を除いて比べる形にする。日時は API が now() で決めるので、作成日時以上であることを別に見る。
+// 完了の履歴が、前提の履歴（statusRowsOf）の後ろに added の 1 件ずつが足されたものになっている。足した行の日時は API が now() で
+//   決めるので、値の代わりに作成日時以上であることを見る。
 async function expectAddedStatus(
-  todo: CreateTodoResponse,
+  todo: BuiltTodo,
   added: readonly boolean[],
 ): Promise<void> {
   const rows = await statusRows(database.db);
+  const before = statusRowsOf(todo);
   expect(rows).toStrictEqual([
-    createdStatus(todo),
+    ...before,
     ...added.map((completed, index) => ({
       todoId: todo.id,
-      position: index + 1,
+      position: before.length + index,
       completed,
-      changedAt: rows[index + 1]?.changedAt,
+      changedAt: rows[before.length + index]?.changedAt,
     })),
   ]);
   for (const row of rows) {
     expect(row.changedAt.getTime()).toBeGreaterThanOrEqual(
-      Date.parse(todo.createdAt),
+      todo.createdAt.getTime(),
     );
   }
 }
@@ -111,13 +104,13 @@ const feature = await loadFeature("./change-todo-completion.feature");
 describeFeature(feature, ({ Scenario }) => {
   Scenario("レスポンス", ({ And }) => {
     And("未完了の Todo を完了にすると、完了になった Todo が返る", async () => {
-      const milk = await createTodo(apis, "牛乳を買う");
+      const milk = await uncompletedTodo("牛乳を買う");
 
       const response = await putCompletion(milk.id, { completed: true });
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
-        ...milk,
+        ...todoResponseOf(milk),
         completed: true,
       } satisfies ChangeTodoCompletionResponse);
     });
@@ -131,7 +124,7 @@ describeFeature(feature, ({ Scenario }) => {
 
         expect(response.status).toBe(200);
         await expect(response.json()).resolves.toStrictEqual({
-          ...milk,
+          ...todoResponseOf(milk),
           completed: false,
         } satisfies ChangeTodoCompletionResponse);
       },
@@ -145,40 +138,33 @@ describeFeature(feature, ({ Scenario }) => {
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual(
-        milk satisfies ChangeTodoCompletionResponse,
+        todoResponseOf(milk) satisfies ChangeTodoCompletionResponse,
       );
     });
   });
 
   Scenario("記録", ({ And }) => {
-    // WHY ほかの Todo を置く: 条件（where）の欠けた UPDATE ですべての Todo を完了にする誤りを見分ける。作成日時を古くして表に
-    //   直接入れ、行の順（作成日時の順）で先頭に来るようにする。
+    // WHY ほかの Todo を置く: 条件（where）の欠けた UPDATE ですべての Todo を完了にする誤りを見分ける。作成日時を古くして、
+    //   行の順（作成日時の順）で先頭に来るようにする。
     And("完了にしたことが保存され、ほかの Todo は変わらない", async () => {
-      const bread = {
-        id: "00000000-0000-4000-8000-000000000001",
-        title: "パンを買う",
-        completed: false,
-        createdAt: new Date("2026-09-01T00:00:00.000Z"),
-      };
-      await storeTodo(database.db, {
-        ...bread,
-        statusChanges: [{ completed: false, changedAt: bread.createdAt }],
-      });
-      const milk = await createTodo(apis, "牛乳を買う");
+      const bread = await aTodo(database.db)
+        .title("パンを買う")
+        .createdAt(new Date("2026-09-01T00:00:00.000Z"))
+        .build();
+      const milk = await uncompletedTodo("牛乳を買う");
 
       await putCompletion(milk.id, { completed: true });
 
       await expect(todoRows(database.db)).resolves.toStrictEqual([
-        bread,
-        { ...milk, completed: true, createdAt: new Date(milk.createdAt) },
+        todoRowOf(bread),
+        todoRowOf({ ...milk, completed: true }),
       ]);
     });
 
-    // 変更の記録には、作成の 2 件に、todos の completed の update と、完了の履歴の insert（全列）が足される
-    //   （.feature には書かない。create-todo.api-spec.test.ts の冒頭）。
+    // 変更の記録は、todos の completed の update と、完了の履歴の insert（全列）の 2 件だけ（前提はビルダーで入れたので記録を残さない。
+    //   .feature には書かない。create-todo.api-spec.test.ts の冒頭）。
     And("完了にすると、完了の履歴に「完了」が 1 件足される", async () => {
-      const milk = await createTodo(apis, "牛乳を買う");
-      const created = await logEntries(database.db);
+      const milk = await uncompletedTodo("牛乳を買う");
 
       await putCompletion(milk.id, { completed: true });
 
@@ -186,7 +172,6 @@ describeFeature(feature, ({ Scenario }) => {
       const completion = await statusRowOf(database.db, milk.id, 1);
       await expect(logEntries(database.db)).resolves.toStrictEqual(
         sortedLogs([
-          ...created,
           {
             tableName: "todos",
             rowId: milk.id,
@@ -204,17 +189,18 @@ describeFeature(feature, ({ Scenario }) => {
 
       await putCompletion(milk.id, { completed: false });
 
-      await expectAddedStatus(milk, [true, false]);
+      await expectAddedStatus(milk, [false]);
     });
 
     // 変わらない変更は書かない（Todo.changeCompletion が同じ Todo を返し、Repository の update は何も書かない）。
     And("既に完了の Todo を完了にしても、履歴は増えない", async () => {
       const milk = await completedTodo("牛乳を買う");
-      const before = await statusRows(database.db);
 
       await putCompletion(milk.id, { completed: true });
 
-      await expect(statusRows(database.db)).resolves.toStrictEqual(before);
+      await expect(statusRows(database.db)).resolves.toStrictEqual(
+        statusRowsOf(milk),
+      );
     });
   });
 
@@ -223,7 +209,7 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "未完了から完了に変わったときだけ、完了の通知が 1 件送られる",
       async () => {
-        const milk = await createTodo(apis, "牛乳を買う");
+        const milk = await uncompletedTodo("牛乳を買う");
 
         await putCompletion(milk.id, { completed: true });
         await putCompletion(milk.id, { completed: true });
@@ -245,7 +231,7 @@ describeFeature(feature, ({ Scenario }) => {
   Scenario("異常系", ({ And }) => {
     // WHY 別の Todo を 1 件置く: 空のときだけ「無い」と返す実装を通さない。無い Todo への要求は通知もしない。
     And("存在しない Todo は、存在しないと伝えられる", async () => {
-      await createTodo(apis, "牛乳を買う");
+      await uncompletedTodo("牛乳を買う");
 
       const response = await putCompletion(MISSING_ID, { completed: true });
 
@@ -260,8 +246,7 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "完了かどうかが真偽値でないと、形が違うという理由で拒否され、何も変わらない",
       async () => {
-        const milk = await createTodo(apis, "牛乳を買う");
-        const logs = await logEntries(database.db);
+        const milk = await uncompletedTodo("牛乳を買う");
 
         const response = await putCompletion(milk.id, { completed: "true" });
 
@@ -282,9 +267,9 @@ describeFeature(feature, ({ Scenario }) => {
           }),
         );
         await expect(todoRows(database.db)).resolves.toStrictEqual([
-          { ...milk, createdAt: new Date(milk.createdAt) },
+          todoRowOf(milk),
         ]);
-        await expect(logEntries(database.db)).resolves.toStrictEqual(logs);
+        await expect(logEntries(database.db)).resolves.toStrictEqual([]);
         expect(notifications).toStrictEqual([]);
       },
     );
