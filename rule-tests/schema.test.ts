@@ -30,11 +30,15 @@ import { describe, expect, it } from "vitest";
 //   「名前 + `(`」で呼び出しを取れる。architecture.test.ts の TypeScript の AST API は、この検査には重い。
 // 限界: pg-core の関数を変数に入れ直して呼ぶ（`const v = varchar; v("x")`）、options を変数や spread で渡す
 //   （`timestamp("x", tz)`）と見えない（後者は withTimezone が見えないので違反になる = 安全側）。import の別名（`varchar as v`）と
-//   名前空間（`pg.varchar`）は拾う。
+//   名前空間（`pg.varchar`）は拾う。import に無い名前（別モジュールの再公開など）の `varchar(` も名前で違反にする（安全側）。
 //
 // サロゲートキー（Issue #213）: 規則 surrogate-key。`pgTable(` ごとに、第 2 引数（列の定義のオブジェクト）の直下に
-//   `id: uuid("id").primaryKey()` が無ければ違反（違反の行は `pgTable(` の行）。`.primaryKey()` の前後のチェーン
-//   （`.defaultRandom()`・`.$type<Id>()` など）は問わない。uuid / pgTable は import の別名と名前空間（`pg.uuid(`）も同じく扱う。
+//   `id: uuid("id").primaryKey()` が無ければ違反（違反の行は `pgTable(` の行）。`uuid("id")` の後ろのチェーンは許可の一覧
+//   （ALLOWED_ID_CHAIN: notNull / primaryKey / defaultRandom / default / $defaultFn / $default / unique）のメソッドの呼び出しに限り、
+//   `.primaryKey()` を必須にする（`.array()`・`.$type<T>()`・`.references()` などが 1 つでもあれば違反。Issue #233）。
+//   uuid は "drizzle-orm/pg-core" からの import（名前・別名 `uuid as u`・名前空間 `import * as pg` の `pg.uuid(`）で
+//   pg-core の uuid と言えるものだけを認める（ローカルの `const uuid = text`・別モジュールの `uuid`・`text as uuid`・
+//   別の名前空間の `other.uuid(` は違反。Issue #233）。pgTable は列の型と同じく、import に無い名前でも表として見る（安全側）。
 //   複合主キー（第 3 引数の `primaryKey({ columns: [...] })`）だけの表、id が uuid でない（`serial` / `text`）表、
 //   id が uuid でも `.primaryKey()` の無い表、DB の列名が "id" でない表も違反。
 // WHY すべての表（子表・履歴表も）に uuid の id の主キー: どの表の 1 行も id で指せ、変更の記録（change_logs の row_id は uuid）・
@@ -44,7 +48,8 @@ import { describe, expect, it } from "vitest";
 // 限界（字句の推定）: 第 2 引数が変数・スプレッド（`{ ...base }`）・関数（`(t) => ({ ... })`）だと中を見ず、id を直接書いていなければ
 //   違反にする（安全側）。キーを引用符で書く（`"id":`）・uuid の引数にコメントを挟むと見分けられず違反になる。
 //   `pgTableCreator` で作った関数や `pgSchema(...).table(` は `pgTable(` でないので見ない。
-//   型引数の中のカンマ（`$type<Record<string, X>>()`）は要素の区切りと取り違える（id の列に付けると違反になる。ほかの列なら影響しない）。
+//   型引数の中のカンマ（`$type<Record<string, X>>()`）は要素の区切りと取り違える（ほかの列なら影響しない。id の列の `$type` は
+//   許可の一覧に無いので、どのみち違反）。import した uuid を関数の引数などで同じ名前に隠す（shadowing）と見分けられず通る。
 //   列名を省いた `id: uuid().primaryKey()`（Drizzle はキー名を列名に使える）も違反にする（`uuid("id")` と書く。reviewer の probe）。
 
 // 列の型の規則（WHY の見出しで例外を認める）。
@@ -103,29 +108,78 @@ function maskCommentsAndStrings(text: string): string {
   return masked;
 }
 
-// `import { a, b as c } from "drizzle-orm/pg-core"` の別名 → 元の名前。
-// WHY: `varchar as vc` と別名で import して `vc(...)` と呼ぶと、名前だけでは見逃す。
-function pgCoreAliases(text: string): Map<string, string> {
-  const aliases = new Map<string, string>();
-  const imports = text.matchAll(
-    /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*["']drizzle-orm\/pg-core["']/g,
-  );
-  for (const [, specifiers = ""] of imports) {
+const IDENTIFIER = "[A-Za-z_$][\\w$]*";
+
+// "drizzle-orm/pg-core" から値として import した名前。named: ローカルの名前 → pg-core の元の名前（`uuid` → `uuid`、
+// `uuid as u` → `u` → `uuid`）。namespaces: `import * as pg` の `pg`。
+// WHY: `varchar as vc` と別名で import して `vc(...)` と呼ぶと、名前だけでは見逃す。逆に、名前が `uuid` でも import に無い
+//   （ローカルの `const uuid = text`・別モジュールの `uuid`・`text as uuid`）なら pg-core の uuid ではない（Issue #233）。
+// WHY `import type` と inline の `type` を除く: 型だけの import は値として呼べず、pg-core の関数を呼んでいる証拠にならない。
+type PgCoreImports = { named: Map<string, string>; namespaces: Set<string> };
+
+function pgCoreImports(text: string): PgCoreImports {
+  const named = new Map<string, string>();
+  const namespaces = new Set<string>();
+  const from = `\\s*from\\s*["']drizzle-orm/pg-core["']`;
+  for (const [, specifiers = ""] of text.matchAll(
+    new RegExp(`import\\s*\\{([^}]*)\\}${from}`, "g"),
+  )) {
     for (const specifier of specifiers.split(",")) {
-      const [imported, local] = specifier.trim().split(/\s+as\s+/);
-      if (imported && local) aliases.set(local.trim(), imported.trim());
+      const [imported = "", local = imported] = specifier
+        .trim()
+        .split(/\s+as\s+/);
+      if (imported === "" || /^type\s/.test(imported)) continue;
+      named.set(local.trim(), imported.trim());
     }
   }
-  return aliases;
+  for (const [, namespace = ""] of text.matchAll(
+    new RegExp(`import\\s*\\*\\s*as\\s+(${IDENTIFIER})${from}`, "g"),
+  )) {
+    namespaces.add(namespace);
+  }
+  return { named, namespaces };
 }
 
-// 呼び出しの名前を pg-core の元の名前に戻す: `pg.uuid(` は名前のまま、`u(` は import の別名を元の名前に戻す。
-function builderName(
+// 呼び出し（masked の中）の正規表現の本体。1: 名前空間などの対象の名前、2: `.`（メンバーの呼び出し）、3: 関数名。
+// WHY 対象の名前の直前に `.` や識別子が無いことを見る: `x.pg.uuid(` の `pg` を名前空間と取り違えない（`.uuid(` は
+//   対象の名前の無いメンバーの呼び出しとして読む）。
+// WHY 名前の途中から一致しない: 正規表現は左から最初に一致する位置で名前を最長に取るので、`myVarchar(` は `varchar` にならない。
+const CALL = `(?:(?:(?<![\\w$]|\\.\\s*)(${IDENTIFIER})\\s*)?(\\.)\\s*)?(${IDENTIFIER})\\s*\\(`;
+
+// 呼び出しが pg-core のどの関数か（pg-core の関数と言えなければ undefined）。列の型・pgTable・uuid で同じこの関数を使う。
+// - `u(`: named import のローカルの名前なら元の名前（import に無い名前は undefined）。
+// - `pg.uuid(`: `pg` が `import * as pg` の名前なら `uuid`（別の名前空間・`).uuid(` などは undefined）。
+// 使う側の WHY（安全側の向きが規則で違う）:
+//   - 列の型・pgTable は `?? 呼び出しの名前` で、import に無い名前（別モジュールの再公開など）も名前で検査する。
+//     undefined を「対象外」にすると、見逃し（違反なし）の方向に倒れる。
+//   - surrogate-key の uuid は undefined を「uuid でない」= 違反にする。名前だけで認めると、ローカルの `const uuid = text` も通る。
+function pgCoreBuilder(
+  object: string | undefined,
   isMember: boolean,
   name: string,
-  aliases: Map<string, string>,
-): string {
-  return isMember ? name : (aliases.get(name) ?? name);
+  imports: PgCoreImports,
+): string | undefined {
+  if (!isMember) return imports.named.get(name);
+  return object !== undefined && imports.namespaces.has(object)
+    ? name
+    : undefined;
+}
+
+// masked の pg-core らしい呼び出しの一覧。index は関数名の位置（行番号に使う）、open は `(` の位置、
+// builder は pgCoreBuilder の結果、name は呼び出しの名前。
+function builderCalls(
+  masked: string,
+  imports: PgCoreImports,
+): { index: number; open: number; name: string; builder?: string }[] {
+  return [...masked.matchAll(new RegExp(CALL, "gd"))].map((call) => {
+    const [whole, object, member, name = ""] = call;
+    return {
+      index: call.indices?.[3]?.[0] ?? call.index,
+      open: call.index + whole.length - 1,
+      name,
+      builder: pgCoreBuilder(object, member !== undefined, name, imports),
+    };
+  });
 }
 
 // masked[open] の括弧（`(` / `{` / `[`）に対応する閉じ括弧の位置（閉じが無ければ末尾 = masked.length）。
@@ -184,14 +238,12 @@ function hasWhyAbove(
 
 function findColumnTypeViolations(text: string): ColumnTypeViolation[] {
   const masked = maskCommentsAndStrings(text);
-  const aliases = pgCoreAliases(text);
   const lines = text.split("\n");
   const violations: ColumnTypeViolation[] = [];
-  // WHY 名前の途中から一致しない: 正規表現は左から最初に一致する位置で名前を最長に取るので、`myVarchar(` は `varchar` にならない。
-  for (const call of masked.matchAll(/(\.\s*)?([A-Za-z_$][\w$]*)\s*\(/g)) {
-    const [whole, member, name = ""] = call;
-    const open = call.index + whole.length - 1;
-    const builder = builderName(member !== undefined, name, aliases);
+  for (const call of builderCalls(masked, pgCoreImports(text))) {
+    const { open } = call;
+    // WHY `?? call.name`: import に無い `varchar(` も名前で違反にする（安全側。pgCoreBuilder のコメント）。
+    const builder = call.builder ?? call.name;
     const rule =
       builder === "timestamp"
         ? /\bwithTimezone\s*:\s*true\b/.test(argumentsOf(masked, open))
@@ -206,23 +258,39 @@ function findColumnTypeViolations(text: string): ColumnTypeViolation[] {
   return violations;
 }
 
-const IDENTIFIER = "[A-Za-z_$][\\w$]*";
+// id の列（`uuid("id")` の後ろ）のチェーンに書いてよいメソッド。これ以外が 1 つでもあれば違反（fail closed。Issue #233）。
+// WHY 許可の一覧にする（禁止の一覧にしない）: `.array()` は列を `uuid[]` に、`.$type<T>()` は TypeScript の型を uuid の文字列
+//   以外に、`.references()` は主キーを別の表への参照に、`.generatedAlwaysAs()` は生成列に変える。どれも「uuid の id の主キー」
+//   でなくなるが、Drizzle のメソッドは版ごとに増えるので、禁止の一覧では新しいメソッドを黙って通す。
+// WHY この 7 つ: 主キー（primaryKey）・NOT NULL（notNull。主キーなら冗長だが害は無い）・一意（unique。同じく冗長）と、
+//   既定値（defaultRandom / default / $defaultFn / $default。値の作り方を決めるだけで列の型と主キーを変えない）。
+const ALLOWED_ID_CHAIN = new Set([
+  "notNull",
+  "primaryKey",
+  "defaultRandom",
+  "default",
+  "$defaultFn",
+  "$default",
+  "unique",
+]);
 
-// 列の定義の 1 要素（masked の [start, end)）が `id: uuid("id")<.メソッド()...>` で、チェーンに `.primaryKey()` を含むか。
+// 列の定義の 1 要素（masked の [start, end)）が `id: uuid("id")<.メソッド()...>` で、チェーンが許可の一覧のメソッドの
+// 呼び出しだけからなり、`.primaryKey()` を含むか。
 function isSurrogateKeyColumn(
   text: string,
   masked: string,
   entry: { start: number; end: number },
-  aliases: Map<string, string>,
+  imports: PgCoreImports,
 ): boolean {
   const value = masked.slice(entry.start, entry.end);
   // キーは素の `id` だけ（`"id":` の引用符付きはコメントと同じく潰れて見えない = 安全側で違反）。
-  const head = new RegExp(
-    `^\\s*id\\s*:\\s*(?:${IDENTIFIER}\\s*(\\.)\\s*)?(${IDENTIFIER})\\s*\\(`,
-  ).exec(value);
+  const head = new RegExp(`^\\s*id\\s*:\\s*${CALL}`).exec(value);
   if (!head) return false;
-  const [whole, member, name = ""] = head;
-  if (builderName(member !== undefined, name, aliases) !== "uuid") return false;
+  const [whole, object, member, name = ""] = head;
+  // WHY `?? 呼び出しの名前` で補わない: import で pg-core の uuid と言えるものだけを認める（pgCoreBuilder のコメント）。
+  if (pgCoreBuilder(object, member !== undefined, name, imports) !== "uuid") {
+    return false;
+  }
   const open = entry.start + whole.length - 1;
   const close = closingIndex(masked, open);
   // DB の列名は元のテキスト（文字列は masked では空白）で見る。`"id"` / `'id'` だけ。
@@ -232,15 +300,20 @@ function isSurrogateKeyColumn(
     `^\\s*\\.\\s*(${IDENTIFIER})\\s*(?:<[^()]*>)?\\s*\\(`,
   );
   let cursor = close + 1;
+  let hasPrimaryKey = false;
   for (
     let call = chainCall.exec(masked.slice(cursor, entry.end));
     call;
     call = chainCall.exec(masked.slice(cursor, entry.end))
   ) {
-    if (call[1] === "primaryKey") return true;
+    const method = call[1] ?? "";
+    if (!ALLOWED_ID_CHAIN.has(method)) return false;
+    if (method === "primaryKey") hasPrimaryKey = true;
     cursor = closingIndex(masked, cursor + call[0].length - 1) + 1;
   }
-  return false;
+  // WHY チェーンの後ろに何も無いことを見る: 呼び出しでない続き（`.primaryKey` の参照・`as X` の型の付け替え）を、
+  //   許可の一覧を通らないまま認めない（fail closed）。
+  return hasPrimaryKey && masked.slice(cursor, entry.end).trim() === "";
 }
 
 // `pgTable(` の "(" の位置から、第 2 引数（列の定義）のオブジェクトの直下の要素の範囲の一覧。
@@ -269,17 +342,16 @@ function columnEntries(
 // （違反の行は `pgTable` の名前の行）。例外（WHY の見出し）は認めない。
 function findSurrogateKeyViolations(text: string): ColumnTypeViolation[] {
   const masked = maskCommentsAndStrings(text);
-  const aliases = pgCoreAliases(text);
+  const imports = pgCoreImports(text);
   const violations: ColumnTypeViolation[] = [];
-  for (const call of masked.matchAll(/(\.\s*)?([A-Za-z_$][\w$]*)\s*\(/g)) {
-    const [whole, member = "", name = ""] = call;
-    if (builderName(member !== "", name, aliases) !== "pgTable") continue;
-    const open = call.index + whole.length - 1;
-    const hasSurrogateKey = columnEntries(masked, open).some((entry) =>
-      isSurrogateKeyColumn(text, masked, entry, aliases),
+  for (const call of builderCalls(masked, imports)) {
+    // WHY `?? call.name`: pg-core 以外から import した `pgTable(` も表として検査する（安全側。pgCoreBuilder のコメント）。
+    if ((call.builder ?? call.name) !== "pgTable") continue;
+    const hasSurrogateKey = columnEntries(masked, call.open).some((entry) =>
+      isSurrogateKeyColumn(text, masked, entry, imports),
     );
     if (hasSurrogateKey) continue;
-    const line = masked.slice(0, call.index + member.length).split("\n").length;
+    const line = masked.slice(0, call.index).split("\n").length;
     violations.push({ rule: "surrogate-key", line });
   }
   return violations;
@@ -467,6 +539,18 @@ describe("列の型の判定（findColumnTypeViolations）: must reject", () => 
       [{ rule: "varchar", line: 2 }],
     ],
     [
+      "pg-core から import していない varchar / 名前空間の名前が違う other.json も名前で違反（安全側）",
+      source(
+        'import { varchar } from "./x";',
+        IMPORT,
+        'const c = { title: varchar("title"), raw: other.json("raw") };',
+      ),
+      [
+        { rule: "varchar", line: 3 },
+        { rule: "json", line: 3 },
+      ],
+    ],
+    [
       "char（固定長）",
       source(IMPORT, 'const c = { code: pg.char("code", { length: 3 }) };'),
       [{ rule: "char", line: 2 }],
@@ -635,10 +719,31 @@ describe("サロゲートキーの判定（findSurrogateKeyViolations）: must p
       ),
     ],
     [
-      ".primaryKey() の前に別のメソッド（型引数付き）がある",
+      ".primaryKey() の前に許可の一覧のメソッド（.notNull() / .unique()）がある",
       source(
         TABLE_IMPORT,
-        'export const t = pgTable("t", { id: uuid("id").$type<Id>().primaryKey() });',
+        'export const a = pgTable("a", { id: uuid("id").notNull().primaryKey() });',
+        'export const b = pgTable("b", { id: uuid("id").unique().primaryKey() });',
+      ),
+    ],
+    [
+      ".primaryKey() の後ろに既定値のメソッド（.$defaultFn / .$default / .default）が続く",
+      source(
+        TABLE_IMPORT,
+        'export const a = pgTable("a", { id: uuid("id").primaryKey().$defaultFn(() => randomUUID()) });',
+        'export const b = pgTable("b", { id: uuid("id").primaryKey().$default(() => randomUUID()) });',
+        'export const c = pgTable("c", { id: uuid("id").primaryKey().default(sql`gen_random_uuid()`) });',
+      ),
+    ],
+    [
+      "import が複数行で末尾にカンマ（実ファイルの書き方）",
+      source(
+        "import {",
+        "  pgTable,",
+        "  text,",
+        "  uuid,",
+        '} from "drizzle-orm/pg-core";',
+        'export const t = pgTable("t", { id: uuid("id").primaryKey(), title: text("title") });',
       ),
     ],
     [
@@ -838,6 +943,105 @@ describe("サロゲートキーの判定（findSurrogateKeyViolations）: must r
       source(
         'import { pgTable as table, text } from "drizzle-orm/pg-core";',
         'export const t = table("t", { title: text("title") });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "uuid がローカルの変数（const uuid = text）で pg-core の uuid でない",
+      source(
+        'import { pgTable, text } from "drizzle-orm/pg-core";',
+        "const uuid = text;",
+        'export const t = pgTable("t", { id: uuid("id").primaryKey() });',
+      ),
+      [{ rule: "surrogate-key", line: 3 }],
+    ],
+    [
+      "uuid を pg-core でない別のモジュールから import している",
+      source(
+        'import { pgTable } from "drizzle-orm/pg-core";',
+        'import { uuid } from "./x";',
+        'export const t = pgTable("t", { id: uuid("id").primaryKey() });',
+      ),
+      [{ rule: "surrogate-key", line: 3 }],
+    ],
+    [
+      "import の別名 uuid が text を指す（text as uuid）",
+      source(
+        'import { pgTable, text as uuid } from "drizzle-orm/pg-core";',
+        'export const t = pgTable("t", { id: uuid("id").primaryKey() });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "uuid を import type だけで import している（値ではない）",
+      source(
+        'import { pgTable } from "drizzle-orm/pg-core";',
+        'import type { uuid } from "drizzle-orm/pg-core";',
+        'export const t = pgTable("t", { id: uuid("id").primaryKey() });',
+      ),
+      [{ rule: "surrogate-key", line: 3 }],
+    ],
+    [
+      "名前空間の名前が import と違う（import * as pg で other.uuid）",
+      source(
+        IMPORT,
+        'export const t = pg.pgTable("t", { id: other.uuid("id").primaryKey() });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "id のチェーンに .array()（uuid[] の列）",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", { id: uuid("id").array().$type<string>().primaryKey() });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "id のチェーンに .array() だけ（ほかは許可の一覧）",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", { id: uuid("id").primaryKey().array() });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "id のチェーンに .$type<string>()",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", { id: uuid("id").$type<string>().primaryKey() });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "id のチェーンに .references(() => t.id)",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", { id: uuid("id").primaryKey().references(() => other.id) });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "id のチェーンに .generatedAlwaysAs(...)",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", { id: uuid("id").primaryKey().generatedAlwaysAs(sql`x`) });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "id のチェーンの後ろに呼び出しでない式（as による型の付け替え）",
+      source(
+        TABLE_IMPORT,
+        'export const t = pgTable("t", { id: uuid("id").primaryKey() as unknown as X });',
+      ),
+      [{ rule: "surrogate-key", line: 2 }],
+    ],
+    [
+      "pgTable を pg-core 以外から import していても表として見る（安全側）",
+      source(
+        'import { pgTable } from "./db";',
+        'export const t = pgTable("t", { title: text("title") });',
       ),
       [{ rule: "surrogate-key", line: 2 }],
     ],
