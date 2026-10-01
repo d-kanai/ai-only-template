@@ -126,16 +126,20 @@ function isCardNumber(digits: string): boolean {
 //   分からない（利用者の入力を含みうる）。type（文字列）を持つオブジェクトだけはそのまま渡す（Writer が DB のエラーを
 //   { type: <pg のエラーの name>, message: <引用符の部分を *** にした pg の message> } で渡す。apps/backend/shared/infra/writer.ts）。
 // WHY 入力の型を unknown にする（z.preprocess）: 呼び出し側は catch で受けた unknown をそのまま渡す。変換は logger の中で行う。
+// WHY type も freeText: Error の name と { type } のオブジェクトの type は、投げた側が自由に決められる文字列（reviewer の指摘）。
 function errorField() {
   return z.preprocess(
     toErrorShape,
-    z.object({ type: z.string(), message: freeText().optional() }),
+    z.object({ type: freeText(), message: freeText().optional() }),
   );
 }
 
 function toErrorShape(value: unknown): unknown {
   if (value instanceof Error) {
-    return { type: value.name, message: value.message };
+    return {
+      type: value.name,
+      message: holdsQueryParameters(value) ? MASK : value.message,
+    };
   }
   if (
     typeof value === "object" &&
@@ -147,13 +151,49 @@ function toErrorShape(value: unknown): unknown {
   return { type: typeof value };
 }
 
+// 例外が SQL とパラメータ（query / params のプロパティ）を抱えているか。
+// WHY 抱えている例外の message を出さない（*** にする。Issue #216 の reviewer の指摘）: drizzle-orm 0.45.3 の DrizzleQueryError の
+//   message は「Failed query: <SQL>\nparams: <生の値>」（errors.js）で、利用者の値（todos.title など）を含む。Writer は db_write の
+//   行で params をマスクした後に同じ例外を投げ直すので、toProblemResponse の server_error にそのまま届く。呼び出し側に頼らず、
+//   どのライブラリの例外でも、クエリのパラメータを持つ例外の message は出さないほうに倒す（fail closed）。cause はスキーマに無く、
+//   今までどおり落ちる。
+// WHY クラス（instanceof DrizzleQueryError）でなくプロパティで見る: apps/shared は drizzle-orm を参照しない（規則
+//   shared-self-contained）。別のライブラリの同じ形の例外も同じに扱える。
+function holdsQueryParameters(error: Error): boolean {
+  return "query" in error || "params" in error;
+}
+
+// 印の無い文字列の項目の長さの上限（文字数）と、切ったときの印。
+// WHY 上限を付ける（reviewer の指摘）: x-request-id・host・accept・content-type・user-agent・パス・クエリのキーはクライアントが
+//   自由に決められ、長さの制限が無い。1 行の大きさ（費用・読みやすさ）を抑える。parse は失敗させない（行を失わない）。
+// WHY 2000 文字（自由文の上限）より短い 256: これらは自由文ではなく、正常な値は短い（UUID・ホスト名・MIME 型・UA の文字列）。
+function bound(value: string): string {
+  const maxLength = 256;
+  return value.length > maxLength
+    ? `${value.slice(0, maxLength)}${freeTextLimit().marker}`
+    : value;
+}
+
+// 長さの上限を付けた文字列（印の無い項目）。
+function bounded() {
+  return z.string().transform(bound);
+}
+
+// 自由文の網を通し、さらに長さの上限を付けた文字列（パス・クエリのキー）。
+// WHY 網の後に切る: 先に切ると、途中で切れたメールアドレスなどが網に一致せず断片が出る。
+function boundedFreeText() {
+  return freeText().transform(bound);
+}
+
 // リクエストログ（page_request / api_request）の形。項目と取り方は apps/frontend_customer/shared/request-log/request-log.ts。
 // 印（Issue #216）:
 //   - sensitive: url.query の値（検索語・メールアドレス・トークンなど利用者の入力）、referer（URL のクエリを含みうる）、
 //     client.address（接続元の IP アドレス。GDPR では個人データ）。
 //   - freeText: message と url.path（パスは利用者が決められ、/users/<メール> のような形がありうる）と url.query のキー。
-//   - そのまま: method・accept・content-type・user_agent.original・host（server.address）・x-request-id（http.request.id。
-//     応答ヘッダと突き合わせる相関 ID）・traceparent から作った trace の 3 つ（Cloud Trace との結び付けに要る）。
+//   - そのまま（長さの上限だけ。bounded）: accept・content-type・user_agent.original・host（server.address）・x-request-id
+//     （http.request.id。応答ヘッダと突き合わせる相関 ID）。url.path と url.query のキーは自由文の網の後に同じ上限で切る。
+//   - そのまま: method（Next が受け付けた HTTP メソッド）・traceparent から作った trace の 3 つ（形を検査した値。Cloud Trace との
+//     結び付けに要る）。
 function requestSchema<Name extends "page_request" | "api_request">(
   name: Name,
 ) {
@@ -163,23 +203,23 @@ function requestSchema<Name extends "page_request" | "api_request">(
     time: z.string(),
     http: z.object({
       request: z.object({
-        id: z.string(),
+        id: bounded(),
         method: z.string(),
         header: z.object({
           referer: sensitive(z.string()).nullable(),
-          accept: z.string().nullable(),
-          "content-type": z.string().nullable(),
+          accept: bounded().nullable(),
+          "content-type": bounded().nullable(),
         }),
         body: z.object({ size: z.number().nullable() }),
       }),
     }),
     url: z.object({
-      path: freeText(),
-      query: z.record(freeText(), sensitive(z.string())),
+      path: boundedFreeText(),
+      query: z.record(boundedFreeText(), sensitive(z.string())),
     }),
     client: z.object({ address: sensitive(z.string()).nullable() }),
-    user_agent: z.object({ original: z.string().nullable() }),
-    server: z.object({ address: z.string().nullable() }),
+    user_agent: z.object({ original: bounded().nullable() }),
+    server: z.object({ address: bounded().nullable() }),
     user: z.object({ id: z.null() }),
     "logging.googleapis.com/trace": z.string().optional(),
     "logging.googleapis.com/spanId": z.string().optional(),
@@ -269,8 +309,9 @@ export const LOG_EVENT_SCHEMAS = {
     error: errorField().optional(),
   }),
   // logger が出す行。failed_name は parse に失敗した種類の名前（一覧にある名前のときだけ）。
+  // WHY message も freeText: 呼び出し側も logger_error を emit できる（型で止めていない）。logger の固定の文言は網に一致しない。
   logger_error: z.object({
-    message: z.string(),
+    message: freeText(),
     event: z.object({
       name: z.literal("logger_error"),
       failed_name: z.enum(LOG_EVENT_NAMES).optional(),

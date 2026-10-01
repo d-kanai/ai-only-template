@@ -546,7 +546,7 @@ describe("logger.emit: error 項目", () => {
   test("Error は { type, message } にして出し、stack と一覧に無いプロパティは出さない", () => {
     const spies = spyConsole();
     class RepositoryError extends Error {
-      readonly params = [SENTINEL];
+      readonly detail = [SENTINEL];
       constructor(message: string) {
         super(message);
         this.name = "RepositoryError";

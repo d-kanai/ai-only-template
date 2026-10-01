@@ -13,6 +13,9 @@ import {
 // 行の出力（logger.emit を通した 1 行。番兵の値が出ないこと・一覧に無いキーが落ちること・parse の失敗）は logger.test.ts。
 // ここは印そのものの振る舞い（何を *** にし、何を残すか・時間の上限）を固定する。
 
+// 番兵の値。出てはいけない値に入れ、parse した結果の JSON に含まれないことを確かめる（正規表現に一致しない文字列）。
+const SENTINEL = "SENTINEL-PII";
+
 describe("LOG_EVENT_NAMES（event.name の一覧）", () => {
   // WHY 一覧を固定する: event.name は Logs Explorer で jsonPayload.event.name="<名前>" と引くための値で、名前を変えると
   //   保存したクエリ・アラートが黙って空になる。足す・変えるときはこのテストと ADR を同じ変更で直す。
@@ -225,5 +228,111 @@ describe("db_write の changes（before / after）と params", () => {
     expect(LOG_EVENT_SCHEMAS.db_write.parse({ ...failed, params: [] })).toEqual(
       { ...failed, params: [] },
     );
+  });
+});
+
+describe("error 項目（Error を { type, message } にする）", () => {
+  // WHY クエリのパラメータを抱えた例外の message を出さない（reviewer の指摘。Issue #216）: drizzle-orm の DrizzleQueryError の
+  //   message は「Failed query: <SQL>\nparams: <生の値>」で、Writer が db_write の行でマスクした後に同じ例外を投げ直し、
+  //   toProblemResponse の server_error にそのまま届く。どのライブラリの例外でも、query / params を持つ例外の message は生の値を
+  //   含みうるので、呼び出し側に依らず logger の中で *** にする（fail closed）。
+  test.each([
+    ["query と params", { query: "insert into todos", params: [SENTINEL] }],
+    ["params だけ", { params: [SENTINEL] }],
+    ["query だけ", { query: `select '${SENTINEL}'` }],
+  ])(
+    "%s を持つ Error は message を *** にし、生の値を出さない",
+    (_kind, extra) => {
+      const error = Object.assign(
+        new Error(`Failed query: insert into todos\nparams: ${SENTINEL}`),
+        extra,
+      );
+
+      const parsed = LOG_EVENT_SCHEMAS.server_error.parse({
+        message: "unexpected error",
+        event: { name: "server_error" },
+        error,
+      });
+
+      expect(parsed.error).toEqual({ type: "Error", message: "***" });
+      expect(JSON.stringify(parsed)).not.toContain(SENTINEL);
+    },
+  );
+
+  test("query / params を持たない Error の message は自由文として出す", () => {
+    expect(
+      LOG_EVENT_SCHEMAS.server_error.parse({
+        message: "unexpected error",
+        event: { name: "server_error" },
+        error: new Error("connection refused for a@b.io"),
+      }).error,
+    ).toEqual({ type: "Error", message: "connection refused for ***" });
+  });
+
+  // WHY type も自由文の網を通す: Error の name と { type } のオブジェクトの type は、投げた側が自由に決められる文字列。
+  test("type も自由文として網を通す（Error の name・{ type } のオブジェクト）", () => {
+    const named = Object.assign(new Error("x"), { name: "Err a@b.io" });
+    expect(
+      LOG_EVENT_SCHEMAS.server_error.parse({
+        message: "unexpected error",
+        event: { name: "server_error" },
+        error: named,
+      }).error,
+    ).toEqual({ type: "Err ***", message: "x" });
+    expect(
+      LOG_EVENT_SCHEMAS.server_error.parse({
+        message: "unexpected error",
+        event: { name: "server_error" },
+        error: { type: "c@d.io" },
+      }).error,
+    ).toEqual({ type: "***" });
+  });
+});
+
+describe("logger_error の message", () => {
+  // WHY 呼び出し側も logger_error を emit できるので、message は自由文の網を通す（logger の固定の文言は網に一致しない）。
+  test("message を自由文として網に通す", () => {
+    expect(
+      LOG_EVENT_SCHEMAS.logger_error.parse({
+        message: "failed for a@b.io",
+        event: { name: "logger_error" },
+      }).message,
+    ).toBe("failed for ***");
+  });
+});
+
+describe("印の無い文字列の項目の長さの上限（bounded）", () => {
+  // WHY 上限を付ける: x-request-id・host・accept・content-type・user-agent・パス・クエリのキーはクライアントが自由に決められ、
+  //   長さの制限が無い。parse を失敗させず（行を失わず）、256 文字で切って印を付ける。
+  test("256 文字を超える値は 256 文字で切り、...[truncated] を付ける。256 文字ちょうどは切らない", () => {
+    const long = "x".repeat(300);
+    const exact = "y".repeat(256);
+    const parsed = LOG_EVENT_SCHEMAS.page_request.parse({
+      message: "GET /",
+      event: { name: "page_request" },
+      time: "2026-01-01T00:00:00.000Z",
+      http: {
+        request: {
+          id: long,
+          method: "GET",
+          header: { referer: null, accept: long, "content-type": long },
+          body: { size: null },
+        },
+      },
+      url: { path: `/${long}`, query: { [long]: "v" } },
+      client: { address: null },
+      user_agent: { original: long },
+      server: { address: exact },
+      user: { id: null },
+    });
+    const cut = `${"x".repeat(256)}...[truncated]`;
+
+    expect(parsed.http.request.id).toBe(cut);
+    expect(parsed.http.request.header.accept).toBe(cut);
+    expect(parsed.http.request.header["content-type"]).toBe(cut);
+    expect(parsed.user_agent.original).toBe(cut);
+    expect(parsed.url.path).toBe(`/${"x".repeat(255)}...[truncated]`);
+    expect(Object.keys(parsed.url.query)).toEqual([cut]);
+    expect(parsed.server.address).toBe(exact);
   });
 });

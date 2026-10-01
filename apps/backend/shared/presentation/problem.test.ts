@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { DrizzleQueryError } from "drizzle-orm";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { DomainError } from "../domain/domain-error";
 import {
@@ -233,6 +234,33 @@ describe("toProblemResponse", () => {
       message: "unexpected error",
       event: { name: "server_error" },
       error: { type: "Error", message: "想定外" },
+    });
+  });
+
+  // WHY DB の例外の message を出さない（Issue #216 の reviewer の指摘）: Writer は db_write の行で params を *** にした後に同じ
+  //   DrizzleQueryError を投げ直し、Repository で捕まえられずにここへ届く。その message は「Failed query: <SQL>\nparams: <生の値>」で、
+  //   todos.title などの利用者の値を含む。logger（apps/shared/log-event.ts）が query / params を持つ例外の message を *** にする。
+  test("DrizzleQueryError（SQL とパラメータを持つ例外）の server_error の行には、パラメータの値も cause の message も出さない", () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const sentinel = "SENTINEL-TITLE";
+    const error = new DrizzleQueryError(
+      'insert into "todos" ("id", "title") values ($1, $2)',
+      ["0b9d6d4e-2f6c-4a8a-9b1e-123456789012", sentinel],
+      new Error(`duplicate key value (title)=(${sentinel})`),
+    );
+
+    toProblemResponse(error, request("/api/todos"));
+
+    const [line] = consoleError.mock.calls[0] as [string];
+    expect(line).not.toContain(sentinel);
+    expect(JSON.parse(line)).toEqual({
+      severity: "ERROR",
+      time: expect.any(String),
+      message: "unexpected error",
+      event: { name: "server_error" },
+      error: { type: "Error", message: "***" },
     });
   });
 
