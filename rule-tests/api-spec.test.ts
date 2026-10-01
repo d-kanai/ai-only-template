@@ -42,11 +42,21 @@ import { containsForbiddenWord } from "./feature-business-language";
 //       apps/backend/shared/presentation/ の api ファイルは対の対象外（今は無い）。
 //   以下は .feature（api-specs/<feature>/ の直下の *.feature）の中身の規則。行ごとに見る（行は 1 始まり。行の区切りは \r\n・\r・\n。
 //   vitest-cucumber は readline で読み、単独の \r でも行を分けるので同じにする。reviewer の指摘）:
-//   - api-spec-scenario-heading: `Scenario:` の見出し（`:` の後ろの前後の空白を除いた文字）が SCENARIO_HEADINGS（レスポンス /
-//     ソート / 検索 / 記録 / 副作用 / 異常系）のどれでもなければ違反。同じ見出しの 2 つ目以降も違反（1 つの .feature に 1 回）。
+//   - api-spec-scenario-heading: `Scenario:` の見出し（`:` の後ろの前後の空白を除いた文字）が SCENARIO_HEADINGS（作成 / 更新 /
+//     削除 / レスポンス / ソート / 検索 / 記録 / 副作用 / 異常系）のどれでもなければ違反。同じ見出しの 2 つ目以降も違反（1 つの
+//     .feature に 1 回）。
 //     WHY: API ごとに同じ観点の見出しで振る舞いを分けると、読む人がどの API でも同じ場所を拾い読みでき、観点の抜けも見出しで分かる。
-//       見出しは読み取り（レスポンス / ソート / 検索 / 異常系）と書き込み（レスポンス / 記録 / 副作用 / 異常系）の観点（ユーザー判断、
-//       2026-09-30 の work-logs）。該当の無い見出しは書かずに省く（見出しの有無・読み取りと書き込みの別は見ない）。
+//       見出しは読み取り（レスポンス / ソート / 検索 / 異常系）と書き込み（作成・更新・削除のどれか 1 つ / レスポンス / 記録 / 副作用 /
+//       異常系）の観点（ユーザー判断、2026-09-30 の work-logs。作成・更新・削除は Issue #249）。該当の無い見出しは書かずに省く。
+//   - api-spec-scenario-order（Issue #249）: 見出しが SCENARIO_HEADINGS の順に並んでいなければ、前の見出しより一覧で前に来る見出しの
+//     行を違反にする（一覧に無い見出しと同じ見出しの 2 つ目は数えない。api-spec-scenario-heading の違反なので）。
+//     WHY: どの API の仕様も同じ順で読める（書き込みならメインの変更 → レスポンス → 記録 → 副作用 → 異常系）。
+//   - api-spec-write-heading（Issue #249）: メインの変更の見出し（作成 / 更新 / 削除）が 2 つ以上なら 2 つ目以降の行、記録か副作用が
+//     あるのにメインの変更の見出しが無ければ最初の記録・副作用の行を違反にする。
+//     WHY: 書き込みの API の仕様で、対象の Todo 自身に起こること（メインの変更）と返る内容（レスポンス）を別の見出しに分ける
+//       （ユーザー判断 2026-10-01。以前は create の「レスポンス」に「未完了の Todo が作られて返る」「前後の空白は除かれる」が混ざって
+//       いた）。書き込みの API かどうかは記録・副作用の見出しで推定する（記録も副作用も無い書き込みの API はメインの変更が無くても
+//       通る。今の 4 つの書き込みの API はどれも記録を持つ）。メインの変更が 1 つの API に 2 つあるのは、1 つの操作の仕様として誤り。
 //   - api-spec-keyword: `Scenario Outline:` / `Scenario Template:` / `Rule:` / `Background:` / `Example:` / `Examples:` /
 //     `Scenarios:` の行と、`# language:` の行は違反。
 //     WHY: 形を「Feature の下に固定の見出しの Scenario と `*` の step」の 1 通りにし、見出しの一覧の検査を逃れる書き方（Example は
@@ -154,6 +164,8 @@ type ApiSpecRuleId =
   | "api-spec-placement"
   | "api-spec-pair"
   | "api-spec-scenario-heading"
+  | "api-spec-scenario-order"
+  | "api-spec-write-heading"
   | "api-spec-keyword"
   | "api-spec-tag"
   | "api-spec-step-star"
@@ -174,8 +186,11 @@ type ApiSpecViolation = { rule: ApiSpecRuleId; line?: number; note?: string };
 
 const API_SPECS_DIR = "apps/backend/api-specs/";
 
-// Scenario の見出しの固定の一覧（api-spec-scenario-heading）。WHY は冒頭の説明。
+// Scenario の見出しの固定の一覧（api-spec-scenario-heading）。並びは .feature に書く順（api-spec-scenario-order）。WHY は冒頭の説明。
 const SCENARIO_HEADINGS: readonly string[] = [
+  "作成",
+  "更新",
+  "削除",
   "レスポンス",
   "ソート",
   "検索",
@@ -301,21 +316,65 @@ const LINE_KINDS_WITHOUT_WORDING: ReadonlySet<FeatureLineKind> = new Set([
   "scenario",
 ]);
 
+// メインの変更（書き込みの API が対象の Todo 自身に起こすこと）の見出し（api-spec-write-heading）。WHY は冒頭の説明。
+const MUTATION_HEADINGS: ReadonlySet<string> = new Set([
+  "作成",
+  "更新",
+  "削除",
+]);
+
+// 書き込みの API だけが持つ見出し。あればメインの変更の見出しが要る（api-spec-write-heading）。
+const WRITE_ONLY_HEADINGS: ReadonlySet<string> = new Set(["記録", "副作用"]);
+
+// .feature の中の見出しの並び（行と名前）。一覧の順・メインの変更の数を、ファイルの見出しを読み終えてから見るために集める。
+type ScenarioHeading = { line: number; name: string };
+
 // `Scenario:` の見出しの違反（api-spec-scenario-heading）。seen に見出しを足す（同じ見出しの 2 つ目以降を違反にするため）。
 function headingViolations(
-  line: string,
-  lineNumber: number,
+  heading: ScenarioHeading,
   seen: Set<string>,
 ): ApiSpecViolation[] {
-  const name = line.slice(line.indexOf(":") + 1).trim();
-  const violates = !SCENARIO_HEADINGS.includes(name) || seen.has(name);
-  seen.add(name);
+  const violates =
+    !SCENARIO_HEADINGS.includes(heading.name) || seen.has(heading.name);
+  seen.add(heading.name);
   return violates
-    ? [{ rule: "api-spec-scenario-heading", line: lineNumber }]
+    ? [{ rule: "api-spec-scenario-heading", line: heading.line }]
     : [];
 }
 
-// .feature の中身の違反（行の順。同じ行なら見出し・キーワード・step・言葉の順）。
+// 見出しの並びの違反（api-spec-scenario-order・api-spec-write-heading）。
+// WHY 一覧に無い見出しと同じ見出しの 2 つ目を除く: api-spec-scenario-heading で違反になるので、ほかの規則で重ねて数えない。
+function headingSequenceViolations(
+  headings: readonly ScenarioHeading[],
+): ApiSpecViolation[] {
+  const seen = new Set<string>();
+  const firsts = headings.filter((heading) => {
+    const counted =
+      SCENARIO_HEADINGS.includes(heading.name) && !seen.has(heading.name);
+    seen.add(heading.name);
+    return counted;
+  });
+  const violations: ApiSpecViolation[] = [];
+  let furthest = -1;
+  for (const heading of firsts) {
+    const position = SCENARIO_HEADINGS.indexOf(heading.name);
+    if (position < furthest) {
+      violations.push({ rule: "api-spec-scenario-order", line: heading.line });
+    }
+    furthest = Math.max(furthest, position);
+  }
+  const mutations = firsts.filter((h) => MUTATION_HEADINGS.has(h.name));
+  for (const extra of mutations.slice(1)) {
+    violations.push({ rule: "api-spec-write-heading", line: extra.line });
+  }
+  const writeOnly = firsts.find((h) => WRITE_ONLY_HEADINGS.has(h.name));
+  if (mutations.length === 0 && writeOnly !== undefined) {
+    violations.push({ rule: "api-spec-write-heading", line: writeOnly.line });
+  }
+  return violations;
+}
+
+// .feature の中身の違反（行の順。同じ行なら見出し・キーワード・step・言葉・見出しの並び（順・メインの変更）の順）。
 function findFeatureContentViolations(source: string): ApiSpecViolation[] {
   // WHY \r\n・\r・\n のどれでも分ける: vitest-cucumber は readline で読み、単独の \r でも行を分ける（reviewer の指摘、Issue #219）。
   //   \n だけで分けると、\r で区切った行が 1 行に隠れて（Feature の行の後ろに続けると丸ごと見ない）検査を逃れる。CRLF の行末に \r が
@@ -323,6 +382,7 @@ function findFeatureContentViolations(source: string): ApiSpecViolation[] {
   const lines = source.split(/\r\n|\r|\n/);
   const violations: ApiSpecViolation[] = [];
   const seenHeadings = new Set<string>();
+  const headings: ScenarioHeading[] = [];
   // 今いる Scenario（行と `*` の数）。Scenario の外（Feature の直下・Background などの後）は undefined。
   let scenario: { line: number; stars: number } | undefined;
   const closeScenario = () => {
@@ -343,7 +403,12 @@ function findFeatureContentViolations(source: string): ApiSpecViolation[] {
     }
     if (kind === "scenario") {
       scenario = { line: lineNumber, stars: 0 };
-      violations.push(...headingViolations(line, lineNumber, seenHeadings));
+      const heading = {
+        line: lineNumber,
+        name: line.slice(line.indexOf(":") + 1).trim(),
+      };
+      headings.push(heading);
+      violations.push(...headingViolations(heading, seenHeadings));
     }
     if (kind === "star" && scenario !== undefined) {
       scenario.stars += 1;
@@ -354,7 +419,9 @@ function findFeatureContentViolations(source: string): ApiSpecViolation[] {
     }
   });
   closeScenario();
-  // WHY 並べ直す: `*` の無い Scenario の違反は、次の Scenario（かファイル末尾）で分かるので後から積まれる。
+  violations.push(...headingSequenceViolations(headings));
+  // WHY 並べ直す: `*` の無い Scenario の違反は、次の Scenario（かファイル末尾）で分かるので後から積まれる。見出しの並びの違反も、
+  //   見出しを読み終えてから積む。
   return violations.sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
 }
 
@@ -1002,10 +1069,12 @@ describe("api ファイルと API 仕様の対（findPairViolations）", () => {
 describe(".feature の中身（findApiSpecViolations）: must pass", () => {
   it.each([
     [
-      "固定の見出し 6 つの Scenario と `*` の step（見出しの レスポンス は禁止語でも可）",
+      "固定の見出しを一覧の順に並べた Scenario と `*` の step（見出しの レスポンス は禁止語でも可）",
       source(
         "Feature: Todo を作る",
         "",
+        "  Scenario: 作成",
+        "    * タイトルを渡すと、未完了の Todo が作られる",
         "  Scenario: レスポンス",
         '    * タイトル "牛乳を買う" で作ると、未完了の Todo が作られる',
         "",
@@ -1078,6 +1147,32 @@ describe(".feature の中身（findApiSpecViolations）: must pass", () => {
         "    * Todo が作られる",
         "",
       ].join("\r\n"),
+    ],
+    [
+      "書き込みの形（更新 / レスポンス / 記録 / 副作用 / 異常系）",
+      source(
+        "Feature: x",
+        "  Scenario: 更新",
+        "    * a",
+        "  Scenario: レスポンス",
+        "    * b",
+        "  Scenario: 記録",
+        "    * c",
+        "  Scenario: 副作用",
+        "    * d",
+        "  Scenario: 異常系",
+        "    * e",
+      ),
+    ],
+    [
+      "記録・副作用の無い書き込み（削除だけ）と、見出しを省いた順（削除 → 異常系）",
+      source(
+        "Feature: x",
+        "  Scenario: 削除",
+        "    * a",
+        "  Scenario: 異常系",
+        "    * b",
+      ),
     ],
   ])("%s は違反なし", (_name, text) => {
     expect(findApiSpecViolations(FEATURE, text)).toEqual([]);
@@ -1165,7 +1260,7 @@ describe(".feature の中身（findApiSpecViolations）: must reject", () => {
         "  Scenario: レスポンス",
         "    # * コメントの中の *",
         "    説明だけ",
-        "  Scenario: 記録",
+        "  Scenario: ソート",
         "    Given a",
         "  Scenario: 異常系",
       ),
@@ -1210,7 +1305,7 @@ describe(".feature の中身（findApiSpecViolations）: must reject", () => {
       "`*` の step の変更の記録（Writer が自動で残す技術の仕組み。変更の記録・変更履歴・change log の区切りと単数形）",
       source(
         "Feature: x",
-        "  Scenario: 記録",
+        "  Scenario: 異常系",
         "    * 変更の記録に作成が残る",
         "    * 変更履歴は増えない",
         "    * change-log が 1 件足される",
@@ -1228,7 +1323,7 @@ describe(".feature の中身（findApiSpecViolations）: must reject", () => {
       source(
         "Feature: x",
         "  Rule: レスポンス",
-        "  Scenario: 記録",
+        "  Scenario: 異常系",
         "    * a",
         "    Given DB が空",
       ),
@@ -1263,6 +1358,109 @@ describe(".feature の中身（findApiSpecViolations）: must reject", () => {
         { rule: "api-spec-tag", line: 1 },
         { rule: "api-spec-tag", line: 3 },
         { rule: "api-spec-tag", line: 6 },
+      ],
+    ],
+    [
+      "メインの変更（作成 / 更新 / 削除）の見出しが無いのに、記録・副作用がある（最初の 1 つの行）",
+      source(
+        "Feature: x",
+        "  Scenario: レスポンス",
+        "    * a",
+        "  Scenario: 記録",
+        "    * b",
+        "  Scenario: 副作用",
+        "    * c",
+      ),
+      [{ rule: "api-spec-write-heading", line: 4 }],
+    ],
+    [
+      "副作用だけがあり、メインの変更の見出しが無い",
+      source("Feature: x", "  Scenario: 副作用", "    * a"),
+      [{ rule: "api-spec-write-heading", line: 2 }],
+    ],
+    [
+      "メインの変更の見出しが 2 つ以上（作成と更新と削除。2 つ目と 3 つ目の行）",
+      source(
+        "Feature: x",
+        "  Scenario: 作成",
+        "    * a",
+        "  Scenario: 更新",
+        "    * b",
+        "  Scenario: 削除",
+        "    * c",
+      ),
+      [
+        { rule: "api-spec-write-heading", line: 4 },
+        { rule: "api-spec-write-heading", line: 6 },
+      ],
+    ],
+    [
+      "一覧の順に並んでいない見出し（レスポンスの後の作成・異常系の後の記録）",
+      source(
+        "Feature: x",
+        "  Scenario: レスポンス",
+        "    * a",
+        "  Scenario: 作成",
+        "    * b",
+        "  Scenario: 異常系",
+        "    * c",
+        "  Scenario: 記録",
+        "    * d",
+      ),
+      [
+        { rule: "api-spec-scenario-order", line: 4 },
+        { rule: "api-spec-scenario-order", line: 8 },
+      ],
+    ],
+    [
+      "同じ見出しの 2 つ目は見出しの違反だけ（順・メインの変更の違反にしない）",
+      source(
+        "Feature: x",
+        "  Scenario: 更新",
+        "    * a",
+        "  Scenario: 更新",
+        "    * b",
+      ),
+      [{ rule: "api-spec-scenario-heading", line: 4 }],
+    ],
+    [
+      "同じ見出しの 2 つ目が一覧で前でも、順の違反にしない（更新 → レスポンス → 更新）",
+      source(
+        "Feature: x",
+        "  Scenario: 更新",
+        "    * a",
+        "  Scenario: レスポンス",
+        "    * b",
+        "  Scenario: 更新",
+        "    * c",
+      ),
+      [{ rule: "api-spec-scenario-heading", line: 6 }],
+    ],
+    [
+      "一覧に無い見出しは順に数えない（異常系 → 一覧）",
+      source(
+        "Feature: x",
+        "  Scenario: 異常系",
+        "    * a",
+        "  Scenario: 一覧",
+        "    * b",
+      ),
+      [{ rule: "api-spec-scenario-heading", line: 4 }],
+    ],
+    [
+      "順は直前の見出しだけでなく、それまでで一覧の最も後ろの見出しと比べる（異常系 → 作成 → レスポンス）",
+      source(
+        "Feature: x",
+        "  Scenario: 異常系",
+        "    * a",
+        "  Scenario: 作成",
+        "    * b",
+        "  Scenario: レスポンス",
+        "    * c",
+      ),
+      [
+        { rule: "api-spec-scenario-order", line: 4 },
+        { rule: "api-spec-scenario-order", line: 6 },
       ],
     ],
   ])("%s は違反", (_name, text, expected) => {

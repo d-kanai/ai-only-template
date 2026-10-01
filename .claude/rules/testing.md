@@ -107,7 +107,21 @@ API 1 つ（`apps/backend/features/<feature>/internal/presentation/<api>.api.ts`
 - 役割: 人が読む仕様は API 仕様（1 API）・画面仕様（1 画面）・API ジャーニー（業務の流れ）・E2E（画面込み）の 4 つにしていく（ユーザー判断 2026-09-30）。presentation の単体テスト（InMemory）は残す（実装の検証と mutation の担い手）。同じ振る舞いを 2 か所で確かめる重複は、役割が違うので許す。
 - 置き場所: `apps/backend/api-specs/<feature>/` の直下に `<api>.feature` と `<api>.api-spec.test.ts`（`<api>` は api ファイルの名前から `.api.ts` を除いたもの）、step が共有する補助は同じディレクトリの `support.ts`（名前は固定）だけ（`api-spec-placement`）。WHY: feature ごとに API 仕様を 1 か所で一覧でき、実 DB の import の例外（`rule-tests/test-doubles.test.ts` の `db-tests-in-infra-only`）もここに絞れる。API 仕様だけの補助は `apps/backend/test-support/`（テストダブル・DB 基盤・テストデータビルダー。ほかのテストからも使うもの）に置かない。
 - 対: presentation の api ファイル 1 つごとに `.feature` と step の両方を置く。API を足したら仕様も足し、API を消した・改名したら仕様も消す・改名する（api の無い仕様も違反。`api-spec-pair`）。
-- `.feature` の形: `Feature:` の下に `Scenario:` を並べる。見出しは固定の一覧 `レスポンス` / `ソート` / `検索` / `記録` / `副作用` / `異常系` のどれかで、1 つの `.feature` に 1 回ずつ（`api-spec-scenario-heading`）。読み取りの API は レスポンス / ソート / 検索 / 異常系、書き込みの API は レスポンス / 記録 / 副作用 / 異常系を使い、該当の無い見出しは書かずに省く（見出しの有無と読み取り・書き込みの別は検査しない）。`Scenario Outline` / `Scenario Template` / `Rule` / `Background` / `Example` / `Examples` / `Scenarios` と `# language:` は使わない（`api-spec-keyword`）。`@` で始まるタグの行も使わない（`api-spec-tag`）。
+- `.feature` の形: `Feature:` の下に `Scenario:` を並べる。見出しは固定の一覧 `作成` / `更新` / `削除` / `レスポンス` / `ソート` / `検索` / `記録` / `副作用` / `異常系` のどれかで、1 つの `.feature` に 1 回ずつ（`api-spec-scenario-heading`）、この一覧の順に並べる（`api-spec-scenario-order`）。該当の無い見出しは書かずに省く。メインの変更（作成 / 更新 / 削除）の見出しは 1 つまでで、記録か副作用があれば 1 つ要る（`api-spec-write-heading`。Issue #249。ADR `docs/adr/quality/20261001-api-spec-mutation-heading.md`）。`Scenario Outline` / `Scenario Template` / `Rule` / `Background` / `Example` / `Examples` / `Scenarios` と `# language:` は使わない（`api-spec-keyword`）。`@` で始まるタグの行も使わない（`api-spec-tag`）。API の種類ごとの見出し（この順に書く）:
+
+    | API | 見出し | 書くこと |
+    | --- | --- | --- |
+    | 読み取り | `レスポンス` | 返る内容（項目・含まれるもの） |
+    | 読み取り | `ソート` | 並び順 |
+    | 読み取り | `検索` | 絞り込みの条件 |
+    | 読み取り | `異常系` | 失敗と、そのときに伝えられること |
+    | 書き込み | `作成` / `更新` / `削除` のどれか 1 つ（メインの変更） | 対象の Todo 自身が操作の後どうなるか（規則を含む。step は保存された行を見る） |
+    | 書き込み | `レスポンス` | 返る内容 |
+    | 書き込み | `記録` | 対象の Todo のほかに残るもの（完了の履歴） |
+    | 書き込み | `副作用` | 通知など、外へ出ていくもの |
+    | 書き込み | `異常系` | 拒否と、そのときに何も変わらないこと |
+
+  - WHY メインの変更とレスポンスを分ける（Issue #249）: 「作られる」と「返る」を 1 つの見出しに混ぜると、どちらの振る舞いの仕様か読み分けられない（ユーザー判断 2026-10-01）。読み取り・書き込みの別そのものは検査しない（記録・副作用の有無で書き込みと推定する）。
   - WHY 固定の見出し: どの API の仕様も同じ観点の見出しで拾い読みでき、観点の抜けが見出しで分かる。`Example` は `Scenario` の別名で見出しの検査を逃れられる。
   - WHY `# language:`: vitest-cucumber 8.0.0 の parser は `#` の行を読み飛ばし、言語は `loadFeature` の第 2 引数（`{ language }`）と `setVitestCucumberConfiguration` で決まる（reviewer の実測。`language: "ja"` と `機能:` / `シナリオ:` / `前提` で見出し・キーワード・step の 3 規則を同時にすり抜けた）。その口は step の実装の `api-spec-load-feature` で止める。`# language:` の行自体は実行に効かないが、Gherkin の慣習では言語の指定なので、別の言語のキーワードで書く意図を持ち込ませない。
   - WHY タグを使わない: 既定の excludeTags（`@ignore` など）の付いた Scenario は skip になり、仕様が黙って外れたまま緑になる（reviewer の実測）。振る舞いは見出しで分けるので、タグは要らない。

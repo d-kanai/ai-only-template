@@ -1,11 +1,13 @@
 # Todo を削除する API の仕様（Issue #219）。step の実装は対の delete-todo.api-spec.test.ts。
 # 書き方（固定の見出し・`*` だけ・1 行 = 1 振る舞い・業務の言葉だけ）は list-todos.feature の冒頭と同じ。
+#   見出しの分け方（作成・更新・削除 / レスポンス / 記録）は create-todo.feature の冒頭と同じ。
 #   削除しても通知などは起きないので、見出し「副作用」は置かない。
 Feature: Todo を削除する
+  Scenario: 削除
+    * 削除した Todo は無くなり、ほかの Todo は残る
   Scenario: レスポンス
     * Todo を削除すると、何も返さずに成功を伝える
   Scenario: 記録
-    * 削除した Todo は無くなり、ほかの Todo は残る
     * 削除した Todo の完了の履歴も無くなる
   Scenario: 異常系
     * 存在しない Todo は、存在しないと伝えられる

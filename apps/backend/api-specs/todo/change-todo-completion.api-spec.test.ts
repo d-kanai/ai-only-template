@@ -102,6 +102,40 @@ const MISSING_ID = "00000000-0000-4000-8000-000000000000";
 const feature = await loadFeature("./change-todo-completion.feature");
 
 describeFeature(feature, ({ Scenario }) => {
+  // WHY 更新の step は保存された Todo の行を見る: 更新 = 完了かどうかを変える Todo 自身の振る舞い（Issue #249）。返る内容は
+  //   レスポンスの step、完了の履歴は記録の step が見る。
+  Scenario("更新", ({ And }) => {
+    // WHY ほかの Todo を置く: 条件（where）の欠けた UPDATE ですべての Todo を完了にする誤りを見分ける。作成日時を古くして、
+    //   行の順（作成日時の順）で先頭に来るようにする。
+    And(
+      "未完了の Todo を完了にすると、完了として保存され、ほかの Todo は変わらない",
+      async () => {
+        const bread = await aTodo(database.db)
+          .title("パンを買う")
+          .createdAt(new Date("2026-09-01T00:00:00.000Z"))
+          .build();
+        const milk = await uncompletedTodo("牛乳を買う");
+
+        await putCompletion(milk.id, { completed: true });
+
+        await expect(todoRows(database.db)).resolves.toStrictEqual([
+          todoRowOf(bread),
+          todoRowOf({ ...milk, completed: true }),
+        ]);
+      },
+    );
+
+    And("完了の Todo を未完了に戻すと、未完了として保存される", async () => {
+      const milk = await completedTodo("牛乳を買う");
+
+      await putCompletion(milk.id, { completed: false });
+
+      await expect(todoRows(database.db)).resolves.toStrictEqual([
+        todoRowOf({ ...milk, completed: false }),
+      ]);
+    });
+  });
+
   Scenario("レスポンス", ({ And }) => {
     And("未完了の Todo を完了にすると、完了になった Todo が返る", async () => {
       const milk = await uncompletedTodo("牛乳を買う");
@@ -144,23 +178,6 @@ describeFeature(feature, ({ Scenario }) => {
   });
 
   Scenario("記録", ({ And }) => {
-    // WHY ほかの Todo を置く: 条件（where）の欠けた UPDATE ですべての Todo を完了にする誤りを見分ける。作成日時を古くして、
-    //   行の順（作成日時の順）で先頭に来るようにする。
-    And("完了にしたことが保存され、ほかの Todo は変わらない", async () => {
-      const bread = await aTodo(database.db)
-        .title("パンを買う")
-        .createdAt(new Date("2026-09-01T00:00:00.000Z"))
-        .build();
-      const milk = await uncompletedTodo("牛乳を買う");
-
-      await putCompletion(milk.id, { completed: true });
-
-      await expect(todoRows(database.db)).resolves.toStrictEqual([
-        todoRowOf(bread),
-        todoRowOf({ ...milk, completed: true }),
-      ]);
-    });
-
     // 変更の記録は、todos の completed の update と、完了の履歴の insert（全列）の 2 件だけ（前提はビルダーで入れたので記録を残さない。
     //   .feature には書かない。create-todo.api-spec.test.ts の冒頭）。
     And("完了にすると、完了の履歴に「完了」が 1 件足される", async () => {
