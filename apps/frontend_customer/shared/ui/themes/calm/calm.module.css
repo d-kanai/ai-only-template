@@ -1,74 +1,112 @@
 /*
  * calm テーマの部品ごとの見た目（Issue #292）。calm.theme.ts が Mantine の Styles API（theme.components の classNames）で
  * 各部品の内側の要素（root・input・label など）に当てる。
- * 方針: 白い面に柔らかい影、大きめの角丸、落ち着いた緑。余白を広めに取り、読みやすさを優先する。
- * 色・角丸・影は Mantine の CSS 変数（--mantine-*）を使い、値は calm.theme.ts のテーマの値から来る。
+ * 方針（今どきの業務アプリの見た目。Linear・Vercel 風）:
+ *   - 面は白で、影ではなく 1px の薄い線で区切る（影はごく薄く 1 段だけ）。
+ *   - 文字は濃いグレー（純粋な黒にしない）、見出しは字間を詰める、補足は小さく薄く。
+ *   - 緑（emerald）はボタン・チェック・フォーカスなど、操作できるところにだけ使う。
+ *   - 一覧の行は区切り線で並べ、カーソルを乗せたときだけ背景と削除の操作を見せる（普段の画面を静かにする）。
+ * 色・角丸は Mantine の CSS 変数（--mantine-*）で、値は calm.theme.ts のテーマの値から来る。
  */
 
-/* 画面の外枠（Container の root）。上下に余白を取り、中身を中央に寄せる。 */
+/* 画面の外枠（Container の root）。上を広めに空けて、中身を中央の細い列にする。 */
 .container {
-  padding-block: var(--mantine-spacing-xl);
+  padding-block: 64px var(--mantine-spacing-xl);
+  max-width: 640px;
 }
 
-/* 見出し（Title の root）。文字色を少し落とし、字間を詰めて柔らかくする。 */
+/* 見出し（Title の root）。大きすぎず、字間を詰めて締まった印象にする。 */
 .title {
-  color: var(--mantine-color-teal-9);
-  letter-spacing: -0.01em;
-  margin-block-end: var(--mantine-spacing-md);
+  color: #111827;
+  font-size: 28px;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+  margin-block-end: var(--mantine-spacing-lg);
 }
 
-/* フォーム・リストの面（Paper の root）。 */
+/* 面（Paper の root）。影ではなく細い線で区切る。 */
 .paper {
-  margin-block-end: var(--mantine-spacing-md);
   background: var(--mantine-color-white);
-  box-shadow: var(--mantine-shadow-sm);
-  padding: var(--mantine-spacing-lg);
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 2px rgb(17 24 39 / 4%);
+  padding: var(--mantine-spacing-md);
+  margin-block-end: var(--mantine-spacing-md);
 }
 
-/* 入力のラベル（TextInput の label）。小さめで、色を薄くする。 */
+/*
+ * フォームの面（Paper を form として描いたもの）は、入力とボタンを 1 行に並べる。
+ * WHY 要素の種類で分ける: 画面は Paper を置くだけで、フォームか一覧かの見た目の違いはテーマで決める。
+ */
+form.paper {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--mantine-spacing-sm);
+}
+
+/* 入力の外枠（TextInput の root）。フォームの中では残りの幅をすべて使う。 */
+.inputRoot {
+  flex: 1;
+}
+
+/* 入力のラベル（TextInput の label）。小さく、少し薄くする。 */
 .inputLabel {
-  color: var(--mantine-color-gray-7);
-  font-size: var(--mantine-font-size-sm);
+  color: #374151;
+  font-size: 13px;
+  font-weight: 500;
   margin-block-end: 6px;
 }
 
-/* 入力欄（TextInput の input）。背景を薄い灰色にし、フォーカスで緑の枠にする。 */
-/* 入力の外枠（TextInput の root）。下のボタンとの間を空ける。 */
-.inputRoot {
-  margin-block-end: var(--mantine-spacing-md);
-}
-
+/* 入力欄（TextInput の input）。高さをボタンにそろえ、フォーカスで緑の輪を出す。 */
 .input {
-  background: var(--mantine-color-gray-0);
-  border-color: var(--mantine-color-gray-2);
+  height: 36px;
+  border-color: #d1d5db;
+  background: var(--mantine-color-white);
+  transition:
+    border-color 120ms,
+    box-shadow 120ms;
 }
 
 .input:focus {
-  border-color: var(--mantine-color-teal-5);
+  border-color: var(--mantine-color-emerald-5);
+  box-shadow: 0 0 0 3px rgb(16 185 129 / 18%);
 }
 
-/* ボタン（Button の root）。 */
+/* ボタン（Button の root）。高さを入力にそろえ、押したときに少し沈む。 */
 .button {
+  height: 36px;
   font-weight: 600;
+  letter-spacing: 0.01em;
+  transition:
+    background-color 120ms,
+    transform 80ms;
 }
 
-/* 一覧（List の root と各行）。行は区切り線で分けたカードにする。 */
+.button:active {
+  transform: translateY(1px);
+}
+
+/* 一覧（List の root と各行）。面いっぱいに行を並べる。 */
 .list {
   list-style: none;
   padding: 0;
-  margin: 0;
+  margin: calc(var(--mantine-spacing-md) * -1);
 }
 
 .listItem {
-  border-block-end: 1px solid var(--mantine-color-gray-2);
-  padding-block: var(--mantine-spacing-sm);
+  border-block-end: 1px solid #f3f4f6;
+  padding: 10px var(--mantine-spacing-md);
+  transition: background-color 120ms;
 }
 
 .listItem:last-child {
   border-block-end: none;
 }
 
-/* 行の中身（List.Item の itemLabel）。チェック・タイトル・日時・削除を横に並べる。 */
+.listItem:hover {
+  background: #f9fafb;
+}
+
+/* 行の中身（List.Item の itemWrapper・itemLabel）。チェック・タイトル・日時・削除を横に並べる。 */
 .listItemLabel {
   display: flex;
   align-items: center;
@@ -76,23 +114,72 @@
   width: 100%;
 }
 
-/* リンク（Anchor の root）。 */
-.anchor {
-  color: var(--mantine-color-teal-8);
-  flex: 1;
+/*
+ * 行の削除ボタンは、普段は文字だけの控えめなボタンにし、行にカーソルを乗せたとき・フォーカスしたときだけ見せる。
+ * WHY 行の中だけ変える: 同じ Button でも、フォームの送信は主な操作、行の削除は従の操作。画面は Button を置くだけなので、
+ *   置かれた場所（一覧の行の中）で見た目を分けるのはテーマの仕事にする。
+ */
+.listItem .button {
+  height: 28px;
+  padding-inline: 10px;
+  background: transparent;
+  color: #6b7280;
+  font-weight: 500;
+  opacity: 0;
 }
 
-/* 補足の文字（Text の root。作成日時・読み込み中）。 */
+.listItem:hover .button,
+.listItem .button:focus-visible {
+  opacity: 1;
+}
+
+.listItem .button:hover {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+/* チェックボックス（Checkbox の input と label）。細い枠にする。 */
+.checkbox {
+  border-color: #d1d5db;
+  cursor: pointer;
+}
+
+.checkboxLabel {
+  color: #374151;
+  font-size: 14px;
+}
+
+/* リンク（Anchor の root）。行のタイトルは本文の色で、カーソルを乗せたときだけ緑にする。 */
+.anchor {
+  color: #111827;
+  font-size: 14px;
+  font-weight: 500;
+  flex: 1;
+  transition: color 120ms;
+}
+
+.anchor:hover {
+  color: var(--mantine-color-emerald-7);
+}
+
+/* 完了した行は、タイトルに取り消し線を引いて薄くする（チェックの状態から CSS だけで決める）。 */
+.listItem:has(input:checked) .anchor {
+  color: #9ca3af;
+  text-decoration: line-through;
+}
+
 /*
+ * 補足の文字（Text の root。作成日時・読み込み中）。小さく薄く、数字の幅をそろえる。
  * :not(a): Mantine の Anchor は内部で Text として描かれ、Text の classNames も付く。リンクの見た目（.anchor）を補足の文字の
  * 見た目で上書きしないよう、リンクを除く。
  */
 .text:not(a) {
-  color: var(--mantine-color-gray-6);
-  font-size: var(--mantine-font-size-sm);
+  color: #9ca3af;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* エラー（Alert の root）。 */
 .alert {
-  margin-block: var(--mantine-spacing-md);
+  margin-block-end: var(--mantine-spacing-md);
 }
