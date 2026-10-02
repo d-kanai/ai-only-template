@@ -5,7 +5,7 @@ import { env } from "@repo/shared/env";
 import { sql } from "drizzle-orm";
 import { Client } from "pg";
 import { describe, expect, test, vi } from "vitest";
-import { TestDatabase } from "./database";
+import { TestDatabase, TestSchemas } from "./database";
 
 // 実 Postgres（compose.yaml）に対して実行する。
 describe("TestDatabase.create", () => {
@@ -124,9 +124,9 @@ describe("TestDatabase.create", () => {
 });
 
 // 実 Postgres（compose.yaml）に対して実行する。
-// WHY 接頭辞を "test_" にせずテストごとに変える: TestDatabase.cleanupSchemas("test_") をここで呼ぶと、並列に動いている
+// WHY 接頭辞を "test_" にせずテストごとに変える: TestSchemas.cleanup("test_") をここで呼ぶと、並列に動いている
 //   他のテストファイルのスキーマまで消してしまう。このテストだけが作るスキーマの接頭辞で確かめる。
-describe("TestDatabase.cleanupSchemas", () => {
+describe("TestSchemas.cleanup", () => {
   // 後始末する側の設定。接続先は単体テストと同じ DB で、Stryker の worker の外として動かす。
   const options = { databaseUrl: env.DATABASE_URL, insideStrykerWorker: false };
 
@@ -153,13 +153,13 @@ describe("TestDatabase.cleanupSchemas", () => {
   // test_ で始めておく: テストが途中で失敗して残っても、次の実行の globalSetup が消す。
   //   "test_cleanup_" の "l" は 16 進に無い文字なので、TestDatabase.create のスキーマ（test_<16 進 32 桁>）とは重ならない。
   function uniquePrefix(): string {
-    return `${TestDatabase.schemaPrefix()}cleanup_${randomUUID().replaceAll("-", "")}_`;
+    return `${TestSchemas.prefix()}cleanup_${randomUUID().replaceAll("-", "")}_`;
   }
 
   test("TestDatabase.create が作るスキーマの接頭辞は test_", () => {
     // given: 前提なし
     // when
-    const prefix = TestDatabase.schemaPrefix();
+    const prefix = TestSchemas.prefix();
 
     // then
     expect(prefix).toBe("test_");
@@ -175,7 +175,7 @@ describe("TestDatabase.cleanupSchemas", () => {
     });
 
     // when
-    const dropped = await TestDatabase.cleanupSchemas(options, prefix);
+    const dropped = await TestSchemas.cleanup(options, prefix);
 
     // then
     expect([...dropped].sort()).toEqual([`${prefix}a`, `${prefix}b`]);
@@ -190,7 +190,7 @@ describe("TestDatabase.cleanupSchemas", () => {
     await withClient((client) => client.query(`create schema ${lookalike}`));
     try {
       // when
-      const dropped = await TestDatabase.cleanupSchemas(options, prefix);
+      const dropped = await TestSchemas.cleanup(options, prefix);
 
       // then
       expect(dropped).toEqual([]);
@@ -210,7 +210,7 @@ describe("TestDatabase.cleanupSchemas", () => {
     await withClient((client) => client.query(`create schema ${prefix}a`));
     try {
       // when
-      const dropped = await TestDatabase.cleanupSchemas(
+      const dropped = await TestSchemas.cleanup(
         { ...options, insideStrykerWorker: true },
         prefix,
       );
@@ -221,7 +221,7 @@ describe("TestDatabase.cleanupSchemas", () => {
         `${prefix}a`,
       ]);
     } finally {
-      await TestDatabase.cleanupSchemas(options, prefix);
+      await TestSchemas.cleanup(options, prefix);
     }
   });
 
@@ -232,13 +232,13 @@ describe("TestDatabase.cleanupSchemas", () => {
     const end = vi.spyOn(Client.prototype, "end");
     try {
       // when
-      await TestDatabase.cleanupSchemas(options, uniquePrefix());
+      await TestSchemas.cleanup(options, uniquePrefix());
 
       // then
       expect(end).toHaveBeenCalledTimes(1);
 
       // when
-      await TestDatabase.cleanupSchemas(
+      await TestSchemas.cleanup(
         { ...options, insideStrykerWorker: true },
         uniquePrefix(),
       );
@@ -253,7 +253,7 @@ describe("TestDatabase.cleanupSchemas", () => {
   test("Postgres に接続できなければ、起動を促すエラーで失敗し、元の接続エラーを cause に残す", async () => {
     // given: 前提なし（接続できない URL を渡す）
     // when
-    const promise = TestDatabase.cleanupSchemas(
+    const promise = TestSchemas.cleanup(
       {
         databaseUrl: "postgresql://u:p@127.0.0.1:1/x",
         insideStrykerWorker: false,

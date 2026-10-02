@@ -111,14 +111,14 @@ export class TodoBuilder {
       createdAt,
       statusChanges:
         this.specified.statusChanges ??
-        TodoBuilder.defaultStatusChanges(completed, createdAt),
+        this.defaultStatusChanges(completed, createdAt),
     };
   }
 
   // 履歴を指定しないときの完了の履歴。作成時の未完了の 1 件、完了なら作成日時の完了をもう 1 件。
   // WHY この規則: 不変条件
   //   （履歴は 1 件以上・作成日時より前にならない・最後の completed が今の値）を満たす最小の履歴で、前提の Todo を正しい Todo にする。
-  private static defaultStatusChanges(
+  private defaultStatusChanges(
     completed: boolean,
     createdAt: Date,
   ): BuiltTodoStatusChange[] {

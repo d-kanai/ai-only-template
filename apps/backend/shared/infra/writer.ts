@@ -236,13 +236,13 @@ export class PostgresWriter implements Writer {
       ({ result, entries } = await statement());
       await ChangeRecords.recordChange(this.tx, entries);
     } catch (error) {
-      const failure = PostgresWriter.failureFields(error);
+      const failure = this.failureFields(error);
       logger.emit({
         message: "db write failed",
         event: {
           name: "db_write",
           phase: "failed",
-          duration_ms: PostgresWriter.elapsedMs(startedAt),
+          duration_ms: this.elapsedMs(startedAt),
         },
         db: {
           ...db,
@@ -265,11 +265,11 @@ export class PostgresWriter implements Writer {
       event: {
         name: "db_write",
         phase: "done",
-        duration_ms: PostgresWriter.elapsedMs(startedAt),
+        duration_ms: this.elapsedMs(startedAt),
       },
       db,
       ...rows,
-      changes: PostgresWriter.loggedChanges(table, entries),
+      changes: this.loggedChanges(table, entries),
     });
     return result;
   }
@@ -282,17 +282,17 @@ export class PostgresWriter implements Writer {
   // WHY 側ごとの「列 → 値」にする（記録の「列 → { before, after }」のまま出さない）: マスクを行（列 → 値）の 1 つの関数（ColumnClassifier.maskRow）で
   //   済ませ、Logs Explorer で jsonPayload.changes.after.completed のように側と列で引ける。
   // WHY table（Writer が書いた表）でマスクする: 記録はすべてこの表の行（1 文 = 1 つの表）。分類は表のオブジェクトで引く。
-  private static loggedChanges(table: Table, entries: readonly ChangeEntry[]) {
+  private loggedChanges(table: Table, entries: readonly ChangeEntry[]) {
     return entries.map(({ tableName, rowId, operation, changes }) => ({
       table: tableName,
       row_id: rowId,
       operation,
-      before: PostgresWriter.maskedSide(table, changes, "before"),
-      after: PostgresWriter.maskedSide(table, changes, "after"),
+      before: this.maskedSide(table, changes, "before"),
+      after: this.maskedSide(table, changes, "after"),
     }));
   }
 
-  private static maskedSide(
+  private maskedSide(
     table: Table,
     changes: Changes,
     side: "before" | "after",
@@ -321,7 +321,9 @@ export class PostgresWriter implements Writer {
   //   渡すのは組み立ての誤りで、黙って別の値を Writer として使わせない。英語: 開発者向けのエラー（Issue #116）。
   // WHY static メソッドの名前を of にする: Repository の書き込みが Writer を通ることを rule-tests/persistence.test.ts の
   //   writes-through-writer が `PostgresWriter.of(` の形で見る。
-  static of(tx: Transaction): Writer {
+  // WHY 戻り値の型を PostgresWriter にする（以前は interface の Writer）: static を置いてよいのは自分のクラスを返すファクトリだけ
+  //   （規則 no-static-in-instance-class。Issue #300）。取り出したものは tx そのもの（PostgresWriter）で、型を広げても値は変わらない。
+  static of(tx: Transaction): PostgresWriter {
     if (!(tx instanceof PostgresWriter)) {
       throw new Error(
         "the transaction was not started by PostgresTransactionRunner",
@@ -345,7 +347,7 @@ export class PostgresWriter implements Writer {
   //   制約かはこの 2 つで引く。どちらも DB が決める名前・コードで、入力値を含まない。文字列でないとき（想定外）は出さない。
   // WHY cause が Error でなければ DrizzleQueryError の name（type）と params だけを出す: drizzle は pg の例外を cause に入れるが、
   //   想定外の形のときに DrizzleQueryError の message（SQL と値）を出さない（fail closed）。
-  private static failureFields(error: unknown): {
+  private failureFields(error: unknown): {
     error: unknown;
     statusCode?: string;
     constraint?: string;
@@ -362,7 +364,7 @@ export class PostgresWriter implements Writer {
       constraint?: unknown;
     };
     return {
-      error: { type: name, message: PostgresWriter.maskQuoted(message) },
+      error: { type: name, message: this.maskQuoted(message) },
       statusCode: typeof code === "string" ? code : undefined,
       constraint: typeof constraint === "string" ? constraint : undefined,
       params: error.params,
@@ -376,7 +378,7 @@ export class PostgresWriter implements Writer {
   // 限界: 引用符の中の識別子（列名・制約名・表名）も消える（not-null 違反の列名など）。制約名は constraint、表名は db.collection.name に
   //   別に出る。引用符で囲まない形の入力値は消えない（実測した 22003 の numeric field overflow などは値を含まない。logger の freeText が
   //   最後の網）。
-  private static maskQuoted(message: string): string {
+  private maskQuoted(message: string): string {
     const first = message.indexOf('"');
     if (first === -1) {
       return message;
@@ -391,7 +393,7 @@ export class PostgresWriter implements Writer {
   // WHY performance.now（Clock.now() にしない）: 経過時間の計測で、時刻ではない（単調に増え、時計の補正で戻らない）。現在時刻の
   //   唯一の出口 Clock.now() の規則 now-single-source の対象外（rule-tests/architecture.test.ts）。
   // WHY 整数に丸める: ミリ秒未満は書き込みの遅さの判断に要らず、浮動小数の桁（12.300000000000182 のような）で行が読みにくくなる。
-  private static elapsedMs(startedAt: number): number {
+  private elapsedMs(startedAt: number): number {
     return Math.round(performance.now() - startedAt);
   }
 }

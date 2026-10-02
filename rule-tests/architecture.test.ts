@@ -21,11 +21,13 @@ import {
   isAsExpression,
   isCallExpression,
   isClassLikeDeclaration,
+  isClassStaticBlockDeclaration,
   isExportAssignment,
   isFunctionDeclaration,
   isFunctionExpression,
   isGetAccessorDeclaration,
   isIdentifier,
+  isIndexSignatureDeclaration,
   isJsxAttribute,
   isJsxExpression,
   isJsxText,
@@ -38,14 +40,17 @@ import {
   isPropertyAccessExpression,
   isPropertyDeclaration,
   isSatisfiesExpression,
+  isSemicolonClassElement,
   isSetAccessorDeclaration,
   isStringLiteral,
   isTemplateExpression,
   isTypeAssertion,
+  isTypeReferenceNode,
   isVariableStatement,
   type JsxAttribute,
   type Node,
   type SourceFile,
+  SyntaxKind,
 } from "typescript/unstable/ast";
 import { createVirtualFileSystem } from "typescript/unstable/fs";
 import { API } from "typescript/unstable/sync";
@@ -2218,6 +2223,115 @@ function findClassBasedViolations(root: string): string[] {
   );
 }
 
+// --- インスタンスで使うクラスに static を置かない（規則 no-static-in-instance-class。Issue #300） ---
+// 規則 class-based と同じ対象のファイルで、インスタンスのメンバー（コンストラクタ・static でないメソッド・フィールド・アクセサ）を
+//   持つクラス（宣言・式、入れ子も）の static メンバー（メソッド・フィールド・アクセサ・static ブロック）を「ファイル:行」で違反にする。
+// 許すもの: static だけのクラス（Clock・TodoApi・EnvReader など。インスタンスを作らない関数の置き場所）と、自分のクラスを返す
+//   static のファクトリ（戻り値の型の注釈がクラス名か Promise<クラス名> のメソッド。Todo.create・Todo.reconstruct・TestDatabase.create・
+//   TodoBuilder.of・PostgresWriter.of・E2eLogServer.start）。
+// WHY 規則にする: Issue #262 の移行で、状態を使わない補助を一律 private static にした（ADR 20261002-class-based-backend.md の
+//   「使い方に合わせて選ぶ」）結果、Repository や API のようにインスタンスで使うクラスの中に static の補助が混ざった
+//   （PostgresTodoRepository.toTodos など）。daiki の判断（2026-10-02「基本 static いらないはず」）で、インスタンスで使うクラスの補助は
+//   インスタンスのメソッドにそろえる。書き方を 1 つにすると、補助を足すたびに static かどうかを選ばずに済み、呼び出しも this. にそろう。
+//   レビューだけでは、移行の書き方（private static）が新しいコードに写されるのを止められない。
+// WHY static だけのクラスは対象外: インスタンスを作らないクラスは、最上位に関数を置かない規則（class-based）の受け皿で、
+//   static を外すとインスタンスの注入（Clock は ADR 20260930-now-single-source.md で注入にしないと決めている）や vi.mock の差し替えの
+//   作り直しになる。範囲は daiki の確認待ち（Issue #300）。
+// WHY ファクトリは許す: private のコンストラクタの前に検証・準備をするための入口（Todo.reconstruct・TestDatabase.create）で、
+//   インスタンスがまだ無いので static でしか書けない。戻り値の型で見分けるのは、名前（create・of・start）が決まっていないため。
+// 限界（見逃す方向）: 戻り値の型の注釈が自分のクラスなら、中で new しないメソッドもファクトリとして通る。別名の型
+//   （type Self = Todo）や推論に任せた戻り値はファクトリと見なさない（違反になる方向）。
+//   コンストラクタはインスタンスのメンバーに数えるので、static だけのクラスに private constructor() {} を足すと違反になる
+//   （インスタンスを作らせない書き方も、static だけのクラスではコンストラクタを書かずに済ませる）。
+const NO_STATIC_IN_INSTANCE_CLASS = {
+  id: "no-static-in-instance-class",
+  name: "規則 class-based の対象のファイルでは、インスタンスのメンバー（コンストラクタ・static でないメソッド・フィールド・アクセサ）を持つクラスに static のメンバーを置かない（自分のクラスか Promise<自分のクラス> を返す static のファクトリは可。static だけのクラスは対象外）",
+  appliesTo: CLASS_BASED.appliesTo,
+};
+
+function isStaticMember(member: Node): boolean {
+  if (isClassStaticBlockDeclaration(member)) {
+    return true;
+  }
+  const modifiers = (member as { modifiers?: readonly Node[] }).modifiers;
+  return (
+    modifiers?.some((modifier) => modifier.kind === SyntaxKind.StaticKeyword) ??
+    false
+  );
+}
+
+// 型の注釈が name の型の参照か（型引数は見ない）。
+function isTypeNamed(type: Node | undefined, name: string): boolean {
+  return (
+    type !== undefined &&
+    isTypeReferenceNode(type) &&
+    isIdentifier(type.typeName) &&
+    type.typeName.text === name
+  );
+}
+
+// 自分のクラス（className）か Promise<className> を返すと注釈した static メソッド。
+function isFactoryOf(member: Node, className: string | undefined): boolean {
+  if (className === undefined || !isMethodDeclaration(member)) {
+    return false;
+  }
+  const returnType = member.type;
+  if (isTypeNamed(returnType, className)) {
+    return true;
+  }
+  return (
+    returnType !== undefined &&
+    isTypeNamed(returnType, "Promise") &&
+    isTypeReferenceNode(returnType) &&
+    returnType.typeArguments?.length === 1 &&
+    isTypeNamed(returnType.typeArguments[0], className)
+  );
+}
+
+// 構文木の中のクラス（宣言と式。入れ子も）のうち、インスタンスのメンバーを持つものの static メンバー（ファクトリを除く）を、
+//   書かれた順に行番号で返す。
+function findStaticInInstanceClasses(sourceFile: SourceFile): number[] {
+  const found: number[] = [];
+  const visit = (node: Node): void => {
+    if (isClassLikeDeclaration(node)) {
+      const members = node.members.filter(
+        (member) => !isSemicolonClassElement(member),
+      );
+      // WHY インスタンスのインデックスシグネチャは数えない: 型の宣言だけで、インスタンスを作るクラスかどうかを決めない。
+      //   static のインデックスシグネチャ（static [k: string]: unknown）は static のメンバーとして違反にする。
+      const hasInstanceMember = members.some(
+        (member) =>
+          !isStaticMember(member) && !isIndexSignatureDeclaration(member),
+      );
+      if (hasInstanceMember) {
+        for (const member of members) {
+          if (isStaticMember(member) && !isFactoryOf(member, node.name?.text)) {
+            found.push(lineOf(sourceFile, member));
+          }
+        }
+      }
+    }
+    node.forEachChild(visit);
+  };
+  visit(sourceFile);
+  return found;
+}
+
+// 「ファイル:行」の一覧。対象のファイルは規則 class-based と同じ。
+function findStaticInInstanceClassViolations(root: string): string[] {
+  const files = listClassBasedCheckedFiles(root);
+  const sourceFiles = parseSourceFiles(
+    Object.fromEntries(
+      files.map((file) => [file, readFileSync(join(root, file), "utf8")]),
+    ),
+  );
+  return files.flatMap((file) =>
+    findStaticInInstanceClasses(sourceFiles.get(file) as SourceFile).map(
+      (line) => `${file}:${line}`,
+    ),
+  );
+}
+
 // --- workspace パッケージの exports（規則 backend-exports。Issue #68 の段階 2。規則 shared-exports。Issue #90） ---
 // exports は、@repo/backend・@repo/shared として外（そのパッケージのディレクトリの外）に公開するファイルの一覧。
 //   ユーザー判断で、全ファイル（"./*"）ではなく、外が使う入口だけを明示する（.claude/rules/backend.md の「import の書き方と
@@ -2411,6 +2525,7 @@ function findViolations(references: Reference[], rule: Rule): string[] {
 //   ハードコードの文言も「frontend-hardcoded-text: ファイル:行」「server-hardcoded-text: ファイル:行」を文言ごとに 1 行で出す。
 //   ProblemResponse.wrap で包んでいない handle も「presentation-with-problem-response: ファイル:行」を handle ごとに 1 行で出す。
 //   backend と apps/shared の本番コードとテストの補助の最上位の関数も「class-based: ファイル:行」を関数ごとに 1 行で出す。
+//   インスタンスで使うクラスの static メンバーも「no-static-in-instance-class: ファイル:行」をメンバーごとに 1 行で出す。
 //   exports の違反は「backend-exports: ...」「shared-exports: ...」の 1 行で出す（findExportsViolations）。
 //   apps/shared の置き場所の違反は「shared-placement: ファイル」の 1 行で出す（ソース以外も含め、apps/shared の全ファイルを見る）。
 // WHY 置き場所の規則も参照を取り出すファイル（listReferencingFiles。apps/e2e/ とリポジトリ直下を含む）全体にかける:
@@ -2448,6 +2563,9 @@ function collectViolations(root: string): string[] {
     ),
     ...findClassBasedViolations(root).map(
       (line) => `${CLASS_BASED.id}: ${line}`,
+    ),
+    ...findStaticInInstanceClassViolations(root).map(
+      (line) => `${NO_STATIC_IN_INSTANCE_CLASS.id}: ${line}`,
     ),
     ...listAllFiles(root, SHARED_ROOT)
       .filter(SHARED_PLACEMENT.isMisplaced)
@@ -5837,6 +5955,269 @@ function judgeClassBased(examples: [string, string][]): boolean[] {
   });
 }
 
+// 規則 no-static-in-instance-class の判定の例。違反例は 1 例 1 つの書き方にする。
+const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
+  violating: [file: string, source: string][];
+  allowed: [file: string, source: string][];
+} = {
+  violating: [
+    // 0: インスタンスのメソッドと private static の補助（移行前の PostgresTodoRepository.toTodos の形）。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export class A {",
+        "  list(): number { return A.helper(); }",
+        "  private static helper(): number { return 1; }",
+        "}",
+      ),
+    ],
+    // 1: コンストラクタだけを持つクラスの static メソッド。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export class A {",
+        "  constructor(readonly x: number) {}",
+        "  static helper(): number { return 1; }",
+        "}",
+      ),
+    ],
+    // 2: static readonly のフィールド（移行前の RequestLogSteps.traceId の形）。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export class A {",
+        "  run(): string { return A.id; }",
+        "  private static readonly id = 'x';",
+        "}",
+      ),
+    ],
+    // 3: static の getter。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export class A {",
+        "  run(): void {}",
+        "  static get x(): number { return 1; }",
+        "}",
+      ),
+    ],
+    // 4: static ブロック。
+    [
+      DOMAIN_FILE,
+      lines("export class A {", "  run(): void {}", "  static {}", "}"),
+    ],
+    // 5: 自分のクラス以外を返す static メソッド（ファクトリではない。移行前の PostgresWriter.of の戻り値 Writer）。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export class A {",
+        "  run(): void {}",
+        "  static of(): B { return new B(); }",
+        "}",
+        "class B {}",
+      ),
+    ],
+    // 6: 戻り値の型を注釈しないファクトリ（推論に任せたものはファクトリと見なさない）。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export class A {",
+        "  run(): void {}",
+        "  static of() { return new A(); }",
+        "}",
+      ),
+    ],
+    // 7: Promise<別のクラス> を返す static メソッド。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export class A {",
+        "  run(): void {}",
+        "  static async of(): Promise<number> { return 1; }",
+        "}",
+      ),
+    ],
+    // 8: 名前の無いクラス式（自分のクラスを名前で返せないのでファクトリにならない）。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export const A = class {",
+        "  run(): void {}",
+        "  static helper(): number { return 1; }",
+        "};",
+      ),
+    ],
+    // 9: メソッドの中の入れ子のクラス。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export class Outer {",
+        "  static make(): number {",
+        "    class Inner { run(): void {} static helper(): void {} }",
+        "    return 1;",
+        "  }",
+        "}",
+      ),
+    ],
+    // 10: apps/shared（logger の移行前の形）。
+    [
+      "apps/shared/logger.ts",
+      lines(
+        "class Logger {",
+        "  emit(): void { Logger.toLine(); }",
+        "  private static toLine(): void {}",
+        "}",
+      ),
+    ],
+    // 11: テストの補助（移行前の InMemoryTodoRepository の形）。
+    [
+      "apps/backend/test-support/todo/x.ts",
+      lines(
+        "export class A {",
+        "  run(): void {}",
+        "  private static load(): void {}",
+        "}",
+      ),
+    ],
+    // 12: apps/e2e の補助。
+    [
+      "apps/e2e/support/x.ts",
+      lines(
+        "export class A {",
+        "  run(): void {}",
+        "  static helper(): void {}",
+        "}",
+      ),
+    ],
+    // 14: static のインデックスシグネチャ。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export class A {",
+        "  run(): void {}",
+        "  static [key: string]: unknown;",
+        "}",
+      ),
+    ],
+    // 13: frontend の React 以外のモジュール。
+    [
+      "apps/frontend_customer/features/todo/api/x.ts",
+      lines(
+        "export class A {",
+        "  run(): void {}",
+        "  static helper(): void {}",
+        "}",
+      ),
+    ],
+  ],
+  allowed: [
+    // 0: static だけのクラス（Clock・TodoApi の形）。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export class A {",
+        "  static run(): number { return A.helper(); }",
+        "  private static helper(): number { return 1; }",
+        "}",
+      ),
+    ],
+    // 1: インスタンスのメソッドだけのクラス。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export class A {",
+        "  constructor(private readonly x: number) {}",
+        "  run(): number { return this.helper(); }",
+        "  private helper(): number { return this.x; }",
+        "}",
+      ),
+    ],
+    // 2: 自分のクラスを返す static のファクトリ（Todo.create・TodoBuilder.of の形）。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export class A {",
+        "  private constructor() {}",
+        "  static create(): A { return new A(); }",
+        "  run(): void {}",
+        "}",
+      ),
+    ],
+    // 3: Promise<自分のクラス> を返す static のファクトリ（TestDatabase.create・E2eLogServer.start の形）。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export class A {",
+        "  private constructor() {}",
+        "  static async start(): Promise<A> { return new A(); }",
+        "  run(): void {}",
+        "}",
+      ),
+    ],
+    // 4: インデックスシグネチャと ; は static でもインスタンスのメンバーでもない（static だけのクラスのまま）。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export class A {",
+        "  [key: string]: unknown;",
+        "  static run(): void {};",
+        "}",
+      ),
+    ],
+    // 5: 対象外のテスト。
+    [
+      "apps/backend/shared/infra/x.test.ts",
+      lines(
+        "export class A {",
+        "  run(): void {}",
+        "  static helper(): void {}",
+        "}",
+      ),
+    ],
+    // 6: 対象外の React の component（.tsx）。
+    [
+      "apps/frontend_customer/features/todo/components/x.tsx",
+      lines(
+        "export class A {",
+        "  run(): void {}",
+        "  static helper(): void {}",
+        "}",
+      ),
+    ],
+    // 7: 対象外のリポジトリ直下。
+    [
+      "vitest.global-setup.ts",
+      lines(
+        "export class A {",
+        "  run(): void {}",
+        "  static helper(): void {}",
+        "}",
+      ),
+    ],
+  ],
+};
+
+// 例をまとめて 1 回で構文解析し、例ごとに違反か（true）を返す。対象外のファイルは解析せずに false。
+function judgeStaticInInstanceClass(examples: [string, string][]): boolean[] {
+  const virtualPath = (i: number, file: string) => `example-${i}/${file}`;
+  const sourceFiles = parseSourceFiles(
+    Object.fromEntries(
+      examples.flatMap(([file, source], i) =>
+        NO_STATIC_IN_INSTANCE_CLASS.appliesTo(file)
+          ? [[virtualPath(i, file), source]]
+          : [],
+      ),
+    ),
+  );
+  return examples.map(([file], i) => {
+    const sourceFile = sourceFiles.get(virtualPath(i, file));
+    return (
+      sourceFile !== undefined &&
+      findStaticInInstanceClasses(sourceFile).length > 0
+    );
+  });
+}
+
 // --- exports の判定（BACKEND_EXPORTS・SHARED_EXPORTS）の仕様 ---
 // 参照 1 件ごとではなく、exports の中身と参照の集まりで決まるので、RULES の外で例を持つ。
 
@@ -5914,12 +6295,13 @@ function violationsOfFixture(files: Record<string, string>): string[] {
 // apps/shared の許可 SHARED_MODULES_BY_LAYER）の違反も置く。
 // ハードコードの文言の規則（FRONTEND_HARDCODED_TEXT・SERVER_HARDCODED_TEXT。Issue #116）と、辞書の置き場所の規則
 // （messages-colocation。Issue #125）の違反も置く。
-// 規則は全部で 36（RULES の 24 + 置き場所 3 + 環境変数の直参照 + console + 現在時刻の読み取り + exports 2 + ハードコードの文言 2 + handle を ProblemResponse.wrap で包む 1 + 最上位の関数 1）。Issue #68 で RULES に 3 規則（backend-to-frontend・
+// 規則は全部で 37（RULES の 24 + 置き場所 3 + 環境変数の直参照 + console + 現在時刻の読み取り + exports 2 + ハードコードの文言 2 + handle を ProblemResponse.wrap で包む 1 + 最上位の関数 1 + インスタンスのクラスの static 1）。Issue #68 で RULES に 3 規則（backend-to-frontend・
 // backend-relative-only・frontend-root-to-backend）を足し、段階 2 で frontend-to-backend-specifier と BACKEND_EXPORTS を足した。
 // Issue #90 で frontend-to-shared-specifier・screen-to-shared・shared-self-contained・SHARED_PLACEMENT・SHARED_EXPORTS を足した。
 // Issue #141 で presentation-with-problem-response（PRESENTATION_WITH_PROBLEM_RESPONSE）を足した。
 // Issue #208 で module-internal・module-expose-only-from-presentation・expose-imports（モジュールの境界）を足した。
 // Issue #262 で class-based（CLASS_BASED。最上位の関数）を足した。
+// Issue #300 で no-static-in-instance-class（NO_STATIC_IN_INSTANCE_CLASS。インスタンスで使うクラスの static）を足した。
 const MUST_REJECT_FILES: Record<string, string> = {
   // class-based（Issue #262）: 最上位の関数（function 宣言・async・generator・オーバーロード・アロー関数と function 式の
   //   変数・export default のアロー関数・namespace の中）。クラスのメソッド・フィールド・メソッドの中の関数（8〜13 行目）は拾わない。
@@ -5933,7 +6315,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
     "const e = function (): void {};",
     "export default async (): Promise<void> => {};",
     "export class Ok {",
-    "  static f(): number { return 1; }",
+    "  f(): number { return 1; }",
     "  readonly g = (): number => 1;",
     "  h(): number { const inner = () => 1; return inner(); }",
     "}",
@@ -6674,6 +7056,18 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/frontend_customer/features/todo/api/bad-api.hook.ts": lines(
     "export function useApi(): void {}",
   ),
+  // no-static-in-instance-class（Issue #300）: インスタンスのメンバーを持つクラスの static メソッド・フィールド（2・3 行目）と、
+  //   自分のクラス以外を返す static（4 行目）。自分のクラスを返すファクトリ（5 行目）と static だけのクラス（8 行目）は拾わない。
+  "apps/backend/shared/infra/bad-static.ts": lines(
+    "export class Repo {",
+    "  private static helper(): number { return 1; }",
+    "  private static readonly id = 'x';",
+    "  static of(): number { return 1; }",
+    "  static create(): Repo { return new Repo(); }",
+    "  list(): number { return Repo.helper(); }",
+    "}",
+    "export class Only { static run(): void {} }",
+  ),
   // backend-placement / frontend-placement（Issue #181）: 直下の test-support/ と前方一致だけが同じ別ディレクトリ。
   "apps/backend/test-support-x/x.ts": lines("export const x = 1;"),
   "apps/frontend_customer/test-support-x/x.ts": lines("export const x = 1;"),
@@ -6693,6 +7087,10 @@ const MUST_REJECT_VIOLATIONS = [
   "class-based: apps/e2e/bad-helper.ts:1",
   "class-based: apps/frontend_customer/features/todo/api/bad-class-api.ts:2",
   "class-based: apps/frontend_customer/shared/i18n/bad-format.ts:1",
+  ...[2, 3, 4].map(
+    (line) =>
+      `no-static-in-instance-class: apps/backend/shared/infra/bad-static.ts:${line}`,
+  ),
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(
     (line) =>
       `now-single-source: apps/backend/features/todo/internal/domain/bad-now.ts:${line}`,
@@ -7212,7 +7610,7 @@ const MUST_PASS_FILES: Record<string, string> = {
     "export interface Notifier { notify(message: string): void; }",
     'export const KEYS = { a: "a" } as const;',
     "export class Validate {",
-    "  static of(x: number): number { function inner(): number { return x; } return inner(); }",
+    "  of(x: number): number { function inner(): number { return x; } return inner(); }",
     "  private readonly twice = (x: number): number => x * 2;",
     "}",
     "export const Other = class { static f(): void {} };",
@@ -7227,6 +7625,18 @@ const MUST_PASS_FILES: Record<string, string> = {
   ),
   "apps/backend/test-support/class-based-helper.ts": lines(
     "export class Helper { static build(): void {} }",
+  ),
+  // no-static-in-instance-class（Issue #300）: インスタンスのクラスの補助はインスタンスのメソッドにし、static は自分のクラス（か
+  //   Promise）を返すファクトリだけ。static だけのクラスは対象外。
+  "apps/backend/shared/infra/good-instance.ts": lines(
+    "export class Repo {",
+    "  private constructor(private readonly x: number) {}",
+    "  static create(): Repo { return new Repo(1); }",
+    "  static async open(): Promise<Repo> { return new Repo(2); }",
+    "  list(): number { return this.helper(); }",
+    "  private helper(): number { return this.x; }",
+    "}",
+    "export class Only { static run(): number { return Only.helper(); } private static helper(): number { return 1; } }",
   ),
   // presentation-with-problem-response（Issue #141）: ProblemResponse.wrap で包んだ handle（ctx あり・なし）。
   //   対象外: api ファイルでない presentation のファイル、テスト、ほかの層の handle。
@@ -8108,6 +8518,16 @@ describeFeature(feature, ({ Scenario }) => {
       // given: 前提なし
       // when
       const violations = findClassBasedViolations(repoRoot);
+
+      // then
+      // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
+      expect(violations).toEqual([]);
+    });
+
+    And(ruleStepText(NO_STATIC_IN_INSTANCE_CLASS.name), () => {
+      // given: 前提なし
+      // when
+      const violations = findStaticInInstanceClassViolations(repoRoot);
 
       // then
       // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
@@ -9223,6 +9643,57 @@ describeFeature(feature, ({ Scenario }) => {
       });
       And(
         "許可例（CLASS_BASED_EXAMPLES.allowed）はどれも違反にならない",
+        () => {
+          // given
+          const cases = allowed.map(([file], i): [string, number] => [
+            `許可例 ${i}（${file}）`,
+            i,
+          ]);
+
+          // when
+          const result = casesByName(cases, ([, i]) => verdictsOf().allowed[i]);
+
+          // then
+          expect(result).toEqual(casesByName(cases, () => false));
+        },
+      );
+    },
+  );
+
+  Scenario(
+    `インスタンスで使うクラスに static を置かない規則の判定（${NO_STATIC_IN_INSTANCE_CLASS.id}）`,
+    ({ And }) => {
+      const { violating, allowed } = NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES;
+      // WHY 遅延して 1 回だけ判定する: 例ごとに tsgo を起動すると遅いため（class-based の判定と同じ）。
+      let verdicts: { violating: boolean[]; allowed: boolean[] } | undefined;
+      const verdictsOf = () => {
+        verdicts ??= {
+          violating: judgeStaticInInstanceClass(violating),
+          allowed: judgeStaticInInstanceClass(allowed),
+        };
+        return verdicts;
+      };
+      And(
+        "違反例（NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES.violating）はすべて違反になる",
+        () => {
+          // given
+          const cases = violating.map(([file], i): [string, number] => [
+            `違反例 ${i}（${file}）`,
+            i,
+          ]);
+
+          // when
+          const result = casesByName(
+            cases,
+            ([, i]) => verdictsOf().violating[i],
+          );
+
+          // then
+          expect(result).toEqual(casesByName(cases, () => true));
+        },
+      );
+      And(
+        "許可例（NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES.allowed）はどれも違反にならない",
         () => {
           // given
           const cases = allowed.map(([file], i): [string, number] => [
