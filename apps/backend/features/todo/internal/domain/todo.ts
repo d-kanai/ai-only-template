@@ -185,7 +185,7 @@ export class Todo {
   // WHY メソッドにする（スキーマを最上位の定数・static フィールドにしない）: 最上位の式や static フィールドの初期化は読み込み時にだけ評価される static な変異になり、
   //   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に作れば、比較や message の変異を
   //   テストで検出できる（Issue #55）。上限の値そのもの（TODO_TITLE_MAX_LENGTH）は最上位の定数なので、todo.test.ts が値と
-  //   境界（100 は通し 101 は弾く）で固定する。
+  //   101 の拒否で、domain 仕様（apps/backend/spec/domain/todo/todo.feature）が境界（100 は通し 101 は弾く）で固定する。
   // WHY branded 型（TodoTitle）にしない: Todo のコンストラクタは private で、どの口（create / reconstruct / rename /
   //   changeCompletion）もコンストラクタの検証（todoPropsSchema）を通る。Todo 型そのものが「不変条件を満たす値」で
   //   あることを表しているので、title だけに brand を付けても守れるものが増えない。

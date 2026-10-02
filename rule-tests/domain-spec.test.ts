@@ -90,7 +90,7 @@ import { featureLines } from "./feature-lines";
 //   （loadFeature の引数の文字列だけは対の形かを読む）。.feature はコメントの行（`#` で始まる行）を説明にも禁止語の対象にも数えない。
 // 限界（字句の推定。rule-tests/api-spec.test.ts と同じ方式）:
 //   - .feature: 行ごとに見るので、docstring（`"""`）の中も行の種類を区別しない（中の `#` の行はコメント、`Given` で始まる行は step
-//     として扱う）。Scenario の中の説明の行・表の行・docstring は止めない（step の引数として読まれる）。説明の行が業務ルールの理由に
+//     として扱う）。Scenario の中の説明の行・表の行・docstring は止めない（step の引数として読まれる）。表の行（`|`）と docstring の区切り（`"""`・```）は説明の行に数えない（区切りの間の行は説明に数える）。説明の行が業務ルールの理由に
 //     なっているか・`*` の文が振る舞い 1 つかは見ない（reviewer が見る）。禁止語は一覧の語だけ。
 //   - step の実装: import の文を正規表現で読むので、`require`・変数を渡す `import(x)` は見ない。domain の値の import は、取り込んだ値を
 //     step の中で使っているかを見ない。domain 以外の層（application・infra・presentation）や vi の import は止めない（必要になったら
@@ -184,6 +184,7 @@ type FeatureLineKind =
   | "keyword"
   | "keyword-step"
   | "star"
+  | "table"
   | "text";
 
 function featureLineKind(line: string): FeatureLineKind {
@@ -205,6 +206,9 @@ function featureLineKind(line: string): FeatureLineKind {
   if (/^\s*(?:Given|When|Then|And|But)(?:\s|$)/.test(line)) {
     return "keyword-step";
   }
+  // WHY 表の行と docstring の区切りを説明の行と分ける: 説明の位置に表や docstring だけを置いても、規則の理由（仕様メモ）を
+  //   書いたことにしない（reviewer の指摘、Issue #318）。
+  if (/^\s*(?:\||"""|```)/.test(line)) return "table";
   return /^\s*\*(?:\s|$)/.test(line) ? "star" : "text";
 }
 
@@ -436,6 +440,11 @@ function isInlineTypeOnly(clause: string): boolean {
   return names.length > 0 && names.every((name) => /^type\s/.test(name));
 }
 
+// `{}` のように名前を 1 つも取らないか。値を何も取り込まないので値の import に数えない（reviewer の指摘、Issue #318）。
+function hasNoImportedName(clause: string): boolean {
+  return /^\{\s*\}$/.test(clause.trim());
+}
+
 // ソース（コメントを消したもの）の import / export … from / import "…" / import("…") の参照先（rule-tests/api-spec.test.ts と同じ
 //   正規表現。WHY は architecture.test.ts の IMPORT_EXPORT_FROM のコメント）。
 function extractImports(code: string): ImportRef[] {
@@ -450,7 +459,9 @@ function extractImports(code: string): ImportRef[] {
         ? "other"
         : typeKeyword !== undefined || isInlineTypeOnly(clause ?? "")
           ? "type"
-          : "value";
+          : hasNoImportedName(clause ?? "")
+            ? "other"
+            : "value";
     // WHY 参照先の位置で行を数える: 一致は前の空行（\s*）から始まることがあり、先頭の位置では import の行とずれる。
     return {
       specifier,
@@ -1029,7 +1040,7 @@ describeFeature(feature, ({ Scenario }) => {
       );
 
       And(
-        "Feature や Rule の後に説明の行が無い（コメントと空行だけも）と、見出しの行の違反になる",
+        "Feature や Rule の後に説明の行が無い（コメントと空行だけ・表と docstring だけも）と、見出しの行の違反になる",
         () => {
           // given
           const cases: [string, string, DomainSpecViolation[]][] = [
@@ -1056,6 +1067,20 @@ describeFeature(feature, ({ Scenario }) => {
                 "      * 1 文字の名前で作れる",
               ),
               [structure(STRUCTURE.featureDescription, 1)],
+            ],
+            [
+              "Rule の後が表と docstring だけ",
+              source(
+                "Feature: x の規則",
+                "  x は、利用者が書き留めたもの。",
+                "  Rule: 名前は 1〜100 文字",
+                "    | 名前 |",
+                '    """',
+                '    """',
+                "    Scenario: 受け付ける名前",
+                "      * 1 文字の名前で作れる",
+              ),
+              [structure(STRUCTURE.ruleDescription, 3)],
             ],
             [
               "Feature の説明も最初の Rule の理由も無い（2 つ目の Rule の後の説明の行はその Rule の理由に数える）",
@@ -1516,6 +1541,14 @@ describeFeature(feature, ({ Scenario }) => {
               "domain を inline の type だけで import",
               source(
                 'import { type X } from "../../../features/x/internal/domain/x";',
+                LOAD_FEATURE,
+              ),
+              [noDomain],
+            ],
+            [
+              "domain を名前の無い import {} で読む",
+              source(
+                'import {} from "../../../features/x/internal/domain/x";',
                 LOAD_FEATURE,
               ),
               [noDomain],

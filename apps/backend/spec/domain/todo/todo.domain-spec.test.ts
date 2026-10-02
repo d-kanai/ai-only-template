@@ -342,7 +342,7 @@ describeFeature(feature, ({ Rule }) => {
 
       RuleScenario("今と同じ状態を指定する", ({ And }) => {
         // WHY 同じ Todo（toBe）が返ることまで見る: 何も変わらないので、保存しても差分が無い（Repository の update が
-        //   何も書かない）。現在時刻も読まない（読む誤りは、時刻を足した新しい Todo になって toBe で落ちる）。
+        //   何も書かない）。現在時刻を読まないことは技術の仕組みなので todo.test.ts が見る。
         And("未完了の Todo を未完了にしても、何も変わらない", () => {
           // given
           const todo = Todo.create("牛乳を買う");

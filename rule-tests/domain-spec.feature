@@ -12,7 +12,7 @@ Feature: domain 仕様の置き場所と書き方
     * Background・Scenario Outline・Example などのキーワード、Given などの step、言語の指定、タグの行は、行の番号で違反になる
   Scenario: .feature の仕様メモの構造（findFeatureContentViolations）
     * Feature の後と各 Rule の後に説明の行があり、Scenario がすべて Rule の下で、箇条書きの step を持てば違反なし（説明が複数行・Scenario の中の説明の行など）
-    * Feature や Rule の後に説明の行が無い（コメントと空行だけも）と、見出しの行の違反になる
+    * Feature や Rule の後に説明の行が無い（コメントと空行だけ・表と docstring だけも）と、見出しの行の違反になる
     * Rule が無い・Rule より前の Scenario・Scenario の無い Rule・step の無い Scenario・Scenario の外の step・Feature の見出しの欠けと重なりは違反になる
   Scenario: .feature の業務の言葉（findFeatureContentViolations）
     * 見出し・説明・step の行の禁止語は行の番号で違反になり、コメントの行の禁止語は違反なし

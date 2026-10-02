@@ -128,7 +128,7 @@ describe("Todo#rename", () => {
     const original = Todo.create("牛乳を買う");
 
     // when
-    const renamed = original.rename(" 卵を買う ");
+    const renamed = original.rename("卵を買う");
 
     // then
     expect(renamed.title).toBe("卵を買う");
@@ -159,6 +159,45 @@ describe("Todo#changeCompletion", () => {
     expect(reopened.createdAt).toEqual(createdAt);
     expect(original.completed).toBe(false);
   });
+
+  // WHY 元の履歴を見る: 履歴は Todo の値で、Todo は不変。足した履歴が元の Todo に混ざると、保存前の値や origin との差分が変わる。
+  test("完了状態を変えても、元の Todo の完了の履歴は変えない", () => {
+    // given
+    const original = Todo.create("牛乳を買う");
+
+    // when
+    const completed = original.changeCompletion(true);
+    completed.changeCompletion(false);
+
+    // then
+    expect(original.statusChanges).toStrictEqual([
+      { completed: false, changedAt: NOW },
+    ]);
+    expect(completed.statusChanges).toStrictEqual([
+      { completed: false, changedAt: NOW },
+      { completed: true, changedAt: NOW },
+    ]);
+  });
+
+  // WHY 現在時刻を読まないことを見る: 同じ状態の指定は何も変えない（domain 仕様）。時刻を読むのは履歴を足すときだけで、読む誤りは
+  //   結果の Todo（toBe）では分からない（reviewer の指摘、Issue #318）。
+  test.each([false, true])(
+    "今と同じ値（%s）を渡すと、現在時刻（Clock.now()）を読まない",
+    (value) => {
+      // given
+      const todo =
+        value === false
+          ? Todo.create("牛乳を買う")
+          : Todo.create("牛乳を買う").changeCompletion(true);
+      vi.mocked(Clock.now).mockClear();
+
+      // when
+      todo.changeCompletion(value);
+
+      // then
+      expect(Clock.now).not.toHaveBeenCalled();
+    },
+  );
 
   // WHY 型に反する値を as で渡す: 型の上では boolean しか渡せないが、完全コンストラクタは口によらず全体を検証する
   //   （todo.ts のコメント）。completed の規則（boolean であること）も、changeCompletion を通って守られることを確かめる。
@@ -258,7 +297,8 @@ describe("Todo.reconstruct", () => {
     expect(todo.title).toBe("牛乳を買う");
   });
 
-  // Issue #94: 保存済みの値も今の不変条件で検査する（Todo 型 = 不変条件を満たす値）。規則を厳しくしたときは、
+  // Issue #94: 保存済みの値も今の不変条件で検査する（Todo 型 = 不変条件を満たす値）。タイトルの規則そのものは domain 仕様が
+  //   見るので、ここで見るのは「読み出しの口も同じ規則を通る」こと（完全コンストラクタ。上の前後の空白の除去も同じ）。規則を厳しくしたときは、
   //   既存のデータを移行（スキル db-migration）してから規則を変える。
   test.each([
     ["タイトルが空文字", { title: "" }, EMPTY_TITLE],
