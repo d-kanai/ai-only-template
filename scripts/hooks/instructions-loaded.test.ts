@@ -65,6 +65,8 @@ describe("instructions-loaded.sh（InstructionsLoaded フック）", () => {
   });
 
   it("2 回実行すると 2 行を追記し、各行に ts・file_path・load_reason・trigger_file_path・memory_type を書く", () => {
+    // given: 前提なし（beforeEach で空の git リポジトリがある）
+    // when
     const before = Date.now();
     const first = run({
       hook_event_name: "InstructionsLoaded",
@@ -83,12 +85,13 @@ describe("instructions-loaded.sh（InstructionsLoaded フック）", () => {
       trigger_file_path: `${repo}/docs/work-logs/2026-09-28.md`,
     });
     const after = Date.now();
+    const [a, b, ...rest] = records();
+
+    // then
     for (const result of [first, second]) {
       expect(result.status).toBe(0);
       expect(result.stdout).toBe("");
     }
-
-    const [a, b, ...rest] = records();
     expect(rest).toEqual([]);
     expect(a).toEqual({
       ts: expect.any(String),
@@ -114,10 +117,16 @@ describe("instructions-loaded.sh（InstructionsLoaded フック）", () => {
   });
 
   it("既にある記録を消さずに追記する", () => {
+    // given
     mkdirSync(join(repo, ".claude/state"), { recursive: true });
     writeFileSync(logFile(), '{"old":true}\n');
+
+    // when
     run({ cwd: repo, file_path: "/x/CLAUDE.md", load_reason: "compact" });
-    expect(records()).toEqual([
+    const written = records();
+
+    // then
+    expect(written).toEqual([
       { old: true },
       {
         ts: expect.any(String),
@@ -130,29 +139,45 @@ describe("instructions-loaded.sh（InstructionsLoaded フック）", () => {
   });
 
   it("cwd がサブディレクトリでも、リポジトリ直下の .claude/state に書く", () => {
+    // given
     mkdirSync(join(repo, "sub"));
+
+    // when
     run({ cwd: join(repo, "sub"), file_path: "/x/CLAUDE.md" });
-    expect(records()).toHaveLength(1);
+    const written = records();
+
+    // then
+    expect(written).toHaveLength(1);
     expect(existsSync(join(repo, "sub/.claude"))).toBe(false);
   });
 
   it("cwd が git リポジトリでなければ cwd の .claude/state に書く", () => {
+    // given
     const outside = join(tmp, "not-a-repo");
     mkdirSync(outside);
+
+    // when
     const result = run({ cwd: outside, file_path: "/x/CLAUDE.md" });
+    const written = records(
+      join(outside, ".claude/state/instructions-loaded.jsonl"),
+    );
+
+    // then
     expect(result.status).toBe(0);
-    expect(
-      records(join(outside, ".claude/state/instructions-loaded.jsonl")),
-    ).toHaveLength(1);
+    expect(written).toHaveLength(1);
   });
 
   it("stdin が JSON でなければ何も書かず、理由を stderr に出して 0 で終わる", () => {
+    // given: 前提なし（beforeEach で空の git リポジトリがある）
+    // when
     const result = spawnSync("bash", [scriptPath], {
       input: "not json",
       cwd: repo,
       env,
       encoding: "utf8",
     });
+
+    // then
     expect(result.status).toBe(0);
     expect(result.stderr).toContain("入力を読めない");
     expect(existsSync(logFile())).toBe(false);

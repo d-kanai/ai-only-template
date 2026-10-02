@@ -131,29 +131,46 @@ function lefthookCalls(): string[] {
 
 describe("何も問題がないとき", () => {
   it("共有フックがメインを指し、lockfile に変更がなければ何も出さず、lefthook install も呼ばない", () => {
+    // given: 前提なし（beforeEach でメインと worktree と偽の lefthook がある）
+    // when
     const result = run(mainRepo);
+
+    // then
     expect([result.status, result.stdout]).toEqual([0, ""]);
     expect(lefthookCalls()).toEqual([]);
   });
 
   it("共有フックが無いときも何も出さない", () => {
+    // given
     rmSync(join(mainRepo, ".git", "hooks", "pre-commit"));
+
+    // when
     const result = run(worktree);
+
+    // then
     expect([result.status, result.stdout]).toEqual([0, ""]);
     expect(lefthookCalls()).toEqual([]);
   });
 
   it("git リポジトリの外で呼ばれたら何も出さない", () => {
+    // given: 前提なし（beforeEach でメインと worktree と偽の lefthook がある）
+    // when
     const result = run(dir);
+
+    // then
     expect([result.status, result.stdout]).toEqual([0, ""]);
   });
 
   it("入力が JSON でなければ何も出さず exit 0（stderr に理由）", () => {
+    // given: 前提なし（beforeEach でメインと worktree と偽の lefthook がある）
+    // when
     const result = spawnSync("bash", [scriptPath], {
       input: "not json",
       encoding: "utf8",
       env: { ...process.env, LEFTHOOK_LOG: lefthookLog },
     });
+
+    // then
     expect([result.status, result.stdout]).toEqual([0, ""]);
     expect(result.stderr).toContain("subagent-stop");
   });
@@ -169,8 +186,14 @@ describe("共有フックが worktree を指しているとき", () => {
   ])(
     "pre-commit が %s を指していれば、メインで lefthook install を実行して直す",
     (_label, target) => {
+      // given
       writeHook("pre-commit", hookPointingTo(target()));
-      const message = systemMessage(run(worktree));
+
+      // when
+      const result = run(worktree);
+
+      // then
+      const message = systemMessage(result);
       expect(lefthookCalls()).toEqual([`${mainRepo} install`]);
       expect(readHook("pre-commit")).toContain(`${mainRepo}/node_modules/`);
       expect(readHook("pre-commit")).not.toContain(target());
@@ -181,22 +204,35 @@ describe("共有フックが worktree を指しているとき", () => {
   );
 
   it("commit-msg だけが worktree を指していても直す", () => {
+    // given
     writeHook("commit-msg", hookPointingTo(worktree, "commit-msg"));
-    const message = systemMessage(run(mainRepo));
+
+    // when
+    const result = run(mainRepo);
+
+    // then
+    const message = systemMessage(result);
     expect(lefthookCalls()).toEqual([`${mainRepo} install`]);
     expect(readHook("commit-msg")).not.toContain(worktree);
     expect(message).toContain("commit-msg");
   });
 
   it("lefthook install が失敗したら、直せなかったことと手順を返す（exit 0）", () => {
+    // given
     writeHook("pre-commit", hookPointingTo(worktree));
-    const message = systemMessage(run(worktree, { FAKE_LEFTHOOK_EXIT: "3" }));
+
+    // when
+    const result = run(worktree, { FAKE_LEFTHOOK_EXIT: "3" });
+
+    // then
+    const message = systemMessage(result);
     expect(message).toContain("直せませんでした");
     expect(message).toContain("pnpm exec lefthook install");
     expect(readHook("pre-commit")).toContain(worktree);
   });
 
   it("node_modules/.bin/lefthook が無ければ pnpm exec lefthook install を使う", () => {
+    // given
     writeHook("pre-commit", hookPointingTo(worktree));
     rmSync(join(mainRepo, "node_modules"), { recursive: true });
     const fakePnpmDir = join(dir, "fake-bin");
@@ -206,32 +242,55 @@ describe("共有フックが worktree を指しているとき", () => {
       `#!/bin/bash\necho "$PWD pnpm $*" >> "$LEFTHOOK_LOG"\n`,
     );
     chmodSync(join(fakePnpmDir, "pnpm"), 0o755);
-    systemMessage(
-      run(worktree, { PATH: `${fakePnpmDir}:${process.env.PATH}` }),
-    );
+
+    // when
+    const result = run(worktree, {
+      PATH: `${fakePnpmDir}:${process.env.PATH}`,
+    });
+
+    // then
+    systemMessage(result);
     expect(lefthookCalls()).toEqual([`${mainRepo} pnpm exec lefthook install`]);
   });
 });
 
 describe("pnpm-lock.yaml に未コミットの変更があるとき", () => {
   it("サブエージェントの作業ツリー（worktree）の lockfile の変更を警告する", () => {
+    // given
     writeFileSync(join(worktree, "pnpm-lock.yaml"), "changed\n");
-    const message = systemMessage(run(worktree));
+
+    // when
+    const result = run(worktree);
+
+    // then
+    const message = systemMessage(result);
     expect(message).toContain("pnpm-lock.yaml");
     expect(message).toContain(worktree);
     expect(lefthookCalls()).toEqual([]);
   });
 
   it("メインの作業ツリーの lockfile の変更も警告する", () => {
+    // given
     writeFileSync(join(mainRepo, "pnpm-lock.yaml"), "changed\n");
-    const message = systemMessage(run(worktree));
+
+    // when
+    const result = run(worktree);
+
+    // then
+    const message = systemMessage(result);
     expect(message).toContain(`${mainRepo}/pnpm-lock.yaml`);
   });
 
   it("フックの修復と lockfile の警告を 1 つのメッセージにまとめる", () => {
+    // given
     writeHook("pre-commit", hookPointingTo(worktree));
     writeFileSync(join(worktree, "pnpm-lock.yaml"), "changed\n");
-    const message = systemMessage(run(worktree));
+
+    // when
+    const result = run(worktree);
+
+    // then
+    const message = systemMessage(result);
     expect(message).toContain("直しました");
     expect(message).toContain("pnpm-lock.yaml");
   });

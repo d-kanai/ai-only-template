@@ -438,7 +438,12 @@ describe(".dockerignore の行（hasDockerignoreEntry）", () => {
     ["前後に空白がある", lines(".git", "  **/test-support\t")],
     ["途中の行にある", lines("# x", "**/test-support", ".env")],
   ])("%s は違反なし", (_name, text) => {
-    expect(hasDockerignoreEntry(text)).toBe(true);
+    // given: it.each の入力
+    // when
+    const result = hasDockerignoreEntry(text);
+
+    // then
+    expect(result).toBe(true);
   });
 
   it.each([
@@ -451,7 +456,12 @@ describe(".dockerignore の行（hasDockerignoreEntry）", () => {
     ["別の名前（前方一致）", lines("**/test-support-x")],
     ["空", ""],
   ])("%s は違反", (_name, text) => {
-    expect(hasDockerignoreEntry(text)).toBe(false);
+    // given: it.each の入力
+    // when
+    const result = hasDockerignoreEntry(text);
+
+    // then
+    expect(result).toBe(false);
   });
 });
 
@@ -499,7 +509,12 @@ describe(".dockerignore のパターンの解釈（isExcludedByDockerignore）",
       "apps/a/test-support/b.ts",
     ],
   ])("%s は除外される", (_name, dockerignore, path) => {
-    expect(excluded(dockerignore, path)).toBe(true);
+    // given: it.each の入力
+    // when
+    const result = excluded(dockerignore, path);
+
+    // then
+    expect(result).toBe(true);
   });
 
   it.each([
@@ -547,7 +562,12 @@ describe(".dockerignore のパターンの解釈（isExcludedByDockerignore）",
     ],
     ["空", "", "apps/a/test-support/b.ts"],
   ])("%s は除外されない", (_name, dockerignore, path) => {
-    expect(excluded(dockerignore, path)).toBe(false);
+    // given: it.each の入力
+    // when
+    const result = excluded(dockerignore, path);
+
+    // then
+    expect(result).toBe(false);
   });
 });
 
@@ -564,7 +584,12 @@ describe("本番のソースか（isProductionSource）", () => {
     "apps/frontend_customer/features/x/my-test-support.ts",
     "apps/backend/features/x/x.test-helper.ts",
   ])("%s は本番のソース", (path) => {
-    expect(isProductionSource(path)).toBe(true);
+    // given: it.each の入力
+    // when
+    const result = isProductionSource(path);
+
+    // then
+    expect(result).toBe(true);
   });
 
   it.each([
@@ -577,7 +602,12 @@ describe("本番のソースか（isProductionSource）", () => {
     "apps/backend/features/x/README.md",
     "apps/backend/package.json",
   ])("%s は本番のソースではない", (path) => {
-    expect(isProductionSource(path)).toBe(false);
+    // given: it.each の入力
+    // when
+    const result = isProductionSource(path);
+
+    // then
+    expect(result).toBe(false);
   });
 });
 
@@ -612,7 +642,12 @@ describe("本番のコードからの test-support の import（findTestSupportI
     ],
     ["空", ""],
   ])("%s は違反なし", (_name, source) => {
-    expect(findTestSupportImports(source)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const result = findTestSupportImports(source);
+
+    // then
+    expect(result).toEqual([]);
   });
 
   it.each<[string, string, number[]]>([
@@ -694,7 +729,12 @@ describe("本番のコードからの test-support の import（findTestSupportI
       [1, 3],
     ],
   ])("%s は違反", (_name, source, expected) => {
-    expect(findTestSupportImports(source)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const result = findTestSupportImports(source);
+
+    // then
+    expect(result).toEqual(expected);
   });
 });
 
@@ -715,7 +755,12 @@ describe("package.json の exports（findTestSupportInExports）", () => {
     ["文字列だけの exports", "./index.ts"],
     ["配列（フォールバック）の値は見ない", { "./x": ["./x.ts"] }],
   ])("%s は違反なし", (_name, exports) => {
-    expect(findTestSupportInExports(exports)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const result = findTestSupportInExports(exports);
+
+    // then
+    expect(result).toEqual([]);
   });
 
   it.each<[string, unknown, string[]]>([
@@ -756,7 +801,12 @@ describe("package.json の exports（findTestSupportInExports）", () => {
       ],
     ],
   ])("%s は違反", (_name, exports, expected) => {
-    expect(findTestSupportInExports(exports)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const result = findTestSupportInExports(exports);
+
+    // then
+    expect(result).toEqual(expected);
   });
 });
 
@@ -776,7 +826,12 @@ describe("InMemory の実装の置き場所（isMisplacedInMemory）", () => {
     "apps/frontend_customer/features/x/x.in-memory.ts",
     "apps/backend-x/features/x/internal/infra/x.in-memory.ts",
   ])("%s は違反なし", (path) => {
-    expect(isMisplacedInMemory(path)).toBe(false);
+    // given: it.each の入力
+    // when
+    const result = isMisplacedInMemory(path);
+
+    // then
+    expect(result).toBe(false);
   });
 
   it.each([
@@ -789,7 +844,12 @@ describe("InMemory の実装の置き場所（isMisplacedInMemory）", () => {
     "apps/backend/features/x/test-support/x.in-memory.ts",
     "apps/backend/test-support-x/x.in-memory.ts",
   ])("%s は違反", (path) => {
-    expect(isMisplacedInMemory(path)).toBe(true);
+    // given: it.each の入力
+    // when
+    const result = isMisplacedInMemory(path);
+
+    // then
+    expect(result).toBe(true);
   });
 });
 
@@ -862,6 +922,7 @@ describe("列挙と検査（fixture）", () => {
   };
 
   it("違反の無いツリーは違反 0 件（列挙は test-support/ のファイル・本番のソース・apps/*/package.json）", () => {
+    // given
     const root = fixture({
       ...allowedFiles,
       ...apiSpecFiles,
@@ -875,13 +936,19 @@ describe("列挙と検査（fixture）", () => {
         "!.env.example",
       ),
     });
-    expect({
+
+    // when
+    const result = {
       testSupport: listTestSupportFiles(root),
       excludedTargets: listDockerExcludedTargets(root),
       production: listProductionSources(root),
       packages: listAppPackageJsons(root),
       violations: collectViolations(root),
-    }).toEqual({
+    };
+
+    // then
+    // spec/api の support.ts もテストでない名前のソースなので、本番のソースとして test-support の import を見る（今の形）。
+    expect(result).toEqual({
       testSupport: [
         "apps/backend/test-support/database.ts",
         "apps/backend/test-support/nested/x.ts",
@@ -897,7 +964,6 @@ describe("列挙と検査（fixture）", () => {
         "apps/frontend_customer/features/x/x.test.tsx",
         "apps/frontend_customer/test-support/i18n.tsx",
       ],
-      // spec/api の support.ts もテストでない名前のソースなので、本番のソースとして test-support の import を見る（今の形）。
       production: [
         "apps/backend/features/x/internal/infra/x.postgres.ts",
         "apps/backend/spec/api/x/support.ts",
@@ -917,6 +983,7 @@ describe("列挙と検査（fixture）", () => {
   });
 
   it("すべての規則の違反を「規則: パス」で返す", () => {
+    // given
     const root = fixture({
       ...allowedFiles,
       // **/spec の行が無い → spec/api の .feature と support.ts が除外されない（step は **/*.test.ts の行も無いので除外されない）。
@@ -942,7 +1009,12 @@ describe("列挙と検査（fixture）", () => {
       "apps/backend/features/x/internal/infra/bad-repository.in-memory.ts":
         "export class InMemoryBadRepository {}\n",
     });
-    expect(collectViolations(root)).toEqual({
+
+    // when
+    const violations = collectViolations(root);
+
+    // then
+    expect(violations).toEqual({
       "dockerignore-entry": [
         "dockerignore-entry: .dockerignore に **/test-support が無い",
       ],
@@ -972,6 +1044,7 @@ describe("列挙と検査（fixture）", () => {
   });
 
   it("行があっても、後ろの ! の行で戻したファイルは除外されない", () => {
+    // given
     const root = fixture({
       ...allowedFiles,
       ".dockerignore": lines(
@@ -981,7 +1054,12 @@ describe("列挙と検査（fixture）", () => {
         "!apps/backend/test-support/nested/x.ts",
       ),
     });
-    expect(collectViolations(root)["dockerignore-excludes"]).toEqual([
+
+    // when
+    const violations = collectViolations(root)["dockerignore-excludes"];
+
+    // then
+    expect(violations).toEqual([
       "dockerignore-excludes: apps/backend/features/x/internal/infra/x.postgres.test.ts",
       "dockerignore-excludes: apps/backend/test-support/database.ts",
       "dockerignore-excludes: apps/backend/test-support/nested/x.ts",
@@ -991,11 +1069,17 @@ describe("列挙と検査（fixture）", () => {
   });
 
   it("test-support の行があっても、test-support を import するテストの拡張子の行が無ければそのテストだけが違反", () => {
+    // given
     const root = fixture({
       ...allowedFiles,
       ".dockerignore": lines("**/test-support", "**/*.test.ts"),
     });
-    expect(collectViolations(root)).toEqual({
+
+    // when
+    const violations = collectViolations(root);
+
+    // then
+    expect(violations).toEqual({
       "dockerignore-entry": [],
       "dockerignore-excludes": [
         "dockerignore-excludes: apps/frontend_customer/features/x/x.test.tsx",
@@ -1007,6 +1091,7 @@ describe("列挙と検査（fixture）", () => {
   });
 
   it("in-memory-placement: apps/backend の下の *.in-memory のソースを列挙し、test-support/ の外にあるものだけが違反", () => {
+    // given
     const root = fixture({
       ...allowedFiles,
       ".dockerignore": lines(
@@ -1033,10 +1118,15 @@ describe("列挙と検査（fixture）", () => {
       "apps/backend/features/x/test-support/w.in-memory.ts":
         "export const w = 1;\n",
     });
-    expect({
+
+    // when
+    const result = {
       inMemory: listBackendInMemorySources(root),
       violations: collectViolations(root),
-    }).toEqual({
+    };
+
+    // then
+    expect(result).toEqual({
       inMemory: [
         "apps/backend/features/x/internal/infra/x-repository.in-memory.ts",
         "apps/backend/features/x/test-support/w.in-memory.ts",
@@ -1059,15 +1149,21 @@ describe("列挙と検査（fixture）", () => {
   });
 
   it("apps/ も .dockerignore も無ければ、列挙は 0 件で行が無い違反だけ（本番の検査は 0 件を失敗にする）", () => {
+    // given
     const root = fixture({ "README.md": "# x\n" });
-    expect({
+
+    // when
+    const result = {
       testSupport: listTestSupportFiles(root),
       excludedTargets: listDockerExcludedTargets(root),
       production: listProductionSources(root),
       packages: listAppPackageJsons(root),
       inMemory: listBackendInMemorySources(root),
       violations: collectViolations(root),
-    }).toEqual({
+    };
+
+    // then
+    expect(result).toEqual({
       testSupport: [],
       excludedTargets: [],
       production: [],
@@ -1138,7 +1234,12 @@ describe("deploy.yml のイメージの検査のステップ（findDeployVerifyV
       ),
     ],
   ])("%s は違反なし", (_name, yaml) => {
-    expect(findDeployVerifyViolations(yaml)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findDeployVerifyViolations(yaml);
+
+    // then
+    expect(violations).toEqual([]);
   });
 
   it.each<[string, string, string[]]>([
@@ -1245,7 +1346,12 @@ describe("deploy.yml のイメージの検査のステップ（findDeployVerifyV
       ["Verify migrate image has no test-support: ステップが無い"],
     ],
   ])("%s は違反", (_name, yaml, expected) => {
-    expect(findDeployVerifyViolations(yaml)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const violations = findDeployVerifyViolations(yaml);
+
+    // then
+    expect(violations).toEqual(expected);
   });
 });
 
@@ -1254,12 +1360,21 @@ describe("test-support（実ファイル）", () => {
   const violations = collectViolations(repoRoot);
 
   it("dockerignore-entry: .dockerignore に **/test-support の行がある", () => {
-    expect(violations["dockerignore-entry"]).toEqual([]);
+    // given: describe の冒頭で collectViolations(repoRoot) 済み（実ファイル）
+    // when
+    const entryViolations = violations["dockerignore-entry"];
+
+    // then
+    expect(entryViolations).toEqual([]);
   });
 
   it("dockerignore-excludes: apps/*/test-support/ のすべてのファイルと test-support を import するテストが .dockerignore で除外される", () => {
+    // given: describe の冒頭で collectViolations(repoRoot) 済み（実ファイル）
+    // when
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     const files = listDockerExcludedTargets(repoRoot);
+
+    // then
     expect(files).toContain("apps/backend/test-support/database.ts");
     expect(files).toContain("apps/frontend_customer/test-support/i18n.tsx");
     expect(files).toContain(
@@ -1276,29 +1391,49 @@ describe("test-support（実ファイル）", () => {
   });
 
   it("production-imports-test-support: 本番のコードは test-support を import しない", () => {
+    // given: describe の冒頭で collectViolations(repoRoot) 済み（実ファイル）
+    // when
     const files = listProductionSources(repoRoot);
+
+    // then
     expect(files).toContain("apps/backend/shared/infra/database.ts");
     expect(files).toContain("apps/frontend_customer/shared/i18n/i18n.tsx");
     expect(violations["production-imports-test-support"]).toEqual([]);
   });
 
   it("deploy-verifies-images: deploy.yml が runtime と migrate のイメージに test-support が無いことを確かめる", () => {
+    // given
     const yaml = readFileSync(join(repoRoot, DEPLOY_WORKFLOW), "utf8");
+
+    // when
+    const steps = readSteps(yaml).length;
+    const deployViolations = findDeployVerifyViolations(yaml);
+
+    // then
     // WHY ステップの区切りが働いていることを先に確かめる: 区切りが壊れて 1 つの塊になると、別のステップの run の test-support で通る。
-    expect(readSteps(yaml).length).toBeGreaterThan(8);
-    expect(findDeployVerifyViolations(yaml)).toEqual([]);
+    expect(steps).toBeGreaterThan(8);
+    expect(deployViolations).toEqual([]);
   });
 
   it("exports-test-support: apps/*/package.json の exports に test-support が無い", () => {
+    // given: describe の冒頭で collectViolations(repoRoot) 済み（実ファイル）
+    // when
     const files = listAppPackageJsons(repoRoot);
+
+    // then
     expect(files).toContain("apps/backend/package.json");
     expect(files).toContain("apps/shared/package.json");
     expect(violations["exports-test-support"]).toEqual([]);
   });
 
   it("in-memory-placement: apps/backend の *.in-memory のソースは apps/backend/test-support/ の下だけにある", () => {
+    // given: describe の冒頭で collectViolations(repoRoot) 済み（実ファイル）
+    // when
+    const backendInMemorySources = listBackendInMemorySources(repoRoot);
+
+    // then
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
-    expect(listBackendInMemorySources(repoRoot)).toContain(
+    expect(backendInMemorySources).toContain(
       "apps/backend/test-support/todo/todo-repository.in-memory.ts",
     );
     expect(violations["in-memory-placement"]).toEqual([]);

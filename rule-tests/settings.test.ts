@@ -274,54 +274,93 @@ describe("matcher の判定（公式 hooks の Matcher patterns）", () => {
     // 正規表現はアンカーなしなので、部分一致でも当たる（公式: RegExp.prototype.test）。
     ["Bas.", "Bash", true],
   ])("matcher %s は %s に当たるか: %s", (matcher, tool, expected) => {
-    expect(matcherMatches(matcher, tool)).toBe(expected);
+    // given: it.each の入力
+    // when
+    const result = matcherMatches(matcher, tool);
+
+    // then
+    expect(result).toBe(expected);
   });
 
   it("Bash と MCP の書き込みツールをすべて並べた matcher は漏れがない（must pass）", () => {
-    expect(findUncoveredTools(PRE_TOOL_USE_MATCHER, GUARDED_TOOLS)).toEqual([]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const uncoveredTools = findUncoveredTools(
+      PRE_TOOL_USE_MATCHER,
+      GUARDED_TOOLS,
+    );
+
+    // then
+    expect(uncoveredTools).toEqual([]);
   });
 
   it("Bash だけの matcher では MCP の書き込みツールが漏れる（must reject）", () => {
-    expect(findUncoveredTools("Bash", GUARDED_TOOLS)).toEqual(
-      GUARDED_TOOLS.slice(1),
-    );
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const uncoveredTools = findUncoveredTools("Bash", GUARDED_TOOLS);
+
+    // then
+    expect(uncoveredTools).toEqual(GUARDED_TOOLS.slice(1));
   });
 
   it("MCP の正規表現だけの matcher では Bash が漏れる（must reject）", () => {
-    expect(findUncoveredTools("mcp__github__.*", GUARDED_TOOLS)).toEqual([
-      "Bash",
-    ]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const uncoveredTools = findUncoveredTools("mcp__github__.*", GUARDED_TOOLS);
+
+    // then
+    expect(uncoveredTools).toEqual(["Bash"]);
   });
 });
 
 describe("permissions.deny の判定", () => {
   it("必須のルールがすべてあれば（ほかのルールがあっても）不足なし（must pass）", () => {
-    expect(findMissingDenyRules(validSettings(), REQUIRED_DENY_RULES)).toEqual(
-      [],
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const missingDenyRules = findMissingDenyRules(
+      validSettings(),
+      REQUIRED_DENY_RULES,
     );
+
+    // then
+    expect(missingDenyRules).toEqual([]);
   });
 
   it.each(REQUIRED_DENY_RULES.map((rule) => [rule]))(
     "%s が無ければ不足として返す（must reject）",
     (rule) => {
+      // given
       const settings = validSettings();
       settings.permissions.deny = settings.permissions.deny.filter(
         (r) => r !== rule,
       );
-      expect(findMissingDenyRules(settings, REQUIRED_DENY_RULES)).toEqual([
-        rule,
-      ]);
+
+      // when
+      const missingDenyRules = findMissingDenyRules(
+        settings,
+        REQUIRED_DENY_RULES,
+      );
+
+      // then
+      expect(missingDenyRules).toEqual([rule]);
     },
   );
 
   it("書式が違うルール（末尾の * の前の空白の有無）は同じルールとみなさない（must reject）", () => {
+    // given
     const settings = validSettings();
     settings.permissions.deny = settings.permissions.deny.map((r) =>
       r === "Bash(git push --force*)" ? "Bash(git push --force *)" : r,
     );
-    expect(findMissingDenyRules(settings, REQUIRED_DENY_RULES)).toEqual([
-      "Bash(git push --force*)",
-    ]);
+
+    // when
+    const missingDenyRules = findMissingDenyRules(
+      settings,
+      REQUIRED_DENY_RULES,
+    );
+
+    // then
+    expect(missingDenyRules).toEqual(["Bash(git push --force*)"]);
   });
 
   it.each([
@@ -331,19 +370,31 @@ describe("permissions.deny の判定", () => {
   ])(
     "%s ときは必須のルールをすべて不足として返す（must reject）",
     (_label, settings) => {
-      expect(findMissingDenyRules(settings, REQUIRED_DENY_RULES)).toEqual(
+      // given: 前提なし（入力は when の呼び出しに直接書く）
+      // when
+      const missingDenyRules = findMissingDenyRules(
+        settings,
         REQUIRED_DENY_RULES,
       );
+
+      // then
+      expect(missingDenyRules).toEqual(REQUIRED_DENY_RULES);
     },
   );
 });
 
 describe("hooks の登録の判定", () => {
   it("期待する登録がすべてあれば問題なし（must pass）", () => {
-    expect(findHookProblems(validSettings(), EXPECTED_HOOKS)).toEqual([]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const hookProblems = findHookProblems(validSettings(), EXPECTED_HOOKS);
+
+    // then
+    expect(hookProblems).toEqual([]);
   });
 
   it("同じイベントにほかのグループやフックが並んでいても問題なし（must pass）", () => {
+    // given
     const settings = validSettings();
     settings.hooks.PreToolUse.unshift({
       matcher: "Edit",
@@ -353,15 +404,25 @@ describe("hooks の登録の判定", () => {
       { type: "command", command: "echo first" },
       ...groupEntries(settings.hooks.PreToolUse[1]),
     ];
-    expect(findHookProblems(settings, EXPECTED_HOOKS)).toEqual([]);
+
+    // when
+    const hookProblems = findHookProblems(settings, EXPECTED_HOOKS);
+
+    // then
+    expect(hookProblems).toEqual([]);
   });
 
   it.each(EXPECTED_HOOKS.map((hook) => [hook.event]))(
     "%s の登録が無ければ問題として返す（must reject）",
     (event) => {
+      // given
       const settings = validSettings();
       delete settings.hooks[event];
+
+      // when
       const problems = findHookProblems(settings, EXPECTED_HOOKS);
+
+      // then
       expect(problems).toHaveLength(1);
       expect(problems[0]).toMatch(new RegExp(`^${event}: `));
     },
@@ -441,12 +502,19 @@ describe("hooks の登録の判定", () => {
       },
     ],
   ])("%s ときは問題として返す（must reject）", (_label, breakIt) => {
+    // given
     const settings = validSettings();
     breakIt(settings);
-    expect(findHookProblems(settings, EXPECTED_HOOKS)).toHaveLength(1);
+
+    // when
+    const problems = findHookProblems(settings, EXPECTED_HOOKS);
+
+    // then
+    expect(problems).toHaveLength(1);
   });
 
   it("フックのコマンドから $CLAUDE_PROJECT_DIR 配下のスクリプトを重複なく取り出す", () => {
+    // given
     const settings = validSettings();
     settings.hooks.Extra = [
       {
@@ -456,7 +524,12 @@ describe("hooks の登録の判定", () => {
         ],
       },
     ];
-    expect(listHookScripts(settings)).toEqual(
+
+    // when
+    const hookScripts = listHookScripts(settings);
+
+    // then
+    expect(hookScripts).toEqual(
       EXPECTED_HOOKS.map((hook) => hook.command.split('"/')[1]),
     );
   });
@@ -464,6 +537,7 @@ describe("hooks の登録の判定", () => {
 
 describe("権限・フックを黙って効かなくする設定の判定", () => {
   it("期待どおりの settings（ほかの allow があっても）は問題なし（must pass）", () => {
+    // given
     const settings = {
       ...validSettings(),
       disableAllHooks: false,
@@ -473,8 +547,14 @@ describe("権限・フックを黙って効かなくする設定の判定", () =
         allow: ["Bash(pnpm test *)", "Bash(git status)", "Read"],
       },
     };
-    expect(findUnsafeSettings(settings)).toEqual([]);
-    expect(findUnexpectedHooks(settings, EXPECTED_HOOKS)).toEqual([]);
+
+    // when
+    const unsafeSettings = findUnsafeSettings(settings);
+    const unexpectedHooks = findUnexpectedHooks(settings, EXPECTED_HOOKS);
+
+    // then
+    expect(unsafeSettings).toEqual([]);
+    expect(unexpectedHooks).toEqual([]);
   });
 
   it.each<[string, Record<string, unknown>, string[]]>([
@@ -499,9 +579,14 @@ describe("権限・フックを黙って効かなくする設定の判定", () =
       ["permissions.allow: Bash"],
     ],
   ])("%s は問題として返す（must reject）", (_label, extra, expected) => {
-    expect(findUnsafeSettings({ ...validSettings(), ...extra })).toEqual(
-      expected,
-    );
+    // given
+    const settings = { ...validSettings(), ...extra };
+
+    // when
+    const unsafe = findUnsafeSettings(settings);
+
+    // then
+    expect(unsafe).toEqual(expected);
   });
 
   it.each<[string, (s: ReturnType<typeof validSettings>) => void, string]>([
@@ -542,9 +627,15 @@ describe("権限・フックを黙って効かなくする設定の判定", () =
       "Stop: matcher=undefined command=undefined は想定外",
     ],
   ])("%s は想定外として返す（must reject）", (_label, breakIt, expected) => {
+    // given
     const settings = validSettings();
     breakIt(settings);
-    expect(findUnexpectedHooks(settings, EXPECTED_HOOKS)).toEqual([expected]);
+
+    // when
+    const unexpected = findUnexpectedHooks(settings, EXPECTED_HOOKS);
+
+    // then
+    expect(unexpected).toEqual([expected]);
   });
 });
 
@@ -565,19 +656,27 @@ describe("スクリプトの存在と構文の判定（fixture）", () => {
   });
 
   it("あって構文の正しいスクリプトは問題なし（must pass）", () => {
-    expect(findBrokenScripts(dir, ["scripts/ok.sh"])).toEqual([]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const brokenScripts = findBrokenScripts(dir, ["scripts/ok.sh"]);
+
+    // then
+    expect(brokenScripts).toEqual([]);
   });
 
   it("無いスクリプトと構文エラーのスクリプトを返す（must reject）", () => {
+    // given
     const problems = findBrokenScripts(dir, [
       "scripts/ok.sh",
       "scripts/missing.sh",
       "scripts/broken.sh",
     ]);
-    expect(problems.map((p) => p.split(":")[0])).toEqual([
-      "scripts/missing.sh",
-      "scripts/broken.sh",
-    ]);
+
+    // when
+    const result = problems.map((p) => p.split(":")[0]);
+
+    // then
+    expect(result).toEqual(["scripts/missing.sh", "scripts/broken.sh"]);
   });
 });
 
@@ -587,37 +686,72 @@ describe(".claude/settings.json（実ファイル）", () => {
   );
 
   it("permissions.deny に必須のルールがすべてある", () => {
-    expect(findMissingDenyRules(settings, REQUIRED_DENY_RULES)).toEqual([]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const missingDenyRules = findMissingDenyRules(
+      settings,
+      REQUIRED_DENY_RULES,
+    );
+
+    // then
+    expect(missingDenyRules).toEqual([]);
   });
 
   it("各イベントに指定のスクリプトが登録されている", () => {
-    expect(findHookProblems(settings, EXPECTED_HOOKS)).toEqual([]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const hookProblems = findHookProblems(settings, EXPECTED_HOOKS);
+
+    // then
+    expect(hookProblems).toEqual([]);
   });
 
   it("想定外のフックの登録が無い", () => {
-    expect(findUnexpectedHooks(settings, EXPECTED_HOOKS)).toEqual([]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const unexpectedHooks = findUnexpectedHooks(settings, EXPECTED_HOOKS);
+
+    // then
+    expect(unexpectedHooks).toEqual([]);
   });
 
   it("フックや権限を黙って効かなくする設定が無い", () => {
-    expect(findUnsafeSettings(settings)).toEqual([]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const unsafeSettings = findUnsafeSettings(settings);
+
+    // then
+    expect(unsafeSettings).toEqual([]);
   });
 
   it("guard-git.sh を登録した PreToolUse の matcher が Bash と MCP の書き込みツールをすべて含む", () => {
+    // given
     const groups = hookGroups(settings, "PreToolUse").filter((group) =>
       groupEntries(group).some(
         (entry) => entry.command === hookCommand("hooks/guard-git.sh"),
       ),
     );
-    expect(groups).toHaveLength(1);
     const matcher = groups[0].matcher;
+
+    // when
+    const uncoveredTools = findUncoveredTools(matcher as string, GUARDED_TOOLS);
+
+    // then
+    expect(groups).toHaveLength(1);
     expect(typeof matcher).toBe("string");
-    expect(findUncoveredTools(matcher as string, GUARDED_TOOLS)).toEqual([]);
+    expect(uncoveredTools).toEqual([]);
   });
 
   it("フックが参照するスクリプトがすべてあり、bash -n が通る", () => {
+    // given
     const scripts = listHookScripts(settings);
+
+    // when
+    const brokenScripts = findBrokenScripts(repoRoot, scripts);
+
+    // then
     // WHY 件数も見る: 取り出しが壊れて 0 件になると、存在の検査が常に通ってしまうため。
     expect(scripts).toHaveLength(EXPECTED_HOOKS.length);
-    expect(findBrokenScripts(repoRoot, scripts)).toEqual([]);
+    expect(brokenScripts).toEqual([]);
   });
 });

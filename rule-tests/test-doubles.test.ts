@@ -420,7 +420,12 @@ describe("テストダブルの判定（findTestDoubleViolations）: must pass",
       ),
     ],
   ])("%s は違反なし", (_name, path, text) => {
-    expect(findTestDoubleViolations(path, text)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findTestDoubleViolations(path, text);
+
+    // then
+    expect(violations).toEqual([]);
   });
 });
 
@@ -748,7 +753,12 @@ describe("テストダブルの判定（findTestDoubleViolations）: must reject
       ],
     ],
   ])("%s は違反", (_name, path, text, expected) => {
-    expect(findTestDoubleViolations(path, text)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const violations = findTestDoubleViolations(path, text);
+
+    // then
+    expect(violations).toEqual(expected);
   });
 });
 
@@ -775,6 +785,7 @@ describe("テストファイルの列挙と検査（fixture）", () => {
   const importTestSupport = `import { createTestDatabase } from "${TEST_SUPPORT}";`;
 
   it("apps/ のテストと vitest.global-setup.ts を対象にし、違反を「規則: パス:行」で返す", () => {
+    // given
     const root = fixture({
       [DOMAIN_TEST]: source('vi.mock("@repo/shared/now");'),
       [APPLICATION_TEST]: source(
@@ -834,10 +845,15 @@ describe("テストファイルの列挙と検査（fixture）", () => {
       "apps/backend/node_modules/x/x.test.ts": source('vi.mock("./y");'),
       "apps/frontend_customer/.next/x.test.ts": source(importTestSupport),
     });
-    expect({
+
+    // when
+    const result = {
       files: listTestDoubleTargets(root),
       violations: collectTestDoubleViolations(root),
-    }).toEqual({
+    };
+
+    // then
+    expect(result).toEqual({
       files: [
         "apps/backend/features/x/internal/application/x.command.test.ts",
         "apps/backend/features/x/internal/domain/x.test.ts",
@@ -869,18 +885,29 @@ describe("テストファイルの列挙と検査（fixture）", () => {
   });
 
   it("apps/ も vitest.global-setup.ts も無ければ対象は 0 件（本番の検査は 0 件を失敗にする）", () => {
+    // given
     const root = fixture({ "README.md": "# x\n" });
-    expect({
+
+    // when
+    const result = {
       files: listTestDoubleTargets(root),
       violations: collectTestDoubleViolations(root),
-    }).toEqual({ files: [], violations: [] });
+    };
+
+    // then
+    expect(result).toEqual({ files: [], violations: [] });
   });
 });
 
 describe("テストダブル（実ファイル）", () => {
   it("backend のテストの vi.mock は @repo/shared/now だけ、test-support/database の import は infra のテスト・test-support のテスト（直下とテストデータビルダー）・API ジャーニーテスト・API 仕様テスト・global-setup だけ", () => {
-    // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
+    // given: 実ファイル（repoRoot）
+    // when
     const files = listTestDoubleTargets(repoRoot);
+    const violations = collectTestDoubleViolations(repoRoot);
+
+    // then
+    // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     expect(files).toContain(
       "apps/backend/features/todo/internal/domain/todo.test.ts",
     );
@@ -892,6 +919,6 @@ describe("テストダブル（実ファイル）", () => {
     expect(files).toContain(
       "apps/backend/spec/journey/todo-lifecycle.api-journey.test.ts",
     );
-    expect(collectTestDoubleViolations(repoRoot)).toEqual([]);
+    expect(violations).toEqual([]);
   });
 });

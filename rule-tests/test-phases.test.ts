@@ -44,8 +44,8 @@ import { afterAll, describe, expect, it } from "vitest";
 //   本体の中の入れ子の関数の中のフェーズコメントも数える。
 // 検査の対象の列挙が 0 件なら、実ファイルのテストで失敗させる（0 件だと違反も 0 件で常に緑になる）。
 
-// WHY 対象を apps/ から始める: 既存のテストを PR に分けて直す（Issue #273）。rule-tests/・scripts/ を直す PR でここに足す。
-const TARGET_DIRS = ["apps"];
+// WHY この 3 つ: リポジトリのテストを置く場所のすべて（vitest.config.mts の include と apps/e2e/）。
+const TARGET_DIRS = ["apps", "rule-tests", "scripts"];
 // WHY 除くディレクトリ: 依存・ビルドの出力・Stryker の一時コピーは自分たちのテストではない。
 const SKIPPED_DIRS = new Set([
   "node_modules",
@@ -269,15 +269,36 @@ function isPunct(token: Token | undefined, text: string): boolean {
   return token?.kind === "punct" && token.text === text;
 }
 
+// tokens[index] が型引数の `<` なら対応する `>` の次の位置、そうでなければ index。
+// WHY 型引数を読み飛ばす: `it.each<[string, number]>(...)` を見逃すと、そのテストが検査されずに通る（worker の報告で発見）。
+//   型引数の中の括弧（`(s: T) => void`・`[a, b]`・`{ a: T }`）は組ごとに読み飛ばす。対応する `>` の次が `(` でなければ
+//   比較の `<` として扱う（`a < b && c > d`）。
+function skipTypeArguments(tokens: Token[], index: number): number {
+  if (!isPunct(tokens[index], "<")) return index;
+  let depth = 0;
+  let position = index;
+  while (position < tokens.length && !isPunct(tokens[position], ";")) {
+    const token = tokens[position] as Token;
+    if (isPunct(token, "<")) depth += 1;
+    else if (isPunct(token, ">")) depth -= 1;
+    else if (depthDelta(token) > 0) position = matching(tokens, position);
+    if (depth === 0)
+      return isPunct(tokens[position + 1], "(") ? position + 1 : index;
+    position += 1;
+  }
+  return index;
+}
+
 // tokens[from] がテストの呼び出しの関数名なら、引数の `(` の位置。テストでなければ undefined。
 function testCallOpen(tokens: Token[], from: number): number | undefined {
-  let index = from + 1;
+  let index = skipTypeArguments(tokens, from + 1);
   while (isPunct(tokens[index], ".") && tokens[index + 1]?.kind === "word") {
     const modifier = (tokens[index + 1] as Token).text;
-    if (MODIFIERS_WITH_ARGS.has(modifier) && isPunct(tokens[index + 2], "(")) {
-      index = matching(tokens, index + 2) + 1;
+    const next = skipTypeArguments(tokens, index + 2);
+    if (MODIFIERS_WITH_ARGS.has(modifier) && isPunct(tokens[next], "(")) {
+      index = skipTypeArguments(tokens, matching(tokens, next) + 1);
     } else if (MODIFIERS_WITHOUT_ARGS.has(modifier)) {
-      index += 2;
+      index = next;
     } else {
       return undefined;
     }
@@ -687,6 +708,26 @@ describe("フェーズコメント（findPhaseViolations）", () => {
       [
         "2: フェーズコメントが given → when → then の順に無い（実際: 無し）",
         "5: フェーズコメントが given → when → then の順に無い（実際: 無し）",
+        "8: フェーズコメントが given → when → then の順に無い（実際: 無し）",
+      ],
+    ],
+    [
+      "型引数の付いた呼び出し（each の型引数・テスト関数の型引数）",
+      lines(
+        'it.each<[string, Map<string, number>]>([["a", new Map()]])("%s", (a) => {',
+        "  expect(a).toBe(1);",
+        "});",
+        'test<{ a: number }>("b", () => {',
+        "  expect(1).toBe(1);",
+        "});",
+        "const ok = a < b && c > d;",
+        'it.each<[string, (s: T) => void]>([])("%s", (a) => {',
+        "  expect(a).toBe(1);",
+        "});",
+      ),
+      [
+        "1: フェーズコメントが given → when → then の順に無い（実際: 無し）",
+        "4: フェーズコメントが given → when → then の順に無い（実際: 無し）",
         "8: フェーズコメントが given → when → then の順に無い（実際: 無し）",
       ],
     ],

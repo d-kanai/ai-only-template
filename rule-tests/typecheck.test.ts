@@ -116,7 +116,12 @@ describe("typecheck の判定（typechecksAllProjects）", () => {
       `tsc -p . --noEmit --strict && tsc -p apps/backend --noEmit --pretty && ${SHARED}`,
     ],
   ])("%s は許可する", (script) => {
-    expect(typechecksAllProjects(script)).toBe(true);
+    // given: it.each の入力
+    // when
+    const allowed = typechecksAllProjects(script);
+
+    // then
+    expect(allowed).toBe(true);
   });
 
   it.each([
@@ -168,7 +173,12 @@ describe("typecheck の判定（typechecksAllProjects）", () => {
     ],
     ["", "空文字"],
   ])("%s（%s）は拒否する", (script) => {
-    expect(typechecksAllProjects(script)).toBe(false);
+    // given: it.each の入力
+    // when
+    const allowed = typechecksAllProjects(script);
+
+    // then
+    expect(allowed).toBe(false);
   });
 });
 
@@ -194,7 +204,12 @@ describe("ワークフローの判定（runsTypecheckBeforeBuild）", () => {
       ),
     ],
   ])("%s は許可する", (_name, yaml) => {
-    expect(runsTypecheckBeforeBuild(yaml)).toBe(true);
+    // given: it.each の入力
+    // when
+    const allowed = runsTypecheckBeforeBuild(yaml);
+
+    // then
+    expect(allowed).toBe(true);
   });
 
   it.each([
@@ -234,23 +249,41 @@ describe("ワークフローの判定（runsTypecheckBeforeBuild）", () => {
       workflow("      - run: pnpm build", "      - run: pnpm typecheck"),
     ],
   ])("%s は拒否する", (_name, yaml) => {
-    expect(runsTypecheckBeforeBuild(yaml)).toBe(false);
+    // given: it.each の入力
+    // when
+    const allowed = runsTypecheckBeforeBuild(yaml);
+
+    // then
+    expect(allowed).toBe(false);
   });
 });
 
 describe("型チェックのゲート（実ファイル）", () => {
   it("package.json の typecheck は、リポジトリ直下と apps/backend・apps/shared の tsconfig を tsc --noEmit で検査する", () => {
+    // given
     const scripts: Record<string, string | undefined> = pkg.scripts;
-    expect(typechecksAllProjects(scripts.typecheck ?? "")).toBe(true);
+
+    // when
+    const allowed = typechecksAllProjects(scripts.typecheck ?? "");
+
+    // then
+    expect(allowed).toBe(true);
   });
 
   it(".github/workflows/ci.yml は pnpm typecheck を pnpm build より前に、失敗で止まる形で実行する", () => {
+    // given
     const yaml = readFileSync(
       join(repoRoot, ".github/workflows/ci.yml"),
       "utf8",
     );
+
+    // when
+    const steps = readWorkflowSteps(yaml);
+    const allowed = runsTypecheckBeforeBuild(yaml);
+
+    // then
     // 前提: ステップを読み取れていること（読み取りが壊れて 0 件になり、判定が素通りするのを防ぐ）。
-    expect(readWorkflowSteps(yaml).length).toBeGreaterThan(5);
-    expect(runsTypecheckBeforeBuild(yaml)).toBe(true);
+    expect(steps.length).toBeGreaterThan(5);
+    expect(allowed).toBe(true);
   });
 });

@@ -100,7 +100,12 @@ describe("public のスキーマ修飾（findPublicSchemaQualifiers）", () => {
     ],
     ["空", ""],
   ])("%s は違反なし", (_name, sql) => {
-    expect(findPublicSchemaQualifiers(sql)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const result = findPublicSchemaQualifiers(sql);
+
+    // then
+    expect(result).toEqual([]);
   });
 
   it.each([
@@ -120,7 +125,12 @@ describe("public のスキーマ修飾（findPublicSchemaQualifiers）", () => {
       [1, 2],
     ],
   ])("%s は違反", (_name, sql, expected) => {
-    expect(findPublicSchemaQualifiers(sql)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const result = findPublicSchemaQualifiers(sql);
+
+    // then
+    expect(result).toEqual(expected);
   });
 });
 
@@ -142,6 +152,7 @@ describe("列挙と検査（fixture）", () => {
   }
 
   it("drizzle の下の *.sql（サブディレクトリを含む）だけを検査し、public で修飾した文をファイルと文の番号で返す", () => {
+    // given
     const root = fixture({
       [`${DRIZZLE_DIR}/0000_create.sql`]: "CREATE TABLE x (a int);",
       [`${DRIZZLE_DIR}/0001_fk.sql`]: lines(
@@ -154,10 +165,15 @@ describe("列挙と検査（fixture）", () => {
       [`${DRIZZLE_DIR}/drizzle.config.ts`]: "// public.t\n",
       "other/0000_x.sql": "SELECT 1 FROM public.t;",
     });
-    expect({
+
+    // when
+    const result = {
       sql: listDrizzleSqlFiles(root),
       violations: collectMigrationViolations(root),
-    }).toEqual({
+    };
+
+    // then
+    expect(result).toEqual({
       sql: [
         `${DRIZZLE_DIR}/0000_create.sql`,
         `${DRIZZLE_DIR}/0001_fk.sql`,
@@ -171,21 +187,31 @@ describe("列挙と検査（fixture）", () => {
   });
 
   it("drizzle のディレクトリが無ければ対象は 0 件で違反も 0 件になる（本番の検査は 0 件を失敗にする）", () => {
+    // given
     const root = fixture({ "README.md": "# x\n" });
-    expect({
+
+    // when
+    const result = {
       sql: listDrizzleSqlFiles(root),
       violations: collectMigrationViolations(root),
-    }).toEqual({ sql: [], violations: [] });
+    };
+
+    // then
+    expect(result).toEqual({ sql: [], violations: [] });
   });
 });
 
 describe("マイグレーション（実ファイル）", () => {
   it("drizzle の SQL は表を public で修飾しない", () => {
+    // given: 実ファイル（repoRoot）
+    // when
+    const files = listDrizzleSqlFiles(repoRoot);
+    const violations = collectMigrationViolations(repoRoot);
+
+    // then
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     //   最初のマイグレーションは消えない（消すと migrate の記録とずれる）ので、それが列挙に入ることを見る。
-    expect(listDrizzleSqlFiles(repoRoot)).toContain(
-      `${DRIZZLE_DIR}/0000_create_todos.sql`,
-    );
-    expect(collectMigrationViolations(repoRoot)).toEqual([]);
+    expect(files).toContain(`${DRIZZLE_DIR}/0000_create_todos.sql`);
+    expect(violations).toEqual([]);
   });
 });

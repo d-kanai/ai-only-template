@@ -98,11 +98,14 @@ afterEach(() => {
 
 describe("worktree-remove.sh（must pass）", () => {
   it("worktree の名前から導いた DB をメインの作業ツリーで drop し、何も出さずに 0 で終わる", () => {
+    // given: 前提なし（beforeEach で空の git リポジトリと偽の docker / pnpm がある）
+    // when
     const result = runHook({
       worktree_path: worktreePath("agent-a3f2"),
       cwd: repo,
     });
 
+    // then
     expect(result.status).toBe(0);
     expect(result.stdout).toBe("");
     expect(calls()).toEqual([
@@ -111,11 +114,14 @@ describe("worktree-remove.sh（must pass）", () => {
   });
 
   it("cwd が消えた worktree でも、worktree_path からメインを求めて drop する", () => {
+    // given: 前提なし（beforeEach で空の git リポジトリと偽の docker / pnpm がある）
+    // when
     const result = runHook({
       worktree_path: worktreePath("feat-64"),
       cwd: worktreePath("feat-64"),
     });
 
+    // then
     expect(result.status).toBe(0);
     expect(calls()).toEqual([
       `${repo} ${PSQL} drop database if exists app_wt_feat_64 with (force)`,
@@ -123,31 +129,44 @@ describe("worktree-remove.sh（must pass）", () => {
   });
 
   it("メインの共有フックが .claude/worktrees/ の下を指していれば、メインで pnpm exec lefthook install を実行する", () => {
+    // given
     writeFileSync(
       join(repo, ".git", "hooks", "pre-commit"),
       `#!/bin/sh\n${worktreePath("agent-a3f2")}/node_modules/.pnpm/lefthook/bin/lefthook run pre-commit\n`,
     );
-    runHook({ worktree_path: worktreePath("agent-a3f2"), cwd: repo });
 
-    expect(calls().at(-1)).toBe(`${repo} pnpm exec lefthook install`);
+    // when
+    runHook({ worktree_path: worktreePath("agent-a3f2"), cwd: repo });
+    const lastCall = calls().at(-1);
+
+    // then
+    expect(lastCall).toBe(`${repo} pnpm exec lefthook install`);
   });
 
   it("共有フックがメインの node_modules を指していれば、lefthook install は実行しない", () => {
+    // given
     writeFileSync(
       join(repo, ".git", "hooks", "pre-commit"),
       `#!/bin/sh\n${repo}/node_modules/.pnpm/lefthook/bin/lefthook run pre-commit\n`,
     );
-    runHook({ worktree_path: worktreePath("agent-a3f2"), cwd: repo });
 
-    expect(calls().filter((c) => c.includes("lefthook"))).toEqual([]);
+    // when
+    runHook({ worktree_path: worktreePath("agent-a3f2"), cwd: repo });
+    const lefthookCalls = calls().filter((c) => c.includes("lefthook"));
+
+    // then
+    expect(lefthookCalls).toEqual([]);
   });
 
   it("WORKTREE_HOOK_DRY_RUN=1 なら実行予定を表示するだけで、docker も pnpm も呼ばない", () => {
+    // given: 前提なし（beforeEach で空の git リポジトリと偽の docker / pnpm がある）
+    // when
     const result = runHook(
       { worktree_path: worktreePath("agent-a3f2"), cwd: repo },
       { WORKTREE_HOOK_DRY_RUN: "1" },
     );
 
+    // then
     expect(result.status).toBe(0);
     expect(result.stdout.trim().split("\n")).toEqual([
       `[dry-run] (cd ${repo} && ${PSQL} "drop database if exists app_wt_agent_a3f2 with (force)")`,
@@ -159,11 +178,14 @@ describe("worktree-remove.sh（must pass）", () => {
 
 describe("worktree-remove.sh（失敗しても worktree の削除を止めない）", () => {
   it("docker が失敗しても 0 で終わり、stderr に DB 名を出す", () => {
+    // given: 前提なし（beforeEach で空の git リポジトリがあり、偽の docker を失敗させる）
+    // when
     const result = runHook(
       { worktree_path: worktreePath("agent-a3f2"), cwd: repo },
       { FAKE_DOCKER_EXIT: "1" },
     );
 
+    // then
     expect(result.status).toBe(0);
     expect(result.stderr).toContain("app_wt_agent_a3f2");
   });
@@ -183,6 +205,8 @@ describe("worktree-remove.sh（失敗しても worktree の削除を止めない
   ])(
     "%s ときは何もせずに 0 で終わる（関係のない DB を消さない）",
     (_, input) => {
+      // given: it.each の input（フックが対象にしない入力）
+      // when
       const result = spawnSync("bash", [hookPath], {
         input: input(),
         encoding: "utf8",
@@ -192,6 +216,7 @@ describe("worktree-remove.sh（失敗しても worktree の削除を止めない
         }),
       });
 
+      // then
       expect(result.status).toBe(0);
       expect(calls()).toEqual([]);
     },

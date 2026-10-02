@@ -89,16 +89,20 @@ describe("pre-compact.sh（PreCompact フック）", () => {
   });
 
   it("trigger・ブランチ・HEAD・git status・stash の件数・直近 5 コミットを .claude/state/pre-compact.md に書き、何も出さずに 0 で終わる", () => {
+    // given
     const head = git(["rev-parse", "HEAD"]);
+
+    // when
     const result = run({
       hook_event_name: "PreCompact",
       trigger: "auto",
       cwd: repo,
     });
+    const lines = readFileSync(stateFile(), "utf8").split("\n");
+
+    // then
     expect(result.status).toBe(0);
     expect(result.stdout).toBe("");
-
-    const lines = readFileSync(stateFile(), "utf8").split("\n");
     expect(lines).toContain("- trigger: auto");
     expect(lines).toContain("- branch: feat/1-x");
     expect(lines).toContain(`- HEAD: ${head}`);
@@ -119,45 +123,69 @@ describe("pre-compact.sh（PreCompact フック）", () => {
   });
 
   it("上書きする（2 回目の実行で 1 回目の内容は残らない）", () => {
+    // given
     run({ trigger: "auto", cwd: repo });
+
+    // when
     const result = run({ trigger: "manual", cwd: repo });
-    expect(result.status).toBe(0);
     const content = readFileSync(stateFile(), "utf8");
+
+    // then
+    expect(result.status).toBe(0);
     expect(content).toContain("- trigger: manual");
     expect(content).not.toContain("- trigger: auto");
   });
 
   it("cwd がサブディレクトリでも、リポジトリ直下の .claude/state に書く", () => {
+    // given
     mkdirSync(join(repo, "sub"));
+
+    // when
     const result = run({ trigger: "manual", cwd: join(repo, "sub") });
+
+    // then
     expect(result.status).toBe(0);
     expect(existsSync(stateFile())).toBe(true);
     expect(existsSync(join(repo, "sub/.claude"))).toBe(false);
   });
 
   it("docs/work-logs/ には書かない", () => {
+    // given: 前提なし（beforeEach で git リポジトリがある）
+    // when
     run({ trigger: "auto", cwd: repo });
+
+    // then
     expect(existsSync(join(repo, "docs/work-logs"))).toBe(false);
   });
 
   it("stash もコミットも無いリポジトリでも書ける（stash は 0、コミットの行は無し）", () => {
+    // given
     const empty = join(tmp, "empty");
     mkdirSync(empty);
     spawnSync("git", ["init", "-q", "-b", "main"], { cwd: empty, env: gitEnv });
+
+    // when
     const result = run({ trigger: "auto", cwd: empty });
-    expect(result.status).toBe(0);
     const content = readFileSync(
       join(empty, ".claude/state/pre-compact.md"),
       "utf8",
     );
+
+    // then
+    expect(result.status).toBe(0);
     expect(content).toContain("- stash: 0");
     expect(content).toContain("- branch: main");
   });
 
   it("cwd が git リポジトリでなければ何も書かず、理由を stderr に出して 0 で終わる（compact を止めない）", () => {
+    // given
     const outside = join(tmp, "not-a-repo");
     mkdirSync(outside);
+
+    // when
     const result = run({ trigger: "auto", cwd: outside });
+
+    // then
     expect(result.status).toBe(0);
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("git リポジトリではない");
