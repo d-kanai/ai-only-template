@@ -16,20 +16,32 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, posix, relative, sep } from "node:path";
 import {
+  isArrowFunction,
+  isAsExpression,
   isCallExpression,
   isClassLikeDeclaration,
+  isExportAssignment,
+  isFunctionDeclaration,
+  isFunctionExpression,
   isGetAccessorDeclaration,
   isIdentifier,
   isJsxAttribute,
   isJsxExpression,
   isJsxText,
   isMethodDeclaration,
+  isModuleBlock,
+  isModuleDeclaration,
+  isNonNullExpression,
   isNoSubstitutionTemplateLiteral,
+  isParenthesizedExpression,
   isPropertyAccessExpression,
   isPropertyDeclaration,
+  isSatisfiesExpression,
   isSetAccessorDeclaration,
   isStringLiteral,
   isTemplateExpression,
+  isTypeAssertion,
+  isVariableStatement,
   type JsxAttribute,
   type Node,
   type SourceFile,
@@ -2025,6 +2037,129 @@ function findProblemResponseViolations(root: string): string[] {
   );
 }
 
+// --- backend の本番コードはクラスを基本にする（規則 backend-class-based。Issue #262 の 4 本目） ---
+// apps/backend の本番コードは、ファイルの最上位（モジュールの直下と namespace の中）に関数を置かない。補助の関数もクラスの
+//   メソッド（状態を使わないものは static）にする。
+// WHY 規則にする: ADR docs/adr/architecture/20261002-class-based-backend.md（daiki の判断 2026-10-02）で、関数を export せず、
+//   ファイルの中だけの補助の関数も置かないと決めた。PR #264 / #266 / #267 で移行を終え、本番コードの最上位の関数は 0 件になった。
+//   レビューだけでは、関数の import が戻る（依存がコンストラクタに出ず、差し替えに vi.mock が要る形に戻る）のを止められない。
+// 違反にするもの（ファイル:行。行は宣言の書き出し）:
+//   - function 宣言（export・export default・async・generator・オーバーロードの宣言・declare function も、1 つずつ）。
+//   - 初期化子が関数（アロー関数・function 式）の変数（const / let / var、export も）。括弧・as・satisfies・! ・<T> で包んだものも。
+//   - export default のアロー関数・function 式（export default async () => {}）。
+// 許すもの: クラス（宣言・式）のメンバー（メソッド・アロー関数のクラスフィールド readonly handle = ProblemResponse.wrap(async ...)）、
+//   メソッドや関数の中の関数、型・interface、関数でない値の変数（定数・オブジェクト・new X().handle のようなプロパティの参照）。
+// 対象: apps/backend の下のテスト以外のソース（8 つの拡張子）。テスト・apps/backend/test-support/・apps/backend/spec/ は除く
+//   （ADR の対象外。テストの組み立ての補助は関数のほうが読みやすく、本番の依存の形に影響しない）。
+// WHY apps/backend/shared/drizzle/drizzle.config.ts も対象にする: drizzle-kit が求めるのは default export の設定オブジェクトだけで、
+//   補助の関数の形は求めない。今もクラス DrizzleConfigPath の static メソッドで書いている（ファイルのコメント）ので、例外は要らない。
+// 限界（見逃す方向）: 最上位の関数呼び出しの引数に書いた関数（即時実行の (() => {})()、z.object(...).refine((x) => ...)）、
+//   オブジェクトリテラルのメソッド・関数のプロパティ（export const x = { f() {} }）、三項演算子などの式の中の関数
+//   （const f = c ? () => 1 : () => 2）、別のファイルの関数の再代入（const f = other.f）は見ない（関数かは型を見ないと決まらない）。
+//   最上位の文のブロックの中の関数（{ ... }・if・try・switch・for の中）も見ない（不自然な書き方なので再帰しない。reviewer の実測）。
+//   レビューで見る。
+const BACKEND_CLASS_BASED = {
+  id: "backend-class-based",
+  name: "apps/backend の本番コード（テスト・test-support/・spec/ を除く）はファイルの最上位に関数を置かない（function 宣言・関数を入れた変数・export default の関数は違反。クラスのメソッド・クラスフィールドのアロー関数・メソッドの中の関数は可）",
+  appliesTo: (file: string) =>
+    isSourceNonTest(file) &&
+    isUnder(file, BACKEND_ROOT) &&
+    !BACKEND_TEST_SUPPORT_DIR.test(file) &&
+    !isUnder(file, `${BACKEND_ROOT}/spec`),
+};
+
+// 括弧・型アサーション（as / <T>）・satisfies・非 null アサーション（!）を外した式。
+// WHY 外す: (() => 1)・(async () => 1) as F・function () {} satisfies F は、包んでも最上位の関数であることは変わらない。
+function unwrapExpression(expression: Node): Node {
+  if (
+    isParenthesizedExpression(expression) ||
+    isAsExpression(expression) ||
+    isSatisfiesExpression(expression) ||
+    isNonNullExpression(expression) ||
+    isTypeAssertion(expression)
+  ) {
+    return unwrapExpression(expression.expression);
+  }
+  return expression;
+}
+
+function isFunctionValue(expression: Node | undefined): boolean {
+  if (expression === undefined) {
+    return false;
+  }
+  const unwrapped = unwrapExpression(expression);
+  return isArrowFunction(unwrapped) || isFunctionExpression(unwrapped);
+}
+
+// 文の並び（ファイルの直下か namespace の中）の最上位の関数を、書かれた順に行番号で返す。
+// WHY namespace（module）の中も見る: namespace の中の function もクラスの外の関数で、namespace で包めば素通りするのを防ぐ。
+function topLevelFunctionLines(
+  sourceFile: SourceFile,
+  statements: readonly Node[],
+): number[] {
+  return statements.flatMap((statement): number[] => {
+    if (isFunctionDeclaration(statement)) {
+      return [lineOf(sourceFile, statement)];
+    }
+    if (isVariableStatement(statement)) {
+      return statement.declarationList.declarations
+        .filter((declaration) => isFunctionValue(declaration.initializer))
+        .map((declaration) => lineOf(sourceFile, declaration));
+    }
+    if (
+      isExportAssignment(statement) &&
+      isFunctionValue(statement.expression)
+    ) {
+      return [lineOf(sourceFile, statement)];
+    }
+    if (isModuleDeclaration(statement)) {
+      return namespaceFunctionLines(sourceFile, statement.body);
+    }
+    return [];
+  });
+}
+
+// namespace の本体（入れ子の a.b.c は ModuleDeclaration が続く）の最上位の関数の行番号。
+function namespaceFunctionLines(
+  sourceFile: SourceFile,
+  body: Node | undefined,
+): number[] {
+  if (body === undefined) {
+    return [];
+  }
+  if (isModuleBlock(body)) {
+    return topLevelFunctionLines(sourceFile, body.statements);
+  }
+  return isModuleDeclaration(body)
+    ? namespaceFunctionLines(sourceFile, body.body)
+    : [];
+}
+
+function findTopLevelFunctions(sourceFile: SourceFile): number[] {
+  return topLevelFunctionLines(sourceFile, sourceFile.statements);
+}
+
+function listClassBasedCheckedFiles(root: string): string[] {
+  return listSourceFiles(root, BACKEND_ROOT).filter(
+    BACKEND_CLASS_BASED.appliesTo,
+  );
+}
+
+// 「ファイル:行」の一覧。
+function findClassBasedViolations(root: string): string[] {
+  const files = listClassBasedCheckedFiles(root);
+  const sourceFiles = parseSourceFiles(
+    Object.fromEntries(
+      files.map((file) => [file, readFileSync(join(root, file), "utf8")]),
+    ),
+  );
+  return files.flatMap((file) =>
+    findTopLevelFunctions(sourceFiles.get(file) as SourceFile).map(
+      (line) => `${file}:${line}`,
+    ),
+  );
+}
+
 // --- workspace パッケージの exports（規則 backend-exports。Issue #68 の段階 2。規則 shared-exports。Issue #90） ---
 // exports は、@repo/backend・@repo/shared として外（そのパッケージのディレクトリの外）に公開するファイルの一覧。
 //   ユーザー判断で、全ファイル（"./*"）ではなく、外が使う入口だけを明示する（.claude/rules/backend.md の「import の書き方と
@@ -2217,6 +2352,7 @@ function findViolations(references: Reference[], rule: Rule): string[] {
 //   現在時刻の読み取りも「now-single-source: ファイル:行」で同じく出す。
 //   ハードコードの文言も「frontend-hardcoded-text: ファイル:行」「server-hardcoded-text: ファイル:行」を文言ごとに 1 行で出す。
 //   ProblemResponse.wrap で包んでいない handle も「presentation-with-problem-response: ファイル:行」を handle ごとに 1 行で出す。
+//   backend の本番コードの最上位の関数も「backend-class-based: ファイル:行」を関数ごとに 1 行で出す。
 //   exports の違反は「backend-exports: ...」「shared-exports: ...」の 1 行で出す（findExportsViolations）。
 //   apps/shared の置き場所の違反は「shared-placement: ファイル」の 1 行で出す（ソース以外も含め、apps/shared の全ファイルを見る）。
 // WHY 置き場所の規則も参照を取り出すファイル（listReferencingFiles。apps/e2e/ とリポジトリ直下を含む）全体にかける:
@@ -2251,6 +2387,9 @@ function collectViolations(root: string): string[] {
     ),
     ...findProblemResponseViolations(root).map(
       (line) => `${PRESENTATION_WITH_PROBLEM_RESPONSE.id}: ${line}`,
+    ),
+    ...findClassBasedViolations(root).map(
+      (line) => `${BACKEND_CLASS_BASED.id}: ${line}`,
     ),
     ...listAllFiles(root, SHARED_ROOT)
       .filter(SHARED_PLACEMENT.isMisplaced)
@@ -2386,6 +2525,35 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
       ]),
     );
     expect(files.filter((file) => TEST_FILE.test(file))).toEqual([]);
+  });
+
+  it(BACKEND_CLASS_BASED.name, () => {
+    // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
+    expect(findClassBasedViolations(repoRoot)).toEqual([]);
+  });
+
+  // WHY 本物のファイルが列挙に入っていることを見る: 列挙（パスの判定）が壊れて 0 件になると、違反も 0 件で常に緑になる。
+  it("最上位に関数を置かない規則は、apps/backend の本番コード（層・expose・drizzle.config.ts）を対象にし、テスト・test-support/・spec/ は対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
+    const files = listClassBasedCheckedFiles(repoRoot);
+    expect(files).toEqual(
+      expect.arrayContaining([
+        "apps/backend/shared/domain/validate.ts",
+        "apps/backend/shared/infra/writer.ts",
+        "apps/backend/shared/presentation/problem.ts",
+        "apps/backend/shared/drizzle/drizzle.config.ts",
+        "apps/backend/features/notification/expose/notifier.ts",
+        "apps/backend/features/todo/internal/domain/todo.ts",
+        "apps/backend/features/todo/internal/presentation/create-todo.api.ts",
+      ]),
+    );
+    expect(
+      files.filter(
+        (file) =>
+          TEST_FILE.test(file) ||
+          isUnder(file, `${BACKEND_ROOT}/test-support`) ||
+          isUnder(file, `${BACKEND_ROOT}/spec`),
+      ),
+    ).toEqual([]);
   });
 
   for (const pkg of EXPORTED_PACKAGES) {
@@ -5930,6 +6098,281 @@ describe("ProblemResponse.wrap で包んでいない handle の抽出（findUnwr
   });
 });
 
+const DOMAIN_FILE = "apps/backend/shared/domain/x.ts";
+
+// 規則 backend-class-based の判定の例。違反例は 1 例 1 つの書き方にして、他の書き方の巻き添えで違反になっていないことを示す。
+const CLASS_BASED_EXAMPLES: {
+  violating: [file: string, source: string][];
+  allowed: [file: string, source: string][];
+} = {
+  violating: [
+    // 0: export する function 宣言（移行前の validate・writerOf の形）。
+    [DOMAIN_FILE, lines("export function f(): number {", "  return 1;", "}")],
+    // 1: export しない function 宣言（ファイルの中だけの補助。移行前の toResponse の形）。
+    [DOMAIN_FILE, lines("function f(): number {", "  return 1;", "}")],
+    // 2: async function。
+    [
+      DOMAIN_FILE,
+      lines("export async function f(): Promise<number> {", "  return 1;", "}"),
+    ],
+    // 3: generator。
+    [
+      DOMAIN_FILE,
+      lines("export function* f(): Generator<number> {", "  yield 1;", "}"),
+    ],
+    // 4: アロー関数の const。
+    [DOMAIN_FILE, lines("export const f = (x: number): number => x + 1;")],
+    // 5: function 式の const（export しない）。
+    [
+      DOMAIN_FILE,
+      lines(
+        "const f = function (x: number): number {",
+        "  return x + 1;",
+        "};",
+      ),
+    ],
+    // 6: export default function（名前なし）。
+    [
+      DOMAIN_FILE,
+      lines("export default function (): number {", "  return 1;", "}"),
+    ],
+    // 7: オーバーロードの宣言（本体の無い宣言だけでも違反。declare function も同じ節）。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export function f(x: string): string;",
+        "export declare function g(): void;",
+      ),
+    ],
+    // 8: export default のアロー関数。
+    [DOMAIN_FILE, lines("export default async (): Promise<number> => 1;")],
+    // 9: 括弧・as・satisfies で包んだアロー関数の let（包んでも関数）。
+    [
+      DOMAIN_FILE,
+      lines(
+        "type F = () => number;",
+        "export let f = ((() => 1) as F) satisfies F;",
+      ),
+    ],
+    // 10: 1 つの文の 2 つ目の変数だけが関数。
+    [DOMAIN_FILE, lines("const a = 1, f = (): number => a;", "export { f };")],
+    // 11: namespace（入れ子の a.b も）の中の function。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export namespace A.B {",
+        "  export function f(): number {",
+        "    return 1;",
+        "  }",
+        "}",
+      ),
+    ],
+    // 12: drizzle-kit の設定も対象（例外にしない）。
+    [
+      "apps/backend/shared/drizzle/drizzle.config.ts",
+      lines(
+        "function path(): string {",
+        '  return ".";',
+        "}",
+        "export default { out: path() };",
+      ),
+    ],
+    // 13: 拡張子 .mts と、層の入れ子のディレクトリ。
+    [
+      "apps/backend/shared/infra/nested/x.mts",
+      lines("export function f(): number {", "  return 1;", "}"),
+    ],
+    // 14: モジュールの公開の入口 expose/。
+    [
+      "apps/backend/features/notification/expose/notify.ts",
+      lines("export function notify(message: string): void {}"),
+    ],
+    // 15〜17: 対象外のディレクトリと名前の前方一致だけが同じ別ディレクトリ・直下でない test-support/ は対象。
+    ["apps/backend/test-support-x/x.ts", lines("export function f(): void {}")],
+    ["apps/backend/spec-x/x.ts", lines("export function f(): void {}")],
+    [
+      "apps/backend/features/todo/test-support/x.ts",
+      lines("export function f(): void {}"),
+    ],
+    // 18: パスに test を含む本番のファイル（*.test.* ではない）。
+    [
+      "apps/backend/shared/infra/test-clock.ts",
+      lines("export function f(): void {}"),
+    ],
+  ],
+  allowed: [
+    // 0: static だけのクラス（状態の無い補助。biome の noStaticOnlyClass は apps/backend で off）。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export class Validate {",
+        "  static of(x: number): number {",
+        "    return x;",
+        "  }",
+        "  private static helper(): void {}",
+        "}",
+      ),
+    ],
+    // 1: 型と interface だけ（関数の型も値ではない）。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export type F = (x: number) => number;",
+        "export interface Notifier {",
+        "  notify(message: string): void;",
+        "}",
+      ),
+    ],
+    // 2: 定数のオブジェクト・関数でない値の変数。
+    [
+      DOMAIN_FILE,
+      lines(
+        'export const KEYS = { a: "a", b: "b" } as const;',
+        "export const LIMIT = 100;",
+        "let count = 0;",
+        "export { count };",
+      ),
+    ],
+    // 3: クラスフィールドのアロー関数（readonly handle = ProblemResponse.wrap(async ...)）と素のアロー関数のフィールド。
+    [
+      "apps/backend/features/todo/internal/presentation/x.api.ts",
+      lines(
+        'import { ProblemResponse } from "../../../../shared/presentation/problem";',
+        "export class XApi {",
+        "  readonly handle = ProblemResponse.wrap(async (request: Request) => new Response(null));",
+        "  private readonly toBody = (x: number): string => String(x);",
+        "}",
+        "export const GET = new XApi().handle;",
+      ),
+    ],
+    // 4: メソッドの中の関数（function 宣言・アロー関数）。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export class A {",
+        "  run(): number {",
+        "    function inner(): number {",
+        "      return 1;",
+        "    }",
+        "    const twice = (x: number) => x * 2;",
+        "    return twice(inner());",
+        "  }",
+        "}",
+      ),
+    ],
+    // 5: クラス式の const と、export default のクラス。
+    [
+      DOMAIN_FILE,
+      lines(
+        "export const A = class {",
+        "  static f(): number {",
+        "    return 1;",
+        "  }",
+        "};",
+        "export default class B {}",
+      ),
+    ],
+    // 6: コメントと文字列の中の function。
+    [
+      DOMAIN_FILE,
+      lines(
+        "// function f() {}",
+        'export const S = "export function f() {}";',
+        "/* const g = () => 1; */",
+      ),
+    ],
+    // 7〜11: 対象外（テスト・test-support/・spec/・apps/shared・frontend）。
+    [
+      "apps/backend/shared/domain/x.test.ts",
+      lines("function helper(): number {", "  return 1;", "}"),
+    ],
+    [
+      "apps/backend/test-support/builder.ts",
+      lines("export function build(): void {}"),
+    ],
+    [
+      "apps/backend/spec/api/todo/support.ts",
+      lines("export function given(): void {}"),
+    ],
+    ["apps/shared/env.ts", lines("export function load(): void {}")],
+    [
+      "apps/frontend_customer/features/todo/x.ts",
+      lines("export function f(): void {}"),
+    ],
+  ],
+};
+
+// 例をまとめて 1 回で構文解析し（tsgo の起動を 1 回にする）、例ごとに違反か（true）を返す。対象外のファイルは解析せずに false。
+function judgeClassBased(examples: [string, string][]): boolean[] {
+  const virtualPath = (i: number, file: string) => `example-${i}/${file}`;
+  const sourceFiles = parseSourceFiles(
+    Object.fromEntries(
+      examples.flatMap(([file, source], i) =>
+        BACKEND_CLASS_BASED.appliesTo(file)
+          ? [[virtualPath(i, file), source]]
+          : [],
+      ),
+    ),
+  );
+  return examples.map(([file], i) => {
+    const sourceFile = sourceFiles.get(virtualPath(i, file));
+    return (
+      sourceFile !== undefined && findTopLevelFunctions(sourceFile).length > 0
+    );
+  });
+}
+
+describe(`backend の本番コードの最上位に関数を置かない規則の判定（${BACKEND_CLASS_BASED.id}）`, () => {
+  const { violating, allowed } = CLASS_BASED_EXAMPLES;
+  // WHY 遅延して 1 回だけ判定する: 例ごとに tsgo を起動すると遅いため（handle の規則の判定と同じ）。
+  let verdicts: { violating: boolean[]; allowed: boolean[] } | undefined;
+  const verdictsOf = () => {
+    verdicts ??= {
+      violating: judgeClassBased(violating),
+      allowed: judgeClassBased(allowed),
+    };
+    return verdicts;
+  };
+  it.each(violating.map(([file], i) => ({ file, i })))(
+    "違反例 $i（$file）は違反",
+    ({ i }) => {
+      expect(verdictsOf().violating[i]).toBe(true);
+    },
+  );
+  it.each(allowed.map(([file], i) => ({ file, i })))(
+    "許可例 $i（$file）は違反ではない",
+    ({ i }) => {
+      expect(verdictsOf().allowed[i]).toBe(false);
+    },
+  );
+});
+
+describe("最上位の関数の抽出（findTopLevelFunctions）", () => {
+  it("最上位の関数ごとに宣言の書き出しの行番号を返す（オーバーロードは宣言ごと、1 つの文の変数は関数のものだけ、クラスの中は返さない）", () => {
+    const source = lines(
+      "export function f(x: string): string;",
+      "export function f(x: number): number;",
+      "export function f(x: unknown): unknown {",
+      "  return x;",
+      "}",
+      "export class A {",
+      "  static g(): void {}",
+      "  readonly h = () => 1;",
+      "}",
+      "const a = 1,",
+      "  b = () => a;",
+      "export default function () {}",
+    );
+    expect(
+      findTopLevelFunctions(
+        parseSourceFiles({ [DOMAIN_FILE]: source }).get(
+          DOMAIN_FILE,
+        ) as SourceFile,
+      ),
+    ).toEqual([1, 2, 3, 11, 12]);
+  });
+});
+
 describe("規則ごとの判定", () => {
   // WHY: 規則を足したのに判定の例を足し忘れると、その規則の判定は下の it.each で 1 度も確かめられない（Issue #68 で 3 規則を足した）。
   it("RULES のすべての規則に判定の例があり、RULES に無い規則の例は無い", () => {
@@ -6230,12 +6673,43 @@ function violationsOfFixture(files: Record<string, string>): string[] {
 // apps/shared の許可 SHARED_MODULES_BY_LAYER）の違反も置く。
 // ハードコードの文言の規則（FRONTEND_HARDCODED_TEXT・SERVER_HARDCODED_TEXT。Issue #116）と、辞書の置き場所の規則
 // （messages-colocation。Issue #125）の違反も置く。
-// 規則は全部で 35（RULES の 24 + 置き場所 3 + 環境変数の直参照 + console + 現在時刻の読み取り + exports 2 + ハードコードの文言 2 + handle を ProblemResponse.wrap で包む 1）。Issue #68 で RULES に 3 規則（backend-to-frontend・
+// 規則は全部で 36（RULES の 24 + 置き場所 3 + 環境変数の直参照 + console + 現在時刻の読み取り + exports 2 + ハードコードの文言 2 + handle を ProblemResponse.wrap で包む 1 + 最上位の関数 1）。Issue #68 で RULES に 3 規則（backend-to-frontend・
 // backend-relative-only・frontend-root-to-backend）を足し、段階 2 で frontend-to-backend-specifier と BACKEND_EXPORTS を足した。
 // Issue #90 で frontend-to-shared-specifier・screen-to-shared・shared-self-contained・SHARED_PLACEMENT・SHARED_EXPORTS を足した。
 // Issue #141 で presentation-with-problem-response（PRESENTATION_WITH_PROBLEM_RESPONSE）を足した。
 // Issue #208 で module-internal・module-expose-only-from-presentation・expose-imports（モジュールの境界）を足した。
+// Issue #262 で backend-class-based（BACKEND_CLASS_BASED。最上位の関数）を足した。
 const MUST_REJECT_FILES: Record<string, string> = {
+  // backend-class-based（Issue #262）: 最上位の関数（function 宣言・async・generator・オーバーロード・アロー関数と function 式の
+  //   変数・export default のアロー関数・namespace の中）。クラスのメソッド・フィールド・メソッドの中の関数（8〜13 行目）は拾わない。
+  //   .mts と expose/・drizzle-kit の設定も対象（前方一致だけが同じ別ディレクトリ test-support-x/ などは判定の例 CLASS_BASED_EXAMPLES）。
+  "apps/backend/shared/domain/bad-function.ts": lines(
+    "export function a(x: string): string;",
+    "export function a(x: unknown): unknown { return x; }",
+    "async function b(): Promise<void> {}",
+    "export function* c(): Generator<number> { yield 1; }",
+    "export const d = (x: number): number => x;",
+    "const e = function (): void {};",
+    "export default async (): Promise<void> => {};",
+    "export class Ok {",
+    "  static f(): number { return 1; }",
+    "  readonly g = (): number => 1;",
+    "  h(): number { const inner = () => 1; return inner(); }",
+    "}",
+    "export const value = 1;",
+    "export namespace N { export function i(): void {} }",
+  ),
+  "apps/backend/shared/infra/bad-function.mts": lines(
+    "export default function (): void {}",
+  ),
+  "apps/backend/features/notification/expose/bad-notify.ts": lines(
+    "export function notify(message: string): void {}",
+  ),
+  // drizzle-kit の設定は例外にしない（名前は下の backend-to-frontend の fixture と重ならないよう .mts。置き場所の例外は同じ）。
+  "apps/backend/shared/drizzle/drizzle.config.mts": lines(
+    'function path(): string { return "."; }',
+    "export default { out: path() };",
+  ),
   // presentation-with-problem-response（Issue #141）: handle を ProblemResponse.wrap で包まない（try / catch の手書き、素の async、
   //   import だけして使わない、別の関数で包む）。.mts と入れ子のディレクトリ・backend/shared/presentation も対象。
   "apps/backend/features/todo/internal/presentation/bad-handle.api.ts": lines(
@@ -6646,8 +7120,9 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/e2e/bad-console.spec.ts": lines("console.log(line);"),
   "scripts/bad-console.ts": lines("console.log(1);"),
   "bad-console.config.mjs": lines("console.log(1);"),
+  // WHY クラスのフィールドにする: 最上位のアロー関数は backend-class-based にも当たり、console の違反だけを置けなくなる。
   "apps/backend/shared/infra/logger-helper.ts": lines(
-    "export const l = () => console.log(1);",
+    "export class L { static l = () => console.log(1); }",
   ),
   // frontend-hardcoded-text（Issue #116）: JSX のテキスト、利用者に見える属性の文字列、日本語の文字列。行番号で検出を比べる。
   //   2 行目・4 行目は 1 行に複数の属性（件数どおりに出る）。7 行目は属性と日本語の両方に当たるが 1 件。
@@ -6719,9 +7194,10 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import { commonMessages } from "../frontend_customer/shared/i18n/common.messages";',
   ),
   // server-hardcoded-text（Issue #116）: 日本語の文字列（テンプレートリテラル・zod の error）。コメント（3 行目）と ErrorKey（5 行目）は拾わない。
+  //   最上位の関数にしない（backend-class-based の巻き添えにしない）ため、クラスの static フィールドにする。
   "apps/backend/features/todo/internal/domain/bad-text.ts": lines(
-    "export const notFound = (id) =>",
-    `  new DomainError("not_found", \`Todo（id: \${id}）が見つかりません\`);`,
+    "export class NotFound { static of = (id) =>",
+    `  new DomainError("not_found", \`Todo（id: \${id}）が見つかりません\`); }`,
     "// 日本語のコメントは拾わない",
     'export const title = z.string().min(1, { error: "タイトルを入力してください" });',
     'export const key = new DomainError("not_found", "todo.notFound", { id: 1 });',
@@ -6915,7 +7391,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   ),
   "apps/shared/lib/clock.ts": lines("export const n = new Date();"),
   "apps/backend/shared/infra/now.ts": lines(
-    "export function now() { return new Date(); }",
+    "export class Clock { static now() { return new Date(); } }",
   ),
   "apps/backend/shared/infra/test-support-clock.ts": lines(
     "export const n = Date.now();",
@@ -6929,6 +7405,13 @@ const MUST_REJECT_FILES: Record<string, string> = {
 };
 
 const MUST_REJECT_VIOLATIONS = [
+  ...[1, 2, 3, 4, 5, 6, 7, 14].map(
+    (line) =>
+      `backend-class-based: apps/backend/shared/domain/bad-function.ts:${line}`,
+  ),
+  "backend-class-based: apps/backend/shared/infra/bad-function.mts:1",
+  "backend-class-based: apps/backend/features/notification/expose/bad-notify.ts:1",
+  "backend-class-based: apps/backend/shared/drizzle/drizzle.config.mts:1",
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(
     (line) =>
       `now-single-source: apps/backend/features/todo/internal/domain/bad-now.ts:${line}`,
@@ -7439,6 +7922,30 @@ const MUST_REJECT_VIOLATIONS = [
 // （`git grep -h "from \"" -- '*.ts' '*.tsx'` で列挙したもの）をすべて含め、alias と相対の両方を置く。
 // コメント・文字列の中の import 風の文字列、from の無い `export type {...};`、テストファイル・TS 以外のファイルも置く。
 const MUST_PASS_FILES: Record<string, string> = {
+  // backend-class-based（Issue #262）: static だけのクラス・クラスフィールドのアロー関数・メソッドの中の関数・クラス式・
+  //   型と interface・定数のオブジェクト・コメントと文字列の中の function。テスト・test-support/・spec/ の関数は対象外
+  //   （apps/shared の関数は下の now-single-source の apps/shared/now.ts）。
+  "apps/backend/shared/domain/good-class.ts": lines(
+    "export type F = (x: number) => number;",
+    "export interface Notifier { notify(message: string): void; }",
+    'export const KEYS = { a: "a" } as const;',
+    "export class Validate {",
+    "  static of(x: number): number { function inner(): number { return x; } return inner(); }",
+    "  private readonly twice = (x: number): number => x * 2;",
+    "}",
+    "export const Other = class { static f(): void {} };",
+    "// export function commented(): void {}",
+    'export const S = "export function inString() {}";',
+  ),
+  "apps/backend/shared/domain/good-class.test.ts": lines(
+    "function helper(): number { return 1; }",
+  ),
+  "apps/backend/test-support/class-based-helper.ts": lines(
+    "export function build(): void {}",
+  ),
+  "apps/backend/spec/api/todo/support.ts": lines(
+    "export function given(): void {}",
+  ),
   // presentation-with-problem-response（Issue #141）: ProblemResponse.wrap で包んだ handle（ctx あり・なし）。
   //   対象外: api ファイルでない presentation のファイル、テスト、ほかの層の handle。
   "apps/backend/features/todo/internal/presentation/good-handle.api.ts": lines(
@@ -8050,7 +8557,7 @@ const MUST_PASS_FILES: Record<string, string> = {
   ),
   "apps/backend/features/todo/internal/domain/good-text.ts": lines(
     "// 見つからないときは ErrorKey で表す（日本語は画面側の辞書に置く）",
-    'export const notFound = (id) => new DomainError("not_found", "todo.notFound", { id });',
+    'export class NotFound { static of = (id) => new DomainError("not_found", "todo.notFound", { id }); }',
   ),
   "apps/backend/features/todo/internal/domain/good-text.test.ts": lines(
     'expect(message).toBe("Todo が見つかりません");',

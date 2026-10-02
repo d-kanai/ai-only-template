@@ -7,6 +7,7 @@ paths:
 
 `apps/backend/` は workspace パッケージ `@repo/backend`。Next・React に依存しない TypeScript で、サーバの起動口は持たない（Next の Route Handler から呼ばれる）。
 依存の向きの規則はすべて `rule-tests/architecture.test.ts` が検査する（規則の一覧は `.claude/rules/architecture-check.md`）。決定と採用しなかった案は ADR（`docs/adr/README.md` の一覧）、実測は 2026-09-28 の work-logs。
+本番コード（テスト・`test-support/`・`spec/` を除く）はファイルの最上位に関数を置かず、クラスにする（状態の無い補助は static メソッド。ADR `docs/adr/architecture/20261002-class-based-backend.md`、Issue #262）。検査は `rule-tests/architecture.test.ts` の `backend-class-based`、static だけのクラスを許す Biome の override は `.claude/rules/lint.md`。
 
 ## 置き場所（DDD 4 層）
 - `apps/backend/` の直下は `features/` と `shared/` と `test-support/` と `spec/`（人が読む仕様。Issue #251。下の `spec/api/`（API 仕様。Issue #219。`<feature>/` の直下の `<api>.feature`・`<api>.api-spec.test.ts`・補助の `support.ts` だけ。`.claude/rules/testing.md` の「API 仕様テスト（spec/api）」）と `spec/journey/`（API ジャーニー））だけ（ほかは `package.json`・`tsconfig.json`）。ファイルは `apps/backend/features/<feature>/internal/` か `apps/backend/shared/` の `domain/` `application/` `presentation/` `infra/` のどれかの下に置く。例外は `apps/backend/shared/drizzle/`（drizzle-kit の設定 `drizzle.config.ts` と、生成したマイグレーションの `*.sql`・`meta/`。ソースは `drizzle.config.ts` だけ）。
