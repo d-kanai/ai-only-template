@@ -7,7 +7,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { CHANGE_OPERATIONS } from "../domain/change-operation";
-import { classifyColumns } from "./column-classification";
+import { ColumnClassifier } from "./column-classification";
 
 // feature をまたぐ表の定義（Drizzle のスキーマ）。feature の表は features/<feature>/internal/infra/schema.ts に置く。
 // WHY shared/infra に置く: change_logs はすべての feature の表の変更を 1 か所に積む横断の表で、どの feature にも属さない。
@@ -27,7 +27,7 @@ export type Changes = Readonly<
 
 // すべての表の行の変更履歴（監査。Issue #189。ADR docs/adr/architecture/20260930-change-logs-written-by-repository.md）。
 // 書くのは書き込みの唯一の口 Writer（shared/infra/writer.ts。Issue #215）で、文ごとに組み立てた記録を、本体の書き込みと同じ
-//   トランザクションの中で shared/infra/change-log.ts の recordChange が入れる。
+//   トランザクションの中で shared/infra/change-log.ts の ChangeRecords.recordChange が入れる。
 // WHY insert のみ（UPDATE / DELETE しない。rule-tests/persistence.test.ts の no-update-delete-on-append-only-tables が
 //   *Logs の表への update / delete を止める）: 変更の記録は後から書き換えないことに意味がある。
 // WHY 外部キーを張らない: 消した行（delete の記録）も指し続ける。表をまたぐので、指す先の表も 1 つに決まらない。
@@ -67,9 +67,9 @@ export const changeLogs = pgTable(
 // change_logs の列の分類（Issue #216。rule-tests/schema.test.ts の column-classification がすべての表に求める）。
 // WHY changes だけ sensitive: 元の表の行の値（todos.title など）をそのまま持つ。actor_id（変更した利用者の id）は、ほかの表の
 //   id と同じくアプリが決める識別子で、ログの相関（誰の変更か）に使うので public。
-// 今は change_logs を Writer の insert / update / delete で書かない（recordChange が直接 INSERT する）ので、この分類が書き込みの
+// 今は change_logs を Writer の insert / update / delete で書かない（ChangeRecords.recordChange が直接 INSERT する）ので、この分類が書き込みの
 //   ログに使われることは無い。表を足したときに分類を書く規則を例外なしにするため、ここにも置く。
-export const changeLogsColumns = classifyColumns(changeLogs, {
+export const changeLogsColumns = ColumnClassifier.classify(changeLogs, {
   id: "public",
   tableName: "public",
   rowId: "public",

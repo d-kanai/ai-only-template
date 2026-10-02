@@ -17,7 +17,7 @@
 // 中身を見せないトランザクション。application・domain は受け取って Repository に渡すだけで、中を触れない。
 // WHY brand（unique symbol のキー）: 構造が空の型（`{}`）だと、どんな値でも Transaction として渡せてしまう。宣言だけの
 //   unique symbol をキーにすると、このモジュールの外では作れない型になり、渡せるのは runner が作った値だけになる（infra が
-//   1 か所の cast で作る。shared/infra/writer.ts の transactionOf）。
+//   1 か所の cast で作る。shared/infra/writer.ts の PostgresWriter の asTransaction）。
 // WHY 実行時の値を持たない（declare）: 型を区別するためだけの印で、実行時には何も要らない。domain・infra は import type で
 //   参照するので、このモジュールに実行時の export を足しても domain・infra には取り込まれない（足すべきでもない）。
 declare const transactionBrand: unique symbol;

@@ -158,7 +158,7 @@ describeFeature(feature, ({ Scenario }) => {
     //   todo-repository.postgres.ts の toTodo）。履歴の無い Todo・最後の履歴が todos.completed と食い違う Todo も同じく 500
     //   （Repository は補わない。Issue #260）。
     // WHY 正しい Todo も 1 件置く: 壊れた 1 件を黙って外して残りを返す実装を通さない。
-    // 例外は toProblemResponse が logger.emit（server_error。ERROR なので console.error）で標準エラーに 1 行出す（vi を使わないので抑えない）。
+    // 例外は ProblemResponse.from が logger.emit（server_error。ERROR なので console.error）で標準エラーに 1 行出す（vi を使わないので抑えない）。
     And(
       "壊れた Todo（完了の履歴の日時が、作られた日時より前のもの）が 1 件でもあると、一覧は取得できず、サーバの誤りとして伝えられる",
       async () => {

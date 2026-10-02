@@ -154,7 +154,7 @@ function toErrorShape(value: unknown): unknown {
 // 例外が SQL とパラメータ（query / params のプロパティ）を抱えているか。
 // WHY 抱えている例外の message を出さない（*** にする。Issue #216 の reviewer の指摘）: drizzle-orm 0.45.3 の DrizzleQueryError の
 //   message は「Failed query: <SQL>\nparams: <生の値>」（errors.js）で、利用者の値（todos.title など）を含む。Writer は db_write の
-//   行で params をマスクした後に同じ例外を投げ直すので、toProblemResponse の server_error にそのまま届く。呼び出し側に頼らず、
+//   行で params をマスクした後に同じ例外を投げ直すので、ProblemResponse.from の server_error にそのまま届く。呼び出し側に頼らず、
 //   どのライブラリの例外でも、クエリのパラメータを持つ例外の message は出さないほうに倒す（fail closed）。cause はスキーマに無く、
 //   今までどおり落ちる。
 // WHY クラス（instanceof DrizzleQueryError）でなくプロパティで見る: apps/shared は drizzle-orm を参照しない（規則
@@ -338,7 +338,7 @@ export type Severity = "INFO" | "WARNING" | "ERROR";
 // 行の重大度（Cloud Logging の LogSeverity の名前。https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#logseverity ）。
 // WHY 種類と phase が決める（呼び出し側が選ばない）: 同じ種類の行が呼び出し側ごとに違う重大度になると、重大度で絞ったアラートが
 //   一部の行を拾わない（Issue #216）。
-// WHY db_write の失敗は WARNING: 500 になる想定外の例外は presentation の toProblemResponse が server_error（ERROR）で別に残す。
+// WHY db_write の失敗は WARNING: 500 になる想定外の例外は presentation の ProblemResponse.from が server_error（ERROR）で別に残す。
 //   書き込みの失敗の多くは制約違反など想定内（409 / 400 にする）もの。
 // WHY notification の失敗は ERROR: 通知の失敗は応答を 500 にしないので server_error の行が出ず、この行が唯一の手がかり。
 // WHY 対応表を関数の中に置く（最上位の定数にしない）: 最上位の値は Stryker の static な変異になり、ignoreStatic で検査から外れる。

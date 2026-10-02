@@ -1,12 +1,9 @@
 import { z } from "zod";
-import { keyedIssue, keyedRefine } from "../../../../shared/domain/keyed-issue";
-import { getDatabase } from "../../../../shared/infra/database";
+import { KeyedIssue } from "../../../../shared/domain/keyed-issue";
+import { AppDatabase } from "../../../../shared/infra/database";
 import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";
-import {
-  parseJsonBody,
-  requestBodySchema,
-} from "../../../../shared/presentation/json-body";
-import { withProblemResponse } from "../../../../shared/presentation/problem";
+import { RequestBody } from "../../../../shared/presentation/json-body";
+import { ProblemResponse } from "../../../../shared/presentation/problem";
 import { CreateTodoCommand } from "../application/create-todo.command";
 import { TODO_TITLE_MAX_LENGTH, type Todo } from "../domain/todo";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
@@ -30,7 +27,7 @@ export type CreateTodoResponse = {
 };
 
 // POST /api/todos の Route Handler を持つクラス。コンストラクタで command を受け取り、handle を Route Handler として export する
-//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包む・
+//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・ProblemResponse.wrap で包む・
 //   補助（リクエストのスキーマ・toResponse）を private static メソッドにするは
 //   list-todos.api.ts の ListTodosApi のコメント）。
 export class CreateTodoApi {
@@ -38,9 +35,9 @@ export class CreateTodoApi {
     private readonly createTodo: Pick<CreateTodoCommand, "execute">,
   ) {}
 
-  readonly handle = withProblemResponse(
+  readonly handle = ProblemResponse.wrap(
     async (request: Request): Promise<Response> => {
-      const input = await parseJsonBody(
+      const input = await RequestBody.parse(
         request,
         CreateTodoApi.createTodoRequestSchema(),
       );
@@ -57,9 +54,9 @@ export class CreateTodoApi {
   //   （domain が通す値を弾かない）。上限の数値は domain の定数を参照し、2 か所に書かない。規則の正は domain で、domain は
   //   ここを通った値も含めて常に完全に検証する（todo.ts の todoPropsSchema。.claude/rules/backend.md の presentation）。
   // WHY メソッドにする（スキーマを最上位の定数・static フィールドにしない）: 読み込み時にだけ評価される static な変異になり
-  //   mutation testing で数えない（json-body.ts の requestBodySchema。stryker.config.mjs の ignoreStatic）。呼び出しのたびに作る。
+  //   mutation testing で数えない（json-body.ts の RequestBody.schema。stryker.config.mjs の ignoreStatic）。呼び出しのたびに作る。
   private static createTodoRequestSchema() {
-    return requestBodySchema({
+    return RequestBody.schema({
       // 型が違う・無いときのキー（request.field.notString）は json-body.ts の toProblemError が決める（z.string に error は書かない）。
       // trim してからコードポイント数（Array.from）で数える: todo.ts の todoPropsSchema の title と同じ（WHY はそちら）。
       title: z
@@ -67,11 +64,13 @@ export class CreateTodoApi {
         .trim()
         .refine(
           (title) => Array.from(title).length >= 1,
-          keyedIssue("todo.title.empty"),
+          KeyedIssue.of("todo.title.empty"),
         )
         .refine(
           (title) => Array.from(title).length <= TODO_TITLE_MAX_LENGTH,
-          keyedRefine("todo.title.tooLong", { max: TODO_TITLE_MAX_LENGTH }),
+          KeyedIssue.refine("todo.title.tooLong", {
+            max: TODO_TITLE_MAX_LENGTH,
+          }),
         ),
     });
   }
@@ -89,11 +88,11 @@ export class CreateTodoApi {
 // app/api/todos/route.ts が re-export する Route Handler。本番は常に Postgres で組み立てる。
 // 組み立ての WHY（ここで組み立てる・Repository を api ファイルごとに作ってよい・InMemory に切り替えない）は list-todos.api.ts の GET のコメント。
 // 書き込みの command には、トランザクションを張る PostgresTransactionRunner を Repository と同じ db で渡す（Issue #215）。
-//   WHY 同じ getDatabase().db: command の読み込み（findByIdForUpdate）と書き込みは runner の tx で、Repository の query（findAll /
+//   WHY 同じ AppDatabase.get().db: command の読み込み（findByIdForUpdate）と書き込みは runner の tx で、Repository の query（findAll /
 //   findById）は Repository の db で行う。どちらも同じプールを使う。
 export const POST = new CreateTodoApi(
   new CreateTodoCommand(
-    new PostgresTodoRepository(getDatabase().db),
-    new PostgresTransactionRunner(getDatabase().db),
+    new PostgresTodoRepository(AppDatabase.get().db),
+    new PostgresTransactionRunner(AppDatabase.get().db),
   ),
 ).handle;

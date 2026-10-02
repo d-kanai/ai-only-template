@@ -17,16 +17,11 @@ import {
   type TestDatabase,
 } from "../../test-support/database";
 import type { Transaction } from "../application/transaction";
-import { classifyColumns } from "./column-classification";
+import { ColumnClassifier } from "./column-classification";
 import { changeLogs } from "./schema";
-import {
-  type DrizzleTransaction,
-  PostgresWriter,
-  transactionOf,
-  writerOf,
-} from "./writer";
+import { type DrizzleTransaction, PostgresWriter } from "./writer";
 
-// WHY 時計（now）を差し替える: ログの行の time と、recordChange が occurred_at に入れる時刻を決めた値にして、
+// WHY 時計（now）を差し替える: ログの行の time と、ChangeRecords.recordChange が occurred_at に入れる時刻を決めた値にして、
 //   行を丸ごと比べるため。
 vi.mock("@repo/shared/now");
 
@@ -44,7 +39,7 @@ const items = pgTable("items", {
 });
 // 列の分類（Issue #216）。本番の表は schema.ts の隣に置く（rule-tests/schema.test.ts の column-classification）。item_name は
 //   利用者が書く自由文の想定で sensitive（ログの before / after で ***）、id は public（値のまま）。
-classifyColumns(items, { id: "public", itemName: "sensitive" });
+ColumnClassifier.classify(items, { id: "public", itemName: "sensitive" });
 
 // 分類を登録していない表（fail closed: ログの before / after は全列 ***）。amount は integer で、形の違う値を渡すと
 //   データ例外（22P02）になり、pg の message に入力値が入る（失敗のログのマスクを確かめる）。
@@ -836,10 +831,10 @@ describe("PostgresWriter の db_write の changes（before / after）のマス�
   });
 });
 
-describe("transactionOf / writerOf", () => {
-  test("transactionOf で Transaction にした Writer は、writerOf で同じ Writer として取り出せる", async () => {
+describe("asTransaction / PostgresWriter.of", () => {
+  test("asTransaction で Transaction にした Writer は、PostgresWriter.of で同じ Writer として取り出せる", async () => {
     await inWriter(async (writer) => {
-      expect(writerOf(transactionOf(writer))).toBe(writer);
+      expect(PostgresWriter.of(writer.asTransaction())).toBe(writer);
     });
   });
 
@@ -848,7 +843,7 @@ describe("transactionOf / writerOf", () => {
   test("PostgresWriter でない Transaction を渡すと、Error を投げる", () => {
     const foreign = {} as unknown as Transaction;
 
-    expect(() => writerOf(foreign)).toThrow(
+    expect(() => PostgresWriter.of(foreign)).toThrow(
       new Error("the transaction was not started by PostgresTransactionRunner"),
     );
   });

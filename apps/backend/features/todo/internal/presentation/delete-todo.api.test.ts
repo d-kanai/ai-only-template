@@ -61,7 +61,7 @@ function deleteRequest(id: string): Request {
 }
 
 // 問い合わせを記録するリポジトリ。uuid の形でない id で、presentation が query / command に渡す前に
-//   404 にしていること（parseUuidParam）を、Repository が呼ばれないことで確かめる。
+//   404 にしていること（ResourceId.parseUuid）を、Repository が呼ばれないことで確かめる。
 // WHY spy で確かめる（その id の Todo を置いて「あっても 404」を見ない）: Issue #94 から Todo は常に不変条件
 //   （id は uuid の形）を満たすので、uuid の形でない id の Todo は作れない。空のリポジトリで 404 を見るだけだと、
 //   id をそのまま渡しても「無い」の 404 になり、presentation の検査を外しても通ってしまう。

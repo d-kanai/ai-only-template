@@ -7,7 +7,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { classifyColumns } from "../../../../shared/infra/column-classification";
+import { ColumnClassifier } from "../../../../shared/infra/column-classification";
 
 // todos テーブルの定義（Drizzle のスキーマ）。
 // WHY スキーマを TypeScript で宣言し、SQL はここから生成する（codebase-first）: テーブルの形の正をこのファイルに置き、
@@ -34,7 +34,7 @@ export const todos = pgTable("todos", {
 // todos の列の分類（Issue #216。書き込みのログの before / after のマスクに使う。shared/infra/column-classification.ts）。
 // WHY title だけ sensitive: 利用者が自由に書く文で、名前・連絡先などの個人情報が入りうる。id（Todo.create が作る uuid）・
 //   完了状態・作成日時はアプリが決める値で、利用者の値を含まない（障害の調査でログから追えるよう値のまま出す）。
-export const todosColumns = classifyColumns(todos, {
+export const todosColumns = ColumnClassifier.classify(todos, {
   id: "public",
   title: "sensitive",
   completed: "public",
@@ -87,10 +87,13 @@ export const todoStatusChanges = pgTable(
 
 // todo_status_changes の列の分類（Issue #216）。
 // WHY すべて public: id・親の id・位置・完了状態・日時はどれもアプリが決める値で、利用者が書く値を含まない。
-export const todoStatusChangesColumns = classifyColumns(todoStatusChanges, {
-  id: "public",
-  todoId: "public",
-  position: "public",
-  completed: "public",
-  changedAt: "public",
-});
+export const todoStatusChangesColumns = ColumnClassifier.classify(
+  todoStatusChanges,
+  {
+    id: "public",
+    todoId: "public",
+    position: "public",
+    completed: "public",
+    changedAt: "public",
+  },
+);

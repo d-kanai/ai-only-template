@@ -1,12 +1,12 @@
 import { logger } from "@repo/shared/logger";
 import { DomainError, type DomainErrorCode } from "../domain/domain-error";
 import {
-  describeErrorKey,
   type ErrorKey,
   type ErrorKeyParams,
+  ErrorKeys,
   type ErrorParamsArgs,
 } from "../domain/error-key";
-import { problemDetail } from "./problem-detail.en";
+import { EnglishProblemDetail } from "./problem-detail.en";
 
 // エラー応答を RFC 9457（Problem Details for HTTP APIs。https://www.rfc-editor.org/rfc/rfc9457.html ）の形にする（Issue #126）。
 // WHY RFC 9457 に準拠する（ユーザー判断）: HTTP API のエラー本文の標準で、Spring の ProblemDetail・ASP.NET Core の
@@ -49,8 +49,8 @@ export type ProblemError = {
   detail: string;
 };
 
-// InvalidRequestError が持つ項目ごとの誤り。detail は toProblemResponse が足す。
-// WHY detail を後で足す: 英語の文を作る場所を toProblemResponse の 1 か所にし、例外を作る側（json-body.ts）に
+// InvalidRequestError が持つ項目ごとの誤り。detail は ProblemResponse.from が足す。
+// WHY detail を後で足す: 英語の文を作る場所を ProblemResponse.from の 1 か所にし、例外を作る側（json-body.ts）に
 //   英語の文言の都合を持ち込まない。
 export type ProblemErrorInput = Omit<ProblemError, "detail">;
 
@@ -95,7 +95,7 @@ export type InvalidRequestArgs<K extends ErrorKey> = [
 // WHY DomainError と分ける: 形の誤りは HTTP の入力の問題で、ドメインのルール違反ではない。
 //   domain 層にリクエストの都合を持ち込まないよう、presentation 層の中で閉じた例外にする。
 //   クライアントから見れば「入力が不正」で同じなので、レスポンスは /problems/validation-error・400 にそろえる。
-// WHY errors を持てるようにする（zod の ZodError をそのまま投げない）: toProblemResponse が zod を知らずに済み、
+// WHY errors を持てるようにする（zod の ZodError をそのまま投げない）: ProblemResponse.from が zod を知らずに済み、
 //   JSON として読めない誤り（zod を通らない）も同じ例外で表せる。
 // WHY K を型引数にする: DomainError と同じく、key から params の型を決める（domain-error.ts のコメント）。
 export class InvalidRequestError<K extends ErrorKey = ErrorKey> extends Error {
@@ -107,7 +107,7 @@ export class InvalidRequestError<K extends ErrorKey = ErrorKey> extends Error {
     // WHY as: rest の形は K が決まるまで分からない（domain-error.ts と同じ）。先頭は params か undefined、2 番目は errors。
     const params = rest[0] as ErrorKeyParams[K] | undefined;
     const errors = rest[1] as ProblemErrorInput[] | undefined;
-    super(describeErrorKey(key, params));
+    super(ErrorKeys.describe(key, params));
     this.name = "InvalidRequestError";
     this.key = key;
     this.params = params;
@@ -118,129 +118,139 @@ export class InvalidRequestError<K extends ErrorKey = ErrorKey> extends Error {
 // 応答の種類。DomainError の code と、想定外の例外（internal_error）。
 type ProblemCategory = DomainErrorCode | "internal_error";
 
-// WHY Record<ProblemCategory, ...> にする: DomainErrorCode に種類を足したとき、ここに type・title・status を書き忘れると
-//   型エラーになり、変換漏れを防げる。
-// WHY 関数の中に置く（モジュールの最上位の定数にしない）: 最上位の式は読み込み時にだけ評価される static な変異になり、
-//   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に評価すれば、変異をテストで検出できる（Issue #55）。
-function problemKindOf(
-  category: ProblemCategory,
-): Pick<Problem, "type" | "title" | "status"> {
-  const problemKinds: Record<
-    ProblemCategory,
-    Pick<Problem, "type" | "title" | "status">
-  > = {
-    validation_error: {
-      type: "/problems/validation-error",
-      title: "Validation error",
-      status: 400,
-    },
-    not_found: { type: "/problems/not-found", title: "Not found", status: 404 },
-    internal_error: {
-      type: "/problems/internal-error",
-      title: "Internal error",
-      status: 500,
-    },
-  };
-  return problemKinds[category];
-}
+// 例外を Problem Details の Response にする変換（from）と、api の handle を包む口（wrap）。
+// WHY クラスの static メソッドにする: backend の本番コードは単独の関数を export しない（ADR
+//   docs/adr/architecture/20261002-class-based-backend.md）。状態を持たない変換なので static にし、api ファイルは
+//   `readonly handle = ProblemResponse.wrap(async (request[, ctx]) => { ... })` と書く。
+export class ProblemResponse {
+  // WHY Record<ProblemCategory, ...> にする: DomainErrorCode に種類を足したとき、ここに type・title・status を書き忘れると
+  //   型エラーになり、変換漏れを防げる。
+  // WHY メソッドの中に置く（モジュールの最上位の定数・static フィールドにしない）: どちらも読み込み時にだけ評価される static な変異になり、
+  //   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に評価すれば、変異をテストで検出できる（Issue #55）。
+  private static problemKindOf(
+    category: ProblemCategory,
+  ): Pick<Problem, "type" | "title" | "status"> {
+    const problemKinds: Record<
+      ProblemCategory,
+      Pick<Problem, "type" | "title" | "status">
+    > = {
+      validation_error: {
+        type: "/problems/validation-error",
+        title: "Validation error",
+        status: 400,
+      },
+      not_found: {
+        type: "/problems/not-found",
+        title: "Not found",
+        status: 404,
+      },
+      internal_error: {
+        type: "/problems/internal-error",
+        title: "Internal error",
+        status: 500,
+      },
+    };
+    return problemKinds[category];
+  }
 
-// WHY params・errors が undefined でも分岐しない: JSON.stringify は値が undefined のプロパティを出力しないので、
-//   本文に params・errors のキーが出ない（problem.test.ts・各 api のテストで toStrictEqual により確かめている）。
-// WHY Content-Type を application/problem+json にする: RFC 9457 の 3 節が定めるメディア型で、汎用の HTTP クライアントや
-//   ツールが Problem Details と見分ける手がかりになる（Response.json の既定は application/json）。画面の fetch は
-//   Content-Type を見ずに response.json() で読むので、変えても読める。
-function problemResponse(
-  category: ProblemCategory,
-  request: Request,
-  key: ErrorKey,
-  params: ErrorParams | undefined,
-  errors: ProblemErrorInput[] | undefined,
-): Response {
-  const kind = problemKindOf(category);
-  const problem: Problem = {
-    ...kind,
-    detail: problemDetail(key, params),
-    instance: new URL(request.url).pathname,
-    key,
-    params,
-    errors: errors?.map((error) => ({
-      ...error,
-      detail: problemDetail(error.key, error.params),
-    })),
-  };
-  return Response.json(problem, {
-    status: kind.status,
-    headers: { "content-type": "application/problem+json" },
-  });
-}
+  // WHY params・errors が undefined でも分岐しない: JSON.stringify は値が undefined のプロパティを出力しないので、
+  //   本文に params・errors のキーが出ない（problem.test.ts・各 api のテストで toStrictEqual により確かめている）。
+  // WHY Content-Type を application/problem+json にする: RFC 9457 の 3 節が定めるメディア型で、汎用の HTTP クライアントや
+  //   ツールが Problem Details と見分ける手がかりになる（Response.json の既定は application/json）。画面の fetch は
+  //   Content-Type を見ずに response.json() で読むので、変えても読める。
+  private static respond(
+    category: ProblemCategory,
+    request: Request,
+    key: ErrorKey,
+    params: ErrorParams | undefined,
+    errors: ProblemErrorInput[] | undefined,
+  ): Response {
+    const kind = ProblemResponse.problemKindOf(category);
+    const problem: Problem = {
+      ...kind,
+      detail: EnglishProblemDetail.of(key, params),
+      instance: new URL(request.url).pathname,
+      key,
+      params,
+      errors: errors?.map((error) => ({
+        ...error,
+        detail: EnglishProblemDetail.of(error.key, error.params),
+      })),
+    };
+    return Response.json(problem, {
+      status: kind.status,
+      headers: { "content-type": "application/problem+json" },
+    });
+  }
 
-// presentation の各 API の handle が投げた例外（withProblemResponse が捕まえたもの）を Problem Details の Response に変換する。
-//   変換の規則をここ 1 か所に集める。
-// WHY request を受け取る: instance（この発生を指す URI 参照）にリクエストのパスを入れるため。
-export function toProblemResponse(error: unknown, request: Request): Response {
-  if (error instanceof DomainError) {
-    return problemResponse(
-      error.code,
+  // presentation の各 API の handle が投げた例外（ProblemResponse.wrap が捕まえたもの）を Problem Details の Response に変換する。
+  //   変換の規則をここ 1 か所に集める。
+  // WHY request を受け取る: instance（この発生を指す URI 参照）にリクエストのパスを入れるため。
+  static from(error: unknown, request: Request): Response {
+    if (error instanceof DomainError) {
+      return ProblemResponse.respond(
+        error.code,
+        request,
+        error.key,
+        error.params,
+        undefined,
+      );
+    }
+    if (error instanceof InvalidRequestError) {
+      return ProblemResponse.respond(
+        "validation_error",
+        request,
+        error.key,
+        error.params,
+        error.errors,
+      );
+    }
+    // WHY ログに残す: 想定外の例外は原因を調べる必要がある。レスポンスでは詳細を隠すので、
+    //   サーバのログ（stderr の 1 行の JSON）にだけ残す。ログはすべて logger を通す（.claude/rules/backend.md の「ログ」）。
+    //   Error は logger が { type, message } にする（stack は出さない）。
+    // WHY 英語の固定の文言: ログは開発者が読むもので、apps/backend の非テストコードには日本語を置かない（Issue #116）。
+    // WHY event.name を server_error にする（Issue #209。apps/shared/log-event.ts）: API の想定外の例外（500）を 1 つの種類で引け、
+    //   アラートの条件にできる。DomainError など 400 / 404 の行は出さないので、この名前の行はすべてサーバ側の不具合の候補。
+    logger.emit({
+      message: "unexpected error",
+      event: { name: "server_error" },
+      error,
+    });
+    // WHY 固定のキーと detail にする: 例外の message には内部の情報（接続先、SQL など）が含まれうるため、クライアントに返さない。
+    return ProblemResponse.respond(
+      "internal_error",
       request,
-      error.key,
-      error.params,
+      "server.internalError",
+      undefined,
       undefined,
     );
   }
-  if (error instanceof InvalidRequestError) {
-    return problemResponse(
-      "validation_error",
-      request,
-      error.key,
-      error.params,
-      error.errors,
-    );
-  }
-  // WHY ログに残す: 想定外の例外は原因を調べる必要がある。レスポンスでは詳細を隠すので、
-  //   サーバのログ（stderr の 1 行の JSON）にだけ残す。ログはすべて logger を通す（.claude/rules/backend.md の「ログ」）。
-  //   Error は logger が { type, message } にする（stack は出さない）。
-  // WHY 英語の固定の文言: ログは開発者が読むもので、apps/backend の非テストコードには日本語を置かない（Issue #116）。
-  // WHY event.name を server_error にする（Issue #209。apps/shared/log-event.ts）: API の想定外の例外（500）を 1 つの種類で引け、
-  //   アラートの条件にできる。DomainError など 400 / 404 の行は出さないので、この名前の行はすべてサーバ側の不具合の候補。
-  logger.emit({
-    message: "unexpected error",
-    event: { name: "server_error" },
-    error,
-  });
-  // WHY 固定のキーと detail にする: 例外の message には内部の情報（接続先、SQL など）が含まれうるため、クライアントに返さない。
-  return problemResponse(
-    "internal_error",
-    request,
-    "server.internalError",
-    undefined,
-    undefined,
-  );
-}
 
-// presentation の各 api の handle（Route Handler）を包み、handler が投げた例外を toProblemResponse で Problem Details の
-//   Response にする（Issue #141）。各 api は `readonly handle = withProblemResponse(async (request[, ctx]) => { ... })` と書く。
-// WHY 包む関数にする: 以前は 5 本の api が同じ try { ... } catch (error) { return toProblemResponse(error, request); } を
-//   手書きしていた。Next の Route Handler には共通の catch が無い（Proxy は handler の例外を捕まえず、instrumentation の
-//   onRequestError は記録するだけ）ので、1 本でも書き忘れると Problem Details ではない Next の素の 500 がクライアントに漏れる。
-//   書き忘れは規則 presentation-with-problem-response（rule-tests/architecture.test.ts）が止める。
-// WHY handle の意味（Route Handler そのもの）と形（アロー関数のプロパティ）は変えない: 戻り値は handler と同じ引数の関数なので、
-//   `export const GET = new ListTodosApi(...).handle` の組み立ても、テストの `.handle(request)` もそのまま使える。
-//   包む対象はアロー関数のままなので、中の this はインスタンスを指し続ける。
-// WHY Args を型引数にして引数をそのまま透過する: (request) と (request, ctx: { params: Promise<...> }) の両方の handler を
-//   同じ関数で包み、ctx の型（動的セグメントの名前）を呼び出し側に残すため。先頭は Request に固定する（instance に使う）。
-// WHY parseJsonBody や await ctx.params を共通化しない（ユーザー判断）: 本文の有無・動的セグメントの有無と、id と本文を
-//   確かめる順番（rename-todo.api.ts・change-todo-completion.api.ts は id を先に見て 404 を優先する）が api ごとに違い、handler の中に書いた方が
-//   その api の処理を 1 か所で読める。ここは例外の変換だけを受け持つ。
-// WHY handler の呼び出しを try の中に置く（handler(...args).catch(...) にしない）: async でない handler が同期で throw
-//   しても、同じく Problem Details にするため。
-export function withProblemResponse<Args extends [Request, ...unknown[]]>(
-  handler: (...args: Args) => Promise<Response>,
-): (...args: Args) => Promise<Response> {
-  return async (...args) => {
-    try {
-      return await handler(...args);
-    } catch (error) {
-      return toProblemResponse(error, args[0]);
-    }
-  };
+  // presentation の各 api の handle（Route Handler）を包み、handler が投げた例外を ProblemResponse.from で Problem Details の
+  //   Response にする（Issue #141）。各 api は `readonly handle = ProblemResponse.wrap(async (request[, ctx]) => { ... })` と書く。
+  // WHY 包む口（handler を受け取り同じ形の関数を返す）にする: 以前は 5 本の api が同じ try { ... } catch (error) { return ProblemResponse.from(error, request); } を
+  //   手書きしていた。Next の Route Handler には共通の catch が無い（Proxy は handler の例外を捕まえず、instrumentation の
+  //   onRequestError は記録するだけ）ので、1 本でも書き忘れると Problem Details ではない Next の素の 500 がクライアントに漏れる。
+  //   書き忘れは規則 presentation-with-problem-response（rule-tests/architecture.test.ts）が止める。
+  // WHY handle の意味（Route Handler そのもの）と形（アロー関数のプロパティ）は変えない: 戻り値は handler と同じ引数の関数なので、
+  //   `export const GET = new ListTodosApi(...).handle` の組み立ても、テストの `.handle(request)` もそのまま使える。
+  //   包む対象はアロー関数のままなので、中の this はインスタンスを指し続ける。
+  // WHY Args を型引数にして引数をそのまま透過する: (request) と (request, ctx: { params: Promise<...> }) の両方の handler を
+  //   同じ関数で包み、ctx の型（動的セグメントの名前）を呼び出し側に残すため。先頭は Request に固定する（instance に使う）。
+  // WHY RequestBody.parse や await ctx.params を共通化しない（ユーザー判断）: 本文の有無・動的セグメントの有無と、id と本文を
+  //   確かめる順番（rename-todo.api.ts・change-todo-completion.api.ts は id を先に見て 404 を優先する）が api ごとに違い、handler の中に書いた方が
+  //   その api の処理を 1 か所で読める。ここは例外の変換だけを受け持つ。
+  // WHY handler の呼び出しを try の中に置く（handler(...args).catch(...) にしない）: async でない handler が同期で throw
+  //   しても、同じく Problem Details にするため。
+  static wrap<Args extends [Request, ...unknown[]]>(
+    handler: (...args: Args) => Promise<Response>,
+  ): (...args: Args) => Promise<Response> {
+    return async (...args) => {
+      try {
+        return await handler(...args);
+      } catch (error) {
+        return ProblemResponse.from(error, args[0]);
+      }
+    };
+  }
 }

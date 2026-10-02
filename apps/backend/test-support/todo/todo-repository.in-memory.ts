@@ -4,7 +4,7 @@ import {
   type TodoRepository,
 } from "../../features/todo/internal/domain/todo-repository";
 import type { Transaction } from "../../shared/application/transaction";
-import { changedProps } from "../../shared/infra/changed-props";
+import { ChangedProps } from "../../shared/infra/changed-props";
 
 // TodoRepository の InMemory 実装。プロセスが終わるとデータは消える。
 // テスト専用（本番の永続化は Postgres。features/todo/internal/infra/todo-repository.postgres.ts を api ファイルが組み立てる）。テストでは
@@ -88,7 +88,7 @@ export class InMemoryTodoRepository implements TodoRepository {
         `update takes a loaded Todo (findByIdForUpdate), but got a new one: ${todo.id}`,
       );
     }
-    const changed = changedProps(origin, {
+    const changed = ChangedProps.of(origin, {
       title: todo.title,
       completed: todo.completed,
     });

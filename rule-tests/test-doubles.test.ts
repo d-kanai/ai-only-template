@@ -23,7 +23,7 @@ import { afterAll, describe, expect, it } from "vitest";
 //     例外の書き方: 呼び出しの行の直前に続く `//` のコメント行（空行を挟まない）のどれかが「// WHY モック: <理由>」なら通す
 //       （rule-tests/schema.test.ts の `// WHY 長さ:`・rule-tests/api-request.test.ts の `// WHY 任意:` と同じ仕組み）。
 //       理由が空・見出しが違う・空行を挟む・同じ行の末尾・ブロックコメントは認めない。
-//     WHY 例外を認める: InMemory で起こせない検証（api ファイルの結線が getDatabase().db を共有することを、Repository を
+//     WHY 例外を認める: InMemory で起こせない検証（api ファイルの結線が AppDatabase.get().db を共有することを、Repository を
 //       受け取った db を記録するサブクラスに差し替えて確かめる route-handlers-share-database.test.ts など）がある。
 //       例外は呼び出しごとに理由を書かせ、黙ってモックが増えないようにする。
 //     WHY 見出しを `WHY モック:` だけにする: 別の理由の WHY コメントが直前にあるだけで黙って通らないようにする。
@@ -410,7 +410,7 @@ describe("テストダブルの判定（findTestDoubleViolations）: must pass",
       "application のテストから名前・場所の一部が同じ別のモジュール（shared/infra/database・database-x・database/x・別の場所の test-support/database・パッケージ・以前の置き場所）",
       APPLICATION_TEST,
       source(
-        'import { getDatabase } from "../../../../shared/infra/database";',
+        'import { AppDatabase } from "../../../../shared/infra/database";',
         'import { a } from "../../../../test-support/database-x";',
         'import { b } from "../../../../test-support/database/x";',
         'import { c } from "./test-support/database";',

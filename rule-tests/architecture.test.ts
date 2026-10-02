@@ -25,6 +25,7 @@ import {
   isJsxText,
   isMethodDeclaration,
   isNoSubstitutionTemplateLiteral,
+  isPropertyAccessExpression,
   isPropertyDeclaration,
   isSetAccessorDeclaration,
   isStringLiteral,
@@ -574,7 +575,7 @@ function isExposeFile(path: string): boolean {
 // WHY 自モジュールの internal はどの層でも許す: expose はモジュールの公開 API の組み立ての場所（presentation の api ファイルと
 //   同じ役割）で、application の command と infra の実装を組み立てて呼ぶ。
 // WHY backend/shared と env を許す（Issue #208 のオーケストレータの判断）: 組み立てには、api ファイルと同じく
-//   `new PostgresTodoRepository(getDatabase().db)` のように backend/shared/infra/database が要る（将来 todo の expose が
+//   `new PostgresTodoRepository(AppDatabase.get().db)` のように backend/shared/infra/database が要る（将来 todo の expose が
 //   internal を組み立てるとき）。env も組み立ての設定として許す。
 // 禁止のまま: 他のモジュールの expose / internal、自モジュールの internal/・expose/ の外の features、test-support、画面側。
 function exposeMayUse(ref: Reference): boolean {
@@ -654,7 +655,7 @@ const SHARED_NOW_MODULE = `${SHARED_ROOT}/now`;
 //   domain / application から使うと、層の規則で infra を参照させなかった意味が無くなる。
 // WHY presentation には logger だけ許す: presentation の infra は組み立てに使う Postgres の Repository の実装と
 //   backend/shared/infra/database だけ（下の presentationAllows）だが、想定外の例外をログに残すのは HTTP の境界
-//   （toProblemResponse）の仕事で、ログの出口をコンストラクタで渡すと全 API の組み立てに logger が入る。logger は状態を持たず、差し替えずにテストできる（console を spy する）ので、直接 import させる（Issue #85）。
+//   （ProblemResponse.from）の仕事で、ログの出口をコンストラクタで渡すと全 API の組み立てに logger が入る。logger は状態を持たず、差し替えずにテストできる（console を spy する）ので、直接 import させる（Issue #85）。
 //   env は infra（接続先・プールの設定）だけが使う。
 // WHY now はすべての層に許す: now() は現在時刻の Date を返すだけで、環境変数・出力・DB に触らない。Entity の生成ルール
 //   （Todo.create の作成日時）は domain に置くので、domain から現在時刻を読めないと時刻を引数で受け取る形になり、
@@ -732,7 +733,7 @@ const SHARED_TRANSACTION_PORT_MODULE =
   "apps/backend/shared/application/transaction";
 
 // 自 feature の infra の Postgres の Repository の実装（`<名前>-repository.postgres`。1 階層だけ）か。
-// WHY ファイル名の形で絞る: Issue #123 でコンテナを廃止し、api ファイルが `new XxxQuery(new PostgresTodoRepository(getDatabase().db))`
+// WHY ファイル名の形で絞る: Issue #123 でコンテナを廃止し、api ファイルが `new XxxQuery(new PostgresTodoRepository(AppDatabase.get().db))`
 //   と組み立てる。組み立てに要るのは Postgres の実装だけで、InMemory の実装（`*.in-memory`。テスト用）や schema を本番の
 //   presentation から使わせない。名前の前方一致だけが同じ別ファイル（`*.postgres-helper`）、テスト（`*.postgres.test`）、
 //   深い階層も許さない。
@@ -757,7 +758,7 @@ function isOwnPostgresRepository(
 //     定数のみ）」）。Entity の生成や操作は application を通す。
 //     WHY 定数を許す（Issue #144。ユーザー判断）: リクエストのスキーマが domain と同じ規則（title の上限の文字数）を重ねるとき、
 //     数値を 2 か所に書かずに domain の定数（TODO_TITLE_MAX_LENGTH）を参照させる。関数・Entity は値で使わせない。
-//     backend/shared/domain（DomainError・keyedIssue）はエラーの変換（instanceof）とキーの付与に値として使うので対象外。
+//     backend/shared/domain（DomainError・KeyedIssue.of）はエラーの変換（instanceof）とキーの付与に値として使うので対象外。
 function presentationAllows(
   ref: Reference,
   self: BackendLocation,
@@ -1907,23 +1908,27 @@ function findHardcodedTextViolations(
   );
 }
 
-// --- api の handle を withProblemResponse で包む（規則 presentation-with-problem-response。Issue #141） ---
-// backend の api ファイルのクラスの handle（Route Handler）は、初期化子が withProblemResponse(...) の呼び出しのプロパティにする
-//   （readonly handle = withProblemResponse(async (request[, ctx]) => { ... })）。
+// --- api の handle を ProblemResponse.wrap で包む（規則 presentation-with-problem-response。Issue #141） ---
+// backend の api ファイルのクラスの handle（Route Handler）は、初期化子が ProblemResponse.wrap(...) の呼び出しのプロパティにする
+//   （readonly handle = ProblemResponse.wrap(async (request[, ctx]) => { ... })）。
 // WHY 規則にする: Next の Route Handler には共通の catch が無い（Proxy は handler の例外を捕まえず、onRequestError は記録だけ）。
 //   包み忘れると、handler が投げた DomainError・InvalidRequestError も Problem Details ではない Next の素の 500 になり、
 //   api のテストに 400 / 404 の経路が無ければ気づけない。以前は 5 本の api が try / catch を手書きしていた
-//   （apps/backend/shared/presentation/problem.ts の withProblemResponse のコメント）。
+//   （apps/backend/shared/presentation/problem.ts の ProblemResponse.wrap のコメント）。
 // 違反にするもの（ファイル:行。行は handle のメンバーの行）:
-//   - handle の初期化子が withProblemResponse(...) の呼び出しでない（素の async のアロー関数、try / catch を自分で書いたもの、
-//     別の関数で包んだもの・withProblemResponse を別の関数で包み直したもの、呼び出さずに withProblemResponse を代入したもの、
-//     problem.withProblemResponse(...) のような名前空間経由の呼び出し）。
+//   - handle の初期化子が ProblemResponse.wrap(...) の呼び出しでない（素の async のアロー関数、try / catch を自分で書いたもの、
+//     別の関数で包んだもの・ProblemResponse.wrap を別の関数で包み直したもの、呼び出さずに ProblemResponse.wrap を代入したもの、
+//     problem.ProblemResponse.wrap(...) のような名前空間経由の呼び出し、ProblemResponse の別のメソッド（ProblemResponse.from(...)）、
+//     別のクラスの wrap（Other.wrap(...)）、素の wrap(...)）。
 //   - 初期化子が無い handle（コンストラクタで代入する）、メソッド・getter・setter の handle。
 //     WHY: 包んでいるかを宣言の 1 か所で読めない。メソッドは this が外れる形でもある（.claude/rules/backend.md）。
 //   - 名前は識別子と文字列リテラル（"handle"）で見る。static も、クラス式（const A = class { ... }）も、入れ子の関数の中のクラスも見る。
-// WHY 呼び出す関数を名前（withProblemResponse の識別子）だけで見る（import 元を確かめない）: 同じ名前の別の関数（ファイルの中で
-//   定義したもの、presentation の別モジュールから import したもの）で包むと通る（見逃す方向の限界。レビューで見る）。
-//   逆に、別名で import したもの（import { withProblemResponse as w }）や型アサーションを付けたもの（... as any）は違反になる（多く検出する方向）。
+// WHY 呼び出す先を名前（ProblemResponse という識別子の wrap というプロパティ）だけで見る（import 元を確かめない）: 同じ名前の別の
+//   クラス（ファイルの中で定義したもの、presentation の別モジュールから import したもの）の wrap で包むと通る（見逃す方向の限界。
+//   レビューで見る）。逆に、別名で import したもの（import { ProblemResponse as P } の P.wrap）や型アサーションを付けたもの
+//   （... as any）、ブラケット（ProblemResponse["wrap"](...)）は違反になる（多く検出する方向）。
+// WHY クラスの static メソッド（ProblemResponse.wrap）にした（Issue #262）: backend の本番コードは単独の関数を export しない（ADR
+//   docs/adr/architecture/20261002-class-based-backend.md）。以前は関数 withProblemResponse の識別子で見ていた。
 // 対象: apps/backend の下の presentation/ の下（入れ子も。置き場所の規則は presentation/nested/x.api.ts を許す）の
 //   *.api.<拡張子>（8 つの拡張子。テストは除く）。WHY 拡張子を .ts に限らない: .api.mts などにすると素通りするため。
 // 限界（見逃す方向）: クラスの外の Route Handler（export async function GET、オブジェクトリテラルの handle）、handle 以外の
@@ -1931,7 +1936,7 @@ function findHardcodedTextViolations(
 //   クラス <Verb><Noun>Api と handle で書く規約（.claude/rules/backend.md）で、ほかの形はレビューで見る。
 const PRESENTATION_WITH_PROBLEM_RESPONSE = {
   id: "presentation-with-problem-response",
-  name: "apps/backend の presentation の api ファイル（*.api.ts）のクラスの handle は withProblemResponse(...) の呼び出しで初期化する（try / catch の手書き・素の async・別の関数で包むのは違反。テストは除く）",
+  name: "apps/backend の presentation の api ファイル（*.api.ts）のクラスの handle は ProblemResponse.wrap(...) の呼び出しで初期化する（try / catch の手書き・素の async・別の関数で包むのは違反。テストは除く）",
   appliesTo: (file: string) =>
     isSourceNonTest(file) &&
     /^apps\/backend\/(?:.+\/)?presentation\/(?:.+\/)?[^/]+\.api\.(?:[cm]?[jt]s|[jt]sx)$/.test(
@@ -1939,7 +1944,10 @@ const PRESENTATION_WITH_PROBLEM_RESPONSE = {
     ),
 };
 
-const WITH_PROBLEM_RESPONSE = "withProblemResponse";
+// handle を包む static メソッド（apps/backend/shared/presentation/problem.ts の ProblemResponse.wrap）のクラス名とメソッド名。
+// WHY 2 つに分ける: 初期化子の呼び出し先を `<クラス名>.<メソッド名>` の形（受け手が識別子のプロパティアクセス）で見るため。
+const PROBLEM_RESPONSE_CLASS = "ProblemResponse";
+const PROBLEM_RESPONSE_WRAP = "wrap";
 const HANDLE_MEMBER = "handle";
 
 // クラスのメンバー（プロパティ・メソッド・getter・setter）の名前。識別子と文字列リテラルの名前だけ（計算された名前などは undefined）。
@@ -1957,20 +1965,26 @@ function classMemberNameOf(member: Node): string | undefined {
     : literalTextOf(member.name);
 }
 
-// member が「初期化子が withProblemResponse(...) の呼び出しのプロパティ」か。
+// member が「初期化子が ProblemResponse.wrap(...) の呼び出しのプロパティ」か。
 function isWrappedByProblemResponse(member: Node): boolean {
   if (!isPropertyDeclaration(member) || member.initializer === undefined) {
     return false;
   }
   const initializer = member.initializer;
+  if (!isCallExpression(initializer)) {
+    return false;
+  }
+  const callee = initializer.expression;
   return (
-    isCallExpression(initializer) &&
-    isIdentifier(initializer.expression) &&
-    initializer.expression.text === WITH_PROBLEM_RESPONSE
+    isPropertyAccessExpression(callee) &&
+    isIdentifier(callee.expression) &&
+    callee.expression.text === PROBLEM_RESPONSE_CLASS &&
+    isIdentifier(callee.name) &&
+    callee.name.text === PROBLEM_RESPONSE_WRAP
   );
 }
 
-// 構文木の中のクラス（宣言と式。入れ子も）の handle のうち、withProblemResponse(...) で初期化していないものを、書かれた順に行番号で返す。
+// 構文木の中のクラス（宣言と式。入れ子も）の handle のうち、ProblemResponse.wrap(...) で初期化していないものを、書かれた順に行番号で返す。
 function findUnwrappedHandles(sourceFile: SourceFile): number[] {
   const found: number[] = [];
   const visit = (node: Node): void => {
@@ -2202,7 +2216,7 @@ function findViolations(references: Reference[], rule: Rule): string[] {
 //   1 つずつ拾えているかまで比べるため）。console の直接の呼び出しも「console-direct-access: ファイル:行」で同じく出す。
 //   現在時刻の読み取りも「now-single-source: ファイル:行」で同じく出す。
 //   ハードコードの文言も「frontend-hardcoded-text: ファイル:行」「server-hardcoded-text: ファイル:行」を文言ごとに 1 行で出す。
-//   withProblemResponse で包んでいない handle も「presentation-with-problem-response: ファイル:行」を handle ごとに 1 行で出す。
+//   ProblemResponse.wrap で包んでいない handle も「presentation-with-problem-response: ファイル:行」を handle ごとに 1 行で出す。
 //   exports の違反は「backend-exports: ...」「shared-exports: ...」の 1 行で出す（findExportsViolations）。
 //   apps/shared の置き場所の違反は「shared-placement: ファイル」の 1 行で出す（ソース以外も含め、apps/shared の全ファイルを見る）。
 // WHY 置き場所の規則も参照を取り出すファイル（listReferencingFiles。apps/e2e/ とリポジトリ直下を含む）全体にかける:
@@ -2359,7 +2373,7 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
   });
 
   // WHY 本物の 5 本が列挙に入っていることを見る: 列挙（パスの正規表現）が壊れて 0 件になると、違反も 0 件で常に緑になる。
-  it("handle を withProblemResponse で包む規則は、本物の api ファイル 6 本を対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
+  it("handle を ProblemResponse.wrap で包む規則は、本物の api ファイル 6 本を対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
     const files = listProblemResponseCheckedFiles(repoRoot);
     expect(files).toEqual(
       expect.arrayContaining([
@@ -5622,7 +5636,7 @@ describe("ハードコードの文言の抽出（findHardcodedTexts）", () => {
   });
 });
 
-// withProblemResponse で包む規則（PRESENTATION_WITH_PROBLEM_RESPONSE。Issue #141）の判定例。[ファイル, ソース] で決まる。
+// ProblemResponse.wrap で包む規則（PRESENTATION_WITH_PROBLEM_RESPONSE。Issue #141）の判定例。[ファイル, ソース] で決まる。
 // WHY 架空のソースで固定する: 実リポジトリの検査は「今の 5 本が包んでいる」ことしか確かめず、判定が緩すぎても（常に違反なし）
 //   通ってしまう。包み忘れの書き方と、対象外のファイル・メンバーの境界を例で持つ。許可例には本物の 5 本も入れる（must pass）。
 // 複数行のソースを 1 つの文字列にする（この下の判定例と、fixture のファイルの中身で使う）。
@@ -5641,7 +5655,7 @@ const REAL_API_FILES = [
 
 const API_FILE = "apps/backend/features/todo/internal/presentation/x.api.ts";
 const IMPORT_WITH_PROBLEM_RESPONSE =
-  'import { withProblemResponse } from "../../../../shared/presentation/problem";';
+  'import { ProblemResponse } from "../../../../shared/presentation/problem";';
 
 const PROBLEM_RESPONSE_EXAMPLES: {
   violating: [file: string, source: string][];
@@ -5652,13 +5666,13 @@ const PROBLEM_RESPONSE_EXAMPLES: {
     [
       API_FILE,
       lines(
-        'import { toProblemResponse } from "../../../../shared/presentation/problem";',
+        'import { ProblemResponse } from "../../../../shared/presentation/problem";',
         "export class XApi {",
         "  readonly handle = async (request: Request): Promise<Response> => {",
         "    try {",
         "      return new Response(null);",
         "    } catch (error) {",
-        "      return toProblemResponse(error, request);",
+        "      return ProblemResponse.from(error, request);",
         "    }",
         "  };",
         "}",
@@ -5669,7 +5683,7 @@ const PROBLEM_RESPONSE_EXAMPLES: {
       API_FILE,
       "export class XApi { readonly handle = async (request: Request) => new Response(null); }",
     ],
-    // withProblemResponse を import だけして使わない。
+    // ProblemResponse.wrap を import だけして使わない。
     [
       API_FILE,
       lines(
@@ -5677,20 +5691,45 @@ const PROBLEM_RESPONSE_EXAMPLES: {
         "export class XApi { readonly handle = async (request: Request) => new Response(null); }",
       ),
     ],
-    // 別の関数で包む・withProblemResponse を別の関数で包み直す・名前空間経由・呼び出さずに代入する。
+    // 別の関数で包む・ProblemResponse.wrap を別の関数で包み直す・名前空間経由・呼び出さずに代入する。
     [
       API_FILE,
       "export class XApi { readonly handle = someOtherWrapper(async (request: Request) => new Response(null)); }",
     ],
     [
       API_FILE,
-      "export class XApi { readonly handle = wrap(withProblemResponse(async (request: Request) => new Response(null))); }",
+      "export class XApi { readonly handle = wrap(ProblemResponse.wrap(async (request: Request) => new Response(null))); }",
     ],
     [
       API_FILE,
-      "export class XApi { readonly handle = problem.withProblemResponse(async (request: Request) => new Response(null)); }",
+      "export class XApi { readonly handle = problem.ProblemResponse.wrap(async (request: Request) => new Response(null)); }",
     ],
-    [API_FILE, "export class XApi { readonly handle = withProblemResponse; }"],
+    [API_FILE, "export class XApi { readonly handle = ProblemResponse.wrap; }"],
+    // ProblemResponse の別のメソッド、別のクラスの wrap、素の wrap、別名で import したクラスの wrap、ブラケット（Issue #262 で
+    //   関数 withProblemResponse を ProblemResponse.wrap にしたときに足した境界）。
+    [
+      API_FILE,
+      "export class XApi { readonly handle = ProblemResponse.from(async (request: Request) => new Response(null)); }",
+    ],
+    [
+      API_FILE,
+      "export class XApi { readonly handle = OtherResponse.wrap(async (request: Request) => new Response(null)); }",
+    ],
+    [
+      API_FILE,
+      "export class XApi { readonly handle = wrap(async (request: Request) => new Response(null)); }",
+    ],
+    [
+      API_FILE,
+      lines(
+        'import { ProblemResponse as P } from "../../../../shared/presentation/problem";',
+        "export class XApi { readonly handle = P.wrap(async (request: Request) => new Response(null)); }",
+      ),
+    ],
+    [
+      API_FILE,
+      'export class XApi { readonly handle = ProblemResponse["wrap"](async (request: Request) => new Response(null)); }',
+    ],
     // 初期化子が無い（コンストラクタで代入する）、メソッド、getter。
     [
       API_FILE,
@@ -5698,7 +5737,7 @@ const PROBLEM_RESPONSE_EXAMPLES: {
         "export class XApi {",
         "  readonly handle: (request: Request) => Promise<Response>;",
         "  constructor() {",
-        "    this.handle = withProblemResponse(async (request: Request) => new Response(null));",
+        "    this.handle = ProblemResponse.wrap(async (request: Request) => new Response(null));",
         "  }",
         "}",
       ),
@@ -5733,7 +5772,7 @@ const PROBLEM_RESPONSE_EXAMPLES: {
       API_FILE,
       lines(
         IMPORT_WITH_PROBLEM_RESPONSE,
-        "export class AApi { readonly handle = withProblemResponse(async (request: Request) => new Response(null)); }",
+        "export class AApi { readonly handle = ProblemResponse.wrap(async (request: Request) => new Response(null)); }",
         "export class BApi { readonly handle = async (request: Request) => new Response(null); }",
       ),
     ],
@@ -5766,7 +5805,7 @@ const PROBLEM_RESPONSE_EXAMPLES: {
       lines(
         IMPORT_WITH_PROBLEM_RESPONSE,
         "export class XApi {",
-        "  readonly handle = withProblemResponse(",
+        "  readonly handle = ProblemResponse.wrap(",
         "    async (request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> => {",
         "      await ctx.params;",
         "      return new Response(null);",
@@ -5775,10 +5814,10 @@ const PROBLEM_RESPONSE_EXAMPLES: {
         "}",
       ),
     ],
-    // 型引数を明示した呼び出しも、呼び出す関数は withProblemResponse。
+    // 型引数を明示した呼び出しも、呼び出す関数は ProblemResponse.wrap。
     [
       API_FILE,
-      "export class XApi { handle = withProblemResponse<[Request]>(async (request) => new Response(null)); }",
+      "export class XApi { handle = ProblemResponse.wrap<[Request]>(async (request) => new Response(null)); }",
     ],
     // handle 以外の名前のメンバー、クラスの外（オブジェクトリテラル）、コメント・文字列の中は見ない。
     [
@@ -5840,7 +5879,7 @@ function judgeProblemResponses(examples: [string, string][]): boolean[] {
   });
 }
 
-describe(`handle を withProblemResponse で包む規則の判定（${PRESENTATION_WITH_PROBLEM_RESPONSE.id}）`, () => {
+describe(`handle を ProblemResponse.wrap で包む規則の判定（${PRESENTATION_WITH_PROBLEM_RESPONSE.id}）`, () => {
   const { violating, allowed } = PROBLEM_RESPONSE_EXAMPLES;
   // WHY 遅延して 1 回だけ判定する: 例ごとに tsgo を起動すると遅いため（ハードコードの文言の判定と同じ）。
   let verdicts: { violating: boolean[]; allowed: boolean[] } | undefined;
@@ -5866,12 +5905,12 @@ describe(`handle を withProblemResponse で包む規則の判定（${PRESENTATI
   );
 });
 
-describe("withProblemResponse で包んでいない handle の抽出（findUnwrappedHandles）", () => {
+describe("ProblemResponse.wrap で包んでいない handle の抽出（findUnwrappedHandles）", () => {
   it("包んでいない handle ごとに、メンバーの書き出しの行番号を返す（包んだ handle・ほかの名前のメンバーは返さない）", () => {
     const source = lines(
       IMPORT_WITH_PROBLEM_RESPONSE,
       "export class AApi {",
-      "  readonly handle = withProblemResponse(async (request: Request) => new Response(null));",
+      "  readonly handle = ProblemResponse.wrap(async (request: Request) => new Response(null));",
       "}",
       "export class BApi {",
       "  private readonly other = 1;",
@@ -6191,22 +6230,22 @@ function violationsOfFixture(files: Record<string, string>): string[] {
 // apps/shared の許可 SHARED_MODULES_BY_LAYER）の違反も置く。
 // ハードコードの文言の規則（FRONTEND_HARDCODED_TEXT・SERVER_HARDCODED_TEXT。Issue #116）と、辞書の置き場所の規則
 // （messages-colocation。Issue #125）の違反も置く。
-// 規則は全部で 35（RULES の 24 + 置き場所 3 + 環境変数の直参照 + console + 現在時刻の読み取り + exports 2 + ハードコードの文言 2 + handle を withProblemResponse で包む 1）。Issue #68 で RULES に 3 規則（backend-to-frontend・
+// 規則は全部で 35（RULES の 24 + 置き場所 3 + 環境変数の直参照 + console + 現在時刻の読み取り + exports 2 + ハードコードの文言 2 + handle を ProblemResponse.wrap で包む 1）。Issue #68 で RULES に 3 規則（backend-to-frontend・
 // backend-relative-only・frontend-root-to-backend）を足し、段階 2 で frontend-to-backend-specifier と BACKEND_EXPORTS を足した。
 // Issue #90 で frontend-to-shared-specifier・screen-to-shared・shared-self-contained・SHARED_PLACEMENT・SHARED_EXPORTS を足した。
 // Issue #141 で presentation-with-problem-response（PRESENTATION_WITH_PROBLEM_RESPONSE）を足した。
 // Issue #208 で module-internal・module-expose-only-from-presentation・expose-imports（モジュールの境界）を足した。
 const MUST_REJECT_FILES: Record<string, string> = {
-  // presentation-with-problem-response（Issue #141）: handle を withProblemResponse で包まない（try / catch の手書き、素の async、
+  // presentation-with-problem-response（Issue #141）: handle を ProblemResponse.wrap で包まない（try / catch の手書き、素の async、
   //   import だけして使わない、別の関数で包む）。.mts と入れ子のディレクトリ・backend/shared/presentation も対象。
   "apps/backend/features/todo/internal/presentation/bad-handle.api.ts": lines(
-    'import { toProblemResponse, withProblemResponse } from "../../../../shared/presentation/problem";',
+    'import { ProblemResponse} from "../../../../shared/presentation/problem";',
     "export class TryCatchApi {",
     "  readonly handle = async (request: Request): Promise<Response> => {",
     "    try {",
     "      return new Response(null);",
     "    } catch (error) {",
-    "      return toProblemResponse(error, request);",
+    "      return ProblemResponse.from(error, request);",
     "    }",
     "  };",
     "}",
@@ -6217,7 +6256,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
     "  readonly handle = someOtherWrapper(async (request: Request) => new Response(null));",
     "}",
     "export class WrappedApi {",
-    "  readonly handle = withProblemResponse(async (request: Request) => new Response(null));",
+    "  readonly handle = ProblemResponse.wrap(async (request: Request) => new Response(null));",
     "}",
   ),
   "apps/backend/features/todo/internal/presentation/nested/bad-handle.api.mts":
@@ -6259,7 +6298,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import type { Todo } from "../../../../backend/features/todo/internal/domain/todo";',
     'import type { ListOthersResponse } from "@repo/backend/features/other/internal/presentation/list-others.api";',
     'import { type GetTodoResponse, GET } from "@repo/backend/features/todo/internal/presentation/get-todo.api";',
-    'export { toProblemResponse } from "../../../../backend/shared/presentation/problem";',
+    'export { ProblemResponse } from "../../../../backend/shared/presentation/problem";',
     'import type { X } from "@repo/backend/features/todo/internal/presentation/list-todos";',
     'import type { DomainError } from "@repo/backend/shared/domain/domain-error";',
     'const m = import("@repo/backend/features/todo/internal/presentation/update-todo.api");',
@@ -6291,7 +6330,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import type { PostgresTodoRepository } from "../infra/todo-repository.postgres";',
     'import type { ListTodosResponse } from "../presentation/list-todos.api";',
     'import type { Other } from "../../../other/internal/domain/other";',
-    'import { toProblemResponse } from "../../../../shared/presentation/problem";',
+    'import { ProblemResponse } from "../../../../shared/presentation/problem";',
     'export type { ListTodosResponse as Dto } from "@/features/todo";',
     'const s = import("@/shared/x");',
     'import "@/app/globals.css";',
@@ -6322,7 +6361,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
       'export { Todo as Entity } from "../domain/todo-entity";',
       // Issue #144: 自 feature の domain から値で import してよいのは定数（UPPER_SNAKE_CASE）だけ。関数、定数と値の混在、
       //   定数の re-export、定数の名前の別名を付けた関数、名前で中身が分からない default / * as は違反。
-      'import { keyedIssue } from "../domain/todo-keyed";',
+      'import { KeyedIssue } from "../domain/todo-keyed";',
       'import { TODO_MAX, Todo } from "../domain/todo-mixed";',
       'export { TODO_MAX } from "../domain/todo-constants";',
       'import { maxLength as TODO_MAX } from "../domain/todo-alias";',
@@ -6410,7 +6449,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/backend/features/notification/expose/bad-expose.ts": lines(
     'import type { Todo } from "../../todo/internal/domain/todo";',
     'import { x } from "../../todo/expose/x";',
-    'import { getDatabase } from "../../../shared/infra/database";',
+    'import { AppDatabase } from "../../../shared/infra/database";',
     'import { env } from "@repo/shared/env";',
     'import { NextResponse } from "next/server";',
     'export { y } from "../lib/y";',
@@ -6518,21 +6557,21 @@ const MUST_REJECT_FILES: Record<string, string> = {
   ),
   "apps/backend/features/todo/internal/application/bad-application-infra.ts":
     lines(
-      'import { getDatabase } from "../../../../shared/infra/database";',
+      'import { AppDatabase } from "../../../../shared/infra/database";',
       // Issue #215: application は runner の実体（infra）を参照しない（backend/shared/application の TransactionRunner を受け取る。Issue #220）。
       'import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";',
     ),
   "apps/backend/features/todo/internal/presentation/bad-presentation-infra.api.ts":
     lines(
       // Issue #123: database と自 feature の Postgres の Repository の実装は許す（組み立てに使う）。schema とテスト基盤は違反。
-      'import { getDatabase } from "../../../../shared/infra/database";',
+      'import { AppDatabase } from "../../../../shared/infra/database";',
       'import { todos } from "../infra/schema";',
       'import { PostgresTodoRepository } from "../infra/todo-repository.postgres";',
       'import { cleanupTestSchemas } from "../../../../test-support/database";',
       // Issue #215: トランザクションの runner（PostgresTransactionRunner）は許す（command の組み立てに使う）。書き込みの口
       //   （writer）と InMemory の runner（test-support）は違反。
       'import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";',
-      'import { writerOf } from "../../../../shared/infra/writer";',
+      'import { PostgresWriter } from "../../../../shared/infra/writer";',
       'import { InMemoryTransactionRunner } from "../../../../test-support/transaction-runner.in-memory";',
     ),
   // core-to-persistence: domain / application から DB のパッケージ（drizzle-orm とそのサブパス、pg）。型だけの参照・re-export・
@@ -6556,7 +6595,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/backend/shared/infra/bad-shared-infra.ts": lines(
     'import { todos } from "../../features/todo/internal/infra/schema";',
     'import { NextResponse } from "next/server";',
-    'import { toProblemResponse } from "../presentation/problem";',
+    'import { ProblemResponse } from "../presentation/problem";',
   ),
   // env-direct-access: env.ts 以外で process.env を読む。書き方ごとに 1 行ずつ置き、行番号で検出を比べる。
   //   コメント・文字列の中（7・8 行目）は拾わない。
@@ -7400,15 +7439,15 @@ const MUST_REJECT_VIOLATIONS = [
 // （`git grep -h "from \"" -- '*.ts' '*.tsx'` で列挙したもの）をすべて含め、alias と相対の両方を置く。
 // コメント・文字列の中の import 風の文字列、from の無い `export type {...};`、テストファイル・TS 以外のファイルも置く。
 const MUST_PASS_FILES: Record<string, string> = {
-  // presentation-with-problem-response（Issue #141）: withProblemResponse で包んだ handle（ctx あり・なし）。
+  // presentation-with-problem-response（Issue #141）: ProblemResponse.wrap で包んだ handle（ctx あり・なし）。
   //   対象外: api ファイルでない presentation のファイル、テスト、ほかの層の handle。
   "apps/backend/features/todo/internal/presentation/good-handle.api.ts": lines(
-    'import { withProblemResponse } from "../../../../shared/presentation/problem";',
+    'import { ProblemResponse } from "../../../../shared/presentation/problem";',
     "export class ListApi {",
-    "  readonly handle = withProblemResponse(async (request: Request) => new Response(null));",
+    "  readonly handle = ProblemResponse.wrap(async (request: Request) => new Response(null));",
     "}",
     "export class GetApi {",
-    "  readonly handle = withProblemResponse(",
+    "  readonly handle = ProblemResponse.wrap(",
     "    async (request: Request, ctx: { params: Promise<{ id: string }> }) => {",
     "      await ctx.params;",
     "      return new Response(null);",
@@ -7596,7 +7635,7 @@ const MUST_PASS_FILES: Record<string, string> = {
   "apps/backend/shared/presentation/json-body.ts": lines(
     'import { z } from "zod";',
     'import { type ProblemErrorInput, InvalidRequestError } from "./problem";',
-    'import { toProblemResponse } from "./problem";',
+    'import { ProblemResponse } from "./problem";',
   ),
   "apps/backend/features/todo/internal/domain/todo.ts": lines(
     'import { randomUUID } from "node:crypto";',
@@ -7649,20 +7688,19 @@ const MUST_PASS_FILES: Record<string, string> = {
   // Issue #123: api ファイルが自分で組み立てる。自 feature の application（値）、Postgres の Repository の実装、
   //   backend/shared/infra/database（プール）を参照する（コンテナは廃止）。
   "apps/backend/features/todo/internal/presentation/list-todos.api.ts": lines(
-    'import { getDatabase } from "../../../../shared/infra/database";',
-    'import { toProblemResponse } from "../../../../shared/presentation/problem";',
+    'import { AppDatabase } from "../../../../shared/infra/database";',
+    'import { ProblemResponse } from "../../../../shared/presentation/problem";',
     'import { ListTodosQuery } from "../application/list-todos.query";',
     'import type { Todo } from "../domain/todo";',
     'import { PostgresTodoRepository } from "../infra/todo-repository.postgres";',
   ),
   "apps/backend/features/todo/internal/presentation/create-todo.api.ts": lines(
     'import { z } from "zod";',
-    'import { toProblemResponse } from "../../../../shared/presentation/problem";',
+    'import { ProblemResponse } from "../../../../shared/presentation/problem";',
     "import {",
-    "  parseJsonBody,",
-    "  requestBodySchema,",
+    "  RequestBody,",
     '} from "../../../../shared/presentation/json-body";',
-    'import { getDatabase } from "../../../../shared/infra/database";',
+    'import { AppDatabase } from "../../../../shared/infra/database";',
     'import { CreateTodoCommand } from "../application/create-todo.command";',
     'import { PostgresTodoRepository } from "../infra/todo-repository.postgres";',
     // Issue #220: トランザクションの口（backend/shared の application）と runner の実装（組み立て）。
@@ -7683,30 +7721,29 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import type { GetTodoResponse } from "./get-todo.api";',
     'import type { ListTodosQuery } from "../application/list-todos.query";',
     'import { GetTodoQuery } from "../application/get-todo.query";',
-    'export { toProblemResponse } from "../../../../shared/presentation/problem";',
+    'export { ProblemResponse } from "../../../../shared/presentation/problem";',
   ),
   "apps/frontend_customer/shared/y.mts": lines(
     'import { x } from "./x";',
     'const lazy = import(`./x`, { with: { type: "json" } });',
   ),
   "apps/backend/features/todo/internal/presentation/get-todo.api.ts": lines(
-    'import { toProblemResponse } from "../../../../shared/presentation/problem";',
+    'import { ProblemResponse } from "../../../../shared/presentation/problem";',
     'import { GetTodoQuery } from "../application/get-todo.query";',
     'import type { Todo } from "../domain/todo";',
     'import type { PostgresTodoRepository as R } from "../infra/todo-repository.postgres";',
     'import { PostgresTodoRepository } from "../infra/todo-repository.postgres";',
-    'import { type Database, getDatabase } from "../../../../shared/infra/database";',
+    'import { type Database, AppDatabase } from "../../../../shared/infra/database";',
   ),
   "apps/backend/features/todo/internal/presentation/update-todo.api.ts": lines(
     'import { z } from "zod";',
     'import { DomainError } from "../../../../shared/domain/domain-error";',
-    'import { toProblemResponse } from "../../../../shared/presentation/problem";',
+    'import { ProblemResponse } from "../../../../shared/presentation/problem";',
     "import {",
-    "  parseJsonBody,",
-    "  requestBodySchema,",
+    "  RequestBody,",
     '} from "../../../../shared/presentation/json-body";',
     'import type { Todo } from "../domain/todo";',
-    'import { getDatabase } from "../../../../shared/infra/database";',
+    'import { AppDatabase } from "../../../../shared/infra/database";',
     "import {",
     "  UpdateTodoCommand,",
     "  type UpdateTodoInput,",
@@ -7714,8 +7751,8 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { PostgresTodoRepository } from "../infra/todo-repository.postgres";',
   ),
   "apps/backend/features/todo/internal/presentation/delete-todo.api.ts": lines(
-    'import { toProblemResponse } from "../../../../shared/presentation/problem";',
-    'import { getDatabase } from "../../../../shared/infra/database";',
+    'import { ProblemResponse } from "../../../../shared/presentation/problem";',
+    'import { AppDatabase } from "../../../../shared/infra/database";',
     'import { DeleteTodoCommand } from "../application/delete-todo.command";',
     'const lazy = import("../infra/todo-repository.postgres");',
   ),
@@ -7728,7 +7765,7 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { SendNotificationCommand } from "../internal/application/send-notification.command";',
     'import { LogNotificationSender } from "../internal/infra/notification-sender.log";',
     'import type { NotificationSender } from "../internal/domain/notification-sender";',
-    'import { getDatabase } from "../../../shared/infra/database";',
+    'import { AppDatabase } from "../../../shared/infra/database";',
     'import { env } from "@repo/shared/env";',
     'export type { Message } from "./message";',
   ),
@@ -7752,7 +7789,7 @@ const MUST_PASS_FILES: Record<string, string> = {
   "apps/backend/shared/infra/transaction.postgres.ts": lines(
     'import type { Transaction, TransactionRunner } from "../application/transaction";',
     'import type { Database } from "./database";',
-    'import { PostgresWriter, transactionOf } from "./writer";',
+    'import { PostgresWriter } from "./writer";',
   ),
   "apps/backend/shared/infra/database.ts": lines(
     'import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";',
@@ -7971,7 +8008,7 @@ const MUST_PASS_FILES: Record<string, string> = {
   //   feature の domain・infra の schema・backend/shared/infra を値で参照してよい（本番のコードからの参照は test-support.test.ts が止める）。
   "apps/backend/test-support/todo/todo-repository.in-memory.ts": lines(
     'import { now } from "@repo/shared/now";',
-    'import { changedProps } from "../../shared/infra/changed-props";',
+    'import { ChangedProps } from "../../shared/infra/changed-props";',
     'import { Todo } from "../../features/todo/internal/domain/todo";',
     'import type { TodoRepository } from "../../features/todo/internal/domain/todo-repository";',
     'import { todos } from "../../features/todo/internal/infra/schema";',
@@ -8298,7 +8335,7 @@ describe("参照の抽出（extractImports）", () => {
       "  TODO_B,",
       '} from "multi-line";',
       'import { Todo } from "pascal";',
-      'import { keyedIssue } from "camel";',
+      'import { KeyedIssue } from "camel";',
       'import { TODO_MAX, Todo } from "mixed";',
       'import { max as TODO_MAX } from "alias-to-constant";',
       'import { Todo_MAX } from "not-upper";',

@@ -843,7 +843,7 @@ describe("列挙と検査（fixture）", () => {
     ),
     // 本番のコードの test-support と関係の無い import・コメントの中。
     "apps/backend/features/x/internal/infra/x.postgres.ts": lines(
-      'import { getDatabase } from "../../../../shared/infra/database";',
+      'import { AppDatabase } from "../../../../shared/infra/database";',
       `// ${importDatabase}`,
     ),
     // 依存と生成物の中は見ない。
@@ -924,7 +924,7 @@ describe("列挙と検査（fixture）", () => {
       // 行が無く、別の書き方（/ 付き）だけ → test-support/ のすべてのファイルが除外されない。
       ".dockerignore": lines(".git", "**/test-support/"),
       "apps/backend/features/x/internal/infra/bad.postgres.ts": lines(
-        'import { getDatabase } from "../../../../shared/infra/database";',
+        'import { AppDatabase } from "../../../../shared/infra/database";',
         importDatabase,
       ),
       "apps/frontend_customer/features/x/components/bad.tsx": lines(

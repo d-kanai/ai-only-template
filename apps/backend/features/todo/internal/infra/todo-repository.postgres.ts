@@ -1,8 +1,8 @@
 import { asc, eq, type SQL } from "drizzle-orm";
 import type { Transaction } from "../../../../shared/application/transaction";
-import { changedProps } from "../../../../shared/infra/changed-props";
+import { ChangedProps } from "../../../../shared/infra/changed-props";
 import type { Database } from "../../../../shared/infra/database";
-import { writerOf } from "../../../../shared/infra/writer";
+import { PostgresWriter } from "../../../../shared/infra/writer";
 import { Todo, type TodoStatusChange } from "../domain/todo";
 import { RequiredTodo, type TodoRepository } from "../domain/todo-repository";
 import { todoStatusChanges, todos } from "./schema";
@@ -14,13 +14,13 @@ type Reader = Pick<Database, "select">;
 
 // TodoRepository の Postgres 実装（Drizzle）。行と Entity の変換だけを書く（Issue #215）。
 // WHY db（Database）をコンストラクタで受け取る: query（findAll / findById）はトランザクションの外で db から読む。プールは
-//   getDatabase が globalThis に 1 つだけ持ち、api ファイルが `new PostgresTodoRepository(getDatabase().db)` と組み立てる
+//   AppDatabase.get が globalThis に 1 つだけ持ち、api ファイルが `new PostgresTodoRepository(AppDatabase.get().db)` と組み立てる
 //   （Issue #123）。テストはテスト用のスキーマの db を渡す。
 // WHY トランザクションを張らない（Issue #188・#189 では save / delete が張っていた）: 範囲は command が runner の run で決め、
 //   Repository は受け取った tx の中で読み書きする（ADR docs/adr/architecture/20260930-transaction-from-application.md）。
 //   Todo（集約）は todos の行と完了の履歴の 2 つの表にまたがるが、command の 1 つのトランザクションの中なので片方だけは残らない。
-// WHY 書き込みは Writer（writerOf(tx)）に渡すだけ: 変更履歴（change_logs）と書き込みのログは Writer が文ごとに横断的に書く
-//   （shared/infra/writer.ts）。Repository は change-log を import せず、db.transaction・recordChange・db の insert / update / delete を
+// WHY 書き込みは Writer（PostgresWriter.of(tx)）に渡すだけ: 変更履歴（change_logs）と書き込みのログは Writer が文ごとに横断的に書く
+//   （shared/infra/writer.ts）。Repository は change-log を import せず、db.transaction・ChangeRecords.recordChange・db の insert / update / delete を
 //   直接呼ばない（rule-tests/persistence.test.ts の no-change-log-in-repository・no-direct-transaction・no-direct-record-change・
 //   no-direct-db-write・writes-through-writer）。
 export class PostgresTodoRepository implements TodoRepository {
@@ -33,7 +33,7 @@ export class PostgresTodoRepository implements TodoRepository {
   }
 
   async findById(id: string): Promise<Todo | undefined> {
-    // WHY id の形（uuid）をここで検査しない: 利用者の入力は presentation の parseUuidParam（z.uuid() → 404）が唯一の
+    // WHY id の形（uuid）をここで検査しない: 利用者の入力は presentation の ResourceId.parseUuid（z.uuid() → 404）が唯一の
     //   検査で、ここに uuid の形でない id が来るのは呼び出し側の実装ミスだけ。「無い」（undefined）として黙って通すと
     //   誤りが隠れるので、Postgres の uuid 型のエラー（invalid input syntax）をそのまま投げ、API は 500 でログに残す。
     // 引数の id は大文字の uuid でもよい（Postgres の uuid 型は同じ値と見る）。履歴を Todo ごとにまとめるキーは、DB が返す
@@ -66,7 +66,7 @@ export class PostgresTodoRepository implements TodoRepository {
   // WHY 名前を ForUpdate で終える: ロックすることを名前で示す（findById はロックしない。Issue #221）。本体に .for( があるメソッドの
   //   名前は rule-tests/persistence.test.ts の lock-method-name-for-update が縛る。
   async findByIdForUpdate(id: string, tx: Transaction): Promise<Todo> {
-    const writer = writerOf(tx);
+    const writer = PostgresWriter.of(tx);
     await writer.select().from(todos).where(eq(todos.id, id)).for("update");
     const [todo] = PostgresTodoRepository.toTodos(
       await PostgresTodoRepository.selectTodos(writer, eq(todos.id, id)),
@@ -86,7 +86,7 @@ export class PostgresTodoRepository implements TodoRepository {
         `insert takes a new Todo (Todo.create), but got a loaded one: ${todo.id}`,
       );
     }
-    const writer = writerOf(tx);
+    const writer = PostgresWriter.of(tx);
     await writer.insert(todos, [
       {
         id: todo.id,
@@ -106,11 +106,11 @@ export class PostgresTodoRepository implements TodoRepository {
   // WHY 変わった列だけ: 全列を書くと、ロックせずに読んだ Todo（query の値など）で書いたときに、別の列の変更を読み込んだときの値に
   //   巻き戻す（lost update）。command は findByIdForUpdate で行をロックしてから書くので同時には読まないが、書く列を最小にしておけば
   //   ロックを外したときにも lost update が戻らない。同じ列は後勝ち（楽観ロックの version 列は入れない。ユーザー判断）。
-  // WHY 差分は origin と今の値の比較（changedProps）で取る: Entity の遷移メソッドは何も記録しない（todo.ts の origin）。
+  // WHY 差分は origin と今の値の比較（ChangedProps.of）で取る: Entity の遷移メソッドは何も記録しない（todo.ts の origin）。
   // WHY 比べる列は title と completed だけ: Todo を変える操作（rename・changeCompletion）が変えるのはこの 2 つで、id と作成日時は
   //   作った後で変わらない。完了の履歴は todos の列ではないので、件数で見る（下）。
-  // WHY 履歴の増分を件数で見る（changedProps で配列を比べない）: 履歴は末尾に足すだけ（Todo.changeCompletion）なので、読み込んだ
-  //   ときの件数より後ろが増えた分。changedProps は配列を参照で比べるが、Todo のコンストラクタが検証するたびに zod が新しい配列を
+  // WHY 履歴の増分を件数で見る（ChangedProps.of で配列を比べない）: 履歴は末尾に足すだけ（Todo.changeCompletion）なので、読み込んだ
+  //   ときの件数より後ろが増えた分。ChangedProps.of は配列を参照で比べるが、Todo のコンストラクタが検証するたびに zod が新しい配列を
   //   作る（zod 4.6.5 の parse は配列をコピーする）ので、rename だけでも「変わった」と判定されてしまう。
   // 同じ position の履歴が既にあれば (todo_id, position) の一意制約違反（23505）で失敗し、同じ tx の UPDATE も戻る（schema.ts）。
   // 行が無ければ（ロックせずに読んだ後に消された）、Writer の update が Error、履歴だけなら外部キー違反（23503）で失敗する。
@@ -122,11 +122,11 @@ export class PostgresTodoRepository implements TodoRepository {
         `update takes a loaded Todo (findByIdForUpdate), but got a new one: ${todo.id}`,
       );
     }
-    const writer = writerOf(tx);
+    const writer = PostgresWriter.of(tx);
     await writer.update(
       todos,
       todo.id,
-      changedProps(origin, { title: todo.title, completed: todo.completed }),
+      ChangedProps.of(origin, { title: todo.title, completed: todo.completed }),
     );
     await writer.insert(
       todoStatusChanges,
@@ -141,7 +141,7 @@ export class PostgresTodoRepository implements TodoRepository {
   //   on delete cascade で消える（履歴の表に DELETE を書かない）。
   // WHY id の形を検査しない: findById と同じ。「無い」として黙って何もしないと、消したつもりで消えていない実装ミスが隠れる。
   async delete(id: string, tx: Transaction): Promise<void> {
-    await writerOf(tx).delete(todos, id);
+    await PostgresWriter.of(tx).delete(todos, id);
   }
 
   // WHY 補助を private static メソッドにする（モジュールの最上位の関数にしない。Issue #262）: backend の本番コードはクラスを基本にし、
@@ -154,12 +154,12 @@ export class PostgresTodoRepository implements TodoRepository {
   //   （schema.ts）と DB の列の定義が保証し、TodoRow の型として届く。値の規則（タイトルの長さ・id の形など）は
   //   Todo.reconstruct（完全コンストラクタ）が検証する（Issue #94）。
   // WHY 不変条件を満たさない行を DomainError ではない Error にする（API は 500 internal_error。Issue #94 で決めた）:
-  //   DomainError(validation_error) のまま投げると presentation の toProblemResponse が 400 にし、「リクエストを直せば
+  //   DomainError(validation_error) のまま投げると presentation の ProblemResponse.from が 400 にし、「リクエストを直せば
   //   通る」とクライアントに伝えてしまう。保存済みのデータの不整合（規則を変えたのに移行していない、手で入れた行）は
   //   クライアントには直せないサーバ側の誤りで、直すのは運用（データの移行。スキル db-migration）。500 なら
-  //   toProblemResponse が logger.emit（server_error）で 1 行残すので、どの行が何に違反したかをログで追える。
+  //   ProblemResponse.from が logger.emit（server_error）で 1 行残すので、どの行が何に違反したかをログで追える。
   // WHY message に id と違反の理由を入れる: logger は Error を { type, message } にし、cause は出さない。
-  //   クライアントへの本文は固定のキー（server.internalError と固定の英語の detail。toProblemResponse）なので、ここに書いた内容は外に出ない。
+  //   クライアントへの本文は固定のキー（server.internalError と固定の英語の detail。ProblemResponse.from）なので、ここに書いた内容は外に出ない。
   // WHY 行を読み飛ばさない（一覧から黙って外さない）: データが消えたように見え、不整合に気づけない。
   // WHY cause に元の DomainError を持たせる: 例外を調べるとき（テスト・デバッガ）に元の例外をたどれるようにする。
   // statusChanges: その Todo の完了の履歴（足した順）。履歴の行が無い（空配列）・最後の completed が todos.completed と違う・日時の並びが
@@ -179,9 +179,9 @@ export class PostgresTodoRepository implements TodoRepository {
         statusChanges,
       });
     } catch (error) {
-      // reconstruct が投げるのは不変条件の違反（DomainError）だけ（todo.ts の validate）。その message はキーと params
+      // reconstruct が投げるのは不変条件の違反（DomainError）だけ（shared/domain/validate.ts の DomainValidation.validated）。その message はキーと params
       //   （例: todo.title.tooLong {"max":100}）で、どの規則に違反したかがログで分かる。
-      // WHY 英語の文言: ログ（toProblemResponse の logger.emit の server_error）に出る開発者向けの文字列で、クライアントには返さない。
+      // WHY 英語の文言: ログ（ProblemResponse.from の logger.emit の server_error）に出る開発者向けの文字列で、クライアントには返さない。
       //   apps/backend の非テストコードには自然言語の日本語を置かない（Issue #116。画面の文言は画面の辞書だけが持つ）。
       throw new Error(
         `stored Todo (id: ${row.id}) violates the invariants: ${(error as Error).message}`,

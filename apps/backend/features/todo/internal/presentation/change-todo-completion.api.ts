@@ -1,12 +1,9 @@
 import { z } from "zod";
-import { getDatabase } from "../../../../shared/infra/database";
+import { AppDatabase } from "../../../../shared/infra/database";
 import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";
-import {
-  parseJsonBody,
-  requestBodySchema,
-} from "../../../../shared/presentation/json-body";
-import { withProblemResponse } from "../../../../shared/presentation/problem";
-import { parseUuidParam } from "../../../../shared/presentation/resource-id";
+import { RequestBody } from "../../../../shared/presentation/json-body";
+import { ProblemResponse } from "../../../../shared/presentation/problem";
+import { ResourceId } from "../../../../shared/presentation/resource-id";
 import { Notifier } from "../../../notification/expose/notifier";
 import { ChangeTodoCompletionCommand } from "../application/change-todo-completion.command";
 import type { Todo } from "../domain/todo";
@@ -39,7 +36,7 @@ export type ChangeTodoCompletionResponse = {
 type Context = { params: Promise<{ id: string }> };
 
 // PUT /api/todos/:id/completion の Route Handler を持つクラス。コンストラクタで command を受け取り、handle を Route Handler として export する
-//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包む・
+//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・ProblemResponse.wrap で包む・
 //   補助（リクエストのスキーマ・toResponse）を private static メソッドにするは
 //   list-todos.api.ts の ListTodosApi のコメント）。
 export class ChangeTodoCompletionApi {
@@ -50,15 +47,15 @@ export class ChangeTodoCompletionApi {
     >,
   ) {}
 
-  readonly handle = withProblemResponse(
+  readonly handle = ProblemResponse.wrap(
     async (request: Request, ctx: Context): Promise<Response> => {
       // WHY id を本文より先に確かめる: rename-todo.api.ts の RenameTodoApi の handle のコメント（存在しえない Todo への
       //   要求は、本文を直しても成功しないので 400 ではなく 404）。
       const { id: rawId } = await ctx.params;
       // uuid の形でない id のキーと params は、command が無い id に投げる not_found と同じにそろえる
       //   （画面から見て「無い Todo」と同じ契約）。
-      const id = parseUuidParam(rawId, "todo.notFound", { id: rawId });
-      const { completed } = await parseJsonBody(
+      const id = ResourceId.parseUuid(rawId, "todo.notFound", { id: rawId });
+      const { completed } = await RequestBody.parse(
         request,
         ChangeTodoCompletionApi.changeTodoCompletionRequestSchema(),
       );
@@ -71,9 +68,9 @@ export class ChangeTodoCompletionApi {
 
   // リクエスト本文の「形」（項目の有無と型。未知の項目は拒否）。
   // WHY completed を必須にする: この API は完了を変えるためだけにあり、completed の無い本文は誤り（「何も変えない」200 にしない）。
-  // WHY 未知の項目を拒否する: title をこの API に送る誤り（名前の変更は /title）を黙って捨てずに 400 で知らせる（json-body.ts の requestBodySchema）。
+  // WHY 未知の項目を拒否する: title をこの API に送る誤り（名前の変更は /title）を黙って捨てずに 400 で知らせる（json-body.ts の RequestBody.schema）。
   private static changeTodoCompletionRequestSchema() {
-    return requestBodySchema({
+    return RequestBody.schema({
       // 型が違う・無いときのキー（request.field.notBoolean）は json-body.ts の toProblemError が決める（z.boolean に error は書かない）。
       completed: z.boolean(),
     });
@@ -96,12 +93,12 @@ export class ChangeTodoCompletionApi {
 //   （presentation）だけ（rule-tests/architecture.test.ts の module-expose-only-from-presentation）。command は interface（TodoCompletedNotifier）を受け取るだけで、
 //   notification モジュールを知らない。
 // 書き込みの command には、トランザクションを張る PostgresTransactionRunner を Repository と同じ db で渡す（Issue #215）。
-//   WHY 同じ getDatabase().db: command の読み込み（findByIdForUpdate）と書き込みは runner の tx で、Repository の query（findAll /
+//   WHY 同じ AppDatabase.get().db: command の読み込み（findByIdForUpdate）と書き込みは runner の tx で、Repository の query（findAll /
 //   findById）は Repository の db で行う。どちらも同じプールを使う。
 export const PUT = new ChangeTodoCompletionApi(
   new ChangeTodoCompletionCommand(
-    new PostgresTodoRepository(getDatabase().db),
-    new PostgresTransactionRunner(getDatabase().db),
+    new PostgresTodoRepository(AppDatabase.get().db),
+    new PostgresTransactionRunner(AppDatabase.get().db),
     new Notifier(),
   ),
 ).handle;
