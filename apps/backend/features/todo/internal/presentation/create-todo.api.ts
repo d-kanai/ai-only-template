@@ -13,34 +13,9 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 
 // POST /api/todos: Todo を作る。201 と作った Todo を返す。
 
-// リクエスト本文の「形」（項目の有無と型。未知の項目は拒否）に、title の必須・長さを domain と同じ規則で重ねる（Issue #144）。
-// WHY 必須・長さも見る: 形の誤りと一緒に、項目ごとの誤り（Problem の errors。pointer が #/title）として 1 回の応答で
-//   まとめて返すため。domain の DomainError(validation_error) は key 1 つで、どの項目の誤りかを持たない。
-// WHY domain と同じキー・同じ数え方・同じ上限（TODO_TITLE_MAX_LENGTH）にする: presentation は domain より厳しくしない
-//   （domain が通す値を弾かない）。上限の数値は domain の定数を参照し、2 か所に書かない。規則の正は domain で、domain は
-//   ここを通った値も含めて常に完全に検証する（todo.ts の todoPropsSchema。.claude/rules/backend.md の presentation）。
-// WHY 関数にする: スキーマを最上位の定数にすると static な変異になり mutation testing で数えない（json-body.ts の requestBodySchema）。
-function createTodoRequestSchema() {
-  return requestBodySchema({
-    // 型が違う・無いときのキー（request.field.notString）は json-body.ts の toProblemError が決める（z.string に error は書かない）。
-    // trim してからコードポイント数（Array.from）で数える: todo.ts の todoPropsSchema の title と同じ（WHY はそちら）。
-    title: z
-      .string()
-      .trim()
-      .refine(
-        (title) => Array.from(title).length >= 1,
-        keyedIssue("todo.title.empty"),
-      )
-      .refine(
-        (title) => Array.from(title).length <= TODO_TITLE_MAX_LENGTH,
-        keyedRefine("todo.title.tooLong", { max: TODO_TITLE_MAX_LENGTH }),
-      ),
-  });
-}
-
 // WHY 型をスキーマから導出する: 検査する形と型を 1 か所で宣言し、ずれを無くす（画面側も import type でこの型を使う）。
 export type CreateTodoRequest = z.infer<
-  ReturnType<typeof createTodoRequestSchema>
+  ReturnType<(typeof CreateTodoApi)["createTodoRequestSchema"]>
 >;
 
 // 同じ形の Response を各 *.api.ts に書く。
@@ -54,17 +29,9 @@ export type CreateTodoResponse = {
   createdAt: string;
 };
 
-function toResponse(todo: Todo): CreateTodoResponse {
-  return {
-    id: todo.id,
-    title: todo.title,
-    completed: todo.completed,
-    createdAt: todo.createdAt.toISOString(),
-  };
-}
-
 // POST /api/todos の Route Handler を持つクラス。コンストラクタで command を受け取り、handle を Route Handler として export する
-//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包むは
+//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包む・
+//   補助（リクエストのスキーマ・toResponse）を private static メソッドにするは
 //   list-todos.api.ts の ListTodosApi のコメント）。
 export class CreateTodoApi {
   constructor(
@@ -73,12 +40,50 @@ export class CreateTodoApi {
 
   readonly handle = withProblemResponse(
     async (request: Request): Promise<Response> => {
-      const input = await parseJsonBody(request, createTodoRequestSchema());
+      const input = await parseJsonBody(
+        request,
+        CreateTodoApi.createTodoRequestSchema(),
+      );
       const todo = await this.createTodo.execute(input);
-      const body: CreateTodoResponse = toResponse(todo);
+      const body: CreateTodoResponse = CreateTodoApi.toResponse(todo);
       return Response.json(body, { status: 201 });
     },
   );
+
+  // リクエスト本文の「形」（項目の有無と型。未知の項目は拒否）に、title の必須・長さを domain と同じ規則で重ねる（Issue #144）。
+  // WHY 必須・長さも見る: 形の誤りと一緒に、項目ごとの誤り（Problem の errors。pointer が #/title）として 1 回の応答で
+  //   まとめて返すため。domain の DomainError(validation_error) は key 1 つで、どの項目の誤りかを持たない。
+  // WHY domain と同じキー・同じ数え方・同じ上限（TODO_TITLE_MAX_LENGTH）にする: presentation は domain より厳しくしない
+  //   （domain が通す値を弾かない）。上限の数値は domain の定数を参照し、2 か所に書かない。規則の正は domain で、domain は
+  //   ここを通った値も含めて常に完全に検証する（todo.ts の todoPropsSchema。.claude/rules/backend.md の presentation）。
+  // WHY メソッドにする（スキーマを最上位の定数・static フィールドにしない）: 読み込み時にだけ評価される static な変異になり
+  //   mutation testing で数えない（json-body.ts の requestBodySchema。stryker.config.mjs の ignoreStatic）。呼び出しのたびに作る。
+  private static createTodoRequestSchema() {
+    return requestBodySchema({
+      // 型が違う・無いときのキー（request.field.notString）は json-body.ts の toProblemError が決める（z.string に error は書かない）。
+      // trim してからコードポイント数（Array.from）で数える: todo.ts の todoPropsSchema の title と同じ（WHY はそちら）。
+      title: z
+        .string()
+        .trim()
+        .refine(
+          (title) => Array.from(title).length >= 1,
+          keyedIssue("todo.title.empty"),
+        )
+        .refine(
+          (title) => Array.from(title).length <= TODO_TITLE_MAX_LENGTH,
+          keyedRefine("todo.title.tooLong", { max: TODO_TITLE_MAX_LENGTH }),
+        ),
+    });
+  }
+
+  private static toResponse(todo: Todo): CreateTodoResponse {
+    return {
+      id: todo.id,
+      title: todo.title,
+      completed: todo.completed,
+      createdAt: todo.createdAt.toISOString(),
+    };
+  }
 }
 
 // app/api/todos/route.ts が re-export する Route Handler。本番は常に Postgres で組み立てる。

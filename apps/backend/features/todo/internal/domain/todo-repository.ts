@@ -33,7 +33,7 @@ export interface TodoRepository {
   // WHY ロックする: 読んでから書くまでの間に別の要求が同じ Todo を消す・変えると、読んだ値を前提にした書き込み（完了の履歴の
   //   位置・通知の条件）がずれる。ロックすれば、書き込むときも読んだときの値のまま。
   // WHY interface に持たせる（ユースケースで throw を書かない）: 例外の code・key・params をここで 1 つに決め、
-  //   ユースケースごとの書き漏れ・書き違いを無くす（Issue #123 の後のユーザー指示、2026-09-29）。実装は requireTodo を使う。
+  //   ユースケースごとの書き漏れ・書き違いを無くす（Issue #123 の後のユーザー指示、2026-09-29）。実装は RequiredTodo.of を使う。
   // WHY 名前を ForUpdate で終える（Issue #221 で改名）: ロック無しの findById と、呼び出し側の前提（tx が要る・
   //   同時更新が直列化される）が違うことを名前で分かるようにする。Postgres の実装の名前と .for( の有無は
   //   rule-tests/persistence.test.ts の lock-method-name-for-update が検査する。
@@ -52,17 +52,25 @@ export interface TodoRepository {
 }
 
 // findByIdForUpdate の共通部分: 読んだ結果が undefined なら not_found の DomainError を投げ、あればそのまま返す。
-// WHY 関数にして domain に置く（実装ごとに throw を書かない）: Postgres と InMemory の 2 つの実装が同じ例外を投げる
+// WHY 1 か所にして domain に置く（実装ごとに throw を書かない）: Postgres と InMemory の 2 つの実装が同じ例外を投げる
 //   ことを 1 か所で保証する。片方だけ key や params を変えると、テスト（InMemory）と本番（Postgres）で API の応答が
 //   ずれ、テストが本番の振る舞いを表さなくなる。
 // WHY 基底クラス（abstract class TodoRepositoryBase）にしない: 実装に継承を強い、interface を満たすだけのテスト用の
-//   スタブ（オブジェクトリテラル）とも形がそろわなくなる。関数なら各実装が `requireTodo(<読んだ Todo>, id)`
+//   スタブ（オブジェクトリテラル）とも形がそろわなくなる。static メソッドなら各実装が `RequiredTodo.of(<読んだ Todo>, id)`
 //   の 1 行で使え（Postgres は行をロックして読んだ結果、InMemory は findById の結果）、依存も「infra → 自 feature の domain」（.claude/rules/backend.md の層の許可）の範囲に収まる。
-// WHY domain に置く（infra の共通ファイルにしない）: 「無い Todo を求めたら not_found」は TodoRepository の約束
-//   （上の interface）そのもので、DomainError も domain の型。domain は自 feature と shared の domain だけを参照する。
-export function requireTodo(todo: Todo | undefined, id: string): Todo {
-  if (todo === undefined) {
-    throw new DomainError("not_found", "todo.notFound", { id });
+// WHY 小さなクラスの static メソッドにする（Issue #262。以前は export した関数 requireTodo）: backend の本番コードは関数を export せず
+//   クラスにする（ADR docs/adr/architecture/20261002-class-based-backend.md）。状態を持たない検査なので、インスタンスをコンストラクタで
+//   受け取る形（Repository の実装に注入する）にはせず static にする。注入にすると、Repository の実装ごとに組み立ての引数が増えるのに、
+//   差し替えたい場面が無い（not_found の作り方は差し替えず、どの実装でも同じであることが目的）。
+// WHY Todo の static メソッドにしない: 「無い Todo を求めたら not_found」は Todo の値の規則ではなく、TodoRepository の約束（上の interface）。
+// WHY domain に置く（infra の共通ファイルにしない）: TodoRepository の約束そのもので、DomainError も domain の型。
+//   domain は自 feature と shared の domain だけを参照する。
+// static だけのクラス: Biome の complexity/noStaticOnlyClass は apps/backend では off（biome.json の overrides。.claude/rules/lint.md）。
+export class RequiredTodo {
+  static of(todo: Todo | undefined, id: string): Todo {
+    if (todo === undefined) {
+      throw new DomainError("not_found", "todo.notFound", { id });
+    }
+    return todo;
   }
-  return todo;
 }

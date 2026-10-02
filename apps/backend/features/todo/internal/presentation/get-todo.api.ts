@@ -22,17 +22,9 @@ export type GetTodoResponse = {
 // （node_modules/next/dist/docs/01-app/01-getting-started/15-route-handlers.md の「Route Context Helper」）。
 type Context = { params: Promise<{ id: string }> };
 
-function toResponse(todo: Todo): GetTodoResponse {
-  return {
-    id: todo.id,
-    title: todo.title,
-    completed: todo.completed,
-    createdAt: todo.createdAt.toISOString(),
-  };
-}
-
 // GET /api/todos/:id の Route Handler を持つクラス。コンストラクタで query を受け取り、handle を Route Handler として export する
-//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包むは
+//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包む・
+//   補助（toResponse）を private static メソッドにするは
 //   list-todos.api.ts の ListTodosApi のコメント）。
 export class GetTodoApi {
   constructor(private readonly getTodo: Pick<GetTodoQuery, "execute">) {}
@@ -46,10 +38,19 @@ export class GetTodoApi {
       // 無い id は GetTodoQuery が、uuid の形でない id は parseUuidParam が DomainError(not_found) を投げ、withProblemResponse が
       //   404 に変換する。
       const todo = await this.getTodo.execute(id);
-      const body: GetTodoResponse = toResponse(todo);
+      const body: GetTodoResponse = GetTodoApi.toResponse(todo);
       return Response.json(body);
     },
   );
+
+  private static toResponse(todo: Todo): GetTodoResponse {
+    return {
+      id: todo.id,
+      title: todo.title,
+      completed: todo.completed,
+      createdAt: todo.createdAt.toISOString(),
+    };
+  }
 }
 
 // app/api/todos/[id]/route.ts が re-export する Route Handler。本番は常に Postgres で組み立てる。
