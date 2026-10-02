@@ -9,7 +9,7 @@ paths:
 規則は `rule-tests/architecture.test.ts` が検査する（一覧は `.claude/rules/architecture-check.md`）。決定は ADR `docs/adr/architecture/20260929-apps-shared-package.md`。
 
 ## 置いてよいもの
-- `env.ts`（環境変数の唯一の入口。`.claude/rules/env.md`）、`logger.ts`（サーバ側のログの唯一の出口。`.claude/rules/backend.md` の「ログ」）、`now.ts`（現在時刻の唯一の出口。下の「now」）、そのテスト（`env.test.ts`・`logger.test.ts`・`now.test.ts`）、`log-event.ts`（logger の `event.name` に使える名前の一覧 `LOG_EVENT_NAMES`（Issue #209）と、種類ごとの行の zod スキーマ `LOG_EVENT_SCHEMAS`・マスクの印 `sensitive()` / `freeText()`・重大度 `severityOf`（Issue #216。下の「ログのスキーマとマスクの印」））とそのテスト `log-event.test.ts`（Issue #216 でマスクの正規表現の仕様を置くために足した。行の丸ごとの形は `logger.test.ts`）、`package.json`・`tsconfig.json` だけ（規則 `shared-placement`。ソース以外のファイルも名前で決める）。
+- `env.ts`（環境変数の唯一の入口。`.claude/rules/env.md`）、`logger.ts`（サーバ側のログの唯一の出口。`.claude/rules/backend.md` の「ログ」）、`now.ts`（現在時刻の唯一の出口。下の「now」）、そのテスト（`env.test.ts`・`logger.test.ts`・`now.test.ts`）、`log-event.ts`（logger の `event.name` に使える名前の一覧 `LOG_EVENT_NAMES`（Issue #209）と、種類ごとの行の zod スキーマ `LOG_EVENT_SCHEMAS`・マスクの印 `LogFieldMarks.sensitive()` / `LogFieldMarks.freeText()`・重大度 `LogSeverity.of`（Issue #216。下の「ログのスキーマとマスクの印」））とそのテスト `log-event.test.ts`（Issue #216 でマスクの正規表現の仕様を置くために足した。行の丸ごとの形は `logger.test.ts`）、`package.json`・`tsconfig.json` だけ（規則 `shared-placement`。ソース以外のファイルも名前で決める）。
   - WHY: 「frontend と backend の両方で使う」ものは多く、共通の置き場所を自由にすると feature のコードや DB・React に依存するコードが集まり、層の規則（backend の 4 層・画面側の境界）の外で依存が育つ。置いてよいのは、どの層・どのパッケージからも同じものを使うべき基盤（外の世界との入口・出口）だけにする。
 - 文言（`env.ts` のエラー、`logger.ts` のメッセージ）は英語で書き、日本語のリテラルを置かない（規則 `server-hardcoded-text`）。WHY: 利用者に見せる文言は frontend の辞書（`apps/frontend_customer/` の `*.messages.ts`）だけで、運用者向けの文言は英語に統一する。
 - 置かないもの: feature のコード（型・DTO を含む。画面とサーバの契約は backend の api ファイルに置く）、DB（`drizzle-orm` / `pg`。永続化は backend の infra）、React・Next・ブラウザの API。
@@ -30,23 +30,30 @@ paths:
 - 値はキーのパスに `.ts` を付けた TS のソース（ビルドしない。`@repo/backend` と同じ）。
 
 ## ログのスキーマとマスクの印（`log-event.ts`。Issue #216）
-- logger の口は `logger.emit(event)` の 1 つ（`info` / `warn` / `error` は無い）。logger は `event.name` で `LOG_EVENT_SCHEMAS` のスキーマを選んで `safeParse` し、その結果だけを 1 行にする。重大度は `severityOf`（種類と `event.phase`）が決める。使い方と行の形は `.claude/rules/backend.md` の「ログ」、決定は ADR `docs/adr/architecture/20260930-log-masking-in-logger.md`。
+- logger の口は `logger.emit(event)` の 1 つ（`info` / `warn` / `error` は無い）。logger は `event.name` で `LOG_EVENT_SCHEMAS` のスキーマを選んで `safeParse` し、その結果だけを 1 行にする。重大度は `LogSeverity.of`（種類と `event.phase`）が決める。使い方と行の形は `.claude/rules/backend.md` の「ログ」、決定は ADR `docs/adr/architecture/20260930-log-masking-in-logger.md`。
 - 種類を足す・項目を足すときは `LOG_EVENT_NAMES` と `LOG_EVENT_SCHEMAS` を同じ変更で直す（`satisfies` が過不足を型で止める）。項目は `z.object` に書いたものだけが出る（一覧に無いキーは落ちる = allowlist。`.strict()` にしない: 行そのものを失う）。
 - 値の印（どの項目に何を付けるか）:
-  - `sensitive(schema)`: 値を常に `***` にする（`transform`）。利用者の入力・利用者に由来する値（`url.query` の値・`referer`・`client.address`）。`null` を残すときは外側に `.nullable()`。WHY `transform`（zod の `.meta()` にしない）: `.meta()` の印は `.optional()` などで包むと外側に引き継がれず、logger から見えなくなる。
-  - `freeText()`: 自由文（`message`・`url.path`・`url.query` のキー・`error.message`・通知の本文）。値は出すが、メール・JWT・Bearer・Luhn に合う 13〜19 桁を `***` にし、2000 文字で切る。正規表現は入れ子の量指定子を使わない線形の形に限る（ReDoS。時間の上限は `log-event.test.ts` が測る）。電話番号は入れない（誤検知）。
+  - `LogFieldMarks.sensitive(schema)`: 値を常に `***` にする（`transform`）。利用者の入力・利用者に由来する値（`url.query` の値・`referer`・`client.address`）。`null` を残すときは外側に `.nullable()`。WHY `transform`（zod の `.meta()` にしない）: `.meta()` の印は `.optional()` などで包むと外側に引き継がれず、logger から見えなくなる。
+  - `LogFieldMarks.freeText()`: 自由文（`FreeTextMask.mask` を通す。`message`・`url.path`・`url.query` のキー・`error.message`・通知の本文）。値は出すが、メール・JWT・Bearer・Luhn に合う 13〜19 桁を `***` にし、2000 文字で切る。正規表現は入れ子の量指定子を使わない線形の形に限る（ReDoS。時間の上限は `log-event.test.ts` が測る）。電話番号は入れない（誤検知）。
   - 印なし: コードと DB が決める名前・id（`event.*`・`db.*`・`row_id`・`http.request.id`・`server.address` など）。`http.request.id` と `server.address` に `freeText` をかけない（E2E の 13 桁の id が Luhn に合うことがあり、`***` になって不安定になる）。
   - `error`: `Error` は `{ type, message }`（message は `freeText`）、`type` を持つオブジェクトはそのまま、それ以外の throw は `{ type: typeof 値 }`（値を出さない）。
 - 型: `LogEvent` は `z.input` の union（`z.infer` = 出力の型だと sensitive の項目が `"***"` 型になり、生の値を渡せない）。種類ごとの必須項目の縛りは `logger.test.ts` の `@ts-expect-error`（`pnpm typecheck`）が固定する。
 - テスト: `logger.test.ts` が全種類の行を丸ごと比べ、sensitive の項目に入れた番兵の値が出力に含まれないことを確かめる。WHY 丸ごと比べる: `LOG_EVENT_SCHEMAS` は最上位の値なので Stryker の static な変異になり ignoreStatic で検査から外れ、項目と印の変更はこの比較だけが止める。
 
 ## now（現在時刻の唯一の出口。`now.ts`）
-- アプリのコード（`apps/frontend_customer`・`apps/backend`・`apps/shared` のテスト以外）で現在時刻が要るときは `now()` を呼ぶ。引数の無い `new Date()`・`Date.now()`・`new` の無い `Date()` を書いてよいのは `now.ts` だけ（規則 `now-single-source`。`rule-tests/architecture.test.ts`）。引数のある `new Date(x)`（解析）・`Date.parse`・`Date.UTC` は可。
+- アプリのコード（`apps/frontend_customer`・`apps/backend`・`apps/shared` のテスト以外）で現在時刻が要るときは `Clock.now()` を呼ぶ。引数の無い `new Date()`・`Date.now()`・`new` の無い `Date()` を書いてよいのは `now.ts` だけ（規則 `now-single-source`。`rule-tests/architecture.test.ts`）。引数のある `new Date(x)`（解析）・`Date.parse`・`Date.UTC` は可。
   - WHY: 時刻を各所で直接読むと、時刻に依存する振る舞い（Entity の作成日時・一覧の並び順・ログの時刻）のテストが実行した瞬間で結果を変え、決定的にならない。出口が 1 つなら、テストは `vi.mock` でそのモジュールを差し替えるだけで時刻を決められる（`.claude/rules/testing.md` の「テストダブル」）。
   - WHY 引数で時刻を受け取る形（`Todo.create(title, createdAt)`・Clock の注入）にしない: 「作ったときの時刻が入る」は Entity の生成ルールで、呼び出し側が時刻を渡せるとルールが呼び出し側に漏れる（ユーザー判断）。
+  - WHY クラスの static メソッド（関数 `now()` にしない。Issue #262）: apps/shared も最上位に関数を置かない（下の「クラスにする」）。インスタンスの注入にしないのは上の WHY と同じで、差し替えは `vi.mock` の 1 つのまま（自動モックは static メソッドも差し替える）。
   - 対象外: テスト・テストの補助（アプリの直下の `test-support/` の下。Issue #181）、`apps/e2e/`（別プロセスの本番ビルドを操作し now を差し替えられない。現在時刻は一意なタイトルを作るためだけ）、`scripts/`・リポジトリ直下の設定。
-- `apps/shared` の中からは相対パスで読む（`logger.ts` の `import { now } from "./now"`）。
+- `apps/shared` の中からは相対パスで読む（`logger.ts` の `import { Clock } from "./now"`）。
 - 決定は ADR `docs/adr/architecture/20260930-now-single-source.md`、検査の書き方と限界は `.claude/rules/architecture-check.md`。
+
+## クラスにする（Issue #262）
+- 本番のファイル（テスト以外）は最上位に関数を置かず、クラスにする（状態の無い補助は `static` / `private static`）。backend と同じ規則 `class-based`（`rule-tests/architecture.test.ts`。`.claude/rules/architecture-check.md`）が検査し、static だけのクラスは `biome.json` の override で `noStaticOnlyClass` を off にしている（`.claude/rules/lint.md`）。決定は ADR `docs/adr/architecture/20261002-class-based-shared-and-test-support.md`。
+  - クラスの対応: `now.ts` の `Clock.now()`、`logger.ts` の `logger`（`Logger` のインスタンス。呼び出しは `logger.emit` のまま）、`log-event.ts` の `LogFieldMarks`（印 `sensitive` / `freeText` と `bounded` / `boundedFreeText` / `error`）・`FreeTextMask`（自由文の網 `mask`）・`LogSeverity`（`of`）、`env.ts` の `EnvReader`（`read` / `readTool`）・`DotEnvFile`（`load` / `findRepoRoot` / `loadFromRepoRoot`）。値の `env` / `toolEnv` / `LOG_EVENT_SCHEMAS` などはそのまま。
+  - 表・スキーマ・定数はメソッドの中で作る（クラスの static フィールドにしない）。WHY: 最上位の値は Stryker の static な変異になり ignoreStatic で検査から外れる（`.claude/rules/testing.md`）。static フィールドの初期化も読み込み時に 1 回だけ評価されるので、同じく外れるおそれがある（未確認。ADR `docs/adr/architecture/20261002-class-based-backend.md`）。
+  - `LOG_EVENT_SCHEMAS` が読み込み時に呼ぶクラス（`LogFieldMarks` など）は、それより前に書く（クラスの宣言は巻き上げられない）。
 
 ## 型チェック・テスト
 - `apps/shared/tsconfig.json` は `apps/backend/tsconfig.json` と同じ方針（Next の plugin・jsx・DOM の型なし）。`pnpm typecheck` が `tsc -p apps/shared --noEmit` で検査する（`rule-tests/typecheck.test.ts`）。

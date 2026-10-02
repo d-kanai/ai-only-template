@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { now } from "@repo/shared/now";
+import { Clock } from "@repo/shared/now";
 import { and, asc, eq, sql } from "drizzle-orm";
 import pg from "pg";
 import {
@@ -26,14 +26,14 @@ import { Todo } from "../domain/todo";
 import { todoStatusChanges, todos } from "./schema";
 import { PostgresTodoRepository } from "./todo-repository.postgres";
 
-// WHY 時計（now）を差し替えられるようにする: 作成日時（Todo.create が now() から入れる）をミリ秒まで決めた値で保存し、
-//   同じ値で読み戻せることを確かめるため。spy: true で本物の now を残し、時刻を決めたいテストだけ次の 1 回の値を返させる。
+// WHY 時計（Clock.now）を差し替えられるようにする: 作成日時（Todo.create が Clock.now() から入れる）をミリ秒まで決めた値で保存し、
+//   同じ値で読み戻せることを確かめるため。spy: true で本物の Clock.now を残し、時刻を決めたいテストだけ次の 1 回の値を返させる。
 vi.mock("@repo/shared/now", { spy: true });
 
 // WHY restoreAllMocks: 文の数を数えるテストが Pool（database.pool）・pg の Client の query を vi.spyOn で包む。失敗したときも次の
-//   テストに spy を残さない（vi.mock の now は restoreAllMocks の対象外で、上の mockReset が戻す）。
+//   テストに spy を残さない（vi.mock の Clock.now は restoreAllMocks の対象外で、上の mockReset が戻す）。
 afterEach(() => {
-  vi.mocked(now).mockReset();
+  vi.mocked(Clock.now).mockReset();
   vi.restoreAllMocks();
 });
 
@@ -128,7 +128,7 @@ async function waitUntilBlockedBy(pid: number): Promise<void> {
 }
 
 // action の間に書かれた変更履歴（change_logs の行）を、id と occurred_at を除いた記録（ChangeEntry）にして返す。
-// WHY id と occurred_at を除く: id は DB が乱数で作り、occurred_at は now() の時刻（shared/infra/change-log.test.ts が固定する）。
+// WHY id と occurred_at を除く: id は DB が乱数で作り、occurred_at は Clock.now() の時刻（shared/infra/change-log.test.ts が固定する）。
 // WHY 表の名前と changes で並べる: 同じ command の記録の順は文の順だが、DB が返す順は決まらない。
 async function changeLogsWrittenBy(
   action: () => Promise<unknown>,
@@ -249,7 +249,7 @@ describe("PostgresTodoRepository", () => {
 
   test("insert した Todo を findById / findAll で同じ値（id・title・completed・作成日時）として取り出せる", async () => {
     const createdAt = new Date("2026-09-28T01:02:03.456Z");
-    vi.mocked(now).mockReturnValueOnce(createdAt);
+    vi.mocked(Clock.now).mockReturnValueOnce(createdAt);
     const todo = Todo.create("牛乳を買う").changeCompletion(true);
     expect(todo.createdAt).toEqual(createdAt);
 

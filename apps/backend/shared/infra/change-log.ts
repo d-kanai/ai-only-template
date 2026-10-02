@@ -1,4 +1,4 @@
-import { now } from "@repo/shared/now";
+import { Clock } from "@repo/shared/now";
 import { getTableColumns, getTableName, type Table } from "drizzle-orm";
 import type { ChangeOperation } from "../domain/change-operation";
 import type { Database } from "./database";
@@ -113,7 +113,7 @@ export class ChangeRecords {
     ];
   }
 
-  // 記録を change_logs に入れる（1 回の INSERT。記録が無ければ何もしない）。occurred_at は now()（同じ呼び出しの記録は同じ時刻）。
+  // 記録を change_logs に入れる（1 回の INSERT。記録が無ければ何もしない）。occurred_at は Clock.now()（同じ呼び出しの記録は同じ時刻）。
   // WHY writer（tx）を受け取る: 本体の書き込みと同じトランザクションで書き、片方だけが残らないようにする（本体が失敗したら
   //   記録も戻り、記録が失敗したら本体も戻る。todo-repository.postgres.test.ts が一時的な CHECK 制約と、COMMIT で失敗させる
   //   遅延制約で固定する）。
@@ -126,7 +126,7 @@ export class ChangeRecords {
     if (entries.length === 0) {
       return;
     }
-    const occurredAt = now();
+    const occurredAt = Clock.now();
     await writer
       .insert(changeLogs)
       .values(entries.map((entry) => ({ ...entry, occurredAt })));

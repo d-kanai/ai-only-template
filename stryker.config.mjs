@@ -121,16 +121,16 @@ export default {
   //   https://stryker-mutator.io/docs/mutation-testing-elements/static-mutants/ ）。
   //   WHY 有効にする（Issue #55）:
   //   - 読み込み時の変異は、その結果を読み込むテストファイル自体の読み込みを壊すことがある。env.ts の
-  //     `export const env = readEnv(process.env)` は読み込み時に readEnv を実行するので、readEnv の中の変異で
+  //     `export const env = EnvReader.read(process.env)` は読み込み時に EnvReader.read を実行するので、その中の変異で
   //     読み込みが失敗し、テストが 1 件も実行されないまま Survived と数えられていた（testsCompleted 0。Issue #59 で判明）。
-  //   - 読み込み時とテスト中の両方で実行される変異（hybrid。env.ts の readEnv、api ファイル最下部の Route Handler の組み立てなど）は、
+  //   - 読み込み時とテスト中の両方で実行される変異（hybrid。env.ts の EnvReader.read、api ファイル最下部の Route Handler の組み立てなど）は、
   //     ignoreStatic を有効にするとテスト中の実行だけを対象に、その変異を通るテストだけで判定される（上の static-mutants の
   //     「What Stryker does」。@stryker-mutator/core 10.0.0 の dist/src/mutants/mutant-test-planner.js の planMutant）。
-  //     そのため readEnv の変異は env.test.ts で正しく killed になる。
+  //     そのため EnvReader.read の変異は env.test.ts で正しく killed になる。
   //   - 実行時間: 既定では static な変異 124 件（全体の 21%）が実行時間の 83% を占めると警告され、全体で約 5 分かかった。
   //     有効にすると約 3.3 分（2026-09-28、ローカル 4 コアで実測。576 変異、3 分 18 秒）。
   //   ロジックの定数は static にしない: 読み込み時に固定される定数（正規表現・変換表・URL・接頭辞など）は、呼び出し時に
-  //   評価する関数の中に置く（todo-repository.postgres.ts の isUuid、problem.ts の problemKindOf、todo-api.ts の todosPath、
+  //   評価する関数・メソッドの中に置く（problem.ts の ProblemResponse.problemKindOf、apps/shared/log-event.ts の FreeTextMask.mask、todo-api.ts の todosPath、
   //   apps/backend/test-support/database.ts の testSchemaPrefix）。最上位の定数のままだと、既定の実行では killed になる変異も
   //   ignoreStatic で数えなくなるため（reviewer 指摘。Issue #55 で 18 件が該当した）。
   //   残る static（数えないもの）: features/todo/internal/infra/schema.ts の todos の 10 件（下の実測）と、Issue #188 / #189 で加わった

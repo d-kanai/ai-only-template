@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { LogEventName } from "./log-event";
 import { type LogEvent, logger } from "./logger";
-import { now } from "./now";
+import { Clock } from "./now";
 
 // logger（サーバ側のログの唯一の出口。Issue #85）の仕様。出力先は console の各メソッドを spy して確かめる。
 // 行の形は Cloud Logging の特別フィールド（severity / time / message）と OTel semconv の名前（Issue #209。ADR
@@ -19,7 +19,7 @@ const NOW = "2026-09-29T01:02:03.456Z";
 //   落ちていることを確かめるため。
 const SENTINEL = "SENTINEL-PII";
 
-// WHY 時計（now）を差し替える: 行の time は現在時刻の唯一の出口 now() から取る。決まった時刻で行を丸ごと比べるため。
+// WHY 時計（Clock.now）を差し替える: 行の time は現在時刻の唯一の出口 Clock.now() から取る。決まった時刻で行を丸ごと比べるため。
 vi.mock("./now");
 
 const consoleMethods = ["log", "warn", "error"] as const;
@@ -312,11 +312,11 @@ function schemaMismatchLine(failedName?: LogEventName): object {
 }
 
 beforeEach(() => {
-  vi.mocked(now).mockReturnValue(new Date(NOW));
+  vi.mocked(Clock.now).mockReturnValue(new Date(NOW));
 });
 
 afterEach(() => {
-  vi.mocked(now).mockReset();
+  vi.mocked(Clock.now).mockReset();
   vi.restoreAllMocks();
 });
 
@@ -455,7 +455,7 @@ describe("logger.emit: time", () => {
     });
   });
 
-  test("time を持たない種類は現在時刻（now()）を使う", () => {
+  test("time を持たない種類は現在時刻（Clock.now()）を使う", () => {
     const spies = spyConsole();
 
     logger.emit({ message: "notification", event: { name: "notification" } });

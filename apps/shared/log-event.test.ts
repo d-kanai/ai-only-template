@@ -2,11 +2,10 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import {
-  freeText,
+  FreeTextMask,
   LOG_EVENT_NAMES,
   LOG_EVENT_SCHEMAS,
-  maskFreeText,
-  sensitive,
+  LogFieldMarks,
 } from "./log-event";
 
 // ログの種類（event.name）ごとのスキーマと、マスクの印（sensitive / freeText）の仕様（Issue #216）。
@@ -39,27 +38,29 @@ describe("LOG_EVENT_NAMES（event.name の一覧）", () => {
   });
 });
 
-describe("sensitive（値を *** にする印）", () => {
+describe("LogFieldMarks.sensitive（値を *** にする印）", () => {
   test("どんな文字列も *** にする", () => {
-    const schema = sensitive(z.string());
+    const schema = LogFieldMarks.sensitive(z.string());
     expect(schema.parse("alice@example.com")).toBe("***");
     expect(schema.parse("")).toBe("***");
   });
 
   // WHY null はそのまま: 値が無いことは個人情報ではない（Issue #216 の既定の判断）。nullable を外側に付けて書く。
   test("nullable を外側に付けると null は null のまま出し、文字列だけを *** にする", () => {
-    const schema = sensitive(z.string()).nullable();
+    const schema = LogFieldMarks.sensitive(z.string()).nullable();
     expect(schema.parse(null)).toBeNull();
     expect(schema.parse("http://localhost/?q=1")).toBe("***");
   });
 
   // WHY 包んだスキーマの検査は残す: 印を付けても、形の違う値（数値など）は通さない（allowlist の型の検査を緩めない）。
   test("包んだスキーマに合わない値は parse に失敗する", () => {
-    expect(sensitive(z.string()).safeParse(1).success).toBe(false);
+    expect(LogFieldMarks.sensitive(z.string()).safeParse(1).success).toBe(
+      false,
+    );
   });
 });
 
-describe("maskFreeText / freeText（自由文の最後の網）", () => {
+describe("FreeTextMask.mask / LogFieldMarks.freeText（自由文の最後の網）", () => {
   test.each([
     [
       "メールアドレス",
@@ -94,7 +95,7 @@ describe("maskFreeText / freeText（自由文の最後の網）", () => {
       "*** and *** paid with ***",
     ],
   ])("%s を *** にする", (_kind, input, expected) => {
-    expect(maskFreeText(input)).toBe(expected);
+    expect(FreeTextMask.mask(input)).toBe(expected);
   });
 
   // WHY 残すものを固定する: 誤検知でログの手がかり（件数・id・時刻）が消えないようにする。
@@ -113,7 +114,7 @@ describe("maskFreeText / freeText（自由文の最後の網）", () => {
     ],
     ["日本語の文", "環境変数 DATABASE_URL がありません"],
   ])("%s は残す", (_kind, input) => {
-    expect(maskFreeText(input)).toBe(input);
+    expect(FreeTextMask.mask(input)).toBe(input);
   });
 
   // WHY 長さの上限: 正規表現は入れ子の量指定子を使わない線形のパターンにしているが、1 行が長すぎるとログの費用と読みにくさが
@@ -123,16 +124,16 @@ describe("maskFreeText / freeText（自由文の最後の網）", () => {
     const head = `${"word ".repeat(399)}`; // 1995 文字
     const input = `${head}alice@example.com tail`;
 
-    expect(maskFreeText(input)).toBe(`${head.trimEnd()}...[truncated]`);
+    expect(FreeTextMask.mask(input)).toBe(`${head.trimEnd()}...[truncated]`);
   });
 
   test("空白の無い 2000 文字を超える入力は、本文を出さず [truncated] だけにする", () => {
-    expect(maskFreeText("a".repeat(2001))).toBe("...[truncated]");
+    expect(FreeTextMask.mask("a".repeat(2001))).toBe("...[truncated]");
   });
 
   test("ちょうど 2000 文字は切らない", () => {
     const input = "a".repeat(2000);
-    expect(maskFreeText(input)).toBe(input);
+    expect(FreeTextMask.mask(input)).toBe(input);
   });
 
   // WHY 時間の上限を測る: 正規表現の置換はログを出す処理の中で同期に動くので、入力（利用者が決められる例外の message など）で
@@ -148,13 +149,13 @@ describe("maskFreeText / freeText（自由文の最後の網）", () => {
     ["4 桁と区切りの繰り返し", "1234 ".repeat(20_000)],
   ])("%s（10 万文字）でも 50ms 以内に返る", (_kind, input) => {
     const startedAt = performance.now();
-    maskFreeText(input);
+    FreeTextMask.mask(input);
     expect(performance.now() - startedAt).toBeLessThan(50);
   });
 
-  test("freeText() は文字列のスキーマで、maskFreeText を通した値を出す", () => {
-    expect(freeText().parse("mail a@b.io")).toBe("mail ***");
-    expect(freeText().safeParse(1).success).toBe(false);
+  test("LogFieldMarks.freeText() は文字列のスキーマで、FreeTextMask.mask を通した値を出す", () => {
+    expect(LogFieldMarks.freeText().parse("mail a@b.io")).toBe("mail ***");
+    expect(LogFieldMarks.freeText().safeParse(1).success).toBe(false);
   });
 });
 

@@ -11,15 +11,7 @@ import {
   test,
   vi,
 } from "vitest";
-import {
-  env,
-  findRepoRoot,
-  loadDotEnvFile,
-  loadRepoDotEnv,
-  readEnv,
-  readToolEnv,
-  toolEnv,
-} from "./env";
+import { DotEnvFile, EnvReader, env, toolEnv } from "./env";
 
 // 必須の変数がすべて正しい値で揃った source。各テストはここから 1 つずつ崩して使う。
 const VALID = {
@@ -35,19 +27,19 @@ const VALID = {
 
 const REQUIRED_NAMES = Object.keys(VALID);
 
-// readEnv が投げたエラーのメッセージを取り出す（投げなければテストを失敗させる）。
+// EnvReader.read が投げたエラーのメッセージを取り出す（投げなければテストを失敗させる）。
 function errorMessageOf(source: Record<string, string | undefined>): string {
   try {
-    readEnv(source);
+    EnvReader.read(source);
   } catch (error) {
     return (error as Error).message;
   }
-  throw new Error("readEnv がエラーを投げなかった");
+  throw new Error("EnvReader.read がエラーを投げなかった");
 }
 
-describe("readEnv", () => {
+describe("EnvReader.read", () => {
   test("必須の変数がすべて正しければ、数は number にして返す", () => {
-    expect(readEnv(VALID)).toEqual({
+    expect(EnvReader.read(VALID)).toEqual({
       DATABASE_URL: "postgresql://u:p@db.example:5432/x",
       DATABASE_POOL_MAX: 10,
       DATABASE_POOL_IDLE_TIMEOUT_MS: 10_000,
@@ -62,14 +54,14 @@ describe("readEnv", () => {
   test("必須の変数以外は返さない（関係のない環境変数を env に混ぜない）", () => {
     expect(
       Object.keys(
-        readEnv({ ...VALID, PATH: "/usr/bin", E2E_PORT: "3100" }),
+        EnvReader.read({ ...VALID, PATH: "/usr/bin", E2E_PORT: "3100" }),
       ).sort(),
     ).toEqual([...REQUIRED_NAMES].sort());
   });
 
   test("アイドル・接続待ちの 0 は受け付ける（0 以上の整数）", () => {
     expect(
-      readEnv({
+      EnvReader.read({
         ...VALID,
         DATABASE_POOL_IDLE_TIMEOUT_MS: "0",
         DATABASE_CONNECTION_TIMEOUT_MS: "0",
@@ -82,7 +74,7 @@ describe("readEnv", () => {
 
   test("DB 側のタイムアウト（文・ロック待ち・トランザクション中のアイドル）の 0（無効）は受け付ける", () => {
     expect(
-      readEnv({
+      EnvReader.read({
         ...VALID,
         DATABASE_STATEMENT_TIMEOUT_MS: "0",
         DATABASE_LOCK_TIMEOUT_MS: "0",
@@ -178,9 +170,9 @@ describe("readEnv", () => {
   });
 });
 
-describe("readToolEnv", () => {
+describe("EnvReader.readTool", () => {
   test("何も無ければ、どのフラグも無効（ツールのフラグは無いのが正常で、エラーにしない）", () => {
-    expect(readToolEnv({})).toEqual({
+    expect(EnvReader.readTool({})).toEqual({
       CI: false,
       PLAYWRIGHT_CHROMIUM_EXECUTABLE: undefined,
       STRYKER_MUTATOR_WORKER: false,
@@ -193,11 +185,11 @@ describe("readToolEnv", () => {
     ["3616", 3616],
     ["65535", 65_535],
   ])("E2E_PORT=%s は %s（ポートの範囲 1〜65535 の中の整数）", (value, port) => {
-    expect(readToolEnv({ E2E_PORT: value }).E2E_PORT).toBe(port);
+    expect(EnvReader.readTool({ E2E_PORT: value }).E2E_PORT).toBe(port);
   });
 
   test("E2E_PORT が空文字なら未設定と同じ undefined（apps/e2e/playwright.config.ts が既定の 3100 を使う）", () => {
-    expect(readToolEnv({ E2E_PORT: "" }).E2E_PORT).toBeUndefined();
+    expect(EnvReader.readTool({ E2E_PORT: "" }).E2E_PORT).toBeUndefined();
   });
 
   test.each([
@@ -217,7 +209,7 @@ describe("readToolEnv", () => {
       // toThrow ではなく投げた値そのものを比べる（toThrow は投げた値が undefined でも通りうる。.claude/rules/testing.md）。
       let thrown: unknown;
       try {
-        readToolEnv({ E2E_PORT: value });
+        EnvReader.readTool({ E2E_PORT: value });
       } catch (error) {
         thrown = error;
       }
@@ -241,7 +233,7 @@ describe("readToolEnv", () => {
   ])(
     "CI=%s なら CI は %s（空でなければ有効。Playwright の !process.env.CI と同じ）",
     (value, expected) => {
-      expect(readToolEnv({ CI: value }).CI).toBe(expected);
+      expect(EnvReader.readTool({ CI: value }).CI).toBe(expected);
     },
   );
 
@@ -250,7 +242,7 @@ describe("readToolEnv", () => {
     ["", undefined],
   ])("PLAYWRIGHT_CHROMIUM_EXECUTABLE=%s なら %s", (value, expected) => {
     expect(
-      readToolEnv({ PLAYWRIGHT_CHROMIUM_EXECUTABLE: value })
+      EnvReader.readTool({ PLAYWRIGHT_CHROMIUM_EXECUTABLE: value })
         .PLAYWRIGHT_CHROMIUM_EXECUTABLE,
     ).toBe(expected);
   });
@@ -260,12 +252,13 @@ describe("readToolEnv", () => {
     ["", false],
   ])("STRYKER_MUTATOR_WORKER=%s なら %s", (value, expected) => {
     expect(
-      readToolEnv({ STRYKER_MUTATOR_WORKER: value }).STRYKER_MUTATOR_WORKER,
+      EnvReader.readTool({ STRYKER_MUTATOR_WORKER: value })
+        .STRYKER_MUTATOR_WORKER,
     ).toBe(expected);
   });
 });
 
-describe("loadDotEnvFile", () => {
+describe("DotEnvFile.load", () => {
   // WHY beforeAll で作る（describe の本体で作らない）: describe の本体はテストを絞り込んだ実行（Stryker など）でも必ず
   //   実行されるが、その describe のテストが 1 つも動かないと afterAll も動かず、一時ディレクトリが残るため。
   let dir: string;
@@ -287,7 +280,7 @@ describe("loadDotEnvFile", () => {
   });
 
   test("ファイルが無ければ何もせず false を返す（.env を置かずに環境変数だけで動かせる）", () => {
-    expect(loadDotEnvFile(join(dir, "missing.env"))).toBe(false);
+    expect(DotEnvFile.load(join(dir, "missing.env"))).toBe(false);
   });
 
   test("ファイルがあれば読み込んで true を返し、環境に既にある変数はファイルの値で上書きしない", () => {
@@ -295,7 +288,7 @@ describe("loadDotEnvFile", () => {
     writeFileSync(file, `${name}_A=from-file\n${name}_B=from-file\n`);
     vi.stubEnv(`${name}_A`, "from-environment");
 
-    expect(loadDotEnvFile(file)).toBe(true);
+    expect(DotEnvFile.load(file)).toBe(true);
 
     expect(process.env[`${name}_A`]).toBe("from-environment");
     expect(process.env[`${name}_B`]).toBe("from-file");
@@ -305,13 +298,13 @@ describe("loadDotEnvFile", () => {
     const directory = join(dir, "directory.env");
     mkdirSync(directory);
 
-    expect(() => loadDotEnvFile(directory)).toThrow();
+    expect(() => DotEnvFile.load(directory)).toThrow();
   });
 });
 
-describe("findRepoRoot / loadRepoDotEnv（リポジトリ直下の .env の探し方）", () => {
+describe("DotEnvFile.findRepoRoot / DotEnvFile.loadFromRepoRoot（リポジトリ直下の .env の探し方）", () => {
   // 一時ディレクトリに「pnpm-workspace.yaml のあるリポジトリ直下」と、その下の apps/backend を作って確かめる。
-  // WHY beforeAll で作る: loadDotEnvFile の describe と同じ（describe の本体で作ると、テストが動かないときに残る）。
+  // WHY beforeAll で作る: DotEnvFile.load の describe と同じ（describe の本体で作ると、テストが動かないときに残る）。
   let repo: string;
   let nested: string;
   let outside: string;
@@ -338,25 +331,25 @@ describe("findRepoRoot / loadRepoDotEnv（リポジトリ直下の .env の探�
   });
 
   test("サブディレクトリから探すと、上にある pnpm-workspace.yaml のディレクトリ（リポジトリ直下）を返す", () => {
-    expect(findRepoRoot(nested)).toBe(repo);
+    expect(DotEnvFile.findRepoRoot(nested)).toBe(repo);
   });
 
   test("リポジトリ直下から探すと、そのディレクトリを返す", () => {
-    expect(findRepoRoot(repo)).toBe(repo);
+    expect(DotEnvFile.findRepoRoot(repo)).toBe(repo);
   });
 
   test("上のどこにも pnpm-workspace.yaml が無ければ、探し始めたディレクトリを返す", () => {
-    expect(findRepoRoot(outside)).toBe(outside);
+    expect(DotEnvFile.findRepoRoot(outside)).toBe(outside);
   });
 
   test("サブディレクトリ（apps/backend）から呼んでも、リポジトリ直下の .env を読む", () => {
-    expect(loadRepoDotEnv(nested)).toBe(true);
+    expect(DotEnvFile.loadFromRepoRoot(nested)).toBe(true);
 
     expect(process.env[`${name}_ROOT`]).toBe("from-repo-root");
   });
 
   test("リポジトリ直下が見つからなければ、カレントディレクトリの .env を読む", () => {
-    expect(loadRepoDotEnv(outside)).toBe(true);
+    expect(DotEnvFile.loadFromRepoRoot(outside)).toBe(true);
 
     expect(process.env[`${name}_CWD`]).toBe("from-cwd");
   });
@@ -369,7 +362,7 @@ describe("findRepoRoot / loadRepoDotEnv（リポジトリ直下の .env の探�
       mkdirSync(sub, { recursive: true });
       writeFileSync(join(sub, ".env"), `${name}_CWD=from-sub\n`);
 
-      expect(loadRepoDotEnv(sub)).toBe(false);
+      expect(DotEnvFile.loadFromRepoRoot(sub)).toBe(false);
       expect(process.env[`${name}_CWD`]).toBeUndefined();
     } finally {
       rmSync(bare, { recursive: true, force: true });
@@ -383,9 +376,9 @@ describe("env / toolEnv（モジュールを読み込んだ時点の値）", () 
     vi.resetModules();
   });
 
-  test("env は process.env を readEnv で検証した値、toolEnv は readToolEnv で読んだ値", () => {
-    expect(env).toEqual(readEnv(process.env));
-    expect(toolEnv).toEqual(readToolEnv(process.env));
+  test("env は process.env を EnvReader.read で検証した値、toolEnv は EnvReader.readTool で読んだ値", () => {
+    expect(env).toEqual(EnvReader.read(process.env));
+    expect(toolEnv).toEqual(EnvReader.readTool(process.env));
   });
 
   test("読み込み時にリポジトリ直下の .env を読み、環境に無い必須の変数を補う", async () => {

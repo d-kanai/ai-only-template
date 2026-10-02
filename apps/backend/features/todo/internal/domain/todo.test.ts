@@ -1,24 +1,24 @@
 // @vitest-environment node
-import { now } from "@repo/shared/now";
+import { Clock } from "@repo/shared/now";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { DomainError } from "../../../../shared/domain/domain-error";
 import type { ErrorKey } from "../../../../shared/domain/error-key";
 import { TODO_TITLE_MAX_LENGTH, Todo } from "./todo";
 
-// WHY 時計（now）を差し替える: Todo.create は作成日時を now() から自動で入れる（引数では受け取らない）。
+// WHY 時計（Clock.now）を差し替える: Todo.create は作成日時を Clock.now() から自動で入れる（引数では受け取らない）。
 //   テストで決まった時刻にするには、現在時刻の唯一の出口（apps/shared/now.ts）を差し替えるしかない。
-//   自動モックの now は既定で undefined を返すので、beforeEach で決まった時刻を返させる（返させ忘れた Todo.create は
+//   自動モックの Clock.now は既定で undefined を返すので、beforeEach で決まった時刻を返させる（返させ忘れた Todo.create は
 //   作成日時の不変条件で validation_error になり、気づける）。
 vi.mock("@repo/shared/now");
 
 const NOW = new Date("2026-09-28T00:00:00.000Z");
 
 beforeEach(() => {
-  vi.mocked(now).mockReturnValue(NOW);
+  vi.mocked(Clock.now).mockReturnValue(NOW);
 });
 
 afterEach(() => {
-  vi.mocked(now).mockReset();
+  vi.mocked(Clock.now).mockReset();
 });
 
 // key と params は API の Problem Details（problem.ts）の拡張メンバーとして画面に渡る（画面が翻訳するクライアントとの契約。Issue #116）ので、両方を検証する。
@@ -53,9 +53,9 @@ const INVALID_CREATED_AT = { key: "todo.createdAt.invalid" } as const;
 const INVALID_STATUS_CHANGES = { key: "todo.statusChanges.invalid" } as const;
 
 describe("Todo.create", () => {
-  test("未完了で作られ、id と、作成日時として現在時刻（now()）が付く", () => {
+  test("未完了で作られ、id と、作成日時として現在時刻（Clock.now()）が付く", () => {
     const createdAt = new Date("2026-09-28T12:34:56.789Z");
-    vi.mocked(now).mockReturnValueOnce(createdAt);
+    vi.mocked(Clock.now).mockReturnValueOnce(createdAt);
 
     const todo = Todo.create("牛乳を買う");
 
@@ -66,15 +66,15 @@ describe("Todo.create", () => {
     expect(todo.statusChanges).toStrictEqual([
       { completed: false, changedAt: createdAt },
     ]);
-    expect(now).toHaveBeenCalledTimes(1);
+    expect(Clock.now).toHaveBeenCalledTimes(1);
     // randomUUID の形式（8-4-4-4-12 の 16 進）。
     expect(todo.id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
     );
   });
 
-  // WHY 型で止める: 作成日時は Entity の生成ルールとして now() から入れる。呼び出し側が渡せると、ルールが呼び出し側に漏れる。
-  test("作成日時は引数で受け取らない（型エラーで、渡しても now() の値が入る）", () => {
+  // WHY 型で止める: 作成日時は Entity の生成ルールとして Clock.now() から入れる。呼び出し側が渡せると、ルールが呼び出し側に漏れる。
+  test("作成日時は引数で受け取らない（型エラーで、渡しても Clock.now() の値が入る）", () => {
     const createdAt = new Date("2000-01-01T00:00:00.000Z");
     // @ts-expect-error Todo.create はタイトルだけを受け取る。
     const todo = Todo.create("牛乳を買う", createdAt);
@@ -130,7 +130,7 @@ describe("Todo.create", () => {
 
   // 完全コンストラクタ: create はタイトルだけでなく Todo のすべての値（TodoProps）を検証してから作る。
   test("作成日時が日付として不正（Invalid Date）なら validation_error を投げる", () => {
-    vi.mocked(now).mockReturnValueOnce(new Date("not a date"));
+    vi.mocked(Clock.now).mockReturnValueOnce(new Date("not a date"));
 
     expectValidationError(() => Todo.create("牛乳を買う"), INVALID_CREATED_AT);
   });
@@ -138,9 +138,9 @@ describe("Todo.create", () => {
 
 describe("Todo#rename", () => {
   test("新しいタイトルの Todo を返し、元の Todo は変えない（作成日時は作ったときのまま）", () => {
-    // WHY 作成時だけ別の時刻にする: rename が now() を読み直す書き換えでは、作成日時が既定の NOW に変わって落ちる。
+    // WHY 作成時だけ別の時刻にする: rename が Clock.now() を読み直す書き換えでは、作成日時が既定の NOW に変わって落ちる。
     const createdAt = new Date("2026-09-27T00:00:00.000Z");
-    vi.mocked(now).mockReturnValueOnce(createdAt);
+    vi.mocked(Clock.now).mockReturnValueOnce(createdAt);
     const original = Todo.create("牛乳を買う");
 
     const renamed = original.rename(" 卵を買う ");
@@ -180,9 +180,9 @@ describe("Todo#rename", () => {
 
 describe("Todo#changeCompletion", () => {
   test("完了 / 未完了を切り替えた Todo を返し、元の Todo は変えない（作成日時は変わらない）", () => {
-    // WHY 作成時だけ別の時刻にする: changeCompletion が now() を読み直す書き換えでは、作成日時が既定の NOW に変わって落ちる。
+    // WHY 作成時だけ別の時刻にする: changeCompletion が Clock.now() を読み直す書き換えでは、作成日時が既定の NOW に変わって落ちる。
     const createdAt = new Date("2026-09-27T00:00:00.000Z");
-    vi.mocked(now).mockReturnValueOnce(createdAt);
+    vi.mocked(Clock.now).mockReturnValueOnce(createdAt);
     const original = Todo.create("牛乳を買う");
 
     const completed = original.changeCompletion(true);
@@ -197,12 +197,12 @@ describe("Todo#changeCompletion", () => {
     expect(original.completed).toBe(false);
   });
 
-  // 完了の履歴（Issue #188）: 完了状態が変わるたびに、変わった後の値と日時（now()）を末尾に 1 件足す。
-  test("完了状態を変えると、変えた後の値と現在時刻（now()）の履歴を末尾に 1 件足す（元の Todo の履歴は変えない）", () => {
+  // 完了の履歴（Issue #188）: 完了状態が変わるたびに、変わった後の値と日時（Clock.now()）を末尾に 1 件足す。
+  test("完了状態を変えると、変えた後の値と現在時刻（Clock.now()）の履歴を末尾に 1 件足す（元の Todo の履歴は変えない）", () => {
     const createdAt = new Date("2026-09-27T00:00:00.000Z");
     const completedAt = new Date("2026-09-27T01:00:00.000Z");
     const reopenedAt = new Date("2026-09-27T02:00:00.000Z");
-    vi.mocked(now)
+    vi.mocked(Clock.now)
       .mockReturnValueOnce(createdAt)
       .mockReturnValueOnce(completedAt)
       .mockReturnValueOnce(reopenedAt);
@@ -228,16 +228,16 @@ describe("Todo#changeCompletion", () => {
   // WHY 同じ値なら遷移しない: 同じ状態への遷移を積むと履歴にノイズが入る。Todo が同じなら Repository の update も差分が無く
   //   SQL を発行しない。
   test.each([false, true])(
-    "今と同じ値（%s）を渡すと、履歴を足さず同じ Todo を返す（now() も読まない）",
+    "今と同じ値（%s）を渡すと、履歴を足さず同じ Todo を返す（Clock.now() も読まない）",
     (value) => {
       const todo =
         value === false
           ? Todo.create("牛乳を買う")
           : Todo.create("牛乳を買う").changeCompletion(true);
-      vi.mocked(now).mockClear();
+      vi.mocked(Clock.now).mockClear();
 
       expect(todo.changeCompletion(value)).toBe(todo);
-      expect(now).not.toHaveBeenCalled();
+      expect(Clock.now).not.toHaveBeenCalled();
     },
   );
 

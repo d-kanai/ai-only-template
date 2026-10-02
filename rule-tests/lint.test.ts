@@ -308,9 +308,10 @@ describe("biome check（pnpm lint と同じ引数）", () => {
   });
 });
 
-// complexity/noStaticOnlyClass の override（Issue #262）: apps/backend/** だけ off にする。backend は最上位に関数を置かず、状態の無い
-//   補助を static だけのクラスにする（ADR docs/adr/architecture/20261002-class-based-backend.md）。apps/shared・apps/frontend_customer は
-//   関数のままなので、static だけのクラスは recommended どおり警告（--error-on-warnings で失敗）のままにする。
+// complexity/noStaticOnlyClass の override（Issue #262）: apps/backend/**・apps/shared/** だけ off にする。どちらも最上位に関数を置かず、
+//   状態の無い補助を static だけのクラスにする（ADR docs/adr/architecture/20261002-class-based-backend.md・
+//   20261002-class-based-shared-and-test-support.md）。apps/frontend_customer は関数のまま（React component / hook と Next の規約の
+//   関数）なので、static だけのクラスは recommended どおり警告（--error-on-warnings で失敗）のままにする。
 // WHY 一時ディレクトリにリポジトリの biome.json を写して、その下の apps/... に置いたファイルを検査する: overrides の includes は
 //   設定ファイルのディレクトリからの相対パスで照合され、リポジトリの外のファイル（noProcessEnv の検査の一時ファイル）には
 //   apps/backend/** が一致しない。リポジトリの中の apps/backend に一時ファイルを置くと、並行して走る architecture.test.ts の
@@ -319,7 +320,7 @@ describe("biome check（pnpm lint と同じ引数）", () => {
 //   「couldn't find an ignore file」で設定エラーになり、違反の有無と関係なく非 0 で終わる。空の .gitignore も無いものとして
 //   同じエラーになった（Biome 2.5.13、2026-10-02 実測）。
 // WHY node_modules/.bin/biome を直接起動する: cwd を一時ディレクトリにするため、pnpm exec はリポジトリの workspace を見つけられない。
-describe("biome check の noStaticOnlyClass は apps/backend だけで off（Issue #262）", () => {
+describe("biome check の noStaticOnlyClass は apps/backend と apps/shared だけで off（Issue #262）", () => {
   let dir: string;
 
   beforeAll(() => {
@@ -358,14 +359,18 @@ describe("biome check の noStaticOnlyClass は apps/backend だけで off（Iss
   it.each([
     ["apps/backend/shared/domain/static-only.ts"],
     ["apps/backend/features/todo/internal/infra/static-only.ts"],
-  ])("%s（apps/backend）では static だけのクラスが 0 で終わる", (path) => {
-    const { status, output } = checkAt(path, STATIC_ONLY_CLASS);
+    ["apps/shared/static-only.ts"],
+  ])(
+    "%s（apps/backend・apps/shared）では static だけのクラスが 0 で終わる",
+    (path) => {
+      const { status, output } = checkAt(path, STATIC_ONLY_CLASS);
 
-    expect(status, output).toBe(0);
-  });
+      expect(status, output).toBe(0);
+    },
+  );
 
   it.each([
-    ["apps/shared/static-only.ts", "apps/shared"],
+    ["apps/shared-x/static-only.ts", "名前の前方一致だけが同じ別ディレクトリ"],
     ["apps/frontend_customer/shared/static-only.ts", "apps/frontend_customer"],
     ["apps/backend-x/static-only.ts", "名前の前方一致だけが同じ別ディレクトリ"],
     ["static-only.ts", "リポジトリ直下"],
@@ -381,14 +386,17 @@ describe("biome check の noStaticOnlyClass は apps/backend だけで off（Iss
 
   // WHY: 上の非 0 が、設定の読み込みの失敗など noStaticOnlyClass 以外の理由ではないことを示す（同じ場所でインスタンスのメンバーを
   //   持つクラスは通る）。
-  it("apps/shared でもインスタンスのメンバーを持つクラスは 0 で終わる", () => {
-    const { status, output } = checkAt("apps/shared/instance-class.ts", [
-      "export class Paths {",
-      "  of(name: string): string {",
-      "    return name;",
-      "  }",
-      "}",
-    ]);
+  it("apps/frontend_customer でもインスタンスのメンバーを持つクラスは 0 で終わる", () => {
+    const { status, output } = checkAt(
+      "apps/frontend_customer/shared/instance-class.ts",
+      [
+        "export class Paths {",
+        "  of(name: string): string {",
+        "    return name;",
+        "  }",
+        "}",
+      ],
+    );
 
     expect(status, output).toBe(0);
   });
