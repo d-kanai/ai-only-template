@@ -110,7 +110,8 @@ paths:
 | handler | handler は `(request: Request) => Promise<Response>`。動的セグメントがあれば `(request, ctx: { params: Promise<{ id: string }> })` で、`await ctx.params` は api ファイル側で行う | - | レビュー |
 | クラス | 各 api ファイルはクラス `<Verb><Noun>Api`（`ListTodosApi`・`GetTodoApi`・`CreateTodoApi`・`RenameTodoApi`・`ChangeTodoCompletionApi`・`DeleteTodoApi`）を export する。コンストラクタで query / command を受け取り（型は `Pick<CreateTodoCommand, "execute">` のように execute だけ）、`handle` を Route Handler にする（Issue #123。ユーザー判断） | クラス + コンストラクタ injection: application の query / command と同じ形にそろえる | レビュー |
 | handle | `handle` は `ProblemResponse.wrap`（`problem.ts`）で包んだアロー関数のプロパティ（`readonly handle = ProblemResponse.wrap(async (request[, ctx]) => { ... })`）にする | WHY アロー関数: `export const POST = new CreateTodoApi(...).handle` のようにインスタンスから取り出して渡すと、メソッドでは `this` が外れる。WHY `ProblemResponse.wrap`（Issue #141）: handler が投げた例外を `ProblemResponse.from` で Problem Details にする。Next の Route Handler には共通の catch が無く（Proxy は handler の例外を捕まえず、`onRequestError` は記録だけ）、包み忘れると Next の素の 500 が漏れる。以前は 5 本の api が同じ try / catch を手書きしていた。包み忘れは規則 `presentation-with-problem-response`（`rule-tests/architecture.test.ts`）が止める | `rule-tests/architecture.test.ts` の `presentation-with-problem-response` |
-| handle | handle の中に try / catch は書かない | - | レビュー |
+| handle | handle の中に try / catch は書かない（try / finally は可。Issue #332） | 例外を Problem Details に変えるのは `ProblemResponse.wrap` の 1 か所で、中で catch すると wrap の変換を通らない応答になるか、例外を握りつぶす | `rule-tests/architecture.test.ts` の `handle-without-try-catch` |
+| handle | 限界: handle から呼ぶ private メソッド・クラスの外の try / catch、Promise の `.catch()`・`.then(_, onRejected)` は見ない | 限界（見逃す方向） | レビュー |
 | handle | `RequestBody.parse` と `await ctx.params` + `ResourceId.parseUuid` は handler の中に書く（共通化しない。ユーザー判断） | 本文・動的セグメントの有無と確かめる順番（rename / change-todo-completion は id を先に見て 404 を優先）が api ごとに違い、handler の中にあればその api の処理を 1 か所で読める | レビュー |
 | 組み立て | 組み立てはファイルの最下部: `export const POST = new CreateTodoApi(new CreateTodoCommand(new PostgresTodoRepository(AppDatabase.get().db), new PostgresTransactionRunner(AppDatabase.get().db))).handle;`（書き込みの command は Repository の次にトランザクションの runner を受け取る。Issue #215。下の「永続化」の「トランザクション」）。本番は常に Postgres（下の「永続化」） | api ファイルで組み立てる（DI コンテナを置かない）: コンテナ（以前の `infra/container.ts`）は分かりにくい（ユーザー判断）。その API が何で動くかを、api ファイル 1 つで読める | レビュー |
 | 組み立て | api ファイルごとに `new PostgresTodoRepository(AppDatabase.get().db)` してよい | プールは `AppDatabase.get` が `globalThis` に 1 つだけ持つので、Repository を api ファイルの数だけ作ってもプールは 1 つ。テストは全 feature の `features/*/internal/presentation/*.api.ts` を読み込み、`features/*/internal/infra/*-repository.postgres.ts` のクラスを受け取った db を記録するサブクラスに差し替えて、渡る db が api ファイルの数だけあり、すべて `AppDatabase.get().db` の 1 つであることを確かめる。feature をまたぐ検査なので shared に置く（Issue #180） | `apps/backend/shared/http/route-handlers-share-database.test.ts` |
@@ -128,7 +129,8 @@ paths:
 | エラーのキー | `new DomainError(code, key, params)` / `new InvalidRequestError(key, params, errors)` / `ResourceId.parseUuid(id, key, params)` は、キーごとに params を型で縛る（params の要るキーに渡し忘れる・形を間違える・要らないキーに渡すとコンパイルエラー。`error-key.ts` の `ErrorParamsArgs`）。検査は `domain-error.test.ts` などの `@ts-expect-error` | - | `pnpm typecheck` |
 | エラーのキー | Error の `message` は開発者向けの `<key> <params の JSON>`（`ErrorKeys.describe`。例 `todo.notFound {"id":"..."}`）。ログから画面の辞書を引ける | - | 説明 |
 | Problem Details | エラー応答は RFC 9457（Problem Details for HTTP APIs。https://www.rfc-editor.org/rfc/rfc9457.html ）の形で、`Content-Type: application/problem+json`（Issue #126。ユーザー判断） | WHY RFC 9457: HTTP API のエラー本文の標準で、Spring の `ProblemDetail`・ASP.NET Core の `ProblemDetails` が実装し、Zalando の API ガイドラインが MUST にしている。汎用のクライアント・ツールが形を個別に知らずに読める。WHY key を残す: `type` は大分類で、画面の文言は細かいキー（`todo.title.tooLong`）で決まる。決定と採用しなかった案は ADR `docs/adr/architecture/20260929-error-response-rfc9457.md` | 説明 |
-| Problem Details | 作るのは `problem.ts` の `ProblemResponse.from(error, request)` だけ（各 api の `handle` を包む `ProblemResponse.wrap` から呼ぶ。api から直接は呼ばない） | - | レビュー |
+| Problem Details | 作るのは `problem.ts` の `ProblemResponse.from(error, request)` だけ（各 api の `handle` を包む `ProblemResponse.wrap` から呼ぶ。api から直接は呼ばない。検査は backend のテスト以外のソースで `problem.ts` の外の `ProblemResponse.from`。Issue #332） | - | `rule-tests/architecture.test.ts` の `problem-response-from-only-in-problem` |
+| Problem Details | 限界: 別名の import（`P.from`）・分割代入・変数に入れ直したクラスは見ない | 限界（見逃す方向） | レビュー |
 | Problem Details | 標準のメンバー: `type`（`/problems/validation-error` / `not-found` / `internal-error`。相対参照。`about:blank` は使わない）、`title`（種類ごとに固定の英語）、`status`（HTTP のステータスと同じ 400 / 404 / 500）、`detail`（この発生に固有の英語）、`instance`（リクエストの URL のパス。クエリは含めない） | - | 説明 |
 | Problem Details | 拡張メンバー: `key`（辞書のキー。画面の翻訳と分岐に使う）、`params`（無ければ省略）、`errors`（presentation のスキーマの誤り（形と、重ねた必須・長さ）のときだけ。各要素は `{ pointer, key, params?, detail }`、`pointer` は JSON Pointer（RFC 6901）の fragment の形 `#/title`、本文全体の誤りは `#`） | - | 説明 |
 | Problem Details | `DomainErrorCode`（と想定外の例外）→ `{ type, title, status }` の対応は `problem.ts` の `problemKindOf`（`Record` で網羅。種類を足して書き忘れると型エラー） | - | `pnpm typecheck` |
@@ -147,9 +149,12 @@ paths:
 | presentation の検証 | 未知のキーは拒否する（`z.strictObject`） | 項目名を打ち間違えた本文や別の API の項目（`/title` に `completed`）を黙って捨てると、送った変更が反映されないまま成功する。画面と API は同時に変えるので互換性の心配は無い | レビュー |
 | presentation の検証 | 動的セグメントの `id` は `z.uuid()` で確かめ、形が違えば 404（`not_found`。無い Todo と同じ契約）。本文より先に確かめる | - | レビュー |
 | domain の検証 | 値の中身の規則（例: `title` は前後の空白を除いて 1〜`TODO_TITLE_MAX_LENGTH`（100）文字。文字数はコードポイント数で、zod の `.min` / `.max`（`String#length`）は使わない）の正は domain の zod スキーマ（`todo.ts` の `todoPropsSchema` の `title`）。`Todo` のコンストラクタがそれで検証し、違反は `DomainError("validation_error", key, params)` → 400（`errors` は付かない。presentation で重ねた規則は先に presentation の `errors` 付きの 400 になる） | zod 4.6.5 の実測（2026-09-29）: `.min` / `.max` は `String#length` なのでコードポイント数は `refine` と `Array.from` で数える（`"🍎".repeat(100)` は length 200） | レビュー |
+| domain の検証 | features の domain で zod の `.min(` / `.max(` を使わない（`Math.min` / `Math.max` は可。Issue #332） | 文字数はコードポイント数で数えるため（上の行） | `rule-tests/domain-validation.test.ts` の `no-zod-length-in-domain` |
 | domain の検証 | domain で zod の `parse` / `safeParse` を直接呼ばず `DomainValidation.validated`（`validate.ts`）を通す | - | `rule-tests/domain-validation.test.ts` の `no-direct-zod-parse-in-domain` |
 | domain の検証 | `validation_error` の DomainError を作るのは backend 全体で `validate.ts` だけ | - | `rule-tests/domain-validation.test.ts` の `validation-error-only-in-validate` |
 | domain の検証 | domain の zod スキーマ・refine の `error` にはキーだけを書く（キー以外の文字列は書かない）。`KeyedIssue.of(key)` / `KeyedIssue.refine(key, params)`（`apps/backend/shared/error/keyed-issue.ts`）を通して `{ error: key }` / `{ error: key, params }` を作り、キーと params を型で縛る | WHY キーと params を JSON にして `error` の文字列に詰めない: 文字列の組み立て・解析の誤りが入る。WHY `{ error: "todo.title.empty" }` と直接書かない: zod の `error` は任意の文字列を受け付け、打ち間違い・params の渡し忘れを型で止められない | レビュー |
+| domain の検証 | features の domain で `error:` の値に文字列リテラルを書かない（Issue #332） | 上の行の WHY `{ error: "todo.title.empty" }` と直接書かない | `rule-tests/domain-validation.test.ts` の `no-literal-error-in-domain-schema` |
+| domain の検証 | 限界: `message:`・`z.string("...")`・`.refine(fn, "...")`・変数経由の文字列は見ない | 限界（見逃す方向） | レビュー |
 | domain の検証 | params は zod の refine の `params` で運ぶ。`DomainValidation.validated` が最初の issue の message（= キー）と params を DomainError に戻す | zod 4.6.5 は refine の `params` を失敗した custom の issue にそのまま載せる（実測 2026-09-29） | 説明 |
 | 生成 | Entity の生成（`Todo.create(title)`）は id・作成日時（`Clock.now()`）・初期状態を自分で決め、作成日時を引数で受け取らない。DB の行から戻す `reconstruct` は保存済みの作成日時を受け取る | 「作ったときの時刻が入る」は生成ルールで、呼び出し側が渡せるとルールが漏れる | レビュー |
 | 生成 | テストで時刻を決めるときは `now` を `vi.mock` で差し替える（`.claude/rules/quality/testing.md` の「テストダブル」） | - | `rule-tests/test-doubles.test.ts` の `vi-mock-only-now` |
@@ -164,9 +169,11 @@ paths:
 | カテゴリ | WHAT | WHY | 強制 |
 | --- | --- | --- | --- |
 | query / command | 読むだけ（副作用なし）は query、状態を変えるものは command に分ける | 副作用の有無をファイル名で見分ける | レビュー |
+| query / command | `*.query.ts` は `.run(` / `.insert(` / `.update(` / `.delete(` を呼ばない（Issue #332） | - | `rule-tests/use-case.test.ts` の `query-without-writes` |
+| query / command | 限界: 名前だけで見るので、別の名前の書き込み（`save` など）・分割代入・ブラケットの呼び出しは見ない | 限界（見逃す方向） | レビュー |
 | トランザクション | 状態を変える command はコンストラクタで `TransactionRunner`（`apps/backend/shared/transaction/transaction.ts`。Repository の次の引数）を受け取り、`execute` の本体を `this.transactions.run(async (tx) => …)` で包み、Repository の読み込み（`findByIdForUpdate`）と書き込み（`insert` / `update` / `delete`）に `tx` を渡す（Issue #215。下の「永続化」の「トランザクション」） | - | `rule-tests/use-case.test.ts` の `command-runs-in-transaction` |
 | トランザクション | 検査は `*.command.ts` の `execute` の本体に `this.<依存>.run(` が無いと違反。DB に触らない command は `execute` の直前の行の `// WHY トランザクション無し: <理由>` で通す | - | `rule-tests/use-case.test.ts` の `command-runs-in-transaction` |
-| トランザクション | query はトランザクションを張らない | - | レビュー |
+| トランザクション | query はトランザクションを張らない | - | `rule-tests/use-case.test.ts` の `query-without-writes` |
 
 ## 永続化（Drizzle + Postgres）
 
@@ -225,6 +232,7 @@ paths:
 | findById | Postgres の `findByIdForUpdate` は、根の行（`todos`）を `FOR UPDATE` でロックする文と、集約（LEFT JOIN）を読む文の 2 文にする | WHY 2 文: READ COMMITTED で 1 文の `SELECT … LEFT JOIN … FOR UPDATE` がロックを待つと、ロックした行だけを最新の版で読み直し、JOIN した履歴は文の始めのスナップショットのままになり（https://www.postgresql.org/docs/current/transaction-iso.html の Read Committed の節）、同時に完了にした Todo を不変条件の違反（500）として読んだ（Issue #215 の実測。`todo-repository.postgres.test.ts` の同時に動かすテスト） | `apps/backend/features/todo/internal/infra/todo-repository.postgres.test.ts` |
 | findById | 行ロック（`FOR UPDATE`）をするメソッドは名前を `ForUpdate` で終える（`findById` はロック無し、`findByIdForUpdate` はロックあり。Issue #221 で改名）。検査は `*.postgres.ts` のクラスのメソッドで、本体に `.for(` があるのに名前が `ForUpdate` で終わらない、または `ForUpdate` で終わるのに `.for(` が無いと違反 | ロックする読み込みとしない読み込みは、呼び出し側の前提（同じ行を変える command の直列化・tx が要ること・not_found のタイミング）が変わるので、名前で区別できなければ取り違える | `rule-tests/persistence.test.ts` の `lock-method-name-for-update` |
 | findById | 限界: 字句の推定で、`.for(` を別の関数に置いて呼ぶ書き方は見ない | 限界（見逃す方向） | レビュー |
+| reconstruct | `*.postgres.ts` で zod の `.parse(` / `.safeParse(`（async も）を呼ばない（`JSON.parse`・`Date.parse` は可。Issue #332） | 行の型は Drizzle のスキーマが保証する（下の行） | `rule-tests/persistence.test.ts` の `no-zod-parse-in-postgres` |
 | reconstruct | DB の行から Entity に戻すときは `Todo.reconstruct`（コンストラクタが不変条件で検証する。行の型は Drizzle のスキーマが保証するので Repository では zod で parse しない）、利用者の入力からは `Todo.create` / `rename` | - | レビュー |
 | 履歴の無い行 | 履歴の無い行・食い違う行: 完了の履歴が 1 件も無い Todo・最後の履歴の `completed` が `todos.completed` と食い違う Todo は、Repository が補わず、ほかの不変条件の違反と同じく 500 にする（Issue #260。#194・#237 では `repairHistory` が補って読み（repair on read）、`Todo.reconstruct(values, stored?)` で次の update に書かせていた（repair on write）） | WHY 補わない: 補いはデプロイの切替から backfill までの間に旧アプリが書いた行を読むための下位互換で、本番環境が無い今は要らない（ADR `docs/adr/workflow/20261002-drop-repair-on-read-without-production.md`。backfill も #247 で外した） | レビュー |
 | 履歴の無い行 | domain の不変条件（履歴は 1 件以上・最後の `completed` が今の値）は緩めない | - | レビュー |
