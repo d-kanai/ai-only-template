@@ -8,12 +8,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { TodoScreen } from "@/features/todo";
 import { ApiError } from "@/features/todo/api/api-error";
-import {
-  changeTodoCompletion,
-  createTodo,
-  deleteTodo,
-  listTodos,
-} from "@/features/todo/api/todo-api";
+import { TodoApi } from "@/features/todo/api/todo-api";
 import { todoItemMessages } from "@/features/todo/components/todo-item.messages";
 import { commonMessages } from "@/shared/i18n/common.messages";
 import { LocaleProvider } from "@/shared/i18n/i18n";
@@ -40,7 +35,7 @@ const milk = {
 
 test("level 1 の見出しに Todo が表示される", async () => {
   // given
-  vi.mocked(listTodos).mockResolvedValue({ todos: [] });
+  vi.mocked(TodoApi.list).mockResolvedValue({ todos: [] });
 
   // when
   render(<TodoScreen />, { wrapper: JaLocale });
@@ -58,7 +53,7 @@ test("level 1 の見出しに Todo が表示される", async () => {
 
 test("一覧の取得中は読み込み中と表示され、取得後は Todo が表示される", async () => {
   // given
-  vi.mocked(listTodos).mockResolvedValue({ todos: [milk] });
+  vi.mocked(TodoApi.list).mockResolvedValue({ todos: [milk] });
 
   // when
   render(<TodoScreen />, { wrapper: JaLocale });
@@ -71,7 +66,7 @@ test("一覧の取得中は読み込み中と表示され、取得後は Todo �
 
 test("エラーが無いときは alert を表示しない", async () => {
   // given
-  vi.mocked(listTodos).mockResolvedValue({ todos: [milk] });
+  vi.mocked(TodoApi.list).mockResolvedValue({ todos: [milk] });
 
   // when
   render(<TodoScreen />, { wrapper: JaLocale });
@@ -84,7 +79,7 @@ test("エラーが無いときは alert を表示しない", async () => {
 // fireEvent.submit は、ハンドラが preventDefault したときだけ false を返す（dispatchEvent の戻り値）。
 test("追加のフォームを送信しても、ブラウザの既定の送信（ページの再読み込み）はしない", async () => {
   // given
-  vi.mocked(listTodos).mockResolvedValue({ todos: [] });
+  vi.mocked(TodoApi.list).mockResolvedValue({ todos: [] });
   render(<TodoScreen />, { wrapper: JaLocale });
   await screen.findByRole("list");
   const form = screen
@@ -101,7 +96,7 @@ test("追加のフォームを送信しても、ブラウザの既定の送信�
 
 test("一覧の取得に失敗すると、エラーのキーを翻訳した文言が alert として表示される", async () => {
   // given
-  vi.mocked(listTodos).mockRejectedValue(
+  vi.mocked(TodoApi.list).mockRejectedValue(
     new ApiError({
       status: 500,
       type: "/problems/internal-error",
@@ -121,7 +116,7 @@ test("一覧の取得に失敗すると、エラーのキーを翻訳した文�
 // 画面の文言が LocaleProvider のロケールに従うこと（ja と en で違う文言のキーで見る）。
 test("LocaleProvider のロケールが en なら、英語の文言で表示する", async () => {
   // given
-  vi.mocked(listTodos).mockResolvedValue({ todos: [] });
+  vi.mocked(TodoApi.list).mockResolvedValue({ todos: [] });
 
   // when
   render(
@@ -139,10 +134,10 @@ test("LocaleProvider のロケールが en なら、英語の文言で表示す�
 
 test("title を入力して追加ボタンを押すと、その title で作成され一覧に表示される", async () => {
   // given
-  vi.mocked(listTodos)
+  vi.mocked(TodoApi.list)
     .mockResolvedValueOnce({ todos: [] })
     .mockResolvedValueOnce({ todos: [milk] });
-  vi.mocked(createTodo).mockResolvedValue(milk);
+  vi.mocked(TodoApi.create).mockResolvedValue(milk);
   render(<TodoScreen />, { wrapper: JaLocale });
   await screen.findByRole("list");
   const titleInput = screen.getByRole("textbox", {
@@ -160,7 +155,7 @@ test("title を入力して追加ボタンを押すと、その title で作成�
 
   // then
   expect(await screen.findByRole("link", { name: "牛乳を買う" })).toBeDefined();
-  expect(createTodo).toHaveBeenCalledWith({ title: "牛乳を買う" });
+  expect(TodoApi.create).toHaveBeenCalledWith({ title: "牛乳を買う" });
   expect(
     (
       screen.getByRole("textbox", {
@@ -172,10 +167,10 @@ test("title を入力して追加ボタンを押すと、その title で作成�
 
 test("完了チェックボックスを押すと、その Todo が完了に更新される", async () => {
   // given
-  vi.mocked(listTodos)
+  vi.mocked(TodoApi.list)
     .mockResolvedValueOnce({ todos: [milk] })
     .mockResolvedValueOnce({ todos: [{ ...milk, completed: true }] });
-  vi.mocked(changeTodoCompletion).mockResolvedValue({
+  vi.mocked(TodoApi.changeCompletion).mockResolvedValue({
     ...milk,
     completed: true,
   });
@@ -194,15 +189,15 @@ test("完了チェックボックスを押すと、その Todo が完了に更�
       checked: true,
     }),
   ).toBeDefined();
-  expect(changeTodoCompletion).toHaveBeenCalledWith("todo-1", true);
+  expect(TodoApi.changeCompletion).toHaveBeenCalledWith("todo-1", true);
 });
 
 test("削除ボタンを押すと、その Todo が削除され一覧から消える", async () => {
   // given
-  vi.mocked(listTodos)
+  vi.mocked(TodoApi.list)
     .mockResolvedValueOnce({ todos: [milk] })
     .mockResolvedValueOnce({ todos: [] });
-  vi.mocked(deleteTodo).mockResolvedValue(undefined);
+  vi.mocked(TodoApi.delete).mockResolvedValue(undefined);
   render(<TodoScreen />, { wrapper: JaLocale });
   const deleteButton = await screen.findByRole("button", {
     name: tJa(todoItemMessages, "deleteAria", { title: "牛乳を買う" }),
@@ -216,14 +211,14 @@ test("削除ボタンを押すと、その Todo が削除され一覧から消�
   await waitFor(() =>
     expect(screen.queryByRole("link", { name: "牛乳を買う" })).toBeNull(),
   );
-  expect(deleteTodo).toHaveBeenCalledWith("todo-1");
+  expect(TodoApi.delete).toHaveBeenCalledWith("todo-1");
 });
 
 // 400 の項目ごとの誤り（ApiError の errors）は、その入力の直下に出し、aria-describedby と aria-invalid で入力と結び付ける。
 // WHY role="alert" はフォーム全体の文言だけ: 項目の文言は入力の説明（accessible description）として読まれる。
 async function submitTitleWithFailure(reason: unknown) {
-  vi.mocked(listTodos).mockResolvedValue({ todos: [] });
-  vi.mocked(createTodo).mockRejectedValue(reason);
+  vi.mocked(TodoApi.list).mockResolvedValue({ todos: [] });
+  vi.mocked(TodoApi.create).mockRejectedValue(reason);
   render(<TodoScreen />, { wrapper: JaLocale });
   await screen.findByRole("list");
   fireEvent.change(
@@ -241,7 +236,7 @@ async function submitTitleWithFailure(reason: unknown) {
 
 test("エラーが無いときは、title の入力は invalid でなく、説明も無い", async () => {
   // given
-  vi.mocked(listTodos).mockResolvedValue({ todos: [] });
+  vi.mocked(TodoApi.list).mockResolvedValue({ todos: [] });
 
   // when
   render(<TodoScreen />, { wrapper: JaLocale });

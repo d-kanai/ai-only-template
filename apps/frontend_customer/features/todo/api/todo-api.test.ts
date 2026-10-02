@@ -1,13 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ApiError } from "@/features/todo/api/api-error";
-import {
-  changeTodoCompletion,
-  createTodo,
-  deleteTodo,
-  getTodo,
-  listTodos,
-  renameTodo,
-} from "@/features/todo/api/todo-api";
+import { TodoApi } from "@/features/todo/api/todo-api";
 
 // fetch を差し替えて、画面側が送る HTTP リクエスト（URL / method / body）と、返ってきたレスポンスの扱いを検証する。
 // 実際の Route Handler には繋がないため、HTTP 契約（backend 側と共通）を満たすリクエストを作れているかをここで固定する。
@@ -36,13 +29,13 @@ function jsonResponse(body: unknown, status: number): Response {
   });
 }
 
-describe("listTodos", () => {
+describe("TodoApi.list", () => {
   test("GET /api/todos を呼び、レスポンスの { todos } を返す", async () => {
     // given
     fetchMock.mockResolvedValue(jsonResponse({ todos: [todo] }, 200));
 
     // when
-    const result = listTodos();
+    const result = TodoApi.list();
 
     // then
     await expect(result).resolves.toEqual({ todos: [todo] });
@@ -53,13 +46,13 @@ describe("listTodos", () => {
   });
 });
 
-describe("getTodo", () => {
+describe("TodoApi.get", () => {
   test("GET /api/todos/:id を呼び、1 件の Todo を返す", async () => {
     // given
     fetchMock.mockResolvedValue(jsonResponse(todo, 200));
 
     // when
-    const result = getTodo("todo-1");
+    const result = TodoApi.get("todo-1");
 
     // then
     await expect(result).resolves.toEqual(todo);
@@ -74,7 +67,7 @@ describe("getTodo", () => {
     fetchMock.mockResolvedValue(jsonResponse(todo, 200));
 
     // when
-    await getTodo("a/b?c");
+    await TodoApi.get("a/b?c");
 
     // then
     expect(fetchMock).toHaveBeenCalledWith(
@@ -84,13 +77,13 @@ describe("getTodo", () => {
   });
 });
 
-describe("createTodo", () => {
+describe("TodoApi.create", () => {
   test("POST /api/todos に JSON の { title } を送り、作成された Todo を返す", async () => {
     // given
     fetchMock.mockResolvedValue(jsonResponse(todo, 201));
 
     // when
-    const result = createTodo({ title: "牛乳を買う" });
+    const result = TodoApi.create({ title: "牛乳を買う" });
 
     // then
     await expect(result).resolves.toEqual(todo);
@@ -105,14 +98,14 @@ describe("createTodo", () => {
 // 名前の変更と完了の切り替えは、ユースケースごとに別の API（PUT /api/todos/:id/title・/completion）を呼ぶ（Issue #175）。
 // WHY 本文を toHaveBeenCalledWith で丸ごと比べる: 相手の項目（title なら completed）を本文に混ぜると、backend は未知の項目として
 //   400 で拒否する。混ぜていないことまで固定する。
-describe("renameTodo", () => {
+describe("TodoApi.rename", () => {
   test("PUT /api/todos/:id/title に JSON の { title } を送り、更新後の Todo を返す", async () => {
     // given
     const renamed = { ...todo, title: "豆乳を買う" };
     fetchMock.mockResolvedValue(jsonResponse(renamed, 200));
 
     // when
-    const result = renameTodo("todo-1", "豆乳を買う");
+    const result = TodoApi.rename("todo-1", "豆乳を買う");
 
     // then
     await expect(result).resolves.toEqual(renamed);
@@ -128,7 +121,7 @@ describe("renameTodo", () => {
     fetchMock.mockResolvedValue(jsonResponse(todo, 200));
 
     // when
-    await renameTodo("a/b?c", "豆乳を買う");
+    await TodoApi.rename("a/b?c", "豆乳を買う");
 
     // then
     expect(fetchMock).toHaveBeenCalledWith(
@@ -152,7 +145,7 @@ describe("renameTodo", () => {
     );
 
     // when
-    const reason = await renameTodo("todo-1", "").catch(
+    const reason = await TodoApi.rename("todo-1", "").catch(
       (error: unknown) => error,
     );
 
@@ -169,7 +162,7 @@ describe("renameTodo", () => {
   });
 });
 
-describe("changeTodoCompletion", () => {
+describe("TodoApi.changeCompletion", () => {
   test.each([true, false])(
     "PUT /api/todos/:id/completion に JSON の { completed: %s } を送り、更新後の Todo を返す",
     async (completed) => {
@@ -178,7 +171,7 @@ describe("changeTodoCompletion", () => {
       fetchMock.mockResolvedValue(jsonResponse(changed, 200));
 
       // when
-      const result = changeTodoCompletion("todo-1", completed);
+      const result = TodoApi.changeCompletion("todo-1", completed);
 
       // then
       await expect(result).resolves.toEqual(changed);
@@ -195,7 +188,7 @@ describe("changeTodoCompletion", () => {
     fetchMock.mockResolvedValue(jsonResponse(todo, 200));
 
     // when
-    await changeTodoCompletion("a/b?c", true);
+    await TodoApi.changeCompletion("a/b?c", true);
 
     // then
     expect(fetchMock).toHaveBeenCalledWith(
@@ -209,7 +202,7 @@ describe("changeTodoCompletion", () => {
     fetchMock.mockResolvedValue(problemResponse(notFoundProblem, 404));
 
     // when
-    const failure = changeTodoCompletion("missing", true);
+    const failure = TodoApi.changeCompletion("missing", true);
 
     // then
     await expect(failure).rejects.toEqual(
@@ -229,13 +222,13 @@ describe("changeTodoCompletion", () => {
   });
 });
 
-describe("deleteTodo", () => {
+describe("TodoApi.delete", () => {
   test("DELETE /api/todos/:id を呼び、204（本文なし）なら undefined で終わる", async () => {
     // given
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
 
     // when
-    const result = deleteTodo("todo-1");
+    const result = TodoApi.delete("todo-1");
 
     // then
     await expect(result).resolves.toBeUndefined();
@@ -295,7 +288,7 @@ describe("エラー時", () => {
     fetchMock.mockResolvedValue(problemResponse(notFoundProblem, 404));
 
     // when
-    const failure = getTodo("missing");
+    const failure = TodoApi.get("missing");
 
     // then
     await expect(failure).rejects.toEqual(
@@ -331,7 +324,7 @@ describe("エラー時", () => {
     );
 
     // when
-    const failure = createTodo({ title: "" });
+    const failure = TodoApi.create({ title: "" });
 
     // then
     await expect(failure).rejects.toEqual(
@@ -376,7 +369,7 @@ describe("エラー時", () => {
     );
 
     // when
-    const reason = await createTodo({ title: "" }).catch(
+    const reason = await TodoApi.create({ title: "" }).catch(
       (error: unknown) => error,
     );
 
@@ -410,7 +403,7 @@ describe("エラー時", () => {
       );
 
       // when
-      const reason = await createTodo({ title: "" }).catch(
+      const reason = await TodoApi.create({ title: "" }).catch(
         (error: unknown) => error,
       );
 
@@ -430,7 +423,7 @@ describe("エラー時", () => {
     fetchMock.mockResolvedValue(problemResponse(notFoundProblem, 410));
 
     // when
-    const failure = getTodo("missing");
+    const failure = TodoApi.get("missing");
 
     // then
     await expect(failure).rejects.toMatchObject({ status: 410 });
@@ -445,7 +438,7 @@ describe("エラー時", () => {
     );
 
     // when
-    const failure = listTodos();
+    const failure = TodoApi.list();
 
     // then
     await expect(failure).rejects.toEqual(
@@ -585,7 +578,7 @@ describe("エラー時", () => {
       fetchMock.mockResolvedValue(problemResponse(body, 502));
 
       // when
-      const failure = listTodos();
+      const failure = TodoApi.list();
 
       // then
       await expect(failure).rejects.toEqual(
@@ -609,7 +602,7 @@ describe("エラー時", () => {
     fetchMock.mockResolvedValue(problemResponse(notFoundProblem, 404));
 
     // when
-    const failure = deleteTodo("missing");
+    const failure = TodoApi.delete("missing");
 
     // then
     await expect(failure).rejects.toEqual(

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Todo } from "@/features/todo/api/todo-api";
-import { formatDateTime } from "@/shared/i18n/format";
+import { DateTimeFormatter } from "@/shared/i18n/format";
 import { useLocale, useT } from "@/shared/i18n/i18n";
 import { todoItemMessages } from "./todo-item.messages";
 
@@ -34,7 +34,7 @@ export function TodoItem({ todo, onToggle, onDelete }: TodoItemProps) {
       />
       <Link href={`/todo/${encodeURIComponent(todo.id)}`}>{todo.title}</Link>
       <time dateTime={todo.createdAt}>
-        {formatDateTime(todo.createdAt, locale, timeZone)}
+        {DateTimeFormatter.format(todo.createdAt, locale, timeZone)}
       </time>
       <button
         type="button"

@@ -8,12 +8,7 @@ import {
 import { Activity, type ActivityProps, createElement, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ApiError } from "@/features/todo/api/api-error";
-import {
-  changeTodoCompletion,
-  createTodo,
-  deleteTodo,
-  listTodos,
-} from "@/features/todo/api/todo-api";
+import { TodoApi } from "@/features/todo/api/todo-api";
 import { useTodoScreen } from "@/features/todo/screens/todo-screen/todo-screen.hook";
 import { commonMessages } from "@/shared/i18n/common.messages";
 import { formatMessage, LocaleProvider } from "@/shared/i18n/i18n";
@@ -69,7 +64,7 @@ async function renderLoaded() {
 describe("初回の読み込み", () => {
   test("読み込み中は isLoading が true で、一覧を取得すると todos に入り isLoading が false になる", async () => {
     // given
-    vi.mocked(listTodos).mockResolvedValue({ todos: [milk] });
+    vi.mocked(TodoApi.list).mockResolvedValue({ todos: [milk] });
 
     // when
     const { result } = renderHook(() => useTodoScreen(), { wrapper: JaLocale });
@@ -87,7 +82,7 @@ describe("初回の読み込み", () => {
   test("StrictMode で 2 回送った GET のうち、先に送った方の応答が後から届いても反映しない", async () => {
     // given
     const firstResponse = deferred<{ todos: (typeof milk)[] }>();
-    vi.mocked(listTodos)
+    vi.mocked(TodoApi.list)
       .mockReturnValueOnce(firstResponse.promise)
       .mockResolvedValueOnce({ todos: [milk] });
     const { result } = renderHook(() => useTodoScreen(), {
@@ -99,7 +94,7 @@ describe("初回の読み込み", () => {
     await act(async () => firstResponse.resolve({ todos: [] }));
 
     // then
-    expect(listTodos).toHaveBeenCalledTimes(2);
+    expect(TodoApi.list).toHaveBeenCalledTimes(2);
     expect(result.current.todos).toEqual([milk]);
     expect(result.current.isLoading).toBe(false);
   });
@@ -111,7 +106,7 @@ describe("初回の読み込み", () => {
   test("Activity で隠れている間に届いた GET の応答は反映せず、再表示したときに取り直す", async () => {
     // given
     const firstResponse = deferred<ListResponse>();
-    vi.mocked(listTodos)
+    vi.mocked(TodoApi.list)
       .mockReturnValueOnce(firstResponse.promise)
       // 再表示で送り直す GET は返さずにおき、読み込み中のままであることを見る。
       .mockReturnValueOnce(deferred<ListResponse>().promise);
@@ -133,7 +128,7 @@ describe("初回の読み込み", () => {
     view.rerender(withActivity("visible"));
 
     // then
-    await waitFor(() => expect(listTodos).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(TodoApi.list).toHaveBeenCalledTimes(2));
     expect(latest?.todos).toEqual([]);
     expect(latest?.isLoading).toBe(true);
   });
@@ -142,7 +137,7 @@ describe("初回の読み込み", () => {
     // given
     const firstResponse = deferred<{ todos: (typeof milk)[] }>();
     const secondResponse = deferred<{ todos: (typeof milk)[] }>();
-    vi.mocked(listTodos)
+    vi.mocked(TodoApi.list)
       .mockReturnValueOnce(firstResponse.promise)
       .mockReturnValueOnce(secondResponse.promise);
     const { result } = renderHook(() => useTodoScreen(), {
@@ -167,10 +162,10 @@ describe("初回の読み込み", () => {
   test("初回の取得が遅れて届いても、追加後に取り直した一覧を上書きしない", async () => {
     // given
     const initialResponse = deferred<{ todos: (typeof milk)[] }>();
-    vi.mocked(listTodos)
+    vi.mocked(TodoApi.list)
       .mockReturnValueOnce(initialResponse.promise)
       .mockResolvedValueOnce({ todos: [milk] });
-    vi.mocked(createTodo).mockResolvedValue(milk);
+    vi.mocked(TodoApi.create).mockResolvedValue(milk);
     const { result } = renderHook(() => useTodoScreen(), { wrapper: JaLocale });
 
     // when
@@ -191,14 +186,14 @@ describe("初回の読み込み", () => {
   test("初回の取得が遅れて失敗しても、追加後に取り直した一覧を残し、エラーも出さない", async () => {
     // given
     const initialResponse = deferred<void>();
-    vi.mocked(listTodos)
+    vi.mocked(TodoApi.list)
       .mockReturnValueOnce(
         initialResponse.promise.then(() => {
           throw new Error("初回の取得に失敗しました");
         }),
       )
       .mockResolvedValueOnce({ todos: [milk] });
-    vi.mocked(createTodo).mockResolvedValue(milk);
+    vi.mocked(TodoApi.create).mockResolvedValue(milk);
     const { result } = renderHook(() => useTodoScreen(), { wrapper: JaLocale });
 
     // when
@@ -219,7 +214,7 @@ describe("初回の読み込み", () => {
 
   test("一覧の取得に失敗すると、ApiError のキーと params を翻訳した文言が error に入る", async () => {
     // given
-    vi.mocked(listTodos).mockRejectedValue(
+    vi.mocked(TodoApi.list).mockRejectedValue(
       new ApiError({
         status: 503,
         key: "error.unknown",
@@ -240,7 +235,7 @@ describe("初回の読み込み", () => {
   // WHY 翻訳は描画のときに LocaleProvider のロケールで行う（hook はキーと params を持つ失敗を保持する）。
   test("LocaleProvider のロケールが en なら、error は英語の文言になる", async () => {
     // given
-    vi.mocked(listTodos).mockRejectedValue(
+    vi.mocked(TodoApi.list).mockRejectedValue(
       new ApiError({
         status: 500,
         type: "/problems/internal-error",
@@ -270,7 +265,7 @@ describe("初回の読み込み", () => {
     "%s で失敗すると、固定の文言（error.unexpected）が error に入る",
     async (_label, reason) => {
       // given
-      vi.mocked(listTodos).mockRejectedValue(reason);
+      vi.mocked(TodoApi.list).mockRejectedValue(reason);
 
       // when
       const { result } = await renderLoaded();
@@ -286,10 +281,10 @@ describe("初回の読み込み", () => {
 describe("追加", () => {
   test("入力した title で作成し、入力を空にして一覧を再取得する", async () => {
     // given
-    vi.mocked(listTodos)
+    vi.mocked(TodoApi.list)
       .mockResolvedValueOnce({ todos: [] })
       .mockResolvedValueOnce({ todos: [milk] });
-    vi.mocked(createTodo).mockResolvedValue(milk);
+    vi.mocked(TodoApi.create).mockResolvedValue(milk);
     const { result } = await renderLoaded();
 
     // when
@@ -297,16 +292,16 @@ describe("追加", () => {
     await act(() => result.current.addTodo());
 
     // then
-    expect(createTodo).toHaveBeenCalledWith({ title: "牛乳を買う" });
-    expect(listTodos).toHaveBeenCalledTimes(2);
+    expect(TodoApi.create).toHaveBeenCalledWith({ title: "牛乳を買う" });
+    expect(TodoApi.list).toHaveBeenCalledTimes(2);
     expect(result.current.todos).toEqual([milk]);
     expect(result.current.newTitle).toBe("");
   });
 
   test("前後の空白を除いた title を送る", async () => {
     // given
-    vi.mocked(listTodos).mockResolvedValue({ todos: [] });
-    vi.mocked(createTodo).mockResolvedValue(milk);
+    vi.mocked(TodoApi.list).mockResolvedValue({ todos: [] });
+    vi.mocked(TodoApi.create).mockResolvedValue(milk);
     const { result } = await renderLoaded();
 
     // when
@@ -314,12 +309,12 @@ describe("追加", () => {
     await act(() => result.current.addTodo());
 
     // then
-    expect(createTodo).toHaveBeenCalledWith({ title: "牛乳を買う" });
+    expect(TodoApi.create).toHaveBeenCalledWith({ title: "牛乳を買う" });
   });
 
   test("空白だけの title は送らない", async () => {
     // given
-    vi.mocked(listTodos).mockResolvedValue({ todos: [] });
+    vi.mocked(TodoApi.list).mockResolvedValue({ todos: [] });
     const { result } = await renderLoaded();
 
     // when
@@ -327,13 +322,13 @@ describe("追加", () => {
     await act(() => result.current.addTodo());
 
     // then
-    expect(createTodo).not.toHaveBeenCalled();
-    expect(listTodos).toHaveBeenCalledTimes(1);
+    expect(TodoApi.create).not.toHaveBeenCalled();
+    expect(TodoApi.list).toHaveBeenCalledTimes(1);
   });
 
   test("作成は成功しても、その後の一覧の再取得に失敗すると、error に message が入り、入力は残る", async () => {
     // given
-    vi.mocked(listTodos)
+    vi.mocked(TodoApi.list)
       .mockResolvedValueOnce({ todos: [] })
       .mockRejectedValueOnce(
         new ApiError({
@@ -342,7 +337,7 @@ describe("追加", () => {
           key: "server.internalError",
         }),
       );
-    vi.mocked(createTodo).mockResolvedValue(milk);
+    vi.mocked(TodoApi.create).mockResolvedValue(milk);
     const { result } = await renderLoaded();
 
     // when
@@ -350,7 +345,7 @@ describe("追加", () => {
     await act(() => result.current.addTodo());
 
     // then
-    expect(createTodo).toHaveBeenCalledWith({ title: "牛乳を買う" });
+    expect(TodoApi.create).toHaveBeenCalledWith({ title: "牛乳を買う" });
     expect(result.current.error).toBe(
       tJa(commonMessages, "server.internalError"),
     );
@@ -370,12 +365,12 @@ describe("追加", () => {
     async (_label, settle) => {
       // given
       const staleReload = deferred<ListResponse>();
-      vi.mocked(listTodos)
+      vi.mocked(TodoApi.list)
         .mockResolvedValueOnce({ todos: [] })
         .mockReturnValueOnce(staleReload.promise)
         .mockResolvedValueOnce({ todos: [{ ...milk, completed: true }] });
-      vi.mocked(createTodo).mockResolvedValue(milk);
-      vi.mocked(changeTodoCompletion).mockResolvedValue({
+      vi.mocked(TodoApi.create).mockResolvedValue(milk);
+      vi.mocked(TodoApi.changeCompletion).mockResolvedValue({
         ...milk,
         completed: true,
       });
@@ -387,7 +382,7 @@ describe("追加", () => {
       act(() => {
         adding = result.current.addTodo();
       });
-      await waitFor(() => expect(listTodos).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(TodoApi.list).toHaveBeenCalledTimes(2));
       await act(() => result.current.toggleTodo("todo-1", true));
       await act(async () => {
         settle(staleReload);
@@ -403,8 +398,8 @@ describe("追加", () => {
 
   test("作成に失敗すると error に message が入り、入力は残る", async () => {
     // given
-    vi.mocked(listTodos).mockResolvedValue({ todos: [] });
-    vi.mocked(createTodo).mockRejectedValue(
+    vi.mocked(TodoApi.list).mockResolvedValue({ todos: [] });
+    vi.mocked(TodoApi.create).mockRejectedValue(
       new ApiError({
         status: 400,
         type: "/problems/validation-error",
@@ -427,11 +422,11 @@ describe("追加", () => {
 });
 
 // 400 の項目ごとの誤り（ApiError の errors）。入力の下に出す文言（fieldErrors）と、フォーム全体の文言（error）に分ける
-//   （分け方の細部は api-error.test.ts の toErrorMessages で固定）。
+//   （分け方の細部は api-error.test.ts の ApiErrorMessage.toMessages で固定）。
 describe("項目ごとのエラー", () => {
   async function addWithFailure(reason: unknown) {
-    vi.mocked(listTodos).mockResolvedValue({ todos: [] });
-    vi.mocked(createTodo).mockRejectedValue(reason);
+    vi.mocked(TodoApi.list).mockResolvedValue({ todos: [] });
+    vi.mocked(TodoApi.create).mockRejectedValue(reason);
     const view = await renderLoaded();
     act(() => view.result.current.setNewTitle("牛乳を買う"));
     await act(() => view.result.current.addTodo());
@@ -440,7 +435,7 @@ describe("項目ごとのエラー", () => {
 
   test("エラーが無いときは、fieldErrors は空", async () => {
     // given
-    vi.mocked(listTodos).mockResolvedValue({ todos: [] });
+    vi.mocked(TodoApi.list).mockResolvedValue({ todos: [] });
 
     // when
     const { result } = await renderLoaded();
@@ -532,7 +527,7 @@ describe("項目ごとのエラー", () => {
         errors: [{ pointer: "#/title", key: "todo.title.empty" }],
       }),
     );
-    vi.mocked(createTodo).mockResolvedValue(milk);
+    vi.mocked(TodoApi.create).mockResolvedValue(milk);
 
     // when
     await act(() => result.current.addTodo());
@@ -544,8 +539,8 @@ describe("項目ごとのエラー", () => {
 
   test("LocaleProvider のロケールが en なら、項目の文言は英語になる", async () => {
     // given
-    vi.mocked(listTodos).mockResolvedValue({ todos: [] });
-    vi.mocked(createTodo).mockRejectedValue(
+    vi.mocked(TodoApi.list).mockResolvedValue({ todos: [] });
+    vi.mocked(TodoApi.create).mockRejectedValue(
       new ApiError({
         status: 400,
         type: "/problems/validation-error",
@@ -574,18 +569,18 @@ describe("完了の切り替え", () => {
   test("指定した completed で更新し、一覧を再取得する", async () => {
     // given
     const completedMilk = { ...milk, completed: true };
-    vi.mocked(listTodos)
+    vi.mocked(TodoApi.list)
       .mockResolvedValueOnce({ todos: [milk] })
       .mockResolvedValueOnce({ todos: [completedMilk] });
-    vi.mocked(changeTodoCompletion).mockResolvedValue(completedMilk);
+    vi.mocked(TodoApi.changeCompletion).mockResolvedValue(completedMilk);
     const { result } = await renderLoaded();
 
     // when
     await act(() => result.current.toggleTodo("todo-1", true));
 
     // then
-    expect(changeTodoCompletion).toHaveBeenCalledWith("todo-1", true);
-    expect(listTodos).toHaveBeenCalledTimes(2);
+    expect(TodoApi.changeCompletion).toHaveBeenCalledWith("todo-1", true);
+    expect(TodoApi.list).toHaveBeenCalledTimes(2);
     expect(result.current.todos).toEqual([completedMilk]);
   });
 });
@@ -593,25 +588,25 @@ describe("完了の切り替え", () => {
 describe("削除", () => {
   test("指定した id を削除し、一覧を再取得する", async () => {
     // given
-    vi.mocked(listTodos)
+    vi.mocked(TodoApi.list)
       .mockResolvedValueOnce({ todos: [milk, bread] })
       .mockResolvedValueOnce({ todos: [bread] });
-    vi.mocked(deleteTodo).mockResolvedValue(undefined);
+    vi.mocked(TodoApi.delete).mockResolvedValue(undefined);
     const { result } = await renderLoaded();
 
     // when
     await act(() => result.current.deleteTodo("todo-1"));
 
     // then
-    expect(deleteTodo).toHaveBeenCalledWith("todo-1");
-    expect(listTodos).toHaveBeenCalledTimes(2);
+    expect(TodoApi.delete).toHaveBeenCalledWith("todo-1");
+    expect(TodoApi.list).toHaveBeenCalledTimes(2);
     expect(result.current.todos).toEqual([bread]);
   });
 
   test("前の操作のエラーは、次の操作が成功すると消える", async () => {
     // given
-    vi.mocked(listTodos).mockResolvedValue({ todos: [milk] });
-    vi.mocked(deleteTodo)
+    vi.mocked(TodoApi.list).mockResolvedValue({ todos: [milk] });
+    vi.mocked(TodoApi.delete)
       .mockRejectedValueOnce(
         new ApiError({
           status: 404,
