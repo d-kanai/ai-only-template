@@ -1,6 +1,6 @@
 import { Todo } from "../../features/todo/internal/domain/todo";
 import {
-  requireTodo,
+  RequiredTodo,
   type TodoRepository,
 } from "../../features/todo/internal/domain/todo-repository";
 import type { Transaction } from "../../shared/application/transaction";
@@ -52,7 +52,7 @@ export class InMemoryTodoRepository implements TodoRepository {
   // WHY findById を通す（Map を直接読まない）: テストが findById を spy したときにも findByIdForUpdate 経由の問い合わせが記録される
   //   ようにする（presentation のテストの「Repository が呼ばれない」）。行ロックは無い（InMemory の呼び出しは直列に動く）。
   async findByIdForUpdate(id: string, _tx: Transaction): Promise<Todo> {
-    return requireTodo(await this.findById(id), id);
+    return RequiredTodo.of(await this.findById(id), id);
   }
 
   // Postgres の実装（todo-repository.postgres.ts の insert）と同じ意味: 新規（origin が undefined）だけを受け付け、同じ id があれば

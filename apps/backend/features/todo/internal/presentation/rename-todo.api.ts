@@ -18,32 +18,9 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 //   名前の変更と完了は業務プロセスが別で、1 つの API に任意の項目として混ぜると command の中で分岐が増える。
 // WHY PUT: URL（/title）が指す 1 つの値を本文の値で置き換える。同じ要求を何度送っても結果が同じ（冪等）。
 
-// リクエスト本文の「形」（項目の有無と型。未知の項目は拒否）に、title の必須・長さを domain と同じ規則で重ねる（Issue #144）。
-// WHY title を必須にする: この API は名前を変えるためだけにあり、title の無い本文は誤り（「何も変えない」200 にしない）。
-// WHY 空・長さも見る・domain と同じキーと定数にする: create-todo.api.ts の createTodoRequestSchema のコメント。
-//   不変条件の正は domain（Todo#rename が常に完全に検証する）。
-// WHY 未知の項目を拒否する: completed をこの API に送る誤り（完了は /completion）を黙って捨てずに 400 で知らせる（json-body.ts の requestBodySchema）。
-function renameTodoRequestSchema() {
-  return requestBodySchema({
-    // 型が違う・無いときのキー（request.field.notString）は json-body.ts の toProblemError が決める（z.string に error は書かない）。
-    // trim してからコードポイント数（Array.from）で数える: todo.ts の todoPropsSchema の title と同じ（WHY はそちら）。
-    title: z
-      .string()
-      .trim()
-      .refine(
-        (title) => Array.from(title).length >= 1,
-        keyedIssue("todo.title.empty"),
-      )
-      .refine(
-        (title) => Array.from(title).length <= TODO_TITLE_MAX_LENGTH,
-        keyedRefine("todo.title.tooLong", { max: TODO_TITLE_MAX_LENGTH }),
-      ),
-  });
-}
-
 // WHY 型をスキーマから導出する: 検査する形と型を 1 か所で宣言し、ずれを無くす（画面側も import type でこの型を使う）。
 export type RenameTodoRequest = z.infer<
-  ReturnType<typeof renameTodoRequestSchema>
+  ReturnType<(typeof RenameTodoApi)["renameTodoRequestSchema"]>
 >;
 
 // 同じ形の Response を各 *.api.ts に書く。
@@ -60,17 +37,9 @@ export type RenameTodoResponse = {
 // Next 16 では動的セグメントの params が Promise で渡される（get-todo.api.ts の Context のコメント）。
 type Context = { params: Promise<{ id: string }> };
 
-function toResponse(todo: Todo): RenameTodoResponse {
-  return {
-    id: todo.id,
-    title: todo.title,
-    completed: todo.completed,
-    createdAt: todo.createdAt.toISOString(),
-  };
-}
-
 // PUT /api/todos/:id/title の Route Handler を持つクラス。コンストラクタで command を受け取り、handle を Route Handler として export する
-//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包むは
+//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包む・
+//   補助（リクエストのスキーマ・toResponse）を private static メソッドにするは
 //   list-todos.api.ts の ListTodosApi のコメント）。
 export class RenameTodoApi {
   constructor(
@@ -85,12 +54,47 @@ export class RenameTodoApi {
       // uuid の形でない id のキーと params は、command が無い id に投げる not_found と同じにそろえる
       //   （画面から見て「無い Todo」と同じ契約）。
       const id = parseUuidParam(rawId, "todo.notFound", { id: rawId });
-      const { title } = await parseJsonBody(request, renameTodoRequestSchema());
+      const { title } = await parseJsonBody(
+        request,
+        RenameTodoApi.renameTodoRequestSchema(),
+      );
       const todo = await this.renameTodo.execute({ id, title });
-      const body: RenameTodoResponse = toResponse(todo);
+      const body: RenameTodoResponse = RenameTodoApi.toResponse(todo);
       return Response.json(body);
     },
   );
+
+  // リクエスト本文の「形」（項目の有無と型。未知の項目は拒否）に、title の必須・長さを domain と同じ規則で重ねる（Issue #144）。
+  // WHY title を必須にする: この API は名前を変えるためだけにあり、title の無い本文は誤り（「何も変えない」200 にしない）。
+  // WHY 空・長さも見る・domain と同じキーと定数にする: create-todo.api.ts の createTodoRequestSchema のコメント。
+  //   不変条件の正は domain（Todo#rename が常に完全に検証する）。
+  // WHY 未知の項目を拒否する: completed をこの API に送る誤り（完了は /completion）を黙って捨てずに 400 で知らせる（json-body.ts の requestBodySchema）。
+  private static renameTodoRequestSchema() {
+    return requestBodySchema({
+      // 型が違う・無いときのキー（request.field.notString）は json-body.ts の toProblemError が決める（z.string に error は書かない）。
+      // trim してからコードポイント数（Array.from）で数える: todo.ts の todoPropsSchema の title と同じ（WHY はそちら）。
+      title: z
+        .string()
+        .trim()
+        .refine(
+          (title) => Array.from(title).length >= 1,
+          keyedIssue("todo.title.empty"),
+        )
+        .refine(
+          (title) => Array.from(title).length <= TODO_TITLE_MAX_LENGTH,
+          keyedRefine("todo.title.tooLong", { max: TODO_TITLE_MAX_LENGTH }),
+        ),
+    });
+  }
+
+  private static toResponse(todo: Todo): RenameTodoResponse {
+    return {
+      id: todo.id,
+      title: todo.title,
+      completed: todo.completed,
+      createdAt: todo.createdAt.toISOString(),
+    };
+  }
 }
 
 // app/api/todos/[id]/title/route.ts が re-export する Route Handler。本番は常に Postgres で組み立てる。
