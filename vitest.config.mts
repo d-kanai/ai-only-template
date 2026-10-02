@@ -56,7 +56,7 @@ export default defineConfig({
     exclude: [...configDefaults.exclude, "apps/e2e/**", ".stryker-tmp/**"],
     // globalSetup: テストファイルを動かす前に 1 回だけ実行する処理（Vitest のプロセスで動く）。
     //   前の実行が残したテスト用のスキーマ（test_<UUID>）を消し、Postgres に接続できなければ分かりやすいエラーで止める
-    //   （Issue #57。WHY は vitest.global-setup.ts と .claude/rules/testing.md）。
+    //   （Issue #57。WHY は vitest.global-setup.ts と .claude/rules/quality/testing.md）。
     globalSetup: ["./vitest.global-setup.ts"],
     // env.TZ: テストのプロセスのタイムゾーンを UTC に固定する（Issue #116）。
     //   WHY: 日時の表示（apps/frontend_customer/shared/i18n/format.ts・features/todo/components/todo-item.tsx）はブラウザのタイムゾーン
@@ -87,13 +87,13 @@ export default defineConfig({
       //   テストが 1 度も触らないファイルが計測から漏れる（Vitest 5.0.1 の型定義「By default only files covered by
       //   tests are included」）。テストを置くべきディレクトリを明示し、触られていないファイルも 0% として数える。
       //   含めないもの（ユーザー判断。Issue #45）:
-      //   - apps/frontend_customer/app/: ルーティングだけで、テストを置かない方針（.claude/rules/frontend.md の「app/（ルーティングだけ）」）。
+      //   - apps/frontend_customer/app/: ルーティングだけで、テストを置かない方針（.claude/rules/code/frontend.md の「app/（ルーティングだけ）」）。
       //     仕様は screen と api ファイルのテストで固定し、app/ の結線は E2E（pnpm test:e2e）で確かめる。
       //   - 設定ファイル（リポジトリ直下の vitest.config.mts など、apps/frontend_customer/next.config.ts、
       //     apps/backend/shared/drizzle/drizzle.config.ts）: ツールに渡す値を並べるだけで、単体テストで検証する振る舞いを持たない。
       //     apps/frontend_customer 直下の Next の規約ファイル instrumentation.ts / instrumentation-node.ts（起動時の環境変数の検証。Issue #59）も
       //     含めない: next start / next dev の起動でだけ動き、プロセスを終える処理なので、起動時に止まることを実測で確かめている
-      //     （.claude/rules/env.md の「環境変数」）。検証の中身は env.ts（計測の対象）のテストで固定している。
+      //     （.claude/rules/tooling/env.md の「環境変数」）。検証の中身は env.ts（計測の対象）のテストで固定している。
       //     同じく直下の Next の規約ファイル proxy.ts（リクエストログ。Issue #80）も含めない: next start / next dev の中で
       //     リクエストごとに Next から呼ばれるだけで、NextRequest の値を渡して 1 行を出力する結線しか持たない。1 行の中身は
       //     apps/frontend_customer/shared/request-log/request-log.ts（計測の対象）のテストで固定し、結線（matcher・stdout・応答ヘッダ）は

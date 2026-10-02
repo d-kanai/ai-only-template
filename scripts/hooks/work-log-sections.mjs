@@ -9,7 +9,7 @@
 // WHY .mjs（.ts にしない）: CI の検査は setup-node より前に runner に入っている node で動く（ci.yml の「Check docs/work-logs in PR diff」）。
 //   その版（Ubuntu 24.04 の runner で 22 系）では型の除去に頼れないので、そのまま実行できる JavaScript にする。
 // WHY console を使わない: rule-tests/architecture.test.ts の console-direct-access が scripts/ の .mjs も対象にする（出力は stdout に書く）。
-// 仕様と限界: .claude/rules/work-log.md。テスト: scripts/hooks/work-log-sections.test.ts。
+// 仕様と限界: .claude/rules/tooling/work-log-hooks.md。テスト: scripts/hooks/work-log-sections.test.ts。
 
 import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";

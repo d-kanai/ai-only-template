@@ -6,7 +6,7 @@ import { SharedSteps } from "../spec/shared.steps";
 import { TodoSteps } from "../spec/todo.steps";
 import { E2eLogServer } from "./log-server";
 
-// E2E の step（*.steps.ts）のクラスを Playwright の fixture として登録する（Issue #279。.claude/rules/testing.md の「E2E」）。
+// E2E の step（*.steps.ts）のクラスを Playwright の fixture として登録する（Issue #279。.claude/rules/quality/testing.md の「E2E」）。
 // WHY step をクラスのメソッドに書く（playwright-bdd のデコレータ @Given / @When / @Then と @Fixture）: テストの補助も最上位に関数を
 //   置かない（ADR docs/adr/architecture/20261002-class-based-shared-and-test-support.md。rule-tests/architecture.test.ts の
 //   class-based）。createBdd の Given(...) の呼び出しで書くと step の関数が最上位の呼び出しの引数に並ぶので、クラスに寄せる。

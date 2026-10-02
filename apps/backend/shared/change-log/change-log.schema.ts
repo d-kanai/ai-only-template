@@ -38,7 +38,7 @@ export const changeLogs = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     // 変わった行の表の名前（DB の表名。例: todos）。
     tableName: text("table_name").notNull(),
-    // 変わった行の id。WHY uuid: 表の id 列はすべて uuid（.claude/rules/backend.md の「列の型」）。
+    // 変わった行の id。WHY uuid: 表の id 列はすべて uuid（.claude/rules/code/backend.md の「列の型」）。
     rowId: uuid("row_id").notNull(),
     // 操作（insert / update / delete）。WHY text の enum（Postgres の enum 型にしない）: 値の一覧は
     //   shared/change-log/change-operation.ts が持ち、Drizzle の型だけを絞る。enum 型は値を足すたびに ALTER TYPE が要る。

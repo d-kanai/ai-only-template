@@ -2,14 +2,14 @@ import { type Dirent, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import type { TaskMeta } from "vitest";
 
-// API 網羅率（Issue #281。.claude/rules/testing.md の「API 網羅率」）の集計と判定の側。vitest.config.mts の reporters が
+// API 網羅率（Issue #281。.claude/rules/quality/testing.md の「API 網羅率」）の集計と判定の側。vitest.config.mts の reporters が
 //   このファイル（default export の ApiCoverageReporter）を読み、Vitest の本体のプロセスで実行の終わりに呼ぶ。
 // API 網羅率 = API ジャーニーの実行で 1 回以上呼ばれた API の数 / 全 API の数。100% 未満なら終了コードを 1 にする（CI の
 //   ci ジョブの pnpm test が失敗する）。
 // WHY（daiki の指示 2026-10-02）: API は必ずどこかの業務の流れ（ジャーニー）に現れるはず。流れに出てこない API は、業務で
 //   使われ方が確かめられていないか、要らない API なので、機械的に見つける。
 // WHY 全 API を route.ts から数える: 利用者から呼べる API は Next のルーティング（apps/frontend_customer/app/api/**/route.ts）が
-//   公開するものだけで、route.ts は backend の api ファイルの re-export だけを置く（.claude/rules/frontend.md）。*.api.ts から
+//   公開するものだけで、route.ts は backend の api ファイルの re-export だけを置く（.claude/rules/code/frontend.md）。*.api.ts から
 //   数えると、ルーティングにつながっていない Api も分母に入る。
 // WHY reporter にする（テストにしない）: 網羅率は全ジャーニーを実行した後でないと決まらず、テストファイルは別々の worker で
 //   並行して動く。reporter の onTestRunEnd は全テストの後に 1 回、全テストの結果（meta を含む）を受け取る。
@@ -87,7 +87,7 @@ export class ApiEndpoints {
     const source = readFileSync(file, "utf8").replace(/\/\/.*/g, "");
     const reExport = /export\s*\{([^}]*)\}\s*from\s*"([^"]+)"/g;
     // WHY re-export とコメント以外が残れば例外にする: route.ts は backend の api ファイルの re-export だけを置く
-    //   （.claude/rules/frontend.md）。Route Handler を直接書いた route.ts は Api のクラスにたどれない。
+    //   （.claude/rules/code/frontend.md）。Route Handler を直接書いた route.ts は Api のクラスにたどれない。
     if (source.replace(reExport, "").replace(/[\s;]/g, "") !== "") {
       throw new Error(
         `${label}: has code other than export { <METHOD> } from "@repo/backend/..." (API coverage cannot count its APIs).`,

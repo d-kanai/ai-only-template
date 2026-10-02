@@ -1,4 +1,4 @@
-# 入力の誤りの伝え方（Issue #126 / #144 / #279。.claude/rules/testing.md の「E2E（Playwright + playwright-bdd）」）。
+# 入力の誤りの伝え方（Issue #126 / #144 / #279。.claude/rules/quality/testing.md の「E2E（Playwright + playwright-bdd）」）。
 # step の実装は api-error.steps.ts（対の名前。rule-tests/e2e-feature.test.ts の e2e-feature-pair）。
 # 誤りの本文の形は apps/backend の problem.test.ts と各 api のテストで固定しているので、ここでは本番のビルドを通っても、誤りの
 #   種類と誤った項目が届くこと（結線）だけを見る。画面は形の誤った入力を送らないので、step の実装は画面ではなく直接呼ぶ。

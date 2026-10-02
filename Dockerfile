@@ -14,7 +14,7 @@
 #   .env は .dockerignore でコンテキストから外し、build ステージで一時的に作るものも同じ RUN の中で消す。
 
 # NODE_IMAGE: すべてのステージの元にする Node.js の公式イメージ（Debian slim 版）。
-# WHY 24.21.0: .tool-versions の nodejs と同じ版にし、手元・CI とコンテナで同じ Node で動かす（.claude/rules/env.md）。
+# WHY 24.21.0: .tool-versions の nodejs と同じ版にし、手元・CI とコンテナで同じ Node で動かす（.claude/rules/tooling/env.md）。
 #   .tool-versions を変えたらここも変える。
 # WHY slim: Node の実行に要るものだけの Debian で、フル版より小さい。alpine（musl）にしないのは、next の依存の sharp などの
 #   ネイティブのバイナリを手元・CI（glibc）と同じ種類にするため。

@@ -16,7 +16,7 @@ import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, expect } from "vitest";
 import { casesByName } from "./case-table";
 
-// テストの本体のフェーズコメント（.claude/rules/testing.md の「フェーズコメント」。Issue #273、daiki の指示 2026-10-02）を、
+// テストの本体のフェーズコメント（.claude/rules/quality/testing.md の「フェーズコメント」。Issue #273、daiki の指示 2026-10-02）を、
 //   テストファイルのソースで機械的に検査するテスト。
 // 違反にするもの（規則 test-phase-comments）:
 //   - テストの本体（コールバックのブロック）の中のフェーズコメント（行頭の `// given` / `// when` / `// then`。後ろに空白か `:` で
@@ -33,7 +33,7 @@ import { casesByName } from "./case-table";
 //   - 対象のディレクトリ（TARGET_DIRS）の下の `*.test.ts` / `*.test.tsx` の `it(` / `test(`（`.each(...)` / `.for(...)` /
 //     `.skipIf(...)` / `.runIf(...)` / `.concurrent` / `.sequential` / `.fails` を挟んだ変種も）。
 //   - API 仕様（`*.api-spec.test.ts`）の step（`Given(` / `When(` / `Then(` / `And(` / `But(`）。`*` の step 1 つが Vitest の
-//     テスト 1 つになり、前提から検証までを 1 つの step で書くため（.claude/rules/testing.md の「API 仕様テスト（spec/api）」）。
+//     テスト 1 つになり、前提から検証までを 1 つの step で書くため（.claude/rules/quality/testing.md の「API 仕様テスト（spec/api）」）。
 //   - ルール検査テスト（rule-tests/ の直下の `*.test.ts`）の step。API 仕様と同じく `*` の step 1 つが前提から検証までの 1 テスト
 //     （Issue #282。rule-tests/rule-test-feature.test.ts）。
 //   WHY API ジャーニー（`*.api-journey.test.ts`）の step は対象外: step の Given / When / Then のキーワード自体がフェーズを表し、

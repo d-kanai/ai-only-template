@@ -15,7 +15,7 @@ import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, expect } from "vitest";
 import { casesByName } from "./case-table";
 
-// 「1 ユースケース = 1 API = 1 command」（.claude/rules/backend.md、Issue #175・#177）を、application の command / query
+// 「1 ユースケース = 1 API = 1 command」（.claude/rules/code/backend.md、Issue #175・#177）を、application の command / query
 // （apps/backend/features/*/internal/application/*.command.ts・*.query.ts）の入力で機械的に検査するテスト。
 // WHY 検査する: 入力の任意の項目は「指定されたときだけ変える」分岐を command に生み、1 つの command に複数のユースケース
 //   （改名・完了の切り替え）が混ざる。ユースケースが違うなら command を分ける（Issue #175）。api 側は rule-tests/api-request.test.ts が

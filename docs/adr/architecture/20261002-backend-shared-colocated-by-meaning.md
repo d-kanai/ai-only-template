@@ -2,7 +2,7 @@
 
 - 日付: 2026-10-02
 - 状態: 採用
-- 関連: Issue #310 / `.claude/rules/backend.md` / `.claude/rules/architecture-check.md` / スキル `db-migration`
+- 関連: Issue #310 / `.claude/rules/code/backend.md` / `.claude/rules/code/architecture-check.md` / スキル `db-migration`
 
 ## 背景
 `apps/backend/shared/` は feature と同じ 4 層（`domain/` `application/` `presentation/` `infra/`）に分け、Drizzle の設定とマイグレーションだけを例外の `shared/drizzle/` に置いていた（architecture/20260929-backend-features-and-shared-directories.md）。shared の中身は feature をまたぐ道具で、1 つの関心が層に散っていた（変更履歴は `domain/change-operation.ts`・`infra/schema.ts`・`infra/change-log.ts`、HTTP のエラー応答は `domain/` と `presentation/`）。feature の層ごとに shared のどの層を使えるかも規則で縛っていた。

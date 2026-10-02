@@ -16,12 +16,12 @@ import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, beforeAll, expect } from "vitest";
 import { casesByName } from "./case-table";
 
-// 依存の版は package.json 上でも完全固定する（.claude/rules/dependencies.md）。
+// 依存の版は package.json 上でも完全固定する（.claude/rules/tooling/dependencies.md）。
 // 対象は pnpm workspace のすべての package.json（リポジトリ直下と、pnpm-workspace.yaml の packages に当たる apps/* など。Issue #68）。
 // lockfile だけに頼ると、`pnpm update` や lockfile の再生成で範囲内の別の版に解決し直されうるため、
 // package.json 側でも範囲指定（^ ~ >= など）を禁止し、このテストで機械的に担保する。
 //
-// ルール検査テスト（.claude/rules/testing.md）なので、判定（isPinnedVersion）・列挙（listDependencies）を関数に切り出し、
+// ルール検査テスト（.claude/rules/quality/testing.md）なので、判定（isPinnedVersion）・列挙（listDependencies）を関数に切り出し、
 // 許可される例（must pass）と違反の例（must reject）の両方で固定する。今の package.json に違反が無いことだけでは、
 // 判定が常に「固定済み」を返す壊れ方を検出できないため。
 // .feature（package.feature）と step の実装（このファイル）に分けた（Issue #282）。
@@ -31,7 +31,7 @@ const repoRoot = join(import.meta.dirname, "..");
 // WHY x.y.z の数字 3 つだけを許す（プレリリース 1.2.3-beta.1 とビルドメタ 1.2.3+build も拒否する）:
 //   完全固定の狙いは「意図した版だけが入る」ことで、x.y.z はそれ自体は満たす。ただしプレリリースは安定版の前提
 //   （semver の互換性の約束）から外れ、ビルドメタは npm の版の比較で無視される（同じ x.y.z の別ビルドを区別できない）。
-//   どちらも通常の依存では使わないので拒否に倒し、使う必要が出たら Issue で決める（.claude/rules/dependencies.md）。
+//   どちらも通常の依存では使わないので拒否に倒し、使う必要が出たら Issue で決める（.claude/rules/tooling/dependencies.md）。
 //   `=1.2.3` や `v1.2.3` も npm は完全一致として解釈するが、書き方を 1 通りにするため拒否する。
 //   先頭が 0 の数（`01.2.3`）は semver で不正なので拒否する（0 そのものは許す）。
 const EXACT_VERSION = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
@@ -53,7 +53,7 @@ function isAllowedVersion(spec: string): boolean {
   return isPinnedVersion(spec) || spec === WORKSPACE_PROTOCOL;
 }
 
-// WHY dependencies と devDependencies の 2 つ: .claude/rules/dependencies.md の対象がこの 2 つ。
+// WHY dependencies と devDependencies の 2 つ: .claude/rules/tooling/dependencies.md の対象がこの 2 つ。
 //   片方だけを見る壊れ方（書き間違い・消し忘れ）をテストで検出するため、定数で持って両方の例を用意する。
 const DEPENDENCY_FIELDS = ["dependencies", "devDependencies"] as const;
 type DependencyField = (typeof DEPENDENCY_FIELDS)[number];
@@ -477,7 +477,7 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("package.json の実ファイル", ({ And }) => {
     // 読み込み → 列挙 → 判定を、本番と同じ readManifest で実ファイルから通す（判定だけ正しくても、読み込みや列挙が
-    //   漏れれば違反は見逃されるため。.claude/rules/testing.md の「ルール検査テスト」）。
+    //   漏れれば違反は見逃されるため。.claude/rules/quality/testing.md の「ルール検査テスト」）。
     And(
       "範囲指定を含む package.json からは、違反の依存をすべて検出する",
       () => {
@@ -625,7 +625,7 @@ describeFeature(feature, ({ Scenario }) => {
 
     // WHY: 同じパッケージを複数の package.json に置く（pg / @types/pg は E2E 用の apps/e2e と apps/backend の両方）と、
     //   片方だけ版を上げたときに、同じ workspace に同じパッケージの 2 つの版が入り、どちらのコードがどちらの版で動くかが
-    //   package.json を見ても分からなくなる。版を上げるときに両方を上げ忘れないよう、機械的に止める（.claude/rules/dependencies.md）。
+    //   package.json を見ても分からなくなる。版を上げるときに両方を上げ忘れないよう、機械的に止める（.claude/rules/tooling/dependencies.md）。
     And(
       "workspace の package.json をまたいで、同じ名前の依存は同じ版で書かれている",
       () => {

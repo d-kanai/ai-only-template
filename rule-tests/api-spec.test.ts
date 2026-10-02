@@ -17,7 +17,7 @@ import { afterAll, expect } from "vitest";
 import { casesByName } from "./case-table";
 import { containsForbiddenWord } from "./feature-business-language";
 
-// API 仕様テスト（Issue #219。.claude/rules/testing.md の「API 仕様テスト（spec/api）」、ADR
+// API 仕様テスト（Issue #219。.claude/rules/quality/testing.md の「API 仕様テスト（spec/api）」、ADR
 //   docs/adr/quality/20260930-api-spec-in-feature.md）の置き場所と形を、ファイルの一覧とソースで機械的に検査するテスト。
 // API 仕様テスト = API 1 つ（apps/backend/features/<feature>/internal/presentation/<api>.api.ts）の振る舞いを、人が読む仕様として
 //   Gherkin の <api>.feature に業務の言葉で書き、step の実装（<api>.api-spec.test.ts）が実 Postgres の上で本番の組み立てを通して
@@ -150,7 +150,7 @@ import { containsForbiddenWord } from "./feature-business-language";
 //     その行の違反。
 //     WHY: すべての handler をまとめて返す入口（以前の todoApis）があると、step は ApiAssembly で終わらない名前で import して、どの API も
 //       呼べる（api-spec-own-api-only を素通りする）。組み立てを Api ごとのクラスに分け、名前を Api のクラスから決めると、step の
-//       import の名前と組み立てる Api が 1 対 1 になる（api ファイルの名前とクラス名は .claude/rules/backend.md の「命名」で対になる）。
+//       import の名前と組み立てる Api が 1 対 1 になる（api ファイルの名前とクラス名は .claude/rules/code/backend.md の「命名」で対になる）。
 //     WHY 行頭の宣言だけを組み立てのクラスと認める: クラス式（`export const Rows = class CreateTodoApiAssembly {`）は別の名前で export でき、
 //       宣言の名前が step の import の名前にならない。
 //   - api-spec-support-assembles-apis: 自 feature の api（apps/backend/features/<feature>/internal/presentation/<名前>.api）を少なくとも
@@ -685,7 +685,7 @@ function isApiModule(module: string | undefined): boolean {
 // api ファイルの名前（kebab-case）から、support.ts の組み立てのクラスの名前を作る
 //   （"change-todo-completion" → "ChangeTodoCompletionApiAssembly"）。
 // WHY Api のクラス名に Assembly を足したものと同じになる: api ファイルとクラスは `<verb>-<noun>.api.ts` と `<Verb><Noun>Api` で対になる
-//   （.claude/rules/backend.md の「命名」）。support.ts の側は api-spec-support-assembler-per-api が new する Api のクラス名から同じ名前を求める。
+//   （.claude/rules/code/backend.md の「命名」）。support.ts の側は api-spec-support-assembler-per-api が new する Api のクラス名から同じ名前を求める。
 function assemblerNameOf(api: string): string {
   return `${api.replace(/(?:^|-)([a-z0-9])/g, (_, char: string) => char.toUpperCase())}ApiAssembly`;
 }

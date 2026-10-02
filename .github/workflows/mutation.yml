@@ -1,10 +1,10 @@
 # mutation testing（Stryker）を main ブランチで毎日実行し、レポートを artifact に保存する（Issue #52）。
-# 設定は stryker.config.mjs、位置づけと運用は .claude/rules/testing.md の「mutation testing（Stryker）」。
+# 設定は stryker.config.mjs、位置づけと運用は .claude/rules/quality/testing.md の「mutation testing（Stryker）」。
 # WHY PR ごとではなく日次: ユーザー判断（Issue #52）。PR の CI（ci.yml）には入れないので、実行時間（ローカル 4 コアで
 #   約 3.5 分、2026-09-28 実測。変異の数はコードの量に応じて増える）が PR のマージを待たせない。
 # score が 100 を下回る（survived が 1 件でもある）と stryker run が非 0 で終わり、このジョブが失敗する
 #   （stryker.config.mjs の thresholds.break: 100。ユーザー判断、Issue #55）。等価な変異は理由付きの disable で除外する前提
-#   （.claude/rules/testing.md の「mutation testing（Stryker）」）。失敗してもレポートは下の upload で残す（if: always()）。
+#   （.claude/rules/quality/testing.md の「mutation testing（Stryker）」）。失敗してもレポートは下の upload で残す（if: always()）。
 name: Mutation
 
 on:
@@ -30,14 +30,14 @@ jobs:
     #   ubuntu-latest も 4 コアなので同程度の見込みで、コードが増えても余裕のある上限にする。
     #   変異がテストを無限ループさせたときなどに、既定の 360 分まで止まらないようにするため。
     timeout-minutes: 30
-    # GitHub Actions は CI=true を既定で設定するので、pnpm install の lefthook postinstall はフックを入れない（.claude/rules/lint.md）。
+    # GitHub Actions は CI=true を既定で設定するので、pnpm install の lefthook postinstall はフックを入れない（.claude/rules/quality/lint.md）。
     steps:
       # ref: main: schedule は既定ブランチで動くが、workflow_dispatch で別ブランチを選んだときも main を検査するように明示する。
       - uses: actions/checkout@v4
         with:
           ref: main
 
-      # Node / pnpm の版の取り方は ci.yml と同じ（.claude/rules/env.md）。
+      # Node / pnpm の版の取り方は ci.yml と同じ（.claude/rules/tooling/env.md）。
       # Node の版は .tool-versions が正。ワークフローに直書きせず、nodejs 行から読む。
       - name: Read Node.js version from .tool-versions
         run: echo "NODE_VERSION=$(awk '$1 == "nodejs" { print $2 }' .tool-versions)" >> "$GITHUB_ENV"
@@ -51,7 +51,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
-      # --frozen-lockfile: lockfile と package.json がずれていたら更新せず失敗させる（.claude/rules/dependencies.md）。
+      # --frozen-lockfile: lockfile と package.json がずれていたら更新せず失敗させる（.claude/rules/tooling/dependencies.md）。
       - run: pnpm install --frozen-lockfile
 
       # 開発用の PostgreSQL を compose.yaml で起動する（ci.yml と同じ手順。WHY の詳細は ci.yml のコメント）。

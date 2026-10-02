@@ -6,7 +6,7 @@ description: Stryker による mutation testing（pnpm test:mutation）の実行
 # mutation-testing（Stryker）
 
 Stryker が実装に変異（条件の反転・戻り値の差し替え・文字列を空にする など）を入れ、Vitest の単体テストが失敗する（killed）か緑のまま（survived）かを数える。設定は `stryker.config.mjs`（各設定の WHY はファイル内のコメント）。
-テストの書き方の規則と disable の一覧は `.claude/rules/testing.md`、決定は ADR `docs/adr/quality/20260928-mutation-testing-daily-with-score-100.md`、実測の score・時間は 2026-09-28 の work-logs。
+テストの書き方の規則と disable の一覧は `.claude/rules/quality/testing.md`、決定は ADR `docs/adr/quality/20260928-mutation-testing-daily-with-score-100.md`、実測の score・時間は 2026-09-28 の work-logs。
 
 ## 位置づけ
 - 検証の弱いテスト（呼び出すだけ・値を見ていない）を日次でまとめて拾う。テストを書いたその場での「守っているコードを壊すと落ちる」確認（手作業）の代わりにはしない。
@@ -30,7 +30,7 @@ Stryker が実装に変異（条件の反転・戻り値の差し替え・文字
 2. 文言の変異: API のエラーの本文（Problem Details の `title`・`detail` など。`problem.ts`・`problem-detail.en.ts`）は検証して殺す。内部のログの文言など検証しない文言だけ disable してよい。
 3. **等価な変異**（変えても振る舞いが変わらず、どのテストでも検出できない）だけ、理由付きで除く: `// Stryker disable next-line <Mutator>: <理由>`。
    - `next-line` は、コメントを直前に持つ文・式の開始行にだけ効く。依存配列など式の途中に効かせたいときは、その式を別の行に書いて直前にコメントを置く。`disable` 〜 `restore` の範囲指定は `next-line` で書けないときだけ、最小範囲で。
-   - 殺せるのにテストを書く手間を省くために使わない。disable を足した・消したら `.claude/rules/testing.md` の一覧を更新する。
+   - 殺せるのにテストを書く手間を省くために使わない。disable を足した・消したら `.claude/rules/quality/testing.md` の一覧を更新する。
    - 「等価」と決める前にほかの実行経路を探す（例: React の `<Activity mode="hidden">` では unmount せずに effect の片付けが走り、state 更新も反映される）。
 4. 等価な変異を生む書き方を避ける:
    - 判定の結果を変えない検査（`"error" in value` の後に `value.error` の型を見る など）は書かない。

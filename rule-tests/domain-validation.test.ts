@@ -15,7 +15,7 @@ import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, expect } from "vitest";
 import { casesByName } from "./case-table";
 
-// 「domain の検証は validate（DomainValidation.validated）を通す」（.claude/rules/backend.md の「入力検証」の domain の項、apps/backend/shared/error/validate.ts、
+// 「domain の検証は validate（DomainValidation.validated）を通す」（.claude/rules/code/backend.md の「入力検証」の domain の項、apps/backend/shared/error/validate.ts、
 // Issue #177）を、backend のソースで機械的に検査するテスト。
 // WHY 検査する: zod の issue → DomainError の変換（最初の issue の message をキーにする・キーの無い issue は DomainError ではない
 //   Error（500）にする）は validate の 1 か所に置いた。Entity ごとに safeParse して自分で DomainError を作ると、変換が Entity ごとに

@@ -19,11 +19,11 @@ paths:
 4. アプリ・テスト・ツールは `apps/shared/env.ts` 経由で worktree の `.env` を読む（`DotEnvFile.findRepoRoot` は worktree の `pnpm-workspace.yaml` で止まる）ので、コードは何も変えずに worktree 専用のリソースを使う。
 
 - WHY 決定的に導く: 乱数や空きの探索にすると、作り直したときに値が変わって作ったリソースを見失う。名前から計算できれば、後始末も名前だけで対象を決められる。
-- WHY 値の入口を `.env` にする: 値の入口は `env.ts` の 1 か所（`.claude/rules/env.md`）。worktree ごとに `.env` を変えれば、分離のための分岐をコードに持たずに済む。
+- WHY 値の入口を `.env` にする: 値の入口は `env.ts` の 1 か所（`.claude/rules/tooling/env.md`）。worktree ごとに `.env` を変えれば、分離のための分岐をコードに持たずに済む。
 - InMemory / WASM の DB には置き換えない（テストは本物のリソースで行う。Issue #64 のユーザー判断）。
 
 ## リソースを足す手順（Redis の DB 番号・キーの接頭辞、バケット名の接頭辞など）
-1. `env.ts` と `.env.example` に変数を足す。アプリの設定は `Env` / `PARSERS`（必須、既定値なし）、ツールの動かし方の切り替え（`E2E_PORT` など）は `ToolEnv`（任意）に置く（`.claude/rules/env.md`）。どちらでも `.env.example` には値を書く（`worktree-env.sh` の導出の元。無ければ失敗する）。
+1. `env.ts` と `.env.example` に変数を足す。アプリの設定は `Env` / `PARSERS`（必須、既定値なし）、ツールの動かし方の切り替え（`E2E_PORT` など）は `ToolEnv`（任意）に置く（`.claude/rules/tooling/env.md`）。どちらでも `.env.example` には値を書く（`worktree-env.sh` の導出の元。無ければ失敗する）。
 2. `scripts/worktree-env.sh` に `derive_<変数名>` の関数を 1 つ足し、`RESOURCES` と先頭の「リソースの一覧」のコメントに変数名を足す。
 3. 作成が要るものは `worktree-create.sh` に、削除は同じファイルの孤立の掃除（`cleanup_orphan_databases` と同じ形）と `worktree-remove.sh` に足す。
 4. テストを先に足す: 導出は `scripts/worktree-env.test.ts`、作成・削除は偽のコマンドを PATH に置く `scripts/hooks/worktree-*.test.ts`。

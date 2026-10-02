@@ -15,29 +15,37 @@ import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, beforeAll, expect } from "vitest";
 import { casesByName } from "./case-table";
 
-// 指示ファイル（CLAUDE.md / .claude/general / .claude/rules / .claude/skills / .claude/agents）と ADR（docs/adr）の構成を
+// 指示ファイル（CLAUDE.md / .claude/rules / .claude/skills / .claude/agents）と ADR（docs/adr）の構成を
 //   仕様として固定するテスト（Issue #64。ADR の検査は Issue #96、分類ディレクトリは Issue #100）。
 // WHY 機械で検査する: 指示ファイルは「読み込まれているか」、ADR は「決まった形で一覧から辿れるか」を人が見落としやすい。
 //   rules の paths の typo は、そのルールが黙って読み込まれなくなるだけで、何もエラーにならない（CLAUDE.md の原則 7）。
-// ルール検査テスト（.claude/rules/testing.md）なので、判定を関数に切り出し、架空の入力で must pass / must reject を固定してから、
+// ルール検査テスト（.claude/rules/quality/testing.md）なので、判定を関数に切り出し、架空の入力で must pass / must reject を固定してから、
 //   一時ディレクトリの fixture と実リポジトリに同じ関数（collectInstructionViolations）を当てる。
 //
 // 検査すること（違反の文字列の先頭が検査の名前）:
 //   claude-md-lines   CLAUDE.md は 200 行以下（公式 https://code.claude.com/docs/en/memory の目安。超えると起動時に警告）。
 //   claude-md-import  CLAUDE.md とそこから @ で読むファイルの @path が、存在するファイルを指す。@ で読んでよいのは
-//                     LEARNINGS.md と .claude/general/*.md だけ（常時読み込む量を増やさないため。規則は .claude/rules に
-//                     paths で置き、手順はスキルにする）。
-//   general-lines     .claude/general/*.md は 1 ファイル 25 行以下（常時読み込まれるため、短い要点だけにする）。
+//                     LEARNINGS.md だけ（常時読み込む量を増やさないため。常時の要点は .claude/rules/workflow/ に paths 無しで
+//                     置けば自動で読まれ、規則は .claude/rules/<分類>/ に paths で置き、手順はスキルにする。Issue #315）。
+//   always-lines      .claude/rules/workflow/*.md は 1 ファイル 25 行以下（常時読み込まれるため、短い要点だけにする）。
 //   rule-tests-index  CLAUDE.md の「ルール検査テスト N 本」の N が rule-tests/ の直下の .feature の数と同じで、各名前を `<名前>` の
-//                     コードスパンで持ち、.claude/rules/testing.md の「今あるもの」が各 `rule-tests/<名前>.test.ts` を持つ（Issue #302）。
+//                     コードスパンで持ち、.claude/rules/quality/testing.md の「今あるもの」が各 `rule-tests/<名前>.test.ts` を持つ（Issue #302）。
 //                     WHY: 一覧は手で足すもので、PR #294 で design-system / screen-outline を足したときに両方の一覧に漏れ、testing.md は
 //                     settings / work-logs-check も漏れていた。一覧に無いルール検査テストは、規則を探す人とエージェントから見えない。
 //                     名前を探すのは CLAUDE.md の「ルール検査テスト N 本（」から最初の「。」までと、testing.md の「今あるもの:」で始まる行だけ。
 //                     限界: 名前が書いてあるかだけを見る（説明の中身・消したテストの名前が残っていることは見ない）。
-//   rules-paths       .claude/rules/*.md はフロントマターに paths（1 件以上の glob）を持ち、各 glob がリポジトリのファイルに
-//                     1 件以上一致する（一致しない glob は typo として扱う。そのルールは読み込まれないまま残るため）。
+//   rules-category    .claude/rules の下の .md は .claude/rules/<分類>/<名前>.md（分類は RULE_CATEGORIES の 4 つ）に置く（Issue #315）。
+//                     WHY: Claude Code は .claude/rules の下を再帰で読む（公式 https://code.claude.com/docs/en/memory 。2026-10-02 確認）
+//                     ので置き場所は自由だが、分類を固定して「どこに何があるか」と「常時か paths か」を置き場所で読めるようにする。
+//   rules-always      .claude/rules/workflow/*.md はフロントマターに paths を持たない（公式: paths の無い rule は起動時に読まれる。
+//                     workflow/ は常時読み込む要点の置き場所なので、paths を書くと黙って常時でなくなる）。
+//   rules-paths       workflow/ 以外の .claude/rules/<分類>/*.md はフロントマターに paths（1 件以上の glob）を持ち、各 glob がリポジトリの
+//                     ファイルに 1 件以上一致する（一致しない glob は typo として扱う。そのルールは読み込まれないまま残るため。
+//                     paths が無いと常時読み込まれ、常時の量が黙って増えるため）。
 //   legacy-rules      旧 rules/ ディレクトリが無く、ファイルに rules/code/・rules/general/ への参照が残っていない
 //                     （docs/work-logs/ は過去の記録なので除く。このファイルは例を持つので除く）。
+//   legacy-general    旧 .claude/general/ ディレクトリが無く、ファイルに .claude/general/ への参照が残っていない（Issue #315 で
+//                     .claude/rules/workflow/ に移した。docs/work-logs/ と、不変の記録の docs/adr/ と、このファイルは除く）。
 //   ADR は docs/adr/<分類>/<ファイル名>（分類は ADR_CATEGORIES の 4 つ）。ADR への参照（置き換え先・一覧のリンク）は
 //   docs/adr/ からの相対パス「<分類>/<ファイル名>」の 1 通りで書く。
 //   adr-name          分類の直下のファイルの名前が yyyymmdd-<topic>.md（topic は英小文字・数字の kebab-case）。
@@ -59,7 +67,7 @@ import { casesByName } from "./case-table";
 //                     description は起動時に一覧として読まれ、いつ使うかの判断に使われる）。
 //   agent-model       .claude/agents/*.md はフロントマターの model が許可したフル ID（ALLOWED_AGENT_MODELS）のいずれか
 //                     （Issue #78。別名 `opus` / `sonnet` や古い ID は意図しないモデルに解決され、消費と品質が変わる。
-//                     `.claude/general/orchestration.md`、`docs/adr/workflow/20260929-save-usage-limit.md`）。
+//                     `.claude/rules/workflow/orchestration.md`、`docs/adr/workflow/20260929-save-usage-limit.md`）。
 // .feature（instructions.feature）と step の実装（このファイル）に分けた（Issue #282）。
 
 const repoRoot = join(import.meta.dirname, "..");
@@ -67,21 +75,26 @@ const SELF = "rule-tests/instructions.test.ts";
 
 const CLAUDE_MD = "CLAUDE.md";
 const CLAUDE_MD_MAX_LINES = 200;
-const GENERAL_MAX_LINES = 25;
+const ALWAYS_MAX_LINES = 25;
+// 常時読み込む rule の置き場所（paths を持たない）。
+const ALWAYS_RULES_DIR = ".claude/rules/workflow/";
+// .claude/rules の分類（Issue #315 のユーザー判断）。workflow は常時、ほかは paths で読む。
+// WHY 固定の集合にする: 分類を自由に足せると、置き場所から「何の規則か」「常時か」が読めなくなる。足すときはここと CLAUDE.md の表を直す。
+const RULE_CATEGORIES = ["code", "quality", "tooling", "workflow"];
 
 function countLines(text: string): number {
   // WHY 末尾の改行を 1 行と数えない: エディタの行数（wc -l）と合わせる。
   return text.replace(/\n$/, "").split("\n").length;
 }
 
-// CLAUDE.md と .claude/general/*.md の行数の上限を超えたもの。
+// CLAUDE.md と .claude/rules/workflow/*.md の行数の上限を超えたもの。
 function findLineViolations(files: { path: string; text: string }[]): string[] {
   return files.flatMap(({ path, text }) => {
     const isClaudeMd = path === CLAUDE_MD;
-    const max = isClaudeMd ? CLAUDE_MD_MAX_LINES : GENERAL_MAX_LINES;
+    const max = isClaudeMd ? CLAUDE_MD_MAX_LINES : ALWAYS_MAX_LINES;
     const lines = countLines(text);
     if (lines <= max) return [];
-    const check = isClaudeMd ? "claude-md-lines" : "general-lines";
+    const check = isClaudeMd ? "claude-md-lines" : "always-lines";
     return [`${check}: ${path} が ${lines} 行（上限 ${max}）`];
   });
 }
@@ -103,13 +116,9 @@ function extractImports(markdown: string): string[] {
   );
 }
 
+// WHY .claude/rules/workflow/ も許さない: paths の無い rule は自動で読まれるので、@ で読むと同じ内容が 2 度入る。
 function isAllowedImportTarget(path: string): boolean {
-  return (
-    path === "LEARNINGS.md" ||
-    (path.startsWith(".claude/general/") &&
-      path.endsWith(".md") &&
-      !path.slice(".claude/general/".length).includes("/"))
-  );
+  return path === "LEARNINGS.md";
 }
 
 type FileReader = (path: string) => string | undefined;
@@ -131,7 +140,7 @@ function findImportViolations(read: FileReader): string[] {
         violations.push(`claude-md-import: ${source} → @${target}（無い）`);
       } else if (!isAllowedImportTarget(resolved)) {
         violations.push(
-          `claude-md-import: ${source} → @${target}（LEARNINGS.md と .claude/general/*.md 以外）`,
+          `claude-md-import: ${source} → @${target}（LEARNINGS.md 以外）`,
         );
       } else {
         queue.push(resolved);
@@ -145,7 +154,7 @@ function findImportViolations(read: FileReader): string[] {
 // 読み取りの仕様: 先頭行が `---` で、次の `---` の行までをフロントマターとする。`key: value` をスカラー、値が空の `key:` の
 //   後ろに続く `  - item` をリストとして読む。値の前後の '...' / "..." は外す。
 // WHY YAML のパーサを足さない: 読みたいのは paths（glob のリスト）と name / description（1 行の文字列）だけで、行の読み取りで
-//   足りる（依存を増やすとサプライチェーンの対象も増える。.claude/rules/dependencies.md）。
+//   足りる（依存を増やすとサプライチェーンの対象も増える。.claude/rules/tooling/dependencies.md）。
 // 限界: フロー形式（`paths: ["a", "b"]`）や複数行の文字列は読まない（paths が無い・値が空として違反になる。見逃す方向ではない）。
 type Frontmatter = Record<string, string | string[]>;
 
@@ -194,13 +203,28 @@ function parseFrontmatter(markdown: string): Frontmatter | undefined {
   return result;
 }
 
-// .claude/rules/<name>.md 1 つの違反。files はリポジトリのファイル（リポジトリ相対のパス）。
+// .claude/rules/<分類>/<name>.md 1 つの違反。files はリポジトリのファイル（リポジトリ相対のパス）。
 function findRuleFileViolations(
   path: string,
   markdown: string,
   files: string[],
 ): string[] {
-  const paths = parseFrontmatter(markdown)?.paths;
+  const category = /^\.claude\/rules\/([^/]+)\/[^/]+\.md$/.exec(path)?.[1];
+  if (category === undefined || !RULE_CATEGORIES.includes(category)) {
+    return [
+      `rules-category: ${path} が .claude/rules/<分類>/<名前>.md（分類は ${RULE_CATEGORIES.join(" / ")}）でない`,
+    ];
+  }
+  const frontmatter = parseFrontmatter(markdown);
+  if (path.startsWith(ALWAYS_RULES_DIR)) {
+    // WHY キーの有無で見る: 空の paths: や値の崩れた paths も、Claude Code の読み方次第で常時でなくなりうるので書かせない。
+    return frontmatter !== undefined && "paths" in frontmatter
+      ? [
+          `rules-always: ${path} に paths がある（workflow/ は常時読み込むので paths を持たない）`,
+        ]
+      : [];
+  }
+  const paths = frontmatter?.paths;
   if (!Array.isArray(paths) || paths.length === 0) {
     return [`rules-paths: ${path} にフロントマターの paths（1 件以上）が無い`];
   }
@@ -242,6 +266,7 @@ function findAgentModelViolations(path: string, markdown: string): string[] {
 
 // --- 旧 rules/ への参照 ---
 // WHY .claude/rules/ を除く: 新しい置き場所（.claude/rules/general.md のような名前）を旧パスと取り違えないため。
+// 注意: 分類 code の rule を `.claude/` を付けずに `rules/code/x.md` と略すと、旧パスとして違反になる（誤検出の方向。常に `.claude/` から書く）。
 const LEGACY_REFERENCE = /(?<!\.claude\/)\brules\/(?:code|general)\b/;
 
 const WORK_LOGS_DIR = "docs/work-logs/";
@@ -255,6 +280,25 @@ function findLegacyReferences(path: string, text: string): string[] {
     .split("\n")
     .flatMap((line, index) =>
       LEGACY_REFERENCE.test(line) ? [`legacy-rules: ${path}:${index + 1}`] : [],
+    );
+}
+
+// --- 旧 .claude/general への参照 ---
+// WHY docs/adr/ も除く: ADR は不変の記録で、当時の置き場所の名前を書き換えない（置き換えの ADR で辿る）。
+// 限界: 末尾の / の無い `.claude/general` は見ない（移した経緯の説明文に名前だけ出すため。ファイルへの参照は / を伴う）。
+const LEGACY_GENERAL_REFERENCE = /\.claude\/general\//;
+
+function isLegacyGeneralScanTarget(path: string): boolean {
+  return isLegacyScanTarget(path) && !path.startsWith(ADR_DIR);
+}
+
+function findLegacyGeneralReferences(path: string, text: string): string[] {
+  return text
+    .split("\n")
+    .flatMap((line, index) =>
+      LEGACY_GENERAL_REFERENCE.test(line)
+        ? [`legacy-general: ${path}:${index + 1}`]
+        : [],
     );
 }
 
@@ -467,7 +511,7 @@ function findAdrCategoryViolations(files: string[]): string[] {
 
 // docs/ の直下に adr/ と work-logs/ 以外のファイル・ディレクトリがあれば、その項目（ディレクトリは末尾に /）。続けて、
 //   docs/adr/ の直下の README.md 以外のファイル。docs/work-logs/ の中の構成は見ない（作業ログの置き方は
-//   .claude/general/work-log.md。CI の check-work-logs-diff.sh はサブディレクトリの .md も数える）。
+//   .claude/rules/workflow/work-log.md。CI の check-work-logs-diff.sh はサブディレクトリの .md も数える）。
 // WHY docs/ を ADR と作業ログだけにする: Issue #96 で docs/*.md（実測・経緯の記録）を廃止し、決定は ADR、実測は作業ログ、
 //   一次情報は規則の WHY に振り分けた。docs/ に別の記録を足せる状態だと、同じ二重管理（最新の規則と記録のずれ）が戻る。
 //   Issue #101 で作業ログを docs/work-logs/ に移し、読み込まれない記録を docs/ の 2 つにまとめた（ユーザー指示）。
@@ -508,7 +552,7 @@ function findNonAdrDocs(files: string[]): string[] {
 }
 
 // --- ルール検査テストの一覧 ---
-const TESTING_MD = ".claude/rules/testing.md";
+const TESTING_MD = ".claude/rules/quality/testing.md";
 
 const RULE_TEST_FEATURE = /^rule-tests\/([^/]+)\.feature$/;
 
@@ -521,7 +565,7 @@ function ruleTestNames(files: string[]): string[] {
     .sort();
 }
 
-// CLAUDE.md の「ルール検査テスト N 本（`<名前>` / …。」と .claude/rules/testing.md の「今あるもの:」の行の `rule-tests/<名前>.test.ts` が、
+// CLAUDE.md の「ルール検査テスト N 本（`<名前>` / …。」と .claude/rules/quality/testing.md の「今あるもの:」の行の `rule-tests/<名前>.test.ts` が、
 //   rule-tests/ の実際のルール検査テストとそろっているか。
 function findRuleTestIndexViolations(
   names: string[],
@@ -580,7 +624,7 @@ function listRepoFiles(root: string): string[] {
 type Inventory = {
   files: string[];
   ruleFiles: string[];
-  generalFiles: string[];
+  alwaysFiles: string[];
   adrs: string[];
   skills: string[];
   agents: string[];
@@ -590,11 +634,10 @@ type Inventory = {
 function inventory(files: string[]): Inventory {
   return {
     files,
-    ruleFiles: files.filter((file) =>
-      /^\.claude\/rules\/[^/]+\.md$/.test(file),
-    ),
-    generalFiles: files.filter((file) =>
-      /^\.claude\/general\/[^/]+\.md$/.test(file),
+    // WHY 下のすべての .md: Claude Code は再帰で読むので、分類の外に置いたものも rules-category で拾う。
+    ruleFiles: files.filter((file) => /^\.claude\/rules\/.+\.md$/.test(file)),
+    alwaysFiles: files.filter((file) =>
+      /^\.claude\/rules\/workflow\/[^/]+\.md$/.test(file),
     ),
     // WHY .md に限らず分類の直下をすべて数える: `.MD` や `.txt` に置いた ADR も adr-name で違反にし、形式の検査から黙って
     //   外れないようにする。分類の外・分類の下のディレクトリに置いたものは adr-category / adr-only が拾う（isAdrFile）。
@@ -617,7 +660,7 @@ function collectInstructionViolations(
       : undefined;
   return [
     ...findLineViolations(
-      [CLAUDE_MD, ...found.generalFiles].map((path) => ({
+      [CLAUDE_MD, ...found.alwaysFiles].map((path) => ({
         path,
         text: read(path) ?? "",
       })),
@@ -631,6 +674,12 @@ function collectInstructionViolations(
     ...found.files
       .filter(isLegacyScanTarget)
       .flatMap((path) => findLegacyReferences(path, read(path) ?? "")),
+    ...(existsSync(join(root, ".claude/general"))
+      ? ["legacy-general: .claude/general/ がある"]
+      : []),
+    ...found.files
+      .filter(isLegacyGeneralScanTarget)
+      .flatMap((path) => findLegacyGeneralReferences(path, read(path) ?? "")),
     ...findAdrViolations(
       found.adrs.map((path) => ({ path, text: read(path) ?? "" })),
       read(ADR_INDEX),
@@ -654,7 +703,7 @@ function collectInstructionViolations(
 let dir: string;
 
 beforeAll(() => {
-  // WHY OS の一時ディレクトリ: リポジトリの中に置くと、テストが途中で落ちたときに作業ツリーに残る（.claude/rules/testing.md）。
+  // WHY OS の一時ディレクトリ: リポジトリの中に置くと、テストが途中で落ちたときに作業ツリーに残る（.claude/rules/quality/testing.md）。
   dir = mkdtempSync(join(tmpdir(), "instructions-test-"));
 });
 
@@ -688,7 +737,7 @@ describeFeature(feature, ({ Scenario }) => {
     });
 
     And(
-      "CLAUDE.md は 200 行まで、.claude/general は 25 行までを許し、超えたら違反にする",
+      "CLAUDE.md は 200 行まで、.claude/rules/workflow は 25 行までを許し、超えたら違反にする",
       () => {
         // given
         const lines = (count: number) => "x\n".repeat(count);
@@ -696,7 +745,7 @@ describeFeature(feature, ({ Scenario }) => {
         // when
         const violations = findLineViolations([
           { path: "CLAUDE.md", text: lines(200) },
-          { path: ".claude/general/a.md", text: lines(25) },
+          { path: ".claude/rules/workflow/a.md", text: lines(25) },
         ]);
 
         // then
@@ -705,13 +754,13 @@ describeFeature(feature, ({ Scenario }) => {
         // when
         const overLimitViolations = findLineViolations([
           { path: "CLAUDE.md", text: lines(201) },
-          { path: ".claude/general/a.md", text: lines(26) },
+          { path: ".claude/rules/workflow/a.md", text: lines(26) },
         ]);
 
         // then
         expect(overLimitViolations).toEqual([
           "claude-md-lines: CLAUDE.md が 201 行（上限 200）",
-          "general-lines: .claude/general/a.md が 26 行（上限 25）",
+          "always-lines: .claude/rules/workflow/a.md が 26 行（上限 25）",
         ]);
       },
     );
@@ -722,14 +771,11 @@ describeFeature(feature, ({ Scenario }) => {
         // given: 前提なし
         // when
         const imports = extractImports(
-          "@LEARNINGS.md\n- ブランチ: @.claude/general/workflow.md\n",
+          "@LEARNINGS.md\n- ブランチ: @docs/branch.md\n",
         );
 
         // then
-        expect(imports).toEqual([
-          "LEARNINGS.md",
-          ".claude/general/workflow.md",
-        ]);
+        expect(imports).toEqual(["LEARNINGS.md", "docs/branch.md"]);
       },
     );
 
@@ -748,7 +794,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And(
-      "@ で読んでよいのは LEARNINGS.md と .claude/general の直下の .md だけ",
+      "@ で読んでよいのは LEARNINGS.md だけ（.claude/rules/workflow は paths 無しで自動で読まれる）",
       () => {
         // given: 前提なし
         // when
@@ -758,21 +804,23 @@ describeFeature(feature, ({ Scenario }) => {
         expect(result).toBe(true);
 
         // when
-        const workflowAllowed = isAllowedImportTarget(
-          ".claude/general/workflow.md",
+        const alwaysAllowed = isAllowedImportTarget(
+          ".claude/rules/workflow/commit.md",
         );
 
         // then
-        expect(workflowAllowed).toBe(true);
+        expect(alwaysAllowed).toBe(false);
 
         // when
-        const rulesAllowed = isAllowedImportTarget(".claude/rules/backend.md");
+        const rulesAllowed = isAllowedImportTarget(
+          ".claude/rules/code/backend.md",
+        );
 
         // then
         expect(rulesAllowed).toBe(false);
 
         // when
-        const nestedAllowed = isAllowedImportTarget(".claude/general/sub/x.md");
+        const nestedAllowed = isAllowedImportTarget("docs/LEARNINGS.md");
 
         // then
         expect(nestedAllowed).toBe(false);
@@ -784,10 +832,12 @@ describeFeature(feature, ({ Scenario }) => {
         expect(adrAllowed).toBe(false);
 
         // when
-        const txtAllowed = isAllowedImportTarget(".claude/general/x.txt");
+        const legacyAllowed = isAllowedImportTarget(
+          ".claude/general/workflow.md",
+        );
 
         // then
-        expect(txtAllowed).toBe(false);
+        expect(legacyAllowed).toBe(false);
       },
     );
 
@@ -796,10 +846,8 @@ describeFeature(feature, ({ Scenario }) => {
       () => {
         // given
         const files: Record<string, string> = {
-          "CLAUDE.md":
-            "@LEARNINGS.md\n@.claude/general/a.md\n@missing.md\n@docs/adr/README.md\n",
-          "LEARNINGS.md": "学び\n",
-          ".claude/general/a.md": "@b.md と @../../LEARNINGS.md\n",
+          "CLAUDE.md": "@LEARNINGS.md\n@missing.md\n@docs/adr/README.md\n",
+          "LEARNINGS.md": "@b.md と @./LEARNINGS.md\n",
           "docs/adr/README.md": "一覧\n",
         };
 
@@ -809,8 +857,8 @@ describeFeature(feature, ({ Scenario }) => {
         // then
         expect(violations).toEqual([
           "claude-md-import: CLAUDE.md → @missing.md（無い）",
-          "claude-md-import: CLAUDE.md → @docs/adr/README.md（LEARNINGS.md と .claude/general/*.md 以外）",
-          "claude-md-import: .claude/general/a.md → @b.md（無い）",
+          "claude-md-import: CLAUDE.md → @docs/adr/README.md（LEARNINGS.md 以外）",
+          "claude-md-import: LEARNINGS.md → @b.md（無い）",
         ]);
       },
     );
@@ -818,9 +866,8 @@ describeFeature(feature, ({ Scenario }) => {
     And("許可されたファイルだけを指す @ は違反にしない", () => {
       // given
       const files: Record<string, string> = {
-        "CLAUDE.md": "@LEARNINGS.md\n@.claude/general/a.md\n",
+        "CLAUDE.md": "@LEARNINGS.md\n",
         "LEARNINGS.md": "学び\n",
-        ".claude/general/a.md": "要点\n",
       };
 
       // when
@@ -831,7 +878,7 @@ describeFeature(feature, ({ Scenario }) => {
     });
   });
 
-  Scenario(".claude/rules のフロントマター", ({ And }) => {
+  Scenario(".claude/rules の分類とフロントマター", ({ And }) => {
     const files = [
       "apps/backend/features/todo/internal/domain/todo.ts",
       "biome.json",
@@ -849,11 +896,82 @@ describeFeature(feature, ({ Scenario }) => {
       expect(frontmatter).toEqual({ paths: ["apps/backend/**", "biome.json"] });
     });
 
+    And(
+      ".claude/rules/<分類>/<名前>.md（分類は code / quality / tooling / workflow）でなければ違反にする（must reject）（直下・分類でない・分類の下のディレクトリ・大文字）",
+      () => {
+        // given
+        const markdown = '---\npaths:\n  - "apps/backend/**"\n---\n';
+        const cases: [string][] = [
+          [".claude/rules/backend.md"],
+          [".claude/rules/misc/backend.md"],
+          [".claude/rules/code/sub/backend.md"],
+          [".claude/rules/Code/backend.md"],
+          [".claude/rules/codes/backend.md"],
+        ];
+
+        // when
+        const result = casesByName(cases, ([path]) =>
+          findRuleFileViolations(path, markdown, files),
+        );
+
+        // then
+        expect(result).toEqual(
+          casesByName(cases, ([path]) => [
+            `rules-category: ${path} が .claude/rules/<分類>/<名前>.md（分類は code / quality / tooling / workflow）でない`,
+          ]),
+        );
+      },
+    );
+
+    And("workflow/ は paths が無ければ違反にしない（must pass）", () => {
+      // given
+      const cases: [string][] = [
+        ["# 常時の要点\n"],
+        ["---\nname: x\n---\n本文\n"],
+      ];
+
+      // when
+      const result = casesByName(cases, ([markdown]) =>
+        findRuleFileViolations(".claude/rules/workflow/x.md", markdown, files),
+      );
+
+      // then
+      expect(result).toEqual(casesByName(cases, () => []));
+    });
+
+    And(
+      "workflow/ に paths があれば違反にする（must reject。常時読み込むため）",
+      () => {
+        // given
+        const cases: [string][] = [
+          ['---\npaths:\n  - "apps/backend/**"\n---\n'],
+          ["---\npaths:\n---\n"],
+          ['---\npaths: "apps/backend/**"\n---\n'],
+        ];
+
+        // when
+        const result = casesByName(cases, ([markdown]) =>
+          findRuleFileViolations(
+            ".claude/rules/workflow/x.md",
+            markdown,
+            files,
+          ),
+        );
+
+        // then
+        expect(result).toEqual(
+          casesByName(cases, () => [
+            "rules-always: .claude/rules/workflow/x.md に paths がある（workflow/ は常時読み込むので paths を持たない）",
+          ]),
+        );
+      },
+    );
+
     And("すべての glob がファイルに一致すれば違反にしない（must pass）", () => {
       // given: 前提なし
       // when
       const violations = findRuleFileViolations(
-        ".claude/rules/x.md",
+        ".claude/rules/code/x.md",
         '---\npaths:\n  - "apps/backend/**"\n  - "biome.json"\n  - "*.test.ts"\n---\n',
         files,
       );
@@ -880,13 +998,13 @@ describeFeature(feature, ({ Scenario }) => {
 
         // when
         const result = casesByName(cases, ([, markdown]) =>
-          findRuleFileViolations(".claude/rules/x.md", markdown, files),
+          findRuleFileViolations(".claude/rules/code/x.md", markdown, files),
         );
 
         // then
         expect(result).toEqual(
           casesByName(cases, () => [
-            "rules-paths: .claude/rules/x.md にフロントマターの paths（1 件以上）が無い",
+            "rules-paths: .claude/rules/code/x.md にフロントマターの paths（1 件以上）が無い",
           ]),
         );
       },
@@ -898,15 +1016,15 @@ describeFeature(feature, ({ Scenario }) => {
         // given: 前提なし
         // when
         const violations = findRuleFileViolations(
-          ".claude/rules/x.md",
+          ".claude/rules/code/x.md",
           '---\npaths:\n  - "apps/backnd/**"\n  - "biome.jsonc"\n  - "apps/backend/**"\n---\n',
           files,
         );
 
         // then
         expect(violations).toEqual([
-          'rules-paths: .claude/rules/x.md の glob "apps/backnd/**" に一致するファイルが無い',
-          'rules-paths: .claude/rules/x.md の glob "biome.jsonc" に一致するファイルが無い',
+          'rules-paths: .claude/rules/code/x.md の glob "apps/backnd/**" に一致するファイルが無い',
+          'rules-paths: .claude/rules/code/x.md の glob "biome.jsonc" に一致するファイルが無い',
         ]);
       },
     );
@@ -1042,7 +1160,7 @@ describeFeature(feature, ({ Scenario }) => {
       () => {
         // given
         const cases: [string][] = [
-          [".claude/rules/backend.md"],
+          [".claude/rules/code/backend.md"],
           [".claude/rules/general.md"],
           ["rules/ ディレクトリは削除した"],
           ["myrules/code/x.md"],
@@ -1098,6 +1216,86 @@ describeFeature(feature, ({ Scenario }) => {
       // then
       expect(adrReadmeTarget).toBe(true);
     });
+
+    And(
+      "旧 .claude/general への参照（文中・@ の import・コードスパン）を違反にする（must reject）",
+      () => {
+        // given
+        const cases: [string][] = [
+          ["詳細は .claude/general/workflow.md"],
+          ["- 運用: @.claude/general/orchestration.md"],
+          ["（`.claude/general/work-log.md`）"],
+          ["`.claude/general/` の要点"],
+        ];
+
+        // when
+        const result = casesByName(cases, ([line]) =>
+          findLegacyGeneralReferences("x.sh", `ok\n${line}\n`),
+        );
+
+        // then
+        expect(result).toEqual(
+          casesByName(cases, () => ["legacy-general: x.sh:2"]),
+        );
+      },
+    );
+
+    And(
+      ".claude/rules/general.md のような別の名前・general の単語は違反にしない（must pass）",
+      () => {
+        // given
+        const cases: [string][] = [
+          [".claude/rules/general.md"],
+          [".claude/rules/workflow/work-log.md"],
+          ["general な規則"],
+          [".claude/generally.md"],
+        ];
+
+        // when
+        const result = casesByName(cases, ([line]) =>
+          findLegacyGeneralReferences("x.sh", line),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => []));
+      },
+    );
+
+    And(
+      "旧 .claude/general への参照は、docs/adr/（不変の記録）も検査しない",
+      () => {
+        // given: 前提なし
+        // when
+        const adrTarget = isLegacyGeneralScanTarget(
+          "docs/adr/workflow/20260928-instruction-files-by-load-timing.md",
+        );
+
+        // then
+        expect(adrTarget).toBe(false);
+
+        // when
+        const workLogTarget = isLegacyGeneralScanTarget(
+          "docs/work-logs/2026-09-28.md",
+        );
+
+        // then
+        expect(workLogTarget).toBe(false);
+
+        // when
+        const selfTarget = isLegacyGeneralScanTarget(SELF);
+
+        // then
+        expect(selfTarget).toBe(false);
+
+        // when
+        const skillTarget = isLegacyGeneralScanTarget(
+          ".claude/skills/pr-flow/SKILL.md",
+        );
+
+        // then
+        expect(skillTarget).toBe(true);
+      },
+    );
   });
 
   // テンプレート（docs/adr/README.md）どおりの ADR の本文。変えたい行だけを渡して must reject の入力を作る。
@@ -1114,7 +1312,7 @@ describeFeature(feature, ({ Scenario }) => {
       title = "# Todo の不変条件を常に全フィールドで検証する",
       date = "- 日付: 2026-09-29",
       status = "- 状態: 採用",
-      related = "- 関連: Issue #94 / PR #95 / `.claude/rules/backend.md`",
+      related = "- 関連: Issue #94 / PR #95 / `.claude/rules/code/backend.md`",
       sections = ADR_REQUIRED_SECTIONS,
     } = overrides;
     return [
@@ -1820,7 +2018,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And(
-      "CLAUDE.md の本数と名前、.claude/rules/testing.md の rule-tests/<名前>.test.ts がそろっていれば違反にしない（must pass）",
+      "CLAUDE.md の本数と名前、.claude/rules/quality/testing.md の rule-tests/<名前>.test.ts がそろっていれば違反にしない（must pass）",
       () => {
         // given
         const read = readerOf({
@@ -1900,8 +2098,8 @@ describeFeature(feature, ({ Scenario }) => {
                 "今あるもの: `rule-tests/api-spec.test.tsx`・`rule-tests/lint.feature`\n",
             },
             [
-              "rule-tests-index: .claude/rules/testing.md に `rule-tests/api-spec.test.ts` が無い",
-              "rule-tests-index: .claude/rules/testing.md に `rule-tests/lint.test.ts` が無い",
+              "rule-tests-index: .claude/rules/quality/testing.md に `rule-tests/api-spec.test.ts` が無い",
+              "rule-tests-index: .claude/rules/quality/testing.md に `rule-tests/lint.test.ts` が無い",
             ],
           ],
           [
@@ -1912,7 +2110,7 @@ describeFeature(feature, ({ Scenario }) => {
                 "検査は `rule-tests/lint.test.ts`\n今あるもの: `rule-tests/api-spec.test.ts`\n",
             },
             [
-              "rule-tests-index: .claude/rules/testing.md に `rule-tests/lint.test.ts` が無い",
+              "rule-tests-index: .claude/rules/quality/testing.md に `rule-tests/lint.test.ts` が無い",
             ],
           ],
         ] as const;
@@ -1959,10 +2157,10 @@ describeFeature(feature, ({ Scenario }) => {
 
     const passing: Record<string, string> = {
       "CLAUDE.md":
-        "# CLAUDE.md\n@LEARNINGS.md\n- 運用: @.claude/general/workflow.md\n決定は docs/adr/README.md\n",
+        "# CLAUDE.md\n@LEARNINGS.md\n- 運用: `.claude/rules/workflow/issue-pr.md`\n決定は docs/adr/README.md\n",
       "LEARNINGS.md": "学び\n",
-      ".claude/general/workflow.md": "要点\n",
-      ".claude/rules/backend.md":
+      ".claude/rules/workflow/issue-pr.md": "# 常時の要点\n",
+      ".claude/rules/code/backend.md":
         '---\npaths:\n  - "apps/backend/**"\n---\n規則の WHY\n',
       ".claude/skills/pr-flow/SKILL.md":
         "---\nname: pr-flow\ndescription: PR を作るとき\n---\n",
@@ -1983,12 +2181,15 @@ describeFeature(feature, ({ Scenario }) => {
       ].join("\n"),
       // 置き換え元と置き換え先を別の分類に置く（置き換えの参照が分類をまたいで辿れることを見る）。
       "docs/adr/architecture/20260929-todo.md": adrText(),
+      // 不変の ADR に残る旧 .claude/general への参照は数えない（related）。
       "docs/adr/quality/20260928-old.md": adrText({
         date: "- 日付: 2026-09-28",
         status: "- 状態: 置き換え（→ architecture/20260929-todo.md）",
+        related: "- 関連: `.claude/general/workflow.md`",
       }),
       "docs/work-logs/2026-09-28.md":
-        "rules/code/test.md を書いた（過去の記録）\n",
+        "rules/code/test.md と .claude/general/workflow.md を書いた（過去の記録）\n",
+
       ".gitignore": "ignored/\n",
       "ignored/rules/code/x.md": "rules/code/x.md\n",
     };
@@ -2009,10 +2210,19 @@ describeFeature(feature, ({ Scenario }) => {
       // given
       const root = makeRepo("reject", {
         ...passing,
-        "CLAUDE.md": `${"x\n".repeat(200)}@LEARNINGS.md\n@missing.md\n@.claude/rules/backend.md\n`,
-        ".claude/general/long.md": "x\n".repeat(26),
-        ".claude/rules/no-paths.md": "# paths が無い\n",
-        ".claude/rules/typo.md": '---\npaths:\n  - "apps/backnd/**"\n---\n',
+        "CLAUDE.md": `${"x\n".repeat(200)}@LEARNINGS.md\n@missing.md\n@.claude/rules/code/backend.md\n`,
+        ".claude/rules/workflow/long.md": "x\n".repeat(26),
+        ".claude/rules/workflow/scoped.md":
+          '---\npaths:\n  - "apps/backend/**"\n---\n',
+        ".claude/rules/code/no-paths.md": "# paths が無い\n",
+        ".claude/rules/code/typo.md":
+          '---\npaths:\n  - "apps/backnd/**"\n---\n',
+        ".claude/rules/flat.md": '---\npaths:\n  - "apps/backend/**"\n---\n',
+        // 分類の下の入れ子も列挙する（Claude Code は再帰で読むので、列挙から落ちると検査から黙って外れる）。
+        ".claude/rules/code/sub/nested.md":
+          '---\npaths:\n  - "apps/backend/**"\n---\n',
+        ".claude/general/orchestration.md": "旧い置き場所\n",
+        "scripts/hook.sh": "echo 詳細は .claude/general/work-log.md\n",
         ".claude/skills/broken/SKILL.md": "---\nname: broken\n---\n",
         ".claude/agents/alias.md": "---\nname: alias\nmodel: sonnet\n---\n",
         "rules/code/test.md": "旧ルール\n",
@@ -2060,17 +2270,22 @@ describeFeature(feature, ({ Scenario }) => {
       // then
       expect(result).toEqual([
         "claude-md-lines: CLAUDE.md が 203 行（上限 200）",
-        "general-lines: .claude/general/long.md が 26 行（上限 25）",
+        "always-lines: .claude/rules/workflow/long.md が 26 行（上限 25）",
         "claude-md-import: CLAUDE.md → @missing.md（無い）",
-        "claude-md-import: CLAUDE.md → @.claude/rules/backend.md（LEARNINGS.md と .claude/general/*.md 以外）",
+        "claude-md-import: CLAUDE.md → @.claude/rules/code/backend.md（LEARNINGS.md 以外）",
         "rule-tests-index: CLAUDE.md に「ルール検査テスト 1 本」の記載が無い",
         "rule-tests-index: CLAUDE.md に `x` が無い",
-        "rule-tests-index: .claude/rules/testing.md に `rule-tests/x.test.ts` が無い",
-        "rules-paths: .claude/rules/no-paths.md にフロントマターの paths（1 件以上）が無い",
-        'rules-paths: .claude/rules/typo.md の glob "apps/backnd/**" に一致するファイルが無い',
+        "rule-tests-index: .claude/rules/quality/testing.md に `rule-tests/x.test.ts` が無い",
+        "rules-paths: .claude/rules/code/no-paths.md にフロントマターの paths（1 件以上）が無い",
+        "rules-category: .claude/rules/code/sub/nested.md が .claude/rules/<分類>/<名前>.md（分類は code / quality / tooling / workflow）でない",
+        'rules-paths: .claude/rules/code/typo.md の glob "apps/backnd/**" に一致するファイルが無い',
+        "rules-category: .claude/rules/flat.md が .claude/rules/<分類>/<名前>.md（分類は code / quality / tooling / workflow）でない",
+        "rules-always: .claude/rules/workflow/scoped.md に paths がある（workflow/ は常時読み込むので paths を持たない）",
         "legacy-rules: rules/ がある",
         "legacy-rules: README.md:1",
         "legacy-rules: work-logs/2026-09-28.md:1",
+        "legacy-general: .claude/general/ がある",
+        "legacy-general: scripts/hook.sh:1",
         "adr-title: docs/adr/tech-stack/20260928-broken.md の 1 行目が「# 」の見出しでない",
         "adr-meta: docs/adr/tech-stack/20260928-broken.md の日付 2026-09-29 がファイル名の 20260928 と違う",
         "adr-meta: docs/adr/tech-stack/20260928-broken.md の置き換え先 20260929-todo.md が docs/adr に無い（<分類>/<ファイル名> で書く）",
@@ -2112,10 +2327,10 @@ describeFeature(feature, ({ Scenario }) => {
       expect(ruleFileCount).toBeGreaterThan(0);
 
       // when
-      const generalFileCount = found.generalFiles.length;
+      const alwaysFileCount = found.alwaysFiles.length;
 
       // then
-      expect(generalFileCount).toBeGreaterThan(0);
+      expect(alwaysFileCount).toBeGreaterThan(0);
 
       // when
       const adrCount = found.adrs.length;
@@ -2161,7 +2376,7 @@ describeFeature(feature, ({ Scenario }) => {
     const violations = collectInstructionViolations(repoRoot, found);
 
     And(
-      "CLAUDE.md・.claude/general・.claude/rules・スキル・エージェント・ADR に違反が無く、旧 rules/ も残っていない",
+      "CLAUDE.md・.claude/rules・スキル・エージェント・ADR に違反が無く、旧 rules/ と .claude/general も残っていない",
       () => {
         // given: 前提なし
         // when

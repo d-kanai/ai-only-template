@@ -135,7 +135,7 @@ describe("check-work-logs-diff.sh", () => {
       // given
       // --no-renames: 利用者の diff.renames の設定に左右されず、名前の変更を常に「削除 + 追加」として扱う。
       //   rename の検出が効くと R になり --diff-filter=AM で外れる（設定で結果が変わる）。
-      // 限界: 中身を足していない名前の変更でも通る（.claude/rules/work-log.md）。
+      // 限界: 中身を足していない名前の変更でも通る（.claude/rules/tooling/work-log-hooks.md）。
       git([
         "mv",
         "docs/work-logs/2026-09-27.md",

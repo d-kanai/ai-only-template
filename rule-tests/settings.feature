@@ -1,4 +1,4 @@
-# .claude/settings.json の権限（permissions.deny）とフックの登録（.claude/rules/git-guard.md）を検査するルール検査テストの仕様（Issue #282）。step の実装は対の settings.test.ts。
+# .claude/settings.json の権限（permissions.deny）とフックの登録（.claude/rules/tooling/git-guard.md）を検査するルール検査テストの仕様（Issue #282）。step の実装は対の settings.test.ts。
 # 規則の WHY と限界は settings.test.ts の冒頭。
 Feature: Claude Code の権限とフックの設定
   Scenario: matcher の判定（公式 hooks の Matcher patterns）

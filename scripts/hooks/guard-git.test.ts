@@ -1,7 +1,7 @@
 // @vitest-environment node
 // WHY: vitest.config.mts の既定環境は jsdom だが、このテストは bash を子プロセスで起動するだけで DOM を使わない。
 //
-// scripts/hooks/guard-git.sh（PreToolUse フック）の仕様。ルール検査テスト（.claude/rules/git-guard.md）なので、
+// scripts/hooks/guard-git.sh（PreToolUse フック）の仕様。ルール検査テスト（.claude/rules/tooling/git-guard.md）なので、
 // deny される例（must reject）と通す例（must pass）を境界のケースまで両方持つ。
 // フックとしての起動は Claude Code がするので、ここでは Claude Code と同じ形の JSON を stdin に渡してスクリプトを直接実行し、
 // stdout の JSON（deny）か、何も出さない（許可）かを見る。
@@ -128,7 +128,7 @@ describe("サブエージェント（agent_type / agent_id がある）", () => 
     ["git \\\n  commit -m x"],
     ["(cd sub && git push)"],
     ["echo $(git commit -m x)"],
-    // 誤検知として受け入れる例（.claude/rules/git-guard.md の「誤検知」）: 文字列の中の git commit も拒否する。
+    // 誤検知として受け入れる例（.claude/rules/tooling/git-guard.md の「誤検知」）: 文字列の中の git commit も拒否する。
     ['echo "git commit -m x"'],
   ])("%s は拒否する", (command) => {
     // given: 前提なし（リポジトリは beforeAll で作成済み）

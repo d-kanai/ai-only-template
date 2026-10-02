@@ -1,6 +1,6 @@
 // .feature（Gherkin）に書かない技術の言葉の一覧と判定。API ジャーニー（rule-tests/api-journey.test.ts の
 //   api-journey-business-language。Issue #217）と API 仕様（rule-tests/api-spec.test.ts の api-spec-business-language。Issue #219）が
-//   同じ一覧を使う。WHY（業務の言葉に限る理由・3 桁の数の扱い）は rule-tests/api-journey.test.ts の冒頭、.claude/rules/testing.md の
+//   同じ一覧を使う。WHY（業務の言葉に限る理由・3 桁の数の扱い）は rule-tests/api-journey.test.ts の冒頭、.claude/rules/quality/testing.md の
 //   「API ジャーニーテスト」「API 仕様テスト（spec/api）」。
 // WHY 1 か所に置く: 一覧を 2 つのテストにそれぞれ書くと、語を足したときに片方だけが変わり、同じ .feature の言葉の規則がずれる。
 // WHY テストファイル（*.test.ts）から export せず、テストでないこのモジュールに置く（Issue #219 で実測）:

@@ -5,17 +5,17 @@ description: Issue からブランチ・PR・CI・マージ・後始末までの
 
 # pr-flow（Issue → ブランチ → PR → マージ → 後始末）
 
-WHY 自動起動にしている（`disable-model-invocation` を付けない）: マージはオーケストレータ（モデル）が人間の承認なしに行うので、モデル自身がこの手順を呼べる必要がある。危険な操作（main への push、squash、force push）はスキルを隠すのではなく、PreToolUse フック `scripts/hooks/guard-git.sh` と `permissions.deny`（`.claude/settings.json`）が止める（`.claude/rules/git-guard.md`）。
+WHY 自動起動にしている（`disable-model-invocation` を付けない）: マージはオーケストレータ（モデル）が人間の承認なしに行うので、モデル自身がこの手順を呼べる必要がある。危険な操作（main への push、squash、force push）はスキルを隠すのではなく、PreToolUse フック `scripts/hooks/guard-git.sh` と `permissions.deny`（`.claude/settings.json`）が止める（`.claude/rules/tooling/git-guard.md`）。
 
 main は常にマージ可能に保つ。main への直接コミット・push はしない（GitHub の Ruleset `protect-main` でも禁止）。
 コマンドは `gh` で書く。クラウドセッション（`gh` が無い）での読み替えは最後の節。GitHub 側の設定（Projects・Ruleset）の詳細は `${CLAUDE_SKILL_DIR}/github-settings.md`。
 
 ## 手順
 1. **Issue**: 無ければ作る（目的・完了条件を書く）。type ラベルを 1 つ付ける: `gh issue create --label <type>`（`feat` / `fix` / `docs` / `chore` / `refactor`）。
-   - 1 Issue = 1 PR。大きければ Issue を分ける。WHY: PR の差分とレビューを小さく保つ。スレッド（セッション）の分け方は `.claude/general/orchestration.md`（ADR `docs/adr/workflow/20261001-project-threads-per-task.md`）。
+   - 1 Issue = 1 PR。大きければ Issue を分ける。WHY: PR の差分とレビューを小さく保つ。スレッド（セッション）の分け方は `.claude/rules/workflow/orchestration.md`（ADR `docs/adr/workflow/20261001-project-threads-per-task.md`）。
    - Projects への追加と Status の変更は GitHub 側のワークフローが行う。Projects の API は呼ばない（`github-settings.md`）。
 2. **ブランチ**: main の最新から切る。`git checkout main && git pull && git checkout -b <type>/<Issue番号>-<内容>`（例: `feat/12-branch-rules`）。type は Issue のラベルと同じ。
-3. **実装**: テストから書く（CLAUDE.md の Test Driven）。作業の分担は `.claude/agents/`（worker / worker-light / researcher / reviewer。使い分けは `.claude/general/orchestration.md`）。worker が完了するごとにコミットし、未コミットを長く残さない。
+3. **実装**: テストから書く（CLAUDE.md の Test Driven）。作業の分担は `.claude/agents/`（worker / worker-light / researcher / reviewer。使い分けは `.claude/rules/workflow/orchestration.md`）。worker が完了するごとにコミットし、未コミットを長く残さない。
 4. **作業ログ**: `docs/work-logs/<YYYY-MM-DD>.md` に、このタスクでやったこと・根拠・判断を追記する。WHY: CI が PR の差分に `docs/work-logs/*.md` の変更が無いと失敗する（文書だけの PR も例外なし）。
 5. **コミット**: 1 行目にサマリ、本文に 🎯 WHY / 📝 WHAT / 🛠️ 実装経緯 / ✅ 検証内容、末尾に `Co-Authored-By: <モデル名>`（メールアドレスは任意。詳細は CLAUDE.md から読み込むコミットのルール）。
 6. **PR 作成**: `gh pr create --label <type>`。

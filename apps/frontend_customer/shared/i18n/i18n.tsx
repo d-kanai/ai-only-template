@@ -236,7 +236,7 @@ export function useLocale(): Locale {
   return use(LocaleContext);
 }
 
-// 画面のロケールで、辞書 messages を翻訳する型付きの t。画面の文言はすべてこれを通す（.claude/rules/frontend.md の「i18n」）。
+// 画面のロケールで、辞書 messages を翻訳する型付きの t。画面の文言はすべてこれを通す（.claude/rules/code/frontend.md の「i18n」）。
 // WHY 辞書を引数で受け取る: 画面・部品ごとの辞書（colocation）のキーだけを受け付ける t にし、別の画面の辞書のキーを
 //   コンパイルエラーにする。
 // WHY useMemo: ロケールと辞書が変わらない限り同じ関数を返し、t を effect や useCallback の依存に入れても作り直しが起きないようにする。

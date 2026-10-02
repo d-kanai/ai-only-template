@@ -43,7 +43,7 @@ import type { Problem } from "../../shared/http/problem";
 import { ApiCoverage } from "../../test-support/api-coverage";
 import { TestDatabase } from "../../test-support/database";
 
-// API ジャーニーテスト（Issue #187 / #200。.claude/rules/testing.md の「API ジャーニーテスト」、ADR
+// API ジャーニーテスト（Issue #187 / #200。.claude/rules/quality/testing.md の「API ジャーニーテスト」、ADR
 //   docs/adr/quality/20260930-backend-journey-tests.md と docs/adr/quality/20260930-gherkin-journeys-with-vitest-cucumber.md）:
 //   Todo のライフサイクルという業務ユースケースに沿って、複数の API の handler（XxxApi.handle）を実 Postgres の上で順に呼ぶ。
 //   業務の流れは todo-lifecycle.feature（Gherkin の日本語の step）に書き、step の実装をこのファイルに書く（対の名前
@@ -102,7 +102,7 @@ afterAll(async () => {
 
 // 本番の api ファイルの最下部と同じ組み立てで、テスト用のスキーマの db を使う handler をそろえる。
 // WHY 名前を HTTP メソッドで始める（postTodo・putTitle・deleteTodo、読み取りは getTodo・listTodos）: rule-tests/api-journey.test.ts
-//   が呼び出しの名前で変更系（post / put / patch / delete）を見分け、その後に DB の読み取りがあるかを検査する（.claude/rules/testing.md
+//   が呼び出しの名前で変更系（post / put / patch / delete）を見分け、その後に DB の読み取りがあるかを検査する（.claude/rules/quality/testing.md
 //   の「API ジャーニーテスト」）。
 // 書き込みの command には、本番と同じくトランザクションを張る PostgresTransactionRunner を同じ db で渡す（Issue #215）。
 // 各 Api を ApiCoverage.track で包む（API 網羅率。Issue #281）。呼ばれた Api のクラス名が step の meta に残り、全 API が
