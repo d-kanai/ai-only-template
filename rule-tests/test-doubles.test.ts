@@ -33,7 +33,7 @@ import { afterAll, describe, expect, it } from "vitest";
 //       WHY 無しで差し替えられる抜け道になる。
 //     WHY 文字列リテラルだけ許す: `vi.mock(import("@repo/shared/now"))` やテンプレートリテラルは今使っておらず、
 //       書き方を 1 つにしておけば判定が単純で見逃しが無い（安全側で違反）。
-//   - db-tests-in-infra-only: apps/backend/test-support/database（実 Postgres。createTestDatabase。Issue #181 で
+//   - db-tests-in-infra-only: apps/backend/test-support/database（実 Postgres。TestDatabase.create。Issue #181 で
 //     apps/backend/shared/infra/database.test-support から移した）を import する（`from` / `import "…"` / `import("…")`。
 //     `import type` も）のは、apps/backend/**/infra/ の直下のテスト、apps/backend/test-support/ の直下のテスト（test-support 自身のテスト）、
 //     apps/backend/test-support/<feature>/ の直下のテストデータビルダーのテスト（*-builder.test.ts。Issue #240）、

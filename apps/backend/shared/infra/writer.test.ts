@@ -12,10 +12,7 @@ import {
   test,
   vi,
 } from "vitest";
-import {
-  createTestDatabase,
-  type TestDatabase,
-} from "../../test-support/database";
+import { TestDatabase } from "../../test-support/database";
 import type { Transaction } from "../application/transaction";
 import { ColumnClassifier } from "./column-classification";
 import { changeLogs } from "./schema";
@@ -63,7 +60,7 @@ const UUID_PATTERN =
 let database: TestDatabase;
 
 beforeAll(async () => {
-  database = await createTestDatabase();
+  database = await TestDatabase.create();
   await database.migrate();
   await database.db.execute(
     sql`create table items (id uuid primary key, item_name text not null)`,

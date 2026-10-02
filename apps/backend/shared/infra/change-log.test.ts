@@ -19,10 +19,7 @@ import {
   test,
   vi,
 } from "vitest";
-import {
-  createTestDatabase,
-  type TestDatabase,
-} from "../../test-support/database";
+import { TestDatabase } from "../../test-support/database";
 import { ChangeRecords } from "./change-log";
 import { changeLogs } from "./schema";
 
@@ -211,7 +208,7 @@ describe("ChangeRecords.recordChange", () => {
   let database: TestDatabase;
 
   beforeAll(async () => {
-    database = await createTestDatabase();
+    database = await TestDatabase.create();
     await database.migrate();
   });
 

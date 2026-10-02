@@ -6,17 +6,17 @@ import {
   todos,
 } from "../../features/todo/internal/infra/schema";
 import { changeLogs } from "../../shared/infra/schema";
-import { createTestDatabase, type TestDatabase } from "../database";
-import { aTodo } from "./todo-builder";
+import { TestDatabase } from "../database";
+import { TodoBuilder } from "./todo-builder";
 
-// テストデータビルダー aTodo（todo-builder.ts）の仕様。実 Postgres（テスト用のスキーマ）に入った行と、build() の返り値を比べる。
+// テストデータビルダー TodoBuilder.of（todo-builder.ts）の仕様。実 Postgres（テスト用のスキーマ）に入った行と、build() の返り値を比べる。
 // WHY 実 Postgres で確かめる: ビルダーは API 仕様（spec/api/）の前提を表に直接入れる道具で、入った行（列・履歴の位置・日時）が
 //   ずれると、仕様の期待値が DB と食い違ったまま気づけない。
 
 let database: TestDatabase;
 
 beforeAll(async () => {
-  database = await createTestDatabase();
+  database = await TestDatabase.create();
   await database.migrate();
 });
 
@@ -53,11 +53,11 @@ function statusRows() {
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-describe("aTodo（Todo のテストデータビルダー）", () => {
+describe("TodoBuilder.of（Todo のテストデータビルダー）", () => {
   it("何も指定しなければ、乱数の id・固定のタイトル・未完了・今の日時の Todo と、作成時の未完了の履歴が 1 件入る", async () => {
     const before = Date.now();
 
-    const todo = await aTodo(database.db).build();
+    const todo = await TodoBuilder.of(database.db).build();
 
     const after = Date.now();
     expect(todo).toStrictEqual({
@@ -90,7 +90,7 @@ describe("aTodo（Todo のテストデータビルダー）", () => {
   it("id・タイトル・作成日時を指定すると、その値で入る", async () => {
     const createdAt = new Date("2026-09-01T00:00:00.000Z");
 
-    const todo = await aTodo(database.db)
+    const todo = await TodoBuilder.of(database.db)
       .id("00000000-0000-4000-8000-000000000001")
       .title("牛乳を買う")
       .createdAt(createdAt)
@@ -117,7 +117,7 @@ describe("aTodo（Todo のテストデータビルダー）", () => {
   it("完了を指定すると、完了の Todo と、作成日時の未完了・完了の履歴 2 件が入る", async () => {
     const createdAt = new Date("2026-09-01T00:00:00.000Z");
 
-    const todo = await aTodo(database.db)
+    const todo = await TodoBuilder.of(database.db)
       .completed(true)
       .createdAt(createdAt)
       .build();
@@ -149,7 +149,7 @@ describe("aTodo（Todo のテストデータビルダー）", () => {
       { completed: true, changedAt: new Date("2026-08-30T00:00:00.000Z") },
     ];
 
-    const todo = await aTodo(database.db)
+    const todo = await TodoBuilder.of(database.db)
       .completed(true)
       .createdAt(createdAt)
       .statusChanges(statusChanges)
@@ -174,7 +174,7 @@ describe("aTodo（Todo のテストデータビルダー）", () => {
 
   // 履歴の無い Todo（壊れた Todo。Repository の読み出しで 500 になることを確かめる前提に使う）も作れる。
   it("空の履歴を指定すると、Todo だけが入り、完了の履歴は入らない", async () => {
-    const todo = await aTodo(database.db).statusChanges([]).build();
+    const todo = await TodoBuilder.of(database.db).statusChanges([]).build();
 
     expect(todo.statusChanges).toStrictEqual([]);
     await expect(todoRows()).resolves.toStrictEqual([
@@ -190,7 +190,7 @@ describe("aTodo（Todo のテストデータビルダー）", () => {
 
   // WHY: 前提の用意は Writer を通らない（記録は対象の操作のものだけにする。spec/api/todo/support.ts の冒頭）。
   it("変更の記録（change_logs）は書かない", async () => {
-    await aTodo(database.db).completed(true).build();
+    await TodoBuilder.of(database.db).completed(true).build();
 
     await expect(database.db.select().from(changeLogs)).resolves.toStrictEqual(
       [],
@@ -200,7 +200,7 @@ describe("aTodo（Todo のテストデータビルダー）", () => {
   // WHY 同じビルダーから 2 回 build する: setter が元のビルダーを書き換えない（ほかの前提に値が漏れない）ことと、id を build の
   //   たびに作ることを確かめる。
   it("同じビルダーから 2 件入れると別の id になり、後から足した指定は元のビルダーに残らない", async () => {
-    const base = aTodo(database.db).title("牛乳を買う");
+    const base = TodoBuilder.of(database.db).title("牛乳を買う");
 
     const milk = await base.build();
     const done = await base.completed(true).build();

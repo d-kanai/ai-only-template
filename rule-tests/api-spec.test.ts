@@ -87,7 +87,7 @@ import { containsForbiddenWord } from "./feature-business-language";
 //       だけに使うなら通す（ログの行をアサートするため。WHY と限界は usesViOnlyForConsoleSpy）。support.ts は例外にしない。
 //   - api-spec-no-in-memory: *.in-memory（InMemory の Repository）を import しない（`import type`・`import()`・`export … from` も）。
 //     WHY: 実 DB で本番の組み立てを通すのが API 仕様の目的（Issue #219。InMemory は presentation の単体テストの道具）。
-//   - api-spec-uses-real-database: apps/backend/test-support/database（createTestDatabase）を値として import する。
+//   - api-spec-uses-real-database: apps/backend/test-support/database（TestDatabase.create）を値として import する。
 //     WHY: 実 Postgres の上で確かめる。型だけの import（TestDatabase）では DB を用意しない。
 //   - api-spec-uses-own-api: 対の api（apps/backend/features/<feature>/internal/presentation/<api>.api。ファイルの置き場所の <feature> と
 //     名前の <api>）を静的な import で参照する（`import type`・inline の type だけでもよい。dynamic `import()`・`export … from` は数えない）。

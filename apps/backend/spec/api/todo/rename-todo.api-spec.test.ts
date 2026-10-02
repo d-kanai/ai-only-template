@@ -3,11 +3,11 @@ import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";
 import type { RenameTodoResponse } from "../../../features/todo/internal/presentation/rename-todo.api";
 import type { ChangeEntry } from "../../../shared/infra/change-log";
+import { TestDatabase } from "../../../test-support/database";
 import {
-  createTestDatabase,
-  type TestDatabase,
-} from "../../../test-support/database";
-import { aTodo, type BuiltTodo } from "../../../test-support/todo/todo-builder";
+  type BuiltTodo,
+  TodoBuilder,
+} from "../../../test-support/todo/todo-builder";
 import {
   RenameTodoApiAssembly,
   TodoSpecExpected,
@@ -27,7 +27,7 @@ let database: TestDatabase;
 let handler: ReturnType<typeof RenameTodoApiAssembly.handler>;
 
 beforeAll(async () => {
-  database = await createTestDatabase();
+  database = await TestDatabase.create();
   await database.migrate();
   handler = RenameTodoApiAssembly.handler(database.db);
 });
@@ -71,11 +71,13 @@ describeFeature(feature, ({ Scenario }) => {
     // WHY 変更の記録をこの step で見る: .feature に書かない（create-todo.api-spec.test.ts の冒頭）。名前を変える操作の結果を確かめる
     //   step に置く。
     And("新しいタイトルが保存され、ほかの Todo は変わらない", async () => {
-      const bread = await aTodo(database.db)
+      const bread = await TodoBuilder.of(database.db)
         .title("パンを買う")
         .createdAt(new Date("2026-09-01T00:00:00.000Z"))
         .build();
-      const milk = await aTodo(database.db).title("牛乳を買う").build();
+      const milk = await TodoBuilder.of(database.db)
+        .title("牛乳を買う")
+        .build();
 
       await putTitle(milk.id, { title: "豆乳を買う" });
 
@@ -97,7 +99,7 @@ describeFeature(feature, ({ Scenario }) => {
     // WHY 完了の Todo を変える: 未完了のままだと、完了かどうかを既定値（未完了）で上書きする誤りを見分けられない。
     // WHY 作成日時を古い日時に決める: 今の日時で上書きする誤りを、作成日時の違いで見分ける。
     And("名前を変えても、完了かどうかと作成日時は変わらない", async () => {
-      const milk = await aTodo(database.db)
+      const milk = await TodoBuilder.of(database.db)
         .title("牛乳を買う")
         .completed(true)
         .createdAt(new Date("2026-09-01T00:00:00.000Z"))
@@ -116,7 +118,9 @@ describeFeature(feature, ({ Scenario }) => {
     });
 
     And("タイトルの前後の空白は除かれる", async () => {
-      const milk = await aTodo(database.db).title("牛乳を買う").build();
+      const milk = await TodoBuilder.of(database.db)
+        .title("牛乳を買う")
+        .build();
 
       await putTitle(milk.id, { title: " 豆乳を買う\t" });
 
@@ -128,7 +132,9 @@ describeFeature(feature, ({ Scenario }) => {
     // 差分の無い変更は書かない（ChangedProps.of が空なら Writer は SQL も記録も出さない）。応答は成功。Todo の行に加えて、
     //   変更の記録が無いことも見る（expectUnchanged。.feature には書かない）。
     And("同じタイトルに変えても、何も変わらない", async () => {
-      const milk = await aTodo(database.db).title("牛乳を買う").build();
+      const milk = await TodoBuilder.of(database.db)
+        .title("牛乳を買う")
+        .build();
 
       const response = await putTitle(milk.id, { title: "牛乳を買う" });
 
@@ -141,7 +147,7 @@ describeFeature(feature, ({ Scenario }) => {
     // WHY 完了の Todo を古い作成日時で置く: 応答の完了かどうか・作成日時を、既定値や今の日時で埋める誤りを見分ける。
     // WHY 前後に空白のあるタイトルで変える: 要求のタイトルを（空白を除く前のまま）返す誤りを見分ける。
     And("名前を変えると、新しいタイトルの Todo が返る", async () => {
-      const milk = await aTodo(database.db)
+      const milk = await TodoBuilder.of(database.db)
         .title("牛乳を買う")
         .completed(true)
         .createdAt(new Date("2026-09-01T00:00:00.000Z"))
@@ -159,7 +165,9 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("記録", ({ And }) => {
     And("名前を変えても、完了の履歴は増えない", async () => {
-      const milk = await aTodo(database.db).title("牛乳を買う").build();
+      const milk = await TodoBuilder.of(database.db)
+        .title("牛乳を買う")
+        .build();
 
       await putTitle(milk.id, { title: "豆乳を買う" });
 
@@ -172,7 +180,9 @@ describeFeature(feature, ({ Scenario }) => {
   Scenario("異常系", ({ And }) => {
     // WHY 別の Todo を 1 件置く: 空のときだけ「無い」と返す実装を通さない。
     And("存在しない Todo は、存在しないと伝えられる", async () => {
-      const milk = await aTodo(database.db).title("牛乳を買う").build();
+      const milk = await TodoBuilder.of(database.db)
+        .title("牛乳を買う")
+        .build();
 
       const response = await putTitle(MISSING_ID, { title: "豆乳を買う" });
 
@@ -205,7 +215,9 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "タイトルが空だと、空という理由で拒否され、タイトルは変わらない",
       async () => {
-        const milk = await aTodo(database.db).title("牛乳を買う").build();
+        const milk = await TodoBuilder.of(database.db)
+          .title("牛乳を買う")
+          .build();
 
         const response = await putTitle(milk.id, { title: " " });
 
@@ -230,7 +242,9 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "101 文字のタイトルは、長すぎるという理由で拒否され、タイトルは変わらない",
       async () => {
-        const milk = await aTodo(database.db).title("牛乳を買う").build();
+        const milk = await TodoBuilder.of(database.db)
+          .title("牛乳を買う")
+          .build();
 
         const response = await putTitle(milk.id, { title: "🍎".repeat(101) });
 
@@ -256,7 +270,9 @@ describeFeature(feature, ({ Scenario }) => {
 
     // 完了かどうかの変更は別の API（/completion）。黙って捨てずに拒否し、名前も変えない（json-body.ts の RequestBody.schema）。
     And("完了かどうかを一緒に送ると、拒否され、何も変わらない", async () => {
-      const milk = await aTodo(database.db).title("牛乳を買う").build();
+      const milk = await TodoBuilder.of(database.db)
+        .title("牛乳を買う")
+        .build();
 
       const response = await putTitle(milk.id, {
         title: "豆乳を買う",

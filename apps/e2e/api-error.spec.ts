@@ -6,7 +6,7 @@ import { expect, test } from "@playwright/test";
 //   書き換えないこと、本文の type・status・key・errors の pointer が届くこと。
 // WHY 画面ではなく request（Playwright の APIRequestContext）で呼ぶ: 画面は形の誤りの本文（未知の項目）を送らないので、
 //   400 の errors を画面の操作では起こせない。
-// WHY resetTodos しない: 400 は何も保存しない（create-todo.api.test.ts で固定）ので、DB の状態に依存しない。
+// WHY E2eDatabase.resetTodos しない: 400 は何も保存しない（create-todo.api.test.ts で固定）ので、DB の状態に依存しない。
 test("形の誤った本文で POST /api/todos を呼ぶと、400 の application/problem+json で、errors の pointer が項目を指す", async ({
   request,
 }) => {
