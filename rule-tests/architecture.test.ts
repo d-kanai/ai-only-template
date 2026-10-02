@@ -505,8 +505,8 @@ function referencesOf(root: string, files: string[]): Reference[] {
 // WHY apps/e2e/ とリポジトリ直下を足す: backend を @repo/backend として、apps/shared を @repo/shared として使う側
 //   （frontend-to-backend-specifier・BACKEND_EXPORTS・frontend-to-shared-specifier・SHARED_EXPORTS）の検査の対象にするため
 //   （Issue #68 の段階 2・Issue #90）。ほかの規則は参照元を apps/ の下に絞っているので、足しても影響しない。
-// 限界: リポジトリ直下のほかのディレクトリ（scripts/ の .ts のテスト以外など）は見ない。今は該当するソースが無い
-//   （scripts/ はシェルスクリプトとテストだけ）。そこに backend を参照するソースを置くなら、ここと fixture に足す。
+// 限界: リポジトリ直下のほかのディレクトリ（scripts/ のテスト以外のソースなど）は見ない。今そこにあるソースは
+//   scripts/hooks/work-log-sections.mjs だけで、backend / shared を参照しない。参照するソースを置くなら、ここと fixture に足す。
 function listReferencingFiles(root: string): string[] {
   return [
     ...listAllSourceFiles(root),
