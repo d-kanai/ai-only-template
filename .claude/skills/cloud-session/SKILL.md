@@ -6,7 +6,7 @@ description: クラウドセッション（Claude Code on the web）の環境の
 # cloud-session（Claude Code on the web の環境）
 
 クラウド VM には asdf が無いので、`scripts/cloud-session-start.sh` が `.tool-versions` と同じ Node / pnpm を入れ、Postgres を起動してマイグレーションを当てる。
-スクリプトの仕様と WHY は `.claude/rules/cloud-session.md`、決定は ADR `docs/adr/workflow/20260928-cloud-session-setup-script-and-hook.md`、VM の実測・時間は 2026-09-28 の work-logs。
+スクリプトの仕様と WHY は `.claude/rules/tooling/cloud-session.md`、決定は ADR `docs/adr/workflow/20260928-cloud-session-setup-script-and-hook.md`、VM の実測・時間は 2026-09-28 の work-logs。
 
 ## 仕組み（2 つの入口）
 - **SessionStart フック**（`.claude/settings.json`、matcher `startup|resume`）: 毎セッション `bash scripts/cloud-session-start.sh` を実行する。`CLAUDE_CODE_REMOTE=true` のときだけ動く（ローカルでは何もしない）。既存の Node / pnpm を見つけて PATH を `CLAUDE_ENV_FILE` に書き出し → `pnpm install --frozen-lockfile` → `.env` が無ければ `.env.example` からコピー → `dockerd` の起動 → `docker compose pull`（再試行つき）→ `up --wait` → `pnpm db:migrate`。Node / pnpm が無ければ自分で入れる。
@@ -28,7 +28,7 @@ description: クラウドセッション（Claude Code on the web）の環境の
 1. リポジトリ直下で `CLAUDE_CODE_REMOTE=true bash scripts/cloud-session-start.sh` を実行する。Node / pnpm が入っていれば取得を飛ばし、`dockerd` の起動 → Postgres の起動 → `pnpm db:migrate` まで戻る（Node / pnpm がインストール済みなら数秒）。
    - worktree の中で実行するときは `CI=true` を付ける。WHY: 中の `pnpm install` が lefthook の postinstall を走らせ、本体と共有の `.git/hooks/pre-commit` を worktree のパスに書き換える（LEARNINGS.md）。
 2. 出力の warn を読む。docker / dockerd が無い、pull の失敗（Docker Hub の 429 など）、up のタイムアウトはここに出る。
-3. `.env` は既にあれば触らない。必須の変数が欠けていれば `cp .env.example .env` を確かめる（`.claude/rules/env.md`）。
+3. `.env` は既にあれば触らない。必須の変数が欠けていれば `cp .env.example .env` を確かめる（`.claude/rules/tooling/env.md`）。
 
 ## E2E（Playwright）
 - `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium pnpm test:e2e`。WHY: VM の `/opt/pw-browsers` の Chromium（ビルド 1194）は `@playwright/test` の要求するビルドと違い、変数なしだと `Executable doesn't exist` で失敗する。

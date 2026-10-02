@@ -1,7 +1,7 @@
 #!/bin/bash
 # クラウドセッション（Claude Code on the web）の VM に、.tool-versions と同じ Node.js / pnpm を用意し、
 # compose.yaml の Postgres を起動してマイグレーション（apps/backend/shared/drizzle/）を当てる（フックのときだけ）。
-# 詳細・役割分担は .claude/rules/cloud-session.md を参照。
+# 詳細・役割分担は .claude/rules/tooling/cloud-session.md を参照。
 #
 # 使い方:
 #   bash scripts/cloud-session-start.sh --install-only  # 環境設定の setup script から呼ぶ。Node / pnpm のインストールだけ行う
@@ -416,7 +416,7 @@ install_dependencies() {
     return 0
   fi
   # --frozen-lockfile: lockfile と package.json がずれていたら更新せず失敗させる。クラウドで勝手に lockfile を
-  #   書き換えて差分を作らないため（依存の版は lockfile が正。.claude/rules/dependencies.md）。
+  #   書き換えて差分を作らないため（依存の版は lockfile が正。.claude/rules/tooling/dependencies.md）。
   if ! (cd "$project_dir" && pnpm install --frozen-lockfile >&2); then
     warn "pnpm install --frozen-lockfile failed; run it manually to see the details"
     return 1
@@ -487,7 +487,7 @@ ensure_docker_daemon() {
 #   達し「失敗しても warn を出して exit 0 で続ける」設計が崩れるのを防ぐため。docker compose pull 自体には全体の
 #   上限を指定するオプションが無い。45 秒は実測（mirror.gcr.io から 18-alpine の初回 pull が 10.5 秒、2026-09-28）の
 #   4 倍強で、45 秒かかるなら止まっているとみなす。
-#   値はフック全体の最悪ケースを 600 秒に収めるように決めた（.claude/rules/cloud-session.md の「時間の上限」）:
+#   値はフック全体の最悪ケースを 600 秒に収めるように決めた（.claude/rules/tooling/cloud-session.md の「時間の上限」）:
 #     Node / pnpm の取得（curl の --max-time の和）280 + デーモン待ち 30 + pull 45 × 3 + 再試行の間隔 6
 #     + up の --wait-timeout 120 = 571 秒。残り約 30 秒が pnpm install（実測 10 秒）などの分。
 #   pull を 240 秒にすると Docker の段だけで 30 + 720 + 6 + 120 = 876 秒になり、600 秒を超える。
@@ -565,7 +565,7 @@ ensure_dotenv() {
 #   ensure_dotenv が用意済み）。スクリプトは接続先を持たず、DATABASE_URL を差し込まない（既定値を 1 か所 = .env.example に
 #   するため。Issue #59）。フックの環境に DATABASE_URL があれば、そのまま引き継がれて .env より優先される。
 # WHY timeout 15: 実測は約 1 秒（2026-09-28、表 1 つ）。15 秒かかるなら止まっているとみなす。フック全体の最悪ケースを
-#   600 秒に収めるための見積もりは .claude/rules/cloud-session.md の「時間の上限」（571 + 15 = 586 秒）。
+#   600 秒に収めるための見積もりは .claude/rules/tooling/cloud-session.md の「時間の上限」（571 + 15 = 586 秒）。
 # WHY Node / pnpm の導入に失敗していても試すか: VM 既定の pnpm でも packageManager の版を取って動く（2026-09-28 の work-logs の VM の実測）。
 #   失敗しても warn を出すだけで、セッションは続けられる。
 # 出力は stderr に回す（stdout は Claude のコンテキストに入るため。start_database と同じ）。

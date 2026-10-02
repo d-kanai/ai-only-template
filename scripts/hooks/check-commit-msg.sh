@@ -1,8 +1,8 @@
 #!/bin/bash
 # コミットメッセージの形式を検査する（lefthook.yml の commit-msg から `bash scripts/hooks/check-commit-msg.sh {1}` で呼ばれる）。
-# 形式は .claude/general/commit.md: 1 行目にサマリ、本文に 🎯 WHY / 📝 WHAT / 🛠️ 実装経緯 / ✅ 検証内容 の 4 見出しをこの順に、
+# 形式は .claude/rules/workflow/commit.md: 1 行目にサマリ、本文に 🎯 WHY / 📝 WHAT / 🛠️ 実装経緯 / ✅ 検証内容 の 4 見出しをこの順に、
 # Co-Authored-By: の行。違反があれば、足りないものを stderr にすべて並べて exit 1（git がコミットを中止する）。
-# WHY / 例外の理由は .claude/rules/git-guard.md。
+# WHY / 例外の理由は .claude/rules/tooling/git-guard.md。
 #
 # 引数: $1 = メッセージのファイル（git が commit-msg フックに渡す .git/COMMIT_EDITMSG）。
 set -u
@@ -59,7 +59,7 @@ for heading in "${HEADINGS[@]}"; do
   positions+=("$pos")
 done
 
-# 見つかった見出しが .claude/general/commit.md の順（WHY → WHAT → 実装経緯 → 検証内容）に並んでいるか。
+# 見つかった見出しが .claude/rules/workflow/commit.md の順（WHY → WHAT → 実装経緯 → 検証内容）に並んでいるか。
 prev=-1
 prev_heading=""
 for idx in "${!HEADINGS[@]}"; do
@@ -85,7 +85,7 @@ if [ "$has_coauthor" -eq 0 ]; then
 fi
 
 if [ "${#errors[@]}" -gt 0 ]; then
-  echo "check-commit-msg: コミットメッセージが .claude/general/commit.md の形式ではありません" >&2
+  echo "check-commit-msg: コミットメッセージが .claude/rules/workflow/commit.md の形式ではありません" >&2
   for error in "${errors[@]}"; do
     echo "  - ${error}" >&2
   done

@@ -24,7 +24,7 @@ import {
   nextSection,
 } from "./feature-lines";
 
-// E2E（apps/e2e/。Playwright + playwright-bdd。Issue #279、.claude/rules/testing.md の「E2E」、ADR
+// E2E（apps/e2e/。Playwright + playwright-bdd。Issue #279、.claude/rules/quality/testing.md の「E2E」、ADR
 //   docs/adr/quality/20261002-e2e-in-gherkin-with-playwright-bdd.md）の置き場所と .feature の書き方を、ファイルの一覧と .feature の
 //   中身で機械的に検査するテスト。E2E は API ジャーニー（apps/backend/spec/journey/）と同じく、業務の流れを Gherkin の .feature に
 //   日本語で書き、step の実装をクラス（*.steps.ts）に書く（daiki の依頼 2026-10-02「ジャーニーテストを参考に cucumber に。

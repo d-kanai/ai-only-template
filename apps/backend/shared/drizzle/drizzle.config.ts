@@ -33,12 +33,12 @@ class DrizzleConfigPath {
   }
 }
 
-// drizzle-kit（マイグレーションの生成と適用）の設定。使い方は .claude/rules/backend.md の「永続化（Drizzle + Postgres）」。
+// drizzle-kit（マイグレーションの生成と適用）の設定。使い方は .claude/rules/code/backend.md の「永続化（Drizzle + Postgres）」。
 //   pnpm db:generate … drizzle-kit generate: schema のファイルと前回のスナップショット（shared/drizzle/meta/）の差分から、
 //                      マイグレーションの SQL を out（shared/drizzle/）に作る。DB には接続しない。
 //   pnpm db:migrate  … drizzle-kit migrate: out の SQL のうち、DB にまだ当てていないものを当てる。
 //                      当てた記録は DB の drizzle.__drizzle_migrations 表に残る（何度実行しても同じ結果になる）。
-// drizzle-kit push（DB を schema に直接合わせる）は使わない。理由は .claude/rules/backend.md。
+// drizzle-kit push（DB を schema に直接合わせる）は使わない。理由は .claude/rules/code/backend.md。
 export default defineConfig({
   // dialect: 接続先の DB の種類。compose.yaml の PostgreSQL 18。
   dialect: "postgresql",

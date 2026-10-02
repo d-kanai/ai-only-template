@@ -7,7 +7,7 @@
 #   {"decision":"block","reason":...} を stdout に出して停止を拒否する（Claude はログを書いてから止まり直す）。
 # WHY: 調査だけの依頼などで作業ログの追記が漏れた（LEARNINGS.md、Issue #64 のユーザー判断）。文章のルールではなく
 #   フックで止める（CLAUDE.md の「7. 機械的な強制を優先」）。
-# 詳細（判定の限界・タイムゾーン・ユーザー側の Stop フックとの順序）: .claude/rules/work-log.md、決定は ADR docs/adr/workflow/20260928-work-log-enforced-by-stop-hook-and-ci.md。
+# 詳細（判定の限界・タイムゾーン・ユーザー側の Stop フックとの順序）: .claude/rules/tooling/work-log-hooks.md、決定は ADR docs/adr/workflow/20260928-work-log-enforced-by-stop-hook-and-ci.md。
 #
 # 入力（stdin の JSON。公式 https://code.claude.com/docs/en/hooks.md の Stop input）:
 #   transcript_path: 会話の JSONL。stop_hook_active: Stop フックの block で続けている途中なら true。cwd: 作業ディレクトリ。
@@ -41,7 +41,7 @@ input=$(cat)
 # stop_hook_active が true なら transcript を読まずに数を 0 とする（下で「ツールを使っていない」と同じく止めない）。
 # WHY stop_hook_active のときは判定しない: block で続けたターンの終わりにもう一度 block すると、ログを書けない状況
 #   （git が壊れているなど）で上限（8 回）までループする。1 回目の block で Claude はログを書く機会を得ているので、2 回目は見ない。
-# 依存（jq など）は足さない（Claude Code は node で動くので node はある。実行環境の前提は .claude/rules/work-log.md）。
+# 依存（jq など）は足さない（Claude Code は node で動くので node はある。実行環境の前提は .claude/rules/tooling/work-log-hooks.md）。
 # 人間のターン: type が "user" で、isMeta でなく、message.content が文字列か、配列で tool_result を含まないもの。
 #   WHY tool_result を除く: ツールの結果も type "user" の行として記録される（2026-09-28 に実セッションの transcript で確認）。
 #   WHY isMeta を除く: Stop フックのフィードバックや他セッションからのメッセージは isMeta: true の user 行で、人間の発言ではない。
@@ -49,7 +49,7 @@ input=$(cat)
 #   Stop hook feedback: で始まる user 行）も除き、その前の本当の人間のターンを起点にする。
 #   WHY: バックグラウンドの完了通知などは isMeta の無い文字列の user 行として記録される（実 transcript で確認）。人間のターンと
 #   数えると、CI の結果を 1 回読むだけの wake のターンで、起点がその通知になり、人間のターンの中で済ませたログのコミットを
-#   見落として止めていた（Issue #64 のオーケストレータの実測）。見分けは文字列の先頭だけ（限界は .claude/rules/work-log.md）。
+#   見落として止めていた（Issue #64 のオーケストレータの実測）。見分けは文字列の先頭だけ（限界は .claude/rules/tooling/work-log-hooks.md）。
 # 数えるのは type が "assistant" の行の message.content にある type "tool_use" の要素。
 # JSON として読めない行は飛ばす（transcript は非同期に書かれ、最後の行が途中で切れていることがある）。
 parsed=$(
@@ -134,7 +134,7 @@ if ! root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null); then
   exit 0
 fi
 
-# 日付はローカルのタイムゾーン（date +%F）。docs/work-logs/ のファイル名を付けるときと同じ規則にする（限界は .claude/rules/work-log.md）。
+# 日付はローカルのタイムゾーン（date +%F）。docs/work-logs/ のファイル名を付けるときと同じ規則にする（限界は .claude/rules/tooling/work-log-hooks.md）。
 # 置き場所は Issue #101 でリポジトリ直下の work-logs/ から docs/work-logs/ に移した（旧い置き場所のログでは通さない）。
 log="docs/work-logs/$(date +%F).md"
 
@@ -172,7 +172,7 @@ block() {
 }
 
 if [ "$changed_in_turn" = no ]; then
-  block "作業ログ ${log} に、このターンでやったこと（調査・判断・確認した事実）を追記してください（.claude/general/work-log.md）。追記してからコミットしてください。"
+  block "作業ログ ${log} に、このターンでやったこと（調査・判断・確認した事実）を追記してください（.claude/rules/workflow/work-log.md）。追記してからコミットしてください。"
 fi
 
 # ここから Issue #178: このターンで追加した行（diff の + の行）の項目に `- 機械化:` の行があるか。
@@ -205,4 +205,4 @@ fi
 
 # 見出しは 1 行 1 つ。「」で囲んで「、」でつなぐ（bash の paste -d はマルチバイトの区切りを扱えないので node で組み立てる）。
 headings=$(MISSING="$missing" node -e 'process.stdout.write(process.env.MISSING.split("\n").map((h) => `「${h}」`).join("、"))')
-block "作業ログ ${log} の項目${headings}に \`- 機械化: <縛れる（何で）/ 縛れない（理由）/ 対象外>\` の行を足してください（.claude/general/work-log.md）。"
+block "作業ログ ${log} の項目${headings}に \`- 機械化: <縛れる（何で）/ 縛れない（理由）/ 対象外>\` の行を足してください（.claude/rules/workflow/work-log.md）。"

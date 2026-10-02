@@ -16,7 +16,7 @@ import { casesByName } from "./case-table";
 //   そのため、リポジトリ直下の tsconfig（全体）と apps/backend・apps/shared の tsconfig（DOM の型なし）を tsc で検査する。
 // WHY 両方の tsconfig を検査する: リポジトリ直下の tsconfig はテストや設定ファイルを含めた全体を見るが、lib に dom を含む
 //   （frontend のテストのため）。apps/backend の tsconfig は DOM の型を入れないので、backend が document などのブラウザの API を
-//   使うと型エラーになる（backend を Next・ブラウザに依存させない方針。.claude/rules/backend.md）。
+//   使うと型エラーになる（backend を Next・ブラウザに依存させない方針。.claude/rules/code/backend.md）。
 // 検査するのは package.json の scripts.typecheck と、.github/workflows/ci.yml に pnpm typecheck のステップがあること。
 // .feature（typecheck.feature）と step の実装（このファイル）に分けた（Issue #282）。
 

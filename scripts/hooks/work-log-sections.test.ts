@@ -15,7 +15,7 @@ import {
 
 // 作業ログ（docs/work-logs/*.md）の diff から、追加された項目（`## ` の見出し）のうち `- 機械化:` の行が無いものを探す判定の仕様。
 // Issue #178。Stop フック（require-work-log.sh）と CI（check-work-logs-diff.sh）が同じ判定を使う。
-// WHY と限界は .claude/rules/work-log.md。
+// WHY と限界は .claude/rules/tooling/work-log-hooks.md。
 
 const scriptPath = resolve(import.meta.dirname, "work-log-sections.mjs");
 

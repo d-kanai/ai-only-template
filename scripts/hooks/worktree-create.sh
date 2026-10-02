@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Claude Code の WorktreeCreate フック（Issue #64。設計と WHY は .claude/rules/worktree.md）。
+# Claude Code の WorktreeCreate フック（Issue #64。設計と WHY は .claude/rules/tooling/worktree.md）。
 # claude --worktree や、サブエージェントの isolation: "worktree" で worktree を作るときに Claude Code が呼ぶ。
 # フックを設定すると Claude Code は自分では git worktree を作らない（公式 https://code.claude.com/docs/en/hooks.md の
 # 「WorktreeCreate」: "Configuring a WorktreeCreate hook replaces that default git behavior"）ので、ここで作る。

@@ -3,7 +3,7 @@
 main は常にマージ可能に保つ。main への直接 commit / push はしない（GitHub の Ruleset `protect-main` と、PreToolUse フック `scripts/hooks/guard-git.sh` で拒否）。
 PR の作成・マージの前にスキル `pr-flow` を読む（手順: コマンド・CI の待ち方・クラウドでの読み替え・後始末）。GitHub 側の設定（Projects・Ruleset）は `.claude/skills/pr-flow/github-settings.md`。
 
-- Issue: 作業は Issue から始める（無ければ目的・完了条件を書いて作る）。1 Issue = 1 PR。Claude Code Projects のスレッド（セッション）の分け方は `.claude/general/orchestration.md`（ADR `docs/adr/workflow/20261001-project-threads-per-task.md`）。type ラベルを 1 つ（`feat` / `fix` / `docs` / `chore` / `refactor`）。Projects の Status は GitHub 側のワークフローが変える（API は呼ばない）。
+- Issue: 作業は Issue から始める（無ければ目的・完了条件を書いて作る）。1 Issue = 1 PR。Claude Code Projects のスレッド（セッション）の分け方は `.claude/rules/workflow/orchestration.md`（ADR `docs/adr/workflow/20261001-project-threads-per-task.md`）。type ラベルを 1 つ（`feat` / `fix` / `docs` / `chore` / `refactor`）。Projects の Status は GitHub 側のワークフローが変える（API は呼ばない）。
 - ブランチ: main から `<type>/<Issue番号>-<内容>`（例: `feat/12-branch-rules`）。type は Issue・PR のラベルと同じ。
 - コミットと push: worker が完了するごとにコミットし、未コミットを長く残さない（環境側の Stop フックが止めるたびに wake になる）。push は 1 ラウンド（実装 → 検証 → 指摘の反映）につき 1 回にまとめる（push ごとに CI が再実行され、完了の通知で wake が増える）。
 - PR: 本文は `.github/PULL_REQUEST_TEMPLATE.md`（WHY / WHAT / 実装経緯 / 検証内容）を埋め、`Closes #<Issue番号>` を入れる。タイトルはコミットの 1 行目と同じ書き方。

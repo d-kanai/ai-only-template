@@ -1,4 +1,4 @@
-# pnpm-workspace.yaml のサプライチェーン保護と版の書き方の設定（.claude/rules/dependencies.md）を検査するルール検査テストの仕様（Issue #282）。step の実装は対の pnpm-workspace.test.ts。
+# pnpm-workspace.yaml のサプライチェーン保護と版の書き方の設定（.claude/rules/tooling/dependencies.md）を検査するルール検査テストの仕様（Issue #282）。step の実装は対の pnpm-workspace.test.ts。
 # 規則の WHY と限界は pnpm-workspace.test.ts の冒頭。
 Feature: pnpm-workspace.yaml の設定
   Scenario: 設定の読み取りと判定（must pass）

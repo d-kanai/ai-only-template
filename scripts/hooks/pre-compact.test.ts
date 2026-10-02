@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // PreCompact フック（scripts/hooks/pre-compact.sh）の仕様。Issue #64。
 // compact の前に、作業状態（日時・trigger・ブランチ・HEAD・git status --short・stash の件数・直近 5 コミットの 1 行目）を
-// <リポジトリ直下>/.claude/state/pre-compact.md に上書きで書く。docs/work-logs/ には書かない（WHY は .claude/rules/work-log.md）。
+// <リポジトリ直下>/.claude/state/pre-compact.md に上書きで書く。docs/work-logs/ には書かない（WHY は .claude/rules/tooling/work-log-hooks.md）。
 
 const scriptPath = resolve(import.meta.dirname, "pre-compact.sh");
 

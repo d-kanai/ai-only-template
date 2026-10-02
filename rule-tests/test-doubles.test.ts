@@ -17,7 +17,7 @@ import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, expect } from "vitest";
 import { casesByName } from "./case-table";
 
-// テストダブルの方針（.claude/rules/testing.md の「テストダブル」。Issue #166 / #177、ユーザー判断 2026-09-30）を、
+// テストダブルの方針（.claude/rules/quality/testing.md の「テストダブル」。Issue #166 / #177、ユーザー判断 2026-09-30）を、
 // テストファイルのソースで機械的に検査するテスト。
 // 違反にするもの:
 //   - vi-mock-only-now: apps/backend/ のテスト（*.test.ts(x)）の `vi.mock(` で、第 1 引数が文字列 "@repo/shared/now"
