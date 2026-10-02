@@ -791,6 +791,63 @@ describe("PostgresTodoRepository", () => {
     ]);
   });
 
+  // WHY 2 つの Todo の両方に複数の履歴を持たせ、履歴の行を Todo をまたいで交互・position の逆順に入れる: LEFT JOIN の行を Todo ごとに
+  //   まとめる処理（toTodos）の誤り（境目で履歴が隣の Todo に混ざる・最後の Todo の履歴が落ちる・最初の Todo だけ正しい）は、
+  //   どちらかの Todo の履歴が 1 件だと起きない（.claude/rules/testing.md の「複数件を扱う処理」）。日時を Todo ごと・履歴ごとに
+  //   変え、取り違えたら値で分かるようにする。
+  test("findAll は、2 つの Todo がそれぞれ複数の履歴を持つときも、履歴を Todo ごとに足した順で組み立てる", async () => {
+    const first = "00000000-0000-4000-8000-000000000002";
+    const second = "00000000-0000-4000-8000-000000000001";
+    const at = (hour: number) =>
+      new Date(`2026-09-28T${String(hour).padStart(2, "0")}:00:00.000Z`);
+    await database.db.insert(todos).values([
+      { id: second, title: "卵を買う", completed: true, createdAt: at(5) },
+      { id: first, title: "牛乳を買う", completed: false, createdAt: at(0) },
+    ]);
+    const rows = [
+      { todoId: second, position: 3, completed: true, changedAt: at(8) },
+      { todoId: first, position: 2, completed: false, changedAt: at(2) },
+      { todoId: second, position: 0, completed: false, changedAt: at(5) },
+      { todoId: first, position: 0, completed: false, changedAt: at(0) },
+      { todoId: second, position: 2, completed: false, changedAt: at(7) },
+      { todoId: first, position: 1, completed: true, changedAt: at(1) },
+      { todoId: second, position: 1, completed: true, changedAt: at(6) },
+    ];
+    for (const row of rows) {
+      await database.db.insert(todoStatusChanges).values(row);
+    }
+
+    const all = await repository().findAll();
+
+    expect(
+      all.map(({ id, completed, statusChanges }) => ({
+        id,
+        completed,
+        statusChanges,
+      })),
+    ).toStrictEqual([
+      {
+        id: first,
+        completed: false,
+        statusChanges: [
+          { completed: false, changedAt: at(0) },
+          { completed: true, changedAt: at(1) },
+          { completed: false, changedAt: at(2) },
+        ],
+      },
+      {
+        id: second,
+        completed: true,
+        statusChanges: [
+          { completed: false, changedAt: at(5) },
+          { completed: true, changedAt: at(6) },
+          { completed: false, changedAt: at(7) },
+          { completed: true, changedAt: at(8) },
+        ],
+      },
+    ]);
+  });
+
   // WHY 2 回目をエラーにする: どちらも「読み込んだときの履歴の次」（同じ position）に足そうとする。両方を足すと、足した順と
   //   日時の順・今の completed がずれうる（履歴の最後の completed が今の completed と違う Todo は読めなくなる）。Postgres では
   //   (todo_id, position) の一意制約違反（SQLSTATE 23505）になり、同じ update の todos の UPDATE（title）も戻る（トランザクション）。
