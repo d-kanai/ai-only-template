@@ -7,19 +7,11 @@ import {
   type TestDatabase,
 } from "../../../test-support/database";
 import {
-  createTodoApi,
-  emptyTodos,
-  expectProblem,
-  jsonRequest,
-  logEntries,
-  rawRequest,
-  sortedLogs,
-  statusInsertLog,
-  statusRowOf,
-  statusRows,
-  todoInsertLog,
-  todoRows,
-  validationProblem,
+  CreateTodoApiAssembly,
+  TodoSpecLogs,
+  TodoSpecProblems,
+  TodoSpecRequests,
+  TodoSpecRows,
 } from "./support";
 
 // API 仕様（Issue #219）: create-todo.feature の `*` の step を、実 Postgres の上で本番と同じ組み立ての handler（CreateTodoApi.handle）を
@@ -34,12 +26,12 @@ import {
 //   今の step はどれも空の状態から作るので、前提は無い。
 
 let database: TestDatabase;
-let handler: ReturnType<typeof createTodoApi>;
+let handler: ReturnType<typeof CreateTodoApiAssembly.handler>;
 
 beforeAll(async () => {
   database = await createTestDatabase();
   await database.migrate();
-  handler = createTodoApi(database.db);
+  handler = CreateTodoApiAssembly.handler(database.db);
 });
 
 afterAll(async () => {
@@ -47,11 +39,11 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await emptyTodos(database.db);
+  await TodoSpecRows.empty(database.db);
 });
 
 async function postTodo(body: unknown): Promise<Response> {
-  return handler(jsonRequest("POST", "/api/todos", body));
+  return handler(TodoSpecRequests.json("POST", "/api/todos", body));
 }
 
 // Todo を作り、作った Todo（応答の本文）を返す。
@@ -63,9 +55,9 @@ async function createTodo(title: string): Promise<CreateTodoResponse> {
 
 // 拒否した要求の後、Todo・完了の履歴・変更の記録のどれにも行が無い。
 async function expectNothingStored(): Promise<void> {
-  await expect(todoRows(database.db)).resolves.toStrictEqual([]);
-  await expect(statusRows(database.db)).resolves.toStrictEqual([]);
-  await expect(logEntries(database.db)).resolves.toStrictEqual([]);
+  await expect(TodoSpecRows.todos(database.db)).resolves.toStrictEqual([]);
+  await expect(TodoSpecRows.statuses(database.db)).resolves.toStrictEqual([]);
+  await expect(TodoSpecLogs.entries(database.db)).resolves.toStrictEqual([]);
 }
 
 const feature = await loadFeature("./create-todo.feature");
@@ -82,7 +74,7 @@ describeFeature(feature, ({ Scenario }) => {
       const milk = await createTodo("牛乳を買う");
 
       const after = Date.now();
-      const rows = await todoRows(database.db);
+      const rows = await TodoSpecRows.todos(database.db);
       expect(rows).toStrictEqual([
         {
           id: expect.stringMatching(
@@ -95,16 +87,19 @@ describeFeature(feature, ({ Scenario }) => {
       ]);
       expect(rows[0]?.createdAt.getTime()).toBeGreaterThanOrEqual(before);
       expect(rows[0]?.createdAt.getTime()).toBeLessThanOrEqual(after);
-      const created = await statusRowOf(database.db, milk.id, 0);
-      await expect(logEntries(database.db)).resolves.toStrictEqual(
-        sortedLogs([todoInsertLog(milk), statusInsertLog(created)]),
+      const created = await TodoSpecRows.status(database.db, milk.id, 0);
+      await expect(TodoSpecLogs.entries(database.db)).resolves.toStrictEqual(
+        TodoSpecLogs.sorted([
+          TodoSpecLogs.todoInsert(milk),
+          TodoSpecLogs.statusInsert(created),
+        ]),
       );
     });
 
     And("タイトルの前後の空白は除かれる", async () => {
       await createTodo(" \t牛乳を買う　");
 
-      await expect(todoRows(database.db)).resolves.toMatchObject([
+      await expect(TodoSpecRows.todos(database.db)).resolves.toMatchObject([
         { title: "牛乳を買う" },
       ]);
     });
@@ -115,7 +110,9 @@ describeFeature(feature, ({ Scenario }) => {
 
       await createTodo(title);
 
-      await expect(todoRows(database.db)).resolves.toMatchObject([{ title }]);
+      await expect(TodoSpecRows.todos(database.db)).resolves.toMatchObject([
+        { title },
+      ]);
     });
   });
 
@@ -127,7 +124,7 @@ describeFeature(feature, ({ Scenario }) => {
       const response = await postTodo({ title: " 牛乳を買う\t" });
 
       expect(response.status).toBe(201);
-      const [row] = await todoRows(database.db);
+      const [row] = await TodoSpecRows.todos(database.db);
       expect(row).toBeDefined();
       await expect(response.json()).resolves.toStrictEqual({
         id: row?.id ?? "",
@@ -143,7 +140,7 @@ describeFeature(feature, ({ Scenario }) => {
     And("完了の履歴に、作成時の「未完了」が 1 件残る", async () => {
       const milk = await createTodo("牛乳を買う");
 
-      await expect(statusRows(database.db)).resolves.toStrictEqual([
+      await expect(TodoSpecRows.statuses(database.db)).resolves.toStrictEqual([
         {
           todoId: milk.id,
           position: 0,
@@ -162,9 +159,9 @@ describeFeature(feature, ({ Scenario }) => {
         for (const title of ["", "  "]) {
           const response = await postTodo({ title });
 
-          await expectProblem(
+          await TodoSpecProblems.expectResponse(
             response,
-            validationProblem("/api/todos", {
+            TodoSpecProblems.validation("/api/todos", {
               detail: "Title must not be empty.",
               key: "todo.title.empty",
               errors: [
@@ -186,9 +183,9 @@ describeFeature(feature, ({ Scenario }) => {
       async () => {
         const response = await postTodo({ title: "🍎".repeat(101) });
 
-        await expectProblem(
+        await TodoSpecProblems.expectResponse(
           response,
-          validationProblem("/api/todos", {
+          TodoSpecProblems.validation("/api/todos", {
             detail: "Title must be at most 100 characters.",
             key: "todo.title.tooLong",
             params: { max: 100 },
@@ -211,9 +208,9 @@ describeFeature(feature, ({ Scenario }) => {
       async () => {
         const response = await postTodo({ title: 1 });
 
-        await expectProblem(
+        await TodoSpecProblems.expectResponse(
           response,
-          validationProblem("/api/todos", {
+          TodoSpecProblems.validation("/api/todos", {
             detail: "title must be a string.",
             key: "request.field.notString",
             params: { path: "title" },
@@ -240,9 +237,9 @@ describeFeature(feature, ({ Scenario }) => {
           completed: true,
         });
 
-        await expectProblem(
+        await TodoSpecProblems.expectResponse(
           response,
-          validationProblem("/api/todos", {
+          TodoSpecProblems.validation("/api/todos", {
             detail: "Request body has unknown fields: completed.",
             key: "request.body.unknownKeys",
             params: { keys: "completed" },
@@ -263,12 +260,12 @@ describeFeature(feature, ({ Scenario }) => {
     // JSON として読めない本文。項目が無いので errors は付かない。
     And("内容が読み取れない形式だと、拒否され、何も保存されない", async () => {
       const response = await handler(
-        rawRequest("POST", "/api/todos", "{title:"),
+        TodoSpecRequests.raw("POST", "/api/todos", "{title:"),
       );
 
-      await expectProblem(
+      await TodoSpecProblems.expectResponse(
         response,
-        validationProblem("/api/todos", {
+        TodoSpecProblems.validation("/api/todos", {
           detail: "Request body must be valid JSON.",
           key: "request.body.notJson",
         }),

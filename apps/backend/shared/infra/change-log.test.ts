@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { now } from "@repo/shared/now";
+import { Clock } from "@repo/shared/now";
 import { sql } from "drizzle-orm";
 import {
   boolean,
@@ -26,11 +26,11 @@ import {
 import { ChangeRecords } from "./change-log";
 import { changeLogs } from "./schema";
 
-// WHY 時計（now）を差し替える: ChangeRecords.recordChange が occurred_at に入れる時刻を決めた値で確かめるため。
+// WHY 時計（Clock.now）を差し替える: ChangeRecords.recordChange が occurred_at に入れる時刻を決めた値で確かめるため。
 vi.mock("@repo/shared/now", { spy: true });
 
 afterEach(() => {
-  vi.mocked(now).mockReset();
+  vi.mocked(Clock.now).mockReset();
   vi.restoreAllMocks();
 });
 
@@ -223,9 +223,9 @@ describe("ChangeRecords.recordChange", () => {
     await database.db.execute(sql`truncate change_logs`);
   });
 
-  test("記録を change_logs に 1 行ずつ入れる（id は DB が作り、occurred_at は now()、同じ呼び出しの行は同じ時刻）", async () => {
+  test("記録を change_logs に 1 行ずつ入れる（id は DB が作り、occurred_at は Clock.now()、同じ呼び出しの行は同じ時刻）", async () => {
     const occurredAt = new Date("2026-09-30T09:00:00.000Z");
-    vi.mocked(now).mockReturnValueOnce(occurredAt);
+    vi.mocked(Clock.now).mockReturnValueOnce(occurredAt);
     const inserted = ChangeRecords.insertEntry(items, ROW, ACTOR_ID);
     const updated = ChangeRecords.updateEntries(
       items,

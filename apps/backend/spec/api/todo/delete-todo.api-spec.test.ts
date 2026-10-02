@@ -8,17 +8,12 @@ import {
 } from "../../../test-support/database";
 import { aTodo } from "../../../test-support/todo/todo-builder";
 import {
-  bodylessRequest,
-  context,
-  deleteTodoApi,
-  emptyTodos,
-  expectProblem,
-  logEntries,
-  notFoundProblem,
-  statusRows,
-  statusRowsOf,
-  todoRowOf,
-  todoRows,
+  DeleteTodoApiAssembly,
+  TodoSpecExpected,
+  TodoSpecLogs,
+  TodoSpecProblems,
+  TodoSpecRequests,
+  TodoSpecRows,
 } from "./support";
 
 // API 仕様（Issue #219）: delete-todo.feature の `*` の step を、実 Postgres の上で本番と同じ組み立ての handler（DeleteTodoApi.handle）を
@@ -27,12 +22,12 @@ import {
 // 前提をビルダーで作るので、変更の記録（change_logs）は前提の分を含まず、削除が残した記録だけになる。
 
 let database: TestDatabase;
-let handler: ReturnType<typeof deleteTodoApi>;
+let handler: ReturnType<typeof DeleteTodoApiAssembly.handler>;
 
 beforeAll(async () => {
   database = await createTestDatabase();
   await database.migrate();
-  handler = deleteTodoApi(database.db);
+  handler = DeleteTodoApiAssembly.handler(database.db);
 });
 
 afterAll(async () => {
@@ -40,13 +35,16 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await emptyTodos(database.db);
+  await TodoSpecRows.empty(database.db);
 });
 
 // WHY 戻り値を DeleteTodoApi の handle の型にする: 対の api ファイルの型を使い、この仕様が delete-todo.api のものだと import で示す
 //   （rule-tests/api-spec.test.ts の api-spec-uses-own-api）。
 async function deleteTodo(id: string): ReturnType<DeleteTodoApi["handle"]> {
-  return handler(bodylessRequest("DELETE", `/api/todos/${id}`), context(id));
+  return handler(
+    TodoSpecRequests.bodyless("DELETE", `/api/todos/${id}`),
+    TodoSpecRequests.context(id),
+  );
 }
 
 // uuid の形だが、どの Todo も指さない id。
@@ -66,10 +64,10 @@ describeFeature(feature, ({ Scenario }) => {
 
       await deleteTodo(milk.id);
 
-      await expect(todoRows(database.db)).resolves.toStrictEqual([
-        todoRowOf(bread),
+      await expect(TodoSpecRows.todos(database.db)).resolves.toStrictEqual([
+        TodoSpecExpected.row(bread),
       ]);
-      await expect(logEntries(database.db)).resolves.toStrictEqual([
+      await expect(TodoSpecLogs.entries(database.db)).resolves.toStrictEqual([
         {
           tableName: "todos",
           rowId: milk.id,
@@ -110,8 +108,8 @@ describeFeature(feature, ({ Scenario }) => {
 
       await deleteTodo(milk.id);
 
-      await expect(statusRows(database.db)).resolves.toStrictEqual(
-        statusRowsOf(bread),
+      await expect(TodoSpecRows.statuses(database.db)).resolves.toStrictEqual(
+        TodoSpecExpected.statusRows(bread),
       );
     });
   });
@@ -123,12 +121,12 @@ describeFeature(feature, ({ Scenario }) => {
 
       const response = await deleteTodo(MISSING_ID);
 
-      await expectProblem(
+      await TodoSpecProblems.expectResponse(
         response,
-        notFoundProblem(MISSING_ID, `/api/todos/${MISSING_ID}`),
+        TodoSpecProblems.notFound(MISSING_ID, `/api/todos/${MISSING_ID}`),
       );
-      await expect(todoRows(database.db)).resolves.toStrictEqual([
-        todoRowOf(milk),
+      await expect(TodoSpecRows.todos(database.db)).resolves.toStrictEqual([
+        TodoSpecExpected.row(milk),
       ]);
     });
 
@@ -137,15 +135,17 @@ describeFeature(feature, ({ Scenario }) => {
       async () => {
         const milk = await aTodo(database.db).title("牛乳を買う").build();
         await deleteTodo(milk.id);
-        const logs = await logEntries(database.db);
+        const logs = await TodoSpecLogs.entries(database.db);
 
         const response = await deleteTodo(milk.id);
 
-        await expectProblem(
+        await TodoSpecProblems.expectResponse(
           response,
-          notFoundProblem(milk.id, `/api/todos/${milk.id}`),
+          TodoSpecProblems.notFound(milk.id, `/api/todos/${milk.id}`),
         );
-        await expect(logEntries(database.db)).resolves.toStrictEqual(logs);
+        await expect(TodoSpecLogs.entries(database.db)).resolves.toStrictEqual(
+          logs,
+        );
       },
     );
   });

@@ -8,15 +8,11 @@ import {
 } from "../../../test-support/database";
 import { aTodo } from "../../../test-support/todo/todo-builder";
 import {
-  bodylessRequest,
-  context,
-  emptyTodos,
-  expectProblem,
-  getTodoApi,
-  internalErrorProblem,
-  notFoundProblem,
-  removeTodoRow,
-  todoResponseOf,
+  GetTodoApiAssembly,
+  TodoSpecExpected,
+  TodoSpecProblems,
+  TodoSpecRequests,
+  TodoSpecRows,
 } from "./support";
 
 // API 仕様（Issue #219）: get-todo.feature の `*` の step を、実 Postgres の上で本番と同じ組み立ての handler（GetTodoApi.handle）を
@@ -24,12 +20,12 @@ import {
 //   list-todos.api-spec.test.ts の冒頭。
 
 let database: TestDatabase;
-let handler: ReturnType<typeof getTodoApi>;
+let handler: ReturnType<typeof GetTodoApiAssembly.handler>;
 
 beforeAll(async () => {
   database = await createTestDatabase();
   await database.migrate();
-  handler = getTodoApi(database.db);
+  handler = GetTodoApiAssembly.handler(database.db);
 });
 
 afterAll(async () => {
@@ -37,11 +33,14 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await emptyTodos(database.db);
+  await TodoSpecRows.empty(database.db);
 });
 
 async function getTodo(id: string): Promise<Response> {
-  return handler(bodylessRequest("GET", `/api/todos/${id}`), context(id));
+  return handler(
+    TodoSpecRequests.bodyless("GET", `/api/todos/${id}`),
+    TodoSpecRequests.context(id),
+  );
 }
 
 // uuid の形だが、どの Todo も指さない id。
@@ -63,7 +62,7 @@ describeFeature(feature, ({ Scenario }) => {
 
         expect(response.status).toBe(200);
         await expect(response.json()).resolves.toStrictEqual(
-          todoResponseOf(milk) satisfies GetTodoResponse,
+          TodoSpecExpected.response(milk) satisfies GetTodoResponse,
         );
       },
     );
@@ -78,7 +77,7 @@ describeFeature(feature, ({ Scenario }) => {
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
-        ...todoResponseOf(milk),
+        ...TodoSpecExpected.response(milk),
         completed: true,
       } satisfies GetTodoResponse);
     });
@@ -92,7 +91,7 @@ describeFeature(feature, ({ Scenario }) => {
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
-        ...todoResponseOf(milk),
+        ...TodoSpecExpected.response(milk),
         title: "豆乳を買う",
       } satisfies GetTodoResponse);
     });
@@ -105,9 +104,9 @@ describeFeature(feature, ({ Scenario }) => {
 
       const response = await getTodo(MISSING_ID);
 
-      await expectProblem(
+      await TodoSpecProblems.expectResponse(
         response,
-        notFoundProblem(MISSING_ID, `/api/todos/${MISSING_ID}`),
+        TodoSpecProblems.notFound(MISSING_ID, `/api/todos/${MISSING_ID}`),
       );
     });
 
@@ -117,23 +116,23 @@ describeFeature(feature, ({ Scenario }) => {
       async () => {
         const response = await getTodo("missing");
 
-        await expectProblem(
+        await TodoSpecProblems.expectResponse(
           response,
-          notFoundProblem("missing", "/api/todos/missing"),
+          TodoSpecProblems.notFound("missing", "/api/todos/missing"),
         );
       },
     );
 
-    // 削除の後の状態（行が無い）を、削除の API を通さずに作る（support.ts の removeTodoRow）。
+    // 削除の後の状態（行が無い）を、削除の API を通さずに作る（support.ts の TodoSpecRows.remove）。
     And("削除した Todo は、存在しないと伝えられる", async () => {
       const milk = await aTodo(database.db).title("牛乳を買う").build();
-      await removeTodoRow(database.db, milk.id);
+      await TodoSpecRows.remove(database.db, milk.id);
 
       const response = await getTodo(milk.id);
 
-      await expectProblem(
+      await TodoSpecProblems.expectResponse(
         response,
-        notFoundProblem(milk.id, `/api/todos/${milk.id}`),
+        TodoSpecProblems.notFound(milk.id, `/api/todos/${milk.id}`),
       );
     });
 
@@ -157,7 +156,10 @@ describeFeature(feature, ({ Scenario }) => {
 
         const response = await getTodo(id);
 
-        await expectProblem(response, internalErrorProblem(`/api/todos/${id}`));
+        await TodoSpecProblems.expectResponse(
+          response,
+          TodoSpecProblems.internalError(`/api/todos/${id}`),
+        );
       },
     );
   });

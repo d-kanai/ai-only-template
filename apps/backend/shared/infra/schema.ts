@@ -48,7 +48,7 @@ export const changeLogs = pgTable(
     changes: jsonb("changes").$type<Changes>().notNull(),
     // 変更した利用者の id。ログインが無い今は常に null（PostgresTodoRepository の actorId）。
     actorId: uuid("actor_id"),
-    // 変更した日時（now()）。同じ文（Writer の 1 回の insert / update / delete）で書いた記録は同じ時刻になる。todos.created_at と同じく timestamptz・mode "date"。
+    // 変更した日時（Clock.now()）。同じ文（Writer の 1 回の insert / update / delete）で書いた記録は同じ時刻になる。todos.created_at と同じく timestamptz・mode "date"。
     occurredAt: timestamp("occurred_at", {
       withTimezone: true,
       mode: "date",

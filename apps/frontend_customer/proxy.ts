@@ -1,6 +1,6 @@
 import { env } from "@repo/shared/env";
 import { logger } from "@repo/shared/logger";
-import { now } from "@repo/shared/now";
+import { Clock } from "@repo/shared/now";
 import { type NextRequest, NextResponse } from "next/server";
 import {
   LOCALE_COOKIE,
@@ -26,8 +26,8 @@ export function proxy(request: NextRequest): NextResponse {
     method: request.method,
     url: request.url,
     headers: request.headers,
-    // WHY now(): 現在時刻は唯一の出口 now（apps/shared/now.ts）から取る（規則 now-single-source）。
-    receivedAt: now(),
+    // WHY Clock.now(): 現在時刻は唯一の出口 Clock.now（apps/shared/now.ts）から取る（規則 now-single-source）。
+    receivedAt: Clock.now(),
     generateRequestId: () => crypto.randomUUID(),
     // WHY env から渡す: trace の projects/<ID>/ に入れる GCP のプロジェクト ID（Issue #209）。request-log.ts は画面側の shared/ に
     //   あり apps/shared（env）を参照できない（規則 screen-to-shared）ので、ここで読んで渡す。

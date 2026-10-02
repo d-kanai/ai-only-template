@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { now } from "@repo/shared/now";
+import { Clock } from "@repo/shared/now";
 import {
   todoStatusChanges,
   todos,
@@ -12,7 +12,7 @@ import type { Database } from "../../shared/infra/database";
 // WHY API（作成・完了の handler）を通さずに表に直接入れる（ユーザー判断 2026-10-01、Issue #240）:
 //   - 前提の用意を、仕様の対象でない API の組み合わせに依存させない。表（集約の子表など）が増えるたびに「前提を作る API の手順」が
 //     変わると、対象の API と関係の無い API の変更で仕様が落ちる。表に入れる値をここ 1 か所で決めれば、表が増えたときもここを直すだけ。
-//   - API では作れない前提を作れる: 作成日時は API が now() で決めるので「同じ日時に作られた」「作成日時の古い順」を作れず（時計は
+//   - API では作れない前提を作れる: 作成日時は API が Clock.now() で決めるので「同じ日時に作られた」「作成日時の古い順」を作れず（時計は
 //     差し替えない。API 仕様は vi を使わない）、不変条件を満たさない行（完了の履歴の日時が作成日時より前・逆順の「壊れた Todo」）や
 //     履歴の無い行（デプロイの途中で古い版が作ったもの）は API では作れない。
 //   - 前提の変更の記録（change_logs）が混ざらない: Writer（shared/infra/writer.ts）を通らないので記録を書かず、仕様が確かめる記録は
@@ -94,12 +94,12 @@ export class TodoBuilder {
   }
 
   // 指定と既定値を合わせた値。
-  // WHY 既定値を build のたびに決める: id（randomUUID）と作成日時（now()）は Todo ごとに変える値で、ビルダーを作ったときに決めると
+  // WHY 既定値を build のたびに決める: id（randomUUID）と作成日時（Clock.now()）は Todo ごとに変える値で、ビルダーを作ったときに決めると
   //   同じビルダーから入れた 2 件が同じ id になる。
   // WHY タイトルの既定値は英語の固定の文字列: test-support は日本語の文言の規則（server-hardcoded-text）の対象外だが、既存の
   //   test-support に倣って英語にする。前提でタイトルを気にしない Todo に使う。
   private values(): BuiltTodo {
-    const createdAt = this.specified.createdAt ?? now();
+    const createdAt = this.specified.createdAt ?? Clock.now();
     const completed = this.specified.completed ?? false;
     return {
       id: this.specified.id ?? randomUUID(),

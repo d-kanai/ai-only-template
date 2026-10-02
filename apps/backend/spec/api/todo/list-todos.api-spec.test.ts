@@ -8,12 +8,11 @@ import {
 } from "../../../test-support/database";
 import { aTodo } from "../../../test-support/todo/todo-builder";
 import {
-  bodylessRequest,
-  emptyTodos,
-  expectProblem,
-  internalErrorProblem,
-  listTodosApi,
-  todoResponseOf,
+  ListTodosApiAssembly,
+  TodoSpecExpected,
+  TodoSpecProblems,
+  TodoSpecRequests,
+  TodoSpecRows,
 } from "./support";
 
 // API 仕様（Issue #219）: list-todos.feature の `*` の step を、実 Postgres の上で本番と同じ組み立ての handler（ListTodosApi.handle）を
@@ -30,12 +29,12 @@ import {
 //   ほかの api-spec も同じ。
 
 let database: TestDatabase;
-let handler: ReturnType<typeof listTodosApi>;
+let handler: ReturnType<typeof ListTodosApiAssembly.handler>;
 
 beforeAll(async () => {
   database = await createTestDatabase();
   await database.migrate();
-  handler = listTodosApi(database.db);
+  handler = ListTodosApiAssembly.handler(database.db);
 });
 
 afterAll(async () => {
@@ -43,11 +42,11 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await emptyTodos(database.db);
+  await TodoSpecRows.empty(database.db);
 });
 
 async function listTodos(): Promise<Response> {
-  return handler(bodylessRequest("GET", "/api/todos"));
+  return handler(TodoSpecRequests.bodyless("GET", "/api/todos"));
 }
 
 // 作成日時と id を決めた未完了の Todo（完了の履歴は作成時の未完了の 1 件。ビルダーの既定）。
@@ -76,7 +75,7 @@ describeFeature(feature, ({ Scenario }) => {
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
-        todos: [todoResponseOf(milk)],
+        todos: [TodoSpecExpected.response(milk)],
       } satisfies ListTodosResponse);
     });
 
@@ -90,7 +89,7 @@ describeFeature(feature, ({ Scenario }) => {
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
-        todos: [todoResponseOf({ ...milk, completed: true })],
+        todos: [TodoSpecExpected.response({ ...milk, completed: true })],
       } satisfies ListTodosResponse);
     });
   });
@@ -118,7 +117,7 @@ describeFeature(feature, ({ Scenario }) => {
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
-        todos: [oldest, middle, newest].map(todoResponseOf),
+        todos: [oldest, middle, newest].map(TodoSpecExpected.response),
       } satisfies ListTodosResponse);
     });
 
@@ -143,7 +142,7 @@ describeFeature(feature, ({ Scenario }) => {
         createdAt,
       ).build();
       const expected = {
-        todos: [first, second, third].map(todoResponseOf),
+        todos: [first, second, third].map(TodoSpecExpected.response),
       } satisfies ListTodosResponse;
 
       for (const response of [await listTodos(), await listTodos()]) {
@@ -183,7 +182,10 @@ describeFeature(feature, ({ Scenario }) => {
 
         const response = await listTodos();
 
-        await expectProblem(response, internalErrorProblem("/api/todos"));
+        await TodoSpecProblems.expectResponse(
+          response,
+          TodoSpecProblems.internalError("/api/todos"),
+        );
       },
     );
   });
