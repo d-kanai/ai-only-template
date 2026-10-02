@@ -31,14 +31,15 @@ flowchart LR
   end
 
   gha -- "build & push" --> ar
-  gha -- "migrate 実行 → deploy" --> migrate
+  gha -- "image 更新・実行" --> migrate
   gha -- "deploy" --> customer
   ar -. image .-> customer & migrate
   user -- HTTPS --> customer
   analyst -- HTTPS --> metabase
   customer & migrate -- "Unix socket" --> dbapp
   metabase -- "Auth Proxy" --> dbmb
-  ds -- "公開 IP + TLS" --> dbapp
+  metabase -- "Auth Proxy（bi_readonly・手作業）" --> dbapp
+  ds -- "公開 IP + TLS（bi_readonly・手作業）" --> dbapp
   dev -- "Data API" --> dbapp
   s1 -.-> customer & migrate
   s2 & s3 -.-> metabase

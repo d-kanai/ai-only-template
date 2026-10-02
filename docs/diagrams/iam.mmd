@@ -8,7 +8,7 @@ flowchart TB
 
   subgraph L1["① デプロイ（GitHub Actions）"]
     direction LR
-    gh(["deploy.yml の job<br/>repo・repo id・main・Environment が一致"]):::who
+    gh(["deploy.yml の job<br/>repo・main・Environment が一致<br/>（repo id は設定したときだけ）"]):::who
     wif{{"WIF<br/>pool github / provider github-actions"}}:::sa
     deployer["SA github-deployer"]:::sa
     ar1[("Artifact Registry app")]:::res

@@ -7,10 +7,10 @@ flowchart TB
 
   pr(["PR"]):::trig --> ci["ci.yml<br/>lint・typecheck・test（required check）"]:::step
   ci -- "緑なら merge" --> main(["main へ push"]):::trig
-  manual(["手動実行 workflow_dispatch<br/>environment: prod を選ぶ"]):::trig
+  manual(["手動実行 workflow_dispatch<br/>stg か prod を選ぶ"]):::trig
 
   main -- "stg" --> cfg
-  manual -- "prod（Environment の承認）" --> cfg
+  manual -- "stg / prod（prod は required reviewers を付けたら承認待ち）" --> cfg
   main -. "同時に走る" .-> ci2["ci.yml（main）"]:::step
 
   subgraph DEPLOY["deploy.yml の job deploy（main のときだけ）"]
@@ -25,7 +25,7 @@ flowchart TB
     j2["gcloud run jobs execute --wait<br/>= drizzle-kit migrate"]:::gcp
     d1["gcloud run deploy<br/>新しいリビジョン"]:::gcp
     d2["update-traffic --to-latest"]:::gcp
-    fail["失敗したらここで止まる<br/>service は古いまま"]:::stop
+    fail["止まる（どの step の失敗でも同じ）<br/>service は古いまま"]:::stop
 
     cfg -- no --> skip
     cfg -- yes --> auth --> b1 --> v1 --> b2 --> v2 --> j1 --> j2

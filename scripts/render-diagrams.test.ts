@@ -63,12 +63,14 @@ afterEach(() => {
   rmSync(workDir, { recursive: true, force: true });
 });
 
-function run(env: Record<string, string>) {
-  return spawnSync("bash", [scriptPath, diagramsDir], {
+// WHY MMDC を 2 語にする: 既定の MMDC（pnpm dlx …）は空白を含み、スクリプトは単語に分けて呼ぶ。1 語の偽物だと、
+//   "$MMDC" とクォートして既定の呼び出しが壊れる変更を見逃す（reviewer の指摘）。
+function run(env: Record<string, string>, script = scriptPath) {
+  return spawnSync("bash", [script, diagramsDir], {
     encoding: "utf8",
     env: {
       ...process.env,
-      MMDC: fakeMmdc,
+      MMDC: `${fakeMmdc} --fake-subcommand`,
       PUPPETEER_EXECUTABLE_PATH: fakeBrowser,
       ...env,
     },
@@ -93,8 +95,8 @@ describe("render-diagrams.sh（must pass: 描く）", () => {
     // then
     expect(result.status).toBe(0);
     expect(calls()).toEqual([
-      `deploy.mmd -> deploy.png -s 2 -b white -q {"executablePath":"${fakeBrowser}","args":["--no-sandbox"]}`,
-      `system.mmd -> system.png -s 2 -b white -q {"executablePath":"${fakeBrowser}","args":["--no-sandbox"]}`,
+      `deploy.mmd -> deploy.png --fake-subcommand -s 2 -b white -q {"executablePath":"${fakeBrowser}","args":["--no-sandbox"]}`,
+      `system.mmd -> system.png --fake-subcommand -s 2 -b white -q {"executablePath":"${fakeBrowser}","args":["--no-sandbox"]}`,
     ]);
     expect(readFileSync(join(diagramsDir, "system.png"), "utf8")).toBe(
       "png of system.mmd\n",
@@ -120,6 +122,74 @@ describe("render-diagrams.sh（must pass: 描く）", () => {
       "system.mmd",
       "system.png",
     ]);
+  });
+});
+
+// PUPPETEER_EXECUTABLE_PATH が無いときに使う Chromium（E2E の Playwright）の探し方。スクリプトを一時ディレクトリの
+//   リポジトリの形（scripts/ と apps/e2e/）に置き、apps/e2e から読む @playwright/test を偽物にする。
+//   NODE_PATH は空にする（クラウドセッションの NODE_PATH の global の @playwright/test を拾わせない）。
+function scriptInFakeRepo(withPlaywright: boolean): string {
+  const fakeRepo = join(workDir, "repo");
+  mkdirSync(join(fakeRepo, "scripts"), { recursive: true });
+  mkdirSync(join(fakeRepo, "apps", "e2e"), { recursive: true });
+  writeFileSync(
+    join(fakeRepo, "scripts", "render-diagrams.sh"),
+    readFileSync(scriptPath, "utf8"),
+  );
+  if (withPlaywright) {
+    const playwright = join(
+      fakeRepo,
+      "apps",
+      "e2e",
+      "node_modules",
+      "@playwright",
+      "test",
+    );
+    mkdirSync(playwright, { recursive: true });
+    writeFileSync(
+      join(playwright, "index.js"),
+      `module.exports = { chromium: { executablePath: () => ${JSON.stringify(fakeBrowser)} } };\n`,
+    );
+  }
+  return join(fakeRepo, "scripts", "render-diagrams.sh");
+}
+
+describe("render-diagrams.sh（Chromium を Playwright から探す）", () => {
+  it("PUPPETEER_EXECUTABLE_PATH が無ければ、apps/e2e の Playwright が使う Chromium を puppeteer に渡す（must pass）", () => {
+    // given
+    writeFileSync(join(diagramsDir, "system.mmd"), "flowchart LR\n");
+    const script = scriptInFakeRepo(true);
+
+    // when
+    const result = run(
+      { PUPPETEER_EXECUTABLE_PATH: "", NODE_PATH: "" },
+      script,
+    );
+
+    // then
+    expect(result.status).toBe(0);
+    expect(calls()).toEqual([
+      `system.mmd -> system.png --fake-subcommand -s 2 -b white -q {"executablePath":"${fakeBrowser}","args":["--no-sandbox"]}`,
+    ]);
+  });
+
+  it("PUPPETEER_EXECUTABLE_PATH も Playwright も無ければ、何も描かずに失敗する（must reject）", () => {
+    // given
+    writeFileSync(join(diagramsDir, "system.mmd"), "flowchart LR\n");
+    const script = scriptInFakeRepo(false);
+
+    // when
+    const result = run(
+      { PUPPETEER_EXECUTABLE_PATH: "", NODE_PATH: "" },
+      script,
+    );
+
+    // then
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(
+      "render-diagrams: Chromium が見つからない（未設定）。PUPPETEER_EXECUTABLE_PATH に Chrome / Chromium のパスを渡す\n",
+    );
+    expect(calls()).toEqual([]);
   });
 });
 
