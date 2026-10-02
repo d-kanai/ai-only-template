@@ -7,16 +7,27 @@ import { DomainValidation } from "./validate";
 
 describe("DomainValidation.validated", () => {
   test("通れば parse した値（trim などの変換後）を返す", () => {
+    // given
     const schema = z.string(KeyedIssue.of("todo.title.invalid")).trim();
 
-    expect(DomainValidation.validated(schema, "  abc  ")).toBe("abc");
+    // when
+    const value = DomainValidation.validated(schema, "  abc  ");
+
+    // then
+    expect(value).toBe("abc");
   });
 
   test("KeyedIssue.of で付けたキーを DomainError(validation_error) の key にする（params は無し）", () => {
+    // given
     const schema = z.string(KeyedIssue.of("todo.title.invalid"));
 
-    try {
+    // when
+    const action = () =>
       DomainValidation.validated(schema, 1 as unknown as string);
+
+    // then
+    try {
+      action();
     } catch (error) {
       expect(error).toBeInstanceOf(DomainError);
       const { code, key, params } = error as DomainError;
@@ -31,12 +42,17 @@ describe("DomainValidation.validated", () => {
   });
 
   test("KeyedIssue.refine で付けたキーと params を DomainError の key と params にする", () => {
+    // given
     const schema = z
       .string()
       .refine(() => false, KeyedIssue.refine("todo.title.tooLong", { max: 3 }));
 
+    // when
+    const action = () => DomainValidation.validated(schema, "abcd");
+
+    // then
     try {
-      DomainValidation.validated(schema, "abcd");
+      action();
     } catch (error) {
       expect(error).toBeInstanceOf(DomainError);
       const { code, key, params } = error as DomainError;
@@ -51,16 +67,22 @@ describe("DomainValidation.validated", () => {
   });
 
   test("複数の issue があるときは最初の issue のキーにする", () => {
+    // given
     const schema = z.object({
       a: z.string(KeyedIssue.of("todo.id.invalid")),
       b: z.string(KeyedIssue.of("todo.title.invalid")),
     });
 
-    try {
+    // when
+    const action = () =>
       DomainValidation.validated(schema, { a: 1, b: 2 } as unknown as {
         a: string;
         b: string;
       });
+
+    // then
+    try {
+      action();
     } catch (error) {
       expect(error).toBeInstanceOf(DomainError);
       expect((error as DomainError).key).toBe("todo.id.invalid");
@@ -73,11 +95,16 @@ describe("DomainValidation.validated", () => {
   //   返すと、画面の辞書に無いキーとして API の契約を破る。利用者の入力の誤り（400）ではなく実装の誤りなので、
   //   DomainError ではない Error（presentation が 500 にしてログに出す）にし、開発中に気づけるようにする。
   test("キーを付け忘れた検査で失敗したら、DomainError ではない Error を zod の文言と ZodError を添えて投げる", () => {
+    // given
     const schema = z.string().min(1);
     const zodMessage = schema.safeParse("").error?.issues[0]?.message;
 
+    // when
+    const action = () => DomainValidation.validated(schema, "");
+
+    // then
     try {
-      DomainValidation.validated(schema, "");
+      action();
     } catch (error) {
       expect(error).not.toBeInstanceOf(DomainError);
       expect(error).toEqual(

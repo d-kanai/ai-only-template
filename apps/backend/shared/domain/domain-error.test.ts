@@ -6,8 +6,11 @@ describe("DomainError", () => {
   // name はログやスタックトレースの先頭に出る。Error のままだと想定外の例外と見分けられない（domain-error.ts の WHY）。
   // message は開発者向け（キーと params の JSON）。自然言語は持たない（画面が key と params を翻訳する。Issue #116）。
   test("code・key・params を持ち、message はキーと params の JSON、name は DomainError になる", () => {
+    // given: 前提なし
+    // when
     const error = new DomainError("not_found", "todo.notFound", { id: "abc" });
 
+    // then
     expect(error).toBeInstanceOf(Error);
     expect(error.code).toBe("not_found");
     expect(error.key).toBe("todo.notFound");
@@ -17,8 +20,11 @@ describe("DomainError", () => {
   });
 
   test("params の無いキーは params を省略でき、params は undefined、message はキーだけになる", () => {
+    // given: 前提なし
+    // when
     const error = new DomainError("validation_error", "todo.title.empty");
 
+    // then
     expect(error.key).toBe("todo.title.empty");
     expect(error.params).toBeUndefined();
     expect(error.message).toBe("todo.title.empty");
@@ -29,6 +35,8 @@ describe("DomainError", () => {
   // WHY 型で縛る: キーごとの params の形（ErrorKeyParams）は画面の辞書が使う契約。params の渡し忘れ・余分な params を
   //   実行時ではなくコンパイル時に止める。
   test("params の要るキーに渡し忘れる・形を間違える、params の無いキーに渡すと、コンパイルエラーになる", () => {
+    // given: 前提なし
+    // when
     const typeOnly = () => [
       // @ts-expect-error todo.title.tooLong は { max: number } が必須
       new DomainError("validation_error", "todo.title.tooLong"),
@@ -42,6 +50,7 @@ describe("DomainError", () => {
       new DomainError("validation_error", "todo.title.unknown"),
     ];
 
+    // then
     expect(typeof typeOnly).toBe("function");
   });
 });

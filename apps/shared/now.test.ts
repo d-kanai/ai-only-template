@@ -12,24 +12,31 @@ afterEach(() => {
 
 describe("now", () => {
   test("システムの時計の現在時刻を Date で返す", () => {
+    // given
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-30T01:02:03.456Z"));
 
+    // when
     const current = now();
 
+    // then
     expect(current).toBeInstanceOf(Date);
     expect(current.toISOString()).toBe("2026-09-30T01:02:03.456Z");
   });
 
   test("呼ぶたびに新しい Date を返す（返した値を書き換えても次の呼び出しに影響しない）", () => {
+    // given
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-30T00:00:00.000Z"));
     const first = now();
     first.setUTCFullYear(2000);
-
     vi.setSystemTime(new Date("2026-09-30T00:00:01.000Z"));
 
-    expect(now().toISOString()).toBe("2026-09-30T00:00:01.000Z");
-    expect(first).not.toBe(now());
+    // when
+    const second = now();
+
+    // then
+    expect(second.toISOString()).toBe("2026-09-30T00:00:01.000Z");
+    expect(first).not.toBe(second);
   });
 });

@@ -93,9 +93,12 @@ afterAll(async () => {
 });
 
 test("全 feature の api ファイルをすべて読み込んでも、Repository に渡る db は AppDatabase.get() の 1 つだけ", async () => {
+  // given: beforeAll で全 feature の api ファイルを読み込み、Repository が受け取った db を記録してある
+  // when
   // beforeAll の resetModules 後に読み込まれた database モジュール（api ファイルが使ったもの）を取る。
   const { AppDatabase } = await import("../infra/database");
 
+  // then
   // 列挙が空だと Repository も 0 個で、下の検証が意味を持たないまま通る。
   expect(features.length).toBeGreaterThan(0);
   expect(apiFiles.length).toBeGreaterThan(0);

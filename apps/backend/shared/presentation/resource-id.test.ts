@@ -6,9 +6,14 @@ import { ResourceId } from "./resource-id";
 
 describe("ResourceId.parseUuid", () => {
   test("uuid の形なら、同じ値をそのまま返す", () => {
+    // given
     const id = randomUUID();
 
-    expect(ResourceId.parseUuid(id, "todo.notFound", { id })).toBe(id);
+    // when
+    const parsed = ResourceId.parseUuid(id, "todo.notFound", { id });
+
+    // then
+    expect(parsed).toBe(id);
   });
 
   // toEqual は Error の name / message を比べるが、独自のプロパティ（code・key・params）まで比べるとは限らない（未確認）ので、
@@ -21,11 +26,16 @@ describe("ResourceId.parseUuid", () => {
   ])(
     "%sなら、渡したキーと params の DomainError(not_found) を投げる",
     (_label, id) => {
-      expect(() => ResourceId.parseUuid(id, "todo.notFound", { id })).toThrow(
+      // given: 前提なし
+      // when
+      const action = () => ResourceId.parseUuid(id, "todo.notFound", { id });
+
+      // then
+      expect(action).toThrow(
         new DomainError("not_found", "todo.notFound", { id }),
       );
       try {
-        ResourceId.parseUuid(id, "todo.notFound", { id });
+        action();
       } catch (error) {
         expect(error).toBeInstanceOf(DomainError);
         const { code, key, params } = error as DomainError;
@@ -40,10 +50,13 @@ describe("ResourceId.parseUuid", () => {
 
   // 型の検査（pnpm typecheck の tsc -p apps/backend が見る。domain-error.test.ts と同じ）。
   test("params の要るキーに渡し忘れると、コンパイルエラーになる", () => {
+    // given: 前提なし
+    // when
     const typeOnly = () =>
       // @ts-expect-error todo.notFound は { id: string } が必須
       ResourceId.parseUuid("missing", "todo.notFound");
 
+    // then
     expect(typeof typeOnly).toBe("function");
   });
 });

@@ -44,12 +44,15 @@ function postRequest(body: string): Request {
 
 describe("POST /api/todos", () => {
   test("201 と作成した Todo（CreateTodoResponse）を返し、保存される", async () => {
+    // given
     const { repository, POST } = setup();
 
+    // when
     const response = await POST(
       postRequest(JSON.stringify({ title: " 牛乳を買う " })),
     );
 
+    // then
     expect(response.status).toBe(201);
     const body = (await response.json()) as CreateTodoResponse;
     expect(body).toEqual({
@@ -68,6 +71,7 @@ describe("POST /api/todos", () => {
   // WHY 本番の POST（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない（Issue #59）
   //   ことを、Postgres の Repository に保存されることで固定する。runner の run と insert を差し替えるので DB には接続しない。
   test("本番の POST は Postgres の runner が張ったトランザクションで、Postgres の Repository に保存する", async () => {
+    // given
     // WHY runner の run を差し替える: 本番の組み立ての PostgresTransactionRunner が DB に接続しないよう、work を呼ぶだけにする。
     //   run が 1 回呼ばれ、Repository がその tx を受け取ることで、本番の command がトランザクションを張ることも確かめる。
     const run = vi
@@ -77,10 +81,12 @@ describe("POST /api/todos", () => {
       .spyOn(PostgresTodoRepository.prototype, "insert")
       .mockResolvedValue();
 
+    // when
     const response = await productionPost(
       postRequest(JSON.stringify({ title: "牛乳を買う" })),
     );
 
+    // then
     expect(response.status).toBe(201);
     expect(run).toHaveBeenCalledTimes(1);
     expect(insert).toHaveBeenCalledTimes(1);
@@ -92,22 +98,28 @@ describe("POST /api/todos", () => {
 
   // presentation は domain より厳しくしない（Issue #144）。domain が通す境界の値（1 文字・前後の空白付き）を presentation も通す。
   test("title の前後の空白を除いて 1 文字なら作れる", async () => {
+    // given
     const { POST } = setup();
 
+    // when
     const response = await POST(postRequest(JSON.stringify({ title: " a " })));
 
+    // then
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toMatchObject({ title: "a" });
   });
 
   test("title の前後の空白を除いて 100 文字（絵文字は 1 文字と数える）なら作れる", async () => {
+    // given
     const { POST } = setup();
     const title = "🍎".repeat(100);
 
+    // when
     const response = await POST(
       postRequest(JSON.stringify({ title: ` ${title} ` })),
     );
 
+    // then
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toMatchObject({ title });
   });
@@ -308,10 +320,13 @@ describe("POST /api/todos", () => {
   ])(
     "%s なら 400 の /problems/validation-error を、理由の key（と params・errors）と英語の detail 付きで返し、何も保存しない",
     async (_label, body, expected) => {
+      // given
       const { repository, POST } = setup();
 
+      // when
       const response = await POST(postRequest(body));
 
+      // then
       expect(response.status).toBe(400);
       expect(response.headers.get("content-type")).toBe(
         "application/problem+json",

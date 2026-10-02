@@ -60,8 +60,11 @@ const feature = await loadFeature("./list-todos.feature");
 describeFeature(feature, ({ Scenario }) => {
   Scenario("レスポンス", ({ And }) => {
     And("Todo が無ければ、空の一覧が返る", async () => {
+      // given: beforeEach で Todo を空にしてある
+      // when
       const response = await listTodos();
 
+      // then
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
         todos: [],
@@ -70,10 +73,13 @@ describeFeature(feature, ({ Scenario }) => {
 
     // 表の Todo（id・タイトル・完了かどうか・作成日時）と同じ内容が一覧に出る。作成日時は ISO 8601 の文字列。
     And("各 Todo は、タイトル・完了かどうか・作成日時を持つ", async () => {
+      // given
       const milk = await aTodo(database.db).title("牛乳を買う").build();
 
+      // when
       const response = await listTodos();
 
+      // then
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
         todos: [todoResponseOf(milk)],
@@ -81,13 +87,16 @@ describeFeature(feature, ({ Scenario }) => {
     });
 
     And("完了にした Todo も一覧に含まれる", async () => {
+      // given
       const milk = await aTodo(database.db)
         .title("牛乳を買う")
         .completed(true)
         .build();
 
+      // when
       const response = await listTodos();
 
+      // then
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
         todos: [todoResponseOf({ ...milk, completed: true })],
@@ -98,6 +107,7 @@ describeFeature(feature, ({ Scenario }) => {
   Scenario("ソート", ({ And }) => {
     // WHY 新しいものから表に入れる: 入れた順のまま返す実装でも通らないように、入れた順と作成日時の順を逆にする。
     And("作成した順（古いものが先）に並ぶ", async () => {
+      // given
       const newest = await uncompletedTodo(
         "00000000-0000-4000-8000-000000000001",
         "卵を買う",
@@ -114,8 +124,10 @@ describeFeature(feature, ({ Scenario }) => {
         new Date("2026-09-02T00:00:00.000Z"),
       ).build();
 
+      // when
       const response = await listTodos();
 
+      // then
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
         todos: [oldest, middle, newest].map(todoResponseOf),
@@ -126,6 +138,7 @@ describeFeature(feature, ({ Scenario }) => {
     // WHY 2 回呼んで比べ、id の順とも比べる: 「毎回同じ順」だけでは、たまたま同じ順だった 2 回を見分けられない。決まった規則
     //   （id の昇順）で並ぶことを、入れた順（id の順と違う）と比べて確かめる。
     And("同じ日時に作られた Todo は、毎回同じ順で並ぶ", async () => {
+      // given
       const createdAt = new Date("2026-09-01T00:00:00.000Z");
       const third = await uncompletedTodo(
         "00000000-0000-4000-8000-000000000003",
@@ -146,7 +159,11 @@ describeFeature(feature, ({ Scenario }) => {
         todos: [first, second, third].map(todoResponseOf),
       } satisfies ListTodosResponse;
 
-      for (const response of [await listTodos(), await listTodos()]) {
+      // when
+      const responses = [await listTodos(), await listTodos()];
+
+      // then
+      for (const response of responses) {
         expect(response.status).toBe(200);
         await expect(response.json()).resolves.toStrictEqual(expected);
       }
@@ -162,6 +179,7 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "壊れた Todo（完了の履歴の日時が、作られた日時より前のもの）が 1 件でもあると、一覧は取得できず、サーバの誤りとして伝えられる",
       async () => {
+        // given
         const createdAt = new Date("2026-09-01T00:00:00.000Z");
         await uncompletedTodo(
           "00000000-0000-4000-8000-000000000001",
@@ -181,8 +199,10 @@ describeFeature(feature, ({ Scenario }) => {
           ])
           .build();
 
+        // when
         const response = await listTodos();
 
+        // then
         await expectProblem(response, internalErrorProblem("/api/todos"));
       },
     );

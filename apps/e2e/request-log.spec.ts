@@ -122,6 +122,7 @@ test("画面を開くと page_request の行が 1 つ、画面が呼ぶ /api/tod
   page,
   request,
 }) => {
+  // given
   // 一覧に Todo を 1 件置き、詳細へのリンク（next/link）のプリフェッチが起きる状態にする。
   const title = `ログ確認 ${Date.now()}`;
   const created = await request.post(`${baseURL}/api/todos`, {
@@ -130,7 +131,10 @@ test("画面を開くと page_request の行が 1 つ、画面が呼ぶ /api/tod
   expect(created.status()).toBe(201);
   const todo = (await created.json()) as { id: string };
 
+  // when
   await page.goto(`${baseURL}/`);
+
+  // then
   await expect(page.getByRole("link", { name: title })).toBeVisible();
 
   // 画面の表示（document の GET /）と、画面の hook が呼ぶ GET /api/todos。
@@ -147,11 +151,14 @@ test("画面を開くと page_request の行が 1 つ、画面が呼ぶ /api/tod
   //   apps/shared/log-event.ts）。値があったこと（null でないこと）だけが行に残る。
   expect(apiLine.http.request.header.referer).toBe("***");
 
+  // when
   // リンクを押したときのクライアント遷移（RSC の取得）は page_request の行になる。表示されたリンクのプリフェッチ
   //   （next-router-prefetch ヘッダ付き）は proxy.ts の matcher の missing で除くので、押す前に /todo/<id> の行は無い。
   // WHY 押す前の行を数え直す: プリフェッチはリンクの表示後に非同期で飛ぶので、上の poll の時点ではまだ届いていないことがある。
   //   詳細の画面を開いた後の行の一覧を丸ごと比べ、/todo/<id> の page_request の行がクライアント遷移の 1 つだけであることを確かめる。
   await page.getByRole("link", { name: title }).click();
+
+  // then
   await expect(page).toHaveURL(`${baseURL}/todo/${todo.id}`);
   await expect(
     page.getByRole("heading", { name: title, level: 1 }),
@@ -169,8 +176,11 @@ test("画面を開くと page_request の行が 1 つ、画面が呼ぶ /api/tod
 test("x-request-id と traceparent を付けて呼ぶと、その値が行の http.request.id・trace と応答ヘッダに入り、クエリの値は *** にマスクして出す", async ({
   request,
 }) => {
+  // given
   const requestId = `e2e-${Date.now()}`;
   const traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+
+  // when
   const response = await request.get(
     `${baseURL}/api/todos?token=secret-value`,
     {
@@ -180,6 +190,8 @@ test("x-request-id と traceparent を付けて呼ぶと、その値が行の ht
       },
     },
   );
+
+  // then
   expect(response.status()).toBe(200);
   expect(response.headers()["x-request-id"]).toBe(requestId);
 

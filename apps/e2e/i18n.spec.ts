@@ -27,8 +27,11 @@ test.describe("ブラウザの言語が ja-JP", () => {
     test("Proxy が上書きして、日本語（lang=ja）で表示する", async ({
       page,
     }) => {
+      // given: beforeEach で Todo を空にし、test.use で x-locale: en を送る設定にしてある
+      // when
       await page.goto("/");
 
+      // then
       await expect(page.locator("html")).toHaveAttribute("lang", "ja");
       await expect(page.getByRole("button", { name: "追加" })).toBeVisible();
     });
@@ -40,12 +43,15 @@ test.describe("ブラウザの言語が ja-JP", () => {
     page,
     baseURL,
   }) => {
+    // given
     await context.addCookies([
       { name: "NEXT_LOCALE", value: "en", url: baseURL ?? "" },
     ]);
 
+    // when
     await page.goto("/");
 
+    // then
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page.getByRole("button", { name: "Add" })).toBeVisible();
   });
@@ -58,27 +64,37 @@ test.describe("ブラウザの言語が en-US", () => {
   test("Accept-Language が en のブラウザで開くと、英語で表示し、日時はブラウザのタイムゾーンで出す", async ({
     page,
   }) => {
+    // given
     const title = `Buy milk ${Date.now()}`;
 
+    // when
     await page.goto("/");
 
+    // then
     // <html lang> はサーバの HTML で決まる（layout が x-locale から決める）。
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(
       page.getByRole("heading", { name: "Todo", level: 1 }),
     ).toBeVisible();
     await expect(page.getByText("Loading…")).toHaveCount(0);
+
+    // when
     await page.getByLabel("New todo").fill(title);
     await page.getByRole("button", { name: "Add" }).click();
+
+    // then
     await expect(
       page.getByRole("checkbox", { name: `Mark “${title}” as completed` }),
     ).toBeVisible();
 
+    // when
     // 作成日時は、ブラウザのタイムゾーン（playwright.config.ts の timezoneId: "Asia/Tokyo"。サーバは UTC）で出る。
     // WHY datetime 属性から期待値を作る: 作成した時刻は実行のたびに変わるので、表示の元の値（API の createdAt）を読んで
     //   同じ書式・タイムゾーンで組み立てた文字列と比べる。サーバのタイムゾーン（UTC）で出していれば 9 時間ずれて一致しない。
     const time = page.getByRole("listitem").locator("time");
     const createdAt = await time.getAttribute("datetime");
+
+    // then
     expect(createdAt).not.toBeNull();
     await expect(time).toHaveText(
       new Intl.DateTimeFormat("en", {
@@ -88,8 +104,11 @@ test.describe("ブラウザの言語が en-US", () => {
       }).format(new Date(createdAt ?? "")),
     );
 
+    // when
     // クライアント遷移（リンクを押す）でも英語のまま（root layout の LocaleProvider が残る）。
     await page.getByRole("link", { name: title }).click();
+
+    // then
     await expect(
       page.getByRole("link", { name: "Back to list" }),
     ).toBeVisible();

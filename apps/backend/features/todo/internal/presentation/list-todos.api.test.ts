@@ -46,10 +46,13 @@ function listRequest(): Request {
 
 describe("GET /api/todos", () => {
   test("Todo が無ければ 200 と空の一覧を返す", async () => {
+    // given
     const { GET } = setup();
 
+    // when
     const response = await GET(listRequest());
 
+    // then
     expect(response.status).toBe(200);
     const body = (await response.json()) as ListTodosResponse;
     expect(body).toEqual({ todos: [] });
@@ -58,26 +61,32 @@ describe("GET /api/todos", () => {
   // WHY 本番の GET（モジュールの最下部で組み立てたもの）を確かめる: 環境変数などで InMemory に切り替える分岐を持たない
   //   （Issue #59）ことを、Postgres の Repository が呼ばれることで固定する。findAll を差し替えるので DB には接続しない。
   test("本番の GET は Postgres の Repository で組み立てている", async () => {
+    // given
     const findAll = vi
       .spyOn(PostgresTodoRepository.prototype, "findAll")
       .mockResolvedValue([]);
 
+    // when
     const response = await productionGet(listRequest());
 
+    // then
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ todos: [] });
     expect(findAll).toHaveBeenCalledTimes(1);
   });
 
   test("作成した Todo を ListTodosResponse の形で、作成した順（作成日時の昇順）に返す", async () => {
+    // given
     const { repository, GET } = setup();
     const first = Todo.create("牛乳を買う");
     const second = Todo.create("卵を買う").changeCompletion(true);
     await repository.insert(first, inMemoryTransaction);
     await repository.insert(second, inMemoryTransaction);
 
+    // when
     const response = await GET(listRequest());
 
+    // then
     expect(response.status).toBe(200);
     const body = (await response.json()) as ListTodosResponse;
     expect(body).toEqual({
@@ -99,6 +108,7 @@ describe("GET /api/todos", () => {
   });
 
   test("一覧の取得で想定外の例外が起きたら、500 と内部の情報を含まない /problems/internal-error を返し、例外をログに残す", async () => {
+    // given
     // ProblemResponse.from が想定外の例外を logger.emit（server_error。ERROR なので中で console.error）に出す。テストの出力を汚さないよう抑制し、
     //   例外の type と message が 1 行に入ったことだけを確かめる（行の形は logger.test.ts で固定している）。
     const consoleError = vi
@@ -109,8 +119,10 @@ describe("GET /api/todos", () => {
       new ListTodosQuery(failingRepository(cause)),
     ).handle;
 
+    // when
     const response = await failingGet(listRequest());
 
+    // then
     expect(response.status).toBe(500);
     expect(response.headers.get("content-type")).toBe(
       "application/problem+json",

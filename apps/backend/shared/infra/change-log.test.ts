@@ -58,7 +58,12 @@ const ROW = {
 
 describe("ChangeRecords.insertEntry", () => {
   test("行の全列を DB の列名で after に持つ insert の記録にする（日時は ISO 8601 の文字列）", () => {
-    expect(ChangeRecords.insertEntry(items, ROW, ACTOR_ID)).toStrictEqual({
+    // given: 前提なし
+    // when
+    const entry = ChangeRecords.insertEntry(items, ROW, ACTOR_ID);
+
+    // then
+    expect(entry).toStrictEqual({
       tableName: "items",
       rowId: ROW.id,
       operation: "insert",
@@ -74,27 +79,46 @@ describe("ChangeRecords.insertEntry", () => {
   });
 
   test("actorId が null（ログインが無い）なら actorId は null", () => {
-    expect(ChangeRecords.insertEntry(items, ROW, null)).toMatchObject({
+    // given: 前提なし
+    // when
+    const entry = ChangeRecords.insertEntry(items, ROW, null);
+
+    // then
+    expect(entry).toMatchObject({
       actorId: null,
     });
   });
 
   test("null の列は null のまま記録する", () => {
+    // given
     const nullable = pgTable("nullables", {
       id: uuid("id").primaryKey(),
       note: text("note"),
     });
 
-    expect(
-      ChangeRecords.insertEntry(nullable, { id: ROW.id, note: null }, null)
-        .changes,
-    ).toStrictEqual({ id: { after: ROW.id }, note: { after: null } });
+    // when
+    const { changes } = ChangeRecords.insertEntry(
+      nullable,
+      { id: ROW.id, note: null },
+      null,
+    );
+
+    // then
+    expect(changes).toStrictEqual({
+      id: { after: ROW.id },
+      note: { after: null },
+    });
   });
 });
 
 describe("ChangeRecords.deleteEntry", () => {
   test("消した行の全列を DB の列名で before に持つ delete の記録にする", () => {
-    expect(ChangeRecords.deleteEntry(items, ROW, ACTOR_ID)).toStrictEqual({
+    // given: 前提なし
+    // when
+    const entry = ChangeRecords.deleteEntry(items, ROW, ACTOR_ID);
+
+    // then
+    expect(entry).toStrictEqual({
       tableName: "items",
       rowId: ROW.id,
       operation: "delete",
@@ -112,15 +136,18 @@ describe("ChangeRecords.deleteEntry", () => {
 
 describe("ChangeRecords.updateEntries", () => {
   test("変わった列（ChangedProps.of の差分）だけを、origin の値を before・差分の値を after にした update の記録 1 件にする", () => {
-    expect(
-      ChangeRecords.updateEntries(
-        items,
-        ROW.id,
-        ROW,
-        { itemName: "豆乳", createdAt: new Date("2026-10-01T00:00:00.000Z") },
-        ACTOR_ID,
-      ),
-    ).toStrictEqual([
+    // given: 前提なし
+    // when
+    const entries = ChangeRecords.updateEntries(
+      items,
+      ROW.id,
+      ROW,
+      { itemName: "豆乳", createdAt: new Date("2026-10-01T00:00:00.000Z") },
+      ACTOR_ID,
+    );
+
+    // then
+    expect(entries).toStrictEqual([
       {
         tableName: "items",
         rowId: ROW.id,
@@ -139,18 +166,36 @@ describe("ChangeRecords.updateEntries", () => {
 
   // WHY 空にする: 差分の無い update は何も書かない（SQL を発行しない）ので、変更の記録も残さない。
   test("変わった列が無ければ記録しない（空配列）", () => {
-    expect(
-      ChangeRecords.updateEntries(items, ROW.id, ROW, {}, ACTOR_ID),
-    ).toStrictEqual([]);
+    // given: 前提なし
+    // when
+    const entries = ChangeRecords.updateEntries(
+      items,
+      ROW.id,
+      ROW,
+      {},
+      ACTOR_ID,
+    );
+
+    // then
+    expect(entries).toStrictEqual([]);
   });
 
   // WHY origin に表の列でない項目（Entity の statusChanges など）があってもよい: 比べるのは差分の key だけ。
   test("origin に表の列でない項目があっても、差分の key だけを記録する", () => {
+    // given
     const origin = { ...ROW, history: [1, 2] };
 
-    expect(
-      ChangeRecords.updateEntries(items, ROW.id, origin, { done: true }, null),
-    ).toStrictEqual([
+    // when
+    const entries = ChangeRecords.updateEntries(
+      items,
+      ROW.id,
+      origin,
+      { done: true },
+      null,
+    );
+
+    // then
+    expect(entries).toStrictEqual([
       {
         tableName: "items",
         rowId: ROW.id,
@@ -166,25 +211,33 @@ describe("ChangeRecords.updateEntries", () => {
 //   変更の記録が欠けたことに気づけない。どちらも呼び出し側（Repository）の実装ミス。
 describe("組み立てられない入力", () => {
   test("表に無い key があれば、表と key の名前を持つ Error を投げる", () => {
-    expect(() =>
+    // given: 前提なし
+    // when
+    const action = () =>
       ChangeRecords.insertEntry(
         items,
         { ...ROW, history: "x" } as typeof ROW,
         null,
-      ),
-    ).toThrow(new Error("items has no column: history"));
+      );
+
+    // then
+    expect(action).toThrow(new Error("items has no column: history"));
   });
 
   test("Object.prototype にある名前（toString）も表に無い key として扱う", () => {
-    expect(() =>
+    // given: 前提なし
+    // when
+    const action = () =>
       ChangeRecords.updateEntries(
         items,
         ROW.id,
         ROW,
         { toString: "x" } as never,
         null,
-      ),
-    ).toThrow(new Error("items has no column: toString"));
+      );
+
+    // then
+    expect(action).toThrow(new Error("items has no column: toString"));
   });
 
   test.each([
@@ -195,13 +248,19 @@ describe("組み立てられない入力", () => {
   ])(
     "列の値が文字列・数値・真偽値・null・Date でない（%s）なら Error を投げる",
     (_label, value) => {
-      expect(() =>
+      // given: 前提なし
+      // when
+      const action = () =>
         ChangeRecords.deleteEntry(
           items,
           { ...ROW, count: value } as never,
           null,
-        ),
-      ).toThrow(new Error("items.count has a value that cannot be recorded"));
+        );
+
+      // then
+      expect(action).toThrow(
+        new Error("items.count has a value that cannot be recorded"),
+      );
     },
   );
 });
@@ -224,6 +283,7 @@ describe("ChangeRecords.recordChange", () => {
   });
 
   test("記録を change_logs に 1 行ずつ入れる（id は DB が作り、occurred_at は now()、同じ呼び出しの行は同じ時刻）", async () => {
+    // given
     const occurredAt = new Date("2026-09-30T09:00:00.000Z");
     vi.mocked(now).mockReturnValueOnce(occurredAt);
     const inserted = ChangeRecords.insertEntry(items, ROW, ACTOR_ID);
@@ -235,12 +295,14 @@ describe("ChangeRecords.recordChange", () => {
       null,
     );
 
+    // when
     await ChangeRecords.recordChange(database.db, [inserted, ...updated]);
-
     const rows = await database.db
       .select()
       .from(changeLogs)
       .orderBy(changeLogs.operation);
+
+    // then
     expect(rows).toStrictEqual([
       { id: expect.any(String), ...inserted, occurredAt },
       { id: expect.any(String), ...updated[0], occurredAt },
@@ -251,10 +313,13 @@ describe("ChangeRecords.recordChange", () => {
   // WHY: 差分の無い update・無い id の delete は記録が 0 件になる。drizzle-orm の insert は空の values を受け付けないので、
   //   SQL を発行せずに終える。
   test("記録が 0 件なら SQL を発行しない", async () => {
+    // given
     const insert = vi.spyOn(database.db, "insert");
 
+    // when
     await ChangeRecords.recordChange(database.db, []);
 
+    // then
     expect(insert).not.toHaveBeenCalled();
     await expect(database.db.select().from(changeLogs)).resolves.toEqual([]);
   });

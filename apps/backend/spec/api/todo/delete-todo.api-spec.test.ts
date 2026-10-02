@@ -61,11 +61,14 @@ describeFeature(feature, ({ Scenario }) => {
     // 変更の記録（.feature には書かない。create-todo.api-spec.test.ts の冒頭）: 消した Todo の消す前の全列の before が 1 件だけ残る
     //   （日時は ISO 8601 の文字列。cascade で消えた完了の履歴の行は記録しない。前提はビルダーで入れたので記録を残さない）。
     And("削除した Todo は無くなり、ほかの Todo は残る", async () => {
+      // given
       const milk = await aTodo(database.db).title("牛乳を買う").build();
       const bread = await aTodo(database.db).title("パンを買う").build();
 
+      // when
       await deleteTodo(milk.id);
 
+      // then
       await expect(todoRows(database.db)).resolves.toStrictEqual([
         todoRowOf(bread),
       ]);
@@ -89,10 +92,13 @@ describeFeature(feature, ({ Scenario }) => {
   Scenario("レスポンス", ({ And }) => {
     // 削除の後に返す内容は無い（204 で本文が空）。
     And("Todo を削除すると、何も返さずに成功を伝える", async () => {
+      // given
       const milk = await aTodo(database.db).title("牛乳を買う").build();
 
+      // when
       const response = await deleteTodo(milk.id);
 
+      // then
       expect(response.status).toBe(204);
       await expect(response.text()).resolves.toBe("");
     });
@@ -102,14 +108,17 @@ describeFeature(feature, ({ Scenario }) => {
     // 外部キーの on delete cascade で消える（履歴の DELETE は書かない。schema.ts の todoStatusChanges）。ほかの Todo の履歴は残る。
     // WHY 消す Todo を完了にしておく: 履歴が 2 件ある Todo でも 1 件目だけを消す誤りを見分ける。
     And("削除した Todo の完了の履歴も無くなる", async () => {
+      // given
       const milk = await aTodo(database.db)
         .title("牛乳を買う")
         .completed(true)
         .build();
       const bread = await aTodo(database.db).title("パンを買う").build();
 
+      // when
       await deleteTodo(milk.id);
 
+      // then
       await expect(statusRows(database.db)).resolves.toStrictEqual(
         statusRowsOf(bread),
       );
@@ -119,10 +128,13 @@ describeFeature(feature, ({ Scenario }) => {
   Scenario("異常系", ({ And }) => {
     // WHY 別の Todo を 1 件置く: 空のときだけ「無い」と返す実装・無い id で別の Todo を消す誤りを通さない。
     And("存在しない Todo は、存在しないと伝えられる", async () => {
+      // given
       const milk = await aTodo(database.db).title("牛乳を買う").build();
 
+      // when
       const response = await deleteTodo(MISSING_ID);
 
+      // then
       await expectProblem(
         response,
         notFoundProblem(MISSING_ID, `/api/todos/${MISSING_ID}`),
@@ -135,12 +147,15 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "削除済みの Todo をもう一度削除すると、存在しないと伝えられる",
       async () => {
+        // given
         const milk = await aTodo(database.db).title("牛乳を買う").build();
         await deleteTodo(milk.id);
         const logs = await logEntries(database.db);
 
+        // when
         const response = await deleteTodo(milk.id);
 
+        // then
         await expectProblem(
           response,
           notFoundProblem(milk.id, `/api/todos/${milk.id}`),

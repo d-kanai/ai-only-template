@@ -20,84 +20,142 @@ const ORIGIN: Props = {
 
 describe("ChangedProps.of", () => {
   test("origin と違う key だけを、今の値で返す（同じ key は含めない）", () => {
+    // given
     const current = { ...ORIGIN, title: "卵を買う" };
 
-    expect(ChangedProps.of(ORIGIN, current)).toStrictEqual({
+    // when
+    const changed = ChangedProps.of(ORIGIN, current);
+
+    // then
+    expect(changed).toStrictEqual({
       title: "卵を買う",
     });
   });
 
   test("複数の key が変わっていれば、変わった key をすべて返す", () => {
+    // given
     const current = { ...ORIGIN, title: "卵を買う", completed: true };
 
-    expect(ChangedProps.of(ORIGIN, current)).toStrictEqual({
+    // when
+    const changed = ChangedProps.of(ORIGIN, current);
+
+    // then
+    expect(changed).toStrictEqual({
       title: "卵を買う",
       completed: true,
     });
   });
 
   test("何も変わっていなければ空のオブジェクトを返す", () => {
-    expect(ChangedProps.of(ORIGIN, { ...ORIGIN })).toStrictEqual({});
+    // given: 前提なし
+    // when
+    const changed = ChangedProps.of(ORIGIN, { ...ORIGIN });
+
+    // then
+    expect(changed).toStrictEqual({});
   });
 
   test("current に無い項目は、origin にあっても比べない（返さない）", () => {
-    expect(
-      ChangedProps.of(ORIGIN, { completed: ORIGIN.completed }),
-    ).toStrictEqual({});
+    // given: 前提なし
+    // when
+    const changed = ChangedProps.of(ORIGIN, { completed: ORIGIN.completed });
+
+    // then
+    expect(changed).toStrictEqual({});
   });
 
   test("current に持たせた項目だけを比べる（origin の一部でよい）", () => {
-    expect(ChangedProps.of(ORIGIN, { completed: true })).toStrictEqual({
+    // given: 前提なし
+    // when
+    const changed = ChangedProps.of(ORIGIN, { completed: true });
+
+    // then
+    expect(changed).toStrictEqual({
       completed: true,
     });
   });
 
   // WHY: Object.is は同じ時刻でも別のインスタンスの Date を別と見る。DB から読み直した Date は毎回別のインスタンス。
   test("Date は同じ時刻なら別のインスタンスでも変わっていないとみなす", () => {
+    // given
     const current = {
       ...ORIGIN,
       createdAt: new Date(ORIGIN.createdAt.getTime()),
     };
 
-    expect(ChangedProps.of(ORIGIN, current)).toStrictEqual({});
+    // when
+    const changed = ChangedProps.of(ORIGIN, current);
+
+    // then
+    expect(changed).toStrictEqual({});
   });
 
   test("Date は違う時刻なら変わったとみなし、今の Date を返す", () => {
+    // given
     const createdAt = new Date("2026-09-30T00:00:00.001Z");
 
-    expect(ChangedProps.of(ORIGIN, { ...ORIGIN, createdAt })).toStrictEqual({
+    // when
+    const changed = ChangedProps.of(ORIGIN, { ...ORIGIN, createdAt });
+
+    // then
+    expect(changed).toStrictEqual({
       createdAt,
     });
   });
 
   // 片方だけが Date のときは Date どうしの比較ではない（Object.is で比べる）。型を偽ったときだけ起きる。
   test("片方だけが Date なら（getTime が同じ数でも）変わったとみなす", () => {
+    // given
     const origin = { value: new Date(0) as Date | number };
 
-    expect(ChangedProps.of(origin, { value: 0 })).toStrictEqual({
+    // when
+    const dateToNumber = ChangedProps.of(origin, { value: 0 });
+
+    // then
+    expect(dateToNumber).toStrictEqual({
       value: 0,
     });
-    expect(
-      ChangedProps.of({ value: 0 as Date | number }, { value: new Date(0) }),
-    ).toStrictEqual({ value: new Date(0) });
+
+    // when
+    const numberToDate = ChangedProps.of(
+      { value: 0 as Date | number },
+      { value: new Date(0) },
+    );
+
+    // then
+    expect(numberToDate).toStrictEqual({ value: new Date(0) });
   });
 
   // Object.is の仕様どおり: NaN は NaN と同じ、0 と -0 は別（=== とは逆）。
   test("NaN から NaN は変わっていない（Object.is で比べる）", () => {
-    expect(
-      ChangedProps.of({ ...ORIGIN, count: Number.NaN }, { count: Number.NaN }),
-    ).toStrictEqual({});
+    // given: 前提なし
+    // when
+    const changed = ChangedProps.of(
+      { ...ORIGIN, count: Number.NaN },
+      { count: Number.NaN },
+    );
+
+    // then
+    expect(changed).toStrictEqual({});
   });
 
   test("0 から -0 は変わったとみなす（Object.is で比べる）", () => {
-    expect(
-      ChangedProps.of({ ...ORIGIN, count: 0 }, { count: -0 }),
-    ).toStrictEqual({
+    // given: 前提なし
+    // when
+    const changed = ChangedProps.of({ ...ORIGIN, count: 0 }, { count: -0 });
+
+    // then
+    expect(changed).toStrictEqual({
       count: -0,
     });
   });
 
   test("current が空なら空のオブジェクトを返す", () => {
-    expect(ChangedProps.of(ORIGIN, {})).toStrictEqual({});
+    // given: 前提なし
+    // when
+    const changed = ChangedProps.of(ORIGIN, {});
+
+    // then
+    expect(changed).toStrictEqual({});
   });
 });

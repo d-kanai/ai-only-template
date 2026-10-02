@@ -142,11 +142,13 @@ function changeLogRows() {
 
 describe("PostgresWriter の insert", () => {
   test("行を INSERT して DB が保存した行を返し、同じトランザクションで変更履歴（全列の after）を書き、前後に 1 行ずつログを出す", async () => {
+    // given
     const logs = captureLogs();
     fixElapsed(1000, 1012.4);
     const row = { id: ID, itemName: "牛乳" };
     let linesBeforeInsert: unknown[] = [];
 
+    // when
     const inserted = await inWriter(async (writer, tx) => {
       const original = tx.insert.bind(tx);
       vi.spyOn(tx, "insert").mockImplementation((table) => {
@@ -156,6 +158,7 @@ describe("PostgresWriter の insert", () => {
       return writer.insert(items, [row]);
     });
 
+    // then
     expect(inserted).toStrictEqual([row]);
     await expect(database.db.select().from(items)).resolves.toStrictEqual([
       row,
@@ -192,6 +195,7 @@ describe("PostgresWriter の insert", () => {
 
   // WHY 複数行は row_ids: 1 文で書いた行をすべてログから引けるようにする（1 行なら row_id。Issue #205 の形のまま）。
   test("複数の行は 1 文で INSERT し、行ごとに変更履歴を書き、ログは row_ids に行の id を並べる", async () => {
+    // given
     const logs = captureLogs();
     fixElapsed(0, 3);
     const rows = [
@@ -199,8 +203,10 @@ describe("PostgresWriter の insert", () => {
       { id: OTHER_ID, itemName: "卵" },
     ];
 
+    // when
     await inWriter((writer) => writer.insert(items, rows));
 
+    // then
     await expect(
       database.db.select().from(items).orderBy(items.itemName),
     ).resolves.toStrictEqual([rows[1], rows[0]]);
@@ -240,8 +246,10 @@ describe("PostgresWriter の insert", () => {
 
   // WHY Writer が id を作る: 前のログと変更履歴に、文を実行する前に行の id が要る（DB の既定値の id は INSERT の後にしか分からない）。
   test("id の無い行には uuid（v4）の id を作って INSERT し、その id をログと変更履歴に使う（id のある行はその id のまま）", async () => {
+    // given
     const logs = captureLogs();
 
+    // when
     const inserted = await inWriter((writer) =>
       writer.insert(items, [
         { itemName: "牛乳" } as typeof items.$inferInsert,
@@ -249,6 +257,7 @@ describe("PostgresWriter の insert", () => {
       ]),
     );
 
+    // then
     const generated = inserted[0]?.id;
     expect(generated).toMatch(UUID_PATTERN);
     expect(inserted).toStrictEqual([
@@ -264,8 +273,10 @@ describe("PostgresWriter の insert", () => {
   // WHY id: undefined を明示した行も「id の無い行」として扱う: スプレッドで後から row を重ねると、undefined の id が作った id を
   //   上書きし、INSERT の id が NULL（NOT NULL 違反）になり、ログと変更履歴の row_id も undefined になる。
   test("id: undefined を明示した行にも uuid（v4）の id を作って INSERT し、その id をログと変更履歴に使う", async () => {
+    // given
     const logs = captureLogs();
 
+    // when
     const inserted = await inWriter((writer) =>
       writer.insert(items, [
         {
@@ -275,6 +286,7 @@ describe("PostgresWriter の insert", () => {
       ]),
     );
 
+    // then
     const generated = inserted[0]?.id;
     expect(generated).toMatch(UUID_PATTERN);
     expect(inserted).toStrictEqual([{ id: generated, itemName: "牛乳" }]);
@@ -285,15 +297,20 @@ describe("PostgresWriter の insert", () => {
   });
 
   test("行が空なら SQL を発行せず、ログも変更履歴も出さずに空配列を返す", async () => {
+    // given
     const logs = captureLogs();
+    let insertCallCount = -1;
 
+    // when
     const inserted = await inWriter(async (writer, tx) => {
       const insert = vi.spyOn(tx, "insert");
       const result = await writer.insert(items, []);
-      expect(insert).not.toHaveBeenCalled();
+      insertCallCount = insert.mock.calls.length;
       return result;
     });
 
+    // then
+    expect(insertCallCount).toBe(0);
     expect(inserted).toStrictEqual([]);
     expect(logs.info()).toStrictEqual([]);
     await expect(changeLogRows()).resolves.toStrictEqual([]);
@@ -304,14 +321,17 @@ describe("PostgresWriter の update", () => {
   // WHY before は DB が UPDATE の直前に持っていた値（呼び出し側の読み込んだときの値ではない）: Writer が同じトランザクションで
   //   行を FOR UPDATE で読み、その値を before にする。呼び出し側は変えた列だけを渡す。
   test("id の行の渡した列だけを UPDATE して更新後の行を返し、変更履歴に DB が UPDATE の直前に持っていた値を before、渡した値を after に書く", async () => {
+    // given
     await database.db.insert(items).values({ id: ID, itemName: "牛乳" });
     const logs = captureLogs();
     fixElapsed(10, 15);
 
+    // when
     const updated = await inWriter((writer) =>
       writer.update(items, ID, { itemName: "卵" }),
     );
 
+    // then
     expect(updated).toStrictEqual({ id: ID, itemName: "卵" });
     await expect(database.db.select().from(items)).resolves.toStrictEqual([
       { id: ID, itemName: "卵" },
@@ -352,6 +372,7 @@ describe("PostgresWriter の update", () => {
   //   ロックで待ちになることがあり、結果が実行順に左右される。
   // lock_timeout を短くして、待つ（= ロックがある）ことを 55P03（lock_not_available）で確かめる（時間の長さで判定しない）。
   test("update は before を読む時点で行を FOR UPDATE でロックするので、UPDATE の前でも別のトランザクションはその行を UPDATE / DELETE できない", async () => {
+    // given
     await database.db.insert(items).values({ id: ID, itemName: "牛乳" });
     captureLogs();
     const writeFromOtherConnection = (
@@ -363,7 +384,8 @@ describe("PostgresWriter の update", () => {
       });
     const probed: string[] = [];
 
-    await inWriter(async (writer, tx) => {
+    // when
+    const updated = await inWriter(async (writer, tx) => {
       const realUpdate = tx.update.bind(tx);
       // writer.ts の update の chain（update(table).set(changes).where(where).returning()）の形で受け、returning の前に確かめる。
       vi.spyOn(tx, "update").mockImplementation(((table: typeof items) => ({
@@ -385,11 +407,11 @@ describe("PostgresWriter の update", () => {
           }),
         }),
       })) as never);
-      await expect(
-        writer.update(items, ID, { itemName: "卵" }),
-      ).resolves.toStrictEqual({ id: ID, itemName: "卵" });
+      return writer.update(items, ID, { itemName: "卵" });
     });
 
+    // then
+    expect(updated).toStrictEqual({ id: ID, itemName: "卵" });
     expect(probed).toEqual(["update", "delete"]);
     await expect(database.db.select().from(items)).resolves.toStrictEqual([
       { id: ID, itemName: "卵" },
@@ -397,19 +419,21 @@ describe("PostgresWriter の update", () => {
   });
 
   test("渡した列が空なら SQL を発行せず、ログも変更履歴も出さずに undefined を返す（行が無くてもエラーにしない）", async () => {
+    // given
     const logs = captureLogs();
+    let calls: { select: unknown[]; update: unknown[] } | undefined;
 
+    // when
     const updated = await inWriter(async (writer, tx) => {
       const select = vi.spyOn(tx, "select");
       const update = vi.spyOn(tx, "update");
       const result = await writer.update(items, ID, {});
-      expect({ select: select.mock.calls, update: update.mock.calls }).toEqual({
-        select: [],
-        update: [],
-      });
+      calls = { select: select.mock.calls, update: update.mock.calls };
       return result;
     });
 
+    // then
+    expect(calls).toEqual({ select: [], update: [] });
     expect(updated).toBeUndefined();
     expect(logs.info()).toStrictEqual([]);
     await expect(changeLogRows()).resolves.toStrictEqual([]);
@@ -418,13 +442,18 @@ describe("PostgresWriter の update", () => {
   // WHY Error（DomainError の not_found にしない）: 呼び出し側（Repository）は同じトランザクションで行を FOR UPDATE で読んでから
   //   update するので、行が無いのは呼び出し側の実装ミス（500）。
   test("id の行が無ければ、表と id を message に持つ Error を投げ、失敗のログ（WARNING）を出し、変更履歴を書かない", async () => {
+    // given
     const logs = captureLogs();
     fixElapsed(0, 2);
     const error = new Error(`items has no row to update: ${ID}`);
 
-    await expect(
-      inWriter((writer) => writer.update(items, ID, { itemName: "卵" })),
-    ).rejects.toEqual(error);
+    // when
+    const promise = inWriter((writer) =>
+      writer.update(items, ID, { itemName: "卵" }),
+    );
+
+    // then
+    await expect(promise).rejects.toEqual(error);
 
     expect(logs.info()).toStrictEqual([startLine("update", { row_id: ID })]);
     expect(logs.warn()).toStrictEqual([
@@ -444,12 +473,15 @@ describe("PostgresWriter の update", () => {
 
 describe("PostgresWriter の delete", () => {
   test("id の行を DELETE して消した行を返し、変更履歴に消す前の全列を before に書く", async () => {
+    // given
     await database.db.insert(items).values({ id: ID, itemName: "牛乳" });
     const logs = captureLogs();
     fixElapsed(0, 1);
 
+    // when
     const deleted = await inWriter((writer) => writer.delete(items, ID));
 
+    // then
     expect(deleted).toStrictEqual({ id: ID, itemName: "牛乳" });
     await expect(database.db.select().from(items)).resolves.toStrictEqual([]);
     await expect(changeLogRows()).resolves.toStrictEqual([
@@ -481,12 +513,15 @@ describe("PostgresWriter の delete", () => {
 
   // 無い id でも前後のログは出す（後のログの changes が空で、何も消さなかったことが分かる）。
   test("id の行が無ければ何も消さずに undefined を返し、変更履歴を書かず、後のログの changes は空になる", async () => {
+    // given
     await database.db.insert(items).values({ id: OTHER_ID, itemName: "卵" });
     const logs = captureLogs();
     fixElapsed(0, 1);
 
+    // when
     const deleted = await inWriter((writer) => writer.delete(items, ID));
 
+    // then
     expect(deleted).toBeUndefined();
     await expect(database.db.select().from(items)).resolves.toHaveLength(1);
     await expect(changeLogRows()).resolves.toStrictEqual([]);
@@ -500,23 +535,29 @@ describe("PostgresWriter の delete", () => {
 describe("PostgresWriter の共通の振る舞い", () => {
   // WHY 四捨五入: 12.6 は 13。切り捨て・差でなく和（2012.6）では落ちる。
   test("所要時間はミリ秒の整数に丸める（開始と終了の差を四捨五入）", async () => {
+    // given
     const logs = captureLogs();
     fixElapsed(1000, 1012.6);
 
+    // when
     await inWriter((writer) => writer.delete(items, ID));
 
+    // then
     expect(logs.info()[1]).toMatchObject({ event: { duration_ms: 13 } });
   });
 
   test("組み立てで渡した actorId を変更履歴の actorId に入れる", async () => {
+    // given
     captureLogs();
 
+    // when
     await inWriter(async (writer) => {
       await writer.insert(items, [{ id: ID, itemName: "牛乳" }]);
       await writer.update(items, ID, { itemName: "卵" });
       await writer.delete(items, ID);
     }, ACTOR_ID);
 
+    // then
     expect((await changeLogRows()).map((row) => row.actorId)).toEqual([
       ACTOR_ID,
       ACTOR_ID,
@@ -525,28 +566,34 @@ describe("PostgresWriter の共通の振る舞い", () => {
   });
 
   test("select は同じトランザクションの drizzle の select（書いた行が見える）", async () => {
+    // given
     captureLogs();
 
+    // when
     const rows = await inWriter(async (writer) => {
       await writer.insert(items, [{ id: ID, itemName: "牛乳" }]);
       return writer.select().from(items);
     });
 
+    // then
     expect(rows).toStrictEqual([{ id: ID, itemName: "牛乳" }]);
   });
 
   // WHY トランザクションが戻ると記録も残らない: 記録は本体と同じトランザクション（tx）で書く。別の接続で書くと、本体が戻っても
   //   記録だけが残る。
   test("書き込みの後にトランザクションが戻ると、本体も変更履歴も残らない", async () => {
+    // given
     captureLogs();
     const failure = new Error("rollback");
 
-    await expect(
-      inWriter(async (writer) => {
-        await writer.insert(items, [{ id: ID, itemName: "牛乳" }]);
-        throw failure;
-      }),
-    ).rejects.toBe(failure);
+    // when
+    const promise = inWriter(async (writer) => {
+      await writer.insert(items, [{ id: ID, itemName: "牛乳" }]);
+      throw failure;
+    });
+
+    // then
+    await expect(promise).rejects.toBe(failure);
 
     await expect(database.db.select().from(items)).resolves.toStrictEqual([]);
     await expect(changeLogRows()).resolves.toStrictEqual([]);
@@ -555,16 +602,19 @@ describe("PostgresWriter の共通の振る舞い", () => {
   // WHY 一時的な CHECK 制約で change_logs の INSERT を失敗させる: 記録の失敗を書き込みの失敗として扱い（失敗のログと例外）、
   //   同じトランザクションの本体も戻ることを確かめる。not valid で既存の行を検査せずに張り、後始末（finally）で外す。
   test("変更履歴の INSERT が失敗すると、失敗のログを出して例外を投げ、本体の書き込みも戻る", async () => {
+    // given
     const logs = captureLogs();
     await database.db.execute(
       sql`alter table change_logs add constraint tmp_reject_all_logs check (table_name = '') not valid`,
     );
     try {
-      await expect(
-        inWriter((writer) =>
-          writer.insert(items, [{ id: ID, itemName: "牛乳" }]),
-        ),
-      ).rejects.toMatchObject({ cause: { code: "23514" } });
+      // when
+      const promise = inWriter((writer) =>
+        writer.insert(items, [{ id: ID, itemName: "牛乳" }]),
+      );
+
+      // then
+      await expect(promise).rejects.toMatchObject({ cause: { code: "23514" } });
 
       await expect(database.db.select().from(items)).resolves.toEqual([]);
       expect(logs.warn()).toMatchObject([
@@ -613,14 +663,17 @@ describe("PostgresWriter の共通の振る舞い", () => {
   }
 
   test("DB のエラー（一意制約違反）のとき、失敗のログは pg のエラーの name・引用符の部分を *** にした message・SQLSTATE（23505）・制約の名前と、値を *** にした params を出す（行の値を出さない）", async () => {
+    // given
     const row = { id: ID, itemName: SENTINEL };
     await database.db.insert(items).values(row);
     const logs = captureLogs();
     fixElapsed(3000, 3004);
 
-    await expect(
-      inWriter((writer) => writer.insert(items, [row])),
-    ).rejects.toMatchObject({
+    // when
+    const promise = inWriter((writer) => writer.insert(items, [row]));
+
+    // then
+    await expect(promise).rejects.toMatchObject({
       cause: {
         code: "23505",
         message: 'duplicate key value violates unique constraint "items_pkey"',
@@ -646,17 +699,20 @@ describe("PostgresWriter の共通の振る舞い", () => {
   // 22P02 の pg の message は「invalid input syntax for type integer: "<入力>"」で、入力値をそのまま含む（実測。入力に " を含めても
   //   pg は逃がさずに "<入力>" と書く）。番兵の値を integer の列に渡し、message と params のどちらにも出ないことを確かめる。
   test('DB のエラー（データ例外 22P02）のとき、pg の message の入力値（引用符の中。入力が " を含んでも）と params の値をログに出さない', async () => {
+    // given
     const input = `${SENTINEL}" tail "x`;
     const logs = captureLogs();
     fixElapsed(0, 2);
 
-    await expect(
-      inWriter((writer) =>
-        writer.insert(notes, [
-          { id: ID, body: SENTINEL, amount: input as unknown as number },
-        ]),
-      ),
-    ).rejects.toMatchObject({
+    // when
+    const promise = inWriter((writer) =>
+      writer.insert(notes, [
+        { id: ID, body: SENTINEL, amount: input as unknown as number },
+      ]),
+    );
+
+    // then
+    await expect(promise).rejects.toMatchObject({
       cause: {
         code: "22P02",
         message: `invalid input syntax for type integer: "${input}"`,
@@ -732,17 +788,20 @@ describe("PostgresWriter の共通の振る舞い", () => {
       },
     ],
   ])("DB のエラーの %s", async (_label, thrown, expected) => {
+    // given
     const logs = captureLogs();
     fixElapsed(0, 1);
 
-    await expect(
-      inWriter(async (writer, tx) => {
-        vi.spyOn(tx, "delete").mockImplementation(() => {
-          throw thrown;
-        });
-        return writer.delete(items, ID);
-      }),
-    ).rejects.toBe(thrown);
+    // when
+    const promise = inWriter(async (writer, tx) => {
+      vi.spyOn(tx, "delete").mockImplementation(() => {
+        throw thrown;
+      });
+      return writer.delete(items, ID);
+    });
+
+    // then
+    await expect(promise).rejects.toBe(thrown);
 
     expect(logs.warn()).toStrictEqual([failedLine("delete", 1, expected)]);
     expect(JSON.stringify(logs.warn())).not.toContain(SENTINEL);
@@ -753,14 +812,17 @@ describe("PostgresWriter の db_write の changes（before / after）のマス�
   // fail closed（Issue #216）: 分類を登録していない表は、どの列が個人情報か分からないので、id も含めて全列の値を *** にする。
   //   change_logs の表には生の値を残す（監査。マスクはログだけ）。null は null のまま。
   test("分類を登録していない表の insert / update / delete は、before / after の全列の値を *** にする（change_logs には生の値）", async () => {
+    // given
     const logs = captureLogs();
 
+    // when
     await inWriter(async (writer) => {
       await writer.insert(notes, [{ id: ID, body: SENTINEL, amount: 3 }]);
       await writer.update(notes, ID, { body: "卵", amount: null });
       await writer.delete(notes, ID);
     });
 
+    // then
     const changes = logs
       .info()
       .filter((line) => line.event.phase === "done")
@@ -833,17 +895,28 @@ describe("PostgresWriter の db_write の changes（before / after）のマス�
 
 describe("asTransaction / PostgresWriter.of", () => {
   test("asTransaction で Transaction にした Writer は、PostgresWriter.of で同じ Writer として取り出せる", async () => {
-    await inWriter(async (writer) => {
-      expect(PostgresWriter.of(writer.asTransaction())).toBe(writer);
-    });
+    // given: 前提なし
+    // when
+    const { writer, found } = await inWriter(async (writer) => ({
+      writer,
+      found: PostgresWriter.of(writer.asTransaction()),
+    }));
+
+    // then
+    expect(found).toBe(writer);
   });
 
   // WHY Error にする: InMemory の runner の tx などを Postgres の Repository に渡すのは組み立ての誤りで、黙って別の接続で
   //   書かせない。
   test("PostgresWriter でない Transaction を渡すと、Error を投げる", () => {
+    // given
     const foreign = {} as unknown as Transaction;
 
-    expect(() => PostgresWriter.of(foreign)).toThrow(
+    // when
+    const action = () => PostgresWriter.of(foreign);
+
+    // then
+    expect(action).toThrow(
       new Error("the transaction was not started by PostgresTransactionRunner"),
     );
   });
