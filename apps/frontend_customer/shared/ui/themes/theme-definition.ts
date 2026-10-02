@@ -16,11 +16,19 @@ export type ThemedComponent =
   | "Button"
   | "Checkbox"
   | "Container"
+  | "Group"
   | "List"
   | "Paper"
+  | "Stack"
   | "Text"
   | "TextInput"
   | "Title";
+
+// 余白の段階名（Mantine の theme.spacing のキー）。画面は余白の props（gap・mt・p など）にこの名前だけを書ける
+// （rule-tests/design-system.test.ts の design-system-no-direct-style の例外。数値や px は書けない）。
+// WHY 余白だけ段階名で画面に書かせる: 画面が増えると、部品の並べ方（どこを詰め、どこを空けるか）をテーマがすべて知る必要が
+//   出る。並べ方は画面に書き、各段階の値（rem）の正はテーマに残す（テーマを替えると余白の詰め具合も替わる）。
+export type SpacingStep = "xs" | "sm" | "md" | "lg" | "xl";
 
 // 1 つのテーマ = Mantine のテーマ（色・フォント・角丸・余白・影と、部品ごとの見た目）+ CSS 変数（背景色など、テーマの
 // オブジェクトに項目が無いもの）。
@@ -29,6 +37,9 @@ export type ThemedComponent =
 //   rule-tests/design-system.test.ts が止める。
 export type ThemeDefinition = {
   theme: MantineThemeOverride & {
+    // WHY spacing を必須にする: 画面は余白を段階名で書くので、テーマが段階の値を書き忘れると Mantine の既定の値のまま残り、
+    //   テーマを差し替えても余白が変わらない。段階をすべて書くまで型チェックで止める。
+    spacing: Record<SpacingStep, string>;
     components: Pick<Required<MantineThemeComponents>, ThemedComponent>;
   };
   cssVariablesResolver: CSSVariablesResolver;

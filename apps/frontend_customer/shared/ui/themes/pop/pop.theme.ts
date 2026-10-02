@@ -4,8 +4,10 @@ import {
   Button,
   Checkbox,
   Container,
+  Group,
   List,
   Paper,
+  Stack,
   Text,
   TextInput,
   Title,
@@ -23,6 +25,16 @@ export const popTheme: ThemeDefinition = {
   theme: {
     primaryColor: "pink",
     defaultRadius: 0,
+    // 余白の段階（画面は gap="md" のように段階名だけを書く）。Mantine の既定（xs 0.625rem〜xl 2rem）より詰め気味。
+    // WHY 詰め気味: 太い黒の枠線とずらした影で面の境目がはっきりしているので、間を詰めても混ざらない。詰めて並べるほうが
+    //   チラシのような賑やかさが出る。bento と値を変え、テーマの差し替えで余白も変わることを確かめる。
+    spacing: {
+      xs: "0.25rem",
+      sm: "0.5rem",
+      md: "0.75rem",
+      lg: "1rem",
+      xl: "1.5rem",
+    },
     fontFamily: "ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace",
     headings: {
       fontFamily: "ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace",
@@ -48,6 +60,10 @@ export const popTheme: ThemeDefinition = {
         defaultProps: { size: "sm" },
         classNames: { root: classes.container },
       }),
+      // WHY 横並びは xs: 枠線の付いた部品を横に詰めて並べ、ひと続きの帯に見せる。
+      Group: Group.extend({
+        defaultProps: { gap: "xs" },
+      }),
       List: List.extend({
         classNames: {
           root: classes.list,
@@ -59,6 +75,10 @@ export const popTheme: ThemeDefinition = {
       Paper: Paper.extend({
         defaultProps: { radius: 0 },
         classNames: { root: classes.paper },
+      }),
+      // WHY 縦並びは sm: ずらした影（枠の外に出る分）が次の面に重ならない最小の間隔。
+      Stack: Stack.extend({
+        defaultProps: { gap: "sm" },
       }),
       Text: Text.extend({
         classNames: { root: classes.text },

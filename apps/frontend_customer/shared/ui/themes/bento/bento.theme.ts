@@ -4,8 +4,10 @@ import {
   Button,
   Checkbox,
   Container,
+  Group,
   List,
   Paper,
+  Stack,
   Text,
   TextInput,
   Title,
@@ -26,6 +28,15 @@ export const bentoTheme: ThemeDefinition = {
     // WHY 7: ボタンの白い文字と並べたときに読める濃さ（6 以下だと緑が明るく、白い文字が沈む）。
     primaryShade: 7,
     defaultRadius: "lg",
+    // 余白の段階（画面は gap="md" のように段階名だけを書く）。Mantine の既定（xs 0.625rem〜xl 2rem）より広め。
+    // WHY 広め: 白い面（Paper）を影で浮かせて並べるので、面と面の間を空けないと影が重なり、お弁当箱の仕切りに見えない。
+    spacing: {
+      xs: "0.75rem",
+      sm: "1rem",
+      md: "1.5rem",
+      lg: "2rem",
+      xl: "3rem",
+    },
     // jade: Mantine の既定に無い緑。green より黄みが少なく、濃い側（8・9）はサイドバーや塗りの面に使う深い緑。
     colors: {
       jade: [
@@ -71,6 +82,10 @@ export const bentoTheme: ThemeDefinition = {
         defaultProps: { size: "sm" },
         classNames: { root: classes.container },
       }),
+      // WHY 横並びは sm: ボタンや入力欄を横に並べるときは 1 つのまとまりに見せたいので、縦の面の間（md）より詰める。
+      Group: Group.extend({
+        defaultProps: { gap: "sm" },
+      }),
       List: List.extend({
         classNames: {
           root: classes.list,
@@ -82,6 +97,10 @@ export const bentoTheme: ThemeDefinition = {
       Paper: Paper.extend({
         defaultProps: { radius: "xl" },
         classNames: { root: classes.paper },
+      }),
+      // WHY 縦並びは md: 面（Paper）を縦に積む間隔。影が隣の面に掛からない広さにする。
+      Stack: Stack.extend({
+        defaultProps: { gap: "md" },
       }),
       Text: Text.extend({
         classNames: { root: classes.text },

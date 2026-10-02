@@ -25,6 +25,7 @@ import {
   isImportDeclaration,
   isImportEqualsDeclaration,
   isJsxAttribute,
+  isJsxExpression,
   isNamedExports,
   isNamedImports,
   isNamespaceImport,
@@ -51,7 +52,16 @@ import { afterAll, expect } from "vitest";
 //     加えて、Mantine の部品の見た目を選ぶ props（LOOK_PROPS: color / variant / size / radius / autoContrast / gradient / shadow /
 //     withBorder / underline）も違反。WHY: <Button color="red" variant="light"> はテーマを差し替えてもその見た目のまま残る。
 //     部品ごとの既定の見た目はテーマの components の defaultProps に書く（shared/ui/themes/bento/bento.theme.ts）。
-//     値の形（文字列・式・テーマの値の参照）は問わない。要素は問わない（素の <div style> も <Button mt="md"> も違反）。
+//     値の形（文字列・式・テーマの値の参照）は問わない。要素は問わない（素の <div style> も <Button c="red"> も違反）。
+//     例外（余白）: 余白の props（style props のうち STYLE_PROPS_DATA の type が spacing で CSS の margin / padding 系のもの
+//     m・mt・mx・ms・mis・p・py・pie など、と並べ方の間隔 gap / rowGap / columnGap / spacing / verticalSpacing）は、値が段階名
+//     xs / sm / md / lg / xl の文字列リテラル（`gap="md"`・`gap={"md"}`）のときだけ許す。数値・"12px" などの文字列・式・変数・
+//     オブジェクト（レスポンシブ指定）・テンプレート・値の無い属性は違反のままで、違反の行に「段階名だけ書ける」と添える。
+//     WHY 余白だけ画面に書かせる: 画面が増えると、部品の並べ方（どこを詰め、どこを空けるか）をテーマがすべて知る必要が出る。
+//     並べ方は画面の構造なので画面に書き、値（rem）の正はテーマの spacing に残す（段階名なら、テーマを替えると余白も替わる）。
+//     WHY 幅・高さ（w・h・maw・mih など）は例外にしない: Mantine は段階名を受けるので type spacing にしているが、余白ではなく
+//     部品の形で、画面に書くとテーマの外に見た目の正ができる。
+//     WHY gap などを style props と別に名前で持つ: STYLE_PROPS_DATA に無く、今まで検査の外だった（`<Stack gap={12}>` が通った）。
 //     WHY style props の一覧を @mantine/core から読む: 手で写すと Mantine の更新で増えた名前（mis / mie など）を見逃す。
 //     @mantine/core は apps/frontend_customer だけの依存なので、そこの package.json から解決する（createRequire）。
 //     WHY shared/ui/ を除く: デザインシステム自身（Provider・テーマ・テーマの上の部品）は見た目を書く場所。
@@ -74,6 +84,8 @@ import { afterAll, expect } from "vitest";
 //   React.createElement / cloneElement の props、useMantineTheme で値を取り出して別の口から当てる書き方は見ない（レビューで見る）。
 //   style props・LOOK_PROPS と同じ名前の素の属性（SVG の <path opacity="0.5">・display、HTML の <input size>・<font color>）も
 //   違反と数える（安全側。今の画面は素の要素でこれらを使わない）。
+//   段階名の判定は値の字面だけを見る（`gap={"md" as const}`・かっこで包んだ "md" も違反と数える。安全側）。並べ方の間隔の props は
+//   名前で見るので、Mantine の部品でない要素の同名の属性（素の <div spacing>）も対象。
 //   design-system-themed-components は @mantine/core の名前だけを見る（部品の中身・別のパッケージ（@mantine/dates など）・
 //   shared/ui/ を経由した再公開は見ない。ThemedComponent の union は文字列リテラルだけを読み、別の型の参照は展開しない）。
 //   部品でない値（ColorSchemeScript・mantineHtmlProps・hook）も名前が一覧に無ければ違反と数える（shared/ui/ に置く）。
@@ -82,6 +94,9 @@ import { afterAll, expect } from "vitest";
 
 // @mantine/core から取り込む値 1 つ（名前と、行を出す節）。
 type MantineImport = { node: Node; name: string };
+
+// Mantine の STYLE_PROPS_DATA の値 1 つ（type は値の解釈の種類、property は CSS のプロパティ名）。
+type StylePropData = { type: string; property: string };
 
 type RuleId =
   | "design-system-no-direct-style"
@@ -114,19 +129,51 @@ class DesignSystemRule {
     "underline",
   ];
 
-  // Mantine の style props の名前（@mantine/core の STYLE_PROPS_DATA のキー）。
-  static mantineStyleProps(root: string): string[] {
+  // 余白の段階名（Mantine の theme.spacing のキー）。値の正（rem）は各テーマの spacing（shared/ui/themes/*/*.theme.ts）。
+  // WHY 固定の一覧: ThemeDefinition の型が両テーマにこの 5 つを必須にしている（shared/ui/themes/theme-definition.ts）。
+  static readonly SPACING_SCALE = ["xs", "sm", "md", "lg", "xl"];
+  // 並べ方の部品（Stack・Group・SimpleGrid など）の間隔の props。STYLE_PROPS_DATA には無いので名前で持つ。
+  static readonly SPACING_LAYOUT_PROPS = [
+    "gap",
+    "rowGap",
+    "columnGap",
+    "spacing",
+    "verticalSpacing",
+  ];
+  // 余白の props の違反に添える文（違反の行を見た人が、段階名なら書けると分かるように）。
+  static readonly SPACING_HINT =
+    "余白は段階名 xs / sm / md / lg / xl の文字列リテラルだけ書ける";
+
+  // Mantine の style props（@mantine/core の STYLE_PROPS_DATA。キーが名前）。
+  static mantineStylePropsData(root: string): Record<string, StylePropData> {
     const requireFromFrontend = createRequire(
       join(root, DesignSystemRule.FRONTEND_ROOT, "package.json"),
     );
     const mantine = requireFromFrontend("@mantine/core") as {
-      STYLE_PROPS_DATA?: Record<string, unknown>;
+      STYLE_PROPS_DATA?: Record<string, StylePropData>;
     };
-    return Object.keys(mantine.STYLE_PROPS_DATA ?? {});
+    return mantine.STYLE_PROPS_DATA ?? {};
   }
 
-  // 見た目を直接書く JSX 属性の名前（style props の一覧に、Styles API と素の React の口と、見た目を選ぶ props を足したもの）。
-  static forbiddenAttributes(styleProps: readonly string[]): Set<string> {
+  // 余白の props の名前: style props のうち type が spacing で CSS の margin / padding 系のもの（STYLE_PROPS_DATA の順）と、
+  // 並べ方の間隔の props。
+  // WHY property も見る: Mantine は幅・高さ（w・h・maw・mih など）も type spacing にしている（段階名を受けるため）。
+  //   幅・高さは並べ方ではなく部品の形なので、段階名でも画面には書かせない。
+  static spacingProps(data: Record<string, StylePropData>): string[] {
+    return [
+      ...Object.entries(data)
+        .filter(
+          ([, { type, property }]) =>
+            type === "spacing" && /^(?:margin|padding)/.test(property),
+        )
+        .map(([name]) => name),
+      ...DesignSystemRule.SPACING_LAYOUT_PROPS,
+    ];
+  }
+
+  // 見た目を直接書く JSX 属性の名前（style props の一覧に、Styles API と素の React の口、見た目を選ぶ props、
+  // 並べ方の間隔の props を足したもの）。余白の props はこのうち値が段階名のものだけ findDirectStyles が許す。
+  static forbiddenAttributes(data: Record<string, StylePropData>): Set<string> {
     return new Set([
       "style",
       "className",
@@ -134,8 +181,24 @@ class DesignSystemRule {
       "styles",
       "vars",
       ...DesignSystemRule.LOOK_PROPS,
-      ...styleProps,
+      ...DesignSystemRule.SPACING_LAYOUT_PROPS,
+      ...Object.keys(data),
     ]);
+  }
+
+  // JSX 属性の値が段階名の文字列リテラルか（`gap="md"` と `gap={"md"}`）。
+  // WHY 文字列リテラルだけ: 数値・"12px"・変数・式・オブジェクト（レスポンシブ指定）・テンプレートは、テーマの外で値を決められる
+  //   （変数や式は中身を追えない）。段階名なら値の正はテーマの spacing に残る。
+  static isSpacingScaleValue(initializer: Node | undefined): boolean {
+    const value =
+      initializer !== undefined && isJsxExpression(initializer)
+        ? initializer.expression
+        : initializer;
+    return (
+      value !== undefined &&
+      isStringLiteral(value) &&
+      DesignSystemRule.SPACING_SCALE.includes(value.text)
+    );
   }
 
   // WHY 前方一致に `/` を付ける: shared/ui-x/ や shared/uix/ を取り違えない。
@@ -176,22 +239,31 @@ class DesignSystemRule {
     });
   }
 
-  // 見た目を直接書く JSX 属性の行（1 始まり、書かれた順）。
+  // 見た目を直接書く JSX 属性（書かれた順）。「行」か、余白の props なら「行 名前（SPACING_HINT）」。
+  // 余白の props（spacing）は値が段階名なら違反にしない。
   static findDirectStyles(
     sourceFile: SourceFile,
     forbidden: ReadonlySet<string>,
-  ): number[] {
-    const lines: number[] = [];
+    spacing: ReadonlySet<string>,
+  ): string[] {
+    const found: string[] = [];
     DesignSystemRule.visit(sourceFile, (node) => {
       if (
-        isJsxAttribute(node) &&
-        isIdentifier(node.name) &&
-        forbidden.has(node.name.text)
+        !isJsxAttribute(node) ||
+        !isIdentifier(node.name) ||
+        !forbidden.has(node.name.text)
       ) {
-        lines.push(DesignSystemRule.lineOf(sourceFile, node));
+        return;
+      }
+      const line = DesignSystemRule.lineOf(sourceFile, node);
+      const name = node.name.text;
+      if (!spacing.has(name)) {
+        found.push(`${line}`);
+      } else if (!DesignSystemRule.isSpacingScaleValue(node.initializer)) {
+        found.push(`${line} ${name}（${DesignSystemRule.SPACING_HINT}）`);
       }
     });
-    return lines;
+    return found;
   }
 
   // 文字列リテラル（埋め込み式の無いテンプレートリテラルも）の値。それ以外は undefined。
@@ -408,12 +480,13 @@ class DesignSystemRule {
     );
   }
 
-  // 規則ごとの違反を「<規則>: <パス>:<行>」（置き場所の違反は「<規則>: <パス>」）で返す。
+  // 規則ごとの違反を「<規則>: <パス>:<行>」（置き場所の違反は「<規則>: <パス>」、余白の props は行の後ろに名前と SPACING_HINT）で返す。
   static collectViolations(
     root: string,
-    styleProps: readonly string[],
+    stylePropsData: Record<string, StylePropData>,
   ): Record<RuleId, string[]> {
-    const forbidden = DesignSystemRule.forbiddenAttributes(styleProps);
+    const forbidden = DesignSystemRule.forbiddenAttributes(stylePropsData);
+    const spacing = new Set(DesignSystemRule.spacingProps(stylePropsData));
     const sources = DesignSystemRule.listCheckedSources(root);
     // WHY theme-definition.ts も同じ起動で解析する: tsgo の起動を 1 回にする。無ければ一覧は空（すべての取り込みが違反）。
     const themeDefinition = DesignSystemRule.listFrontendFiles(root).filter(
@@ -433,7 +506,7 @@ class DesignSystemRule {
       ),
     );
     const linesIn = (
-      find: (sourceFile: SourceFile) => number[],
+      find: (sourceFile: SourceFile) => (number | string)[],
       rule: RuleId,
     ) =>
       sources.flatMap((path) =>
@@ -444,7 +517,7 @@ class DesignSystemRule {
     return {
       "design-system-no-direct-style": linesIn(
         (sourceFile) =>
-          DesignSystemRule.findDirectStyles(sourceFile, forbidden),
+          DesignSystemRule.findDirectStyles(sourceFile, forbidden, spacing),
         "design-system-no-direct-style",
       ),
       "design-system-css-placement": [
@@ -469,21 +542,36 @@ class DesignSystemRule {
   }
 }
 
-// 架空の Mantine の style props（実物の一覧に依存せず判定を固定する）。
-const FAKE_STYLE_PROPS = ["mt", "p", "c", "bg", "display"];
+// 架空の Mantine の style props（実物の一覧に依存せず判定を固定する）。w は type が spacing でも幅なので余白ではない。
+const FAKE_STYLE_PROPS_DATA = {
+  mt: { type: "spacing", property: "marginTop" },
+  p: { type: "spacing", property: "padding" },
+  w: { type: "spacing", property: "width" },
+  c: { type: "textColor", property: "color" },
+  bg: { type: "color", property: "background" },
+  display: { type: "identity", property: "display" },
+};
+
+// 余白の props の違反に添える文（判定と同じ定数から作る）。
+const spacing = (line: number, name: string) =>
+  `${line} ${name}（${DesignSystemRule.SPACING_HINT}）`;
 
 const lines = (...rows: string[]) => `${rows.join("\n")}\n`;
 
 // 例（ファイル名 → ソース）をまとめて構文解析し、例ごとの違反の行を返す。
 function directStyleLines(sources: Record<string, string>) {
   const parsed = DesignSystemRule.parse(sources);
-  const forbidden = DesignSystemRule.forbiddenAttributes(FAKE_STYLE_PROPS);
+  const forbidden = DesignSystemRule.forbiddenAttributes(FAKE_STYLE_PROPS_DATA);
+  const spacingProps = new Set(
+    DesignSystemRule.spacingProps(FAKE_STYLE_PROPS_DATA),
+  );
   return Object.fromEntries(
     Object.keys(sources).map((path) => [
       path,
       DesignSystemRule.findDirectStyles(
         parsed.get(path) as SourceFile,
         forbidden,
+        spacingProps,
       ),
     ]),
   );
@@ -602,10 +690,10 @@ describeFeature(feature, ({ Scenario }) => {
             "  <div style={{ color: 'red' }}>", // 2
             '    <span className="x" />', // 3
             "    <Button classNames={{ root: 'x' }} styles={{ root: {} }} vars={() => ({})} />", // 4 x3
-            '    <Box mt="md" p={4} c="red" bg="blue" display="flex" />', // 5 x5
+            '    <Box w="md" c="red" bg="blue" display="flex" />', // 5 x4
             "    <Stack",
             '      gap="md"',
-            '      mt="xl"', // 8
+            '      c="xl"', // 8
             "    />",
             '    <Button color="red" variant="light" size="xs" radius="xl" autoContrast />', // 10 x5
             '    <Paper gradient={{ from: "a", to: "b" }} shadow="md" withBorder />', // 11 x3
@@ -626,10 +714,153 @@ describeFeature(feature, ({ Scenario }) => {
         // then
         expect(result).toEqual({
           "a.tsx": [
-            2, 3, 4, 4, 4, 5, 5, 5, 5, 5, 8, 10, 10, 10, 10, 10, 11, 11, 11, 12,
+            "2",
+            "3",
+            "4",
+            "4",
+            "4",
+            "5",
+            "5",
+            "5",
+            "5",
+            "8",
+            "10",
+            "10",
+            "10",
+            "10",
+            "10",
+            "11",
+            "11",
+            "11",
+            "12",
           ],
-          "b.jsx": [1],
+          "b.jsx": ["1"],
         });
+      },
+    );
+
+    And(
+      "must pass: 余白の props と並べ方の間隔 gap など は、値が段階名 xs・sm・md・lg・xl の文字列リテラルなら違反にしない（属性の文字列と式の中の文字列の両方）",
+      () => {
+        // given
+        const sources = {
+          "a.tsx": lines(
+            "export const A = () => (",
+            '  <Stack gap="xs" rowGap="sm" columnGap="md" mt="lg" p="xl">',
+            "    <Group gap={\"md\"} mt={'xs'} />",
+            '    <SimpleGrid spacing="sm" verticalSpacing={"lg"} />',
+            "  </Stack>",
+            ");",
+          ),
+        };
+
+        // when
+        const result = directStyleLines(sources);
+
+        // then
+        expect(result).toEqual({ "a.tsx": [] });
+      },
+    );
+
+    And(
+      "must reject: 余白の props と並べ方の間隔に、数値・段階名でない文字列・テンプレート・変数・式・オブジェクト・値の無い属性を書くと、段階名だけ書けることを添えて違反",
+      () => {
+        // given
+        const sources = {
+          "a.tsx": lines(
+            "export const A = (size) => (",
+            "  <Stack gap={12}>", // 2 数値
+            '    <Group gap="12px" mt="1rem" p="" />', // 3 段階名でない文字列 x3
+            '    <Group gap="MD" rowGap="md " columnGap="xxl" />', // 4 大文字・空白・似た名前 x3
+            "    <Group gap={`md`} mt={size} p={size ? 'md' : 'lg'} />", // 5 テンプレート・変数・式 x3
+            "    <Group gap={{ base: 'xs', sm: 'md' }} spacing={('md')} />", // 6 オブジェクト・かっこ x2
+            "    <Group verticalSpacing p />", // 7 値の無い属性 x2
+            "  </Stack>",
+            ");",
+          ),
+        };
+
+        // when
+        const result = directStyleLines(sources);
+
+        // then
+        expect(result).toEqual({
+          "a.tsx": [
+            spacing(2, "gap"),
+            spacing(3, "gap"),
+            spacing(3, "mt"),
+            spacing(3, "p"),
+            spacing(4, "gap"),
+            spacing(4, "rowGap"),
+            spacing(4, "columnGap"),
+            spacing(5, "gap"),
+            spacing(5, "mt"),
+            spacing(5, "p"),
+            spacing(6, "gap"),
+            spacing(6, "spacing"),
+            spacing(7, "verticalSpacing"),
+            spacing(7, "p"),
+          ],
+        });
+      },
+    );
+
+    And(
+      "must reject: 余白でない style props の幅・色など と見た目を選ぶ props は、値が段階名でも違反",
+      () => {
+        // given
+        const sources = {
+          "a.tsx": lines(
+            "export const A = () => (",
+            '  <Box w="md" c="md" bg={"sm"} display="xs">', // 2 x4
+            '    <Button size="md" radius="xl" shadow="sm" />', // 3 x3
+            '    <Box style="md" className="md" />', // 4 x2
+            "  </Box>",
+            ");",
+          ),
+        };
+
+        // when
+        const result = directStyleLines(sources);
+
+        // then
+        expect(result).toEqual({
+          "a.tsx": ["2", "2", "2", "2", "3", "3", "3", "4", "4"],
+        });
+      },
+    );
+  });
+
+  Scenario("余白の props の一覧（spacingProps）", ({ And }) => {
+    And(
+      "STYLE_PROPS_DATA のうち type が spacing で margin か padding の props と、gap などの並べ方の間隔だけを余白として読み、幅と高さは読まない",
+      () => {
+        // given
+        const data = {
+          ...FAKE_STYLE_PROPS_DATA,
+          mih: { type: "spacing", property: "minHeight" },
+          mx: { type: "spacing", property: "marginInline" },
+          pis: { type: "spacing", property: "paddingInlineStart" },
+          // type が spacing でない margin 風のもの・property が margin で始まらないものは読まない。
+          mg: { type: "size", property: "margin" },
+          xm: { type: "spacing", property: "xMargin" },
+        };
+
+        // when
+        const result = DesignSystemRule.spacingProps(data);
+
+        // then
+        expect(result).toEqual([
+          "mt",
+          "p",
+          "mx",
+          "pis",
+          "gap",
+          "rowGap",
+          "columnGap",
+          "spacing",
+          "verticalSpacing",
+        ]);
       },
     );
   });
@@ -890,7 +1121,7 @@ describeFeature(feature, ({ Scenario }) => {
       const sources = DesignSystemRule.listCheckedSources(root);
       const violations = DesignSystemRule.collectViolations(
         root,
-        FAKE_STYLE_PROPS,
+        FAKE_STYLE_PROPS_DATA,
       );
 
       // then
@@ -920,7 +1151,7 @@ describeFeature(feature, ({ Scenario }) => {
           "apps/frontend_customer/features/x/x.tsx": lines(
             'import classes from "./x.module.css";',
             "export const X = () => (",
-            '  <Box mt="md" classNames={classes} color="red" />',
+            '  <Box mt="md" p={4} classNames={classes} color="red" />',
             ");",
             'import { Box, Text } from "@mantine/core";',
           ),
@@ -930,14 +1161,14 @@ describeFeature(feature, ({ Scenario }) => {
         // when
         const violations = DesignSystemRule.collectViolations(
           root,
-          FAKE_STYLE_PROPS,
+          FAKE_STYLE_PROPS_DATA,
         );
 
         // then
         expect(violations).toEqual({
           "design-system-no-direct-style": [
             "design-system-no-direct-style: apps/frontend_customer/app/layout.tsx:2",
-            "design-system-no-direct-style: apps/frontend_customer/features/x/x.tsx:3",
+            `design-system-no-direct-style: apps/frontend_customer/features/x/x.tsx:${spacing(3, "p")}`,
             "design-system-no-direct-style: apps/frontend_customer/features/x/x.tsx:3",
             "design-system-no-direct-style: apps/frontend_customer/features/x/x.tsx:3",
           ],
@@ -967,7 +1198,7 @@ describeFeature(feature, ({ Scenario }) => {
         // when
         const violations = DesignSystemRule.collectViolations(
           root,
-          FAKE_STYLE_PROPS,
+          FAKE_STYLE_PROPS_DATA,
         );
 
         // then
@@ -987,7 +1218,7 @@ describeFeature(feature, ({ Scenario }) => {
         const sources = DesignSystemRule.listCheckedSources(root);
         const violations = DesignSystemRule.collectViolations(
           root,
-          FAKE_STYLE_PROPS,
+          FAKE_STYLE_PROPS_DATA,
         );
 
         // then
@@ -1003,12 +1234,14 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("デザインシステム（実ファイル）", ({ And }) => {
     And(
-      "Mantine の style props の一覧を @mantine/core の STYLE_PROPS_DATA から読める（空でない）",
+      "Mantine の style props の一覧と余白の props を @mantine/core の STYLE_PROPS_DATA から読める（空でない、幅と高さは余白に入れない）",
       () => {
         // given: apps/frontend_customer の依存の @mantine/core（実物）
+        const data = DesignSystemRule.mantineStylePropsData(repoRoot);
 
         // when
-        const styleProps = DesignSystemRule.mantineStyleProps(repoRoot);
+        const styleProps = Object.keys(data);
+        const spacingProps = DesignSystemRule.spacingProps(data);
 
         // then
         expect(styleProps).toEqual(
@@ -1023,6 +1256,14 @@ describeFeature(feature, ({ Scenario }) => {
             "display",
           ]),
         );
+        expect(spacingProps).toEqual(
+          expect.arrayContaining(["m", "mt", "mis", "p", "py", "pie", "gap"]),
+        );
+        expect(
+          spacingProps.filter((name) =>
+            ["w", "h", "maw", "mih", "c", "bg"].includes(name),
+          ),
+        ).toEqual([]);
       },
     );
 
@@ -1045,9 +1286,12 @@ describeFeature(feature, ({ Scenario }) => {
   });
 
   Scenario("デザインシステム（実ファイル）: 規則ごとの検査", ({ And }) => {
-    const styleProps = DesignSystemRule.mantineStyleProps(repoRoot);
+    const stylePropsData = DesignSystemRule.mantineStylePropsData(repoRoot);
     const sources = DesignSystemRule.listCheckedSources(repoRoot);
-    const violations = DesignSystemRule.collectViolations(repoRoot, styleProps);
+    const violations = DesignSystemRule.collectViolations(
+      repoRoot,
+      stylePropsData,
+    );
 
     And(
       "列挙: apps/frontend_customer のテスト以外のソース（shared/ui/ の外）が 1 件以上ある",
@@ -1063,7 +1307,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And(
-      "design-system-no-direct-style: shared/ui/ の外で style・className・Styles API・Mantine の style props を書かない",
+      "design-system-no-direct-style: shared/ui/ の外で style・className・Styles API・Mantine の style props を書かない（余白は段階名だけ）",
       () => {
         // given: Scenario の冒頭で collectViolations(repoRoot) 済み（実ファイル）
 
