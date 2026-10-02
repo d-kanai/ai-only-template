@@ -27,6 +27,13 @@ export type Env = {
   DATABASE_POOL_IDLE_TIMEOUT_MS: number;
   // 接続待ちの上限（ミリ秒、0 以上。0 は無制限）。
   DATABASE_CONNECTION_TIMEOUT_MS: number;
+  // DB 側で 1 つの文を打ち切るまでの時間（ミリ秒、0 以上。0 は送らず DB 側の既定に従う）。Postgres の statement_timeout。
+  DATABASE_STATEMENT_TIMEOUT_MS: number;
+  // DB 側で行ロックなどを待つ上限（ミリ秒、0 以上。0 は送らず DB 側の既定に従う）。Postgres の lock_timeout。
+  DATABASE_LOCK_TIMEOUT_MS: number;
+  // トランザクションを開いたまま何もしていない接続を DB が切るまでの時間（ミリ秒、0 以上。0 は送らず DB 側の既定に従う）。
+  //   Postgres の idle_in_transaction_session_timeout。
+  DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: number;
   // GCP のプロジェクト ID。リクエストログの trace（projects/<ID>/traces/<trace-id>。Cloud Logging の特別フィールド
   //   logging.googleapis.com/trace）に入れる（Issue #209。apps/frontend_customer/proxy.ts）。
   // WHY 環境変数で受け取る: Cloud Run が自動で付ける環境変数（PORT・K_SERVICE など。
@@ -98,6 +105,9 @@ const PARSERS: { [K in keyof Env]: (raw: string) => Check<Env[K]> } = {
   DATABASE_POOL_MAX: positiveInteger,
   DATABASE_POOL_IDLE_TIMEOUT_MS: nonNegativeInteger,
   DATABASE_CONNECTION_TIMEOUT_MS: nonNegativeInteger,
+  DATABASE_STATEMENT_TIMEOUT_MS: nonNegativeInteger,
+  DATABASE_LOCK_TIMEOUT_MS: nonNegativeInteger,
+  DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: nonNegativeInteger,
   GCP_PROJECT_ID: requiredString,
 };
 
