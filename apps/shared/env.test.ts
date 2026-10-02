@@ -281,7 +281,7 @@ describe("EnvReader.readTool", () => {
     (value) => {
       // given: 前提なし（value は test.each の引数）
       // when
-      // toThrow ではなく投げた値そのものを比べる（toThrow は投げた値が undefined でも通りうる。.claude/rules/testing.md）。
+      // toThrow ではなく投げた値そのものを比べる（toThrow は投げた値が undefined でも通りうる。.claude/rules/quality/testing.md）。
       let thrown: unknown;
       try {
         EnvReader.readTool({ E2E_PORT: value });
@@ -576,7 +576,7 @@ describe("env / toolEnv（モジュールを読み込んだ時点の値）", () 
     const loading = import("./env");
 
     // then
-    // rejects.toThrow("文字列") は reject された値が undefined でも通るので、Error であることと message を別に確かめる（.claude/rules/testing.md）。
+    // rejects.toThrow("文字列") は reject された値が undefined でも通るので、Error であることと message を別に確かめる（.claude/rules/quality/testing.md）。
     await expect(loading).rejects.toBeInstanceOf(Error);
     await expect(loading).rejects.toMatchObject({
       message: expect.stringContaining("DATABASE_POOL_MAX"),

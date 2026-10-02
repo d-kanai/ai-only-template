@@ -5,8 +5,8 @@ description: npm パッケージの追加・更新・移動と lockfile の作�
 
 # dependency-update（依存の追加・更新・パッチ）
 
-方針（完全固定、`workspace:*` だけ例外、どのパッケージに置くか、現状の例外の版）は `.claude/rules/dependencies.md`。ここは手順。
-Node / pnpm 本体の版（`.tool-versions`・`packageManager`）は `.claude/rules/env.md`。
+方針（完全固定、`workspace:*` だけ例外、どのパッケージに置くか、現状の例外の版）は `.claude/rules/tooling/dependencies.md`。ここは手順。
+Node / pnpm 本体の版（`.tool-versions`・`packageManager`）は `.claude/rules/tooling/env.md`。
 
 ## 1. 版を決める
 1. 原則 **latest**。npm レジストリの dist-tags を 1 次情報にする: `curl -s https://registry.npmjs.org/<pkg> | jq -r '.["dist-tags"].latest'`
@@ -16,7 +16,7 @@ Node / pnpm 本体の版（`.tool-versions`・`packageManager`）は `.claude/ru
    - latest を入れられなかったときは、入れた版とその理由を PR に書く。
    - `packageManager`（pnpm 本体）の解決は対象外で、5 日未満の pnpm でも拒否されない（2026-09-28 実測。公式仕様は未確認）。pnpm の版は `.tool-versions` と `packageManager` で明示する。
 3. 版は `x.y.z` の数字 3 つだけ。`^` `~` `>=` `*` `latest`・プレリリース（`-beta.1`）・ビルドメタ（`+build`）・`=1.2.3` / `v1.2.3` は使わない。
-4. 例外（`.claude/rules/dependencies.md`）: React / React DOM は create-next-app の版、`@types/node` は `.tool-versions` の Node メジャーに合わせた最新。
+4. 例外（`.claude/rules/tooling/dependencies.md`）: React / React DOM は create-next-app の版、`@types/node` は `.tool-versions` の Node メジャーに合わせた最新。
 
 ## 2. 追加・更新する
 1. 置き場所を決める: そのパッケージのコードが import するものはそのパッケージ（`next` / `react` は frontend、`drizzle-orm` / `pg` は backend）。ツールとテストだけが使うものはリポジトリ直下。

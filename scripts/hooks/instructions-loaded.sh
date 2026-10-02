@@ -9,7 +9,7 @@
 #   ルールが黙って読まれない、を記録で見つけられるようにする。
 # WHY .claude/state/: セッションごとの一時的な記録で、コミットしない（.gitignore 済み）。docs/work-logs/ に書かない理由は
 #   pre-compact.sh と同じ（Stop フックの判定が素通りになる）。
-# 見方: .claude/rules/work-log.md。
+# 見方: .claude/rules/tooling/work-log-hooks.md。
 #
 # 入力（stdin の JSON。公式 https://code.claude.com/docs/en/hooks.md の InstructionsLoaded input）:
 #   file_path, memory_type, load_reason, trigger_file_path（遅延読み込みのとき）, cwd。

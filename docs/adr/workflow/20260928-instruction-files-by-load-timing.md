@@ -1,7 +1,7 @@
 # 指示ファイルを読み込まれるときで分ける: 常時（CLAUDE.md・.claude/general）、パス依存（.claude/rules）、手順（スキル）、強制（フック・テスト）
 
 - 日付: 2026-09-28
-- 状態: 採用
+- 状態: 置き換え（→ workflow/20261002-always-loaded-rules-in-rules-workflow.md）
 - 関連: Issue #64 / PR #75 / Issue #63 / PR #65 / `CLAUDE.md` / `rule-tests/instructions.test.ts`
 
 ## 背景

@@ -24,7 +24,7 @@ import {
   nextSection,
 } from "./feature-lines";
 
-// API ジャーニーテスト（Issue #187 / #200。.claude/rules/testing.md の「API ジャーニーテスト」、ADR
+// API ジャーニーテスト（Issue #187 / #200。.claude/rules/quality/testing.md の「API ジャーニーテスト」、ADR
 //   docs/adr/quality/20260930-backend-journey-tests.md と docs/adr/quality/20260930-gherkin-journeys-with-vitest-cucumber.md）の
 //   置き場所と形を、ファイルの一覧とソースで機械的に検査するテスト。
 // API ジャーニーテスト = 実 Postgres の上で、複数の API の handler（XxxApi.handle）を業務ユースケースに沿って順に呼ぶテスト。

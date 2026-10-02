@@ -1,4 +1,4 @@
-# Biome と Lefthook の導入（.claude/rules/lint.md）が効いていることを検査するルール検査テストの仕様（Issue #282）。step の実装は対の lint.test.ts。
+# Biome と Lefthook の導入（.claude/rules/quality/lint.md）が効いていることを検査するルール検査テストの仕様（Issue #282）。step の実装は対の lint.test.ts。
 # 規則の WHY と限界は lint.test.ts の冒頭。
 Feature: Biome と Lefthook
   Scenario: biome check（pnpm lint と同じ引数）

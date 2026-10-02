@@ -8,7 +8,7 @@
 # WHY docs/work-logs/ に書かない: docs/work-logs/ は人が読む作業の記録。自動の dump を入れると、Stop フック（require-work-log.sh）の
 #   「docs/work-logs/<今日>.md が変わったか」の判定が、ログを書いていないのに素通りになる。
 # WHY 上書き: 必要なのは直前の 1 回分だけ。追記するとセッションをまたいで増え続ける。.claude/state/ は .gitignore 済み。
-# 詳細: .claude/rules/work-log.md。
+# 詳細: .claude/rules/tooling/work-log-hooks.md。
 #
 # 入力（stdin の JSON。公式 https://code.claude.com/docs/en/hooks.md の PreCompact input）: trigger, cwd。
 # 出力: なし。終了コードは常に 0（exit 2 や decision: block は compact を止めるので使わない）。

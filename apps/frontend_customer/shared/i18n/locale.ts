@@ -33,7 +33,7 @@ type LanguageRange = { tag: string; quality: number };
 //   定数（SUPPORTED_LOCALES など）はクラスの外の値のまま（関数ではないので規則の対象外。名前を変えずに済む）。
 export class Locales {
   // WHY null も受け取る: Cookie やヘッダが無い（null）ときも「対応するロケールではない」として同じ判定で扱う。
-  //   呼び出し側で null を別に検査すると、その検査を消す変異が結果を変えない（等価な変異。.claude/rules/testing.md）。
+  //   呼び出し側で null を別に検査すると、その検査を消す変異が結果を変えない（等価な変異。.claude/rules/quality/testing.md）。
   static is(value: string | null): value is Locale {
     return (SUPPORTED_LOCALES as readonly (string | null)[]).includes(value);
   }
@@ -45,7 +45,7 @@ export class Locales {
   //   " 1"（空白）も数にするので、qvalue ではない値を有効な重みとして扱ってしまう。
   // WHY 文法どおりの 1 本の正規表現（0(\.\d{0,3})?|1(\.0{0,3})?）にしない: "0" の後ろの小数部を必須にする変異が、
   //   q=0 も書き方の誤りもどちらも候補から外すので結果を変えず、mutation testing で消せない（等価な変異。
-  //   .claude/rules/testing.md）。分けた形なら、どの変異も有効な値か無効な値のどちらかの結果を変える。
+  //   .claude/rules/quality/testing.md）。分けた形なら、どの変異も有効な値か無効な値のどちらかの結果を変える。
   // WHY 書き方の誤りを候補から外す（q=1 扱いにしない）: 重みの分からない言語を最優先にすると、利用者が低くしたつもりの
   //   言語が選ばれる。外しても、他に対応する言語が無ければ既定の ja になるだけ。
   // WHY 正規表現を関数の中に書く（最上位の定数にしない）: 最上位の式は static な変異になり mutation testing で数えない
@@ -61,7 +61,7 @@ export class Locales {
   // q=0（受け付けない。RFC 9110 の 12.4.2）と、q 値が qvalue の書き方でないもの（NaN）は除く。
   // WHY "q=" を大文字・小文字を区別せずに探す: パラメータ名は大文字・小文字を区別しない（RFC 9110 の 5.6.6）。
   // WHY 空のタグ（", ," など）を除く検査を書かない: 空のタグはどのロケールとも一致せず、結果を変えない。結果を変えない検査は
-  //   mutation testing で消しても落ちない（等価な変異。.claude/rules/testing.md）。
+  //   mutation testing で消しても落ちない（等価な変異。.claude/rules/quality/testing.md）。
   private static parseAcceptLanguage(header: string | null): LanguageRange[] {
     if (header === null) {
       return [];
