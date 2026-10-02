@@ -129,14 +129,17 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "未完了の Todo を完了にすると、完了として保存され、ほかの Todo は変わらない",
       async () => {
+        // given
         const bread = await TodoBuilder.of(database.db)
           .title("パンを買う")
           .createdAt(new Date("2026-09-01T00:00:00.000Z"))
           .build();
         const milk = await uncompletedTodo("牛乳を買う");
 
+        // when
         await putCompletion(milk.id, { completed: true });
 
+        // then
         await expect(TodoSpecRows.todos(database.db)).resolves.toStrictEqual([
           TodoSpecExpected.row(bread),
           TodoSpecExpected.row({ ...milk, completed: true }),
@@ -145,10 +148,13 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And("完了の Todo を未完了に戻すと、未完了として保存される", async () => {
+      // given
       const milk = await completedTodo("牛乳を買う");
 
+      // when
       await putCompletion(milk.id, { completed: false });
 
+      // then
       await expect(TodoSpecRows.todos(database.db)).resolves.toStrictEqual([
         TodoSpecExpected.row({ ...milk, completed: false }),
       ]);
@@ -157,10 +163,13 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("レスポンス", ({ And }) => {
     And("未完了の Todo を完了にすると、完了になった Todo が返る", async () => {
+      // given
       const milk = await uncompletedTodo("牛乳を買う");
 
+      // when
       const response = await putCompletion(milk.id, { completed: true });
 
+      // then
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
         ...TodoSpecExpected.response(milk),
@@ -171,10 +180,13 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "完了の Todo を未完了に戻すと、未完了になった Todo が返る",
       async () => {
+        // given
         const milk = await completedTodo("牛乳を買う");
 
+        // when
         const response = await putCompletion(milk.id, { completed: false });
 
+        // then
         expect(response.status).toBe(200);
         await expect(response.json()).resolves.toStrictEqual({
           ...TodoSpecExpected.response(milk),
@@ -185,10 +197,13 @@ describeFeature(feature, ({ Scenario }) => {
 
     // 同じ要求を何度送っても結果が同じ（冪等。change-todo-completion.api.ts の冒頭）。
     And("既に完了の Todo を完了にしても、同じ結果が返る", async () => {
+      // given
       const milk = await completedTodo("牛乳を買う");
 
+      // when
       const response = await putCompletion(milk.id, { completed: true });
 
+      // then
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual(
         TodoSpecExpected.response(milk) satisfies ChangeTodoCompletionResponse,
@@ -200,10 +215,13 @@ describeFeature(feature, ({ Scenario }) => {
     // 変更の記録は、todos の completed の update と、完了の履歴の insert（全列）の 2 件だけ（前提はビルダーで入れたので記録を残さない。
     //   .feature には書かない。create-todo.api-spec.test.ts の冒頭）。
     And("完了にすると、完了の履歴に「完了」が 1 件足される", async () => {
+      // given
       const milk = await uncompletedTodo("牛乳を買う");
 
+      // when
       await putCompletion(milk.id, { completed: true });
 
+      // then
       await expectAddedStatus(milk, [true]);
       const completion = await TodoSpecRows.status(database.db, milk.id, 1);
       await expect(TodoSpecLogs.entries(database.db)).resolves.toStrictEqual(
@@ -221,19 +239,25 @@ describeFeature(feature, ({ Scenario }) => {
     });
 
     And("未完了に戻すと、完了の履歴に「未完了」が 1 件足される", async () => {
+      // given
       const milk = await completedTodo("牛乳を買う");
 
+      // when
       await putCompletion(milk.id, { completed: false });
 
+      // then
       await expectAddedStatus(milk, [false]);
     });
 
     // 変わらない変更は書かない（Todo.changeCompletion が同じ Todo を返し、Repository の update は何も書かない）。
     And("既に完了の Todo を完了にしても、履歴は増えない", async () => {
+      // given
       const milk = await completedTodo("牛乳を買う");
 
+      // when
       await putCompletion(milk.id, { completed: true });
 
+      // then
       await expect(TodoSpecRows.statuses(database.db)).resolves.toStrictEqual(
         TodoSpecExpected.statusRows(milk),
       );
@@ -245,20 +269,26 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "未完了から完了に変わったときだけ、完了の通知が 1 件送られる",
       async () => {
+        // given
         const milk = await uncompletedTodo("牛乳を買う");
 
+        // when
         await putCompletion(milk.id, { completed: true });
         await putCompletion(milk.id, { completed: true });
 
+        // then
         expect(notifications()).toStrictEqual([`Todo completed: ${milk.id}`]);
       },
     );
 
     And("未完了に戻したときは通知されない", async () => {
+      // given
       const milk = await completedTodo("牛乳を買う");
 
+      // when
       const response = await putCompletion(milk.id, { completed: false });
 
+      // then
       expect(response.status).toBe(200);
       expect(notifications()).toStrictEqual([]);
     });
@@ -267,10 +297,13 @@ describeFeature(feature, ({ Scenario }) => {
   Scenario("異常系", ({ And }) => {
     // WHY 別の Todo を 1 件置く: 空のときだけ「無い」と返す実装を通さない。無い Todo への要求は通知もしない。
     And("存在しない Todo は、存在しないと伝えられる", async () => {
+      // given
       await uncompletedTodo("牛乳を買う");
 
+      // when
       const response = await putCompletion(MISSING_ID, { completed: true });
 
+      // then
       await TodoSpecProblems.expectResponse(
         response,
         TodoSpecProblems.notFound(
@@ -285,10 +318,13 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "完了かどうかが真偽値でないと、形が違うという理由で拒否され、何も変わらない",
       async () => {
+        // given
         const milk = await uncompletedTodo("牛乳を買う");
 
+        // when
         const response = await putCompletion(milk.id, { completed: "true" });
 
+        // then
         await TodoSpecProblems.expectResponse(
           response,
           TodoSpecProblems.validation(`/api/todos/${milk.id}/completion`, {

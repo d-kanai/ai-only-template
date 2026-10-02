@@ -48,6 +48,11 @@ describe("EnglishProblemDetail.of", () => {
     ],
     ["server.internalError", undefined, "Internal server error."],
   ])("%s は params を埋め込んだ英語の文にする", (key, params, expected) => {
-    expect(EnglishProblemDetail.of(key, params)).toBe(expected);
+    // given: 前提なし
+    // when
+    const detail = EnglishProblemDetail.of(key, params);
+
+    // then
+    expect(detail).toBe(expected);
   });
 });

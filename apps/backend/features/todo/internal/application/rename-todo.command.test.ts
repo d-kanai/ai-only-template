@@ -33,10 +33,13 @@ async function setup() {
 
 describe("RenameTodoCommand", () => {
   test("title を変えて保存し、変えた Todo を返す（completed はそのまま）", async () => {
+    // given
     const { repository, todo, command } = await setup();
 
+    // when
     const renamed = await command.execute({ id: todo.id, title: "卵を買う" });
 
+    // then
     expect(renamed).toMatchObject({
       id: todo.id,
       title: "卵を買う",
@@ -47,6 +50,7 @@ describe("RenameTodoCommand", () => {
 
   // WHY 読み込み（行ロック）と書き込みを同じ tx で行う（Issue #215）: 読んでから書くまでの間に、別の要求が同じ Todo を変えられない。
   test("findByIdForUpdate と update を、runner の run が渡した同じ tx で、run の中（COMMIT の前）で行う", async () => {
+    // given
     const { repository, todo } = await setup();
     const events: string[] = [];
     const loaded = (await repository.findById(todo.id)) as Todo;
@@ -62,22 +66,27 @@ describe("RenameTodoCommand", () => {
         events.push("update");
       });
 
+    // when
     const renamed = await new RenameTodoCommand(
       repository,
       committingRunner(events),
     ).execute({ id: todo.id, title: "卵を買う" });
 
+    // then
     expect(find.mock.calls).toEqual([[todo.id, inMemoryTransaction]]);
     expect(update.mock.calls).toEqual([[renamed, inMemoryTransaction]]);
     expect(events).toEqual(["findByIdForUpdate", "update", "commit"]);
   });
 
   test("無い id なら、その id を params に持つ DomainError(not_found, todo.notFound) を投げる", async () => {
+    // given
     const { command } = await setup();
 
-    await expect(
-      command.execute({ id: "missing", title: "卵を買う" }),
-    ).rejects.toMatchObject({
+    // when
+    const promise = command.execute({ id: "missing", title: "卵を買う" });
+
+    // then
+    await expect(promise).rejects.toMatchObject({
       code: "not_found",
       key: "todo.notFound",
       params: { id: "missing" },
@@ -85,11 +94,14 @@ describe("RenameTodoCommand", () => {
   });
 
   test("title が不変条件を満たさなければ validation_error を投げ、保存済みの Todo は変わらない", async () => {
+    // given
     const { repository, todo, command } = await setup();
 
-    await expect(
-      command.execute({ id: todo.id, title: " " }),
-    ).rejects.toMatchObject({
+    // when
+    const promise = command.execute({ id: todo.id, title: " " });
+
+    // then
+    await expect(promise).rejects.toMatchObject({
       code: "validation_error",
       key: "todo.title.empty",
       params: undefined,

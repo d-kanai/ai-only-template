@@ -9,8 +9,11 @@ import { todoStatusChanges } from "./schema";
 //   同時更新は SQLSTATE 23505 で失敗する。schema.ts の WHY）をコードとして固定できる。
 describe("todo_status_changes の表の宣言", () => {
   test("(todo_id, position) の一意 index を持つ（同じ Todo の同じ位置に履歴を 2 回足せない）", () => {
+    // given: 前提なし
+    // when
     const { indexes } = getTableConfig(todoStatusChanges);
 
+    // then
     expect(
       indexes.map((index) => ({
         name: index.config.name,

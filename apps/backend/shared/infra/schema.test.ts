@@ -8,8 +8,11 @@ import { changeLogs } from "./schema";
 //   テストでは呼ばれない（features/todo/internal/infra/schema.test.ts と同じ）。
 describe("change_logs の表の宣言", () => {
   test("(table_name, row_id) の index を持つ（1 つの行の変更履歴を引く検索に使う。一意ではない）", () => {
+    // given: 前提なし
+    // when
     const { indexes } = getTableConfig(changeLogs);
 
+    // then
     expect(
       indexes.map((index) => ({
         name: index.config.name,

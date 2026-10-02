@@ -22,13 +22,16 @@ function committingRunner(events: string[]): TransactionRunner {
 
 describe("CreateTodoCommand", () => {
   test("未完了の Todo を作って保存し、作った Todo を返す", async () => {
+    // given
     const repository = new InMemoryTodoRepository();
 
+    // when
     const todo = await new CreateTodoCommand(
       repository,
       new InMemoryTransactionRunner(),
     ).execute({ title: " 牛乳を買う " });
 
+    // then
     expect(todo.title).toBe("牛乳を買う");
     expect(todo.completed).toBe(false);
     await expect(repository.findById(todo.id)).resolves.toEqual(todo);
@@ -36,6 +39,7 @@ describe("CreateTodoCommand", () => {
 
   // WHY command がトランザクションを張る（Issue #215）: 書き込みの範囲は command が決め、Repository は run が渡した tx で書く。
   test("Todo の insert を、runner の run が渡した tx で、run の中（COMMIT の前）で行う", async () => {
+    // given
     const repository = new InMemoryTodoRepository();
     const events: string[] = [];
     const insert = vi
@@ -44,24 +48,29 @@ describe("CreateTodoCommand", () => {
         events.push("insert");
       });
 
+    // when
     const todo = await new CreateTodoCommand(
       repository,
       committingRunner(events),
     ).execute({ title: "牛乳を買う" });
 
+    // then
     expect(insert.mock.calls).toEqual([[todo, inMemoryTransaction]]);
     expect(events).toEqual(["insert", "commit"]);
   });
 
   test("タイトルが不変条件を満たさなければ validation_error を投げ、何も保存しない", async () => {
+    // given
     const repository = new InMemoryTodoRepository();
 
-    await expect(
-      new CreateTodoCommand(
-        repository,
-        new InMemoryTransactionRunner(),
-      ).execute({ title: "" }),
-    ).rejects.toMatchObject({
+    // when
+    const promise = new CreateTodoCommand(
+      repository,
+      new InMemoryTransactionRunner(),
+    ).execute({ title: "" });
+
+    // then
+    await expect(promise).rejects.toMatchObject({
       code: "validation_error",
       key: "todo.title.empty",
       params: undefined,

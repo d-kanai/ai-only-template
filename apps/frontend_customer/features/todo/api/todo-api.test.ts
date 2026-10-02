@@ -38,9 +38,14 @@ function jsonResponse(body: unknown, status: number): Response {
 
 describe("listTodos", () => {
   test("GET /api/todos を呼び、レスポンスの { todos } を返す", async () => {
+    // given
     fetchMock.mockResolvedValue(jsonResponse({ todos: [todo] }, 200));
 
-    await expect(listTodos()).resolves.toEqual({ todos: [todo] });
+    // when
+    const result = listTodos();
+
+    // then
+    await expect(result).resolves.toEqual({ todos: [todo] });
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/todos",
       expect.objectContaining({ method: "GET" }),
@@ -50,9 +55,14 @@ describe("listTodos", () => {
 
 describe("getTodo", () => {
   test("GET /api/todos/:id を呼び、1 件の Todo を返す", async () => {
+    // given
     fetchMock.mockResolvedValue(jsonResponse(todo, 200));
 
-    await expect(getTodo("todo-1")).resolves.toEqual(todo);
+    // when
+    const result = getTodo("todo-1");
+
+    // then
+    await expect(result).resolves.toEqual(todo);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/todos/todo-1",
       expect.objectContaining({ method: "GET" }),
@@ -60,10 +70,13 @@ describe("getTodo", () => {
   });
 
   test("id に URL で意味を持つ文字が含まれていてもエンコードしてパスに入れる", async () => {
+    // given
     fetchMock.mockResolvedValue(jsonResponse(todo, 200));
 
+    // when
     await getTodo("a/b?c");
 
+    // then
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/todos/a%2Fb%3Fc",
       expect.anything(),
@@ -73,9 +86,14 @@ describe("getTodo", () => {
 
 describe("createTodo", () => {
   test("POST /api/todos に JSON の { title } を送り、作成された Todo を返す", async () => {
+    // given
     fetchMock.mockResolvedValue(jsonResponse(todo, 201));
 
-    await expect(createTodo({ title: "牛乳を買う" })).resolves.toEqual(todo);
+    // when
+    const result = createTodo({ title: "牛乳を買う" });
+
+    // then
+    await expect(result).resolves.toEqual(todo);
     expect(fetchMock).toHaveBeenCalledWith("/api/todos", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -89,10 +107,15 @@ describe("createTodo", () => {
 //   400 で拒否する。混ぜていないことまで固定する。
 describe("renameTodo", () => {
   test("PUT /api/todos/:id/title に JSON の { title } を送り、更新後の Todo を返す", async () => {
+    // given
     const renamed = { ...todo, title: "豆乳を買う" };
     fetchMock.mockResolvedValue(jsonResponse(renamed, 200));
 
-    await expect(renameTodo("todo-1", "豆乳を買う")).resolves.toEqual(renamed);
+    // when
+    const result = renameTodo("todo-1", "豆乳を買う");
+
+    // then
+    await expect(result).resolves.toEqual(renamed);
     expect(fetchMock).toHaveBeenCalledWith("/api/todos/todo-1/title", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -101,10 +124,13 @@ describe("renameTodo", () => {
   });
 
   test("id に URL で意味を持つ文字が含まれていてもエンコードしてパスに入れる", async () => {
+    // given
     fetchMock.mockResolvedValue(jsonResponse(todo, 200));
 
+    // when
     await renameTodo("a/b?c", "豆乳を買う");
 
+    // then
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/todos/a%2Fb%3Fc/title",
       expect.anything(),
@@ -112,6 +138,7 @@ describe("renameTodo", () => {
   });
 
   test("400 の Problem Details なら、errors（#/title）を持つ ApiError を投げる", async () => {
+    // given
     fetchMock.mockResolvedValue(
       problemResponse(
         {
@@ -124,10 +151,12 @@ describe("renameTodo", () => {
       ),
     );
 
+    // when
     const reason = await renameTodo("todo-1", "").catch(
       (error: unknown) => error,
     );
 
+    // then
     expect(reason).toBeInstanceOf(ApiError);
     expect(reason).toMatchObject({
       status: 400,
@@ -144,12 +173,15 @@ describe("changeTodoCompletion", () => {
   test.each([true, false])(
     "PUT /api/todos/:id/completion に JSON の { completed: %s } を送り、更新後の Todo を返す",
     async (completed) => {
+      // given
       const changed = { ...todo, completed };
       fetchMock.mockResolvedValue(jsonResponse(changed, 200));
 
-      await expect(changeTodoCompletion("todo-1", completed)).resolves.toEqual(
-        changed,
-      );
+      // when
+      const result = changeTodoCompletion("todo-1", completed);
+
+      // then
+      await expect(result).resolves.toEqual(changed);
       expect(fetchMock).toHaveBeenCalledWith("/api/todos/todo-1/completion", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -159,10 +191,13 @@ describe("changeTodoCompletion", () => {
   );
 
   test("id に URL で意味を持つ文字が含まれていてもエンコードしてパスに入れる", async () => {
+    // given
     fetchMock.mockResolvedValue(jsonResponse(todo, 200));
 
+    // when
     await changeTodoCompletion("a/b?c", true);
 
+    // then
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/todos/a%2Fb%3Fc/completion",
       expect.anything(),
@@ -170,10 +205,13 @@ describe("changeTodoCompletion", () => {
   });
 
   test("404 の Problem Details なら、type・key・params を持つ ApiError を投げる", async () => {
+    // given
     fetchMock.mockResolvedValue(problemResponse(notFoundProblem, 404));
 
+    // when
     const failure = changeTodoCompletion("missing", true);
 
+    // then
     await expect(failure).rejects.toEqual(
       new ApiError({
         status: 404,
@@ -193,9 +231,14 @@ describe("changeTodoCompletion", () => {
 
 describe("deleteTodo", () => {
   test("DELETE /api/todos/:id を呼び、204（本文なし）なら undefined で終わる", async () => {
+    // given
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
 
-    await expect(deleteTodo("todo-1")).resolves.toBeUndefined();
+    // when
+    const result = deleteTodo("todo-1");
+
+    // then
+    await expect(result).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/todos/todo-1",
       expect.objectContaining({ method: "DELETE" }),
@@ -248,10 +291,13 @@ const notFoundProblem = {
 //   toMatchObject でも明示する。
 describe("エラー時", () => {
   test("Problem Details が返ったら、HTTP ステータスと、本文の type・key・params を持つ ApiError を投げる（detail は読まない）", async () => {
+    // given
     fetchMock.mockResolvedValue(problemResponse(notFoundProblem, 404));
 
+    // when
     const failure = getTodo("missing");
 
+    // then
     await expect(failure).rejects.toEqual(
       new ApiError({
         status: 404,
@@ -269,6 +315,7 @@ describe("エラー時", () => {
   });
 
   test("Problem Details に params が無ければ、空の params の ApiError を投げる", async () => {
+    // given
     fetchMock.mockResolvedValue(
       problemResponse(
         {
@@ -283,8 +330,10 @@ describe("エラー時", () => {
       ),
     );
 
+    // when
     const failure = createTodo({ title: "" });
 
+    // then
     await expect(failure).rejects.toEqual(
       new ApiError({
         status: 400,
@@ -303,6 +352,7 @@ describe("エラー時", () => {
   // 400 の項目ごとの誤り（拡張メンバー errors。apps/backend/shared/presentation/problem.ts の ProblemError）。
   //   detail は読まない（ApiError のコンストラクタが落とす）。params の無い要素は空の params にする。
   test("Problem Details に errors があれば、各要素の pointer・key・params を持つ ApiError を投げる", async () => {
+    // given
     fetchMock.mockResolvedValue(
       problemResponse(
         {
@@ -325,10 +375,12 @@ describe("エラー時", () => {
       ),
     );
 
+    // when
     const reason = await createTodo({ title: "" }).catch(
       (error: unknown) => error,
     );
 
+    // then
     expect(reason).toBeInstanceOf(ApiError);
     expect((reason as ApiError).errors).toStrictEqual([
       {
@@ -352,14 +404,17 @@ describe("エラー時", () => {
   ])(
     "Problem Details の %s なら、項目ごとの誤りが空の ApiError を投げる",
     async (_label, errors) => {
+      // given
       fetchMock.mockResolvedValue(
         problemResponse({ ...validationProblem, errors }, 400),
       );
 
+      // when
       const reason = await createTodo({ title: "" }).catch(
         (error: unknown) => error,
       );
 
+      // then
       expect(reason).toMatchObject({
         status: 400,
         key: "request.field.notString",
@@ -371,20 +426,28 @@ describe("エラー時", () => {
   // RFC 9457 の 3.1.2 節: 本文の status は参考（advisory）で、途中の中継（プロキシ・キャッシュ）がステータスを変えることがある。
   //   画面が受け取った HTTP の応答のステータスを正とし、本文が読めない失敗（error.unknown）と同じ値の取り方にそろえる。
   test("ApiError の status は HTTP の応答のステータスにする（本文の status は使わない）", async () => {
+    // given
     fetchMock.mockResolvedValue(problemResponse(notFoundProblem, 410));
 
-    await expect(getTodo("missing")).rejects.toMatchObject({ status: 410 });
+    // when
+    const failure = getTodo("missing");
+
+    // then
+    await expect(failure).rejects.toMatchObject({ status: 410 });
   });
 
   // backend を通らないエラー（プロキシや Next のエラーページなど）は、本文が JSON でないことも、
   // JSON でも Problem Details の形でないこともある。どちらもキーを取り出せないので、HTTP ステータスを error.unknown で伝える。
   test("本文が JSON でなければ、HTTP ステータスを持つ error.unknown の ApiError を投げる（type は無い）", async () => {
+    // given
     fetchMock.mockResolvedValue(
       new Response("Internal Server Error", { status: 500 }),
     );
 
+    // when
     const failure = listTodos();
 
+    // then
     await expect(failure).rejects.toEqual(
       new ApiError({
         status: 500,
@@ -518,10 +581,13 @@ describe("エラー時", () => {
   ])(
     "本文が JSON でも Problem Details の形でなければ（%s）、HTTP ステータスを持つ error.unknown の ApiError を投げる",
     async (_label, body) => {
+      // given
       fetchMock.mockResolvedValue(problemResponse(body, 502));
 
+      // when
       const failure = listTodos();
 
+      // then
       await expect(failure).rejects.toEqual(
         new ApiError({
           status: 502,
@@ -539,10 +605,13 @@ describe("エラー時", () => {
   );
 
   test("削除に失敗したら、Problem Details の type・key・params を持つ ApiError を投げる", async () => {
+    // given
     fetchMock.mockResolvedValue(problemResponse(notFoundProblem, 404));
 
+    // when
     const failure = deleteTodo("missing");
 
+    // then
     await expect(failure).rejects.toEqual(
       new ApiError({
         status: 404,

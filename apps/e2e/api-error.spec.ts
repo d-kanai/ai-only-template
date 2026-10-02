@@ -10,10 +10,13 @@ import { expect, test } from "@playwright/test";
 test("形の誤った本文で POST /api/todos を呼ぶと、400 の application/problem+json で、errors の pointer が項目を指す", async ({
   request,
 }) => {
+  // given: 前提なし（リクエストの本文は when で作る）
+  // when
   const response = await request.post("/api/todos", {
     data: { title: 1 },
   });
 
+  // then
   expect(response.status()).toBe(400);
   expect(response.headers()["content-type"]).toBe("application/problem+json");
   const body = await response.json();
@@ -31,8 +34,11 @@ test("形の誤った本文で POST /api/todos を呼ぶと、400 の applicatio
 test("空のタイトル・長すぎるタイトルで POST /api/todos を呼ぶと、errors の pointer が #/title を指し、key と params が届く", async ({
   request,
 }) => {
+  // given: 前提なし（リクエストの本文は when で作る）
+  // when
   const empty = await request.post("/api/todos", { data: { title: " " } });
 
+  // then
   expect(empty.status()).toBe(400);
   expect(await empty.json()).toMatchObject({
     type: "/problems/validation-error",
@@ -40,10 +46,12 @@ test("空のタイトル・長すぎるタイトルで POST /api/todos を呼ぶ
     errors: [{ pointer: "#/title", key: "todo.title.empty" }],
   });
 
+  // when
   const tooLong = await request.post("/api/todos", {
     data: { title: "a".repeat(101) },
   });
 
+  // then
   expect(tooLong.status()).toBe(400);
   expect(await tooLong.json()).toMatchObject({
     key: "todo.title.tooLong",
