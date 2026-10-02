@@ -13,7 +13,7 @@ import {
 //   domain は自然言語を持たず「何が起きたか」（key）と、文言に埋め込む値（params）だけを表す。
 //   key と params の組はキーごとに型で縛る（error-key.ts の ErrorKeyParams）。
 // WHY domain に置く: domain 層は HTTP を知らない。「何が起きたか」だけを表し、
-//   HTTP のステータスへの変換は presentation 層（apps/backend/shared/presentation/problem.ts）が行う。
+//   HTTP のステータスへの変換は presentation 層（apps/backend/shared/http/problem.ts）が行う。
 
 // validation_error: 不変条件（例: タイトルの長さ）を満たさない。
 // not_found: 指定された集約が存在しない。

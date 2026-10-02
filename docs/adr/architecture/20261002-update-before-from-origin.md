@@ -2,7 +2,7 @@
 
 - 日付: 2026-10-02
 - 状態: 採用
-- 関連: Issue #312 / `apps/backend/shared/infra/writer.ts` / `apps/backend/shared/infra/change-log.ts` / `apps/backend/features/todo/internal/infra/todo-repository.postgres.ts` / ADR `architecture/20260930-transaction-from-application.md`（「update は同じトランザクションで FOR UPDATE で読んだ行を before」の部分をこの ADR で変え、状態を「置き換え」にした。それ以外の決定はその ADR のまま）
+- 関連: Issue #312 / `apps/backend/shared/drizzle/writer.ts` / `apps/backend/shared/change-log/change-log.ts` / `apps/backend/features/todo/internal/infra/todo-repository.postgres.ts` / ADR `architecture/20260930-transaction-from-application.md`（「update は同じトランザクションで FOR UPDATE で読んだ行を before」の部分をこの ADR で変え、状態を「置き換え」にした。それ以外の決定はその ADR のまま）
 
 ## 背景
 Issue #215 で書き込みの口 Writer を作ったとき、Writer は表・id・変える列だけを受け取る形にし、update の変更履歴の before は Writer が同じトランザクションで `SELECT … FOR UPDATE` で読み直して取るようにした（ADR `architecture/20260930-transaction-from-application.md`。悪い点に「SELECT が 1 文増える」と書いた）。

@@ -16,7 +16,7 @@ import { expect } from "vitest";
 import { casesByName } from "./case-table";
 
 // DB の列の型の既定（.claude/rules/code/backend.md の「列の型」。決定は ADR docs/adr/quality/20260930-db-column-types-default-text-and-integer.md、
-// Issue #145）を、Drizzle のスキーマ（apps/backend/**/infra/schema.ts）で機械的に検査するテスト。
+// Issue #145）を、Drizzle のスキーマ（apps/backend/**/infra/schema.ts と apps/backend/shared/ の下の *.schema.ts）で機械的に検査するテスト。
 // WHY 検査する: 「文字列は text、長さは domain が持つ」は文章だけだと、varchar(255) を書き慣れた人や AI が既定のように書き、
 //   domain（zod）と DB の 2 か所に上限ができてずれる。DB の制約違反は 500 になり、domain の 400（errors[] 付き）に負ける。
 // 列の型で違反にするもの（規則 → 例外を認める WHY の見出し）:
@@ -56,12 +56,12 @@ import { casesByName } from "./case-table";
 //
 // 列の分類表（Issue #216）: 規則 column-classification。`pgTable(` ごとに、表を受ける変数（`const <名前> = pgTable(`）の名前に
 //   Columns を付けた分類表 `export const <名前>Columns = ColumnClassifier.classify(<名前>, { ... })` が同じファイルに無ければ違反（違反の行は
-//   `pgTable(` の行）。ColumnClassifier は `column-classification`（apps/backend/shared/infra/column-classification.ts）からの
+//   `pgTable(` の行）。ColumnClassifier は `column-classification`（apps/backend/shared/drizzle/column-classification.ts）からの
 //   名前の import（値。`import type`・inline の `type`・別名 `x as ColumnClassifier`・ほかのモジュールは不可）に限り、呼ぶのは
 //   その static メソッド classify（`ColumnClassifier.maskRow(` など別のメソッドは不可）。
 //   Issue #262 で関数 classifyColumns をクラス ColumnClassifier の static メソッドにした（ADR docs/adr/architecture/20261002-class-based-backend.md）。
 //   表を変数で受けない `pgTable(`（`export default pgTable(`）も違反。例外（`// WHY <見出し>:`）は認めない。
-// WHY すべての表に分類表: 書き込みのログ（shared/infra/writer.ts の db_write）は changes の before / after に行の値を出し、分類が
+// WHY すべての表に分類表: 書き込みのログ（shared/drizzle/writer.ts の db_write）は changes の before / after に行の値を出し、分類が
 //   sensitive の列と分類の無い列を *** にする。分類が無い表は全列 ***（fail closed）で漏れはしないが、ログで追えない表が黙って
 //   増える。表を足した時点で、どの列が個人情報かを決めさせる（列の網羅は ColumnClassifier.classify の引数の型が tsc で強制する）。
 // WHY 名前を `<表の変数>Columns` に固定し、ColumnClassifier.classify の第 1 引数も見る: 分類表と表の組を字句で決めるため。別の表を渡した
@@ -430,9 +430,15 @@ function findColumnClassificationViolations(
   return violations;
 }
 
-// 検査の対象: apps/backend の下の infra/schema.ts（node_modules は除く）。リポジトリ相対の / 区切りで、名前順。
+// 検査の対象: apps/backend の下の infra/schema.ts と、apps/backend/shared/ の下の schema.ts / *.schema.ts（node_modules とテストは
+//   除く）。リポジトリ相対の / 区切りで、名前順。
 // WHY features と shared の両方: drizzle-kit の設定（apps/backend/shared/drizzle/drizzle.config.ts）が読むのは
-//   features/*/internal/infra/schema.ts だけだが、shared/infra に置いたスキーマも同じ既定に従わせる（置いた時点で止める）。
+//   features/*/internal/infra/schema.ts と、横断の表（change_logs）の shared/change-log/change-log.schema.ts。どちらも同じ既定に従わせる。
+// WHY shared は *.schema.ts の名前で拾う（1 ファイルに固定しない）: Issue #310 で shared/ を層（infra など）から意味の単位
+//   （drizzle / change-log など）のディレクトリに分け、横断の表は shared/<単位>/<単位>.schema.ts に置く形になった。横断の表を足すと
+//   別のディレクトリに置かれうるので、名前の形で拾い、drizzle-kit の設定に足す前でも置いた時点で止める。
+// WHY shared の外の *.schema.ts（features/x/internal/domain/x.schema.ts など）は拾わない: features の表の置き場所は infra/schema.ts だけで、
+//   domain の zod のスキーマ（Entity の検証）などは Drizzle の表ではない。
 // WHY root を引数で受け取る: 本番（リポジトリ直下）と fixture（一時ディレクトリ）で同じ列挙を通すため。
 function listSchemaFiles(root: string): string[] {
   const backend = join(root, "apps/backend");
@@ -446,7 +452,11 @@ function listSchemaFiles(root: string): string[] {
     .map((path) => `apps/backend/${path.split(sep).join("/")}`)
     .filter(
       (path) =>
-        /\/infra\/schema\.ts$/.test(path) && !path.includes("/node_modules/"),
+        (/\/infra\/schema\.ts$/.test(path) ||
+          /^apps\/backend\/shared\/(?:[^/]+\/)*(?:[^/]+\.)?schema\.ts$/.test(
+            path,
+          )) &&
+        !path.includes("/node_modules/"),
     )
     .sort();
 }
@@ -480,7 +490,7 @@ const TABLE_IMPORT =
 
 // --- 列の分類表（column-classification。Issue #216） ---
 const CLASSIFY_IMPORT =
-  'import { ColumnClassifier } from "../../../../shared/infra/column-classification";';
+  'import { ColumnClassifier } from "../../../../shared/drizzle/column-classification";';
 const TODOS =
   'export const todos = pgTable("todos", { id: uuid("id").primaryKey(), title: text("title") });';
 const TODOS_COLUMNS =
@@ -1256,7 +1266,7 @@ describeFeature(feature, ({ Scenario }) => {
               source(TABLE_IMPORT, CLASSIFY_IMPORT, TODOS, TODOS_COLUMNS),
             ],
             [
-              "同じディレクトリからの import（shared/infra/schema.ts）と、pg.pgTable（名前空間）",
+              "同じディレクトリからの import（shared/change-log/change-log.schema.ts）と、pg.pgTable（名前空間）",
               source(
                 IMPORT,
                 'import { ColumnClassifier, type ColumnClass } from "./column-classification";',
@@ -1417,7 +1427,7 @@ describeFeature(feature, ({ Scenario }) => {
               "ColumnClassifier を import type で import している",
               source(
                 TABLE_IMPORT,
-                'import type { ColumnClassifier } from "../../../../shared/infra/column-classification";',
+                'import type { ColumnClassifier } from "../../../../shared/drizzle/column-classification";',
                 TODOS,
                 TODOS_COLUMNS,
               ),
@@ -1427,7 +1437,7 @@ describeFeature(feature, ({ Scenario }) => {
               "ColumnClassifier を inline の type で import している",
               source(
                 TABLE_IMPORT,
-                'import { type ColumnClassifier } from "../../../../shared/infra/column-classification";',
+                'import { type ColumnClassifier } from "../../../../shared/drizzle/column-classification";',
                 TODOS,
                 TODOS_COLUMNS,
               ),
@@ -1437,7 +1447,7 @@ describeFeature(feature, ({ Scenario }) => {
               "別の名前を ColumnClassifier の別名で import している",
               source(
                 TABLE_IMPORT,
-                'import { ColumnClassification as ColumnClassifier } from "../../../../shared/infra/column-classification";',
+                'import { ColumnClassification as ColumnClassifier } from "../../../../shared/drizzle/column-classification";',
                 TODOS,
                 TODOS_COLUMNS,
               ),
@@ -1457,7 +1467,7 @@ describeFeature(feature, ({ Scenario }) => {
               "ColumnClassifier を別名で import して呼んでいる（import { ColumnClassifier as C } の C.classify）",
               source(
                 TABLE_IMPORT,
-                'import { ColumnClassifier as C } from "../../../../shared/infra/column-classification";',
+                'import { ColumnClassifier as C } from "../../../../shared/drizzle/column-classification";',
                 TODOS,
                 'export const todosColumns = C.classify(todos, { id: "public", title: "sensitive" });',
               ),
@@ -1515,7 +1525,7 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("スキーマの列挙と検査（fixture）", ({ And }) => {
     And(
-      "apps/backend の features と shared の infra/schema.ts だけを対象にし、すべての規則（列の型・surrogate-key・column-classification）の違反を「規則: パス:行」の行の順で返す",
+      "apps/backend の infra/schema.ts と、shared の下の schema.ts・名前が .schema.ts で終わるファイルだけを対象にし、すべての規則（列の型・surrogate-key・column-classification）の違反を「規則: パス:行」の行の順で返す",
       () => {
         // given
         const fixtureFiles = {
@@ -1529,17 +1539,26 @@ describeFeature(feature, ({ Scenario }) => {
           // 違反の無いファイル（uuid の id と分類表）。
           "apps/backend/features/b/internal/infra/schema.ts": source(
             IMPORT,
-            'import { ColumnClassifier } from "../../../../shared/infra/column-classification";',
+            'import { ColumnClassifier } from "../../../../shared/drizzle/column-classification";',
             'export const b = pg.pgTable("b", { id: pg.uuid("id").primaryKey() });',
             'export const bColumns = ColumnClassifier.classify(b, { id: "public" });',
           ),
-          "apps/backend/shared/infra/schema.ts": source(
+          "apps/backend/shared/change-log/change-log.schema.ts": source(
             IMPORT,
             'export const s = pg.pgTable("s", { id: pg.uuid("id").primaryKey(), raw: pg.json("raw") });',
           ),
-          // 対象外: infra/schema.ts でないファイル、infra 以外の schema.ts、テスト、node_modules、apps/backend の外。
+          // shared の別の意味の単位に足した横断の表（*.schema.ts）と、名前が schema.ts だけのもの。
+          "apps/backend/shared/audit/audit.schema.ts": varcharColumn,
+          "apps/backend/shared/audit/schema.ts": varcharColumn,
+          // 対象外: infra/schema.ts でないファイル、infra 以外の schema.ts、shared の外の *.schema.ts、shared の schema でない
+          //   ファイル・前方一致だけの名前（x-schema.ts）、テスト、node_modules、apps/backend の外。
           "apps/backend/features/c/internal/infra/other.ts": varcharColumn,
           "apps/backend/features/c/internal/domain/schema.ts": varcharColumn,
+          "apps/backend/features/c/internal/domain/c.schema.ts": varcharColumn,
+          "apps/backend/shared/drizzle/database.ts": varcharColumn,
+          "apps/backend/shared/audit/audit-schema.ts": varcharColumn,
+          "apps/backend/shared/change-log/change-log.schema.test.ts":
+            varcharColumn,
           "apps/backend/features/c/internal/infra/schema.test.ts":
             varcharColumn,
           "apps/backend/node_modules/x/infra/schema.ts": varcharColumn,
@@ -1554,15 +1573,23 @@ describeFeature(feature, ({ Scenario }) => {
           files: [
             "apps/backend/features/a/internal/infra/schema.ts",
             "apps/backend/features/b/internal/infra/schema.ts",
-            "apps/backend/shared/infra/schema.ts",
+            "apps/backend/shared/audit/audit.schema.ts",
+            "apps/backend/shared/audit/schema.ts",
+            "apps/backend/shared/change-log/change-log.schema.ts",
           ],
           violations: [
             "surrogate-key: apps/backend/features/a/internal/infra/schema.ts:2",
             "column-classification: apps/backend/features/a/internal/infra/schema.ts:2",
             "varchar: apps/backend/features/a/internal/infra/schema.ts:3",
             "timestamp-without-timezone: apps/backend/features/a/internal/infra/schema.ts:4",
-            "json: apps/backend/shared/infra/schema.ts:2",
-            "column-classification: apps/backend/shared/infra/schema.ts:2",
+            "varchar: apps/backend/shared/audit/audit.schema.ts:2",
+            "surrogate-key: apps/backend/shared/audit/audit.schema.ts:2",
+            "column-classification: apps/backend/shared/audit/audit.schema.ts:2",
+            "varchar: apps/backend/shared/audit/schema.ts:2",
+            "surrogate-key: apps/backend/shared/audit/schema.ts:2",
+            "column-classification: apps/backend/shared/audit/schema.ts:2",
+            "json: apps/backend/shared/change-log/change-log.schema.ts:2",
+            "column-classification: apps/backend/shared/change-log/change-log.schema.ts:2",
           ],
         });
       },
@@ -1588,7 +1615,7 @@ describeFeature(feature, ({ Scenario }) => {
     "DB の列の型・サロゲートキー・列の分類表（実ファイル）",
     ({ And }) => {
       And(
-        "apps/backend の infra/schema.ts はすべて列の型の既定に従い、すべての表が uuid の id の primaryKey と列の分類表を持つ",
+        "apps/backend の infra/schema.ts と shared の .schema.ts はすべて列の型の既定に従い、すべての表が uuid の id の primaryKey と列の分類表を持つ",
         () => {
           // given: 実ファイル（repoRoot）
           // when
@@ -1597,8 +1624,12 @@ describeFeature(feature, ({ Scenario }) => {
 
           // then
           // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
+          //   features と shared の両方の置き場所が列挙に入ることを見る（片方の列挙だけが壊れても気づく）。
           expect(files).toContain(
             "apps/backend/features/todo/internal/infra/schema.ts",
+          );
+          expect(files).toContain(
+            "apps/backend/shared/change-log/change-log.schema.ts",
           );
           expect(violations).toEqual([]);
         },

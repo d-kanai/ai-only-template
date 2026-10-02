@@ -1,8 +1,12 @@
 import { Clock } from "@repo/shared/now";
 import { getTableColumns, getTableName, type Table } from "drizzle-orm";
-import type { ChangeOperation } from "../domain/change-operation";
-import type { Database } from "./database";
-import { type Changes, type ChangeValue, changeLogs } from "./schema";
+import type { Database } from "../drizzle/database";
+import {
+  type Changes,
+  type ChangeValue,
+  changeLogs,
+} from "./change-log.schema";
+import type { ChangeOperation } from "./change-operation";
 
 // 変更履歴（change_logs。Issue #189）の記録の組み立てと書き込み。使うのは書き込みの唯一の口 Writer（writer.ts。Issue #215）だけで、
 //   Writer が文ごとに記録を組み立て（ChangeRecords.insertEntry など）、同じトランザクションの中で ChangeRecords.recordChange を呼ぶ。Repository（*.postgres.ts）は

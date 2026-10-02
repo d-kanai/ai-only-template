@@ -1,7 +1,7 @@
 # backend も最初の階層を features/ と shared/ にし、Drizzle の設定とマイグレーションは shared/drizzle/ に置く
 
 - 日付: 2026-09-29
-- 状態: 採用
+- 状態: 置き換え（→ architecture/20261002-backend-shared-colocated-by-meaning.md）
 - 関連: Issue #98 / `.claude/rules/backend.md` / `.claude/rules/architecture-check.md` / スキル `db-migration`
 
 ## 背景

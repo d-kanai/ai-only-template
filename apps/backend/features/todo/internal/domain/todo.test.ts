@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { Clock } from "@repo/shared/now";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { DomainError } from "../../../../shared/domain/domain-error";
-import type { ErrorKey } from "../../../../shared/domain/error-key";
+import { DomainError } from "../../../../shared/error/domain-error";
+import type { ErrorKey } from "../../../../shared/error/error-key";
 import { TODO_TITLE_MAX_LENGTH, Todo } from "./todo";
 
 // WHY 時計（Clock.now）を差し替える: Todo.create は作成日時を Clock.now() から自動で入れる（引数では受け取らない）。

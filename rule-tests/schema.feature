@@ -14,7 +14,7 @@ Feature: DB のスキーマの書き方
   Scenario: 列の分類表の判定（findColumnClassificationViolations）: must reject
     * 列の分類表の無い表は違反（分類表が無い・片方の表だけにある・名前が <表>Columns でないなど）
   Scenario: スキーマの列挙と検査（fixture）
-    * apps/backend の features と shared の infra/schema.ts だけを対象にし、すべての規則（列の型・surrogate-key・column-classification）の違反を「規則: パス:行」の行の順で返す
+    * apps/backend の infra/schema.ts と、shared の下の schema.ts・名前が .schema.ts で終わるファイルだけを対象にし、すべての規則（列の型・surrogate-key・column-classification）の違反を「規則: パス:行」の行の順で返す
     * apps/backend が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）
   Scenario: DB の列の型・サロゲートキー・列の分類表（実ファイル）
-    * apps/backend の infra/schema.ts はすべて列の型の既定に従い、すべての表が uuid の id の primaryKey と列の分類表を持つ
+    * apps/backend の infra/schema.ts と shared の .schema.ts はすべて列の型の既定に従い、すべての表が uuid の id の primaryKey と列の分類表を持つ

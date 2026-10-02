@@ -9,7 +9,7 @@ import {
 
 // zod のスキーマで検証し、違反なら DomainError(validation_error) を投げる。Entity の完全コンストラクタ（Todo など、
 //   すべての Entity）が不変条件のスキーマと一緒に使う。
-// WHY shared/domain に置く: Entity ごとに同じ「zod の issue → DomainError」の変換を持つと、キーの無い issue の扱い
+// WHY shared/error に置く: Entity ごとに同じ「zod の issue → DomainError」の変換を持つと、キーの無い issue の扱い
 //   （下の 500）が Entity ごとにずれる。変換は 1 か所にし、各 Entity はスキーマ（規則）だけを持つ。
 // WHY ZodError をそのまま投げない: domain の外（presentation の ProblemResponse.from）は DomainError だけを見て 400 に変換する。
 //   zod を使っていることを domain の外に漏らさない。

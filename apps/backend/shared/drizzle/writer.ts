@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import { logger } from "@repo/shared/logger";
 import { DrizzleQueryError, eq, getTableName, type Table } from "drizzle-orm";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
-import type { Transaction } from "../application/transaction";
-import type { ChangeOperation } from "../domain/change-operation";
-import { type ChangeEntry, ChangeRecords } from "./change-log";
+import { type ChangeEntry, ChangeRecords } from "../change-log/change-log";
+import type { Changes } from "../change-log/change-log.schema";
+import type { ChangeOperation } from "../change-log/change-operation";
+import type { Transaction } from "../transaction/transaction";
 import { ColumnClassifier } from "./column-classification";
 import type { Database } from "./database";
-import type { Changes } from "./schema";
 
 // 書き込みの唯一の口（Writer。Issue #215。ADR docs/adr/architecture/20260930-transaction-from-application.md）。Repository
 //   （*.postgres.ts）は行の変換だけを書き、insert / update / delete をこの Writer に渡す。Writer は 1 文ごとに次を横断的に行う:
@@ -22,7 +22,7 @@ import type { Changes } from "./schema";
 //   することは rule-tests/persistence.test.ts の no-change-log-in-repository が止め、書き込みが Writer を通ることは
 //   writes-through-writer が見る。
 // WHY 以前の writeInTransaction（write.ts）を置き換える: トランザクションを張るのは command（application）の runner になり
-//   （shared/infra/transaction.postgres.ts）、書き込みごとにトランザクションを張る入口は要らなくなった。
+//   （shared/drizzle/transaction.postgres.ts）、書き込みごとにトランザクションを張る入口は要らなくなった。
 // 前提: 書き込む表はすべて uuid の id 列（主キー）を持つ（Issue #213）。update / delete は id で 1 行を指す。
 
 // db.transaction のコールバックが受け取る tx の型（drizzle-orm の NodePgTransaction）。
@@ -320,7 +320,7 @@ export class PostgresWriter implements Writer {
     );
   }
 
-  // この Writer を Transaction（shared/application/transaction の brand の型）にする（PostgresTransactionRunner が work に渡す値）。
+  // この Writer を Transaction（shared/transaction/transaction の brand の型）にする（PostgresTransactionRunner が work に渡す値）。
   // WHY cast をここに閉じる: Transaction は domain の brand の型で、infra の実体（Writer）を application・domain に見せない。
   //   作るのはこのメソッド、取り出すのは PostgresWriter.of だけにする。
   asTransaction(): Transaction {

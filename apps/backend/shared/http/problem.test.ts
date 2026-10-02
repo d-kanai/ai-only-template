@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { DrizzleQueryError } from "drizzle-orm";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { DomainError } from "../domain/domain-error";
+import { DomainError } from "../error/domain-error";
 import {
   InvalidRequestError,
   type Problem,

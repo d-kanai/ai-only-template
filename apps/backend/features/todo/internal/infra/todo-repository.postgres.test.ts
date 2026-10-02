@@ -12,12 +12,12 @@ import {
   test,
   vi,
 } from "vitest";
-import type { Transaction } from "../../../../shared/application/transaction";
-import { DomainError } from "../../../../shared/domain/domain-error";
-import type { ChangeEntry } from "../../../../shared/infra/change-log";
-import { changeLogs } from "../../../../shared/infra/schema";
-import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";
-import { PostgresWriter } from "../../../../shared/infra/writer";
+import type { ChangeEntry } from "../../../../shared/change-log/change-log";
+import { changeLogs } from "../../../../shared/change-log/change-log.schema";
+import { PostgresTransactionRunner } from "../../../../shared/drizzle/transaction.postgres";
+import { PostgresWriter } from "../../../../shared/drizzle/writer";
+import { DomainError } from "../../../../shared/error/domain-error";
+import type { Transaction } from "../../../../shared/transaction/transaction";
 import { TestDatabase } from "../../../../test-support/database";
 import { Todo } from "../domain/todo";
 import { todoStatusChanges, todos } from "./schema";
@@ -54,7 +54,7 @@ beforeEach(async () => {
   await database.db.execute(
     sql`truncate change_logs, todo_status_changes, todos`,
   );
-  // WHY console.log / console.warn を黙らせる: 書き込みのたびに Writer（shared/infra/writer.ts。Issue #205・#215）が
+  // WHY console.log / console.warn を黙らせる: 書き込みのたびに Writer（shared/drizzle/writer.ts。Issue #205・#215）が
   //   書き込みの前後のログ（info は console.log、失敗は console.warn）を出し、テストの出力が埋まる。ログの行は下の
   //   writeLogsBy が読む（afterEach の restoreAllMocks が戻す）。
   vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -125,7 +125,7 @@ async function waitUntilBlockedBy(pid: number): Promise<void> {
 }
 
 // action の間に書かれた変更履歴（change_logs の行）を、id と occurred_at を除いた記録（ChangeEntry）にして返す。
-// WHY id と occurred_at を除く: id は DB が乱数で作り、occurred_at は Clock.now() の時刻（shared/infra/change-log.test.ts が固定する）。
+// WHY id と occurred_at を除く: id は DB が乱数で作り、occurred_at は Clock.now() の時刻（shared/change-log/change-log.test.ts が固定する）。
 // WHY 表の名前と changes で並べる: 同じ command の記録の順は文の順だが、DB が返す順は決まらない。
 async function changeLogsWrittenBy(
   action: () => Promise<unknown>,
@@ -174,7 +174,7 @@ function dbFields(table: string, operation: string) {
   return { collection: { name: table }, operation: { name: operation } };
 }
 
-// 書き込みの前後のログの行（time と所要時間は実行ごとに変わるので形だけを見る。値は shared/infra/writer.test.ts が固定する）。
+// 書き込みの前後のログの行（time と所要時間は実行ごとに変わるので形だけを見る。値は shared/drizzle/writer.test.ts が固定する）。
 // Writer は文ごとにログを出す（Issue #215）。1 行の文は row_id、複数行の INSERT は row_ids。
 function writeStartLine(table: string, rowIds: string[], operation: string) {
   return {
@@ -1422,7 +1422,7 @@ describe("PostgresTodoRepository", () => {
     }
   });
 
-  // 書き込みのログ（Issue #205・#215）は Postgres だけ（InMemory はログを出さない）。ログを出すのは shared/infra/writer.ts の
+  // 書き込みのログ（Issue #205・#215）は Postgres だけ（InMemory はログを出さない）。ログを出すのは shared/drizzle/writer.ts の
   //   Writer で、文ごとに前後の 2 行を出す。changes は書いた行ごとの記録で、before / after の値は schema.ts の列の分類表で
   //   マスクする（Issue #216）。todos.title（利用者が書く自由文）は sensitive で ***、ほかの列（id・完了状態・日時・位置）は値のまま。
   test("新規の Todo を insert すると、todos の INSERT と完了の履歴の INSERT のそれぞれに、前後のログ（表・行の id・insert）を出し、changes の after は title だけを *** にする", async () => {

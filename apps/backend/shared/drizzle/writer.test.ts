@@ -13,9 +13,9 @@ import {
   vi,
 } from "vitest";
 import { TestDatabase } from "../../test-support/database";
-import type { Transaction } from "../application/transaction";
+import { changeLogs } from "../change-log/change-log.schema";
+import type { Transaction } from "../transaction/transaction";
 import { ColumnClassifier } from "./column-classification";
-import { changeLogs } from "./schema";
 import { type DrizzleTransaction, PostgresWriter } from "./writer";
 
 // WHY 時計（Clock.now）を差し替える: ログの行の time と、ChangeRecords.recordChange が occurred_at に入れる時刻を決めた値にして、
@@ -27,7 +27,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// 書き込みに使う架空の表。WHY 実在の表（todos）を使わない: Writer は表によらない汎用の処理で、shared/infra のテストから
+// 書き込みに使う架空の表。WHY 実在の表（todos）を使わない: Writer は表によらない汎用の処理で、shared のテストから
 //   feature の表を参照しない。表はテスト用のスキーマに作る（beforeAll）。
 // WHY id に DB の既定値を付けない: id を渡さない行の id を Writer が作ることを、DB の既定値に頼らずに確かめる。
 const items = pgTable("items", {

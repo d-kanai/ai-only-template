@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import type { Problem } from "../../../../shared/presentation/problem";
+import type { Problem } from "../../../../shared/http/problem";
 import { InMemoryTodoRepository } from "../../../../test-support/todo/todo-repository.in-memory";
 import { inMemoryTransaction } from "../../../../test-support/transaction-runner.in-memory";
 import { GetTodoQuery } from "../application/get-todo.query";

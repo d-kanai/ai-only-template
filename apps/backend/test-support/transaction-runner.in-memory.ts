@@ -1,10 +1,10 @@
 import type {
   Transaction,
   TransactionRunner,
-} from "../shared/application/transaction";
+} from "../shared/transaction/transaction";
 
 // TransactionRunner の InMemory 実装（テスト用。Issue #215）。command のテストと、api ファイルのテストの組み立てで
-//   InMemory の Repository と一緒に渡す。本番は PostgresTransactionRunner（shared/infra/transaction.postgres.ts）。
+//   InMemory の Repository と一緒に渡す。本番は PostgresTransactionRunner（shared/drizzle/transaction.postgres.ts）。
 // WHY work を呼ぶだけ（rollback を再現しない）: InMemory の Repository は tx を使わず、Map を直接書き換える。work が途中で失敗しても、
 //   それまでの書き換えは戻らない。今の command は、失敗しうる処理（findByIdForUpdate の not_found・Entity の検証）をすべて書き込みの前に
 //   行い、書き込みは最後の 1 回（insert / update / delete）なので、InMemory で戻らなくても結果は変わらない。rollback（原子性）は
@@ -18,7 +18,7 @@ export class InMemoryTransactionRunner implements TransactionRunner {
 
 // InMemory の runner が work に渡す Transaction。InMemory の Repository は受け取るだけで使わない。
 // WHY export する: テストが Repository に直接 Todo を置く（`repository.insert(todo, inMemoryTransaction)`）ときに使う。
-// WHY cast: Transaction（shared/application/transaction）は brand の型で、infra の実体（Postgres の Writer）以外は作れない。InMemory は中身の要らない
+// WHY cast: Transaction（shared/transaction/transaction）は brand の型で、infra の実体（Postgres の Writer）以外は作れない。InMemory は中身の要らない
 //   印だけを渡す（本番のコードは test-support を参照できないので、この値が本番に混ざることはない。rule-tests/test-support.test.ts）。
-//   Postgres の Repository に渡すと PostgresWriter.of が Error にする（shared/infra/writer.ts）。
+//   Postgres の Repository に渡すと PostgresWriter.of が Error にする（shared/drizzle/writer.ts）。
 export const inMemoryTransaction = Object.freeze({}) as unknown as Transaction;

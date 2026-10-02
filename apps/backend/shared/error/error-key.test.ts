@@ -44,7 +44,7 @@ describe("ERROR_KEYS", () => {
 });
 
 // ParamlessErrorKey は params を持たないキー（Record<string, never>）だけ。zod の型の検査（z.string など）の issue は
-//   params を運ばないので、そこに付けられるのはこのキーだけにする（shared/domain/keyed-issue.ts の KeyedIssue.of）。
+//   params を運ばないので、そこに付けられるのはこのキーだけにする（shared/error/keyed-issue.ts の KeyedIssue.of）。
 describe("ParamlessErrorKey", () => {
   test("params の無いキーだけを含む（型で検査する）", () => {
     // given: 前提なし
