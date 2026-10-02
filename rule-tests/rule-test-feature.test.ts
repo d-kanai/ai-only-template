@@ -51,21 +51,13 @@ const FORBIDDEN_VITEST_IMPORTS = new Set(["it", "test", "describe", "suite"]);
 // まだ .feature に移していないルール検査テストの名前（`rule-tests/<名前>.test.ts`）。移したら消す。
 const PENDING = new Set([
   "api-journey",
-  "api-request",
-  "api-spec",
-  "domain-validation",
   "instructions",
   "lint",
   "package",
-  "persistence",
   "pnpm-workspace",
-  "schema",
   "settings",
-  "test-doubles",
   "test-phases",
-  "test-support",
   "typecheck",
-  "use-case",
   "work-logs-check",
 ]);
 

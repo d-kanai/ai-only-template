@@ -12,7 +12,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
+import { afterAll, expect } from "vitest";
+import { casesByName } from "./case-table";
 
 // 永続化の規則（.claude/rules/backend.md の「永続化」。Issue #165 / #172 / #177 / #188 / #189 / #205 / #215 / #221）を、backend のソースで
 // 機械的に検査するテスト。対象は apps/backend/ の下のテスト以外の .ts（*.test.ts を除く）。
@@ -631,1268 +633,1314 @@ const withWriter = (...lines: string[]) =>
     "const tx = PostgresWriter.of(t);",
     "const writer = PostgresWriter.of(t);",
   );
-
-describe("永続化の判定（findPersistenceViolations）: must pass", () => {
-  it.each([
-    [
-      "*.postgres.ts の update が changed-props を import している（差分の UPDATE）",
-      POSTGRES,
-      withWriter(
-        IMPORT_CHANGED_PROPS,
-        "export class XRepository {",
-        "  async update(x: X, t: Transaction): Promise<void> {",
-        "    await writer.update(xs, x.id, ChangedProps.of(x.origin, { name: x.name }));",
-        "  }",
-        "}",
-      ),
-    ],
-    [
-      "複数行の import で changed-props を読む（拡張子付き）",
-      POSTGRES,
-      source(
-        "import {",
-        "  ChangedProps,",
-        '} from "../../../../shared/infra/changed-props.ts";',
-        "class XRepository {",
-        "  update(x: X) {}",
-        "}",
-      ),
-    ],
-    [
-      "update を定義していない *.postgres.ts は import 不要（Writer の update を呼ぶだけの行・insert の定義は update の定義ではない）",
-      POSTGRES,
-      withWriter(
-        "export class XRepository {",
-        "  async insert(x: X, t: Transaction): Promise<void> {",
-        "    await writer.update(xs, x.id, changes);",
-        "  }",
-        "}",
-      ),
-    ],
-    [
-      "*.postgres.ts でない Repository（in-memory）の update は import 不要",
-      IN_MEMORY,
-      source("class InMemoryXRepository {", "  async update(x: X) {}", "}"),
-    ],
-    [
-      "コメントの中の .onConflictDoUpdate( / .onConflictDoNothing(",
-      POSTGRES,
-      withWriter(
-        "// .onConflictDoUpdate( で上書きしない。",
-        "await tx.insert(xs).values(row); // .onConflictDoNothing() も使わない",
-      ),
-    ],
-    [
-      "名前の一部が一致するだけの別のメソッド（onConflictDoUpdateLater / updateAll / preupdate）",
-      POSTGRES,
-      source(
-        "q.onConflictDoUpdateLater(x);",
-        "class XRepository {",
-        "  async updateAll(xs: X[]) {}",
-        "  preupdate(x: X) {}",
-        "}",
-      ),
-    ],
-    [
-      "Entity が static reconstruct( と get origin() を持つ",
-      ENTITY,
-      source(
-        "export class X {",
-        "  get origin(): Readonly<XProps> | undefined {",
-        "    return this.#origin;",
-        "  }",
-        "  static reconstruct(values: XProps): X {",
-        "    return new X(values, (valid) => valid);",
-        "  }",
-        "}",
-      ),
-    ],
-    [
-      "reconstruct も origin も無い domain のファイル",
-      "apps/backend/features/x/internal/domain/x-repository.ts",
-      source(
-        "export interface XRepository {",
-        "  update(x: X, tx: Transaction): Promise<void>;",
-        "}",
-      ),
-    ],
-    [
-      "コメントの中の static reconstruct(",
-      ENTITY,
-      source(
-        "// static reconstruct( は Repository が使う。",
-        "export class X {}",
-      ),
-    ],
-    [
-      "テストファイル（*.test.ts）は対象外",
-      "apps/backend/features/x/internal/infra/x-repository.postgres.test.ts",
-      source(
-        "async update(x) {}",
-        "q.onConflictDoUpdate({});",
-        "static reconstruct(v) {}",
-        "await this.db.transaction(async (tx) => tx.insert(xs).values(r));",
-        'import { ChangeRecords } from "../../../../shared/infra/change-log";',
-      ),
-    ],
-    [
-      "shared/domain の reconstruct（entity-with-reconstruct-has-origin は features の domain だけ）",
-      "apps/backend/shared/domain/x.ts",
-      source("export class X {", "  static reconstruct(v: V) {}", "}"),
-    ],
-    [
-      "backend の外（frontend）は対象外",
-      "apps/frontend_customer/features/x/x.ts",
-      source("q.onConflictDoUpdate({});"),
-    ],
-    // Issue #208: feature の層は internal/ の下だけ。internal/ を挟まない旧の置き場所（置き場所の規則 backend-placement が
-    //   違反にする）は、domain・schema.ts の規則の対象外。
-    [
-      "internal/ を挟まない features/x/domain/ の reconstruct は entity-with-reconstruct-has-origin の対象外",
-      "apps/backend/features/x/domain/x.ts",
-      source("export class X {", "  static reconstruct(v: V) {}", "}"),
-    ],
-    [
-      "internal/ を挟まない features/x/infra/schema.ts は append-only-table-naming の対象外",
-      "apps/backend/features/x/infra/schema.ts",
-      source('export const statusLog = pgTable("todo_status_changes", {});'),
-    ],
-    [
-      "insert のみの表（*Changes / *Events / *Logs）への insert と select、それ以外の表の update / delete",
-      POSTGRES,
-      withWriter(
-        "await tx.insert(todoStatusChanges).values(rows);",
-        "await tx.insert(orderEvents).values(rows);",
-        "await writer.insert(changeLogs).values(rows);",
-        "await this.db.select().from(todoStatusChanges);",
-        "await tx.update(todos).set(changed);",
-        "await tx.delete(todos).where(eq(todos.id, id));",
-      ),
-    ],
-    [
-      "名前の途中に Changes / Events / Logs を含むだけの表（todoChangesLog / eventsArchive / logsArchive）",
-      POSTGRES,
-      withWriter(
-        "await tx.delete(todoChangesLog);",
-        "await tx.update(eventsArchive).set(row);",
-        "await tx.delete(logsArchive);",
-      ),
-    ],
-    [
-      "update / delete で始まる別のメソッド（updateChanges( / deleted( / predelete(）",
-      POSTGRES,
-      source(
-        "q.updateChanges(todoStatusChanges);",
-        "q.deleted(todoStatusChanges);",
-        "q.predelete(todoStatusChanges);",
-      ),
-    ],
-    [
-      "コメントの中の .delete(todoStatusChanges)",
-      POSTGRES,
-      withWriter(
-        "// this.db.delete(todoStatusChanges) は書かない（cascade で消える）。",
-        "await tx.delete(todos); // tx.update(todoStatusChanges) も書かない",
-      ),
-    ],
-    [
-      "*.postgres.ts 以外（in-memory）の .delete(xChanges)",
-      IN_MEMORY,
-      source("this.statusChanges.delete(todoStatusChanges);"),
-    ],
-    [
-      "schema.ts の _changes / _events / _logs の表を Changes / Events / Logs で終わる変数で受ける",
-      SCHEMA,
-      source(
-        'export const todoStatusChanges = pgTable("todo_status_changes", {',
-        "});",
-        "export const orderEvents = pgTable('order_events', {});",
-        "export const accessLogs = pgTable(`access_logs`, {});",
-      ),
-    ],
-    [
-      "shared/infra/schema.ts の change_logs を changeLogs で受ける（横断の表の置き場所）",
-      SHARED_SCHEMA,
-      source(
-        "export const changeLogs = pgTable(",
-        '  "change_logs",',
-        "  {},",
-        ");",
-      ),
-    ],
-    [
-      '改行を挟んだ pgTable(\\n  "x_changes" を Changes で終わる変数で受ける',
-      SCHEMA,
-      source(
-        "export const todoStatusChanges = pgTable(",
-        '  "todo_status_changes",',
-        "  {},",
-        ");",
-      ),
-    ],
-    [
-      "_changes / _events / _logs で終わらない表は対象外（変数名は問わない）",
-      SCHEMA,
-      source(
-        'export const todos = pgTable("todos", {});',
-        'export const changeLog = pgTable("todo_changes_log", {});',
-        'export const history = pgTable("todo_changesx", {});',
-        'export const audit = pgTable("todo_logsx", {});',
-      ),
-    ],
-    [
-      'コメントの中の pgTable("x_changes")',
-      SCHEMA,
-      source('// export const statusLog = pgTable("todo_status_changes", {});'),
-    ],
-    [
-      "schema.ts でないファイル（schema.test.ts・infra の別のファイル）は append-only-table-naming の対象外",
-      "apps/backend/features/x/internal/infra/x-tables.ts",
-      source('export const statusLog = pgTable("todo_status_changes", {});'),
-    ],
-    [
-      "*.postgres.ts の書き込みが writer を import し、PostgresWriter.of(tx) で得た Writer で書く（複数行の import・拡張子付き・改行を挟む・PostgresWriter.of( に直接続ける）",
-      POSTGRES,
-      source(
-        IMPORT_CHANGED_PROPS,
-        'import type { Transaction } from "../../../../shared/application/transaction";',
-        "import {",
-        "  PostgresWriter,",
-        '} from "../../../../shared/infra/writer.ts";',
-        "class A {",
-        "  async insert(x: X, tx: Transaction) {",
-        "    const writer = PostgresWriter.of(tx);",
-        "    await writer.insert(xs, [row]);",
-        "    await writer",
-        "      .insert(xChanges, rows);",
-        "  }",
-        "  async update(x: X, tx: Transaction) {",
-        "    let w = PostgresWriter.of(tx);",
-        "    await w.update(xs, x.id, ChangedProps.of(x.origin, { name: x.name }));",
-        "  }",
-        "  async delete(id: string, tx: Transaction) {",
-        "    await PostgresWriter.of(tx).delete(xs, id);",
-        "    await PostgresWriter.of ( tx ) . delete (ys, id);",
-        "  }",
-        "}",
-      ),
-    ],
-    [
-      "change-log を名前が同じ別のモジュール（./change-log・shared/infra/change-log-x）やコメントの中で読むだけ",
-      POSTGRES,
-      source(
-        'import { ChangeRecords } from "./change-log";',
-        'import { x } from "../../../../shared/infra/change-log-x";',
-        '// import { ChangeRecords } from "../../../../shared/infra/change-log";',
-      ),
-    ],
-    [
-      "*.postgres.ts でない書き込みの口（shared/infra/writer.ts）と InMemory は change-log を import してよい",
-      "apps/backend/shared/infra/writer.ts",
-      source(
-        'import { ChangeRecords } from "./change-log";',
-        'import type { ChangeEntry } from "../../shared/infra/change-log";',
-      ),
-    ],
-    [
-      "transaction / recordChange で始まる・終わる・含むだけの別の名前（transactional( / myTransaction( / transactions / recordChanges( / recordChangeLater(）と型の Transaction、import のパスの transaction",
-      POSTGRES,
-      source(
-        'import type { Transaction } from "../../../../shared/application/transaction";',
-        'import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";',
-        "await this.transactional(async (tx) => {});",
-        "await myTransaction(async (tx) => {});",
-        "const transactions = [];",
-        "await recordChanges(tx, entries);",
-        "recordChangeLater(entries);",
-        "type T = Transaction;",
-      ),
-    ],
-    [
-      "db でない受け手（PostgresWriter.of で得た tx / writer / 名前に db を含むだけの mydb）の書き込みと、db の読み取り（select / execute）",
-      POSTGRES,
-      withWriter(
-        "await tx.insert(xs, rows);",
-        "await writer.update(xs, id, changes);",
-        "const mydb = PostgresWriter.of(t);",
-        "await mydb.delete(xs, id);",
-        "await this.db.select().from(xs);",
-        "await this.db.execute(sql`select 1`);",
-      ),
-    ],
-    [
-      "書き込みの口（shared/infra/writer.ts。*.postgres.ts でない）は drizzle の tx で書き、recordChange( を呼んでよい",
-      "apps/backend/shared/infra/writer.ts",
-      source(
-        "const inserted = await this.tx.insert(table).values(rows).returning();",
-        "await ChangeRecords.recordChange(this.tx, entries);",
-      ),
-    ],
-    [
-      "トランザクションの runner（shared/infra/transaction.postgres.ts）は *.postgres.ts でも db.transaction( を呼んでよい（Repository の規則の対象外）",
-      RUNNER,
-      source(
-        'import type { Transaction } from "../application/transaction";',
-        "return this.db.transaction((tx) =>",
-        "  work(new PostgresWriter(tx, this.actorId).asTransaction()),",
-        ");",
-      ),
-    ],
-    [
-      "書き込みの無い *.postgres.ts（読み取りだけ）は writer の import 不要。update / insert / delete で始まる別の名前も書き込みではない",
-      POSTGRES,
-      source(
-        "const rows = await this.db.select().from(xs);",
-        "q.updateChanges(x); q.inserted(x); q.deleteLater(x);",
-      ),
-    ],
-    [
-      "コメントの中の書き込み・transaction(・recordChange(・this.db.insert(",
-      POSTGRES,
-      source(
-        "// await this.db.insert(xs).values(row); は PostgresWriter.of で得た Writer で書く",
-        "// this.db.transaction( と recordChange(tx, entries) は直接呼ばない",
-        "const rows = await this.db.select().from(xs); // db.transaction(async (tx) => recordChange(tx, e))",
-      ),
-    ],
-    [
-      "*.postgres.ts 以外（in-memory）の書き込みと、transaction( と recordChange(",
-      IN_MEMORY,
-      source(
-        "this.todos.delete(id);",
-        "this.logs.push(...entries);",
-        "await this.db.transaction(async (tx) => {});",
-        "await recordChange(this.db, entries);",
-      ),
-    ],
-    [
-      "子表を import した *.postgres.ts の集約の読み出しが、leftJoin で子表の全件を読む（where は親の列、orderBy に子の position）",
-      POSTGRES,
-      source(
-        IMPORT_CHILD,
-        "const rows = await this.db",
-        "  .select({ todo: todos, change: { completed: todoStatusChanges.completed } })",
-        "  .from(todos)",
-        "  .leftJoin(todoStatusChanges, eq(todoStatusChanges.todoId, todos.id))",
-        "  .where(eq(todos.id, id))",
-        "  .orderBy(asc(todos.createdAt), asc(todoStatusChanges.position));",
-      ),
-    ],
-    [
-      "子表を import した *.postgres.ts の行ロック（.for(。findByIdForUpdate が集約を読む前に根の行だけをロックする文）は、親だけを from で読んでよい",
-      POSTGRES,
-      source(
-        IMPORT_CHILD,
-        "await writer",
-        "  .select()",
-        "  .from(todos)",
-        "  .where(eq(todos.id, id))",
-        '  .for("update");',
-      ),
-    ],
-    [
-      "子表を import していない *.postgres.ts の from( / limit( / where は対象外（*Logs は集約の子表ではない）",
-      POSTGRES,
-      source(
-        'import { changeLogs } from "../../../../shared/infra/schema";',
-        "await this.db.select().from(xs).limit(1);",
-        "await this.db.select().from(changeLogs).where(eq(changeLogs.rowId, id)).limit(10);",
-        "await this.db.select().from(todoStatusChanges);",
-      ),
-    ],
-    [
-      "コメントの中の .from(todoStatusChanges) / .limit(1) / where の子表の列",
-      POSTGRES,
-      source(
-        IMPORT_CHILD,
-        "// this.db.select().from(todoStatusChanges).limit(1) は書かない",
-        "const rows = await this.db.select().from(todos).leftJoin(todoStatusChanges, on); // .where(eq(todoStatusChanges.position, 0))",
-      ),
-    ],
-    [
-      "クラスの static な from（Array.from / Buffer.from）はクエリではない",
-      POSTGRES,
-      source(
-        IMPORT_CHILD,
-        "return Array.from(grouped.values(), ({ row }) => toTodo(row));",
-        "const bytes = Buffer . from(text);",
-      ),
-    ],
-    [
-      "(a) 大文字を途中に含む小文字で始まる受け手（todoReader.from(todos)）はクエリとして見る",
-      POSTGRES,
-      source(
-        IMPORT_CHILD,
-        "const rows = await todoReader.from(todos).leftJoin(todoStatusChanges, on);",
-      ),
-    ],
-    [
-      "別名で import した子表（x as orderEvents）も leftJoin で読めばよい",
-      POSTGRES,
-      source(
-        'import { orders, orderEventsTable as orderEvents } from "./schema";',
-        "const rows = await this.db.select().from(orders).leftJoin(orderEvents, on).orderBy(orderEvents.position);",
-      ),
-    ],
-    [
-      "lock-method-name-for-update: 行ロック（.for(）をするメソッドの名前が ForUpdate で終わる（複数行の引数・修飾子も。本体の行頭の呼び出し・if はメソッドの宣言ではない）",
-      POSTGRES,
-      source(
-        "export class XRepository {",
-        "  async findByIdForUpdate(id: string, tx: Transaction): Promise<X> {",
-        "    requireX(id);",
-        "    if (id) {}",
-        '    await writer.select().from(xs).where(eq(xs.id, id)).for("update");',
-        "  }",
-        "  private async lockForUpdate(",
-        "    id: string,",
-        "  ): Promise<void> {",
-        "    await writer",
-        "      .select()",
-        "      .from(xs)",
-        '      .for("update");',
-        "  }",
-        "}",
-      ),
-    ],
-    [
-      "lock-method-name-for-update: ロックしないメソッドの本体は次のメソッドの宣言までで、後ろの ForUpdate のメソッドの .for( を含まない",
-      POSTGRES,
-      source(
-        "export class XRepository {",
-        "  constructor(private readonly db: Database) {}",
-        "  async findById(id: string): Promise<X | undefined> {",
-        "    for (const x of xs) {}",
-        "    xs.forEach((x) => x);",
-        '    // .for("update") は findByIdForUpdate だけが付ける',
-        "  }",
-        "  async findByIdForUpdate(id: string, tx: Transaction): Promise<X> {",
-        '    await writer.select().from(xs).for("update");',
-        "  }",
-        "}",
-      ),
-    ],
-    [
-      "lock-method-name-for-update: *.postgres.ts でないファイル（in-memory）は対象外",
-      IN_MEMORY,
-      source(
-        "class InMemoryXRepository {",
-        '  async findById(id: string) { return q.for("update"); }',
-        "  async findByIdForUpdate(id: string) {}",
-        "}",
-      ),
-    ],
-  ])("%s は違反なし", (_name, path, text) => {
-    // given: it.each の入力
-    // when
-    const violations = findPersistenceViolations(path, text);
-
-    // then
-    expect(violations).toEqual([]);
-  });
+// WHY OS の一時ディレクトリに置く: リポジトリ内に置くと本番の検査や Biome・git の差分に混ざる。afterAll で消す。
+const roots: string[] = [];
+afterAll(() => {
+  for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
 
-describe("永続化の判定（findPersistenceViolations）: must reject", () => {
-  it.each<[string, string, string, PersistenceViolation[]]>([
-    [
-      ".onConflictDoUpdate(（chain の次の行）",
-      POSTGRES,
-      withWriter(
-        IMPORT_CHANGED_PROPS,
-        "await tx",
-        "  .insert(xs)",
-        "  .values(row)",
-        "  .onConflictDoUpdate({ target: xs.id, set: row });",
-      ),
-      [{ rule: "no-upsert", line: 5 }],
-    ],
-    [
-      ".onConflictDoNothing()（同じ行）",
-      POSTGRES,
-      withWriter(
-        IMPORT_CHANGED_PROPS,
-        "await tx.insert(xs).values(row).onConflictDoNothing();",
-      ),
-      [{ rule: "no-upsert", line: 2 }],
-    ],
-    [
-      "空白を挟んだ . onConflictDoNothing (",
-      POSTGRES,
-      source("q . onConflictDoNothing ( );"),
-      [{ rule: "no-upsert", line: 1 }],
-    ],
-    [
-      "変数に入れ直して呼ぶ（const f = q.onConflictDoUpdate; f({})）",
-      POSTGRES,
-      source("const f = q.onConflictDoUpdate;", "f({});"),
-      [{ rule: "no-upsert", line: 1 }],
-    ],
-    [
-      'ブラケットで呼ぶ（q["onConflictDoUpdate"](…)）',
-      POSTGRES,
-      source('q["onConflictDoUpdate"]({ target: xs.id, set: row });'),
-      [{ rule: "no-upsert", line: 1 }],
-    ],
-    [
-      ". の後で改行する（q.\\n  onConflictDoUpdate(）",
-      POSTGRES,
-      source("q.", "  onConflictDoUpdate({});"),
-      [{ rule: "no-upsert", line: 2 }],
-    ],
-    [
-      "*.postgres.ts 以外（in-memory / shared/infra / application）の upsert",
-      "apps/backend/shared/infra/x.ts",
-      source("q.onConflictDoUpdate({});"),
-      [{ rule: "no-upsert", line: 1 }],
-    ],
-    [
-      "*.postgres.ts の async update( が changed-props を import していない",
-      POSTGRES,
-      withWriter(
-        "export class XRepository {",
-        "  async update(x: X, t: Transaction): Promise<void> {",
-        "    await writer.update(xs, x.id, changes);",
-        "  }",
-        "}",
-      ),
-      [{ rule: "update-uses-changed-props", line: 2 }],
-    ],
-    [
-      "async の無い update( / public async update( / 型引数付きの update<",
-      POSTGRES,
-      source(
-        "class A {",
-        "  update(x: X) {}",
-        "}",
-        "class B {",
-        "  public async update(x: X) {}",
-        "}",
-        "class C {",
-        "  update<T>(x: T) {}",
-        "}",
-      ),
-      [
-        { rule: "update-uses-changed-props", line: 2 },
-        { rule: "update-uses-changed-props", line: 5 },
-        { rule: "update-uses-changed-props", line: 8 },
-      ],
-    ],
-    [
-      "changed-props の import がコメントの中だけ",
-      POSTGRES,
-      source(
-        `// ${IMPORT_CHANGED_PROPS}`,
-        "class A {",
-        "  async update(x: X) {}",
-        "}",
-      ),
-      [{ rule: "update-uses-changed-props", line: 3 }],
-    ],
-    [
-      "changed-props を import type だけで読む（関数を呼べない）",
-      POSTGRES,
-      source(
-        'import type { ChangedProps } from "../../../../shared/infra/changed-props";',
-        "class A {",
-        "  async update(x: X) {}",
-        "}",
-      ),
-      [{ rule: "update-uses-changed-props", line: 3 }],
-    ],
-    [
-      "名前が同じ別のモジュール（./changed-props / shared/infra/changed-props-x）",
-      POSTGRES,
-      source(
-        'import { ChangedProps } from "./changed-props";',
-        'import { diff } from "../../../../shared/infra/changed-props-x";',
-        "class A {",
-        "  async update(x: X) {}",
-        "}",
-      ),
-      [{ rule: "update-uses-changed-props", line: 4 }],
-    ],
-    [
-      "Entity が static reconstruct( を持つのに get origin() が無い",
-      ENTITY,
-      source(
-        "export class X {",
-        "  static reconstruct(values: XProps): X {",
-        "    return new X(values);",
-        "  }",
-        "}",
-      ),
-      [{ rule: "entity-with-reconstruct-has-origin", line: 2 }],
-    ],
-    [
-      "get origin() がコメントの中だけ・getter でない origin のフィールド",
-      ENTITY,
-      source(
-        "export class X {",
-        "  // get origin() は持たない",
-        "  readonly origin?: XProps;",
-        "  public static reconstruct(values: XProps): X {",
-        "    return new X(values);",
-        "  }",
-        "}",
-      ),
-      [{ rule: "entity-with-reconstruct-has-origin", line: 4 }],
-    ],
-    [
-      "domain の下の入れ子の Entity",
-      "apps/backend/features/x/internal/domain/nested/y.ts",
-      source("export class Y {", "  static reconstruct(v: V) {}", "}"),
-      [{ rule: "entity-with-reconstruct-has-origin", line: 2 }],
-    ],
-    [
-      "tx.delete(todoStatusChanges)（insert のみの表の DELETE）",
-      POSTGRES,
-      withWriter("await tx.delete(todoStatusChanges);"),
-      [{ rule: "no-update-delete-on-append-only-tables", line: 1 }],
-    ],
-    [
-      "PostgresWriter.of で得た Writer の update(todoStatusChanges, …)（Writer を通しても insert のみの表の UPDATE）",
-      POSTGRES,
-      withWriter(
-        "const w = PostgresWriter.of(t);",
-        "await w.update(todoStatusChanges, id, { completed: true });",
-      ),
-      [{ rule: "no-update-delete-on-append-only-tables", line: 2 }],
-    ],
-    [
-      "改行を挟んだ .delete( と表の名前（chain の次の行で .delete(、その次の行に表。行は delete の行）",
-      POSTGRES,
-      withWriter(
-        "await tx",
-        "  .delete(",
-        "    todoStatusChanges",
-        "  )",
-        "  .where(eq(todoStatusChanges.todoId, id));",
-      ),
-      [{ rule: "no-update-delete-on-append-only-tables", line: 2 }],
-    ],
-    [
-      "空白を挟んだ . update ( orderEvents )（*Events の表）",
-      POSTGRES,
-      withWriter("writer . update ( orderEvents ).set(row);"),
-      [{ rule: "no-update-delete-on-append-only-tables", line: 1 }],
-    ],
-    [
-      "メンバーの参照（schema.todoStatusChanges）",
-      POSTGRES,
-      withWriter("await tx.delete(schema.todoStatusChanges);"),
-      [{ rule: "no-update-delete-on-append-only-tables", line: 1 }],
-    ],
-    [
-      "1 行に 2 つ・複数の行（行の順に、見つけた数だけ返す）",
-      POSTGRES,
-      withWriter(
-        "await tx.update(aChanges).set(r); await tx.delete(bEvents);",
-        "await tx.delete(todos);",
-        "await tx.delete(cChanges);",
-      ),
-      [
-        { rule: "no-update-delete-on-append-only-tables", line: 1 },
-        { rule: "no-update-delete-on-append-only-tables", line: 1 },
-        { rule: "no-update-delete-on-append-only-tables", line: 3 },
-      ],
-    ],
-    [
-      "schema.ts の _changes の表を Changes で終わらない変数で受ける（表名と変数名のずれ）",
-      SCHEMA,
-      source(
-        'export const todos = pgTable("todos", {});',
-        'export const statusLog = pgTable("todo_status_changes", {});',
-      ),
-      [{ rule: "append-only-table-naming", line: 2 }],
-    ],
-    [
-      "改行を挟んだ pgTable(\\n  'x_events'（行は pgTable の行）",
-      SCHEMA,
-      source(
-        "export const orderLog = pgTable(",
-        "  'order_events',",
-        "  {},",
-        ");",
-      ),
-      [{ rule: "append-only-table-naming", line: 1 }],
-    ],
-    [
-      "変数で受けない _changes の表（export default pgTable(…)）",
-      SCHEMA,
-      source('export default pgTable("todo_status_changes", {});'),
-      [{ rule: "append-only-table-naming", line: 1 }],
-    ],
-    [
-      "*.postgres.ts の insert / update / delete（改行・空白を挟む）が writer を import していない（書き込みの行ごと）",
-      POSTGRES,
-      source(
-        "await tx.insert(xs).values(row);",
-        "await tx",
-        "  .update(xs)",
-        "  .set(row);",
-        "await tx . delete (xs);",
-      ),
-      [
-        { rule: "writes-through-writer", line: 1 },
-        { rule: "writes-through-writer", line: 3 },
-        { rule: "writes-through-writer", line: 5 },
-      ],
-    ],
-    [
-      "writer を import type だけ・export だけ・コメントの中だけ・名前が同じ別のモジュール（./writer・shared/infra/writer-x・shared/infra/write）で読む",
-      POSTGRES,
-      source(
-        'import type { Writer } from "../../../../shared/infra/writer";',
-        `// ${IMPORT_WRITER}`,
-        'import { PostgresWriter } from "./writer";',
-        'import { x } from "../../../../shared/infra/writer-x";',
-        'import { y } from "../../../../shared/infra/write";',
-        'export { PostgresWriter } from "../../../../shared/infra/writer";',
-        "const w = PostgresWriter.of(tx);",
-        "await w.insert(xs, rows);",
-      ),
-      [{ rule: "writes-through-writer", line: 8 }],
-    ],
-    [
-      "writer を import しても、受け手が PostgresWriter.of で得た Writer でない（drizzle の tx・メンバーの this.writer / this.dbx・別の関数の戻り値・前方一致だけの別の関数・別名への入れ直し）",
-      POSTGRES,
-      source(
-        IMPORT_WRITER,
-        "const w = PostgresWriter.of(tx);",
-        "await tx.insert(xs).values(row);",
-        "await this.writer.update(xs, id, changes);",
-        "await this.dbx.insert(xs, rows);",
-        "await getWriter(tx).delete(xs, id);",
-        "await MyPostgresWriter.of(tx).delete(xs, id);",
-        "const v = w; await v.delete(xs, id);",
-        "await w.insert(xs, rows);",
-        "await PostgresWriter.from(tx).delete(xs, id);",
-        "await x.PostgresWriter.of(tx).delete(xs, id);",
-        "const u = PostgresWriter.ofTx(tx); await u.insert(xs, rows);",
-      ),
-      [
-        { rule: "writes-through-writer", line: 3 },
-        { rule: "writes-through-writer", line: 4 },
-        { rule: "writes-through-writer", line: 5 },
-        { rule: "writes-through-writer", line: 6 },
-        { rule: "writes-through-writer", line: 7 },
-        { rule: "writes-through-writer", line: 8 },
-        { rule: "writes-through-writer", line: 10 },
-        { rule: "writes-through-writer", line: 11 },
-        { rule: "writes-through-writer", line: 12 },
-      ],
-    ],
-    [
-      "*.postgres.ts が change-log を import する（値・import type・複数行・拡張子付き・export … from）",
-      POSTGRES,
-      source(
-        'import { ChangeRecords } from "../../../../shared/infra/change-log";',
-        "import type { ChangeEntry } from '../../../../shared/infra/change-log.ts';",
-        "import {",
-        "  ChangeRecords,",
-        '} from "../../../../shared/infra/change-log";',
-        'export { ChangeRecords } from "../../../../shared/infra/change-log";',
-      ),
-      [
-        { rule: "no-change-log-in-repository", line: 1 },
-        { rule: "no-change-log-in-repository", line: 2 },
-        { rule: "no-change-log-in-repository", line: 3 },
-        { rule: "no-change-log-in-repository", line: 6 },
-      ],
-    ],
-    [
-      "*.postgres.ts で transaction を直接使う（db.transaction( / 空白を挟む / tx.transaction( のセーブポイント / ブラケット / 分割代入 / . の後の改行）",
-      POSTGRES,
-      withWriter(
-        "await this.db.transaction(async (tx) => {",
-        "});",
-        "await db . transaction (async (tx) => {});",
-        "await tx.transaction(async (sp) => {});",
-        'await this.db["transaction"](async (tx) => {});',
-        "const { transaction } = this.db;",
-        "await this.db.",
-        "  transaction(async (tx) => {});",
-      ),
-      [
-        { rule: "no-direct-transaction", line: 1 },
-        { rule: "no-direct-transaction", line: 3 },
-        { rule: "no-direct-transaction", line: 4 },
-        { rule: "no-direct-transaction", line: 5 },
-        { rule: "no-direct-transaction", line: 6 },
-        { rule: "no-direct-transaction", line: 8 },
-      ],
-    ],
-    // db の直接の書き込みは、受け手が Writer でないので writes-through-writer も重ねて検出する（no-direct-db-write の WHY）。
-    [
-      "*.postgres.ts で db を直接使って書き込む（this.db.insert( / 空白を挟む db . update ( / 改行を挟む this.db\\n  .delete( / database.db）",
-      POSTGRES,
-      withWriter(
-        "await this.db.insert(xs).values(row);",
-        "await db . update ( xs ).set(row);",
-        "await this.db",
-        "  .delete(xs)",
-        "  .where(eq(xs.id, id));",
-        "await database.db.insert(xs).values(row);",
-      ),
-      [
-        { rule: "writes-through-writer", line: 1 },
-        { rule: "no-direct-db-write", line: 1 },
-        { rule: "writes-through-writer", line: 2 },
-        { rule: "no-direct-db-write", line: 2 },
-        { rule: "writes-through-writer", line: 4 },
-        { rule: "no-direct-db-write", line: 4 },
-        { rule: "writes-through-writer", line: 6 },
-        { rule: "no-direct-db-write", line: 6 },
-      ],
-    ],
-    [
-      "*.postgres.ts で recordChange を直接使う（import・別名の import・Writer を取り出した後の呼び出し・名前空間の参照・ChangeRecords の static メソッド）",
-      POSTGRES,
-      withWriter(
-        'import { recordChange } from "./audit";',
-        'import { recordChange as rc } from "./audit";',
-        "const w = PostgresWriter.of(t);",
-        "  await recordChange(w, entries);",
-        "  await w.insert(xs, rows);",
-        "",
-        "await changeLog . recordChange (tx, entries);",
-        "await ChangeRecords.recordChange(w, entries);",
-      ),
-      [
-        { rule: "no-direct-record-change", line: 1 },
-        { rule: "no-direct-record-change", line: 2 },
-        { rule: "no-direct-record-change", line: 4 },
-        { rule: "no-direct-record-change", line: 7 },
-        { rule: "no-direct-record-change", line: 8 },
-      ],
-    ],
-    [
-      "(a) 子表を import した *.postgres.ts で、親の from(todos) に子表の leftJoin が無い（innerJoin・別の表の leftJoin も）",
-      POSTGRES,
-      source(
-        IMPORT_CHILD,
-        "const a = await this.db.select().from(todos).where(eq(todos.id, id));",
-        "const b = await this.db.select().from(todos).innerJoin(todoStatusChanges, on);",
-        "const c = await this.db.select().from(schema.todos).leftJoin(others, on);",
-      ),
-      [
-        { rule: "aggregate-loads-all-children", line: 2 },
-        { rule: "aggregate-loads-all-children", line: 3 },
-        { rule: "aggregate-loads-all-children", line: 4 },
-      ],
-    ],
-    [
-      "(b)(d) 子表だけを from で読み（改行を挟んだ chain）、where で子表の列を絞る",
-      POSTGRES,
-      source(
-        IMPORT_CHILD,
-        "const rows = await this.db",
-        "  .select()",
-        "  .from(",
-        "    todoStatusChanges,",
-        "  )",
-        "  .where(eq(todoStatusChanges.todoId, id));",
-      ),
-      [
-        { rule: "aggregate-loads-all-children", line: 4 },
-        { rule: "aggregate-loads-all-children", line: 7 },
-      ],
-    ],
-    [
-      "(c) limit( で件数を絞る（leftJoin で読んでいても）",
-      POSTGRES,
-      source(
-        IMPORT_CHILD,
-        "const rows = await this.db.select().from(todos).leftJoin(todoStatusChanges, on)",
-        "  .limit(1);",
-      ),
-      [{ rule: "aggregate-loads-all-children", line: 3 }],
-    ],
-    [
-      "(c) offset( で行を飛ばす・selectDistinctOn で各 Todo の 1 行だけを読む（leftJoin で読んでいても）",
-      POSTGRES,
-      source(
-        IMPORT_CHILD,
-        "const rows = await this.db.select().from(todos).leftJoin(todoStatusChanges, on)",
-        "  .offset(1);",
-        "const latest = await this.db",
-        "  .selectDistinctOn([todos.id], { id: todos.id })",
-        "  .from(todos).leftJoin(todoStatusChanges, on);",
-      ),
-      [
-        { rule: "aggregate-loads-all-children", line: 3 },
-        { rule: "aggregate-loads-all-children", line: 5 },
-      ],
-    ],
-    [
-      "(d) where で子表の position / changedAt を絞る（and の奥・改行を挟む。orderBy の子表の列は可）",
-      POSTGRES,
-      source(
-        IMPORT_CHILD,
-        "const latest = await this.db.select().from(todos).leftJoin(todoStatusChanges, on).where(eq(todoStatusChanges.position, 0)).orderBy(todoStatusChanges.position);",
-        "const recent = await this.db",
-        "  .select()",
-        "  .from(todos)",
-        "  .leftJoin(todoStatusChanges, on)",
-        "  .where(",
-        "    and(eq(todos.id, id), gt(todoStatusChanges . changedAt, since)),",
-        "  );",
-      ),
-      [
-        { rule: "aggregate-loads-all-children", line: 2 },
-        { rule: "aggregate-loads-all-children", line: 7 },
-      ],
-    ],
-    [
-      "insert のみの表（*Logs）への update / delete",
-      POSTGRES,
-      withWriter(
-        "await writer.delete(changeLogs);",
-        "await tx.update(schema.accessLogs).set(row);",
-      ),
-      [
-        { rule: "no-update-delete-on-append-only-tables", line: 1 },
-        { rule: "no-update-delete-on-append-only-tables", line: 2 },
-      ],
-    ],
-    [
-      "_logs の表を Logs で終わらない変数で受ける（shared/infra/schema.ts も対象）",
-      SHARED_SCHEMA,
-      source('export const changeLog = pgTable("change_logs", {});'),
-      [{ rule: "append-only-table-naming", line: 1 }],
-    ],
-    [
-      "1 つのファイルに upsert と import の無い update（行の順に返す）",
-      POSTGRES,
-      source(
-        "class A {",
-        "  async update(x: X) {",
-        "    await q.onConflictDoUpdate({});",
-        "  }",
-        "}",
-      ),
-      [
-        { rule: "update-uses-changed-props", line: 2 },
-        { rule: "no-upsert", line: 3 },
-      ],
-    ],
-    [
-      "トランザクションの runner と同じ名前でも、shared/infra の別の *.postgres.ts は Repository の規則の対象（db.transaction( を呼べない）",
-      "apps/backend/shared/infra/other.postgres.ts",
-      source("return this.db.transaction((tx) => work(tx));"),
-      [{ rule: "no-direct-transaction", line: 1 }],
-    ],
-    [
-      "lock-method-name-for-update: 行ロック（.for(）をするメソッドの名前が ForUpdate で終わらない（findByIdLocked）",
-      POSTGRES,
-      source(
-        "export class XRepository {",
-        "  async findByIdLocked(id: string, tx: Transaction): Promise<X> {",
-        '    await writer.select().from(xs).where(eq(xs.id, id)).for("update");',
-        "  }",
-        "}",
-      ),
-      [{ rule: "lock-method-name-for-update", line: 2 }],
-    ],
-    [
-      "lock-method-name-for-update: 名前が ForUpdate で終わるのに本体に .for( が無い（名前が嘘になる）",
-      POSTGRES,
-      source(
-        "export class XRepository {",
-        "  async findByIdForUpdate(id: string): Promise<X> {",
-        "    return selectXs(this.db, eq(xs.id, id));",
-        "  }",
-        "}",
-      ),
-      [{ rule: "lock-method-name-for-update", line: 2 }],
-    ],
-    [
-      "lock-method-name-for-update: 複数行の宣言・修飾子（private / static）・. と for と ( の間の改行と空白",
-      POSTGRES,
-      source(
-        "export class XRepository {",
-        "  private async findLocked(",
-        "    id: string,",
-        "  ): Promise<X> {",
-        "    await writer.select().from(xs).",
-        '      for ("share");',
-        "  }",
-        "  static lock(id: string) {",
-        '    return q .for("update");',
-        "  }",
-        "}",
-      ),
-      [
-        { rule: "lock-method-name-for-update", line: 2 },
-        { rule: "lock-method-name-for-update", line: 8 },
-      ],
-    ],
-    [
-      "lock-method-name-for-update: ロックが前のメソッドにあり、後ろの ForUpdate のメソッドには無い（本体を次の宣言で区切る）",
-      POSTGRES,
-      source(
-        "export class XRepository {",
-        "  async load(id: string) {",
-        '    await writer.select().from(xs).for("update");',
-        "  }",
-        "  async findByIdForUpdate(id: string) {",
-        "    return selectXs(writer, eq(xs.id, id));",
-        "  }",
-        "}",
-      ),
-      [
-        { rule: "lock-method-name-for-update", line: 2 },
-        { rule: "lock-method-name-for-update", line: 5 },
-      ],
-    ],
-    [
-      "lock-method-name-for-update: ForUpdate で終わらない似た名前（forUpdateX・findForUpdates）と、2 つ目のクラスのメソッド",
-      POSTGRES,
-      source(
-        "class A {",
-        '  async forUpdateX() { await q.for("update"); }',
-        "}",
-        "class B {",
-        '  async findForUpdates() { await q.for("update"); }',
-        "}",
-      ),
-      [
-        { rule: "lock-method-name-for-update", line: 2 },
-        { rule: "lock-method-name-for-update", line: 5 },
-      ],
-    ],
-    [
-      "lock-method-name-for-update: トランザクションの runner（Repository の規則の対象外）も対象",
-      RUNNER,
-      source(
-        "export class PostgresTransactionRunner {",
-        "  async run(id: string) {",
-        '    await q.for("update");',
-        "  }",
-        "}",
-      ),
-      [{ rule: "lock-method-name-for-update", line: 2 }],
-    ],
-  ])("%s は違反", (_name, path, text, expected) => {
-    // given: it.each の入力
-    // when
-    const violations = findPersistenceViolations(path, text);
-
-    // then
-    expect(violations).toEqual(expected);
-  });
-});
-
-// --- 列挙 → 読み取り → 判定を通した fixture テスト ---
-// WHY: 判定が正しくても、対象の列挙（apps/backend の下のテスト以外の .ts の見つけ方）が漏れれば見逃す。一時ディレクトリに
-//   架空のツリーを置き、本番と同じ collectPersistenceViolations に通して、違反の集合を丸ごと比較する（見逃しも余分な検出も失敗にする）。
-describe("backend のソースの列挙と検査（fixture）", () => {
-  // WHY OS の一時ディレクトリに置く: リポジトリ内に置くと本番の検査や Biome・git の差分に混ざる。afterAll で消す。
-  const roots: string[] = [];
-  afterAll(() => {
-    for (const root of roots) rmSync(root, { recursive: true, force: true });
-  });
-
-  function fixture(files: Record<string, string>): string {
-    const root = mkdtempSync(join(tmpdir(), "persistence-"));
-    roots.push(root);
-    for (const [path, content] of Object.entries(files)) {
-      mkdirSync(dirname(join(root, path)), { recursive: true });
-      writeFileSync(join(root, path), content);
-    }
-    return root;
+function fixture(files: Record<string, string>): string {
+  const root = mkdtempSync(join(tmpdir(), "persistence-"));
+  roots.push(root);
+  for (const [path, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), content);
   }
+  return root;
+}
 
-  const updateMethod = source("class A {", "  async update(x: X) {}", "}");
-  const reconstructOnly = source(
-    "export class Y {",
-    "  static reconstruct(v: V) {}",
-    "}",
+const updateMethod = source("class A {", "  async update(x: X) {}", "}");
+const reconstructOnly = source(
+  "export class Y {",
+  "  static reconstruct(v: V) {}",
+  "}",
+);
+
+const feature = await loadFeature("./persistence.feature");
+
+describeFeature(feature, ({ Scenario }) => {
+  Scenario(
+    "永続化の判定（findPersistenceViolations）: must pass",
+    ({ And }) => {
+      And(
+        "永続化の規則に従う書き方は違反なし（changed-props を import した update・origin を持つ Entity・insert のみの表への insert・Writer を通した書き込み・JOIN で読む集約・ForUpdate のメソッドなど）",
+        () => {
+          // given
+          const cases: [string, string, string][] = [
+            [
+              "*.postgres.ts の update が changed-props を import している（差分の UPDATE）",
+              POSTGRES,
+              withWriter(
+                IMPORT_CHANGED_PROPS,
+                "export class XRepository {",
+                "  async update(x: X, t: Transaction): Promise<void> {",
+                "    await writer.update(xs, x.id, ChangedProps.of(x.origin, { name: x.name }));",
+                "  }",
+                "}",
+              ),
+            ],
+            [
+              "複数行の import で changed-props を読む（拡張子付き）",
+              POSTGRES,
+              source(
+                "import {",
+                "  ChangedProps,",
+                '} from "../../../../shared/infra/changed-props.ts";',
+                "class XRepository {",
+                "  update(x: X) {}",
+                "}",
+              ),
+            ],
+            [
+              "update を定義していない *.postgres.ts は import 不要（Writer の update を呼ぶだけの行・insert の定義は update の定義ではない）",
+              POSTGRES,
+              withWriter(
+                "export class XRepository {",
+                "  async insert(x: X, t: Transaction): Promise<void> {",
+                "    await writer.update(xs, x.id, changes);",
+                "  }",
+                "}",
+              ),
+            ],
+            [
+              "*.postgres.ts でない Repository（in-memory）の update は import 不要",
+              IN_MEMORY,
+              source(
+                "class InMemoryXRepository {",
+                "  async update(x: X) {}",
+                "}",
+              ),
+            ],
+            [
+              "コメントの中の .onConflictDoUpdate( / .onConflictDoNothing(",
+              POSTGRES,
+              withWriter(
+                "// .onConflictDoUpdate( で上書きしない。",
+                "await tx.insert(xs).values(row); // .onConflictDoNothing() も使わない",
+              ),
+            ],
+            [
+              "名前の一部が一致するだけの別のメソッド（onConflictDoUpdateLater / updateAll / preupdate）",
+              POSTGRES,
+              source(
+                "q.onConflictDoUpdateLater(x);",
+                "class XRepository {",
+                "  async updateAll(xs: X[]) {}",
+                "  preupdate(x: X) {}",
+                "}",
+              ),
+            ],
+            [
+              "Entity が static reconstruct( と get origin() を持つ",
+              ENTITY,
+              source(
+                "export class X {",
+                "  get origin(): Readonly<XProps> | undefined {",
+                "    return this.#origin;",
+                "  }",
+                "  static reconstruct(values: XProps): X {",
+                "    return new X(values, (valid) => valid);",
+                "  }",
+                "}",
+              ),
+            ],
+            [
+              "reconstruct も origin も無い domain のファイル",
+              "apps/backend/features/x/internal/domain/x-repository.ts",
+              source(
+                "export interface XRepository {",
+                "  update(x: X, tx: Transaction): Promise<void>;",
+                "}",
+              ),
+            ],
+            [
+              "コメントの中の static reconstruct(",
+              ENTITY,
+              source(
+                "// static reconstruct( は Repository が使う。",
+                "export class X {}",
+              ),
+            ],
+            [
+              "テストファイル（*.test.ts）は対象外",
+              "apps/backend/features/x/internal/infra/x-repository.postgres.test.ts",
+              source(
+                "async update(x) {}",
+                "q.onConflictDoUpdate({});",
+                "static reconstruct(v) {}",
+                "await this.db.transaction(async (tx) => tx.insert(xs).values(r));",
+                'import { ChangeRecords } from "../../../../shared/infra/change-log";',
+              ),
+            ],
+            [
+              "shared/domain の reconstruct（entity-with-reconstruct-has-origin は features の domain だけ）",
+              "apps/backend/shared/domain/x.ts",
+              source("export class X {", "  static reconstruct(v: V) {}", "}"),
+            ],
+            [
+              "backend の外（frontend）は対象外",
+              "apps/frontend_customer/features/x/x.ts",
+              source("q.onConflictDoUpdate({});"),
+            ],
+            // Issue #208: feature の層は internal/ の下だけ。internal/ を挟まない旧の置き場所（置き場所の規則 backend-placement が
+            //   違反にする）は、domain・schema.ts の規則の対象外。
+            [
+              "internal/ を挟まない features/x/domain/ の reconstruct は entity-with-reconstruct-has-origin の対象外",
+              "apps/backend/features/x/domain/x.ts",
+              source("export class X {", "  static reconstruct(v: V) {}", "}"),
+            ],
+            [
+              "internal/ を挟まない features/x/infra/schema.ts は append-only-table-naming の対象外",
+              "apps/backend/features/x/infra/schema.ts",
+              source(
+                'export const statusLog = pgTable("todo_status_changes", {});',
+              ),
+            ],
+            [
+              "insert のみの表（*Changes / *Events / *Logs）への insert と select、それ以外の表の update / delete",
+              POSTGRES,
+              withWriter(
+                "await tx.insert(todoStatusChanges).values(rows);",
+                "await tx.insert(orderEvents).values(rows);",
+                "await writer.insert(changeLogs).values(rows);",
+                "await this.db.select().from(todoStatusChanges);",
+                "await tx.update(todos).set(changed);",
+                "await tx.delete(todos).where(eq(todos.id, id));",
+              ),
+            ],
+            [
+              "名前の途中に Changes / Events / Logs を含むだけの表（todoChangesLog / eventsArchive / logsArchive）",
+              POSTGRES,
+              withWriter(
+                "await tx.delete(todoChangesLog);",
+                "await tx.update(eventsArchive).set(row);",
+                "await tx.delete(logsArchive);",
+              ),
+            ],
+            [
+              "update / delete で始まる別のメソッド（updateChanges( / deleted( / predelete(）",
+              POSTGRES,
+              source(
+                "q.updateChanges(todoStatusChanges);",
+                "q.deleted(todoStatusChanges);",
+                "q.predelete(todoStatusChanges);",
+              ),
+            ],
+            [
+              "コメントの中の .delete(todoStatusChanges)",
+              POSTGRES,
+              withWriter(
+                "// this.db.delete(todoStatusChanges) は書かない（cascade で消える）。",
+                "await tx.delete(todos); // tx.update(todoStatusChanges) も書かない",
+              ),
+            ],
+            [
+              "*.postgres.ts 以外（in-memory）の .delete(xChanges)",
+              IN_MEMORY,
+              source("this.statusChanges.delete(todoStatusChanges);"),
+            ],
+            [
+              "schema.ts の _changes / _events / _logs の表を Changes / Events / Logs で終わる変数で受ける",
+              SCHEMA,
+              source(
+                'export const todoStatusChanges = pgTable("todo_status_changes", {',
+                "});",
+                "export const orderEvents = pgTable('order_events', {});",
+                "export const accessLogs = pgTable(`access_logs`, {});",
+              ),
+            ],
+            [
+              "shared/infra/schema.ts の change_logs を changeLogs で受ける（横断の表の置き場所）",
+              SHARED_SCHEMA,
+              source(
+                "export const changeLogs = pgTable(",
+                '  "change_logs",',
+                "  {},",
+                ");",
+              ),
+            ],
+            [
+              '改行を挟んだ pgTable(\\n  "x_changes" を Changes で終わる変数で受ける',
+              SCHEMA,
+              source(
+                "export const todoStatusChanges = pgTable(",
+                '  "todo_status_changes",',
+                "  {},",
+                ");",
+              ),
+            ],
+            [
+              "_changes / _events / _logs で終わらない表は対象外（変数名は問わない）",
+              SCHEMA,
+              source(
+                'export const todos = pgTable("todos", {});',
+                'export const changeLog = pgTable("todo_changes_log", {});',
+                'export const history = pgTable("todo_changesx", {});',
+                'export const audit = pgTable("todo_logsx", {});',
+              ),
+            ],
+            [
+              'コメントの中の pgTable("x_changes")',
+              SCHEMA,
+              source(
+                '// export const statusLog = pgTable("todo_status_changes", {});',
+              ),
+            ],
+            [
+              "schema.ts でないファイル（schema.test.ts・infra の別のファイル）は append-only-table-naming の対象外",
+              "apps/backend/features/x/internal/infra/x-tables.ts",
+              source(
+                'export const statusLog = pgTable("todo_status_changes", {});',
+              ),
+            ],
+            [
+              "*.postgres.ts の書き込みが writer を import し、PostgresWriter.of(tx) で得た Writer で書く（複数行の import・拡張子付き・改行を挟む・PostgresWriter.of( に直接続ける）",
+              POSTGRES,
+              source(
+                IMPORT_CHANGED_PROPS,
+                'import type { Transaction } from "../../../../shared/application/transaction";',
+                "import {",
+                "  PostgresWriter,",
+                '} from "../../../../shared/infra/writer.ts";',
+                "class A {",
+                "  async insert(x: X, tx: Transaction) {",
+                "    const writer = PostgresWriter.of(tx);",
+                "    await writer.insert(xs, [row]);",
+                "    await writer",
+                "      .insert(xChanges, rows);",
+                "  }",
+                "  async update(x: X, tx: Transaction) {",
+                "    let w = PostgresWriter.of(tx);",
+                "    await w.update(xs, x.id, ChangedProps.of(x.origin, { name: x.name }));",
+                "  }",
+                "  async delete(id: string, tx: Transaction) {",
+                "    await PostgresWriter.of(tx).delete(xs, id);",
+                "    await PostgresWriter.of ( tx ) . delete (ys, id);",
+                "  }",
+                "}",
+              ),
+            ],
+            [
+              "change-log を名前が同じ別のモジュール（./change-log・shared/infra/change-log-x）やコメントの中で読むだけ",
+              POSTGRES,
+              source(
+                'import { ChangeRecords } from "./change-log";',
+                'import { x } from "../../../../shared/infra/change-log-x";',
+                '// import { ChangeRecords } from "../../../../shared/infra/change-log";',
+              ),
+            ],
+            [
+              "*.postgres.ts でない書き込みの口（shared/infra/writer.ts）と InMemory は change-log を import してよい",
+              "apps/backend/shared/infra/writer.ts",
+              source(
+                'import { ChangeRecords } from "./change-log";',
+                'import type { ChangeEntry } from "../../shared/infra/change-log";',
+              ),
+            ],
+            [
+              "transaction / recordChange で始まる・終わる・含むだけの別の名前（transactional( / myTransaction( / transactions / recordChanges( / recordChangeLater(）と型の Transaction、import のパスの transaction",
+              POSTGRES,
+              source(
+                'import type { Transaction } from "../../../../shared/application/transaction";',
+                'import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";',
+                "await this.transactional(async (tx) => {});",
+                "await myTransaction(async (tx) => {});",
+                "const transactions = [];",
+                "await recordChanges(tx, entries);",
+                "recordChangeLater(entries);",
+                "type T = Transaction;",
+              ),
+            ],
+            [
+              "db でない受け手（PostgresWriter.of で得た tx / writer / 名前に db を含むだけの mydb）の書き込みと、db の読み取り（select / execute）",
+              POSTGRES,
+              withWriter(
+                "await tx.insert(xs, rows);",
+                "await writer.update(xs, id, changes);",
+                "const mydb = PostgresWriter.of(t);",
+                "await mydb.delete(xs, id);",
+                "await this.db.select().from(xs);",
+                "await this.db.execute(sql`select 1`);",
+              ),
+            ],
+            [
+              "書き込みの口（shared/infra/writer.ts。*.postgres.ts でない）は drizzle の tx で書き、recordChange( を呼んでよい",
+              "apps/backend/shared/infra/writer.ts",
+              source(
+                "const inserted = await this.tx.insert(table).values(rows).returning();",
+                "await ChangeRecords.recordChange(this.tx, entries);",
+              ),
+            ],
+            [
+              "トランザクションの runner（shared/infra/transaction.postgres.ts）は *.postgres.ts でも db.transaction( を呼んでよい（Repository の規則の対象外）",
+              RUNNER,
+              source(
+                'import type { Transaction } from "../application/transaction";',
+                "return this.db.transaction((tx) =>",
+                "  work(new PostgresWriter(tx, this.actorId).asTransaction()),",
+                ");",
+              ),
+            ],
+            [
+              "書き込みの無い *.postgres.ts（読み取りだけ）は writer の import 不要。update / insert / delete で始まる別の名前も書き込みではない",
+              POSTGRES,
+              source(
+                "const rows = await this.db.select().from(xs);",
+                "q.updateChanges(x); q.inserted(x); q.deleteLater(x);",
+              ),
+            ],
+            [
+              "コメントの中の書き込み・transaction(・recordChange(・this.db.insert(",
+              POSTGRES,
+              source(
+                "// await this.db.insert(xs).values(row); は PostgresWriter.of で得た Writer で書く",
+                "// this.db.transaction( と recordChange(tx, entries) は直接呼ばない",
+                "const rows = await this.db.select().from(xs); // db.transaction(async (tx) => recordChange(tx, e))",
+              ),
+            ],
+            [
+              "*.postgres.ts 以外（in-memory）の書き込みと、transaction( と recordChange(",
+              IN_MEMORY,
+              source(
+                "this.todos.delete(id);",
+                "this.logs.push(...entries);",
+                "await this.db.transaction(async (tx) => {});",
+                "await recordChange(this.db, entries);",
+              ),
+            ],
+            [
+              "子表を import した *.postgres.ts の集約の読み出しが、leftJoin で子表の全件を読む（where は親の列、orderBy に子の position）",
+              POSTGRES,
+              source(
+                IMPORT_CHILD,
+                "const rows = await this.db",
+                "  .select({ todo: todos, change: { completed: todoStatusChanges.completed } })",
+                "  .from(todos)",
+                "  .leftJoin(todoStatusChanges, eq(todoStatusChanges.todoId, todos.id))",
+                "  .where(eq(todos.id, id))",
+                "  .orderBy(asc(todos.createdAt), asc(todoStatusChanges.position));",
+              ),
+            ],
+            [
+              "子表を import した *.postgres.ts の行ロック（.for(。findByIdForUpdate が集約を読む前に根の行だけをロックする文）は、親だけを from で読んでよい",
+              POSTGRES,
+              source(
+                IMPORT_CHILD,
+                "await writer",
+                "  .select()",
+                "  .from(todos)",
+                "  .where(eq(todos.id, id))",
+                '  .for("update");',
+              ),
+            ],
+            [
+              "子表を import していない *.postgres.ts の from( / limit( / where は対象外（*Logs は集約の子表ではない）",
+              POSTGRES,
+              source(
+                'import { changeLogs } from "../../../../shared/infra/schema";',
+                "await this.db.select().from(xs).limit(1);",
+                "await this.db.select().from(changeLogs).where(eq(changeLogs.rowId, id)).limit(10);",
+                "await this.db.select().from(todoStatusChanges);",
+              ),
+            ],
+            [
+              "コメントの中の .from(todoStatusChanges) / .limit(1) / where の子表の列",
+              POSTGRES,
+              source(
+                IMPORT_CHILD,
+                "// this.db.select().from(todoStatusChanges).limit(1) は書かない",
+                "const rows = await this.db.select().from(todos).leftJoin(todoStatusChanges, on); // .where(eq(todoStatusChanges.position, 0))",
+              ),
+            ],
+            [
+              "クラスの static な from（Array.from / Buffer.from）はクエリではない",
+              POSTGRES,
+              source(
+                IMPORT_CHILD,
+                "return Array.from(grouped.values(), ({ row }) => toTodo(row));",
+                "const bytes = Buffer . from(text);",
+              ),
+            ],
+            [
+              "(a) 大文字を途中に含む小文字で始まる受け手（todoReader.from(todos)）はクエリとして見る",
+              POSTGRES,
+              source(
+                IMPORT_CHILD,
+                "const rows = await todoReader.from(todos).leftJoin(todoStatusChanges, on);",
+              ),
+            ],
+            [
+              "別名で import した子表（x as orderEvents）も leftJoin で読めばよい",
+              POSTGRES,
+              source(
+                'import { orders, orderEventsTable as orderEvents } from "./schema";',
+                "const rows = await this.db.select().from(orders).leftJoin(orderEvents, on).orderBy(orderEvents.position);",
+              ),
+            ],
+            [
+              "lock-method-name-for-update: 行ロック（.for(）をするメソッドの名前が ForUpdate で終わる（複数行の引数・修飾子も。本体の行頭の呼び出し・if はメソッドの宣言ではない）",
+              POSTGRES,
+              source(
+                "export class XRepository {",
+                "  async findByIdForUpdate(id: string, tx: Transaction): Promise<X> {",
+                "    requireX(id);",
+                "    if (id) {}",
+                '    await writer.select().from(xs).where(eq(xs.id, id)).for("update");',
+                "  }",
+                "  private async lockForUpdate(",
+                "    id: string,",
+                "  ): Promise<void> {",
+                "    await writer",
+                "      .select()",
+                "      .from(xs)",
+                '      .for("update");',
+                "  }",
+                "}",
+              ),
+            ],
+            [
+              "lock-method-name-for-update: ロックしないメソッドの本体は次のメソッドの宣言までで、後ろの ForUpdate のメソッドの .for( を含まない",
+              POSTGRES,
+              source(
+                "export class XRepository {",
+                "  constructor(private readonly db: Database) {}",
+                "  async findById(id: string): Promise<X | undefined> {",
+                "    for (const x of xs) {}",
+                "    xs.forEach((x) => x);",
+                '    // .for("update") は findByIdForUpdate だけが付ける',
+                "  }",
+                "  async findByIdForUpdate(id: string, tx: Transaction): Promise<X> {",
+                '    await writer.select().from(xs).for("update");',
+                "  }",
+                "}",
+              ),
+            ],
+            [
+              "lock-method-name-for-update: *.postgres.ts でないファイル（in-memory）は対象外",
+              IN_MEMORY,
+              source(
+                "class InMemoryXRepository {",
+                '  async findById(id: string) { return q.for("update"); }',
+                "  async findByIdForUpdate(id: string) {}",
+                "}",
+              ),
+            ],
+          ];
+
+          // when
+          const violations = casesByName(cases, ([, path, text]) =>
+            findPersistenceViolations(path, text),
+          );
+
+          // then
+          expect(violations).toEqual(casesByName(cases, () => []));
+        },
+      );
+    },
   );
 
-  it("apps/backend の下のテスト以外の .ts を対象にし、違反を「規則: パス:行」で返す", () => {
-    // given
-    const root = fixture({
-      [POSTGRES]: source(IMPORT_CHANGED_PROPS, updateMethod),
-      "apps/backend/features/y/internal/infra/y-repository.postgres.ts": source(
-        updateMethod,
-        "q.onConflictDoUpdate({});",
-      ),
-      // 行ロックのメソッドの名前（Issue #221）: ロックして ForUpdate で終わる（可）・ロックして終わらない・終わるのにロックしない。
-      "apps/backend/features/y/internal/infra/y-lock.postgres.ts": source(
-        "export class YLock {",
-        "  async findByIdForUpdate(id: string) {",
-        '    await PostgresWriter.of(tx).select().from(ys).for("update");',
-        "  }",
-        "  async findByIdLocked(id: string) {",
-        '    await PostgresWriter.of(tx).select().from(ys).for("update");',
-        "  }",
-        "  async findLockedForUpdate(id: string) {}",
-        "}",
-      ),
-      "apps/backend/features/y/internal/infra/y-reader.postgres.ts": source(
-        "export class YReader {}",
-        "await this.db.delete(yChanges);",
-      ),
-      [IN_MEMORY]: source(updateMethod, "q.onConflictDoNothing();"),
-      "apps/backend/shared/infra/z.ts": source("", "q.onConflictDoNothing();"),
-      [ENTITY]: source(
-        "export class X {",
-        "  get origin() {}",
-        "  static reconstruct(v: V) {}",
-        "}",
-      ),
-      "apps/backend/features/y/internal/domain/y.ts": reconstructOnly,
-      [SCHEMA]: source(
-        'export const xStatusChanges = pgTable("x_status_changes", {});',
-      ),
-      "apps/backend/features/y/internal/infra/schema.ts": source(
-        'export const ys = pgTable("ys", {});',
-        'export const yLog = pgTable("y_events", {});',
-      ),
-      "apps/backend/features/y/internal/domain/y-repository.ts": source(
-        "export interface YRepository {}",
-      ),
-      // 書き込みの口と集約の読み出しの規則（Issue #189・#205・#215）: transaction と recordChange を直接呼び、drizzle の tx で書き、
-      //   change-log を import し、子表を import して親だけを読む。
-      "apps/backend/features/z/internal/infra/z-repository.postgres.ts": source(
-        IMPORT_WRITER,
-        'import { zChanges, zs } from "./schema";',
-        "await this.db.transaction(async (tx) => { await tx.insert(zs).values(r); });",
-        "await recordChange(this.db, entries);",
-        "const rows = await this.db.select().from(zs).limit(1);",
-        'import { ChangeRecords } from "../../../../shared/infra/change-log";',
-      ),
-      // 規則を満たす Repository（writer を import し、PostgresWriter.of(tx) で得た Writer で書き、子表を leftJoin で読む）。
-      "apps/backend/features/z/internal/infra/z-writer.postgres.ts": source(
-        IMPORT_WRITER,
-        'import type { Transaction } from "../../../../shared/application/transaction";',
-        'import { zChanges, zs } from "./schema";',
-        "const writer = PostgresWriter.of(tx);",
-        "await writer.delete(zs, id);",
-        "const rows = await this.db.select().from(zs).leftJoin(zChanges, on);",
-      ),
-      // 書き込みの口（*.postgres.ts でない）は change-log を import し、tx で書き、recordChange を呼んでよい。
-      "apps/backend/shared/infra/writer.ts": source(
-        'import { ChangeRecords } from "./change-log";',
-        "await this.tx.insert(table).values(rows);",
-        "await ChangeRecords.recordChange(this.tx, entries);",
-      ),
-      // トランザクションの runner（*.postgres.ts だが Repository でない）は db.transaction を呼んでよい。同じ場所の別の *.postgres.ts は
-      //   対象のまま。
-      [RUNNER]: source("return this.db.transaction((tx) => work(tx));"),
-      "apps/backend/shared/infra/other.postgres.ts": source(
-        "return this.db.transaction((tx) => work(tx));",
-      ),
-      "apps/backend/shared/infra/schema.ts": source(
-        'export const changeLog = pgTable("change_logs", {});',
-      ),
-      // 対象外: テスト、features でない domain の reconstruct、.ts でないファイル、backend の外、node_modules の中。
-      "apps/backend/features/y/internal/infra/y-repository.postgres.test.ts":
-        source(
-          updateMethod,
-          "q.onConflictDoUpdate({});",
-          "await this.db.delete(yChanges);",
-        ),
-      "apps/backend/features/y/internal/infra/y-repository.in-memory.ts":
-        source("this.yEvents.delete(id);", "q.update(yEvents);"),
-      "apps/backend/features/y/internal/domain/y.test.ts": reconstructOnly,
-      "apps/backend/shared/domain/w.ts": reconstructOnly,
-      "apps/backend/shared/drizzle/0000_x.sql":
-        "INSERT ... ON CONFLICT DO UPDATE;",
-      "apps/frontend_customer/features/x/x.ts": source(
-        "q.onConflictDoUpdate({});",
-      ),
-      "apps/backend/node_modules/x/x.postgres.ts": updateMethod,
-    });
+  Scenario(
+    "永続化の判定（findPersistenceViolations）: must reject",
+    ({ And }) => {
+      And(
+        "永続化の規則の違反を規則と行で返す（upsert・changed-props の import の無い update・origin の無い Entity・insert のみの表の update / delete・Writer を通さない書き込み・子表を JOIN しない集約・ForUpdate で終わらないロックのメソッドなど）",
+        () => {
+          // given
+          const cases: [string, string, string, PersistenceViolation[]][] = [
+            [
+              ".onConflictDoUpdate(（chain の次の行）",
+              POSTGRES,
+              withWriter(
+                IMPORT_CHANGED_PROPS,
+                "await tx",
+                "  .insert(xs)",
+                "  .values(row)",
+                "  .onConflictDoUpdate({ target: xs.id, set: row });",
+              ),
+              [{ rule: "no-upsert", line: 5 }],
+            ],
+            [
+              ".onConflictDoNothing()（同じ行）",
+              POSTGRES,
+              withWriter(
+                IMPORT_CHANGED_PROPS,
+                "await tx.insert(xs).values(row).onConflictDoNothing();",
+              ),
+              [{ rule: "no-upsert", line: 2 }],
+            ],
+            [
+              "空白を挟んだ . onConflictDoNothing (",
+              POSTGRES,
+              source("q . onConflictDoNothing ( );"),
+              [{ rule: "no-upsert", line: 1 }],
+            ],
+            [
+              "変数に入れ直して呼ぶ（const f = q.onConflictDoUpdate; f({})）",
+              POSTGRES,
+              source("const f = q.onConflictDoUpdate;", "f({});"),
+              [{ rule: "no-upsert", line: 1 }],
+            ],
+            [
+              'ブラケットで呼ぶ（q["onConflictDoUpdate"](…)）',
+              POSTGRES,
+              source('q["onConflictDoUpdate"]({ target: xs.id, set: row });'),
+              [{ rule: "no-upsert", line: 1 }],
+            ],
+            [
+              ". の後で改行する（q.\\n  onConflictDoUpdate(）",
+              POSTGRES,
+              source("q.", "  onConflictDoUpdate({});"),
+              [{ rule: "no-upsert", line: 2 }],
+            ],
+            [
+              "*.postgres.ts 以外（in-memory / shared/infra / application）の upsert",
+              "apps/backend/shared/infra/x.ts",
+              source("q.onConflictDoUpdate({});"),
+              [{ rule: "no-upsert", line: 1 }],
+            ],
+            [
+              "*.postgres.ts の async update( が changed-props を import していない",
+              POSTGRES,
+              withWriter(
+                "export class XRepository {",
+                "  async update(x: X, t: Transaction): Promise<void> {",
+                "    await writer.update(xs, x.id, changes);",
+                "  }",
+                "}",
+              ),
+              [{ rule: "update-uses-changed-props", line: 2 }],
+            ],
+            [
+              "async の無い update( / public async update( / 型引数付きの update<",
+              POSTGRES,
+              source(
+                "class A {",
+                "  update(x: X) {}",
+                "}",
+                "class B {",
+                "  public async update(x: X) {}",
+                "}",
+                "class C {",
+                "  update<T>(x: T) {}",
+                "}",
+              ),
+              [
+                { rule: "update-uses-changed-props", line: 2 },
+                { rule: "update-uses-changed-props", line: 5 },
+                { rule: "update-uses-changed-props", line: 8 },
+              ],
+            ],
+            [
+              "changed-props の import がコメントの中だけ",
+              POSTGRES,
+              source(
+                `// ${IMPORT_CHANGED_PROPS}`,
+                "class A {",
+                "  async update(x: X) {}",
+                "}",
+              ),
+              [{ rule: "update-uses-changed-props", line: 3 }],
+            ],
+            [
+              "changed-props を import type だけで読む（関数を呼べない）",
+              POSTGRES,
+              source(
+                'import type { ChangedProps } from "../../../../shared/infra/changed-props";',
+                "class A {",
+                "  async update(x: X) {}",
+                "}",
+              ),
+              [{ rule: "update-uses-changed-props", line: 3 }],
+            ],
+            [
+              "名前が同じ別のモジュール（./changed-props / shared/infra/changed-props-x）",
+              POSTGRES,
+              source(
+                'import { ChangedProps } from "./changed-props";',
+                'import { diff } from "../../../../shared/infra/changed-props-x";',
+                "class A {",
+                "  async update(x: X) {}",
+                "}",
+              ),
+              [{ rule: "update-uses-changed-props", line: 4 }],
+            ],
+            [
+              "Entity が static reconstruct( を持つのに get origin() が無い",
+              ENTITY,
+              source(
+                "export class X {",
+                "  static reconstruct(values: XProps): X {",
+                "    return new X(values);",
+                "  }",
+                "}",
+              ),
+              [{ rule: "entity-with-reconstruct-has-origin", line: 2 }],
+            ],
+            [
+              "get origin() がコメントの中だけ・getter でない origin のフィールド",
+              ENTITY,
+              source(
+                "export class X {",
+                "  // get origin() は持たない",
+                "  readonly origin?: XProps;",
+                "  public static reconstruct(values: XProps): X {",
+                "    return new X(values);",
+                "  }",
+                "}",
+              ),
+              [{ rule: "entity-with-reconstruct-has-origin", line: 4 }],
+            ],
+            [
+              "domain の下の入れ子の Entity",
+              "apps/backend/features/x/internal/domain/nested/y.ts",
+              source("export class Y {", "  static reconstruct(v: V) {}", "}"),
+              [{ rule: "entity-with-reconstruct-has-origin", line: 2 }],
+            ],
+            [
+              "tx.delete(todoStatusChanges)（insert のみの表の DELETE）",
+              POSTGRES,
+              withWriter("await tx.delete(todoStatusChanges);"),
+              [{ rule: "no-update-delete-on-append-only-tables", line: 1 }],
+            ],
+            [
+              "PostgresWriter.of で得た Writer の update(todoStatusChanges, …)（Writer を通しても insert のみの表の UPDATE）",
+              POSTGRES,
+              withWriter(
+                "const w = PostgresWriter.of(t);",
+                "await w.update(todoStatusChanges, id, { completed: true });",
+              ),
+              [{ rule: "no-update-delete-on-append-only-tables", line: 2 }],
+            ],
+            [
+              "改行を挟んだ .delete( と表の名前（chain の次の行で .delete(、その次の行に表。行は delete の行）",
+              POSTGRES,
+              withWriter(
+                "await tx",
+                "  .delete(",
+                "    todoStatusChanges",
+                "  )",
+                "  .where(eq(todoStatusChanges.todoId, id));",
+              ),
+              [{ rule: "no-update-delete-on-append-only-tables", line: 2 }],
+            ],
+            [
+              "空白を挟んだ . update ( orderEvents )（*Events の表）",
+              POSTGRES,
+              withWriter("writer . update ( orderEvents ).set(row);"),
+              [{ rule: "no-update-delete-on-append-only-tables", line: 1 }],
+            ],
+            [
+              "メンバーの参照（schema.todoStatusChanges）",
+              POSTGRES,
+              withWriter("await tx.delete(schema.todoStatusChanges);"),
+              [{ rule: "no-update-delete-on-append-only-tables", line: 1 }],
+            ],
+            [
+              "1 行に 2 つ・複数の行（行の順に、見つけた数だけ返す）",
+              POSTGRES,
+              withWriter(
+                "await tx.update(aChanges).set(r); await tx.delete(bEvents);",
+                "await tx.delete(todos);",
+                "await tx.delete(cChanges);",
+              ),
+              [
+                { rule: "no-update-delete-on-append-only-tables", line: 1 },
+                { rule: "no-update-delete-on-append-only-tables", line: 1 },
+                { rule: "no-update-delete-on-append-only-tables", line: 3 },
+              ],
+            ],
+            [
+              "schema.ts の _changes の表を Changes で終わらない変数で受ける（表名と変数名のずれ）",
+              SCHEMA,
+              source(
+                'export const todos = pgTable("todos", {});',
+                'export const statusLog = pgTable("todo_status_changes", {});',
+              ),
+              [{ rule: "append-only-table-naming", line: 2 }],
+            ],
+            [
+              "改行を挟んだ pgTable(\\n  'x_events'（行は pgTable の行）",
+              SCHEMA,
+              source(
+                "export const orderLog = pgTable(",
+                "  'order_events',",
+                "  {},",
+                ");",
+              ),
+              [{ rule: "append-only-table-naming", line: 1 }],
+            ],
+            [
+              "変数で受けない _changes の表（export default pgTable(…)）",
+              SCHEMA,
+              source('export default pgTable("todo_status_changes", {});'),
+              [{ rule: "append-only-table-naming", line: 1 }],
+            ],
+            [
+              "*.postgres.ts の insert / update / delete（改行・空白を挟む）が writer を import していない（書き込みの行ごと）",
+              POSTGRES,
+              source(
+                "await tx.insert(xs).values(row);",
+                "await tx",
+                "  .update(xs)",
+                "  .set(row);",
+                "await tx . delete (xs);",
+              ),
+              [
+                { rule: "writes-through-writer", line: 1 },
+                { rule: "writes-through-writer", line: 3 },
+                { rule: "writes-through-writer", line: 5 },
+              ],
+            ],
+            [
+              "writer を import type だけ・export だけ・コメントの中だけ・名前が同じ別のモジュール（./writer・shared/infra/writer-x・shared/infra/write）で読む",
+              POSTGRES,
+              source(
+                'import type { Writer } from "../../../../shared/infra/writer";',
+                `// ${IMPORT_WRITER}`,
+                'import { PostgresWriter } from "./writer";',
+                'import { x } from "../../../../shared/infra/writer-x";',
+                'import { y } from "../../../../shared/infra/write";',
+                'export { PostgresWriter } from "../../../../shared/infra/writer";',
+                "const w = PostgresWriter.of(tx);",
+                "await w.insert(xs, rows);",
+              ),
+              [{ rule: "writes-through-writer", line: 8 }],
+            ],
+            [
+              "writer を import しても、受け手が PostgresWriter.of で得た Writer でない（drizzle の tx・メンバーの this.writer / this.dbx・別の関数の戻り値・前方一致だけの別の関数・別名への入れ直し）",
+              POSTGRES,
+              source(
+                IMPORT_WRITER,
+                "const w = PostgresWriter.of(tx);",
+                "await tx.insert(xs).values(row);",
+                "await this.writer.update(xs, id, changes);",
+                "await this.dbx.insert(xs, rows);",
+                "await getWriter(tx).delete(xs, id);",
+                "await MyPostgresWriter.of(tx).delete(xs, id);",
+                "const v = w; await v.delete(xs, id);",
+                "await w.insert(xs, rows);",
+                "await PostgresWriter.from(tx).delete(xs, id);",
+                "await x.PostgresWriter.of(tx).delete(xs, id);",
+                "const u = PostgresWriter.ofTx(tx); await u.insert(xs, rows);",
+              ),
+              [
+                { rule: "writes-through-writer", line: 3 },
+                { rule: "writes-through-writer", line: 4 },
+                { rule: "writes-through-writer", line: 5 },
+                { rule: "writes-through-writer", line: 6 },
+                { rule: "writes-through-writer", line: 7 },
+                { rule: "writes-through-writer", line: 8 },
+                { rule: "writes-through-writer", line: 10 },
+                { rule: "writes-through-writer", line: 11 },
+                { rule: "writes-through-writer", line: 12 },
+              ],
+            ],
+            [
+              "*.postgres.ts が change-log を import する（値・import type・複数行・拡張子付き・export … from）",
+              POSTGRES,
+              source(
+                'import { ChangeRecords } from "../../../../shared/infra/change-log";',
+                "import type { ChangeEntry } from '../../../../shared/infra/change-log.ts';",
+                "import {",
+                "  ChangeRecords,",
+                '} from "../../../../shared/infra/change-log";',
+                'export { ChangeRecords } from "../../../../shared/infra/change-log";',
+              ),
+              [
+                { rule: "no-change-log-in-repository", line: 1 },
+                { rule: "no-change-log-in-repository", line: 2 },
+                { rule: "no-change-log-in-repository", line: 3 },
+                { rule: "no-change-log-in-repository", line: 6 },
+              ],
+            ],
+            [
+              "*.postgres.ts で transaction を直接使う（db.transaction( / 空白を挟む / tx.transaction( のセーブポイント / ブラケット / 分割代入 / . の後の改行）",
+              POSTGRES,
+              withWriter(
+                "await this.db.transaction(async (tx) => {",
+                "});",
+                "await db . transaction (async (tx) => {});",
+                "await tx.transaction(async (sp) => {});",
+                'await this.db["transaction"](async (tx) => {});',
+                "const { transaction } = this.db;",
+                "await this.db.",
+                "  transaction(async (tx) => {});",
+              ),
+              [
+                { rule: "no-direct-transaction", line: 1 },
+                { rule: "no-direct-transaction", line: 3 },
+                { rule: "no-direct-transaction", line: 4 },
+                { rule: "no-direct-transaction", line: 5 },
+                { rule: "no-direct-transaction", line: 6 },
+                { rule: "no-direct-transaction", line: 8 },
+              ],
+            ],
+            // db の直接の書き込みは、受け手が Writer でないので writes-through-writer も重ねて検出する（no-direct-db-write の WHY）。
+            [
+              "*.postgres.ts で db を直接使って書き込む（this.db.insert( / 空白を挟む db . update ( / 改行を挟む this.db\\n  .delete( / database.db）",
+              POSTGRES,
+              withWriter(
+                "await this.db.insert(xs).values(row);",
+                "await db . update ( xs ).set(row);",
+                "await this.db",
+                "  .delete(xs)",
+                "  .where(eq(xs.id, id));",
+                "await database.db.insert(xs).values(row);",
+              ),
+              [
+                { rule: "writes-through-writer", line: 1 },
+                { rule: "no-direct-db-write", line: 1 },
+                { rule: "writes-through-writer", line: 2 },
+                { rule: "no-direct-db-write", line: 2 },
+                { rule: "writes-through-writer", line: 4 },
+                { rule: "no-direct-db-write", line: 4 },
+                { rule: "writes-through-writer", line: 6 },
+                { rule: "no-direct-db-write", line: 6 },
+              ],
+            ],
+            [
+              "*.postgres.ts で recordChange を直接使う（import・別名の import・Writer を取り出した後の呼び出し・名前空間の参照・ChangeRecords の static メソッド）",
+              POSTGRES,
+              withWriter(
+                'import { recordChange } from "./audit";',
+                'import { recordChange as rc } from "./audit";',
+                "const w = PostgresWriter.of(t);",
+                "  await recordChange(w, entries);",
+                "  await w.insert(xs, rows);",
+                "",
+                "await changeLog . recordChange (tx, entries);",
+                "await ChangeRecords.recordChange(w, entries);",
+              ),
+              [
+                { rule: "no-direct-record-change", line: 1 },
+                { rule: "no-direct-record-change", line: 2 },
+                { rule: "no-direct-record-change", line: 4 },
+                { rule: "no-direct-record-change", line: 7 },
+                { rule: "no-direct-record-change", line: 8 },
+              ],
+            ],
+            [
+              "(a) 子表を import した *.postgres.ts で、親の from(todos) に子表の leftJoin が無い（innerJoin・別の表の leftJoin も）",
+              POSTGRES,
+              source(
+                IMPORT_CHILD,
+                "const a = await this.db.select().from(todos).where(eq(todos.id, id));",
+                "const b = await this.db.select().from(todos).innerJoin(todoStatusChanges, on);",
+                "const c = await this.db.select().from(schema.todos).leftJoin(others, on);",
+              ),
+              [
+                { rule: "aggregate-loads-all-children", line: 2 },
+                { rule: "aggregate-loads-all-children", line: 3 },
+                { rule: "aggregate-loads-all-children", line: 4 },
+              ],
+            ],
+            [
+              "(b)(d) 子表だけを from で読み（改行を挟んだ chain）、where で子表の列を絞る",
+              POSTGRES,
+              source(
+                IMPORT_CHILD,
+                "const rows = await this.db",
+                "  .select()",
+                "  .from(",
+                "    todoStatusChanges,",
+                "  )",
+                "  .where(eq(todoStatusChanges.todoId, id));",
+              ),
+              [
+                { rule: "aggregate-loads-all-children", line: 4 },
+                { rule: "aggregate-loads-all-children", line: 7 },
+              ],
+            ],
+            [
+              "(c) limit( で件数を絞る（leftJoin で読んでいても）",
+              POSTGRES,
+              source(
+                IMPORT_CHILD,
+                "const rows = await this.db.select().from(todos).leftJoin(todoStatusChanges, on)",
+                "  .limit(1);",
+              ),
+              [{ rule: "aggregate-loads-all-children", line: 3 }],
+            ],
+            [
+              "(c) offset( で行を飛ばす・selectDistinctOn で各 Todo の 1 行だけを読む（leftJoin で読んでいても）",
+              POSTGRES,
+              source(
+                IMPORT_CHILD,
+                "const rows = await this.db.select().from(todos).leftJoin(todoStatusChanges, on)",
+                "  .offset(1);",
+                "const latest = await this.db",
+                "  .selectDistinctOn([todos.id], { id: todos.id })",
+                "  .from(todos).leftJoin(todoStatusChanges, on);",
+              ),
+              [
+                { rule: "aggregate-loads-all-children", line: 3 },
+                { rule: "aggregate-loads-all-children", line: 5 },
+              ],
+            ],
+            [
+              "(d) where で子表の position / changedAt を絞る（and の奥・改行を挟む。orderBy の子表の列は可）",
+              POSTGRES,
+              source(
+                IMPORT_CHILD,
+                "const latest = await this.db.select().from(todos).leftJoin(todoStatusChanges, on).where(eq(todoStatusChanges.position, 0)).orderBy(todoStatusChanges.position);",
+                "const recent = await this.db",
+                "  .select()",
+                "  .from(todos)",
+                "  .leftJoin(todoStatusChanges, on)",
+                "  .where(",
+                "    and(eq(todos.id, id), gt(todoStatusChanges . changedAt, since)),",
+                "  );",
+              ),
+              [
+                { rule: "aggregate-loads-all-children", line: 2 },
+                { rule: "aggregate-loads-all-children", line: 7 },
+              ],
+            ],
+            [
+              "insert のみの表（*Logs）への update / delete",
+              POSTGRES,
+              withWriter(
+                "await writer.delete(changeLogs);",
+                "await tx.update(schema.accessLogs).set(row);",
+              ),
+              [
+                { rule: "no-update-delete-on-append-only-tables", line: 1 },
+                { rule: "no-update-delete-on-append-only-tables", line: 2 },
+              ],
+            ],
+            [
+              "_logs の表を Logs で終わらない変数で受ける（shared/infra/schema.ts も対象）",
+              SHARED_SCHEMA,
+              source('export const changeLog = pgTable("change_logs", {});'),
+              [{ rule: "append-only-table-naming", line: 1 }],
+            ],
+            [
+              "1 つのファイルに upsert と import の無い update（行の順に返す）",
+              POSTGRES,
+              source(
+                "class A {",
+                "  async update(x: X) {",
+                "    await q.onConflictDoUpdate({});",
+                "  }",
+                "}",
+              ),
+              [
+                { rule: "update-uses-changed-props", line: 2 },
+                { rule: "no-upsert", line: 3 },
+              ],
+            ],
+            [
+              "トランザクションの runner と同じ名前でも、shared/infra の別の *.postgres.ts は Repository の規則の対象（db.transaction( を呼べない）",
+              "apps/backend/shared/infra/other.postgres.ts",
+              source("return this.db.transaction((tx) => work(tx));"),
+              [{ rule: "no-direct-transaction", line: 1 }],
+            ],
+            [
+              "lock-method-name-for-update: 行ロック（.for(）をするメソッドの名前が ForUpdate で終わらない（findByIdLocked）",
+              POSTGRES,
+              source(
+                "export class XRepository {",
+                "  async findByIdLocked(id: string, tx: Transaction): Promise<X> {",
+                '    await writer.select().from(xs).where(eq(xs.id, id)).for("update");',
+                "  }",
+                "}",
+              ),
+              [{ rule: "lock-method-name-for-update", line: 2 }],
+            ],
+            [
+              "lock-method-name-for-update: 名前が ForUpdate で終わるのに本体に .for( が無い（名前が嘘になる）",
+              POSTGRES,
+              source(
+                "export class XRepository {",
+                "  async findByIdForUpdate(id: string): Promise<X> {",
+                "    return selectXs(this.db, eq(xs.id, id));",
+                "  }",
+                "}",
+              ),
+              [{ rule: "lock-method-name-for-update", line: 2 }],
+            ],
+            [
+              "lock-method-name-for-update: 複数行の宣言・修飾子（private / static）・. と for と ( の間の改行と空白",
+              POSTGRES,
+              source(
+                "export class XRepository {",
+                "  private async findLocked(",
+                "    id: string,",
+                "  ): Promise<X> {",
+                "    await writer.select().from(xs).",
+                '      for ("share");',
+                "  }",
+                "  static lock(id: string) {",
+                '    return q .for("update");',
+                "  }",
+                "}",
+              ),
+              [
+                { rule: "lock-method-name-for-update", line: 2 },
+                { rule: "lock-method-name-for-update", line: 8 },
+              ],
+            ],
+            [
+              "lock-method-name-for-update: ロックが前のメソッドにあり、後ろの ForUpdate のメソッドには無い（本体を次の宣言で区切る）",
+              POSTGRES,
+              source(
+                "export class XRepository {",
+                "  async load(id: string) {",
+                '    await writer.select().from(xs).for("update");',
+                "  }",
+                "  async findByIdForUpdate(id: string) {",
+                "    return selectXs(writer, eq(xs.id, id));",
+                "  }",
+                "}",
+              ),
+              [
+                { rule: "lock-method-name-for-update", line: 2 },
+                { rule: "lock-method-name-for-update", line: 5 },
+              ],
+            ],
+            [
+              "lock-method-name-for-update: ForUpdate で終わらない似た名前（forUpdateX・findForUpdates）と、2 つ目のクラスのメソッド",
+              POSTGRES,
+              source(
+                "class A {",
+                '  async forUpdateX() { await q.for("update"); }',
+                "}",
+                "class B {",
+                '  async findForUpdates() { await q.for("update"); }',
+                "}",
+              ),
+              [
+                { rule: "lock-method-name-for-update", line: 2 },
+                { rule: "lock-method-name-for-update", line: 5 },
+              ],
+            ],
+            [
+              "lock-method-name-for-update: トランザクションの runner（Repository の規則の対象外）も対象",
+              RUNNER,
+              source(
+                "export class PostgresTransactionRunner {",
+                "  async run(id: string) {",
+                '    await q.for("update");',
+                "  }",
+                "}",
+              ),
+              [{ rule: "lock-method-name-for-update", line: 2 }],
+            ],
+          ];
 
-    // when
-    const result = {
-      files: listBackendSources(root),
-      violations: collectPersistenceViolations(root),
-    };
+          // when
+          const violations = casesByName(cases, ([, path, text]) =>
+            findPersistenceViolations(path, text),
+          );
 
-    // then
-    expect(result).toEqual({
-      files: [
-        "apps/backend/features/x/internal/domain/x.ts",
-        "apps/backend/features/x/internal/infra/schema.ts",
-        "apps/backend/features/x/internal/infra/x-repository.in-memory.ts",
-        "apps/backend/features/x/internal/infra/x-repository.postgres.ts",
-        "apps/backend/features/y/internal/domain/y-repository.ts",
-        "apps/backend/features/y/internal/domain/y.ts",
-        "apps/backend/features/y/internal/infra/schema.ts",
-        "apps/backend/features/y/internal/infra/y-lock.postgres.ts",
-        "apps/backend/features/y/internal/infra/y-reader.postgres.ts",
-        "apps/backend/features/y/internal/infra/y-repository.in-memory.ts",
-        "apps/backend/features/y/internal/infra/y-repository.postgres.ts",
-        "apps/backend/features/z/internal/infra/z-repository.postgres.ts",
-        "apps/backend/features/z/internal/infra/z-writer.postgres.ts",
-        "apps/backend/shared/domain/w.ts",
-        "apps/backend/shared/infra/other.postgres.ts",
-        "apps/backend/shared/infra/schema.ts",
-        "apps/backend/shared/infra/transaction.postgres.ts",
-        "apps/backend/shared/infra/writer.ts",
-        "apps/backend/shared/infra/z.ts",
-      ],
-      violations: [
-        "no-upsert: apps/backend/features/x/internal/infra/x-repository.in-memory.ts:4",
-        "entity-with-reconstruct-has-origin: apps/backend/features/y/internal/domain/y.ts:2",
-        "append-only-table-naming: apps/backend/features/y/internal/infra/schema.ts:2",
-        "lock-method-name-for-update: apps/backend/features/y/internal/infra/y-lock.postgres.ts:5",
-        "lock-method-name-for-update: apps/backend/features/y/internal/infra/y-lock.postgres.ts:8",
-        "no-update-delete-on-append-only-tables: apps/backend/features/y/internal/infra/y-reader.postgres.ts:2",
-        "writes-through-writer: apps/backend/features/y/internal/infra/y-reader.postgres.ts:2",
-        "no-direct-db-write: apps/backend/features/y/internal/infra/y-reader.postgres.ts:2",
-        "update-uses-changed-props: apps/backend/features/y/internal/infra/y-repository.postgres.ts:2",
-        "no-upsert: apps/backend/features/y/internal/infra/y-repository.postgres.ts:4",
-        "writes-through-writer: apps/backend/features/z/internal/infra/z-repository.postgres.ts:3",
-        "no-direct-transaction: apps/backend/features/z/internal/infra/z-repository.postgres.ts:3",
-        "no-direct-record-change: apps/backend/features/z/internal/infra/z-repository.postgres.ts:4",
-        "aggregate-loads-all-children: apps/backend/features/z/internal/infra/z-repository.postgres.ts:5",
-        "aggregate-loads-all-children: apps/backend/features/z/internal/infra/z-repository.postgres.ts:5",
-        "no-change-log-in-repository: apps/backend/features/z/internal/infra/z-repository.postgres.ts:6",
-        "no-direct-transaction: apps/backend/shared/infra/other.postgres.ts:1",
-        "append-only-table-naming: apps/backend/shared/infra/schema.ts:1",
-        "no-upsert: apps/backend/shared/infra/z.ts:2",
-      ],
-    });
+          // then
+          expect(violations).toEqual(
+            casesByName(cases, ([, , , expected]) => expected),
+          );
+        },
+      );
+    },
+  );
+
+  // --- 列挙 → 読み取り → 判定を通した fixture テスト ---
+  // WHY: 判定が正しくても、対象の列挙（apps/backend の下のテスト以外の .ts の見つけ方）が漏れれば見逃す。一時ディレクトリに
+  //   架空のツリーを置き、本番と同じ collectPersistenceViolations に通して、違反の集合を丸ごと比較する（見逃しも余分な検出も失敗にする）。
+  Scenario("backend のソースの列挙と検査（fixture）", ({ And }) => {
+    And(
+      "apps/backend の下のテスト以外の .ts を対象にし、違反を「規則: パス:行」で返す",
+      () => {
+        // given
+        const root = fixture({
+          [POSTGRES]: source(IMPORT_CHANGED_PROPS, updateMethod),
+          "apps/backend/features/y/internal/infra/y-repository.postgres.ts":
+            source(updateMethod, "q.onConflictDoUpdate({});"),
+          // 行ロックのメソッドの名前（Issue #221）: ロックして ForUpdate で終わる（可）・ロックして終わらない・終わるのにロックしない。
+          "apps/backend/features/y/internal/infra/y-lock.postgres.ts": source(
+            "export class YLock {",
+            "  async findByIdForUpdate(id: string) {",
+            '    await PostgresWriter.of(tx).select().from(ys).for("update");',
+            "  }",
+            "  async findByIdLocked(id: string) {",
+            '    await PostgresWriter.of(tx).select().from(ys).for("update");',
+            "  }",
+            "  async findLockedForUpdate(id: string) {}",
+            "}",
+          ),
+          "apps/backend/features/y/internal/infra/y-reader.postgres.ts": source(
+            "export class YReader {}",
+            "await this.db.delete(yChanges);",
+          ),
+          [IN_MEMORY]: source(updateMethod, "q.onConflictDoNothing();"),
+          "apps/backend/shared/infra/z.ts": source(
+            "",
+            "q.onConflictDoNothing();",
+          ),
+          [ENTITY]: source(
+            "export class X {",
+            "  get origin() {}",
+            "  static reconstruct(v: V) {}",
+            "}",
+          ),
+          "apps/backend/features/y/internal/domain/y.ts": reconstructOnly,
+          [SCHEMA]: source(
+            'export const xStatusChanges = pgTable("x_status_changes", {});',
+          ),
+          "apps/backend/features/y/internal/infra/schema.ts": source(
+            'export const ys = pgTable("ys", {});',
+            'export const yLog = pgTable("y_events", {});',
+          ),
+          "apps/backend/features/y/internal/domain/y-repository.ts": source(
+            "export interface YRepository {}",
+          ),
+          // 書き込みの口と集約の読み出しの規則（Issue #189・#205・#215）: transaction と recordChange を直接呼び、drizzle の tx で書き、
+          //   change-log を import し、子表を import して親だけを読む。
+          "apps/backend/features/z/internal/infra/z-repository.postgres.ts":
+            source(
+              IMPORT_WRITER,
+              'import { zChanges, zs } from "./schema";',
+              "await this.db.transaction(async (tx) => { await tx.insert(zs).values(r); });",
+              "await recordChange(this.db, entries);",
+              "const rows = await this.db.select().from(zs).limit(1);",
+              'import { ChangeRecords } from "../../../../shared/infra/change-log";',
+            ),
+          // 規則を満たす Repository（writer を import し、PostgresWriter.of(tx) で得た Writer で書き、子表を leftJoin で読む）。
+          "apps/backend/features/z/internal/infra/z-writer.postgres.ts": source(
+            IMPORT_WRITER,
+            'import type { Transaction } from "../../../../shared/application/transaction";',
+            'import { zChanges, zs } from "./schema";',
+            "const writer = PostgresWriter.of(tx);",
+            "await writer.delete(zs, id);",
+            "const rows = await this.db.select().from(zs).leftJoin(zChanges, on);",
+          ),
+          // 書き込みの口（*.postgres.ts でない）は change-log を import し、tx で書き、recordChange を呼んでよい。
+          "apps/backend/shared/infra/writer.ts": source(
+            'import { ChangeRecords } from "./change-log";',
+            "await this.tx.insert(table).values(rows);",
+            "await ChangeRecords.recordChange(this.tx, entries);",
+          ),
+          // トランザクションの runner（*.postgres.ts だが Repository でない）は db.transaction を呼んでよい。同じ場所の別の *.postgres.ts は
+          //   対象のまま。
+          [RUNNER]: source("return this.db.transaction((tx) => work(tx));"),
+          "apps/backend/shared/infra/other.postgres.ts": source(
+            "return this.db.transaction((tx) => work(tx));",
+          ),
+          "apps/backend/shared/infra/schema.ts": source(
+            'export const changeLog = pgTable("change_logs", {});',
+          ),
+          // 対象外: テスト、features でない domain の reconstruct、.ts でないファイル、backend の外、node_modules の中。
+          "apps/backend/features/y/internal/infra/y-repository.postgres.test.ts":
+            source(
+              updateMethod,
+              "q.onConflictDoUpdate({});",
+              "await this.db.delete(yChanges);",
+            ),
+          "apps/backend/features/y/internal/infra/y-repository.in-memory.ts":
+            source("this.yEvents.delete(id);", "q.update(yEvents);"),
+          "apps/backend/features/y/internal/domain/y.test.ts": reconstructOnly,
+          "apps/backend/shared/domain/w.ts": reconstructOnly,
+          "apps/backend/shared/drizzle/0000_x.sql":
+            "INSERT ... ON CONFLICT DO UPDATE;",
+          "apps/frontend_customer/features/x/x.ts": source(
+            "q.onConflictDoUpdate({});",
+          ),
+          "apps/backend/node_modules/x/x.postgres.ts": updateMethod,
+        });
+
+        // when
+        const result = {
+          files: listBackendSources(root),
+          violations: collectPersistenceViolations(root),
+        };
+
+        // then
+        expect(result).toEqual({
+          files: [
+            "apps/backend/features/x/internal/domain/x.ts",
+            "apps/backend/features/x/internal/infra/schema.ts",
+            "apps/backend/features/x/internal/infra/x-repository.in-memory.ts",
+            "apps/backend/features/x/internal/infra/x-repository.postgres.ts",
+            "apps/backend/features/y/internal/domain/y-repository.ts",
+            "apps/backend/features/y/internal/domain/y.ts",
+            "apps/backend/features/y/internal/infra/schema.ts",
+            "apps/backend/features/y/internal/infra/y-lock.postgres.ts",
+            "apps/backend/features/y/internal/infra/y-reader.postgres.ts",
+            "apps/backend/features/y/internal/infra/y-repository.in-memory.ts",
+            "apps/backend/features/y/internal/infra/y-repository.postgres.ts",
+            "apps/backend/features/z/internal/infra/z-repository.postgres.ts",
+            "apps/backend/features/z/internal/infra/z-writer.postgres.ts",
+            "apps/backend/shared/domain/w.ts",
+            "apps/backend/shared/infra/other.postgres.ts",
+            "apps/backend/shared/infra/schema.ts",
+            "apps/backend/shared/infra/transaction.postgres.ts",
+            "apps/backend/shared/infra/writer.ts",
+            "apps/backend/shared/infra/z.ts",
+          ],
+          violations: [
+            "no-upsert: apps/backend/features/x/internal/infra/x-repository.in-memory.ts:4",
+            "entity-with-reconstruct-has-origin: apps/backend/features/y/internal/domain/y.ts:2",
+            "append-only-table-naming: apps/backend/features/y/internal/infra/schema.ts:2",
+            "lock-method-name-for-update: apps/backend/features/y/internal/infra/y-lock.postgres.ts:5",
+            "lock-method-name-for-update: apps/backend/features/y/internal/infra/y-lock.postgres.ts:8",
+            "no-update-delete-on-append-only-tables: apps/backend/features/y/internal/infra/y-reader.postgres.ts:2",
+            "writes-through-writer: apps/backend/features/y/internal/infra/y-reader.postgres.ts:2",
+            "no-direct-db-write: apps/backend/features/y/internal/infra/y-reader.postgres.ts:2",
+            "update-uses-changed-props: apps/backend/features/y/internal/infra/y-repository.postgres.ts:2",
+            "no-upsert: apps/backend/features/y/internal/infra/y-repository.postgres.ts:4",
+            "writes-through-writer: apps/backend/features/z/internal/infra/z-repository.postgres.ts:3",
+            "no-direct-transaction: apps/backend/features/z/internal/infra/z-repository.postgres.ts:3",
+            "no-direct-record-change: apps/backend/features/z/internal/infra/z-repository.postgres.ts:4",
+            "aggregate-loads-all-children: apps/backend/features/z/internal/infra/z-repository.postgres.ts:5",
+            "aggregate-loads-all-children: apps/backend/features/z/internal/infra/z-repository.postgres.ts:5",
+            "no-change-log-in-repository: apps/backend/features/z/internal/infra/z-repository.postgres.ts:6",
+            "no-direct-transaction: apps/backend/shared/infra/other.postgres.ts:1",
+            "append-only-table-naming: apps/backend/shared/infra/schema.ts:1",
+            "no-upsert: apps/backend/shared/infra/z.ts:2",
+          ],
+        });
+      },
+    );
+
+    And(
+      "apps/backend が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）",
+      () => {
+        // given
+        const root = fixture({ "README.md": "# x\n" });
+
+        // when
+        const result = {
+          files: listBackendSources(root),
+          violations: collectPersistenceViolations(root),
+        };
+
+        // then
+        expect(result).toEqual({ files: [], violations: [] });
+      },
+    );
   });
 
-  it("apps/backend が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）", () => {
-    // given
-    const root = fixture({ "README.md": "# x\n" });
+  Scenario("永続化（実ファイル）", ({ And }) => {
+    And(
+      "upsert を使わず、.postgres.ts の update は changed-props を import し、reconstruct を持つ Entity は origin を持ち、insert のみの表を update / delete せず、その表を Changes / Events / Logs で終わる変数で宣言し、書き込みは PostgresWriter.of で得た Writer を通し（transaction と recordChange を直接呼ばず、change-log を import しない）、集約は子表の全件を JOIN で読み、行ロックをするメソッドの名前は ForUpdate で終わる",
+      () => {
+        // given: 実ファイル（repoRoot）
+        // when
+        const files = listBackendSources(repoRoot);
+        const violations = collectPersistenceViolations(repoRoot);
 
-    // when
-    const result = {
-      files: listBackendSources(root),
-      violations: collectPersistenceViolations(root),
-    };
-
-    // then
-    expect(result).toEqual({ files: [], violations: [] });
-  });
-});
-
-describe("永続化（実ファイル）", () => {
-  it("upsert を使わず、*.postgres.ts の update は changed-props を import し、reconstruct を持つ Entity は origin を持ち、insert のみの表を update / delete せず、その表を Changes / Events / Logs で終わる変数で宣言し、書き込みは PostgresWriter.of で得た Writer を通し（transaction と recordChange を直接呼ばず、change-log を import しない）、集約は子表の全件を JOIN で読み、行ロックをするメソッドの名前は ForUpdate で終わる", () => {
-    // given: 実ファイル（repoRoot）
-    // when
-    const files = listBackendSources(repoRoot);
-    const violations = collectPersistenceViolations(repoRoot);
-
-    // then
-    // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
-    expect(files).toContain(
-      "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
+        // then
+        // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
+        expect(files).toContain(
+          "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
+        );
+        expect(files).toContain(
+          "apps/backend/features/todo/internal/domain/todo.ts",
+        );
+        expect(files).toContain(
+          "apps/backend/features/todo/internal/infra/schema.ts",
+        );
+        expect(files).toContain("apps/backend/shared/infra/schema.ts");
+        expect(violations).toEqual([]);
+      },
     );
-    expect(files).toContain(
-      "apps/backend/features/todo/internal/domain/todo.ts",
-    );
-    expect(files).toContain(
-      "apps/backend/features/todo/internal/infra/schema.ts",
-    );
-    expect(files).toContain("apps/backend/shared/infra/schema.ts");
-    expect(violations).toEqual([]);
   });
 });
