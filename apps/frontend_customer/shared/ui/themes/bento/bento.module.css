@@ -1,12 +1,12 @@
 /*
- * calm テーマの部品ごとの見た目（Issue #292）。calm.theme.ts が Mantine の Styles API（theme.components の classNames）で
+ * bento テーマの部品ごとの見た目（Issue #292）。bento.theme.ts が Mantine の Styles API（theme.components の classNames）で
  * 各部品の内側の要素（root・input・label など）に当てる。
- * 方針（今どきの業務アプリの見た目。Linear・Vercel 風）:
- *   - 面は白で、影ではなく 1px の薄い線で区切る（影はごく薄く 1 段だけ）。
- *   - 文字は濃いグレー（純粋な黒にしない）、見出しは字間を詰める、補足は小さく薄く。
- *   - 緑（emerald）はボタン・チェック・フォーカスなど、操作できるところにだけ使う。
- *   - 一覧の行は区切り線で並べ、カーソルを乗せたときだけ背景と削除の操作を見せる（普段の画面を静かにする）。
- * 色・角丸は Mantine の CSS 変数（--mantine-*）で、値は calm.theme.ts のテーマの値から来る。
+ * 方針（お弁当箱のように箱を並べる、元気な SaaS の見た目）:
+ *   - 面は白で大きく丸め、線ではなく緑みの柔らかい影で浮かせる。背景は薄い緑（bento.theme.ts の --mantine-color-body）。
+ *   - 見出しは太く、字間を詰める。文字は黒ではなく深い緑（--mantine-color-text）。
+ *   - 操作できるところ（ボタン・チェック）は濃い緑（jade）、フォーカスの輪だけライム（#c4f25a）で目立たせる。
+ *   - 一覧の行は細い線で並べ、カーソルを乗せたときだけ背景と削除の操作を見せる（普段の画面を静かにする）。
+ * 色・角丸は Mantine の CSS 変数（--mantine-*）で、値は bento.theme.ts のテーマの値から来る。
  */
 
 /* 画面の外枠（Container の root）。上を広めに空けて、中身を中央の細い列にする。 */
@@ -15,27 +15,30 @@
   max-width: 640px;
 }
 
-/* 見出し（Title の root）。大きすぎず、字間を詰めて締まった印象にする。 */
+/* 見出し（Title の root）。 */
 .title {
-  color: #111827;
+  color: var(--mantine-color-text);
+  letter-spacing: -0.035em;
 }
 
 /* 画面の見出し（h1）だけ大きさを決める。h2 以下は Mantine のテーマの大きさのまま。 */
 h1.title {
-  font-size: 28px;
-  letter-spacing: -0.025em;
-  line-height: 1.2;
+  font-size: 40px;
+  line-height: 1.05;
   margin-block-end: var(--mantine-spacing-lg);
 }
 
 /*
- * 面（Paper の root。Mantine の Card も内部で Paper として描かれ、この見た目が付く）。影ではなく細い線で区切る。
- * 余白は持たせない（Card は padding の prop で、フォームと一覧は下の規則で決める）。
+ * 面（Paper の root。Mantine の Card も内部で Paper として描かれ、この見た目が付く）。線を引かず、緑みの影で浮かせる。
+ * 余白は持たせない（フォームと一覧は下の規則で決める）。
  */
 .paper {
   background: var(--mantine-color-white);
-  border: 1px solid #e5e7eb;
-  box-shadow: 0 1px 2px rgb(17 24 39 / 4%);
+  border: 0;
+  border-radius: 24px;
+  box-shadow:
+    0 1px 0 rgb(11 42 30 / 4%),
+    0 10px 30px -18px rgb(11 94 55 / 35%);
 }
 
 /* 画面の外枠の直下に縦に並ぶ面（フォームと一覧）は、間を空ける。 */
@@ -48,7 +51,7 @@ h1.title {
  * WHY 要素の種類で分ける: 画面は Paper を置くだけで、フォームか一覧かの見た目の違いはテーマで決める。
  */
 form.paper {
-  padding: var(--mantine-spacing-md);
+  padding: var(--mantine-spacing-md) var(--mantine-spacing-lg);
   display: flex;
   align-items: flex-end;
   gap: var(--mantine-spacing-sm);
@@ -59,41 +62,36 @@ form .inputRoot {
   flex: 1;
 }
 
-/* 入力のラベル（TextInput の label）。小さく、少し薄くする。 */
+/* 入力のラベル（TextInput の label）。小さく太めにする。 */
 .inputLabel {
-  color: #374151;
+  color: var(--mantine-color-text);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   margin-block-end: 6px;
 }
 
-/* 入力欄（TextInput の input）。高さをボタンにそろえ、フォーカスで緑の輪を出す。 */
+/*
+ * 入力欄（TextInput の input）。枠を引かず薄い緑の面にし、フォーカスでライムの輪を出す。
+ * WHY 左右の余白を --input-padding で渡す: padding を直接書くと、左にアイコンのある入力で Mantine がアイコンの幅に合わせる
+ *   余白を上書きし、文字がアイコンに重なる（試作で実測、2026-10-02）。
+ */
 .input {
-  height: 36px;
-  border-color: #d1d5db;
-  background: var(--mantine-color-white);
-  transition:
-    border-color 120ms,
-    box-shadow 120ms;
-}
-
-/* 枠の無い入力（variant="unstyled"）は、枠と背景を付けない。 */
-.input[data-variant="unstyled"] {
+  --input-padding: 16px;
+  height: 38px;
   border: 0;
-  background: transparent;
-  box-shadow: none;
+  background: #f3f8f5;
+  transition: box-shadow 120ms;
 }
 
 .input:focus {
-  border-color: var(--mantine-color-emerald-5);
-  box-shadow: 0 0 0 3px rgb(16 185 129 / 18%);
+  box-shadow: 0 0 0 3px #c4f25a;
 }
 
-/* ボタン（Button の root）。高さを入力にそろえ、押したときに少し沈む。 */
+/* ボタン（Button の root）。高さを入力にそろえ、太字にして、押したときに少し沈む。 */
 .button {
-  height: 36px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
+  height: 38px;
+  padding-inline: 20px;
+  font-weight: 700;
   transition:
     background-color 120ms,
     transform 80ms;
@@ -111,8 +109,8 @@ form .inputRoot {
 }
 
 .listItem {
-  border-block-end: 1px solid #f3f4f6;
-  padding: 10px var(--mantine-spacing-md);
+  border-block-end: 1px solid #eef2ef;
+  padding: 12px var(--mantine-spacing-lg);
   transition: background-color 120ms;
 }
 
@@ -121,7 +119,7 @@ form .inputRoot {
 }
 
 .listItem:hover {
-  background: #f9fafb;
+  background: #f6faf7;
 }
 
 /* 行の中身（List.Item の itemWrapper・itemLabel）。チェック・タイトル・日時・削除を横に並べる。 */
@@ -139,10 +137,10 @@ form .inputRoot {
  */
 .listItem .button {
   height: 28px;
-  padding-inline: 10px;
+  padding-inline: 12px;
   background: transparent;
-  color: #6b7280;
-  font-weight: 500;
+  color: var(--mantine-color-dimmed);
+  font-weight: 600;
   opacity: 0;
 }
 
@@ -156,33 +154,34 @@ form .inputRoot {
   color: #dc2626;
 }
 
-/* チェックボックス（Checkbox の input と label）。細い枠にする。 */
+/* チェックボックス（Checkbox の input と label）。太めの枠で、押せる場所だとわかるようにする。 */
 .checkbox {
-  border-color: #d1d5db;
+  border: 2px solid #b9cfc3;
+  border-radius: 7px;
   cursor: pointer;
 }
 
 .checkboxLabel {
-  color: #374151;
+  color: var(--mantine-color-text);
   font-size: 14px;
 }
 
 /* リンク（Anchor の root）。行のタイトルは本文の色で、カーソルを乗せたときだけ緑にする。 */
 .anchor {
-  color: #111827;
+  color: var(--mantine-color-text);
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   flex: 1;
   transition: color 120ms;
 }
 
 .anchor:hover {
-  color: var(--mantine-color-emerald-7);
+  color: var(--mantine-color-jade-7);
 }
 
 /* 完了した行は、タイトルに取り消し線を引いて薄くする（チェックの状態から CSS だけで決める）。 */
 .listItem:has(input:checked) .anchor {
-  color: #9ca3af;
+  color: var(--mantine-color-dimmed);
   text-decoration: line-through;
 }
 
@@ -192,12 +191,13 @@ form .inputRoot {
  * 見た目で上書きしないよう、リンクを除く。
  */
 .text:not(a) {
-  color: #9ca3af;
+  color: var(--mantine-color-dimmed);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
-/* エラー（Alert の root）。 */
+/* エラー（Alert の root）。面と同じく大きく丸める。 */
 .alert {
+  border-radius: 18px;
   margin-block-end: var(--mantine-spacing-md);
 }

@@ -49,7 +49,7 @@ import { afterAll, describe, expect, it } from "vitest";
 //     style props（@mantine/core の実行時の値 STYLE_PROPS_DATA のキー。m・mt・p・bg・c・fz・w・h・pos・display・flex など）のもの。
 //     加えて、Mantine の部品の見た目を選ぶ props（LOOK_PROPS: color / variant / size / radius / autoContrast / gradient / shadow /
 //     withBorder / underline）も違反。WHY: <Button color="red" variant="light"> はテーマを差し替えてもその見た目のまま残る。
-//     部品ごとの既定の見た目はテーマの components の defaultProps に書く（shared/ui/themes/calm/calm.theme.ts）。
+//     部品ごとの既定の見た目はテーマの components の defaultProps に書く（shared/ui/themes/bento/bento.theme.ts）。
 //     値の形（文字列・式・テーマの値の参照）は問わない。要素は問わない（素の <div style> も <Button mt="md"> も違反）。
 //     WHY style props の一覧を @mantine/core から読む: 手で写すと Mantine の更新で増えた名前（mis / mie など）を見逃す。
 //     @mantine/core は apps/frontend_customer だけの依存なので、そこの package.json から解決する（createRequire）。

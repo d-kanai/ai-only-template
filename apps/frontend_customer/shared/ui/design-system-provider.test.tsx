@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { DesignSystem } from "@/test-support/design-system";
 import { activeTheme } from "./active-theme";
 import { DesignSystemProvider } from "./design-system-provider";
-import { calmTheme } from "./themes/calm/calm.theme";
+import { bentoTheme } from "./themes/bento/bento.theme";
 import { popTheme } from "./themes/pop/pop.theme";
 import type { ThemeDefinition } from "./themes/theme-definition";
 
@@ -15,17 +15,17 @@ import type { ThemeDefinition } from "./themes/theme-definition";
 afterEach(cleanup);
 
 const themes: [string, ThemeDefinition][] = [
-  ["calm", calmTheme],
+  ["bento", bentoTheme],
   ["pop", popTheme],
 ];
 
-test("画面全体で使うテーマは calm", () => {
+test("画面全体で使うテーマは bento", () => {
   // given: 前提なし（activeTheme はモジュールの定数）
   // when
   const theme = activeTheme;
 
   // then
-  expect(theme).toBe(calmTheme);
+  expect(theme).toBe(bentoTheme);
 });
 
 test("テーマを渡さなければ、画面全体で使うテーマ（activeTheme）の見た目で描く", () => {
@@ -80,13 +80,13 @@ describe.each(themes)("%s テーマ", (_name, theme) => {
   });
 });
 
-test("calm と pop では、同じ部品に付く見た目のクラスが違う（テーマの差し替えで見た目が変わる）", () => {
+test("bento と pop では、同じ部品に付く見た目のクラスが違う（テーマの差し替えで見た目が変わる）", () => {
   // given
-  const calm = calmTheme.theme.components.Button.classNames.root;
+  const bento = bentoTheme.theme.components.Button.classNames.root;
 
   // when
   const pop = popTheme.theme.components.Button.classNames.root;
 
   // then
-  expect(pop).not.toBe(calm);
+  expect(pop).not.toBe(bento);
 });

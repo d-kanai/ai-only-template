@@ -13,7 +13,7 @@ import {
 import type { ThemeDefinition } from "../theme-definition";
 import classes from "./pop.module.css";
 
-// pop テーマ（Issue #292）: 太い黒の枠線とずらした影、角丸なし、等幅のフォント、黄色とピンク。calm とまったく違う
+// pop テーマ（Issue #292）: 太い黒の枠線とずらした影、角丸なし、等幅のフォント、黄色とピンク。bento とまったく違う
 // テイストにし、テーマの差し替えだけでどこまで変わるかを確かめる試作。
 // 部品ごとの見た目は隣の pop.module.css に書き、Styles API（components の classNames）で各部品の内側の要素に当てる。
 // WHY defaultProps も使う: 部品の variant・size などの「見た目の選択」も画面ではなくテーマで決める（画面は部品を置くだけ）。
