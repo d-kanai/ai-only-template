@@ -53,6 +53,9 @@ export class I18nSteps {
   @Then("画面が英語で表示される")
   async english(): Promise<void> {
     await expect(this.page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(
+      this.page.getByRole("heading", { name: "Todo", level: 1 }),
+    ).toBeVisible();
     await expect(this.page.getByRole("button", { name: "Add" })).toBeVisible();
     await expect(this.page.getByText("Loading…")).toHaveCount(0);
   }

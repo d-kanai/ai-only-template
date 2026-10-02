@@ -50,7 +50,8 @@ import {
 //       シナリオごとに変える手段がタグしか無い（apps/e2e/fixtures.ts の locale）ので、そのタグだけを許す。
 //   行の読み方（行の区切り・コメント・仕切りの形・区画）は rule-tests/feature-lines.ts（API ジャーニーと共有）。
 //   限界: API ジャーニーの .feature の規則と同じ（docstring の中も行として見る・全角の数字と英字・一覧に無い技術の言葉は見ない・
-//     キーワードは英語だけ）。
+//     キーワードは英語だけ・仕切りを要るのは When の直前だけで、操作を `*` / And で書くと要求されない）。step の名前は *.steps.ts
+//     だけを見る（*.steps.js / *.steps.mts は列挙に入らない。playwright.config.ts も *.steps.ts しか読まないので実行もされない）。
 // 列挙: apps/e2e/ の下（依存・生成物・Playwright の出力のディレクトリは除く）の *.feature・*.steps.ts・*.spec.*・*.test.*。
 //   列挙が 0 件なら実ファイルのテストで失敗させる（0 件だと違反も 0 件で常に緑になる）。
 
@@ -471,6 +472,21 @@ describe("E2E の列挙と検査（fixture）", () => {
 });
 
 describe("E2E（実ファイル）", () => {
+  // WHY fixtures.ts のタグと突き合わせる: 片方だけを改名すると、この検査は古いタグを通し続ける（reviewer の指摘、Issue #279）。
+  it("許すタグは apps/e2e/fixtures.ts の ENGLISH_BROWSER_TAG と同じ", () => {
+    // given
+    const fixtures = readFileSync(
+      join(repoRoot, E2E_DIR, "fixtures.ts"),
+      "utf8",
+    );
+
+    // when
+    const tag = /const ENGLISH_BROWSER_TAG = "([^"]+)";/.exec(fixtures)?.[1];
+
+    // then
+    expect([...ALLOWED_TAGS]).toEqual([tag]);
+  });
+
   it("apps/e2e には対になった *.feature と *.steps.ts（と共有の shared.steps.ts）だけがあり、.feature は業務の言葉だけで When の前に仕切りがあり、許すタグだけを使う", () => {
     // given
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
