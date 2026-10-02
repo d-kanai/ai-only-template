@@ -8,7 +8,11 @@ locals {
   database_env = {
     DATABASE_POOL_IDLE_TIMEOUT_MS  = "10000" # 使われない接続を 10 秒で閉じる（node-postgres の既定。.env.example と同じ）。
     DATABASE_CONNECTION_TIMEOUT_MS = "5000"  # 接続待ちの上限 5 秒（.env.example と同じ WHY）。
+    # トランザクションを開いたまま何もしていない接続を 30 秒で切る（.env.example と同じ WHY。Issue #58）。
+    DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS = "30000"
   }
+  # DATABASE_STATEMENT_TIMEOUT_MS / DATABASE_LOCK_TIMEOUT_MS（DB 側の文の実行時間・ロック待ちの上限）も service / job で違うので
+  #   下で個別に書く（service は .env.example と同じ 10 秒 / 3 秒、job は 0 = 送らず DB の既定（上限なし）に従う）。
   # DB 以外でアプリが起動時に必須とする設定（apps/shared/env.ts。.env.example に意味と WHY）。service と job で同じ値。
   # WHY job にも渡す: migrate（drizzle-kit）も設定の読み込みで env.ts を通り、必須の変数が 1 つでも欠けると止まる。
   app_env = {
@@ -91,6 +95,15 @@ resource "google_cloud_run_v2_service" "customer" {
       env {
         name  = "DATABASE_POOL_MAX"
         value = "3"
+      }
+      # DB 側の文の実行時間・ロック待ちの上限（.env.example と同じ値と WHY。Issue #58）。
+      env {
+        name  = "DATABASE_STATEMENT_TIMEOUT_MS"
+        value = "10000"
+      }
+      env {
+        name  = "DATABASE_LOCK_TIMEOUT_MS"
+        value = "3000"
       }
       dynamic "env" {
         for_each = merge(local.database_env, local.app_env)
@@ -188,6 +201,19 @@ resource "google_cloud_run_v2_job" "migrate" {
         env {
           name  = "DATABASE_POOL_MAX"
           value = "1"
+        }
+        # WHY job は文の実行時間・ロック待ちを無効（0）にする: このジョブは backfill（pnpm db:backfill。アプリのプールを使う
+        #   apps/backend/shared/infra/backfill.ts）も流し、1 つの SQL ファイルが表全体を 1 文で書き換え、アプリの行ロックを待つ
+        #   ことがある。API 向けの 10 秒 / 3 秒で打ち切るとデプロイが途中で止まる。上限はジョブの timeout（600s）が持つ。
+        # 限界: 逆向き（backfill が行ロックを握っている間に API が同じ行を更新する）は、API の lock_timeout（3 秒）を超えると
+        #   55P03 で 500 になる。今の backfill（0001_todo_status_changes.sql）は小さく、数秒で終わる前提。
+        env {
+          name  = "DATABASE_STATEMENT_TIMEOUT_MS"
+          value = "0"
+        }
+        env {
+          name  = "DATABASE_LOCK_TIMEOUT_MS"
+          value = "0"
         }
         dynamic "env" {
           for_each = merge(local.database_env, local.app_env)
