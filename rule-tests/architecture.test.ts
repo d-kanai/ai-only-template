@@ -404,7 +404,7 @@ function isSourceNonTest(path: string): boolean {
 //   .next: next build / next dev の生成物（apps/frontend_customer/.next/。数千件の JS）。next build の .next/standalone/ には
 //     pnpm の node_modules の形（相対パスの symlink）が複製され、循環する symlink を含みうる（Issue #130 / #142）。
 //   .features-gen: playwright-bdd の bddgen が apps/e2e の .feature から生成する Playwright のテスト（apps/e2e/.features-gen/*.spec.js。
-//     Issue #279。.gitignore 済み）。自分たちが書くコードではなく、.feature と step（apps/e2e/*.steps.ts）が検査の対象。
+//     Issue #279。.gitignore 済み）。自分たちが書くコードではなく、.feature と step（apps/e2e/spec/*.steps.ts）が検査の対象。
 // WHY 名前を列挙する（"." で始まるディレクトリをまとめて除かない）: まとめて除くと apps/backend/.lib/x.ts のような自前のコードが
 //   検査を素通りする（Issue #68 の reviewer 指摘）。既知の生成物・依存だけを除き、それ以外の "." のディレクトリは通常どおり
 //   検査して、置き場所の規則で違反にする。生成物のディレクトリが増えたらここに足す。
@@ -898,7 +898,7 @@ const RULES: Rule[] = [
     //   分けたときも、相対パスの参照は壊れる。書き方を 1 つにそろえ、公開の過不足は BACKEND_EXPORTS で検査する。
     //   段階 1 の限界（参照先で判定するので、相対パスでも許される場所なら違反にしない）を、この規則で解消する。
     // WHY 参照先が backend のものだけを見る: apps/frontend_customer の中の参照（"@/..." や "./x"）はこの規則の対象外。
-    // WHY apps/e2e/ とリポジトリ直下も対象にする: apps/e2e/playwright.config.ts・apps/e2e/database.ts・vitest.global-setup.ts も env.ts などを
+    // WHY apps/e2e/ とリポジトリ直下も対象にする: apps/e2e/playwright.config.ts・apps/e2e/support/database.ts・vitest.global-setup.ts も env.ts などを
     //   使う。相対パスを許すと、exports に無いファイルを使っていても気づけない。
     id: "frontend-to-backend-specifier",
     name: 'apps/frontend_customer/・apps/e2e/・リポジトリ直下のファイルから apps/backend/ への参照は "@repo/backend/..." の書き方だけ（相対パスや "@/../backend/" を使わない。例外は vitest.global-setup.ts → test-support/database の相対パスだけ）',
@@ -1406,7 +1406,7 @@ function listAllFiles(root: string, dir: string): string[] {
 //   - 逆に、global.process.env と (process).env はこちらだけが検出する（Biome の noProcessEnv は検出しない。2026-09-28 実測）。
 
 // 検査の対象にするディレクトリ。依存の向きの対象（apps/frontend_customer・apps/backend・apps/shared）に、E2E（apps/e2e/）を足す。
-// WHY apps/e2e/ を含める: E2E の補助（apps/e2e/database.ts）と設定（apps/e2e/playwright.config.ts）は接続先やフラグを読むので、
+// WHY apps/e2e/ を含める: E2E の補助（apps/e2e/support/database.ts）と設定（apps/e2e/playwright.config.ts）は接続先やフラグを読むので、
 //   既定値や直参照が入り込みやすい。
 // WHY apps/shared を含める（Issue #90）: 例外の env.ts がここにあり、同じ場所のほかのファイル（env-helper.ts など）は違反にするため。
 const ENV_CHECK_DIRS = [FRONTEND_ROOT, BACKEND_ROOT, SHARED_ROOT, E2E_ROOT];
@@ -2078,7 +2078,7 @@ function findProblemResponseViolations(root: string): string[] {
 //   - apps/frontend_customer 直下のファイル（proxy.ts の proxy、instrumentation.ts の register は Next が関数の export を求める。
 //     instrumentation-node.ts は register が Node.js runtime でだけ dynamic import する本体で、Vitest のカバレッジの対象外
 //     （vitest.config.mts）。形を変えても単体テストで確かめられないので、規約のファイルとまとめて外す。next.config.ts も規約のファイル）。
-// WHY テストの補助（apps/backend/test-support/・apps/backend/spec/ の support.ts・apps/e2e/database.ts）も対象にする（Issue #262 の
+// WHY テストの補助（apps/backend/test-support/・apps/backend/spec/ の support.ts・apps/e2e/support/database.ts）も対象にする（Issue #262 の
 //   2 つ目の PR。以前は除いていた）: daiki が対象の範囲を「すべて」と決め、テストの補助も移した（ADR
 //   20261002-class-based-shared-and-test-support.md）。テストの組み立てを読むときも依存の形（クラスのメソッド）が本番とそろう。
 // WHY テスト（*.test.*・*.spec.*）は除く: テストの本体は Vitest / Playwright の describe・it・test に関数を渡す形で、ファイルの中だけの
@@ -2499,7 +2499,11 @@ const RULE_EXAMPLES: Record<
         "@/../backend/features/todo/internal/presentation/list-todos.api",
         "type",
       ],
-      ["apps/e2e/database.ts", "../backend/shared/infra/env", "value"],
+      [
+        "apps/e2e/support/database.ts",
+        "../../backend/shared/infra/env",
+        "value",
+      ],
       ["apps/e2e/playwright.config.ts", "../backend/shared/infra/env", "value"],
       // 例外（vitest.global-setup.ts → test-support/database）は、そのファイルとその参照先の組だけ。
       //   global-setup からでも env を相対パスで参照するのは違反。別のルート直下のファイルから test-support も違反。
@@ -2512,7 +2516,11 @@ const RULE_EXAMPLES: Record<
         "value",
       ],
       ["vitest.config.mts", "./apps/backend/test-support/database", "value"],
-      ["apps/e2e/database.ts", "../backend/test-support/database", "value"],
+      [
+        "apps/e2e/support/database.ts",
+        "../../backend/test-support/database",
+        "value",
+      ],
     ],
     allowed: [
       [
@@ -2565,7 +2573,7 @@ const RULE_EXAMPLES: Record<
       // "@/" の後ろの ".." で apps/frontend_customer の外に出る書き方も、apps/shared への参照として数える（toReference の normalize）。
       ["apps/frontend_customer/proxy.ts", "@/../shared/logger", "value"],
       ["apps/frontend_customer/proxy.ts", "../shared/now", "value"],
-      ["apps/e2e/database.ts", "../shared/env", "value"],
+      ["apps/e2e/support/database.ts", "../../shared/env", "value"],
       ["apps/e2e/playwright.config.ts", "../shared/env.ts", "type"],
       ["vitest.global-setup.ts", "./apps/shared/env", "value"],
       // backend と違い、リポジトリ直下のテスト基盤にも相対パスの例外は無い。
@@ -2594,7 +2602,7 @@ const RULE_EXAMPLES: Record<
       ],
       ["apps/frontend_customer/app/page.tsx", "../../shared-x/y", "value"],
       // 前方一致だけが同じ別パッケージ（@repo/shared-extra）はパッケージの参照。
-      ["apps/e2e/database.ts", "@repo/shared-extra/x", "value"],
+      ["apps/e2e/support/database.ts", "@repo/shared-extra/x", "value"],
       // backend は対象外（backend の中の書き方は backend-relative-only が見る。Issue #90）。
       [
         "apps/backend/shared/drizzle/drizzle.config.ts",
@@ -4452,7 +4460,7 @@ const PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/backend/spec/api/todo/support.ts",
     "apps/frontend_customer/features/todo/lib/x.ts",
     // backend の規則の対象外（apps/e2e は E2E の workspace パッケージ @repo/e2e。Issue #84）。
-    "apps/e2e/database.ts",
+    "apps/e2e/support/database.ts",
     "apps/e2e/playwright.config.ts",
     "apps/e2e/todo.spec.ts",
     // apps/shared（@repo/shared。Issue #90）も backend の規則の対象外（SHARED_PLACEMENT が見る）。
@@ -4499,7 +4507,7 @@ const FRONTEND_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     // frontend の規則の対象外（apps/backend は BACKEND_PLACEMENT が見る）。
     "apps/backend/lib/x.ts",
     // apps/e2e（E2E の workspace パッケージ @repo/e2e。Issue #84）も frontend の規則の対象外。
-    "apps/e2e/database.ts",
+    "apps/e2e/support/database.ts",
     "apps/e2e/playwright.config.ts",
     "apps/e2e/todo.spec.ts",
     // apps/shared（@repo/shared。Issue #90）も frontend の規則の対象外（SHARED_PLACEMENT が見る）。
@@ -4544,7 +4552,7 @@ const SHARED_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/shared-x/extra.ts",
     "apps/backend/shared/infra/database.ts",
     "apps/frontend_customer/shared/request-log/request-log.ts",
-    "apps/e2e/database.ts",
+    "apps/e2e/support/database.ts",
   ],
 };
 
@@ -4880,7 +4888,7 @@ const NOW_ACCESS_EXAMPLES: {
     ["apps/backend/test-support/nested/x.ts", "new Date();"],
     ["apps/frontend_customer/test-support/i18n.tsx", "new Date();"],
     ["apps/e2e/todo.spec.ts", "const runId = Date.now();"],
-    ["apps/e2e/database.ts", "new Date();"],
+    ["apps/e2e/support/database.ts", "new Date();"],
     ["scripts/tool.ts", "Date.now();"],
     ["vitest.config.mts", "Date.now();"],
     ["apps/backend/features/todo/internal/domain/x.md", "new Date();"],
@@ -5593,7 +5601,7 @@ const CLASS_BASED_EXAMPLES: {
       lines("export function given(): void {}"),
     ],
     [
-      "apps/e2e/database.ts",
+      "apps/e2e/support/database.ts",
       lines("export async function resetTodos(): Promise<void> {}"),
     ],
     ["apps/e2e/nested/x.mts", lines("export const f = (): number => 1;")],
@@ -7731,7 +7739,7 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { env } from "@repo/shared/env";',
     "export default { url: env.DATABASE_URL };",
   ),
-  "apps/e2e/database.ts": lines(
+  "apps/e2e/support/database.ts": lines(
     'import { Client } from "pg";',
     'import { env } from "@repo/shared/env";',
     "export const url = env.DATABASE_URL;",
@@ -8033,7 +8041,7 @@ describeFeature(feature, ({ Scenario }) => {
           "apps/backend/features/todo/internal/domain/todo.test.ts",
           "apps/backend/test-support/database.ts",
           "apps/frontend_customer/test-support/i18n.tsx",
-          "apps/e2e/todo.steps.ts",
+          "apps/e2e/spec/todo.steps.ts",
           "vitest.config.mts",
         ]) {
           expect(files).not.toContain(excluded);
@@ -8133,10 +8141,10 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/backend/test-support/todo/todo-builder.ts",
             "apps/backend/test-support/todo/todo-repository.in-memory.ts",
             "apps/backend/spec/api/todo/support.ts",
-            "apps/e2e/database.ts",
+            "apps/e2e/support/database.ts",
             "apps/e2e/playwright.config.ts",
-            "apps/e2e/fixtures.ts",
-            "apps/e2e/todo.steps.ts",
+            "apps/e2e/support/fixtures.ts",
+            "apps/e2e/spec/todo.steps.ts",
             "apps/frontend_customer/features/todo/api/todo-api.ts",
             "apps/frontend_customer/features/todo/api/api-error.ts",
             "apps/frontend_customer/features/todo/index.ts",
@@ -8271,7 +8279,7 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/backend/shared/drizzle/drizzle.config.ts",
             "apps/backend/shared/infra/database.ts",
             "apps/backend/shared/presentation/problem.ts",
-            "apps/e2e/database.ts",
+            "apps/e2e/support/database.ts",
             "apps/e2e/playwright.config.ts",
             "vitest.global-setup.ts",
           ]),
@@ -8300,7 +8308,7 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/frontend_customer/instrumentation-node.ts",
             "apps/frontend_customer/features/todo/api/todo-api.ts",
             "apps/frontend_customer/app/page.tsx",
-            "apps/e2e/database.ts",
+            "apps/e2e/support/database.ts",
             "apps/e2e/playwright.config.ts",
             "vitest.config.mts",
             "vitest.global-setup.ts",
@@ -8339,10 +8347,10 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/frontend_customer/instrumentation-node.ts",
             "apps/frontend_customer/features/todo/api/todo-api.ts",
             "apps/frontend_customer/app/page.tsx",
-            "apps/e2e/database.ts",
+            "apps/e2e/support/database.ts",
             "apps/e2e/playwright.config.ts",
-            "apps/e2e/log-server.ts",
-            "apps/e2e/request-log.steps.ts",
+            "apps/e2e/support/log-server.ts",
+            "apps/e2e/spec/request-log.steps.ts",
             "vitest.config.mts",
             "vitest.global-setup.ts",
             "stryker.config.mjs",
@@ -9420,7 +9428,10 @@ describeFeature(feature, ({ Scenario }) => {
               "apps/frontend_customer/app/api/todos/route.ts",
               "@repo/backend/features/todo/internal/presentation/list-todos.api",
             ),
-            ref("apps/e2e/database.ts", "@repo/backend/shared/infra/env"),
+            ref(
+              "apps/e2e/support/database.ts",
+              "@repo/backend/shared/infra/env",
+            ),
             // backend の中の参照（backend-relative-only が見る）と、前方一致だけが同じ別パッケージは数えない。
             ref(
               "apps/backend/features/todo/internal/infra/x.ts",
@@ -9529,7 +9540,7 @@ describeFeature(feature, ({ Scenario }) => {
             [
               ref("apps/frontend_customer/proxy.ts", "@repo/shared/logger"),
               ref("apps/backend/shared/infra/database.ts", "@repo/shared/env"),
-              ref("apps/e2e/database.ts", "@repo/shared/env"),
+              ref("apps/e2e/support/database.ts", "@repo/shared/env"),
               ref("vitest.global-setup.ts", "@repo/shared/env"),
               // apps/shared の中の参照と、前方一致だけが同じ別パッケージ・@repo/backend の参照は数えない。
               ref("apps/shared/x.ts", "@repo/shared/missing"),

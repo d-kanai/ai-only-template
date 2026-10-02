@@ -730,7 +730,7 @@ describeFeature(feature, ({ Scenario }) => {
           ["apps/frontend_customer/features/todo/components/todo-item.tsx"],
           ["apps/frontend_customer/proxy.ts"],
           ["apps/shared/env.ts"],
-          ["apps/e2e/database.ts"],
+          ["apps/e2e/support/database.ts"],
           ["apps/backend/features/x/x.mts"],
           ["apps/backend/features/x/x.cjs"],
           ["apps/frontend_customer/features/x/test-support-x/y.ts"],

@@ -33,10 +33,10 @@ const baseURL = `http://localhost:${port}`;
 //   CI では未設定にし、playwright install で入れた、版の合ったブラウザを使う。
 const chromiumExecutable = toolEnv.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
 
-// サーバ（next start）とテスト（apps/e2e/database.ts）が使う Postgres の接続先。env.ts が .env / 環境変数から読んで検証した値で、
+// サーバ（next start）とテスト（apps/e2e/support/database.ts）が使う Postgres の接続先。env.ts が .env / 環境変数から読んで検証した値で、
 // 欠けていれば env.ts の読み込み（この設定ファイルの読み込み）で、サーバを起動する前に失敗する。
 // WHY webServer に明示的に渡す: next start は自分でも .env を読むが、コマンドの前に付けた DATABASE_URL（環境変数）で
-//   E2E の接続先を変えたときに、テスト（apps/e2e/database.ts）とサーバが必ず同じ DB を指すようにする。
+//   E2E の接続先を変えたときに、テスト（apps/e2e/support/database.ts）とサーバが必ず同じ DB を指すようにする。
 // 前提: Postgres が起動していて（pnpm db:up）、マイグレーションを当ててある（pnpm db:migrate）こと。
 //   webServer の中では当てない（Issue #57 の方針。CI・クラウドのフックは E2E の前に db:migrate を実行する）。
 const databaseUrl = env.DATABASE_URL;
@@ -45,16 +45,20 @@ const databaseUrl = env.DATABASE_URL;
 //   ADR docs/adr/quality/20261002-e2e-in-gherkin-with-playwright-bdd.md）。playwright-bdd の bddgen が .feature から Playwright の
 //   テスト（outputDir の .features-gen/ の *.spec.js）を生成し、playwright test がそれを実行する（package.json の test）。
 // defineBddConfig の返り値は生成先のディレクトリで、testDir にそのまま渡す（Playwright は生成されたテストだけを探す）。
-// features: apps/e2e の直下の .feature。steps: step のクラスを fixture にまとめる fixtures.ts と、step のクラスの *.steps.ts
-//   （fixtures.ts が import するので、ここに無くても読まれるが、playwright-bdd が step を探す範囲として明示する）。
+// features: spec/ の直下の .feature。steps: step のクラスを fixture にまとめる support/fixtures.ts と、spec/ の step のクラスの
+//   *.steps.ts（fixtures.ts が import するので、ここに無くても読まれるが、playwright-bdd が step を探す範囲として明示する）。
+// WHY spec/ と support/ に分ける（Issue #297）: 読むもの（業務の仕様の .feature と step の対）とテストの土台（fixture・DB・ログの
+//   サーバ）を分け、直下の平置きを無くす。置き場所は rule-tests/e2e-feature.test.ts の e2e-feature-placement が検査する。
+//   生成先は .features-gen/spec/*.feature.spec.js になる（playwright-bdd の既定の featuresRoot は設定ファイルのディレクトリで、
+//   そこからの相対パスを保つ。2026-10-02 に bddgen を実行して確かめた）。
 // outputDir: 既定（設定ファイルのディレクトリの .features-gen）と同じ値を明示する。.gitignore・rule-tests/architecture.test.ts の
 //   EXCLUDED_DIRS・rule-tests/e2e-feature.test.ts の SKIPPED_DIRS が同じ名前を除くので、名前を変えるならそちらも変える。
 //   生成物は *.spec.js で、tsconfig.json の include（*.ts / *.tsx / *.mts）に入らないので型チェックの対象にもならない。
 // missingSteps: 既定の fail-on-gen（.feature の step に対応する実装が無ければ、生成の時点で失敗にする）。WHY 既定のまま: 書いた
 //   流れが実装されないまま残らない（API ジャーニーの vitest-cucumber の「Missing steps」と同じ役割）。
 const testDir = defineBddConfig({
-  features: "*.feature",
-  steps: ["fixtures.ts", "*.steps.ts"],
+  features: "spec/*.feature",
+  steps: ["support/fixtures.ts", "spec/*.steps.ts"],
   outputDir: ".features-gen",
 });
 
@@ -67,7 +71,7 @@ export default defineConfig({
   //   test-results（apps/e2e/test-results。.gitignore 済み）になる（playwright 1.63.0 の lib/common/index.js の packageJsonDir）。
   testDir,
   // fullyParallel / workers: テストを 1 つずつ順番に実行する。
-  //   WHY: webServer の 1 プロセスと 1 つの Postgres を全テストが共有し、各シナリオの前に todos を空にする（apps/e2e/shared.steps.ts の Background の step）。
+  //   WHY: webServer の 1 プロセスと 1 つの Postgres を全テストが共有し、各シナリオの前に todos を空にする（apps/e2e/spec/shared.steps.ts の Background の step）。
   //   並列に動かすと、別のテストのリセットや作った Todo が混ざり、結果が実行のタイミングで変わるため。
   fullyParallel: false,
   workers: 1,
@@ -82,7 +86,7 @@ export default defineConfig({
     // locale: ブラウザの言語（navigator.language と、リクエストの Accept-Language）。
     //   WHY ja-JP に固定する: 画面の言語は Accept-Language で決まる（apps/frontend_customer/proxy.ts・shared/i18n/locale.ts。Issue #116）。
     //   固定しないと、実行する環境（CI の Chromium の既定は en-US）で画面の言語が変わり、日本語の文言を探すテストが落ちる。
-    //   英語の表示は、step で Accept-Language のヘッダを en-US にして確かめる（apps/e2e/i18n.steps.ts）。
+    //   英語の表示は、step で Accept-Language のヘッダを en-US にして確かめる（apps/e2e/spec/i18n.steps.ts）。
     locale: "ja-JP",
     // timezoneId: ブラウザのタイムゾーン。
     //   WHY サーバ（UTC）と違う Asia/Tokyo にする: 日時はブラウザのタイムゾーンで表示する（todo-item.tsx）。サーバと同じ UTC だと、
