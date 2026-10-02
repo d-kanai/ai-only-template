@@ -63,8 +63,9 @@ apps/
     env.ts              # 環境変数の唯一の入口（リポジトリ直下の .env を読み、必須の変数を検証する）
     logger.ts           # サーバ側のログの唯一の出口（JSON 1 行）
   e2e/
-    package.json        # @repo/e2e。@playwright/test / pg / @repo/shared、test（playwright test）
-    *.spec.ts           # Playwright の E2E（database.ts はテストの前のリセット、playwright.config.ts は設定）
+    package.json        # @repo/e2e。@playwright/test / playwright-bdd / pg / @repo/shared、test（bddgen && playwright test）
+    *.feature           # E2E の業務の流れ（Gherkin。日本語の step。API ジャーニーと同じ書き方）
+    *.steps.ts          # step の実装（クラスのメソッド。fixtures.ts が fixture にする。shared.steps.ts は共有の step。database.ts は Todo のリセット、playwright.config.ts は設定）
 ```
 
 - 画面は SSR を前提にせず、データは hook から `/api/...` を呼んで取る。サーバの処理はすべて `apps/backend/` に置く。

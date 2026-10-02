@@ -14,6 +14,13 @@ import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { containsForbiddenWord } from "./feature-business-language";
+import {
+  type FeatureSection,
+  featureLines,
+  isSkippedLine,
+  lacksSectionDivider,
+  nextSection,
+} from "./feature-lines";
 
 // API ジャーニーテスト（Issue #187 / #200。.claude/rules/testing.md の「API ジャーニーテスト」、ADR
 //   docs/adr/quality/20260930-backend-journey-tests.md と docs/adr/quality/20260930-gherkin-journeys-with-vitest-cucumber.md）の
@@ -33,11 +40,13 @@ import { containsForbiddenWord } from "./feature-business-language";
 //     WHY テスト以外のソースも止める（architecture.test.ts の backend-placement でも止まるが、ここでも見る）: .md など
 //       ソースでないファイルは backend-placement の対象外で、spec/journey/ を別の用途の置き場所にさせないため。
 //     WHY spec/journey/ の外の .feature も止める（reviewer の指摘、Issue #200）: .feature を実行するのは対の
-//       *.api-journey.test.ts だけで、外に置いた .feature（features/<f>/・apps/e2e/ など）は対の検査（api-journey-feature-pair）の
+//       *.api-journey.test.ts だけで、外に置いた .feature（features/<f>/・frontend など）は対の検査（api-journey-feature-pair）の
 //       対象にならず、何も実行されないまま残る。
 //     WHY *.journey.test.* も止める: 廃止した TS だけのジャーニーの名前。どこに置いても違反にし、.feature + step の対に寄せる。
 //     例外: apps/backend/spec/api/ の下の .feature（API 仕様。Issue #219）はこの規則の対象外。置き場所と対は
 //       rule-tests/api-spec.test.ts の api-spec-placement / api-spec-pair が見る（ここで止めると API 仕様を置けない）。
+//     例外: apps/e2e/ の下の .feature（E2E。Issue #279）もこの規則の対象外。E2E は playwright-bdd で .feature を実行し、置き場所と
+//       対（<name>.feature ⇔ <name>.steps.ts）・中身は rule-tests/e2e-feature.test.ts が見る。
 //   - api-journey-feature-pair（Issue #200）: apps/backend/spec/journey/ の直下の <name>.feature には、同じ場所に
 //     <name>.api-journey.test.ts（step の実装）が要り、<name>.api-journey.test.ts には <name>.feature が要る。片方だけ・
 //     名前の違う組（a.feature と b.api-journey.test.ts）は、対の無いほうのファイルを違反にする。
@@ -182,14 +191,18 @@ function isFeatureFile(path: string): boolean {
 const OUTSIDE_API_JOURNEY_FILE =
   /\.(?:api-)?journey\.test\.[cm]?[jt]sx?$|\.feature$/;
 
-// API 仕様の置き場所（Issue #219）。この下の .feature は API 仕様のもので、api-journey-placement の対象外。
-const API_SPECS_DIR = "apps/backend/spec/api/";
+// API 仕様の置き場所（Issue #219）と E2E の置き場所（Issue #279）。この下の .feature はそれぞれのもので、api-journey-placement の
+//   対象外（置き場所と対は rule-tests/api-spec.test.ts と rule-tests/e2e-feature.test.ts が見る）。
+const OTHER_FEATURE_DIRS = ["apps/backend/spec/api/", "apps/e2e/"];
 
-// spec/journey/ の外で、置き場所の違反として見るファイルか（API 仕様の .feature を除く）。
+// spec/journey/ の外で、置き場所の違反として見るファイルか（API 仕様と E2E の .feature を除く）。
 function isOutsideApiJourneyTarget(path: string): boolean {
   return (
     OUTSIDE_API_JOURNEY_FILE.test(path) &&
-    !(path.startsWith(API_SPECS_DIR) && path.endsWith(".feature"))
+    !(
+      OTHER_FEATURE_DIRS.some((dir) => path.startsWith(dir)) &&
+      path.endsWith(".feature")
+    )
   );
 }
 
@@ -450,39 +463,15 @@ function findApiJourneyContentViolations(
   return [...lineLevel, ...fileLevel];
 }
 
-// 仕切りの行（api-journey-section-divider）か。形は冒頭の説明。
-// WHY 見出しの最初と最後の文字を「空白でも ─ でもない」に限る: `─` の数の違い（6 つ・4 つ）や空白の重なりを、見出しの一部として
-//   通さないため（`# ────── x ─────` は左の 6 つ目の ─ が見出しの先頭になりうる）。
-function isSectionDivider(line: string): boolean {
-  return /^\s*# ─{5} [^\s─](?:.*[^\s─])? ─{5}$/.test(line);
-}
-
-// .feature の区画（シナリオ・Background・それ以外）を、line が見出しなら切り替えて返す。見出しでなければ今の区画のまま。
-type FeatureSection = "scenario" | "background" | "other";
-function nextSection(line: string, current: FeatureSection): FeatureSection {
-  if (/^\s*(?:Scenario(?: Outline| Template)?|Example)\s*:/.test(line)) {
-    return "scenario";
-  }
-  if (/^\s*Background\s*:/.test(line)) {
-    return "background";
-  }
-  return /^\s*(?:Feature|Rule)\s*:/.test(line) ? "other" : current;
-}
-
 // .feature（isFeatureFile のファイル）の中身の違反（行の順。同じ行なら tag・business-language・section-divider の順）。
+// 行の読み方（行の区切り・コメント・仕切りの形・区画）は rule-tests/feature-lines.ts（E2E の e2e-feature.test.ts と共有。Issue #279）。
 function findFeatureContentViolations(source: string): ApiJourneyViolation[] {
-  // WHY \r\n・\r・\n のどれでも分ける: CRLF のファイルを \n だけで分けると行末に \r が残り、仕切りの `─{5}$` が一致せず、すべての
-  //   When が仕切りの違反になる（reviewer の実測、Issue #217）。単独の \r も分ける: vitest-cucumber は readline で読み、\r でも行を
-  //   分けるので、\n だけで分けると \r で区切った行が 1 行に隠れて検査を逃れる（reviewer の指摘、Issue #219）。
-  const lines = source.split(/\r\n|\r|\n/);
+  const lines = featureLines(source);
   // 今いる区画。シナリオの中の When だけが仕切りを要る。Feature / Rule の見出しでシナリオの外に戻る。
   let section: FeatureSection = "other";
   return lines.flatMap((line, index): ApiJourneyViolation[] => {
     const lineNumber = index + 1;
-    // WHY 行頭（字下げの後）の # だけをコメントにする: Gherkin のコメントは行全体だけで、行の途中の # は文の一部。
-    // WHY 仕切りはコメントでも禁止語を見る（reviewer の指摘、Issue #217）: 仕切りの見出しは読者が拾い読みする行で、見ないと
-    //   `# ───── POST /api/todos で DB に insert ─────` のように技術の言葉を見出しに移すだけで検査を逃れられる。
-    if (/^\s*(?:#|$)/.test(line) && !isSectionDivider(line)) {
+    if (isSkippedLine(line)) {
       return [];
     }
     section = nextSection(line, section);
@@ -492,12 +481,13 @@ function findFeatureContentViolations(source: string): ApiJourneyViolation[] {
     const wording: ApiJourneyViolation[] = containsForbiddenWord(line)
       ? [{ rule: "api-journey-business-language", line: lineNumber }]
       : [];
-    const divider: ApiJourneyViolation[] =
-      section === "scenario" &&
-      /^\s*When\s/.test(line) &&
-      !isSectionDivider(lines[index - 1] ?? "")
-        ? [{ rule: "api-journey-section-divider", line: lineNumber }]
-        : [];
+    const divider: ApiJourneyViolation[] = lacksSectionDivider(
+      lines,
+      index,
+      section,
+    )
+      ? [{ rule: "api-journey-section-divider", line: lineNumber }]
+      : [];
     return [...tag, ...wording, ...divider];
   });
 }
@@ -702,7 +692,8 @@ describe("API ジャーニーの置き場所（isMisplacedApiJourneyFile）", ()
     // .feature は spec/journey/ の直下にだけ置く（reviewer の指摘、Issue #200）。
     ["backend の feature の下の .feature", "apps/backend/features/x/x.feature"],
     ["旧名の journeys/ の .feature", "apps/backend/journeys/x.feature"],
-    ["E2E の .feature", "apps/e2e/x.feature"],
+    // E2E の例外は apps/e2e/ の下だけ（前方一致だけの別ディレクトリは違反）。
+    ["e2e の前方一致だけの別ディレクトリの .feature", "apps/e2e-x/x.feature"],
     ["frontend の直下の .feature", "apps/frontend_customer/x.feature"],
     // API 仕様の例外は .feature だけ（spec/api/ の下でも API ジャーニーの名前は違反）。
     [
@@ -1320,7 +1311,7 @@ describe(".feature の業務の言葉と仕切り（findApiJourneyViolations）:
   it("spec/journey/ の外の .feature は置き場所の違反だけを返す（中身は見ない）", () => {
     expect(
       findApiJourneyViolations(
-        "apps/e2e/x.feature",
+        "apps/frontend_customer/x.feature",
         source("Feature: DB", "  Scenario: y", "    When 状態 201 を返す"),
       ),
     ).toEqual([{ rule: "api-journey-placement" }]);
@@ -1677,7 +1668,7 @@ describe("API ジャーニーの列挙と検査（fixture）", () => {
       "apps/backend/spec/journey/b.api-journey.test.ts": source(
         ...REQUIRED_IMPORTS,
       ),
-      // 置き場所の違反: サブディレクトリの中、spec/journey/ の外（旧名の journeys/・feature の下・E2E・frontend）。
+      // 置き場所の違反: サブディレクトリの中、spec/journey/ の外（旧名の journeys/・feature の下・frontend）。
       "apps/backend/spec/journey/nested/z.feature": "Feature: z\n",
       "apps/backend/spec/journey/nested/y.api-journey.test.ts": source(
         ...REQUIRED_IMPORTS,
@@ -1688,8 +1679,7 @@ describe("API ジャーニーの列挙と検査（fixture）", () => {
       ),
       "apps/backend/features/todo/out.feature": "Feature: out\n",
       // 置き場所の違反の .feature は中身を見ない（DB があっても置き場所の違反だけ）。
-      "apps/e2e/out.feature": "Feature: e2e の DB\n",
-      "apps/frontend_customer/x.feature": "Feature: front\n",
+      "apps/frontend_customer/x.feature": "Feature: front の DB\n",
       // 対象外: 層の下のテスト（vi.mock があっても API ジャーニーではない）、名前に feature を含むだけのソース、
       //   node_modules と . で始まるディレクトリの中。
       "apps/backend/features/x/internal/presentation/x.api.test.ts": source(
@@ -1700,6 +1690,8 @@ describe("API ジャーニーの列挙と検査（fixture）", () => {
         "export const a = 1;\n",
       // API 仕様の .feature は対象外（中身に DB があっても見ない。api-spec.test.ts が見る）。
       "apps/backend/spec/api/todo/create-todo.feature": "Feature: DB\n",
+      // E2E の .feature も対象外（中身に DB があっても見ない。e2e-feature.test.ts が見る。Issue #279）。
+      "apps/e2e/out.feature": "Feature: e2e の DB\n",
       "apps/backend/spec/api/todo/x.api-journey.test.ts": source(
         ...REQUIRED_IMPORTS,
       ),
@@ -1735,7 +1727,6 @@ describe("API ジャーニーの列挙と検査（fixture）", () => {
         "apps/backend/spec/journey/x.api-journey.test.ts",
         "apps/backend/spec/journey/x.feature",
         "apps/backend/spec/journey/x.test.ts",
-        "apps/e2e/out.feature",
         "apps/frontend_customer/x.feature",
       ],
       violations: [
@@ -1761,7 +1752,6 @@ describe("API ジャーニーの列挙と検査（fixture）", () => {
         "api-journey-section-divider: apps/backend/spec/journey/wording.feature:6",
         "api-journey-tag: apps/backend/spec/journey/wording.feature:7",
         "api-journey-placement: apps/backend/spec/journey/x.test.ts",
-        "api-journey-placement: apps/e2e/out.feature",
         "api-journey-placement: apps/frontend_customer/x.feature",
       ],
     });

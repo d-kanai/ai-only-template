@@ -110,6 +110,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-30 | API 1 つごとの仕様を Gherkin の .feature に業務の言葉で書き、実 DB で本番の組み立てを通して確かめる（API 仕様。apps/backend/spec/api/） | 採用 | [20260930-api-spec-in-feature.md](quality/20260930-api-spec-in-feature.md) |
 | 2026-10-01 | 書き込みの API 仕様は、メインの変更（作成 / 更新 / 削除）とレスポンスを別の Scenario に分け、見出しを一覧の順に並べる | 採用 | [20261001-api-spec-mutation-heading.md](quality/20261001-api-spec-mutation-heading.md) |
 | 2026-10-01 | 人が読む backend の仕様（API 仕様・API ジャーニー）を apps/backend/spec/ の下の api/ と journey/ にまとめる | 採用 | [20261001-backend-spec-directory.md](quality/20261001-backend-spec-directory.md) |
+| 2026-10-02 | E2E を API ジャーニーと同じ Gherkin の .feature と step のクラスで書き、playwright-bdd で Playwright のランナーのまま実行する | 採用 | [20261002-e2e-in-gherkin-with-playwright-bdd.md](quality/20261002-e2e-in-gherkin-with-playwright-bdd.md) |
 | 2026-10-02 | API ジャーニーの実行で全 API が 1 回は呼ばれることを API 網羅率として測り、100% を CI のゲートにする | 採用 | [20261002-api-journey-coverage-gate.md](quality/20261002-api-journey-coverage-gate.md) |
 
 ### workflow/
