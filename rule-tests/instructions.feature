@@ -51,6 +51,11 @@ Feature: 指示ファイルの構成と形式
     * docs/adr/ の下のディレクトリのファイル・docs/adr/README.md・docs/work-logs/ の下のファイル・docs/ の外のファイルだけなら違反にしない（must pass）
     * docs/adr/ の直下の README.md 以外のファイル（ADR・大文字違いの readme・分類名のファイルを含む）を違反にする（must reject）
     * docs/ の直下のファイル・ディレクトリ（adr / work-logs の前方一致と、その名前のファイルを含む）を 1 項目ずつ違反にする（must reject）
+  Scenario: ルール検査テストの一覧（rule-tests-index）
+    * rule-tests の直下の .feature の名前をルール検査テストとして読み、入れ子とほかの拡張子は読まない
+    * CLAUDE.md の本数と名前、.claude/rules/testing.md の rule-tests/<名前>.test.ts がそろっていれば違反にしない（must pass）
+    * CLAUDE.md の本数が違う・本数の記載が無い・名前が無い、testing.md に rule-tests/<名前>.test.ts が無ければ違反にする（must reject。名前は CLAUDE.md の本数の後ろの（…。と testing.md の「今あるもの:」の行の中だけを見る）
+    * ルール検査テストが 0 件なら、この検査は違反を出さない
   Scenario: fixture のリポジトリを検査したときに検出される違反
     * 許可される構成では違反 0 件（must pass。.gitignore の中と docs/work-logs/ の旧参照は数えない）
     * 違反を入れた構成では、すべての違反を検出する（must reject）
