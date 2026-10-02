@@ -26,7 +26,18 @@ main は常にマージ可能に保つ。main への直接コミット・push �
 7. **レビュー**: ロジックのある変更は reviewer サブエージェントに差分と観点を絞って検証させる。機械的な変更（改名・文書・参照の更新だけ）と、reviewer が使えないときは、オーケストレータ自身がテスト実行・差分確認で確かめ、その旨を PR の「検証内容」に書く。指摘は同じブランチで直し、1 ラウンド（実装 → 検証 → 指摘の反映）につき push は 1 回にまとめる（push ごとに CI が再実行され、完了の通知で wake が増える）。
 8. **rule-review を PR に残す**（ユーザー判断 2026-10-02、Issue #341）: PR を作ったら、auto-merge を付ける前にスキル `rule-review` を引数なしで回し、結果を PR のレビュー 1 つにまとめて残す。WHY: レビューの結果と直した経過が PR に残り、後から PR を開けば何を見て何を直したかが分かる。auto-merge を先に付けると、CI が緑になった時点でレビューの前にマージされる。
    - 残し方: 指摘ごとに、その `file:line` への行コメント（重大度・何が反しているか・観点 `<rules file>:<行>` と WHAT の引用）。本文に rule-review の報告（`## rule-review: 🔴 n / 🟡 n / 🟣 n`。指摘なし・観点なしもそのまま）。クラウドでは `pull_request_review_write`（`method: create`、event なし）→ `add_comment_to_pending_review`（`subjectType: LINE`、`side: RIGHT`）→ `pull_request_review_write`（`method: submit_pending`、`event: COMMENT`）。指摘なしのときは `pull_request_review_write`（`method: create`、`event: COMMENT`）で本文だけを出す。`commitID` は `git rev-parse HEAD` の 40 桁（短縮 SHA は「Could not coerce value ... to GitObjectID」で拒否された。2026-10-02 実測）。差分の外の 🟣 は行コメントにせず本文にだけ書く（GitHub は差分の外の行にコメントできない）。
-   - 直す: 🔴 は直す。🟡 は直すか、直さない理由を返信する。🟣 は返信だけ（直すなら別の Issue）。直したら、各スレッドに直したコミットを返信して resolve する。push は手順 7 と同じく 1 ラウンドに 1 回。
+   - ローカル（`gh`）では、レビューは 1 回の REST 呼び出しで行コメントごと出す（`gh pr review` は行コメントを付けられない）:
+     ```sh
+     gh api repos/d-kanai/ai-only-template/pulls/<PR番号>/reviews \
+       -f commit_id="$(git rev-parse HEAD)" -f event=COMMENT -f body="$(cat <報告のファイル>)" \
+       -f 'comments[][path]=<file>' -F 'comments[][line]=<line>' -f 'comments[][side]=RIGHT' -f 'comments[][body]=<指摘>'
+     # 返信: gh api repos/d-kanai/ai-only-template/pulls/<PR番号>/comments/<comment_id>/replies -f body='<返信>'
+     # resolve（GraphQL）: スレッドの id を
+     #   gh api graphql -f query='query{repository(owner:"d-kanai",name:"ai-only-template"){pullRequest(number:<PR番号>){reviewThreads(first:100){nodes{id isResolved comments(first:1){nodes{databaseId}}}}}}}'
+     # で取り、gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -f id=<PRRT_...>
+     ```
+     クラウドでは GraphQL が使えない（「GitHub GraphQL is not available from Claude Code sessions」。2026-10-02 実測）ので、返信は `add_reply_to_pull_request_comment`、resolve は `resolve_review_thread`（スレッドの id は `pull_request_read` の `get_review_comments`）を使う。
+   - 直す: 🔴 は直す。🟡 は直すか、直さない理由を返信する。🟣 は返信だけ（直すなら別の Issue）。どのスレッドも、返信したら resolve する（直したものは直したコミットを返信する）。WHY: 直さないと決めたスレッドも resolve しないと、Ruleset の「Require conversation resolution before merging」を ON にしたときにマージが止まる（PR #342 の Codex の指摘）。push は手順 7 と同じく 1 ラウンドに 1 回。
    - 再レビュー: 直した後にもう一度 rule-review を回し、🔴 だけを同じ形で残す（REVIEW.md の再レビュー）。🔴 が 0 になったら手順 9 に進む。
 9. **CI は待たない**（ユーザー判断 2026-09-29、Issue #82）: マージ条件の「`ci` が緑」は Ruleset `protect-main` の required status check が守るので、オーケストレータがポーリングで待つ必要はない（ポーリングの完了通知は wake になり消費が増える。ADR `docs/adr/workflow/20260929-save-usage-limit.md`）。
    - 手順 8 で 🔴 が 0 になったら auto-merge（merge commit）を付けて、そのターンを終える: `gh pr merge <PR番号> --merge --auto`（クラウドでは GitHub MCP の `enable_pr_auto_merge`、`mergeMethod: MERGE`）。緑になった時点で GitHub 側がマージし、赤なら止まったままになる。
