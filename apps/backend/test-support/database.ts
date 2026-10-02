@@ -103,7 +103,7 @@ export class TestDatabase {
   //   worker を途中で作り直すこともある。後から始まった worker の globalSetup が、他の worker が使っている途中の
   //   スキーマを消すと、そのテストが変異と関係なく失敗する。Stryker の後に残ったものは、次の pnpm test で消える
   //   （GitHub Actions の日次実行はランナーごと捨てるので残っても害がない）。
-  // WHY 接続できないときに専用のエラーにする: pnpm test は Postgres が起動している前提（.claude/rules/testing.md）。
+  // WHY 接続できないときに専用のエラーにする: pnpm test は Postgres が起動している前提（.claude/rules/quality/testing.md）。
   //   各テストファイルの ECONNREFUSED が並ぶより、最初に「起動していない」と分かる方が早く直せる。
   static async cleanupSchemas(
     { databaseUrl: url, insideStrykerWorker }: CleanupOptions,

@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// WorktreeCreate フック scripts/hooks/worktree-create.sh の仕様（Issue #64。.claude/rules/worktree.md）。
+// WorktreeCreate フック scripts/hooks/worktree-create.sh の仕様（Issue #64。.claude/rules/tooling/worktree.md）。
 // 公式（https://code.claude.com/docs/en/hooks.md の WorktreeCreate）: stdin に JSON（name / cwd など）が渡り、command フックは
 //   作った worktree のパスを stdout の最後の空でない行に出す。0 以外で終わると worktree の作成が失敗する。
 const repoRoot = resolve(__dirname, "..", "..");

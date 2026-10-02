@@ -63,7 +63,7 @@ next-env.d.ts
 
 # Claude Code のフックの記録（Issue #64）。scripts/hooks/pre-compact.sh が compact 直前の作業状態を pre-compact.md に、
 # scripts/hooks/instructions-loaded.sh が読み込まれた指示ファイルを instructions-loaded.jsonl に書く。
-# WHY コミットしない: セッションごとの一時的な記録で、人が読む作業の記録は docs/work-logs/ に書く（.claude/rules/work-log.md）。
+# WHY コミットしない: セッションごとの一時的な記録で、人が読む作業の記録は docs/work-logs/ に書く（.claude/rules/tooling/work-log-hooks.md）。
 /.claude/state/
 # isolation: worktree のサブエージェントが作る git worktree（.claude/worktrees/agent-<id>。Issue #64 の実測）。
 # WHY コミットしない: worktree は別の作業ツリーで、本体の作業ツリーから見ると未追跡のディレクトリとして git status に出てしまう。

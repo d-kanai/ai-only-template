@@ -78,7 +78,7 @@ export type Problem = {
   //   項目ごとの誤りの一覧（Issue #88）。
   // WHY presentation の誤りだけ: domain の不変条件の誤り（DomainError）は key 1 つで、domain はリクエストの項目名を知らない
   //   （domain にリクエストの都合を持ち込まない）。項目ごとに返したい値の規則は presentation のスキーマで重ねる
-  //   （.claude/rules/backend.md の presentation）。JSON として読めない誤りも項目が無いので付けない。
+  //   （.claude/rules/code/backend.md の presentation）。JSON として読めない誤りも項目が無いので付けない。
   // WHY 省略可能にする（空配列にしない）: 誤りが項目に結び付かないとき（404・500・JSON でない）は一覧自体が無い。
   errors?: ProblemError[];
 };
@@ -206,7 +206,7 @@ export class ProblemResponse {
       );
     }
     // WHY ログに残す: 想定外の例外は原因を調べる必要がある。レスポンスでは詳細を隠すので、
-    //   サーバのログ（stderr の 1 行の JSON）にだけ残す。ログはすべて logger を通す（.claude/rules/backend.md の「ログ」）。
+    //   サーバのログ（stderr の 1 行の JSON）にだけ残す。ログはすべて logger を通す（.claude/rules/code/backend.md の「ログ」）。
     //   Error は logger が { type, message } にする（stack は出さない）。
     // WHY 英語の固定の文言: ログは開発者が読むもので、apps/backend の非テストコードには日本語を置かない（Issue #116）。
     // WHY event.name を server_error にする（Issue #209。apps/shared/log-event.ts）: API の想定外の例外（500）を 1 つの種類で引け、

@@ -57,7 +57,7 @@ export interface TodoRepository {
 //   ずれ、テストが本番の振る舞いを表さなくなる。
 // WHY 基底クラス（abstract class TodoRepositoryBase）にしない: 実装に継承を強い、interface を満たすだけのテスト用の
 //   スタブ（オブジェクトリテラル）とも形がそろわなくなる。static メソッドなら各実装が `RequiredTodo.of(<読んだ Todo>, id)`
-//   の 1 行で使え（Postgres は行をロックして読んだ結果、InMemory は findById の結果）、依存も「infra → 自 feature の domain」（.claude/rules/backend.md の層の許可）の範囲に収まる。
+//   の 1 行で使え（Postgres は行をロックして読んだ結果、InMemory は findById の結果）、依存も「infra → 自 feature の domain」（.claude/rules/code/backend.md の層の許可）の範囲に収まる。
 // WHY 小さなクラスの static メソッドにする（Issue #262。以前は export した関数 requireTodo）: backend の本番コードは関数を export せず
 //   クラスにする（ADR docs/adr/architecture/20261002-class-based-backend.md）。状態を持たない検査なので、インスタンスをコンストラクタで
 //   受け取る形（Repository の実装に注入する）にはせず static にする。注入にすると、Repository の実装ごとに組み立ての引数が増えるのに、
@@ -65,7 +65,7 @@ export interface TodoRepository {
 // WHY Todo の static メソッドにしない: 「無い Todo を求めたら not_found」は Todo の値の規則ではなく、TodoRepository の約束（上の interface）。
 // WHY domain に置く（infra の共通ファイルにしない）: TodoRepository の約束そのもので、DomainError も domain の型。
 //   domain は自 feature と shared の domain だけを参照する。
-// static だけのクラス: Biome の complexity/noStaticOnlyClass は apps/backend では off（biome.json の overrides。.claude/rules/lint.md）。
+// static だけのクラス: Biome の complexity/noStaticOnlyClass は apps/backend では off（biome.json の overrides。.claude/rules/quality/lint.md）。
 export class RequiredTodo {
   static of(todo: Todo | undefined, id: string): Todo {
     if (todo === undefined) {

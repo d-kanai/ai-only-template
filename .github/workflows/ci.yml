@@ -25,7 +25,7 @@ jobs:
     env:
       # next build が Vercel に匿名テレメトリを送るのを止める（CI から外部に送る必要がない）。
       NEXT_TELEMETRY_DISABLED: "1"
-    # GitHub Actions は CI=true を既定で設定するので、pnpm install の lefthook postinstall はフックを入れない（.claude/rules/lint.md）。
+    # GitHub Actions は CI=true を既定で設定するので、pnpm install の lefthook postinstall はフックを入れない（.claude/rules/quality/lint.md）。
     steps:
       # fetch-depth: 0: 全ブランチと全履歴を取る（既定の 1 は PR のマージコミット 1 つだけ）。
       # WHY: 下の作業ログの検査（check-work-logs-diff.sh）が `origin/<base>...HEAD` の三点 diff で PR の変更だけを見るため、
@@ -35,7 +35,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # PR の差分に作業ログ（docs/work-logs/*.md）の変更が無ければ失敗させる（Issue #64。置き場所は Issue #101。.claude/rules/work-log.md）。
+      # PR の差分に作業ログ（docs/work-logs/*.md）の変更が無ければ失敗させる（Issue #64。置き場所は Issue #101。.claude/rules/tooling/work-log-hooks.md）。
       # WHY: 調査だけの依頼などで作業ログの追記が漏れた。文書だけの PR も例外にしない（ユーザー判断）。
       # WHY pull_request のときだけ: main への push では github.base_ref が空で、比べる base が無い。
       # WHY 最初に置く: install も Postgres も要らない検査（runner にある node だけを使う。Issue #178）なので、準備より先に、原因の分かる
@@ -44,7 +44,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: bash scripts/hooks/check-work-logs-diff.sh origin/${{ github.base_ref }}
 
-      # Node の版は .tool-versions が正（.claude/rules/env.md）。ワークフローに直書きせず、nodejs 行から読む。
+      # Node の版は .tool-versions が正（.claude/rules/tooling/env.md）。ワークフローに直書きせず、nodejs 行から読む。
       - name: Read Node.js version from .tool-versions
         run: echo "NODE_VERSION=$(awk '$1 == "nodejs" { print $2 }' .tool-versions)" >> "$GITHUB_ENV"
 
@@ -57,7 +57,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
-      # --frozen-lockfile: lockfile と package.json がずれていたら更新せず失敗させる（.claude/rules/dependencies.md）。
+      # --frozen-lockfile: lockfile と package.json がずれていたら更新せず失敗させる（.claude/rules/tooling/dependencies.md）。
       - run: pnpm install --frozen-lockfile
 
       # 開発用の PostgreSQL を compose.yaml で起動する（Issue #51）。

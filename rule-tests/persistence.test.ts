@@ -16,7 +16,7 @@ import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, expect } from "vitest";
 import { casesByName } from "./case-table";
 
-// 永続化の規則（.claude/rules/backend.md の「永続化」。Issue #165 / #172 / #177 / #188 / #189 / #205 / #215 / #221）を、backend のソースで
+// 永続化の規則（.claude/rules/code/backend.md の「永続化」。Issue #165 / #172 / #177 / #188 / #189 / #205 / #215 / #221）を、backend のソースで
 // 機械的に検査するテスト。対象は apps/backend/ の下のテスト以外の .ts（*.test.ts を除く）。
 // 違反にするもの:
 //   - no-upsert: `onConflictDoUpdate` / `onConflictDoNothing`（Drizzle の upsert）の名前がコードにあること。
@@ -55,7 +55,7 @@ import { casesByName } from "./case-table";
 //       `export const statusLog = pgTable("todo_status_changes", …)` のように表名と変数名がずれると素通りする。表名（DB の命名）
 //       から変数名を縛れば、insert のみの表は必ずその検査にかかる。
 //     WHY schema.ts だけ: 表の宣言の置き場所は features/<f>/internal/infra/schema.ts と、横断の表の shared/infra/schema.ts だけ
-//       （drizzle-kit の設定が読む場所。.claude/rules/backend.md）。
+//       （drizzle-kit の設定が読む場所。.claude/rules/code/backend.md）。
 //     限界: 表名が `_changes` / `_events` で終わらない insert のみの表（命名の規約そのもの）、`pgSchema("s").table(…)`・
 //       pgTable を別名で import した宣言、型注釈付きの変数（`const x: T = pgTable(…)`。違反と数える）、分割代入は見ない。
 //   - writes-through-writer（Issue #215 で writes-through-write-in-transaction を置き換え。その前は Issue #189 の writes-record-change-log）:
@@ -106,7 +106,7 @@ import { casesByName } from "./case-table";
 //     `this.db.` も `database.db.` も。`db` と `.` と名前と `(` の間の空白・改行は可）がある。行は書き込みの名前の行。
 //     WHY: `this.db.insert(` と書くと、トランザクションもログも変更履歴も無しに書けてしまう。書き込みは PostgresWriter.of(tx) で得た Writer で
 //       行う。writes-through-writer も同じ行を違反にする（受け手が Writer でない）が、db の直接の書き込みは名前で分かるように重ねて持つ。
-//     WHY 受け手の名前 `db`（語の境界）で見る: Repository は db をコンストラクタで受け取り `this.db` で使う（.claude/rules/backend.md）。
+//     WHY 受け手の名前 `db`（語の境界）で見る: Repository は db をコンストラクタで受け取り `this.db` で使う（.claude/rules/code/backend.md）。
 //       `mydb`・`this.dbx` のような名前に db を含むだけの受け手は通す。
 //     限界: `const w = this.db; w.insert(…)` のような別名、`this["db"]`、分割代入した関数の呼び出し、`db?.insert(` / `db!.insert(`
 //       （`?.` / `!` は受け手の正規表現に一致しない）は見ない。文字列の中の `db.insert(` は違反と数える（安全側）。

@@ -15,7 +15,7 @@ import { Client } from "pg";
 // WHY クラスの static メソッドにする（Issue #262。以前は関数 resetTodos・countTodosWithTitle・withClient）: テストの補助も最上位に
 //   関数を置かない（ADR docs/adr/architecture/20261002-class-based-shared-and-test-support.md。rule-tests/architecture.test.ts の
 //   class-based が apps/e2e の *.spec.ts 以外を検査する）。状態を持たないので static だけのクラスにする（biome の noStaticOnlyClass は
-//   apps/e2e/** で off。.claude/rules/lint.md）。
+//   apps/e2e/** で off。.claude/rules/quality/lint.md）。
 export class E2eDatabase {
   // Todo をすべて消す。各テストの前に呼び、前のテスト・前回の実行のデータに結果が左右されないようにする。
   // WHY TRUNCATE: 行を 1 件ずつ消す DELETE より速く、表の中身だけを消す（表の定義とマイグレーションの記録は残る）。

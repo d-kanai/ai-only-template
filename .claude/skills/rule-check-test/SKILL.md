@@ -6,7 +6,7 @@ description: ルール検査テスト（architecture / lint / package / pnpm-wor
 # rule-check-test（ルール検査テストと fault injection）
 
 `context: fork` を付けない理由: worker / reviewer の定義の `skills:` で事前読み込みし、作業中の文脈のまま手順として使うため。
-ルール検査テスト = コードの振る舞いではなく「規則や設定が効いていること」を検査するテスト。違反を見逃す（false negative）と存在する意味が無いので、以下を必須にする。一覧は `.claude/rules/testing.md`、依存の向きの規則は `.claude/rules/architecture-check.md`。
+ルール検査テスト = コードの振る舞いではなく「規則や設定が効いていること」を検査するテスト。違反を見逃す（false negative）と存在する意味が無いので、以下を必須にする。一覧は `.claude/rules/quality/testing.md`、依存の向きの規則は `.claude/rules/code/architecture-check.md`。
 テスト以外のゲート（カバレッジのしきい値、pre-commit、CI の required status check、型チェック、権限・フック）も同じ手順で確かめる。
 
 ## 1. must pass と must reject を両方書く

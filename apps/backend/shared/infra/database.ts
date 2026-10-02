@@ -10,7 +10,7 @@ import { Pool, type PoolConfig } from "pg";
 // Drizzle の db（プール全体）。Repository の実装がコンストラクタで受け取り、読み書きに使う。
 // WHY トランザクションの型（以前の Transaction と、db との和の型）を置かない: Issue #123 で「command を一律にトランザクションで包む」
 //   仕組みを廃止し、Repository は db だけを受け取る。複数の書き込みが要る command が出たら、そのときに型を足す
-//   （.claude/rules/backend.md の「永続化（Drizzle + Postgres）」）。
+//   （.claude/rules/code/backend.md の「永続化（Drizzle + Postgres）」）。
 export type Database = NodePgDatabase;
 
 export type DatabaseConfig = {

@@ -2,7 +2,7 @@
 // WHY: vitest.config.mts の既定環境は jsdom だが、このテストはファイルを読むのと bash -n を起動するだけで DOM を使わない。
 //
 // .claude/settings.json の権限（permissions.deny）とフックの登録を仕様として固定するルール検査テスト
-// （WHAT / WHY は .claude/rules/git-guard.md。JSON にはコメントを書けないため）。
+// （WHAT / WHY は .claude/rules/tooling/git-guard.md。JSON にはコメントを書けないため）。
 // 判定を関数に切り出し、架空の JSON で許可（must pass）と拒否（must reject）を固定してから、同じ関数で実ファイルを検査する。
 // .feature（settings.feature）と step の実装（このファイル）に分けた（Issue #282）。
 import { spawnSync } from "node:child_process";
@@ -22,7 +22,7 @@ import { casesByName } from "./case-table";
 
 const repoRoot = resolve(__dirname, "..");
 
-// 必ず入っている deny のルール。フック（scripts/hooks/guard-git.sh）と二重にする（WHY は .claude/rules/git-guard.md）。
+// 必ず入っている deny のルール。フック（scripts/hooks/guard-git.sh）と二重にする（WHY は .claude/rules/tooling/git-guard.md）。
 // 書式は公式 permissions の「Wildcard patterns」: 末尾の `*` の前に空白を置かない形（`--force*`）は `--force-with-lease` も含む。
 const REQUIRED_DENY_RULES = [
   "Bash(git push --force*)",

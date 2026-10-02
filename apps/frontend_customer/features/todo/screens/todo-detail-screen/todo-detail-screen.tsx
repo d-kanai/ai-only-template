@@ -29,7 +29,7 @@ type TodoDetailScreenProps = {
 //   このファイルの下の方の export しない部品に閉じる。形は rule-tests/screen-outline.test.ts が検査する。
 // 見た目はデザインシステムの atom（shared/ui/atoms/）を置くだけで、色・余白・部品の形はテーマ（shared/ui/themes/）に書く（Issue #292）。
 // "use client": データは hook から /api/todos/:id を fetch して取る（SSR を前提にしない構成）ため。
-// 文言はすべて隣の辞書（todo-detail-screen.messages.ts）のキーで t から出す（.claude/rules/frontend.md の「i18n」）。
+// 文言はすべて隣の辞書（todo-detail-screen.messages.ts）のキーで t から出す（.claude/rules/code/frontend.md の「i18n」）。
 export function TodoDetailScreen({ todoId }: TodoDetailScreenProps) {
   const {
     todo,

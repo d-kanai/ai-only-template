@@ -22,7 +22,7 @@ import { todoScreenMessages } from "./todo-screen.messages";
 // 見た目はデザインシステムの atom（shared/ui/atoms/）を置くだけで、色・余白・部品の形はテーマ（shared/ui/themes/）に書く（Issue #292）。
 // "use client": データは hook から /api/todos を fetch して取る（SSR を前提にしない構成）ため、
 // useState / useEffect とイベントハンドラを使うクライアントコンポーネントにする。
-// 文言はすべて隣の辞書（todo-screen.messages.ts）のキーで t から出す（.claude/rules/frontend.md の「i18n」）。
+// 文言はすべて隣の辞書（todo-screen.messages.ts）のキーで t から出す（.claude/rules/code/frontend.md の「i18n」）。
 export function TodoScreen() {
   const {
     todos,

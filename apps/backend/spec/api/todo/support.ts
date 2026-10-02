@@ -54,7 +54,7 @@ import type { Problem } from "../../../shared/presentation/problem";
 //   （rule-tests/api-spec.test.ts の api-spec-own-api-only が import の名前で、api-spec-support-assembler-per-api が 1 つのクラスに
 //   Api を 1 つだけ new する形で、api-spec-support-no-api-call が support.ts の中で組み立てのクラスを使わない形で止める）。
 // WHY 名前を Api のクラス名 + Assembly にする: 規則が api ファイルの名前（kebab-case）と new する Api のクラス名の両方から同じ名前を
-//   導いて照合できる（.claude/rules/backend.md の「命名」で両者は対になる）。
+//   導いて照合できる（.claude/rules/code/backend.md の「命名」で両者は対になる）。
 export class CreateTodoApiAssembly {
   static handler(db: Database) {
     return new CreateTodoApi(

@@ -1,4 +1,4 @@
-# 画面での Todo の管理（Issue #279。.claude/rules/testing.md の「E2E（Playwright + playwright-bdd）」）。
+# 画面での Todo の管理（Issue #279。.claude/rules/quality/testing.md の「E2E（Playwright + playwright-bdd）」）。
 # step の実装は todo.steps.ts（対の名前。rule-tests/e2e-feature.test.ts の e2e-feature-pair）。ほかの .feature と共有する step
 #   （Background の「Todo が 1 件も無い」・「Todo の一覧を開く」・「{string} の詳細を開く」）は shared.steps.ts。
 # 書き方は API ジャーニー（apps/backend/spec/journey/todo-lifecycle.feature）にそろえる:

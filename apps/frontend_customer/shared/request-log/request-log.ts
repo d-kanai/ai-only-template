@@ -1,7 +1,7 @@
 // リクエストログ（1 リクエスト = JSON 1 行、5W1H）の 1 行を組み立てる純粋関数（Issue #80。キーの名前は Issue #209）。
 // 出力するのは apps/frontend_customer/proxy.ts（Next の規約ファイル）。ここは受け取った値から 1 行の中身を決めるだけで、
 // 時刻の取得・乱数・出力をしない。WHY: 仕様（各項目の取り方）をテストで丸ごと固定し、proxy.ts を薄く保つため。
-// 仕様の表は Issue #80、決定は ADR docs/adr/architecture/20260929-request-log-in-proxy.md（キーの名前は 20260930-log-format-cloud-logging-otel.md）、限界（status と所要時間が取れない、RSC のリクエストの扱い）は .claude/rules/frontend.md。
+// 仕様の表は Issue #80、決定は ADR docs/adr/architecture/20260929-request-log-in-proxy.md（キーの名前は 20260930-log-format-cloud-logging-otel.md）、限界（status と所要時間が取れない、RSC のリクエストの扱い）は .claude/rules/code/frontend.md。
 
 // 1 行の JSON の形。項目は Issue #80 の表（5W1H）、キーの名前は OTel semconv の HTTP の名前を入れ子にしたもの（Issue #209。
 //   https://opentelemetry.io/docs/specs/semconv/http/http-spans/ 。ADR docs/adr/architecture/20260930-log-format-cloud-logging-otel.md）。
@@ -184,7 +184,7 @@ export class RequestLogBuilder {
 
   // WHY x-forwarded-for の先頭: プロキシを経るごとに右に追記されるので、先頭が最初の接続元（クライアント）になる。
   //   Next.js v15 で request.ip は削除され、ヘッダから取るしかない（proxy.md）。ヘッダは偽装できるので、信頼できる
-  //   プロキシの後ろで動かす前提の値（.claude/rules/frontend.md の限界: 信頼できるリバースプロキシがヘッダを付け直す前提）。
+  //   プロキシの後ろで動かす前提の値（.claude/rules/code/frontend.md の限界: 信頼できるリバースプロキシがヘッダを付け直す前提）。
   private static clientIp(headers: Headers): string | null {
     const forwardedFor = headers.get("x-forwarded-for")?.split(",")[0].trim();
     return (

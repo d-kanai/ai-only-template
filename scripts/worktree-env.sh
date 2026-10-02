@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# worktree 用の .env の内容を stdout に出す（Issue #64。設計は .claude/rules/worktree.md）。
+# worktree 用の .env の内容を stdout に出す（Issue #64。設計は .claude/rules/tooling/worktree.md）。
 #
 # 使い方:
 #   bash scripts/worktree-env.sh <worktree の名前> [.env.example のパス]   # 既定はこのリポジトリの .env.example
@@ -20,7 +20,7 @@
 #   E2E_PORT     → derive_E2E_PORT:     3101 + (cksum(名前) % 800)。3101〜3900（メインの 3100 と重ねない）
 # リソース（Redis の DB 番号やキーの接頭辞、バケット名の接頭辞など）を足すとき:
 #   1. env.ts（アプリの設定は Env / PARSERS で必須、ツールの切り替えは ToolEnv で任意）と .env.example に変数を足す
-#      （.claude/rules/env.md）。.env.example には必ず値を書く（ここで置き換える元の行になる）
+#      （.claude/rules/tooling/env.md）。.env.example には必ず値を書く（ここで置き換える元の行になる）
 #   2. ここに derive_<変数名> 関数を足し、RESOURCES と上の一覧に変数名を足す
 #   3. 作成が要るもの（create database など）は scripts/hooks/worktree-create.sh に、削除は同じファイルの孤立の掃除と
 #      worktree-remove.sh に足す
@@ -32,7 +32,7 @@ RESOURCES=(DATABASE_URL E2E_PORT)
 # 名前を Postgres の識別子に使える形にする: [a-z0-9_] 以外は _ に、先頭が数字なら _ を前に付ける。
 # WHY 英大文字も _ にする: Postgres は引用符なしの識別子を小文字に畳むので、大文字を残すと作った名前と比べる名前がずれる。
 # 限界: 違う名前が同じ結果になりうる（a-b と a_b）。Claude Code が付ける名前（agent-<id>、bold-oak-a3f2 など）は
-#   英小文字・数字・- だけなので、実用上は重ならない想定（.claude/rules/worktree.md の「限界」）。
+#   英小文字・数字・- だけなので、実用上は重ならない想定（.claude/rules/tooling/worktree.md の「限界」）。
 worktree_sanitize() {
   local sanitized
   sanitized=$(printf '%s' "$1" | LC_ALL=C tr -c 'a-z0-9_' '_')
@@ -55,7 +55,7 @@ worktree_db_name() {
 # worktree の名前 → E2E のポート（3101〜3900）。
 # WHY cksum: POSIX のコマンドで、Linux と macOS で同じ値になる（POSIX が CRC の計算方法を決めている）。
 # WHY 800 通り: 1024 未満（特権ポート）と pnpm dev の 3000・メインの 3100 を避け、並列の数（数個〜十数個）に対して
-#   重なりにくい幅にする。重なる可能性は残る（.claude/rules/worktree.md の「限界」）。
+#   重なりにくい幅にする。重なる可能性は残る（.claude/rules/tooling/worktree.md の「限界」）。
 worktree_e2e_port() {
   local crc
   crc=$(printf '%s' "$1" | cksum | awk '{print $1}')
