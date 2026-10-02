@@ -33,10 +33,10 @@ import { casesByName } from "./case-table";
 
 // drizzle-kit の out（生成したマイグレーションの SQL と meta/ の置き場所）。apps/backend/shared/drizzle/drizzle.config.ts の out と同じ。
 // WHY drizzle/ ではなく migrations/ を見る: Issue #310 で drizzle/ に接続・書き込みのソース（database.ts・writer.ts など）も置くように
-//   なり、生成物を drizzle/migrations/ に分けた。drizzle-kit migrate が当てるのは out の SQL だけなので、検査もそこに合わせる
+//   なり、生成物を drizzle/migrations/ に分けた。pnpm db:migrate（migrate.ts）が当てるのは migrations/ の SQL だけなので、検査もそこに合わせる
 //   （drizzle/ の直下に .sql を置いても当てられないので、検査の対象にしない）。
-// WHY 設定から読まずに定数で持つ: 設定ファイルは env.ts（DATABASE_URL の検証）を読み込むので、テストから import すると .env に
-//   依存する。out を変えたら、実ファイルのテスト（最初のマイグレーションが列挙に入ること）が失敗して、ここの直し忘れに気づく。
+// WHY 設定から読まずに定数で持つ: 設定ファイルを import すると drizzle-kit（defineConfig）とその読み込みにテストが依存する。
+//   置き場所は migrate.ts（import.meta.dirname の隣の migrations/）と package.json の db:migrate:bundle にもある。out を変えたら、実ファイルのテスト（最初のマイグレーションが列挙に入ること）が失敗して、ここの直し忘れに気づく。
 const MIGRATIONS_DIR = "apps/backend/shared/drizzle/migrations";
 
 // コメント（`--` から行末と `/* … */`）を消して `;` で文に分け、空の文を除く。

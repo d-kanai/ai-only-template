@@ -35,8 +35,8 @@ type LoggedRequest = {
 @Fixture<typeof test>("requestLogSteps")
 export class RequestLogSteps {
   // 呼び出し元が付ける追跡の値（x-request-id / traceparent）と、クエリに載せる秘密の値。
-  private static readonly traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
-  private static readonly secretValue = "secret-value";
+  private readonly traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+  private readonly secretValue = "secret-value";
 
   // step の間で渡す値（作った Todo の id・追跡の番号・応答）。
   private todoId = "";
@@ -71,7 +71,7 @@ export class RequestLogSteps {
   @Then("作成・一覧の画面の表示・一覧の取得の順に 1 行ずつ記録される")
   async listLogged(): Promise<void> {
     await expect
-      .poll(() => this.loggedRequests().map(RequestLogSteps.summary))
+      .poll(() => this.loggedRequests().map((request) => this.summary(request)))
       .toEqual([
         { name: "api_request", method: "POST", path: "/api/todos" },
         { name: "page_request", method: "GET", path: "/" },
@@ -100,7 +100,11 @@ export class RequestLogSteps {
       `${this.server.baseURL}/todo/${this.todoId}`,
     );
     await expect
-      .poll(() => this.loggedRequests().slice(3).map(RequestLogSteps.summary))
+      .poll(() =>
+        this.loggedRequests()
+          .slice(3)
+          .map((request) => this.summary(request)),
+      )
       .toEqual([
         { name: "page_request", method: "GET", path: `/todo/${this.todoId}` },
         {
@@ -119,11 +123,11 @@ export class RequestLogSteps {
   async getWithTrace(): Promise<void> {
     this.requestId = `e2e-${Date.now()}`;
     this.response = await this.request.get(
-      `${this.server.baseURL}/api/todos?token=${RequestLogSteps.secretValue}`,
+      `${this.server.baseURL}/api/todos?token=${this.secretValue}`,
       {
         headers: {
           "x-request-id": this.requestId,
-          traceparent: `00-${RequestLogSteps.traceId}-00f067aa0ba902b7-01`,
+          traceparent: `00-${this.traceId}-00f067aa0ba902b7-01`,
         },
       },
     );
@@ -146,7 +150,7 @@ export class RequestLogSteps {
       event: { name: "api_request" },
       http: { request: { id: this.requestId } },
       url: { path: "/api/todos", query: { token: "***" } },
-      "logging.googleapis.com/trace": `projects/${env.GCP_PROJECT_ID}/traces/${RequestLogSteps.traceId}`,
+      "logging.googleapis.com/trace": `projects/${env.GCP_PROJECT_ID}/traces/${this.traceId}`,
       "logging.googleapis.com/spanId": "00f067aa0ba902b7",
       "logging.googleapis.com/trace_sampled": true,
     });
@@ -157,9 +161,7 @@ export class RequestLogSteps {
       "event",
     ]);
     expect(new Date(line?.time ?? "").toISOString()).toBe(line?.time);
-    expect(this.server.lines.join("\n")).not.toContain(
-      RequestLogSteps.secretValue,
-    );
+    expect(this.server.lines.join("\n")).not.toContain(this.secretValue);
   }
 
   // stdout のうちリクエストログの行だけを取り出す。JSON でない行（Next の起動メッセージ）と、リクエストログ以外の JSON の行
@@ -180,7 +182,7 @@ export class RequestLogSteps {
   }
 
   // 並びを比べるための要約（種類・メソッド・パス）。
-  private static summary({ event, http, url }: LoggedRequest) {
+  private summary({ event, http, url }: LoggedRequest) {
     return { name: event.name, method: http.request.method, path: url.path };
   }
 }

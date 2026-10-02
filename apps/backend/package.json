@@ -6,8 +6,7 @@
     "./shared/http/problem": "./shared/http/problem.ts"
   },
   "scripts": {
-    "db:generate": "drizzle-kit generate --config shared/drizzle/drizzle.config.ts",
-    "db:migrate": "drizzle-kit migrate --config shared/drizzle/drizzle.config.ts"
+    "db:generate": "drizzle-kit generate --config shared/drizzle/drizzle.config.ts"
   },
   "dependencies": {
     "@repo/shared": "workspace:*",

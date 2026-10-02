@@ -2,8 +2,10 @@
 #   - main への push（PR のマージ）: stg に自動でデプロイする。
 #   - 手動実行（Actions の「Run workflow」で main と環境を選ぶ）: 選んだ環境にデプロイする。prod はこれでしか出さない。
 #   WHY prod を自動にしない: stg で動きを確かめてから、人が出すタイミングを決める（ADR docs/adr/tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md）。
-# 流れ: WIF で GCP に認証 → runtime / migrate の 2 イメージを build して Artifact Registry に push → migrate ジョブのイメージを
+# 流れ: WIF で GCP に認証 → runtime イメージを 1 つ build して Artifact Registry に push → migrate ジョブのイメージを同じものに
 #   入れ替えて実行（成功を待つ）→ service のイメージを入れ替える → トラフィックを最新のリビジョンに向ける。
+#   WHY イメージを 1 つにするか（Issue #326）: migrate ジョブは同じイメージをコマンド違い（node migrate/migrate.mjs。
+#   infra/modules/app/run.tf の job の command）で動かす。WHY は Dockerfile の先頭。
 # 器（service / job / DB / 権限）は Terraform（infra/envs/<環境> → infra/modules/app）が作る。このワークフローはイメージだけを
 #   入れ替える（WHY は infra/modules/app/main.tf）。
 # 名前（service / job）は infra/modules/app/main.tf の locals（name_prefix の既定）と同じ。GitHub の Variables（vars.*）は
@@ -88,7 +90,6 @@ jobs:
             echo "REGION=$GCP_REGION"
             # イメージのタグは git の sha。WHY: どのコミットのイメージがどのリビジョンで動いているかを 1 対 1 で辿れる（latest は使わない）。
             echo "IMAGE=$GCP_AR_REPO/frontend-customer:$SHA"
-            echo "MIGRATE_IMAGE=$GCP_AR_REPO/frontend-customer-migrate:$SHA"
           } >> "$GITHUB_ENV"
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
@@ -121,9 +122,10 @@ jobs:
       - if: steps.config.outputs.ready == 'true'
         uses: docker/setup-buildx-action@v4
 
-      # アプリのイメージ（Dockerfile の runtime ステージ。next の standalone を node で起動）。
+      # アプリのイメージ（Dockerfile の runtime ステージ。service は next の standalone を node で起動し、migrate ジョブは
+      #   同じイメージで node migrate/migrate.mjs を実行する）。
       # cache: ステージのレイヤーを GitHub Actions のキャッシュに置き、次の実行で依存の install などを飛ばす。
-      #   scope をイメージごとに分ける（同じ scope に 2 つを書くと、後の書き込みで先のキャッシュの参照が上書きされる）。
+      #   scope: キャッシュの名前。以前は runtime / migrate の 2 イメージで分けていた（Issue #326 で 1 つにした）。
       #   mode=max: 最終ステージ以外（deps / build）のレイヤーもキャッシュする。
       - if: steps.config.outputs.ready == 'true'
         name: Build and push runtime image
@@ -138,8 +140,10 @@ jobs:
 
       # push した runtime のイメージに test-support（テストだけが使うコード。apps/*/test-support/。Issue #181）が入っていないことを確かめる。
       # WHY: runtime に入るのは next build の standalone（トレースしたファイル）だけで、test-support が入りうるのは、app/ のルートとして
-      #   置いたもの（app/api/test-support/*）と本番のコードから import されたものだけ。そこを main へのデプロイ（migrate と service の
-      #   入れ替えより前）で止める。コンテキスト全体（COPY . .）が入るのは migrate のイメージで、下の「Verify migrate image」が見る。
+      #   置いたもの（app/api/test-support/*）と本番のコードから import されたもの、束ねたマイグレーションの入口（migrate/migrate.mjs。
+      #   esbuild が import をたどったものだけ）。そこを main へのデプロイ（migrate と service の入れ替えより前）で止める。
+      #   コンテキスト全体（COPY . .）が入るのは deps / build ステージだけで、runtime には入らない（Issue #326 まではそれを載せた
+      #   migrate のイメージがあり、別のステップで見ていた）。
       #   .dockerignore の行とパターン・本番のコードの import は rule-tests/test-support.test.ts が PR の CI で見る。ここはビルドの結果で見る。
       # docker pull: build-push-action の push: true はイメージをランナーの docker に残さず、load: true は push と同時に使えないので、
       #   Artifact Registry から取る（上の configure-docker の資格情報を使う）。
@@ -161,39 +165,18 @@ jobs:
             exit 1
           fi
 
-      # マイグレーションのイメージ（Dockerfile の migrate ステージ。`pnpm db:migrate` を実行する）。
-      - if: steps.config.outputs.ready == 'true'
-        name: Build and push migrate image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          target: migrate
-          push: true
-          tags: ${{ env.MIGRATE_IMAGE }}
-          cache-from: type=gha,scope=migrate
-          cache-to: type=gha,scope=migrate,mode=max
-
-      # push した migrate のイメージに test-support が入っていないことを確かめる（Issue #181）。
-      # WHY: migrate は deps ステージ（COPY . . でビルドのコンテキスト全体）から作るので、.dockerignore の **/test-support を消す・
-      #   ! で戻すなどの変更で漏れると、ここに入る（runtime は standalone だけなので入らない）。migrate ジョブのイメージを入れ替える前に止める。
-      # 書き方（docker pull・--user root・find・found）は上の「Verify runtime image」と同じ。
-      # rule-tests/test-support.test.ts がこのステップ（名前・if・run の test-support）があることを確かめる。
-      - if: steps.config.outputs.ready == 'true'
-        name: Verify migrate image has no test-support
-        run: |
-          docker pull "$MIGRATE_IMAGE"
-          found="$(docker run --rm --user root --entrypoint sh "$MIGRATE_IMAGE" -c 'find / -path /proc -prune -o -path /sys -prune -o -path "*test-support*" -print')"
-          if [ -n "$found" ]; then
-            echo "$found"
-            echo "::error::test-support が migrate のイメージに含まれている（.dockerignore の **/test-support を確かめる）"
-            exit 1
-          fi
-
-      # migrate ジョブのイメージを今回のものにする。WHY service より先: 新しいコードが使う表・列を、新しいリビジョンが
+      # migrate ジョブのイメージを今回のもの（service と同じイメージ）にし、コマンドをマイグレーションの入口にする。
+      # --command node --args migrate/migrate.mjs: イメージの CMD（server.js の起動）を置き換え、Dockerfile が /app/migrate に置いた
+      #   束ねた入口を実行する（WORKDIR /app からの相対パス）。
+      # WHY コマンドをここで書く（Terraform に書かない）: コマンドはイメージの中身（migrate/ の置き場所）と組で決まる。イメージと
+      #   同じステップで入れ替えれば、Terraform の apply の有無・順序によらず、ジョブがイメージに無いコマンドを実行することが無い
+      #   （Issue #326 の前の migrate 専用のイメージから移るときも、この 1 回の update で両方が変わる）。Terraform は
+      #   ignore_changes で command / args を見ない（infra/modules/app/run.tf）。
+      # WHY service より先: 新しいコードが使う表・列を、新しいリビジョンが
       #   リクエストを受ける前に作っておく（マイグレーションは古いコードとも動く形で書く前提）。
       - if: steps.config.outputs.ready == 'true'
         name: Update migrate job image
-        run: gcloud run jobs update "$MIGRATE_JOB" --image "$MIGRATE_IMAGE" --region "$REGION" --quiet
+        run: gcloud run jobs update "$MIGRATE_JOB" --image "$IMAGE" --command node --args migrate/migrate.mjs --region "$REGION" --quiet
 
       # マイグレーションを実行し、終わるまで待つ（--wait）。失敗したらこのステップが赤になり、以降（service のデプロイ）は
       #   実行されない。WHY: スキーマが古いまま新しいコードを出さない。

@@ -131,6 +131,17 @@ import { casesByName } from "./case-table";
 //       ずれ、同じクラスの後ろのメソッドすべてを見逃す。JSDoc の行（`* lockForUpdate() を…`）を generator の宣言と取り違え、
 //       overload のシグネチャ（`findForUpdate(id): Promise<X>;`）は本体が空なので、どちらも `ForUpdate` の名前として違反にする
 //       （誤検出。reviewer の probe で確認。今のコードには現れない）。
+//   - no-zod-parse-in-postgres（Issue #332）: *.postgres.ts（feature の infra の Repository と shared/drizzle の runner。
+//     REPOSITORY_RULES_EXEMPT も対象）で zod の検証 `.parse(` / `.safeParse(` / `.parseAsync(` / `.safeParseAsync(` を呼ぶ（`.` と名前と
+//     `(` の間の空白・改行は可）。直前の識別子が組み込みの JSON / Date（`JSON.parse(` / `Date.parse(`）は zod ではないので除く。
+//     行は名前の行（呼び出しごと）。
+//     WHY: DB の行から戻した値の検証は Entity の reconstruct（private コンストラクタの完全コンストラクタ）が行う（.claude/rules/code/backend.md
+//       の「完全コンストラクタ」）。Repository でも parse すると規則が 2 か所に分かれ、ずれたときにどちらが正か分からなくなる。
+//     WHY async の名前も含める: 同じ働きの別の名前で逃れさせない（rule-tests/domain-validation.test.ts の no-direct-zod-parse-in-domain と
+//       同じ考え方。decode 系・validate 系は今は見ない）。
+//     限界: 名前で見るので、zod でない `.parse(`（`URL.parse(` など。JSON / Date 以外）も違反と数える（安全側）。`.decode(` /
+//       `.spa(` / `.validate(` などほかの検証メソッド、`z.parse(schema, x)`、parse を変数に入れ直す・分割代入・ブラケット
+//       （`schema["parse"](x)`）、Repository が呼ぶ別のモジュールの中の parse は見ない。
 // 変更履歴の表（change_logs。変数名 changeLogs）も insert のみ: no-update-delete-on-append-only-tables と append-only-table-naming は
 //   `Logs` / `_logs` も対象にし、append-only-table-naming は横断の表の置き場所 shared/change-log/change-log.schema.ts も見る（Issue #189）。
 // コメントと文字列の扱い（限界）: 各行の `//` 以降を落としてから探す（「// .onConflictDoUpdate( は使わない」を違反と数えない）。
@@ -157,7 +168,8 @@ type RuleId =
   | "no-direct-record-change"
   | "no-direct-db-write"
   | "aggregate-loads-all-children"
-  | "lock-method-name-for-update";
+  | "lock-method-name-for-update"
+  | "no-zod-parse-in-postgres";
 
 type PersistenceViolation = { rule: RuleId; line: number };
 
@@ -487,6 +499,24 @@ const REPOSITORY_RULES_EXEMPT = new Set([
   "apps/backend/shared/drizzle/transaction.postgres.ts",
 ]);
 
+// *.postgres.ts の zod の parse の呼び出しの行（no-zod-parse-in-postgres）。
+function zodParseLines(code: string): number[] {
+  return [
+    ...code.matchAll(
+      /\.\s*(?:safeParse|parse|safeParseAsync|parseAsync)\s*\(/g,
+    ),
+  ].flatMap((call) => {
+    // WHY 受け手の識別子を `.` の直前から取る（domain-validation.test.ts と同じ）: `JSON.parse(` を除き、`xSchema().parse(` は拾う。
+    //   `(?<![\w$.])` で `config.JSON.parse(` のような「JSON という名前のプロパティ」を組み込みの JSON と取り違えない。
+    const receiver = /(?<![\w$.])([A-Za-z_$][\w$]*)\s*$/.exec(
+      code.slice(0, call.index),
+    )?.[1];
+    if (receiver === "JSON" || receiver === "Date") return [];
+    const name = call.index + call[0].search(/[a-zA-Z]/);
+    return [lineAt(code, name)];
+  });
+}
+
 // path はリポジトリ相対の / 区切り。規則ごとに対象のパスを絞り、違反を行の順に返す。
 function findPersistenceViolations(
   path: string,
@@ -543,10 +573,15 @@ function findPersistenceViolations(
   }
 
   // WHY isRepository でなく *.postgres.ts すべて: 行ロックの名前の規則は Repository かどうかに関わらない（runner も対象）。
+  //   zod の parse も同じ（runner も DB の行を Entity にしない。Issue #332）。
   if (/\.postgres\.ts$/.test(path)) {
     violations.push(
       ...lockMethodNameViolations(lines.join("\n")).map((line) => ({
         rule: "lock-method-name-for-update" as const,
+        line,
+      })),
+      ...zodParseLines(lines.join("\n")).map((line) => ({
+        rule: "no-zod-parse-in-postgres" as const,
         line,
       })),
     );
@@ -688,7 +723,7 @@ describeFeature(feature, ({ Scenario }) => {
     "永続化の判定（findPersistenceViolations）: must pass",
     ({ And }) => {
       And(
-        "永続化の規則に従う書き方は違反なし（changed-props を import した update・origin を持つ Entity・insert のみの表への insert・Writer を通した書き込み・JOIN で読む集約・ForUpdate のメソッドなど）",
+        "永続化の規則に従う書き方は違反なし（changed-props を import した update・origin を持つ Entity・insert のみの表への insert・Writer を通した書き込み・JOIN で読む集約・ForUpdate のメソッド・.postgres.ts の JSON.parse など）",
         () => {
           // given
           const cases: [string, string, string][] = [
@@ -1142,6 +1177,27 @@ describeFeature(feature, ({ Scenario }) => {
               ),
             ],
             [
+              "no-zod-parse-in-postgres: JSON.parse / Date.parse・名前の一部が parse なだけの別のもの・受け手の無い関数・コメントの中",
+              POSTGRES,
+              source(
+                "const a = JSON.parse(row.payload);",
+                "const b = Date . parse (iso);",
+                "const c = parseRow(row);",
+                "const d = result.parsed;",
+                "const e = schema.parseLater(row);",
+                "// Repository で xSchema().parse(row) をしない（reconstruct が検証する）。",
+                "return X.reconstruct(row); // .safeParse( しない",
+              ),
+            ],
+            [
+              "no-zod-parse-in-postgres: *.postgres.ts でないファイル（in-memory・schema.ts・domain）の parse は対象外",
+              IN_MEMORY,
+              source(
+                "const a = xSchema().parse(row);",
+                "const b = s.safeParse(row);",
+              ),
+            ],
+            [
               "lock-method-name-for-update: *.postgres.ts でないファイル（in-memory）は対象外",
               IN_MEMORY,
               source(
@@ -1169,7 +1225,7 @@ describeFeature(feature, ({ Scenario }) => {
     "永続化の判定（findPersistenceViolations）: must reject",
     ({ And }) => {
       And(
-        "永続化の規則の違反を規則と行で返す（upsert・changed-props の import の無い update・origin の無い Entity・insert のみの表の update / delete・Writer を通さない書き込み・子表を JOIN しない集約・ForUpdate で終わらないロックのメソッドなど）",
+        "永続化の規則の違反を規則と行で返す（upsert・changed-props の import の無い update・origin の無い Entity・insert のみの表の update / delete・Writer を通さない書き込み・子表を JOIN しない集約・ForUpdate で終わらないロックのメソッド・.postgres.ts の zod の parse など）",
         () => {
           // given
           const cases: [string, string, string, PersistenceViolation[]][] = [
@@ -1744,6 +1800,32 @@ describeFeature(feature, ({ Scenario }) => {
               ],
             ],
             [
+              "no-zod-parse-in-postgres: .parse / .safeParse / .parseAsync / .safeParseAsync（受け手が呼び出しの結果・改行した chain・空白・JSON という名前のプロパティ）",
+              POSTGRES,
+              source(
+                "const a = xSchema().parse(row);",
+                "const b = xSchema.safeParse(row);",
+                "const c = await s.parseAsync(row);",
+                "const d = await s.safeParseAsync(row);",
+                "const e = z",
+                "  .string()",
+                "  .parse(row.title);",
+                "const f = s . safeParse ( row );",
+                "const g = config.JSON.parse(row);",
+                "return X.reconstruct(s.parse(row)); // reconstruct に渡す前に parse する",
+              ),
+              [1, 2, 3, 4, 7, 8, 9, 10].map((line) => ({
+                rule: "no-zod-parse-in-postgres" as const,
+                line,
+              })),
+            ],
+            [
+              "no-zod-parse-in-postgres: トランザクションの runner（shared/drizzle の *.postgres.ts。Repository の規則の対象外）も対象",
+              RUNNER,
+              source("const config = s.safeParse(options);"),
+              [{ rule: "no-zod-parse-in-postgres", line: 1 }],
+            ],
+            [
               "lock-method-name-for-update: トランザクションの runner（Repository の規則の対象外）も対象",
               RUNNER,
               source(
@@ -1798,6 +1880,11 @@ describeFeature(feature, ({ Scenario }) => {
           "apps/backend/features/y/internal/infra/y-reader.postgres.ts": source(
             "export class YReader {}",
             "await this.db.delete(yChanges);",
+          ),
+          // Issue #332: Repository で DB の行を zod で検証する（reconstruct に任せない）。
+          "apps/backend/features/y/internal/infra/y-parser.postgres.ts": source(
+            "const meta = JSON.parse(row.meta);",
+            "return Y.reconstruct(ySchema().parse(row));",
           ),
           [IN_MEMORY]: source(updateMethod, "q.onConflictDoNothing();"),
           "apps/backend/shared/change-log/z.ts": source(
@@ -1872,7 +1959,11 @@ describeFeature(feature, ({ Scenario }) => {
               "await this.db.delete(yChanges);",
             ),
           "apps/backend/features/y/internal/infra/y-repository.in-memory.ts":
-            source("this.yEvents.delete(id);", "q.update(yEvents);"),
+            source(
+              "this.yEvents.delete(id);",
+              "q.update(yEvents);",
+              "const y = ySchema().parse(row);",
+            ),
           "apps/backend/features/y/internal/domain/y.test.ts": reconstructOnly,
           "apps/backend/shared/error/w.ts": reconstructOnly,
           "apps/backend/shared/drizzle/migrations/0000_x.sql":
@@ -1900,6 +1991,7 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/backend/features/y/internal/domain/y.ts",
             "apps/backend/features/y/internal/infra/schema.ts",
             "apps/backend/features/y/internal/infra/y-lock.postgres.ts",
+            "apps/backend/features/y/internal/infra/y-parser.postgres.ts",
             "apps/backend/features/y/internal/infra/y-reader.postgres.ts",
             "apps/backend/features/y/internal/infra/y-repository.in-memory.ts",
             "apps/backend/features/y/internal/infra/y-repository.postgres.ts",
@@ -1920,6 +2012,7 @@ describeFeature(feature, ({ Scenario }) => {
             "append-only-table-naming: apps/backend/features/y/internal/infra/schema.ts:2",
             "lock-method-name-for-update: apps/backend/features/y/internal/infra/y-lock.postgres.ts:5",
             "lock-method-name-for-update: apps/backend/features/y/internal/infra/y-lock.postgres.ts:8",
+            "no-zod-parse-in-postgres: apps/backend/features/y/internal/infra/y-parser.postgres.ts:2",
             "no-update-delete-on-append-only-tables: apps/backend/features/y/internal/infra/y-reader.postgres.ts:2",
             "writes-through-writer: apps/backend/features/y/internal/infra/y-reader.postgres.ts:2",
             "no-direct-db-write: apps/backend/features/y/internal/infra/y-reader.postgres.ts:2",
@@ -1960,7 +2053,7 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("永続化（実ファイル）", ({ And }) => {
     And(
-      "upsert を使わず、.postgres.ts の update は changed-props を import し、reconstruct を持つ Entity は origin を持ち、insert のみの表を update / delete せず、その表を Changes / Events / Logs で終わる変数で宣言し、書き込みは PostgresWriter.of で得た Writer を通し（transaction と recordChange を直接呼ばず、change-log を import しない）、集約は子表の全件を JOIN で読み、行ロックをするメソッドの名前は ForUpdate で終わる",
+      "upsert を使わず、.postgres.ts の update は changed-props を import し、reconstruct を持つ Entity は origin を持ち、insert のみの表を update / delete せず、その表を Changes / Events / Logs で終わる変数で宣言し、書き込みは PostgresWriter.of で得た Writer を通し（transaction と recordChange を直接呼ばず、change-log を import しない）、集約は子表の全件を JOIN で読み、行ロックをするメソッドの名前は ForUpdate で終わり、.postgres.ts は zod の parse を呼ばない",
       () => {
         // given: 実ファイル（repoRoot）
         // when

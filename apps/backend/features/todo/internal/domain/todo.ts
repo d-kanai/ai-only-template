@@ -23,9 +23,9 @@ export type TodoStatusChange = {
 
 // WHY 型をスキーマから導出する: 規則と型を 1 か所で宣言し、項目を足したときのずれを無くす。
 // WHY 入力の型（z.input）にする: コンストラクタは検証する前の値を受け取る（出力の型と同じ形だが、「検証済み」を意味しない）。
-// WHY (typeof Todo)["todoPropsSchema"] と添字で参照する: スキーマは Todo の private static メソッドで、`typeof Todo.todoPropsSchema`
-//   はクラスの外から private を読めず型エラーになる。添字の型（indexed access type）は private のメンバーも参照できる（TypeScript の仕様）。
-type TodoProps = z.input<ReturnType<(typeof Todo)["todoPropsSchema"]>>;
+// WHY Todo["todoPropsSchema"] と添字で参照する: スキーマは Todo の private メソッドで、`Todo.prototype.todoPropsSchema` のような
+//   参照はクラスの外から private を読めず型エラーになる。添字の型（indexed access type）は private のメンバーも参照できる（TypeScript の仕様）。
+type TodoProps = z.input<ReturnType<Todo["todoPropsSchema"]>>;
 
 // Todo の Entity（集約ルート）。
 // WHY 不変（immutable）にする: 変更系のメソッドは新しい Todo を返し、自分は変えない。
@@ -66,7 +66,7 @@ export class Todo {
     props: TodoProps,
     origin: (valid: TodoProps) => Readonly<TodoProps> | undefined,
   ) {
-    const valid = DomainValidation.validated(Todo.todoPropsSchema(), props);
+    const valid = DomainValidation.validated(this.todoPropsSchema(), props);
     this.id = valid.id;
     this.title = valid.title;
     this.completed = valid.completed;
@@ -169,9 +169,10 @@ export class Todo {
     };
   }
 
-  // WHY Todo の private static メソッドにする（モジュールの最上位の関数にしない。Issue #262）: backend の本番コードはクラスを基本にし、
+  // WHY Todo の private メソッドにする（モジュールの最上位の関数にしない。Issue #262）: backend の本番コードはクラスを基本にし、
   //   補助の関数も使うクラスのメソッドにする（ADR docs/adr/architecture/20261002-class-based-backend.md）。不変条件は Todo の規則で、
-  //   読むのは Todo（コンストラクタ）だけなので private。インスタンスの状態を使わない（コンストラクタが this を作る前の値を検証する）ので static。
+  //   読むのは Todo（コンストラクタ）だけなので private。インスタンスの状態は使わないが static にしない: インスタンスで使うクラスに static を置かない（規則 no-static-in-instance-class。Issue #300）。
+  //   コンストラクタの中でも prototype のメソッドは呼べるので、値を代入する前に this.todoPropsSchema() で検証できる。
   // Todo が持つ値のすべて（完全コンストラクタが検証する値）の規則 = Todo の不変条件。
   // WHY タイトル以外（id・完了状態・作成日時）も規則に含める: どの口から来た値も、すべてが規則を満たすことを 1 つの
   //   スキーマで宣言する。create の id は randomUUID で常に満たすが、reconstruct は DB の行（Postgres の uuid 型は
@@ -192,7 +193,7 @@ export class Todo {
   // WHY title のスキーマを別の関数に切り出さない: 読むのはここ（todoPropsSchema の title）だけで、切り出すと規則が
   //   2 か所に分かれて見える（Issue #159）。口ごとに一部の項目だけを検証すると、どの口を通ったかで守られる規則が変わる
   //   （Issue #94 で撤回した分け方）ので、規則はいつも全体で当てる。
-  private static todoPropsSchema() {
+  private todoPropsSchema() {
     const fields = z.object({
       id: z.uuid(KeyedIssue.of("todo.id.invalid")),
       // タイトルの不変条件: 前後の空白を除いて 1〜TODO_TITLE_MAX_LENGTH 文字。Todo の規則は todoPropsSchema 1 か所に宣言する（Issue #88）。
@@ -240,7 +241,7 @@ export class Todo {
         .readonly(),
     });
     return fields.refine(
-      Todo.isConsistentHistory,
+      (props) => this.isConsistentHistory(props),
       KeyedIssue.of("todo.statusChanges.invalid"),
     );
   }
@@ -254,7 +255,7 @@ export class Todo {
   // WHY 最初の日時は作成日時以上: 作られる前に状態が変わることは無い。
   // WHY 最後の completed が今の completed と等しい: 今の完了状態（todos.completed の列。一覧・詳細はこれだけを読む）と、
   //   履歴から導いた最新の状態がずれると、どちらが正しいか決まらない。
-  private static isConsistentHistory({
+  private isConsistentHistory({
     completed,
     createdAt,
     statusChanges,

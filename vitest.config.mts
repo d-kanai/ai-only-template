@@ -126,6 +126,9 @@ export default defineConfig({
       //   - **/*.test.{ts,tsx}: テストそのもの。Vitest もテストの include パターンを常に除外に足すが、意図を明示する。
       //   - **/*.d.ts: 型宣言だけで実行されるコードを持たない。
       //   - apps/backend/shared/drizzle/*.config.ts: drizzle-kit の設定（上の「設定ファイル」）。
+      //   - apps/backend/shared/drizzle/migrate.ts: マイグレーションの入口（Issue #326）。読み込むと最上位で DB にマイグレーションを
+      //     当てるので、単体テストからは読み込めない。中身（DatabaseMigration.run）は migration.postgres.test.ts が仕様にし、
+      //     入口そのものは CI の pnpm db:migrate が毎回、束ねたファイル（dist/migrate/migrate.mjs）として実行する。
       //   coverageConfigDefaults.exclude（Vitest の既定の除外。5.0.1 では空配列）と結合し、将来の版で既定が増えても
       //   消さないようにする。なお Vitest は設定ファイル（vitest.config.*）・setupFiles・node_modules を、
       //   この設定とは別に常に除外する（5.0.1 の dist/chunks/index.*.js の resolveConfig で確認）。
@@ -134,6 +137,7 @@ export default defineConfig({
         "**/*.test.{ts,tsx}",
         "**/*.d.ts",
         "apps/backend/shared/drizzle/*.config.ts",
+        "apps/backend/shared/drizzle/migrate.ts",
       ],
       // thresholds: 4 指標すべて 100%。1 つでも下回ると vitest（pnpm test、CI の ci ジョブ）が失敗する。
       //   WHY 100: ユーザー判断（Issue #45）。テスト = 仕様なので、テストが通らないコードは仕様のないコードになる。

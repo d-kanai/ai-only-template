@@ -58,14 +58,14 @@
 | `docs/adr/` | 読み込まれない（必要なら自分で読む） | ADR（決定の記録。1 決定 1 ファイル、不変。命名 `<分類>/yyyymmdd-<topic>.md`、分類は `architecture`（構造・境界・設計パターン）/ `tech-stack`（言語・ツールの選定）/ `quality`（品質ゲート・テスト方針）/ `workflow`（開発プロセス・環境・エージェント運用）、形式は `rule-tests/instructions.test.ts` が検査する。一覧は `docs/adr/README.md`） |
 | `docs/work-logs/` | 読み込まれない | 日ごとの作業ログ |
 | `docs/diagrams/` | 読み込まれない | Terraform と GitHub Actions から起こした構成図（`.mmd` と `.png`。作り直しはスキル `infra-diagram`） |
-| `rule-tests/` | 読み込まれない | ルール検査テスト 23 本（`api-journey` / `api-request` / `api-spec` / `architecture` / `design-system` / `domain-validation` / `e2e-feature` / `instructions` / `lint` / `migration` / `package` / `persistence` / `pnpm-workspace` / `rule-test-feature` / `schema` / `screen-outline` / `settings` / `test-doubles` / `test-phases` / `test-support` / `typecheck` / `use-case` / `work-logs-check`。それぞれ仕様の `*.feature` と step の実装の `*.test.ts` の対。Issue #86、`schema` は Issue #145、`api-request` は Issue #175、`domain-validation` / `persistence` / `test-doubles` / `use-case` は Issue #177、`test-support` は Issue #181、`api-journey` は Issue #187、`api-spec` は Issue #219、`migration` は Issue #194（#247 で backfill の規則を外し、Issue #192 の `public` の修飾の検査だけが残る）、`test-phases` は Issue #273、`e2e-feature` は Issue #279、`rule-test-feature` と .feature の対は Issue #282、`design-system` と `screen-outline` は Issue #292。本数と一覧は `instructions` が検査する） |
+| `rule-tests/` | 読み込まれない | ルール検査テスト 24 本（`api-journey` / `api-request` / `api-spec` / `architecture` / `design-system` / `domain-validation` / `e2e-feature` / `instructions` / `lint` / `migration` / `package` / `persistence` / `pnpm-workspace` / `rule-test-feature` / `rules-table` / `schema` / `screen-outline` / `settings` / `test-doubles` / `test-phases` / `test-support` / `typecheck` / `use-case` / `work-logs-check`。それぞれ仕様の `*.feature` と step の実装の `*.test.ts` の対。Issue #86、`schema` は Issue #145、`api-request` は Issue #175、`domain-validation` / `persistence` / `test-doubles` / `use-case` は Issue #177、`test-support` は Issue #181、`api-journey` は Issue #187、`api-spec` は Issue #219、`migration` は Issue #194（#247 で backfill の規則を外し、Issue #192 の `public` の修飾の検査だけが残る）、`test-phases` は Issue #273、`e2e-feature` は Issue #279、`rule-test-feature` と .feature の対は Issue #282、`design-system` と `screen-outline` は Issue #292、`rules-table` は Issue #322。本数と一覧は `instructions` が検査する） |
 
 ### .claude/rules（パス依存。分類のディレクトリの下）
 | ファイル | 触ったときに読まれる主なファイル | 内容 |
 | --- | --- | --- |
 | `code/backend.md` | `apps/backend/**` | DDD 4 層と許可の一覧、exports、永続化（Drizzle / Postgres / トランザクション）、命名 |
 | `code/frontend.md` | `apps/frontend_customer/**` | app はルーティングだけ、features の構成、画面の骨組み（Layout と Section / Form）、デザインシステム（Mantine を包む atom とテーマ）、画面側とサーバ側の境界、SSR を前提にしない |
-| `code/architecture-check.md` | `rule-tests/architecture.test.ts` | 依存の向きの 35 規則、足すときの手順、限界 |
+| `code/architecture-check.md` | `rule-tests/architecture.test.ts` | 依存の向きの 39 規則、足すときの手順、限界 |
 | `quality/testing.md` | `**/*.test.ts(x)`・`apps/e2e/**`・テストの設定 | テスト = 仕様、置き方、テストダブル、ルール検査テスト、Stryker、E2E |
 | `quality/lint.md` | `biome.json`・`rule-tests/lint.test.ts`・`lefthook.yml`・`package.json` | Biome の方針と設定の WHY、pre-commit |
 | `tooling/env.md` | `.env.example`・`env.ts`・`instrumentation*`・`compose.yaml`・`.tool-versions` | Node / pnpm の版、環境変数の一元化と検査 |
@@ -78,6 +78,7 @@
 
 ### スキル（手順。`/<name>` でも呼べる）
 - `pr-flow`: Issue → ブランチ → PR → CI → マージ → 後始末（PR の作成・マージの前に読む）。
+- `rule-review`: 差分を `.claude/rules/code` の表の `レビュー` の行（機械で止めていない規範）でレビューする。基準は `REVIEW.md`。
 - `rule-check-test`: ルール検査テストとゲートの must pass / must reject と fault injection。
 - `mutation-testing`: Stryker の実行と生き残りの扱い。
 - `db-migration`: スキーマの変更とマイグレーション。

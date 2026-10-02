@@ -15,15 +15,6 @@ import { expect } from "@playwright/test";
 // WHY 環境変数を渡さない（親の環境を引き継ぐ。TZ だけ UTC にする）: next start は .env を読み、webServer と同じく apps/e2e/support/database.ts と
 //   同じ DB を使う。コマンドの前に DATABASE_URL を付けて変えたときも、その値を引き継ぐので同じ DB になる。
 export class E2eLogServer {
-  // WHY __dirname（このファイルのある apps/e2e/support）から相対でたどる: カレントディレクトリ（pnpm --filter @repo/e2e test では apps/e2e）に
-  //   左右されずに apps/frontend_customer を指すため。
-  private static readonly frontendDir = resolve(
-    __dirname,
-    "..",
-    "..",
-    "frontend_customer",
-  );
-
   // next start の stdout の行（リクエストログの JSON 行と Next の起動メッセージ）。
   readonly lines: string[] = [];
   baseURL = "";
@@ -45,19 +36,23 @@ export class E2eLogServer {
   //   next に届く）。spawn の env オプションで足すと process.env を直接読むことになり、env.ts 以外での直参照の禁止
   //   （Biome の noProcessEnv と rule-tests/architecture.test.ts の env-direct-access）に当たる。
   static async start(): Promise<E2eLogServer> {
+    // WHY __dirname（このファイルのある apps/e2e/support）から相対でたどる: カレントディレクトリ（pnpm --filter @repo/e2e test では apps/e2e）に
+    //   左右されずに apps/frontend_customer を指すため。
+    // WHY start の中の定数にする（クラスのフィールドにしない）: 使うのは next を起動する start だけで、start はインスタンスを作る前に動く。
+    const frontendDir = resolve(__dirname, "..", "..", "frontend_customer");
     const server = new E2eLogServer(
       spawn(
         "env",
         [
           "TZ=UTC",
           process.execPath,
-          resolve(E2eLogServer.frontendDir, "node_modules/next/dist/bin/next"),
+          resolve(frontendDir, "node_modules/next/dist/bin/next"),
           "start",
           "-p",
           "0",
         ],
         {
-          cwd: E2eLogServer.frontendDir,
+          cwd: frontendDir,
           stdio: ["ignore", "pipe", "inherit"],
         },
       ),

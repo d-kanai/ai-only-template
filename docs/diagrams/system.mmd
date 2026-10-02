@@ -33,7 +33,7 @@ flowchart LR
   gha -- "build & push" --> ar
   gha -- "image 更新・実行" --> migrate
   gha -- "deploy" --> customer
-  ar -. image .-> customer & migrate
+  ar -. "同じ image（コマンド違い）" .-> customer & migrate
   user -- HTTPS --> customer
   analyst -- HTTPS --> metabase
   customer & migrate -- "Unix socket" --> dbapp

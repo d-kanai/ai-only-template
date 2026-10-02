@@ -17,18 +17,16 @@ flowchart TB
     cfg{"Environment に<br/>GCP_WIF_PROVIDER がある？"}
     skip["スキップして成功扱い"]:::stop
     auth["WIF で github-deployer になる"]:::step
-    b1["runtime イメージを build & push"]:::step
+    b1["runtime イメージ（アプリと migrate で共用）を build & push"]:::step
     v1["test-support が入っていないか検査"]:::step
-    b2["migrate イメージを build & push"]:::step
-    v2["test-support が入っていないか検査"]:::step
-    j1["gcloud run jobs update<br/>job の image を差し替え"]:::step
-    j2["gcloud run jobs execute --wait<br/>= drizzle-kit migrate"]:::gcp
+    j1["gcloud run jobs update<br/>job を同じ image + node migrate/migrate.mjs に"]:::step
+    j2["gcloud run jobs execute --wait<br/>= マイグレーション"]:::gcp
     d1["gcloud run deploy<br/>新しいリビジョン"]:::gcp
     d2["update-traffic --to-latest"]:::gcp
     fail["止まる（どの step の失敗でも同じ）<br/>service は古いまま"]:::stop
 
     cfg -- no --> skip
-    cfg -- yes --> auth --> b1 --> v1 --> b2 --> v2 --> j1 --> j2
+    cfg -- yes --> auth --> b1 --> v1 --> j1 --> j2
     j2 -- 成功 --> d1 --> d2
     j2 -- 失敗 --> fail
   end

@@ -12,7 +12,7 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 
 // WHY 型をスキーマから導出する: 検査する形と型を 1 か所で宣言し、ずれを無くす（画面側も import type でこの型を使う）。
 export type CreateTodoRequest = z.infer<
-  ReturnType<(typeof CreateTodoApi)["createTodoRequestSchema"]>
+  ReturnType<CreateTodoApi["createTodoRequestSchema"]>
 >;
 
 // 同じ形の Response を各 *.api.ts に書く。
@@ -28,7 +28,7 @@ export type CreateTodoResponse = {
 
 // POST /api/todos の Route Handler を持つクラス。コンストラクタで command を受け取り、handle を Route Handler として export する
 //   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・ProblemResponse.wrap で包む・
-//   補助（リクエストのスキーマ・toResponse）を private static メソッドにするは
+//   補助（リクエストのスキーマ・toResponse）を private メソッドにするは
 //   list-todos.api.ts の ListTodosApi のコメント）。
 export class CreateTodoApi {
   constructor(
@@ -39,10 +39,10 @@ export class CreateTodoApi {
     async (request: Request): Promise<Response> => {
       const input = await RequestBody.parse(
         request,
-        CreateTodoApi.createTodoRequestSchema(),
+        this.createTodoRequestSchema(),
       );
       const todo = await this.createTodo.execute(input);
-      const body: CreateTodoResponse = CreateTodoApi.toResponse(todo);
+      const body: CreateTodoResponse = this.toResponse(todo);
       return Response.json(body, { status: 201 });
     },
   );
@@ -55,7 +55,7 @@ export class CreateTodoApi {
   //   ここを通った値も含めて常に完全に検証する（todo.ts の todoPropsSchema。.claude/rules/code/backend.md の presentation）。
   // WHY メソッドにする（スキーマを最上位の定数・static フィールドにしない）: 読み込み時にだけ評価される static な変異になり
   //   mutation testing で数えない（json-body.ts の RequestBody.schema。stryker.config.mjs の ignoreStatic）。呼び出しのたびに作る。
-  private static createTodoRequestSchema() {
+  private createTodoRequestSchema() {
     return RequestBody.schema({
       // 型が違う・無いときのキー（request.field.notString）は json-body.ts の toProblemError が決める（z.string に error は書かない）。
       // trim してからコードポイント数（Array.from）で数える: todo.ts の todoPropsSchema の title と同じ（WHY はそちら）。
@@ -75,7 +75,7 @@ export class CreateTodoApi {
     });
   }
 
-  private static toResponse(todo: Todo): CreateTodoResponse {
+  private toResponse(todo: Todo): CreateTodoResponse {
     return {
       id: todo.id,
       title: todo.title,

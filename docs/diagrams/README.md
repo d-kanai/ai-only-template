@@ -9,7 +9,7 @@
 ![全体の構成](system.png)
 
 ## デプロイの流れ（`deploy.mmd`）
-main への merge で stg、手動実行で prod。migrate ジョブが成功してからサービスを更新する。
+main への merge で stg、手動実行で stg か prod。migrate ジョブが成功してからサービスを更新する。
 
 ![デプロイの流れ](deploy.png)
 

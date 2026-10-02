@@ -10,7 +10,7 @@ description: Drizzle のスキーマ変更とマイグレーション（schema.t
 
 ## 前提
 - Postgres が起動していること: `pnpm db:up`（`compose.yaml`）。接続先は `.env` の `DATABASE_URL`（無ければ `cp .env.example .env`）。
-- コマンドはリポジトリ直下で実行する。`pnpm db:generate` / `pnpm db:migrate` は `pnpm --filter @repo/backend <script>` を呼び、`apps/backend` をカレントディレクトリにして `drizzle-kit ... --config shared/drizzle/drizzle.config.ts` を動かす（`apps/backend` で直接実行しても、リポジトリ直下から `--config apps/backend/shared/drizzle/drizzle.config.ts` で実行しても同じ）。設定の WHY は `apps/backend/shared/drizzle/drizzle.config.ts` のコメント。
+- コマンドはリポジトリ直下で実行する。`pnpm db:generate` は `pnpm --filter @repo/backend db:generate` を呼び、`apps/backend` をカレントディレクトリにして `drizzle-kit generate --config shared/drizzle/drizzle.config.ts` を動かす（`apps/backend` で直接実行しても、リポジトリ直下から `--config apps/backend/shared/drizzle/drizzle.config.ts` で実行しても同じ）。設定の WHY は `apps/backend/shared/drizzle/drizzle.config.ts` のコメント。`pnpm db:migrate` はリポジトリ直下の script で、`apps/backend` には無い（入口 `migrate.ts` を束ねて実行する。Issue #326）。
 
 ## 手順
 1. **テスト（仕様）から**: 新しい列・表を使う Repository のテスト（`*.postgres.test.ts`）を先に書き、失敗することを確かめる。
@@ -23,7 +23,7 @@ description: Drizzle のスキーマ変更とマイグレーション（schema.t
    - 意図と違えば `schema.ts` を直して作り直す。**生成済みの SQL は手で直さない**。WHY: `meta/` のスナップショットとずれ、次の generate の差分が壊れる。
    - SQL に `"public".` が無いこと（表をスキーマで修飾しない）。あると `rule-tests/migration.test.ts` の `no-public-schema-qualifier` が失敗する（WHY は下の「外部キー」）。
    - `--custom` の SQL（下の「外部キー」）を書いたら、別の一時スキーマにデータを入れてから当て、行の中身・外部キーの参照先（`pg_constraint` の `confrelid::regclass` が当てたスキーマの表か）・選んだ削除時の動作（親を消したときに子が消える / 拒否される / `NULL` になる）を確かめる。WHY: テストはファイルごとの別スキーマに当てるので、参照先が public だとテストでは気づけないまま壊れる。
-5. **当てる**: `pnpm db:migrate`（`drizzle-kit migrate`）。まだ当てていない SQL だけを当てる。当てた記録は DB の `drizzle.__drizzle_migrations` 表に残り、何度実行しても同じ結果になる。
+5. **当てる**: `pnpm db:migrate`（入口 `apps/backend/shared/drizzle/migrate.ts` を esbuild で `dist/migrate/` に束ね、drizzle-orm の migrator で当てる。Cloud Run の migrate ジョブが runtime イメージで実行するのと同じファイル。Issue #326）。まだ当てていない SQL だけを当てる。当てた記録は DB の `drizzle.__drizzle_migrations` 表に残り、何度実行しても同じ結果になる。
 6. **テストを通す**: `pnpm test`。実 Postgres のテストは `TestDatabase.create()` がテストファイルごとの別スキーマにマイグレーションを当てるので、テスト用に migrate する必要はない。E2E（`pnpm test:e2e`）は `public` の表を使うので手順 5 が要る。
 7. **コミット**: `schema.ts`・テスト・`apps/backend/shared/drizzle/migrations/`（SQL と `meta/` をまとめて）を同じコミットに入れる。
 - データの移行（既存の行を足す・直す）の仕組みは今は無い（Issue #247 で backfill を外した。本番環境が無く移すデータが無い）。要るようになったら方法を決め直す（`.claude/rules/code/backend.md` の「永続化」）。
@@ -46,4 +46,4 @@ description: Drizzle のスキーマ変更とマイグレーション（schema.t
 
 ## 困ったとき
 - `relation "todos" does not exist`: migrate していない。手順 5。
-- 必須の環境変数が欠けていると `drizzle.config.ts` の読み込み（`env.ts`）で名前を挙げて止まる。`.env` を `.env.example` から作る（`.claude/rules/tooling/env.md`）。
+- 必須の環境変数が欠けていると `pnpm db:migrate`（入口 `migrate.ts` のアプリのプールが読む `env.ts`）が名前を挙げて止まる。`pnpm db:generate`（drizzle-kit）は DB に接続せず、`.env` も読まない（Issue #326）。`.env` を `.env.example` から作る（`.claude/rules/tooling/env.md`）。
