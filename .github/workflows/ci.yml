@@ -22,6 +22,12 @@ permissions:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    # timeout-minutes: job 全体の上限（分）。超えると GitHub が job を止めて失敗にする。書かないと既定の 360 分まで止まらない。
+    # WHY 30 分: 直近 100 回の実行（2026-10-02、`gh run list --workflow ci.yml --limit 100`）の成功 93 回の所要時間は
+    #   最短 101 秒・中央値 145 秒・最長 207 秒（約 3.5 分）。テストや E2E が増えても余裕のある上限にし、テストの無限ループや
+    #   Postgres・サーバの待ちの固まりで Actions の分数を食い続けないようにする（Issue #351。.claude/rules/tooling/github-actions.md）。
+    #   rule-tests/github-actions.test.ts の job-timeout がすべての job にあることを検査する。
+    timeout-minutes: 30
     env:
       # next build が Vercel に匿名テレメトリを送るのを止める（CI から外部に送る必要がない）。
       NEXT_TELEMETRY_DISABLED: "1"
@@ -31,7 +37,7 @@ jobs:
       # WHY: 下の作業ログの検査（check-work-logs-diff.sh）が `origin/<base>...HEAD` の三点 diff で PR の変更だけを見るため、
       #   base ブランチ（origin/main）と、HEAD との分岐点（merge-base）までの履歴が要る。浅い履歴では分岐点が求まらず失敗する。
       #   rule-tests/work-logs-check.test.ts がこの値を検査する。
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
@@ -50,9 +56,9 @@ jobs:
 
       # pnpm の版は package.json の packageManager から取る（version を省略すると pnpm/action-setup が packageManager を読む）。
       # setup-node の cache: pnpm より先に pnpm を入れておく必要がある。
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
