@@ -1,7 +1,7 @@
 import type {
   ErrorKey,
   ErrorKeyParams,
-} from "@repo/backend/shared/presentation/problem";
+} from "@repo/backend/shared/http/problem";
 import { describe, expect, expectTypeOf, test } from "vitest";
 import { ApiError, ApiErrorMessage } from "@/features/todo/api/api-error";
 import { commonMessages } from "@/shared/i18n/common.messages";
@@ -44,7 +44,7 @@ describe("ApiError", () => {
     expect(error.params).toEqual({});
   });
 
-  // errors は Problem Details の拡張メンバー（項目ごとの誤り。apps/backend/shared/presentation/problem.ts の ProblemError）。
+  // errors は Problem Details の拡張メンバー（項目ごとの誤り。apps/backend/shared/http/problem.ts の ProblemError）。
   test("errors を省くと、項目ごとの誤りは空の配列になる", () => {
     // given: 前提なし
     // when

@@ -1,12 +1,12 @@
 import type { ErrorKey, ErrorKeyParams, ParamlessErrorKey } from "./error-key";
 
 // zod のスキーマ・refine の引数（{ error } / { error, params }）を、ErrorKey（と params）から作る（Issue #116）。
-// WHY error にキーを入れる: zod は error の文字列を issue の message にする。domain の DomainValidation.validated（shared/domain/validate.ts。Entity の todo.ts が呼ぶ）は
-//   それを DomainError の key に、presentation の toProblemError（shared/presentation/json-body.ts）は Problem の errors の key に戻す。
+// WHY error にキーを入れる: zod は error の文字列を issue の message にする。domain の DomainValidation.validated（shared/error/validate.ts。Entity の todo.ts が呼ぶ）は
+//   それを DomainError の key に、presentation の toProblemError（shared/http/json-body.ts）は Problem の errors の key に戻す。
 //   domain は自然言語の文言を持たない（画面がキーを辞書で翻訳する）。
-// WHY shared/domain に置く（Issue #144 で todo.ts から移した）: presentation のリクエストのスキーマも、domain と同じ規則
-//   （必須・長さ）を同じキーで重ねる（.claude/rules/code/backend.md の presentation）。feature の domain は presentation から値で
-//   import できない（定数を除く。規則 presentation）が、shared の domain は値で import できる。
+// WHY shared に置く（Issue #144 で todo.ts から shared/domain に移し、Issue #310 で shared/error に移した）: presentation の
+//   リクエストのスキーマも、domain と同じ規則（必須・長さ）を同じキーで重ねる（.claude/rules/code/backend.md の presentation）。
+//   feature の domain は presentation から値で import できない（定数を除く。規則 presentation）が、shared はどの層からも値で import できる。
 // WHY このクラスを通す（{ error: "todo.title.empty" } と直接書かない）: zod の error は任意の文字列を受け付けるので、
 //   キーの打ち間違いを型で止めるため。
 // WHY 2 つに分ける（KeyedIssue.of は params の無いキーだけ、KeyedIssue.refine は params の要るキーだけ）: 型の検査（z.string など）の

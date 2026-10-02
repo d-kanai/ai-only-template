@@ -67,7 +67,7 @@ FROM deps AS build
 RUN cp .env.example .env && pnpm build && rm .env
 
 # ---- migrate: Cloud Run のジョブで pnpm db:migrate（drizzle-kit migrate）を実行するイメージ ----
-# WHY deps から作るか: drizzle-kit は devDependencies で、drizzle.config.ts・マイグレーションの SQL（apps/backend/shared/drizzle/）と
+# WHY deps から作るか: drizzle-kit は devDependencies で、drizzle.config.ts・マイグレーションの SQL（apps/backend/shared/drizzle/migrations/）と
 #   @repo/shared/env のソースも要る。standalone には入らない。
 # 環境変数（DATABASE_* など）はジョブから渡す。.env は無い（.dockerignore で外している）ので、足りなければ drizzle.config.ts の
 #   読み込み（@repo/shared/env）が名前を挙げて失敗する。

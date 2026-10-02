@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { getTableConfig, type IndexedColumn } from "drizzle-orm/pg-core";
 import { describe, expect, test } from "vitest";
-import { changeLogs } from "./schema";
+import { changeLogs } from "./change-log.schema";
 
 // 表の宣言のうち、実行時のクエリでは評価されない部分（index などの追加設定のコールバック）の仕様。
 // WHY テストする: 追加設定のコールバックは drizzle-kit（pnpm db:generate）と getTableConfig だけが評価し、Repository の

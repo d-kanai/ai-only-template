@@ -2,15 +2,15 @@
 import { existsSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
-import type { Database } from "../infra/database";
+import type { Database } from "../drizzle/database";
 
 // 各 feature の *.api.ts は、モジュールの評価時に `new <Api>(new <Command>(new Postgres<X>Repository(AppDatabase.get().db)))` で
 // Route Handler を 1 回だけ組み立てる（組み立ては api ファイルごと。.claude/rules/code/backend.md の「presentation」）。
 // このテストは「全 feature の api ファイルをすべて読み込んでも、Repository に渡る db は 1 つ（= プールは Next のサーバプロセスで 1 つ）」を固定する。
 // WHY: api ファイルごとに AppDatabase.get() を呼ぶ設計は、AppDatabase.get が同じものを返すことに依存している。呼ぶたびに
 //   新しいプールを作る実装に変わると、api ファイルの数だけプールができて max_connections を食いつぶす（Issue #132）。
-//   モジュールの読み直し（HMR）で同じプールが返ることは shared/infra/database.test.ts が固定する。
-// WHY shared に置く: 検査するのは特定の feature ではなく、feature をまたぐプール（shared/infra/database.ts）の使われ方。
+//   モジュールの読み直し（HMR）で同じプールが返ることは shared/drizzle/database.test.ts が固定する。
+// WHY shared に置く: 検査するのは特定の feature ではなく、feature をまたぐプール（shared/drizzle/database.ts）の使われ方。
 //   todo の下に置くと、feature を足したときにその feature の api ファイルが対象から漏れる（Issue #180）。
 
 // apps/backend/features/。feature・api ファイル・Repository の数を固定せずに列挙するのは、足したときにこのテストを直さなくてよいようにするため。
@@ -87,7 +87,7 @@ beforeAll(async () => {
 // WHY afterAll: 読み込みを beforeAll で行うので、モックの解除とプールの後始末もファイルの最後に 1 回行う。
 afterAll(async () => {
   for (const file of repositoryFiles) vi.doUnmock(file);
-  const { AppDatabase } = await import("../infra/database");
+  const { AppDatabase } = await import("../drizzle/database");
   await AppDatabase.close();
   vi.resetModules();
 });
@@ -96,7 +96,7 @@ test("全 feature の api ファイルをすべて読み込んでも、Repositor
   // given: beforeAll で全 feature の api ファイルを読み込み、Repository が受け取った db を記録してある
   // when
   // beforeAll の resetModules 後に読み込まれた database モジュール（api ファイルが使ったもの）を取る。
-  const { AppDatabase } = await import("../infra/database");
+  const { AppDatabase } = await import("../drizzle/database");
 
   // then
   // 列挙が空だと Repository も 0 個で、下の検証が意味を持たないまま通る。

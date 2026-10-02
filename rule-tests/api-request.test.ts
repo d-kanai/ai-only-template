@@ -362,7 +362,7 @@ describeFeature(feature, ({ Scenario }) => {
             partialUpdate,
           "apps/backend/features/a/internal/presentation/helper.ts":
             partialUpdate,
-          "apps/backend/shared/presentation/x.api.ts": partialUpdate,
+          "apps/backend/shared/http/x.api.ts": partialUpdate,
           // Issue #208: internal/ を挟まない旧の置き場所（置き場所の規則 backend-placement が違反にする）。
           "apps/backend/features/a/presentation/old-a.api.ts": partialUpdate,
           "apps/frontend_customer/features/a/presentation/x.api.ts":

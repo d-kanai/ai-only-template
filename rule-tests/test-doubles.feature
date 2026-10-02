@@ -9,4 +9,4 @@ Feature: テストダブル
     * apps/ のテストと vitest.global-setup.ts を対象にし、違反を「規則: パス:行」で返す
     * apps/ も vitest.global-setup.ts も無ければ対象は 0 件（本番の検査は 0 件を失敗にする）
   Scenario: テストダブル（実ファイル）
-    * backend のテストの vi.mock は @repo/shared/now だけ、test-support/database の import は infra のテスト・test-support のテスト（直下とテストデータビルダー）・API ジャーニーテスト・API 仕様テスト・global-setup だけ
+    * backend のテストの vi.mock は @repo/shared/now だけ、test-support/database の import は infra と shared/drizzle・shared/change-log のテスト・test-support のテスト（直下とテストデータビルダー）・API ジャーニーテスト・API 仕様テスト・global-setup だけ

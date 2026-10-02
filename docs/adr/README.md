@@ -57,7 +57,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-28 | 画面側は feature 単位・screen 単位で同居させ、API 側は feature 単位の DDD 4 層にし、app/ はルーティングだけにする | 採用 | [20260928-feature-based-directory-and-ddd-backend.md](architecture/20260928-feature-based-directory-and-ddd-backend.md) |
 | 2026-09-28 | ディレクトリを pnpm workspace の apps/frontend（Next）と apps/backend（@repo/backend）に分け、プロセスは Next 1 つのままにする | 採用 | [20260928-monorepo-apps-frontend-backend.md](architecture/20260928-monorepo-apps-frontend-backend.md) |
 | 2026-09-29 | frontend と backend で共通の基盤（env と logger）は、workspace パッケージ apps/shared（@repo/shared）に置く | 採用 | [20260929-apps-shared-package.md](architecture/20260929-apps-shared-package.md) |
-| 2026-09-29 | backend も最初の階層を features/ と shared/ にし、Drizzle の設定とマイグレーションは shared/drizzle/ に置く | 採用 | [20260929-backend-features-and-shared-directories.md](architecture/20260929-backend-features-and-shared-directories.md) |
+| 2026-09-29 | backend も最初の階層を features/ と shared/ にし、Drizzle の設定とマイグレーションは shared/drizzle/ に置く | 置き換え（→ architecture/20261002-backend-shared-colocated-by-meaning.md） | [20260929-backend-features-and-shared-directories.md](architecture/20260929-backend-features-and-shared-directories.md) |
 | 2026-09-29 | DI コンテナとトランザクションの runner を廃止し、各クラスはコンストラクタ injection にして api ファイルで組み立てる | 採用 | [20260929-constructor-injection-without-container.md](architecture/20260929-constructor-injection-without-container.md) |
 | 2026-09-29 | E2E は apps/e2e の workspace パッケージ @repo/e2e にする | 採用 | [20260929-e2e-as-workspace-package.md](architecture/20260929-e2e-as-workspace-package.md) |
 | 2026-09-29 | API のエラー応答は RFC 9457（Problem Details）の形にし、key と params を拡張メンバーに、開発者向けの英語を detail に入れる | 採用 | [20260929-error-response-rfc9457.md](architecture/20260929-error-response-rfc9457.md) |
@@ -83,6 +83,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-10-02 | apps/backend の本番コードはクラスを基本にし、関数を export せず、補助の関数もクラスのメソッドにする | 採用 | [20261002-class-based-backend.md](architecture/20261002-class-based-backend.md) |
 | 2026-10-02 | クラスベースの対象を apps/shared とテストの補助（test-support・e2e の補助・spec の support.ts）に広げる | 採用 | [20261002-class-based-shared-and-test-support.md](architecture/20261002-class-based-shared-and-test-support.md) |
 | 2026-10-02 | クラスベースの対象を frontend の React 以外のモジュールに広げる | 採用 | [20261002-class-based-frontend-modules.md](architecture/20261002-class-based-frontend-modules.md) |
+| 2026-10-02 | backend/shared は層ではなく意味の単位（error / transaction / http / drizzle / change-log）で置き、feature からの参照を縛らない | 採用 | [20261002-backend-shared-colocated-by-meaning.md](architecture/20261002-backend-shared-colocated-by-meaning.md) |
 
 ### tech-stack/
 言語・ツール・ライブラリの選定

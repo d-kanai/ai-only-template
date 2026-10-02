@@ -686,7 +686,7 @@ describeFeature(feature, ({ Scenario }) => {
           "apps/backend/features/x/internal/domain/x.ts": partialUpdate,
           "apps/backend/features/x/internal/presentation/update-x.api.ts":
             partialUpdate,
-          "apps/backend/shared/application/y.command.ts": partialUpdate,
+          "apps/backend/shared/transaction/y.command.ts": partialUpdate,
           // Issue #208: internal/ を挟まない旧の置き場所（置き場所の規則 backend-placement が違反にする）。
           "apps/backend/features/x/application/old.command.ts": partialUpdate,
           "apps/frontend_customer/features/x/application/y.command.ts":

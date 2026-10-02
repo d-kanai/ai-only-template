@@ -13,7 +13,7 @@
       "!**/.next",
       "!dist",
       "!build",
-      "!apps/backend/shared/drizzle/meta"
+      "!apps/backend/shared/drizzle/migrations/meta"
     ]
   },
   "formatter": {

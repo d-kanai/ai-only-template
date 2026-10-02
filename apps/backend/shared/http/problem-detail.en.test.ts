@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
-import type { ErrorKey } from "../domain/error-key";
+import type { ErrorKey } from "../error/error-key";
 import { EnglishProblemDetail } from "./problem-detail.en";
 
 // Problem Details の detail（開発者向けの英語。RFC 9457 の「この発生に固有の説明」）。画面には出さない（画面は key と params を

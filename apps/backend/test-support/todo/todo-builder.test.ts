@@ -5,7 +5,7 @@ import {
   todoStatusChanges,
   todos,
 } from "../../features/todo/internal/infra/schema";
-import { changeLogs } from "../../shared/infra/schema";
+import { changeLogs } from "../../shared/change-log/change-log.schema";
 import { TestDatabase } from "../database";
 import { TodoBuilder } from "./todo-builder";
 
