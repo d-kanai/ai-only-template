@@ -53,10 +53,10 @@ Feature: 指示ファイルの構成と形式
     * 4 つの分類の直下のファイルと、分類の外のファイルは違反にしない（must pass。直下のファイルは adr-only が見る）
     * 4 つ以外の分類（大文字・前方一致・旧案の名前を含む）と、分類の下のディレクトリを 1 項目ずつ違反にする（must reject）
     * 形式の検査（adr-name ほか）の対象は、4 つの分類の直下のファイルだけ
-  Scenario: docs/ には adr/ と work-logs/ だけ、docs/adr/ の直下には README.md と分類だけ（adr-only）
-    * docs/adr/ の下のディレクトリのファイル・docs/adr/README.md・docs/work-logs/ の下のファイル・docs/ の外のファイルだけなら違反にしない（must pass）
+  Scenario: docs/ には adr/・work-logs/・diagrams/ だけ、docs/adr/ の直下には README.md と分類だけ（adr-only）
+    * docs/adr/ の下のディレクトリのファイル・docs/adr/README.md・docs/work-logs/ と docs/diagrams/ の下のファイル・docs/ の外のファイルだけなら違反にしない（must pass）
     * docs/adr/ の直下の README.md 以外のファイル（ADR・大文字違いの readme・分類名のファイルを含む）を違反にする（must reject）
-    * docs/ の直下のファイル・ディレクトリ（adr / work-logs の前方一致と、その名前のファイルを含む）を 1 項目ずつ違反にする（must reject）
+    * docs/ の直下のファイル・ディレクトリ（adr / work-logs / diagrams の前方一致と、その名前のファイルを含む）を 1 項目ずつ違反にする（must reject）
   Scenario: ルール検査テストの一覧（rule-tests-index）
     * rule-tests の直下の .feature の名前をルール検査テストとして読み、入れ子とほかの拡張子は読まない
     * CLAUDE.md の本数と名前、.claude/rules/quality/testing.md の rule-tests/<名前>.test.ts がそろっていれば違反にしない（must pass）
@@ -68,4 +68,4 @@ Feature: 指示ファイルの構成と形式
   Scenario: リポジトリの指示ファイル
     * 列挙が空でない（対象 0 件で緑にならない）
     * CLAUDE.md・.claude/rules・スキル・エージェント・ADR に違反が無く、旧 rules/ と .claude/general も残っていない
-    * docs/ の直下には adr/ と work-logs/ しか無い
+    * docs/ の直下には adr/・work-logs/・diagrams/ しか無い

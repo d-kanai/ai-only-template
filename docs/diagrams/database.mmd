@@ -1,0 +1,16 @@
+%% Cloud SQL の中身。元: infra/modules/app/sql.tf（作り直しはスキル infra-diagram）
+flowchart TB
+  classDef data fill:#e6f4ea,stroke:#1e8e3e,color:#0d3b1e
+  classDef user fill:#fef7e0,stroke:#e3a008,color:#4a3500
+  subgraph INST["Cloud SQL インスタンス app-db（db-f1-micro・ZONAL・PostgreSQL）"]
+    dbapp[("database app<br/>アプリのテーブル")]:::data
+    dbmb[("database metabase<br/>Metabase の設定・質問")]:::data
+    uapp["user app（パスワード）"]:::user
+    umb["user metabase（パスワード）"]:::user
+    uiam["IAM ユーザー（MCP 用）"]:::user
+    uro["読み取り専用ユーザー（psql で手作業）"]:::user
+  end
+  uapp --> dbapp
+  umb --> dbmb
+  uiam -.-> dbapp
+  uro -.-> dbapp
