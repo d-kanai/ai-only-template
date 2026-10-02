@@ -169,7 +169,12 @@ describe("版の判定（isPinnedVersion）", () => {
   it.each([["1.2.3"], ["0.0.1"], ["10.20.30"]])(
     "完全固定の %s は許可する",
     (spec) => {
-      expect(isPinnedVersion(spec)).toBe(true);
+      // given: it.each の引数
+      // when
+      const result = isPinnedVersion(spec);
+
+      // then
+      expect(result).toBe(true);
     },
   );
 
@@ -203,13 +208,23 @@ describe("版の判定（isPinnedVersion）", () => {
     ["1.2.3-beta.1", "プレリリース（安定版の前提から外れる）"],
     ["1.2.3+build", "ビルドメタ（版の比較で無視される）"],
   ])("%s（%s）は拒否する", (spec) => {
-    expect(isPinnedVersion(spec)).toBe(false);
+    // given: it.each の入力
+    // when
+    const result = isPinnedVersion(spec);
+
+    // then
+    expect(result).toBe(false);
   });
 });
 
 describe("許可する書き方の判定（isAllowedVersion）", () => {
   it.each([["1.2.3"], ["0.0.1"], ["workspace:*"]])("%s は許可する", (spec) => {
-    expect(isAllowedVersion(spec)).toBe(true);
+    // given: it.each の引数
+    // when
+    const result = isAllowedVersion(spec);
+
+    // then
+    expect(result).toBe(true);
   });
 
   it.each([
@@ -223,52 +238,78 @@ describe("許可する書き方の判定（isAllowedVersion）", () => {
     ["^1.2.3", "キャレット（完全固定でもない）"],
     ["*", "任意の版"],
   ])("%s（%s）は拒否する", (spec) => {
-    expect(isAllowedVersion(spec)).toBe(false);
+    // given: it.each の入力
+    // when
+    const result = isAllowedVersion(spec);
+
+    // then
+    expect(result).toBe(false);
   });
 });
 
 describe("範囲指定の検出（findNonPinnedVersions）", () => {
   it("dependencies の範囲指定を検出する", () => {
-    expect(
-      findNonPinnedVersions({
-        dependencies: { a: "1.0.0", b: "^1.0.0" },
-        devDependencies: { c: "1.0.0" },
-      }),
-    ).toEqual([{ field: "dependencies", name: "b", spec: "^1.0.0" }]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const result = findNonPinnedVersions({
+      dependencies: { a: "1.0.0", b: "^1.0.0" },
+      devDependencies: { c: "1.0.0" },
+    });
+
+    // then
+    expect(result).toEqual([
+      { field: "dependencies", name: "b", spec: "^1.0.0" },
+    ]);
   });
 
   it("devDependencies の範囲指定を検出する", () => {
-    expect(
-      findNonPinnedVersions({
-        dependencies: { a: "1.0.0" },
-        devDependencies: { c: "1.0.0", d: "~1.0.0" },
-      }),
-    ).toEqual([{ field: "devDependencies", name: "d", spec: "~1.0.0" }]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const result = findNonPinnedVersions({
+      dependencies: { a: "1.0.0" },
+      devDependencies: { c: "1.0.0", d: "~1.0.0" },
+    });
+
+    // then
+    expect(result).toEqual([
+      { field: "devDependencies", name: "d", spec: "~1.0.0" },
+    ]);
   });
 
   it("すべて完全固定なら何も検出しない", () => {
-    expect(
-      findNonPinnedVersions({
-        dependencies: { a: "1.0.0" },
-        devDependencies: { c: "2.3.4" },
-      }),
-    ).toEqual([]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const result = findNonPinnedVersions({
+      dependencies: { a: "1.0.0" },
+      devDependencies: { c: "2.3.4" },
+    });
+
+    // then
+    expect(result).toEqual([]);
   });
 
   it("workspace:* は検出せず、それ以外の workspace: は検出する", () => {
-    expect(
-      findNonPinnedVersions({
-        dependencies: { "@repo/a": "workspace:*", "@repo/b": "workspace:^" },
-        devDependencies: { "@repo/c": "workspace:1.0.0" },
-      }),
-    ).toEqual([
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const result = findNonPinnedVersions({
+      dependencies: { "@repo/a": "workspace:*", "@repo/b": "workspace:^" },
+      devDependencies: { "@repo/c": "workspace:1.0.0" },
+    });
+
+    // then
+    expect(result).toEqual([
       { field: "dependencies", name: "@repo/b", spec: "workspace:^" },
       { field: "devDependencies", name: "@repo/c", spec: "workspace:1.0.0" },
     ]);
   });
 
   it("dependencies / devDependencies が無い package.json は依存 0 件として扱う", () => {
-    expect(listDependencies({})).toEqual([]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const result = listDependencies({});
+
+    // then
+    expect(result).toEqual([]);
   });
 });
 
@@ -280,44 +321,56 @@ describe("workspace の中での版のずれの検出（findInconsistentVersions
   });
 
   it("同じ名前の依存が、すべての package.json で同じ版なら何も検出しない", () => {
-    expect(
-      findInconsistentVersions([
-        root({ devDependencies: { pg: "8.23.0", "@types/pg": "8.23.1" } }),
-        backend({
-          dependencies: { pg: "8.23.0" },
-          devDependencies: { "@types/pg": "8.23.1" },
-        }),
-      ]),
-    ).toEqual([]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const result = findInconsistentVersions([
+      root({ devDependencies: { pg: "8.23.0", "@types/pg": "8.23.1" } }),
+      backend({
+        dependencies: { pg: "8.23.0" },
+        devDependencies: { "@types/pg": "8.23.1" },
+      }),
+    ]);
+
+    // then
+    expect(result).toEqual([]);
   });
 
   it("名前が違えば版が違っても検出しない（前方一致だけが同じ別パッケージも別名）", () => {
-    expect(
-      findInconsistentVersions([
-        root({ devDependencies: { pg: "8.23.0" } }),
-        backend({
-          dependencies: { "pg-format": "1.0.4", "@types/pg": "8.23.1" },
-        }),
-      ]),
-    ).toEqual([]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const result = findInconsistentVersions([
+      root({ devDependencies: { pg: "8.23.0" } }),
+      backend({
+        dependencies: { "pg-format": "1.0.4", "@types/pg": "8.23.1" },
+      }),
+    ]);
+
+    // then
+    expect(result).toEqual([]);
   });
 
   it("片方の package.json にだけある依存は検出しない", () => {
-    expect(
-      findInconsistentVersions([
-        root({ devDependencies: { vitest: "5.0.1" } }),
-        backend({ dependencies: { "drizzle-orm": "0.45.3" } }),
-      ]),
-    ).toEqual([]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const result = findInconsistentVersions([
+      root({ devDependencies: { vitest: "5.0.1" } }),
+      backend({ dependencies: { "drizzle-orm": "0.45.3" } }),
+    ]);
+
+    // then
+    expect(result).toEqual([]);
   });
 
   it("リポジトリ直下と app で版が違う依存を、出てくる場所ごとに検出する", () => {
-    expect(
-      findInconsistentVersions([
-        root({ devDependencies: { pg: "8.23.0", typescript: "7.0.2" } }),
-        backend({ dependencies: { pg: "8.22.0" } }),
-      ]),
-    ).toEqual([
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const result = findInconsistentVersions([
+      root({ devDependencies: { pg: "8.23.0", typescript: "7.0.2" } }),
+      backend({ dependencies: { pg: "8.22.0" } }),
+    ]);
+
+    // then
+    expect(result).toEqual([
       {
         name: "pg",
         occurrences: [
@@ -333,14 +386,17 @@ describe("workspace の中での版のずれの検出（findInconsistentVersions
   });
 
   it("同じ package.json の dependencies と devDependencies で版が違う依存も検出する", () => {
-    expect(
-      findInconsistentVersions([
-        backend({
-          dependencies: { pg: "8.23.0" },
-          devDependencies: { pg: "8.23.1" },
-        }),
-      ]),
-    ).toEqual([
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const result = findInconsistentVersions([
+      backend({
+        dependencies: { pg: "8.23.0" },
+        devDependencies: { pg: "8.23.1" },
+      }),
+    ]);
+
+    // then
+    expect(result).toEqual([
       {
         name: "pg",
         occurrences: [
@@ -375,6 +431,7 @@ describe("package.json の実ファイル", () => {
   // 読み込み → 列挙 → 判定を、本番と同じ readManifest で実ファイルから通す（判定だけ正しくても、読み込みや列挙が
   //   漏れれば違反は見逃されるため。.claude/rules/testing.md の「ルール検査テスト」）。
   it("範囲指定を含む package.json からは、違反の依存をすべて検出する", () => {
+    // given
     const file = join(dir, "package.json");
     writeFileSync(
       file,
@@ -387,7 +444,11 @@ describe("package.json の実ファイル", () => {
       }),
     );
 
-    expect(findNonPinnedVersions(readManifest(file))).toEqual([
+    // when
+    const violations = findNonPinnedVersions(readManifest(file));
+
+    // then
+    expect(violations).toEqual([
       { field: "dependencies", name: "caret", spec: "^1.0.0" },
       { field: "dependencies", name: "tag", spec: "latest" },
       { field: "devDependencies", name: "tilde", spec: "~2.0.0" },
@@ -398,6 +459,7 @@ describe("package.json の実ファイル", () => {
   // workspace の package.json の列挙を、一時ディレクトリの架空のツリーで固定する（列挙が漏れると、そのパッケージの
   //   範囲指定は検査されないまま通るため）。
   it("pnpm-workspace.yaml の packages に当たり package.json を持つディレクトリを、リポジトリ直下の package.json と合わせて列挙する", () => {
+    // given
     const root = join(dir, "workspace");
     const files: Record<string, string> = {
       "package.json": "{}",
@@ -425,7 +487,11 @@ describe("package.json の実ファイル", () => {
       writeFileSync(join(root, path), content);
     }
 
-    expect(listWorkspaceManifests(root)).toEqual([
+    // when
+    const listed = listWorkspaceManifests(root);
+
+    // then
+    expect(listed).toEqual([
       "package.json",
       "apps/a/package.json",
       "apps/b/package.json",
@@ -434,6 +500,7 @@ describe("package.json の実ファイル", () => {
   });
 
   it("pnpm-workspace.yaml の packages が <ディレクトリ>/* 以外の形なら、読み落とさずに例外にする", () => {
+    // given
     const root = join(dir, "unsupported");
     mkdirSync(root, { recursive: true });
     writeFileSync(
@@ -441,7 +508,11 @@ describe("package.json の実ファイル", () => {
       "packages:\n  - apps/**\n",
     );
 
-    expect(() => listWorkspaceManifests(root)).toThrow(
+    // when
+    const action = () => listWorkspaceManifests(root);
+
+    // then
+    expect(action).toThrow(
       new Error(
         'pnpm-workspace.yaml の packages の "apps/**" は読めない形（"<ディレクトリ>/*" だけを扱う）',
       ),
@@ -457,7 +528,12 @@ describe("package.json の実ファイル", () => {
   // WHY: 列挙が漏れる（pnpm-workspace.yaml の読み違い・パターンの書き換え）と、そのパッケージの範囲指定は検査されない。
   //   今の workspace のパッケージ（リポジトリ直下・apps/backend・apps/e2e・apps/frontend_customer・apps/shared）がすべて入っていることを確かめる。
   it("リポジトリ直下と apps/* の package.json をすべて列挙できる", () => {
-    expect(manifestPaths).toEqual(
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const result = manifestPaths;
+
+    // then
+    expect(result).toEqual(
       expect.arrayContaining([
         "package.json",
         "apps/backend/package.json",
@@ -473,11 +549,14 @@ describe("package.json の実ファイル", () => {
   it.each(DEPENDENCY_FIELDS)(
     "workspace の package.json の %s から 1 件以上の依存を列挙できる",
     (field) => {
-      expect(
-        manifests
-          .flatMap(({ manifest }) => listDependencies(manifest))
-          .filter((dependency) => dependency.field === field).length,
-      ).toBeGreaterThan(0);
+      // given: it.each の引数
+      // when
+      const result = manifests
+        .flatMap(({ manifest }) => listDependencies(manifest))
+        .filter((dependency) => dependency.field === field).length;
+
+      // then
+      expect(result).toBeGreaterThan(0);
     },
   );
 
@@ -485,29 +564,38 @@ describe("package.json の実ファイル", () => {
   //   片方だけ版を上げたときに、同じ workspace に同じパッケージの 2 つの版が入り、どちらのコードがどちらの版で動くかが
   //   package.json を見ても分からなくなる。版を上げるときに両方を上げ忘れないよう、機械的に止める（.claude/rules/dependencies.md）。
   it("workspace の package.json をまたいで、同じ名前の依存は同じ版で書かれている", () => {
-    expect(findInconsistentVersions(manifests)).toEqual([]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const result = findInconsistentVersions(manifests);
+
+    // then
+    expect(result).toEqual([]);
   });
 
   // WHY: 上の検査は 2 か所以上に出てくる依存が無いと何も比べない。今のリポジトリで比べる対象（pg）が列挙できていることを確かめる。
   it("2 つ以上の package.json に出てくる依存（pg）を、比べる対象として列挙できる", () => {
-    expect(
-      manifests.filter(({ manifest }) =>
-        listDependencies(manifest).some(
-          (dependency) => dependency.name === "pg",
-        ),
-      ).length,
-    ).toBeGreaterThanOrEqual(2);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const result = manifests.filter(({ manifest }) =>
+      listDependencies(manifest).some((dependency) => dependency.name === "pg"),
+    ).length;
+
+    // then
+    expect(result).toBeGreaterThanOrEqual(2);
   });
 
   it("workspace のすべての package.json の dependencies / devDependencies は完全固定（x.y.z）か workspace:* で書かれている", () => {
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const result = manifests.flatMap(({ path, manifest }) =>
+      findNonPinnedVersions(manifest).map((dependency) => ({
+        path,
+        ...dependency,
+      })),
+    );
+
+    // then
     // 失敗時にどの package.json のどのパッケージがどの値かが出力に出るよう、条件を満たさない依存を集めて空配列と比較する。
-    expect(
-      manifests.flatMap(({ path, manifest }) =>
-        findNonPinnedVersions(manifest).map((dependency) => ({
-          path,
-          ...dependency,
-        })),
-      ),
-    ).toEqual([]);
+    expect(result).toEqual([]);
   });
 });

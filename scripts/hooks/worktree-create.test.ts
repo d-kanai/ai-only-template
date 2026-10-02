@@ -146,8 +146,11 @@ afterEach(() => {
 
 describe("worktree-create.sh（must pass: 作成）", () => {
   it("<メイン>/.claude/worktrees/<name> に <name> ブランチの worktree を作り、その絶対パスだけを stdout に出す", () => {
+    // given: 前提なし（beforeEach で git リポジトリと偽の docker / pnpm がある）
+    // when
     const result = runHook({ name: "agent-a3f2", cwd: repo });
 
+    // then
     expect(result.status).toBe(0);
     expect(result.stdout).toBe(`${worktreePath("agent-a3f2")}\n`);
     expect(git(["worktree", "list", "--porcelain"])).toContain(
@@ -162,8 +165,9 @@ describe("worktree-create.sh（must pass: 作成）", () => {
   });
 
   it("worktree の .env は、worktree の .env.example から worktree-env.sh で導いた内容になる（DB 名と E2E_PORT が worktree 用）", () => {
+    // given: 前提なし（beforeEach で git リポジトリと偽の docker / pnpm がある）
+    // when
     runHook({ name: "agent-a3f2", cwd: repo });
-
     const dotenv = readFileSync(
       join(worktreePath("agent-a3f2"), ".env"),
       "utf8",
@@ -177,6 +181,8 @@ describe("worktree-create.sh（must pass: 作成）", () => {
       ],
       { encoding: "utf8" },
     ).stdout;
+
+    // then
     expect(dotenv).toBe(expected);
     expect(dotenv).toContain(
       "DATABASE_URL=postgresql://app:app@localhost:5432/app_wt_agent_a3f2\n",
@@ -185,9 +191,13 @@ describe("worktree-create.sh（must pass: 作成）", () => {
   });
 
   it("孤立 DB の列挙 → CI=true で install → DB の存在確認 → create database → .env の DB で migrate の順に呼ぶ（docker はメインで実行）", () => {
+    // given
+    const wt = worktreePath("agent-a3f2");
+
+    // when
     runHook({ name: "agent-a3f2", cwd: repo });
 
-    const wt = worktreePath("agent-a3f2");
+    // then
     expect(calls()).toEqual([
       `${repo} ${PSQL} ${LIST_SQL}`,
       `${wt} CI=true env_db=none pnpm install --frozen-lockfile`,
@@ -198,18 +208,24 @@ describe("worktree-create.sh（must pass: 作成）", () => {
   });
 
   it("DB が既にあれば create database は呼ばず、migrate だけを行う", () => {
+    // given: 前提なし（beforeEach で git リポジトリと偽の docker / pnpm がある）
+    // when
     runHook({ name: "agent-a3f2", cwd: repo }, { FAKE_DB_EXISTS: "1" });
+    const recorded = calls();
 
-    expect(calls().filter((c) => c.includes("create database"))).toEqual([]);
-    expect(calls().filter((c) => c.endsWith("pnpm db:migrate"))).toHaveLength(
+    // then
+    expect(recorded.filter((c) => c.includes("create database"))).toEqual([]);
+    expect(recorded.filter((c) => c.endsWith("pnpm db:migrate"))).toHaveLength(
       1,
     );
   });
 
   it("対応する worktree が無い app_wt_ の DB だけを drop し、ある worktree・作成中の worktree・形の違う名前は消さない", () => {
+    // given
     runHook({ name: "keep-me", cwd: repo });
     rmSync(callLog);
 
+    // when
     runHook(
       { name: "agent-a3f2", cwd: repo },
       {
@@ -217,40 +233,54 @@ describe("worktree-create.sh（must pass: 作成）", () => {
           "app_wt_agent_a3f2\\napp_wt_gone\\napp_wt_keep_me\\napp_wt_bad-name\\napp_wt_x;drop\\n",
       },
     );
+    const drops = calls().filter((c) => c.includes("drop database"));
 
-    expect(calls().filter((c) => c.includes("drop database"))).toEqual([
+    // then
+    expect(drops).toEqual([
       `${repo} ${PSQL} drop database if exists app_wt_gone with (force)`,
     ]);
   });
 
   it("ディレクトリを消した worktree（git には登録が残る）の DB も孤立として drop する", () => {
+    // given
     runHook({ name: "gone-dir", cwd: repo });
     rmSync(worktreePath("gone-dir"), { recursive: true, force: true });
     rmSync(callLog);
 
+    // when
     runHook(
       { name: "agent-a3f2", cwd: repo },
       { FAKE_DB_LIST: "app_wt_gone_dir\\n" },
     );
+    const drops = calls().filter((c) => c.includes("drop database"));
 
-    expect(calls().filter((c) => c.includes("drop database"))).toEqual([
+    // then
+    expect(drops).toEqual([
       `${repo} ${PSQL} drop database if exists app_wt_gone_dir with (force)`,
     ]);
   });
 
   it("同じ name で 2 回呼ぶと、既存の worktree をそのまま使って同じパスを返す", () => {
+    // given
     runHook({ name: "agent-a3f2", cwd: repo });
+
+    // when
     const second = runHook({ name: "agent-a3f2", cwd: repo });
 
+    // then
     expect(second.status).toBe(0);
     expect(second.stdout).toBe(`${worktreePath("agent-a3f2")}\n`);
     expect(git(["worktree", "list"]).trim().split("\n")).toHaveLength(2);
   });
 
   it("同名のブランチが既にあれば、そのブランチで worktree を作る", () => {
+    // given
     git(["branch", "agent-a3f2"]);
+
+    // when
     const result = runHook({ name: "agent-a3f2", cwd: repo });
 
+    // then
     expect(result.status).toBe(0);
     expect(
       git(
@@ -261,44 +291,59 @@ describe("worktree-create.sh（must pass: 作成）", () => {
   });
 
   it("cwd が worktree の中でも、メインの作業ツリーの下に作る", () => {
+    // given
     runHook({ name: "first", cwd: repo });
+
+    // when
     const result = runHook({ name: "second", cwd: worktreePath("first") });
 
+    // then
     expect(result.stdout).toBe(`${worktreePath("second")}\n`);
   });
 });
 
 describe("worktree-create.sh（共有フックの修復）", () => {
   it("メインの .git/hooks/pre-commit が .claude/worktrees/ の下を指していれば、最後にメインで pnpm exec lefthook install を実行する", () => {
+    // given
     writeFileSync(
       join(repo, ".git", "hooks", "pre-commit"),
       `#!/bin/sh\n${repo}/.claude/worktrees/old/node_modules/.pnpm/lefthook/bin/lefthook run pre-commit\n`,
     );
-    runHook({ name: "agent-a3f2", cwd: repo });
 
-    expect(calls().at(-1)).toBe(
-      `${repo} CI= env_db=none pnpm exec lefthook install`,
-    );
+    // when
+    runHook({ name: "agent-a3f2", cwd: repo });
+    const lastCall = calls().at(-1);
+
+    // then
+    expect(lastCall).toBe(`${repo} CI= env_db=none pnpm exec lefthook install`);
   });
 
   it("pre-commit がメインの node_modules を指していれば、lefthook install は実行しない", () => {
+    // given
     writeFileSync(
       join(repo, ".git", "hooks", "pre-commit"),
       `#!/bin/sh\n${repo}/node_modules/.pnpm/lefthook/bin/lefthook run pre-commit\n`,
     );
-    runHook({ name: "agent-a3f2", cwd: repo });
 
-    expect(calls().filter((c) => c.includes("lefthook"))).toEqual([]);
+    // when
+    runHook({ name: "agent-a3f2", cwd: repo });
+    const lefthookCalls = calls().filter((c) => c.includes("lefthook"));
+
+    // then
+    expect(lefthookCalls).toEqual([]);
   });
 });
 
 describe("worktree-create.sh（DB の段が失敗しても worktree は返す）", () => {
   it("docker が失敗しても 0 で終わってパスを返し、.env は書き、migrate は呼ばず、DB が分離されていないことを stderr に出す", () => {
+    // given: 前提なし（beforeEach で git リポジトリと偽の docker / pnpm がある）
+    // when
     const result = runHook(
       { name: "agent-a3f2", cwd: repo },
       { FAKE_DOCKER_EXIT: "1" },
     );
 
+    // then
     expect(result.status).toBe(0);
     expect(result.stdout).toBe(`${worktreePath("agent-a3f2")}\n`);
     expect(existsSync(join(worktreePath("agent-a3f2"), ".env"))).toBe(true);
@@ -307,11 +352,14 @@ describe("worktree-create.sh（DB の段が失敗しても worktree は返す）
   });
 
   it("pnpm install が失敗しても 0 で終わってパスを返し、stderr に警告を出す", () => {
+    // given: 前提なし（beforeEach で git リポジトリと偽の docker / pnpm がある）
+    // when
     const result = runHook(
       { name: "agent-a3f2", cwd: repo },
       { FAKE_PNPM_EXIT: "1" },
     );
 
+    // then
     expect(result.status).toBe(0);
     expect(result.stdout).toBe(`${worktreePath("agent-a3f2")}\n`);
     expect(result.stderr).toContain("pnpm install");
@@ -325,8 +373,11 @@ describe("worktree-create.sh（must reject: 作れない入力は 0 以外で終
     ["スラッシュを含む", "a/b"],
     ["ドットで始まる", ".hidden"],
   ])("name が%s（%s）なら、worktree を作らずに失敗する", (_, name) => {
+    // given: it.each の name（作れない名前）
+    // when
     const result = runHook({ name, cwd: repo });
 
+    // then
     expect(result.status).not.toBe(0);
     expect(result.stdout).toBe("");
     expect(git(["worktree", "list"]).trim().split("\n")).toHaveLength(1);
@@ -334,8 +385,11 @@ describe("worktree-create.sh（must reject: 作れない入力は 0 以外で終
   });
 
   it("cwd が git リポジトリでなければ失敗する", () => {
+    // given: 前提なし（git リポジトリでない base を cwd にする）
+    // when
     const result = runHook({ name: "agent-a3f2", cwd: base });
 
+    // then
     expect(result.status).not.toBe(0);
     expect(result.stdout).toBe("");
   });
@@ -343,12 +397,16 @@ describe("worktree-create.sh（must reject: 作れない入力は 0 以外で終
 
 describe("worktree-create.sh（DRY_RUN）", () => {
   it("WORKTREE_HOOK_DRY_RUN=1 なら実行予定を表示して最後の行にパスを出すだけで、worktree も DB も作らない", () => {
+    // given
+    const wt = worktreePath("agent-a3f2");
+
+    // when
     const result = runHook(
       { name: "agent-a3f2", cwd: repo },
       { WORKTREE_HOOK_DRY_RUN: "1" },
     );
-    const wt = worktreePath("agent-a3f2");
 
+    // then
     expect(result.status).toBe(0);
     expect(result.stdout.trim().split("\n")).toEqual([
       `[dry-run] (cd ${repo} && git worktree add -b agent-a3f2 ${wt} HEAD)`,

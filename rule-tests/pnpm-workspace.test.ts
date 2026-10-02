@@ -193,19 +193,27 @@ function replaceOnce(text: string, from: string, to: string): string {
 
 describe("設定の読み取りと判定（must pass）", () => {
   it("期待どおりの設定だけなら違反なし", () => {
-    expect(violationsOf(VALID_YAML)).toEqual([]);
+    // given: VALID_YAML（モジュールの定数）
+    // when
+    const violations = violationsOf(VALID_YAML);
+
+    // then
+    expect(violations).toEqual([]);
   });
 
   it("値の後ろのコメントは値に含めない", () => {
-    expect(
-      violationsOf(
-        replaceOnce(
-          VALID_YAML,
-          "minimumReleaseAge: 7200\n",
-          "minimumReleaseAge: 7200 # 5 日\n",
-        ),
-      ),
-    ).toEqual([]);
+    // given
+    const yaml = replaceOnce(
+      VALID_YAML,
+      "minimumReleaseAge: 7200\n",
+      "minimumReleaseAge: 7200 # 5 日\n",
+    );
+
+    // when
+    const violations = violationsOf(yaml);
+
+    // then
+    expect(violations).toEqual([]);
   });
 
   it.each([
@@ -225,15 +233,32 @@ describe("設定の読み取りと判定（must pass）", () => {
       "  lefthook: true # 理由\n",
     ],
   ])("%s は読まない（違反なし）", (_case, from, to) => {
-    expect(violationsOf(replaceOnce(VALID_YAML, from, to))).toEqual([]);
+    // given: it.each の入力
+    // when
+    const result = violationsOf(replaceOnce(VALID_YAML, from, to));
+
+    // then
+    expect(result).toEqual([]);
   });
 
   it("改行が CRLF でも読める", () => {
-    expect(violationsOf(VALID_YAML.replaceAll("\n", "\r\n"))).toEqual([]);
+    // given
+    const yaml = VALID_YAML.replaceAll("\n", "\r\n");
+
+    // when
+    const violations = violationsOf(yaml);
+
+    // then
+    expect(violations).toEqual([]);
   });
 
   it("トップレベルと子の値を型付きで読む", () => {
-    expect(readTopLevelSettings(VALID_YAML)).toEqual({
+    // given: VALID_YAML（モジュールの定数）
+    // when
+    const settings = readTopLevelSettings(VALID_YAML);
+
+    // then
+    expect(settings).toEqual({
       allowBuilds: {
         esbuild: false,
         sharp: false,
@@ -410,14 +435,24 @@ describe("設定の読み取りと判定（must reject）", () => {
       ],
     ],
   ])("%s と違反になる", (_case, mutate, expectedKeys) => {
-    expect(violationsOf(mutate(VALID_YAML))).toEqual(expectedKeys);
+    // given: it.each の入力
+    // when
+    const result = violationsOf(mutate(VALID_YAML));
+
+    // then
+    expect(result).toEqual(expectedKeys);
   });
 
   it("トップレベルのキーが重複していると例外にする", () => {
     // WHY toThrow(Error) と message の両方: toThrow("文字列") は throw undefined でも通る（.claude/rules/testing.md）。
-    expect(() =>
-      readTopLevelSettings(`${VALID_YAML}minimumReleaseAge: 1440\n`),
-    ).toThrow(
+    // given
+    const yaml = `${VALID_YAML}minimumReleaseAge: 1440\n`;
+
+    // when
+    const action = () => readTopLevelSettings(yaml);
+
+    // then
+    expect(action).toThrow(
       expect.objectContaining({
         message: expect.stringContaining("minimumReleaseAge"),
       }),
@@ -440,6 +475,7 @@ describe("pnpm-workspace.yaml の実ファイル", () => {
   // 読み込み → 読み取り → 判定を、本番と同じ readWorkspaceSettings で実ファイルから通す
   //   （.claude/rules/testing.md の「ルール検査テスト」）。
   it("違反を含む pnpm-workspace.yaml からは、違反の設定と実際の値をすべて検出する", () => {
+    // given
     const file = join(dir, "pnpm-workspace.yaml");
     writeFileSync(
       file,
@@ -455,29 +491,36 @@ describe("pnpm-workspace.yaml の実ファイル", () => {
       ].join("\n"),
     );
 
-    expect(findWorkspaceSettingViolations(readWorkspaceSettings(file))).toEqual(
-      [
-        {
-          key: "minimumReleaseAge",
-          expected: 7200,
-          actual: undefined,
-        },
-        { key: "savePrefix", expected: "", actual: "^" },
-        {
-          key: "allowBuilds",
-          expected: EXPECTED_SETTINGS.allowBuilds,
-          actual: { esbuild: false, lefthook: true, sharp: true },
-        },
-      ],
+    // when
+    const violations = findWorkspaceSettingViolations(
+      readWorkspaceSettings(file),
     );
+
+    // then
+    expect(violations).toEqual([
+      {
+        key: "minimumReleaseAge",
+        expected: 7200,
+        actual: undefined,
+      },
+      { key: "savePrefix", expected: "", actual: "^" },
+      {
+        key: "allowBuilds",
+        expected: EXPECTED_SETTINGS.allowBuilds,
+        actual: { esbuild: false, lefthook: true, sharp: true },
+      },
+    ]);
   });
 
   it("サプライチェーン保護と版の書き方の設定が期待どおり", () => {
+    // given: 実ファイル（repoRoot の pnpm-workspace.yaml）
+    // when
+    const violations = findWorkspaceSettingViolations(
+      readWorkspaceSettings(join(repoRoot, "pnpm-workspace.yaml")),
+    );
+
+    // then
     // 失敗時にどの設定がどの値かが出力に出るよう、違反の一覧を空配列と比較する。
-    expect(
-      findWorkspaceSettingViolations(
-        readWorkspaceSettings(join(repoRoot, "pnpm-workspace.yaml")),
-      ),
-    ).toEqual([]);
+    expect(violations).toEqual([]);
   });
 });

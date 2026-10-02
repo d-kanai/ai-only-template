@@ -107,7 +107,11 @@ describe("通すメッセージ（must pass）", () => {
       "# Conflicts:\n#\tx.ts\nMerge branch 'main' into feat/1-x\n",
     ],
   ])("%s", (_label, message) => {
+    // given: it.each の message（通すべき形式のメッセージ）
+    // when
     const result = check(message);
+
+    // then
     expect(result.status, result.stderr).toBe(0);
   });
 });
@@ -204,7 +208,11 @@ describe("拒否するメッセージ（must reject）", () => {
       ["🎯 WHY"],
     ],
   ])("%s", (_label, message, expectedInStderr) => {
+    // given: it.each の message（拒否される形式のメッセージ）
+    // when
     const result = check(message);
+
+    // then
     expect(result.status).toBe(1);
     for (const text of expectedInStderr) {
       expect(result.stderr).toContain(text);
@@ -212,9 +220,13 @@ describe("拒否するメッセージ（must reject）", () => {
   });
 
   it("メッセージのファイルが無ければ exit 1", () => {
+    // given: 前提なし（存在しないパスを渡す）
+    // when
     const result = spawnSync("bash", [scriptPath, join(dir, "no-such-file")], {
       encoding: "utf8",
     });
+
+    // then
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("no-such-file");
   });
@@ -222,22 +234,27 @@ describe("拒否するメッセージ（must reject）", () => {
 
 describe("lefthook.yml の commit-msg", () => {
   it("commit-msg で check-commit-msg.sh にメッセージのファイル（{1}）を渡す", () => {
+    // given: 前提なし（リポジトリの lefthook.yml を読む）
+    // when
     // WHY lefthook dump: YAML を自前で読まず、Lefthook 自身が解釈した結果を見る（rule-tests/lint.test.ts と同じ）。
     const result = spawnSync(lefthookBin, ["dump", "--format", "json"], {
       cwd: repoRoot,
       encoding: "utf8",
     });
-    expect(result.status, result.stdout + result.stderr).toBe(0);
     const config = JSON.parse(result.stdout) as {
       "commit-msg"?: { commands?: Record<string, { run?: string }> };
     };
     const runs = Object.values(config["commit-msg"]?.commands ?? {}).map(
       (command) => command.run,
     );
+
+    // then
+    expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(runs).toEqual(["bash scripts/hooks/check-commit-msg.sh {1}"]);
   });
 
   it("一時的な git リポジトリで、git commit が形式の違うメッセージを拒否し、正しいメッセージを通す", () => {
+    // given
     // 使い捨てのリポジトリに lefthook.yml とスクリプトをコピーし、.git/hooks/commit-msg を手で置く。
     // WHY lefthook install を使わない: install は lefthook.yml のすべてのフック（pre-commit の biome など）を入れ、
     //   一時リポジトリには node_modules が無いので pre-commit が失敗する。commit-msg だけを確かめる。
@@ -269,6 +286,8 @@ describe("lefthook.yml の commit-msg", () => {
 
     writeFileSync(join(dir, "bad.txt"), without("🛠️ 実装経緯"));
     writeFileSync(join(dir, "good.txt"), VALID);
+
+    // when
     const bad = gitIn([
       "commit",
       "-q",
@@ -283,11 +302,12 @@ describe("lefthook.yml の commit-msg", () => {
       "-F",
       join(dir, "good.txt"),
     ]);
+    const log = gitIn(["log", "--format=%s"]);
 
+    // then
     expect(bad.status).not.toBe(0);
     expect(bad.stdout + bad.stderr).toContain("🛠️ 実装経緯");
     expect(good.status, good.stdout + good.stderr).toBe(0);
-    const log = gitIn(["log", "--format=%s"]);
     expect(log.stdout.trim()).toBe("Biome の設定を直す");
   });
 });

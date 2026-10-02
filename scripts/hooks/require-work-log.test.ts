@@ -253,14 +253,21 @@ describe("require-work-log.sh（Stop フック）", () => {
     // 前のターンで書いて未コミットのまま残ったログ（ファイルの更新時刻が起点より前）。git status では「変わっている」ままなので、
     // 作業ツリーの変更だけを見ると、以後のターンはログを書かずに通っていた（reviewer 指摘）。
     it("前のターンで書いた未コミットのログ（未追跡・更新時刻が最後の人間のターンより前）だけなら拒否する", () => {
+      // given
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# 前のターンで書いた\n");
       const before = new Date(turnStart.getTime() - 120_000);
       utimesSync(join(repo, todayLog), before, before);
-      expectBlocked(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectBlocked(result);
     });
 
     it("前のターンで変更したままの追跡済みのログ（更新時刻が最後の人間のターンより前）だけなら拒否する", () => {
+      // given
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# 今日\n");
       commit("log", {
@@ -270,27 +277,45 @@ describe("require-work-log.sh（Stop フック）", () => {
       writeRepoFile(todayLog, "# 今日\n前のターンの追記\n");
       const before = new Date(turnStart.getTime() - 120_000);
       utimesSync(join(repo, todayLog), before, before);
-      expectBlocked(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectBlocked(result);
     });
 
     it("このターンに別のファイルだけをコミットした（ログはコミットしていない）なら拒否する", () => {
+      // given
       // コミット側の判定は docs/work-logs/<今日>.md に絞る（-- "$log"）。絞らないと、このターンのどのコミットでも通ってしまう。
       writeTranscript(turnWithTool());
       writeRepoFile("src.ts", "x\n");
       commit("code");
-      expectBlocked(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectBlocked(result);
     });
 
     it("timestamp が無いときは今日の 0 時を起点にし、昨日の更新時刻の未コミットのログだけなら拒否する", () => {
+      // given
       writeTranscript([human("調べて", null), toolUse("t1"), toolResult("t1")]);
       writeRepoFile(todayLog, "# 今日\n");
       utimesSync(join(repo, todayLog), yesterdayNoon, yesterdayNoon);
-      expectBlocked(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectBlocked(result);
     });
 
     it.each(AUTOMATIC_WAKES)(
       "人間のターン（ログ未追記）の後に自動の wake（%s）でツールを 1 回使ったら、人間のターンを起点に拒否する",
       (_name, wake) => {
+        // given
         writeTranscript([
           human("調べて"),
           assistantText("バックグラウンドで実行します"),
@@ -298,11 +323,17 @@ describe("require-work-log.sh（Stop フック）", () => {
           toolUse("t1"),
           toolResult("t1"),
         ]);
-        expectBlocked(run(stopInput()));
+
+        // when
+        const result = run(stopInput());
+
+        // then
+        expectBlocked(result);
       },
     );
 
     it("人間の発言が <task-notification> を先頭以外に含むだけなら人間のターンとして起点にする", () => {
+      // given
       // 起点が後ろ（wakeAt）になるので、それより前のログのコミットは数えず拒否する。
       writeTranscript([
         human("調べて"),
@@ -314,15 +345,27 @@ describe("require-work-log.sh（Stop フック）", () => {
       ]);
       writeRepoFile(todayLog, "# 今日\n");
       commit("log");
-      expectBlocked(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectBlocked(result);
     });
 
     it("ツールを使ったのに docs/work-logs/<今日>.md が作業ツリーでもコミットでも変わっていなければ、block と理由を返す", () => {
+      // given
       writeTranscript(turnWithTool());
-      expectBlocked(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectBlocked(result);
     });
 
     it("tool_result の user 行を人間のターンと数えない（人間ターン → tool_use → tool_result → テキストは 1 回の使用）", () => {
+      // given
       // tool_result を人間のターンと誤認すると、その後の tool_use が 0 件になって素通りする。
       writeTranscript([
         human("調べて"),
@@ -332,10 +375,16 @@ describe("require-work-log.sh（Stop フック）", () => {
         toolResult("t2"),
         assistantText("完了"),
       ]);
-      expectBlocked(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectBlocked(result);
     });
 
     it("isMeta の user 行（Stop フックのフィードバックなど）を人間のターンと数えない", () => {
+      // given
       writeTranscript([
         human("調べて"),
         toolUse("t1"),
@@ -343,26 +392,44 @@ describe("require-work-log.sh（Stop フック）", () => {
         meta("Stop hook feedback: ..."),
         assistantText("完了"),
       ]);
-      expectBlocked(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectBlocked(result);
     });
 
     it("メッセージ以外の行（attachment など）と、書きかけの最後の行があっても数えられる", () => {
+      // given
       // transcript は非同期に書かれる（公式 hooks の transcript_path の説明）ので、最後の行が途中で切れていることがある。
       writeTranscript(
         [attachment, ...turnWithTool(), attachment],
         '{"type":"assi',
       );
-      expectBlocked(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectBlocked(result);
     });
 
     it("変更されたのが昨日の作業ログだけなら拒否する", () => {
+      // given
       writeTranscript(turnWithTool());
       writeRepoFile(`docs/work-logs/${yesterday}.md`, "# 昨日\n追記\n");
       writeRepoFile("src.ts", "x\n");
-      expectBlocked(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectBlocked(result);
     });
 
     it("docs/work-logs/<今日>.md が、今日だが最後の人間のターンより前のコミットでしか変わっていなければ拒否する", () => {
+      // given
       // 1 日の中で 1 度ログをコミットすると、以後のターンが素通りしていた（Issue #64 の worker の実測で 66 件）。
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# 今日\n");
@@ -370,10 +437,16 @@ describe("require-work-log.sh（Stop フック）", () => {
         GIT_AUTHOR_DATE: beforeTurnGitDate,
         GIT_COMMITTER_DATE: beforeTurnGitDate,
       });
-      expectBlocked(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectBlocked(result);
     });
 
     it("最後の人間のターンに timestamp が無ければ今日の 0 時にフォールバックし、昨日のコミットだけなら拒否する", () => {
+      // given
       writeTranscript([human("調べて", null), toolUse("t1"), toolResult("t1")]);
       writeRepoFile(todayLog, "# 今日\n");
       const yesterdayDate = `${yesterday}T13:00:00`;
@@ -381,12 +454,17 @@ describe("require-work-log.sh（Stop フック）", () => {
         GIT_AUTHOR_DATE: yesterdayDate,
         GIT_COMMITTER_DATE: yesterdayDate,
       });
+
+      // when
       const result = run(stopInput());
+
+      // then
       expectBlocked(result);
       expect(result.stderr).toContain("今日の 0 時を起点にして判定する");
     });
 
     it("docs/work-logs/<今日>.md が昨日の日付のコミットにしか無ければ拒否する", () => {
+      // given
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# 今日\n");
       const yesterdayDate = `${yesterday}T13:00:00`;
@@ -394,55 +472,89 @@ describe("require-work-log.sh（Stop フック）", () => {
         GIT_AUTHOR_DATE: yesterdayDate,
         GIT_COMMITTER_DATE: yesterdayDate,
       });
-      expectBlocked(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectBlocked(result);
     });
 
     it("stop_hook_active が入力に無くても（true でなければ）拒否する", () => {
+      // given
       writeTranscript(turnWithTool());
-      expectBlocked(
-        run({
-          hook_event_name: "Stop",
-          transcript_path: transcript,
-          cwd: repo,
-        }),
-      );
+
+      // when
+      const result = run({
+        hook_event_name: "Stop",
+        transcript_path: transcript,
+        cwd: repo,
+      });
+
+      // then
+      expectBlocked(result);
     });
 
     // WHY 旧い置き場所を must reject に置く: Issue #101 で work-logs/ を docs/ の下に移した。旧い置き場所に書いたログで
     //   通すと、リポジトリ直下に作り直した旧いディレクトリに書く誤りを見逃す。
     it("旧い置き場所（リポジトリ直下の work-logs/<今日>.md）にこのターンで書いただけなら拒否する", () => {
+      // given
       writeTranscript(turnWithTool());
       writeRepoFile(`work-logs/${today}.md`, "# 旧い置き場所\n");
-      expectBlocked(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectBlocked(result);
     });
 
     it("旧い置き場所（リポジトリ直下の work-logs/<今日>.md）をこのターンでコミットしただけなら拒否する", () => {
+      // given
       writeTranscript(turnWithTool());
       writeRepoFile(`work-logs/${today}.md`, "# 旧い置き場所\n");
       commit("old log");
-      expectBlocked(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectBlocked(result);
     });
 
     it("cwd がリポジトリのサブディレクトリでも、リポジトリ直下の docs/work-logs/<今日>.md で判定する", () => {
+      // given
       writeTranscript(turnWithTool());
       mkdirSync(join(repo, "sub"));
-      expectBlocked(run(stopInput({ cwd: join(repo, "sub") })));
+
+      // when
+      const result = run(stopInput({ cwd: join(repo, "sub") }));
+
+      // then
+      expectBlocked(result);
     });
   });
 
   describe("停止を許可する（must pass）", () => {
     it("最後の人間のターン以降に書いた未コミットのログ（更新時刻がちょうど起点の秒）なら許可する", () => {
+      // given
       // 起点は timestamp を秒に切り捨てた時刻で、更新時刻が起点以上なら許可する（同じ秒に書いたものも通す）。
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# このターンで書いた\n");
       const atStart = new Date(Math.floor(turnStart.getTime() / 1000) * 1000);
       utimesSync(join(repo, todayLog), atStart, atStart);
-      expectAllowed(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectAllowed(result);
     });
 
     it.each(AUTOMATIC_WAKES)(
       "人間のターン → ログ追記のコミット → 自動の wake（%s）でツール 1 回、なら許可する",
       (_name, wake) => {
+        // given
         writeTranscript([
           human("調べて"),
           toolUse("t1"),
@@ -453,17 +565,29 @@ describe("require-work-log.sh（Stop フック）", () => {
         ]);
         writeRepoFile(todayLog, "# 今日\n");
         commit("log");
-        expectAllowed(run(stopInput()));
+
+        // when
+        const result = run(stopInput());
+
+        // then
+        expectAllowed(result);
       },
     );
 
     it("docs/work-logs/<今日>.md が作業ツリーで新しく作られていれば（未追跡）許可する", () => {
+      // given
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# 今日\n");
-      expectAllowed(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectAllowed(result);
     });
 
     it("コミット済みの docs/work-logs/<今日>.md が作業ツリーで変更されていれば許可する", () => {
+      // given
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# 今日\n");
       commit("log", {
@@ -471,40 +595,63 @@ describe("require-work-log.sh（Stop フック）", () => {
         GIT_COMMITTER_DATE: `${yesterday}T13:00:00`,
       });
       writeRepoFile(todayLog, "# 今日\n追記\n");
-      expectAllowed(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectAllowed(result);
     });
 
     it("docs/work-logs/<今日>.md の変更がステージ済みなら許可する", () => {
+      // given
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# 今日\n");
       git(["add", todayLog]);
-      expectAllowed(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectAllowed(result);
     });
 
     it("docs/work-logs/<今日>.md が最後の人間のターン以降のコミットで変更されていれば（作業ツリーはきれいでも）許可する", () => {
+      // given
       writeTranscript(turnWithTool());
       writeRepoFile(todayLog, "# 今日\n");
       commit("log");
-      expect(git(["status", "--porcelain"])).toBe("");
+
+      // when
+      const status = git(["status", "--porcelain"]);
       const result = run(stopInput());
+
+      // then
+      expect(status).toBe("");
       expectAllowed(result);
       // timestamp が読めたので、フォールバックの理由は出さない。
       expect(result.stderr).toBe("");
     });
 
     it("最後の人間のターンに timestamp が無ければ今日の 0 時にフォールバックし、今日のコミットなら許可して理由を stderr に出す", () => {
+      // given
       writeTranscript([human("調べて", null), toolUse("t1"), toolResult("t1")]);
       writeRepoFile(todayLog, "# 今日\n");
       commit("log", {
         GIT_AUTHOR_DATE: beforeTurnGitDate,
         GIT_COMMITTER_DATE: beforeTurnGitDate,
       });
+
+      // when
       const result = run(stopInput());
+
+      // then
       expectAllowed(result);
       expect(result.stderr).toContain("今日の 0 時を起点にして判定する");
     });
 
     it("timestamp が日時として読めない値でも今日の 0 時にフォールバックする", () => {
+      // given
       writeTranscript([
         human("調べて", "not-a-date"),
         toolUse("t1"),
@@ -515,79 +662,130 @@ describe("require-work-log.sh（Stop フック）", () => {
         GIT_AUTHOR_DATE: beforeTurnGitDate,
         GIT_COMMITTER_DATE: beforeTurnGitDate,
       });
+
+      // when
       const result = run(stopInput());
+
+      // then
       expectAllowed(result);
       expect(result.stderr).toContain("今日の 0 時を起点にして判定する");
     });
 
     it("cwd がリポジトリのサブディレクトリでも、リポジトリ直下の docs/work-logs/<今日>.md の変更を見て許可する", () => {
+      // given
       writeTranscript(turnWithTool());
       mkdirSync(join(repo, "sub"));
       writeRepoFile(todayLog, "# 今日\n");
-      expectAllowed(run(stopInput({ cwd: join(repo, "sub") })));
+
+      // when
+      const result = run(stopInput({ cwd: join(repo, "sub") }));
+
+      // then
+      expectAllowed(result);
     });
 
     it("stop_hook_active が true なら（フックで続けている途中なら）判定せずに許可する", () => {
+      // given
       writeTranscript(turnWithTool());
-      expectAllowed(run(stopInput({ stop_hook_active: true })));
+
+      // when
+      const result = run(stopInput({ stop_hook_active: true }));
+
+      // then
+      expectAllowed(result);
     });
 
     it("最後の人間のターン以降にツールを使っていなければ（会話だけのターン）許可する", () => {
+      // given
       writeTranscript([human("やあ"), assistantText("こんにちは")]);
-      expectAllowed(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectAllowed(result);
     });
 
     it("前のターンでツールを使っていても、最後の人間のターン以降に使っていなければ許可する", () => {
+      // given
       writeTranscript([
         ...turnWithTool(),
         human("ありがとう"),
         assistantText("どういたしまして"),
       ]);
-      expectAllowed(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectAllowed(result);
     });
 
     it("content が配列でも tool_result を含まない user 行は人間のターンとして扱う", () => {
+      // given
       writeTranscript([
         ...turnWithTool(),
         humanArray("次は？"),
         assistantText("以上です"),
       ]);
-      expectAllowed(run(stopInput()));
+
+      // when
+      const result = run(stopInput());
+
+      // then
+      expectAllowed(result);
     });
 
     it("cwd が git リポジトリでなければ何もせず、理由を stderr に出す", () => {
+      // given
       writeTranscript(turnWithTool());
       const outside = join(tmp, "not-a-repo");
       mkdirSync(outside);
+
+      // when
       const result = run(stopInput({ cwd: outside }));
+
+      // then
       expectAllowed(result);
       expect(result.stderr).toContain("git リポジトリではない");
     });
 
     it("transcript が読めなければ何もせず、理由を stderr に出す", () => {
+      // given: 前提なし（beforeEach で空のリポジトリがある）
+      // when
       const result = run(
         stopInput({ transcript_path: join(tmp, "missing.jsonl") }),
       );
+
+      // then
       expectAllowed(result);
       expect(result.stderr).toContain("transcript を読めない");
     });
 
     it("transcript_path が無ければ何もせず、理由を stderr に出す", () => {
+      // given: 前提なし（beforeEach で空のリポジトリがある）
+      // when
       const result = run({
         hook_event_name: "Stop",
         cwd: repo,
         stop_hook_active: false,
       });
+
+      // then
       expectAllowed(result);
       expect(result.stderr).toContain("transcript を読めない");
     });
 
     it("stdin が JSON でなければ何もせず、理由を stderr に出す", () => {
+      // given: 前提なし（beforeEach で空のリポジトリがある）
+      // when
       const result = spawnSync("bash", [scriptPath], {
         input: "not json",
         env: gitEnv,
         encoding: "utf8",
       });
+
+      // then
       expectAllowed(result);
       expect(result.stderr).toContain("入力を読めない");
     });
@@ -615,19 +813,32 @@ describe("require-work-log.sh（Stop フック）", () => {
 
     describe("拒否する（must reject）", () => {
       it("未追跡の新しいログで追加した項目に無ければ、見出しを挙げて拒否する", () => {
+        // given
         writeTranscript(turnWithTool());
         writeRepoFile(todayLog, log(item("調べた")));
-        expectMechanizationBlocked(run(stopInput()), ["調べた"]);
+
+        // when
+        const result = run(stopInput());
+
+        // then
+        expectMechanizationBlocked(result, ["調べた"]);
       });
 
       it("ステージ済みの新しいログで追加した項目に無ければ拒否する", () => {
+        // given
         writeTranscript(turnWithTool());
         writeRepoFile(todayLog, log(item("調べた")));
         git(["add", todayLog]);
-        expectMechanizationBlocked(run(stopInput()), ["調べた"]);
+
+        // when
+        const result = run(stopInput());
+
+        // then
+        expectMechanizationBlocked(result, ["調べた"]);
       });
 
       it("コミット済みのログに作業ツリーで追加した項目に無ければ、追加した項目だけを挙げて拒否する", () => {
+        // given
         writeTranscript(turnWithTool());
         commitBeforeTurn(log(item("前からある")));
         writeRepoFile(
@@ -639,19 +850,32 @@ describe("require-work-log.sh（Stop フック）", () => {
             item("足した3"),
           ),
         );
-        expectMechanizationBlocked(run(stopInput()), ["足した1", "足した3"]);
+
+        // when
+        const result = run(stopInput());
+
+        // then
+        expectMechanizationBlocked(result, ["足した1", "足した3"]);
       });
 
       it("このターンのコミットで追加した項目に無ければ（作業ツリーがきれいでも）拒否する", () => {
+        // given
         writeTranscript(turnWithTool());
         commitBeforeTurn(log(item("前からある")));
         writeRepoFile(todayLog, log(item("前からある"), item("足した")));
         commit("log");
-        expect(git(["status", "--porcelain"])).toBe("");
-        expectMechanizationBlocked(run(stopInput()), ["足した"]);
+
+        // when
+        const status = git(["status", "--porcelain"]);
+        const result = run(stopInput());
+
+        // then
+        expect(status).toBe("");
+        expectMechanizationBlocked(result, ["足した"]);
       });
 
       it("このターンに 2 回コミットしたら、最初のコミットで追加した項目も見る（最も古いコミットの親から比べる）", () => {
+        // given
         writeTranscript(turnWithTool());
         commitBeforeTurn(log(item("前からある")));
         writeRepoFile(todayLog, log(item("前からある"), item("1回目")));
@@ -665,10 +889,16 @@ describe("require-work-log.sh（Stop フック）", () => {
           ),
         );
         commit("log 2");
-        expectMechanizationBlocked(run(stopInput()), ["1回目"]);
+
+        // when
+        const result = run(stopInput());
+
+        // then
+        expectMechanizationBlocked(result, ["1回目"]);
       });
 
       it("このターンのコミットに加えて作業ツリーで追加した項目も見る", () => {
+        // given
         writeTranscript(turnWithTool());
         writeRepoFile(
           todayLog,
@@ -679,20 +909,32 @@ describe("require-work-log.sh（Stop フック）", () => {
           todayLog,
           log(item("コミットした", "対象外（調査のみ）"), item("未コミット")),
         );
-        expectMechanizationBlocked(run(stopInput()), ["未コミット"]);
+
+        // when
+        const result = run(stopInput());
+
+        // then
+        expectMechanizationBlocked(result, ["未コミット"]);
       });
 
       it("このターンのコミットが親の無い最初のコミットでも、空のツリーから比べて拒否する", () => {
+        // given
         writeTranscript(turnWithTool());
         git(["checkout", "-q", "--orphan", "fresh"]);
         writeRepoFile(todayLog, log(item("最初のコミット")));
         commit("root");
-        expectMechanizationBlocked(run(stopInput()), ["最初のコミット"]);
+
+        // when
+        const result = run(stopInput());
+
+        // then
+        expectMechanizationBlocked(result, ["最初のコミット"]);
       });
     });
 
     describe("許可する（must pass）", () => {
       it("未追跡の新しいログで追加した項目にあれば許可する", () => {
+        // given
         writeTranscript(turnWithTool());
         writeRepoFile(
           todayLog,
@@ -701,17 +943,29 @@ describe("require-work-log.sh（Stop フック）", () => {
             item("直した", "縛れる（Stop フック）"),
           ),
         );
-        expectAllowed(run(stopInput()));
+
+        // when
+        const result = run(stopInput());
+
+        // then
+        expectAllowed(result);
       });
 
       it("既存の項目に箇条書きを足しただけ（追加した見出しが無い）なら許可する", () => {
+        // given
         writeTranscript(turnWithTool());
         commitBeforeTurn(log(item("前からある")));
         writeRepoFile(todayLog, `${log(item("前からある"))}- 追記: y\n`);
-        expectAllowed(run(stopInput()));
+
+        // when
+        const result = run(stopInput());
+
+        // then
+        expectAllowed(result);
       });
 
       it("ターンより前のコミットにある項目は見ない（このターンのコミットで追加した項目にあれば許可する）", () => {
+        // given
         writeTranscript(turnWithTool());
         commitBeforeTurn(log(item("前からある")));
         writeRepoFile(
@@ -719,21 +973,43 @@ describe("require-work-log.sh（Stop フック）", () => {
           log(item("前からある"), item("足した", "縛れない（理由）")),
         );
         commit("log");
-        expectAllowed(run(stopInput()));
+
+        // when
+        const result = run(stopInput());
+
+        // then
+        expectAllowed(result);
       });
 
       it("stop_hook_active が true なら、追加した項目に無くても判定せずに許可する", () => {
+        // given
         writeTranscript(turnWithTool());
         writeRepoFile(todayLog, log(item("調べた")));
-        expectAllowed(run(stopInput({ stop_hook_active: true })));
+
+        // when
+        const result = run(stopInput({ stop_hook_active: true }));
+
+        // then
+        expectAllowed(result);
       });
     });
   });
 
   it("テストの前提: transcript を消した状態と置いた状態で結果が変わる（fixture が効いている）", () => {
+    // given
     writeTranscript(turnWithTool());
-    expectBlocked(run(stopInput()));
+
+    // when
+    const withTranscript = run(stopInput());
+
+    // then
+    expectBlocked(withTranscript);
+
+    // when
     unlinkSync(transcript);
-    expectAllowed(run(stopInput()));
+    const withoutTranscript = run(stopInput());
+
+    // then
+    expectAllowed(withoutTranscript);
   });
 });

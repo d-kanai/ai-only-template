@@ -100,6 +100,8 @@ describe("biome check（pnpm lint と同じ引数）", () => {
   }
 
   it("未使用変数と == を含むファイルは非 0 で終わり、ルール名が出力される", () => {
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
     const { status, output } = checkSource("violation.ts", [
       "export function isAnswer(value: number): boolean {",
       "  const unused = 1;",
@@ -107,6 +109,7 @@ describe("biome check（pnpm lint と同じ引数）", () => {
       "}",
     ]);
 
+    // then
     expect(status, output).not.toBe(0);
     expect(output).toContain("noUnusedVariables");
     expect(output).toContain("noDoubleEquals");
@@ -144,8 +147,11 @@ describe("biome check（pnpm lint と同じ引数）", () => {
       ],
     ],
   ])("%s（%s）の違反だけでも非 0 で終わる", (_kind, rule, lines) => {
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
     const { status, output } = checkSource(`${rule}.ts`, lines);
 
+    // then
     expect(status, output).not.toBe(0);
     expect(output).toContain(rule);
   });
@@ -165,10 +171,13 @@ describe("biome check（pnpm lint と同じ引数）", () => {
   ])(
     "%s で process.env を読むと非 0 で終わり、noProcessEnv が出力される",
     (_kind, fileName) => {
+      // given: 前提なし（入力は when の呼び出しに直接書く）
+      // when
       const { status, output } = checkSource(fileName, [
         "export const url = process.env.DATABASE_URL;",
       ]);
 
+      // then
       expect(status, output).not.toBe(0);
       expect(output).toContain("noProcessEnv");
     },
@@ -177,23 +186,29 @@ describe("biome check（pnpm lint と同じ引数）", () => {
   it.each([["x.test.ts"], ["x.test.tsx"]])(
     "テスト（%s）では process.env を読んでも 0 で終わる（子プロセスに PATH を渡すなどで使う）",
     (fileName) => {
+      // given: 前提なし（入力は when の呼び出しに直接書く）
+      // when
       const { status, output } = checkSource(fileName, [
         "export const path = process.env.PATH;",
       ]);
 
+      // then
       expect(status, output).toBe(0);
     },
   );
 
   it("apps/shared/env.ts は process.env を読んでいても 0 で終わる（環境変数の唯一の入口）", () => {
+    // given
     const envModule = "apps/shared/env.ts";
+
+    // when
+    const result = pnpmExec("biome", ["check", ERROR_ON_WARNINGS, envModule]);
+
+    // then
     // 前提: env.ts が実際に process.env を読んでいること（読んでいなければ、この検査は何も確かめていない）。
     expect(readFileSync(join(repoRoot, envModule), "utf8")).toContain(
       "process.env",
     );
-
-    const result = pnpmExec("biome", ["check", ERROR_ON_WARNINGS, envModule]);
-
     expect(result.status, result.stdout + result.stderr).toBe(0);
   });
 
@@ -227,12 +242,15 @@ describe("biome check（pnpm lint と同じ引数）", () => {
   ])(
     "%s を %s に書くと非 0 で終わり、noConsole が出力される",
     (call, _kind, fileName) => {
+      // given: 前提なし（入力は when の呼び出しに直接書く）
+      // when
       const { status, output } = checkSource(fileName, [
         "export function report(value: unknown): void {",
         `  ${call}(value);`,
         "}",
       ]);
 
+      // then
       expect(status, output).not.toBe(0);
       expect(output).toContain("noConsole");
     },
@@ -241,6 +259,8 @@ describe("biome check（pnpm lint と同じ引数）", () => {
   it.each([["x.test.ts"], ["x.test.tsx"]])(
     "テスト（%s）では console を書いても 0 で終わる（vi.spyOn(console, ...) で出力を抑える・確かめる）",
     (fileName) => {
+      // given: 前提なし（入力は when の呼び出しに直接書く）
+      // when
       const { status, output } = checkSource(fileName, [
         "export function report(value: unknown): void {",
         "  console.log(value);",
@@ -248,23 +268,27 @@ describe("biome check（pnpm lint と同じ引数）", () => {
         "}",
       ]);
 
+      // then
       expect(status, output).toBe(0);
     },
   );
 
   it("apps/shared/logger.ts は console を書いていても 0 で終わる（ログの唯一の出口）", () => {
+    // given
     const loggerModule = "apps/shared/logger.ts";
     // 前提: logger.ts が実際に console を使っていること（使っていなければ、この検査は何も確かめていない）。
     const source = readFileSync(join(repoRoot, loggerModule), "utf8");
-    expect(source).toContain("console.log(");
-    expect(source).toContain("console.error(");
 
+    // when
     const result = pnpmExec("biome", [
       "check",
       ERROR_ON_WARNINGS,
       loggerModule,
     ]);
 
+    // then
+    expect(source).toContain("console.log(");
+    expect(source).toContain("console.error(");
     expect(result.status, result.stdout + result.stderr).toBe(0);
   });
 
@@ -292,18 +316,24 @@ describe("biome check（pnpm lint と同じ引数）", () => {
       ],
     ],
   ])("%s: %s書き方は 0 で終わる", (rule, _how, lines) => {
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
     const { status, output } = checkSource(`allowed-${rule}.ts`, lines);
 
+    // then
     expect(status, output).toBe(0);
   });
 
   it("違反のないファイルは 0 で終わる", () => {
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
     const { status, output } = checkSource("clean.ts", [
       "export function isAnswer(value: number): boolean {",
       "  return value === 42;",
       "}",
     ]);
 
+    // then
     expect(status, output).toBe(0);
   });
 });
@@ -372,8 +402,11 @@ describe("biome check の noStaticOnlyClass は apps/backend・apps/shared・app
   ])(
     "%s（apps/backend・apps/shared・apps/e2e・frontend の React 以外のモジュール）では static だけのクラスが 0 で終わる",
     (path) => {
+      // given: 前提なし（入力は when の呼び出しに直接書く）
+      // when
       const { status, output } = checkAt(path, STATIC_ONLY_CLASS);
 
+      // then
       expect(status, output).toBe(0);
     },
   );
@@ -408,8 +441,11 @@ describe("biome check の noStaticOnlyClass は apps/backend・apps/shared・app
   ])(
     "%s（%s）では static だけのクラスが非 0 で終わり、noStaticOnlyClass が出力される",
     (path) => {
+      // given: 前提なし（入力は when の呼び出しに直接書く）
+      // when
       const { status, output } = checkAt(path, STATIC_ONLY_CLASS);
 
+      // then
       expect(status, output).not.toBe(0);
       expect(output).toContain("noStaticOnlyClass");
     },
@@ -418,6 +454,8 @@ describe("biome check の noStaticOnlyClass は apps/backend・apps/shared・app
   // WHY: 上の非 0 が、設定の読み込みの失敗など noStaticOnlyClass 以外の理由ではないことを示す（同じ場所でインスタンスのメンバーを
   //   持つクラスは通る）。
   it("apps/frontend_customer の app/ でもインスタンスのメンバーを持つクラスは 0 で終わる", () => {
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
     const { status, output } = checkAt(
       "apps/frontend_customer/app/instance-class.ts",
       [
@@ -429,18 +467,22 @@ describe("biome check の noStaticOnlyClass は apps/backend・apps/shared・app
       ],
     );
 
+    // then
     expect(status, output).toBe(0);
   });
 
   it("リポジトリの apps/backend/shared/drizzle/drizzle.config.ts（static だけのクラス DrizzleConfigPath）は 0 で終わる", () => {
+    // given
     const configFile = "apps/backend/shared/drizzle/drizzle.config.ts";
     // 前提: static だけのクラスを実際に持つこと（持たなければ、この検査は何も確かめていない）。
     const source = readFileSync(join(repoRoot, configFile), "utf8");
-    expect(source).toContain("class DrizzleConfigPath {");
-    expect(source).toContain("  static fromConfigDir(");
 
+    // when
     const result = pnpmExec("biome", ["check", ERROR_ON_WARNINGS, configFile]);
 
+    // then
+    expect(source).toContain("class DrizzleConfigPath {");
+    expect(source).toContain("  static fromConfigDir(");
     expect(result.status, result.stdout + result.stderr).toBe(0);
   });
 });
@@ -455,7 +497,12 @@ describe("--error-on-warnings 付きの biome check かの判定（runsBiomeChec
     ],
     ["pnpm install && biome check --error-on-warnings ."],
   ])("%s は許可する", (command) => {
-    expect(runsBiomeCheckWithErrorOnWarnings(command)).toBe(true);
+    // given: it.each の入力
+    // when
+    const result = runsBiomeCheckWithErrorOnWarnings(command);
+
+    // then
+    expect(result).toBe(true);
   });
 
   it.each([
@@ -520,7 +567,12 @@ describe("--error-on-warnings 付きの biome check かの判定（runsBiomeChec
     ],
     ["", "空文字"],
   ])("%s（%s）は拒否する", (command) => {
-    expect(runsBiomeCheckWithErrorOnWarnings(command)).toBe(false);
+    // given: it.each の入力
+    // when
+    const result = runsBiomeCheckWithErrorOnWarnings(command);
+
+    // then
+    expect(result).toBe(false);
   });
 });
 
@@ -531,24 +583,32 @@ describe("package.json scripts", () => {
   ])(
     "%s は --error-on-warnings 付きで biome check を実行する",
     (_name, script) => {
-      expect(runsBiomeCheckWithErrorOnWarnings(script), script).toBe(true);
+      // given: it.each の script
+      // when
+      const result = runsBiomeCheckWithErrorOnWarnings(script);
+
+      // then
+      expect(result, script).toBe(true);
     },
   );
 });
 
 describe("lefthook.yml", () => {
   it("pre-commit で --error-on-warnings 付きの biome check を実行するコマンドが定義されている", () => {
+    // given: 前提なし（リポジトリの lefthook.yml を読む）
+    // when
     // WHY: YAML を自前でパースせず `lefthook dump` を使うのは、Lefthook 自身が解釈した結果
     //   （インデント崩れなどで意図と違う構造になっていないか）を検査するため。
     const result = pnpmExec("lefthook", ["dump", "--format", "json"]);
-    expect(result.status, result.stdout + result.stderr).toBe(0);
-
     const config = JSON.parse(result.stdout) as {
       "pre-commit"?: { commands?: Record<string, { run?: string }> };
     };
     const runs = Object.values(config["pre-commit"]?.commands ?? {}).map(
       (command) => command.run ?? "",
     );
+
+    // then
+    expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(runs.filter(runsBiomeCheckWithErrorOnWarnings)).toHaveLength(1);
   });
 });

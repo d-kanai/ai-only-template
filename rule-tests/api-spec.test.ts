@@ -1085,7 +1085,12 @@ describe("API 仕様の置き場所（isMisplacedApiSpecFile）", () => {
       "apps/backend/features/x/internal/domain/x.api-spec.ts",
     ],
   ])("%s は違反なし", (_name, path) => {
-    expect(isMisplacedApiSpecFile(path)).toBe(false);
+    // given: it.each の入力
+    // when
+    const result = isMisplacedApiSpecFile(path);
+
+    // then
+    expect(result).toBe(false);
   });
 
   it.each([
@@ -1137,7 +1142,12 @@ describe("API 仕様の置き場所（isMisplacedApiSpecFile）", () => {
     ],
     ["E2E の step（.js）", "apps/e2e/x.api-spec.test.js"],
   ])("%s は違反", (_name, path) => {
-    expect(isMisplacedApiSpecFile(path)).toBe(true);
+    // given: it.each の入力
+    // when
+    const result = isMisplacedApiSpecFile(path);
+
+    // then
+    expect(result).toBe(true);
   });
 });
 
@@ -1177,7 +1187,12 @@ describe("api ファイルと API 仕様の対（findPairViolations）", () => {
       files(),
     ],
   ])("%s は違反なし", (_name, path, set) => {
-    expect(findPairViolations(path, set)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findPairViolations(path, set);
+
+    // then
+    expect(violations).toEqual([]);
   });
 
   it.each([
@@ -1237,7 +1252,12 @@ describe("api ファイルと API 仕様の対（findPairViolations）", () => {
       ],
     ],
   ])("%s は違反", (_name, path, set, expected) => {
-    expect(findPairViolations(path, set)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const violations = findPairViolations(path, set);
+
+    // then
+    expect(violations).toEqual(expected);
   });
 });
 
@@ -1350,7 +1370,12 @@ describe(".feature の中身（findApiSpecViolations）: must pass", () => {
       ),
     ],
   ])("%s は違反なし", (_name, text) => {
-    expect(findApiSpecViolations(FEATURE, text)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findApiSpecViolations(FEATURE, text);
+
+    // then
+    expect(violations).toEqual([]);
   });
 });
 
@@ -1639,7 +1664,12 @@ describe(".feature の中身（findApiSpecViolations）: must reject", () => {
       ],
     ],
   ])("%s は違反", (_name, text, expected) => {
-    expect(findApiSpecViolations(FEATURE, text)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const violations = findApiSpecViolations(FEATURE, text);
+
+    // then
+    expect(violations).toEqual(expected);
   });
 });
 
@@ -1720,15 +1750,24 @@ describe("step の実装の中身（findApiSpecViolations）: must pass", () => 
       ),
     ],
   ])("%s は違反なし", (_name, text) => {
-    expect(findApiSpecViolations(STEPS, source(text, LOAD_FEATURE))).toEqual(
-      [],
-    );
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(STEPS, source(text, LOAD_FEATURE));
+
+    // then
+    expect(violations).toEqual([]);
   });
 
   it("api ファイルは中身を見ない", () => {
-    expect(
-      findApiSpecViolations(API, source('import { vi } from "vitest";')),
-    ).toEqual([]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(
+      API,
+      source('import { vi } from "vitest";'),
+    );
+
+    // then
+    expect(violations).toEqual([]);
   });
 });
 
@@ -1861,18 +1900,24 @@ describe("step の実装の中身（findApiSpecViolations）: must reject", () =
       ],
     ],
   ])("%s は違反", (_name, text, expected) => {
-    expect(findApiSpecViolations(STEPS, source(text, LOAD_FEATURE))).toEqual(
-      expected,
-    );
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(STEPS, source(text, LOAD_FEATURE));
+
+    // then
+    expect(violations).toEqual(expected);
   });
 
   it("置き場所が違えば置き場所の違反だけを返す（中身は見ない）", () => {
-    expect(
-      findApiSpecViolations(
-        "apps/backend/spec/api/x/nested/create-x.feature",
-        source("Feature: DB", "  Scenario: 一覧", "    Given 状態 201"),
-      ),
-    ).toEqual([{ rule: "api-spec-placement" }]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(
+      "apps/backend/spec/api/x/nested/create-x.feature",
+      source("Feature: DB", "  Scenario: 一覧", "    Given 状態 201"),
+    );
+
+    // then
+    expect(violations).toEqual([{ rule: "api-spec-placement" }]);
   });
 });
 
@@ -1925,9 +1970,12 @@ describe("step の実装が呼べる API（findApiSpecViolations の api-spec-ow
       ),
     ],
   ])("%s は違反なし", (_name, text) => {
-    expect(findApiSpecViolations(STEPS, source(text, LOAD_FEATURE))).toEqual(
-      [],
-    );
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(STEPS, source(text, LOAD_FEATURE));
+
+    // then
+    expect(violations).toEqual([]);
   });
 
   it.each([
@@ -1986,12 +2034,18 @@ describe("step の実装が呼べる API（findApiSpecViolations の api-spec-ow
       [3, 4, 5, 6],
     ],
   ])("%s は違反", (_name, text, lines) => {
-    expect(findApiSpecViolations(STEPS, source(text, LOAD_FEATURE))).toEqual(
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(STEPS, source(text, LOAD_FEATURE));
+
+    // then
+    expect(violations).toEqual(
       lines.map((line) => ({ rule: "api-spec-own-api-only", line })),
     );
   });
 
   it("対の組み立てのクラスの名前は api ファイルの名前の PascalCase に ApiAssembly を足したもの（change-x-completion → ChangeXCompletionApiAssembly）", () => {
+    // given
     const path = "apps/backend/spec/api/x/change-x-completion.api-spec.test.ts";
     const text = (name: string) =>
       source(
@@ -2000,11 +2054,16 @@ describe("step の実装が呼べる API（findApiSpecViolations の api-spec-ow
         `import { ${name} } from "./support";`,
         'const feature = await loadFeature("./change-x-completion.feature");',
       );
-    expect({
+
+    // when
+    const result = {
       own: findApiSpecViolations(path, text("ChangeXCompletionApiAssembly")),
       kebab: findApiSpecViolations(path, text("ChangeXcompletionApiAssembly")),
       create: findApiSpecViolations(path, text("CreateXApiAssembly")),
-    }).toEqual({
+    };
+
+    // then
+    expect(result).toEqual({
       own: [],
       kebab: [{ rule: "api-spec-own-api-only", line: 3 }],
       create: [{ rule: "api-spec-own-api-only", line: 3 }],
@@ -2045,7 +2104,12 @@ describe("step の実装の loadFeature と skip（findApiSpecViolations）", ()
       ),
     ],
   ])("%s は違反なし", (_name, text) => {
-    expect(findApiSpecViolations(STEPS, text)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findApiSpecViolations(STEPS, text);
+
+    // then
+    expect(violations).toEqual([]);
   });
 
   it.each([
@@ -2121,7 +2185,12 @@ describe("step の実装の loadFeature と skip（findApiSpecViolations）", ()
       })),
     ],
   ])("%s は違反", (_name, text, expected) => {
-    expect(findApiSpecViolations(STEPS, text)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const violations = findApiSpecViolations(STEPS, text);
+
+    // then
+    expect(violations).toEqual(expected);
   });
 });
 
@@ -2146,7 +2215,12 @@ describe("補助 support.ts の中身（findApiSpecViolations）", () => {
       ),
     ],
   ])("%s は違反なし", (_name, text) => {
-    expect(findApiSpecViolations(SUPPORT, text)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findApiSpecViolations(SUPPORT, text);
+
+    // then
+    expect(violations).toEqual([]);
   });
 
   it.each([
@@ -2170,23 +2244,29 @@ describe("補助 support.ts の中身（findApiSpecViolations）", () => {
       ),
     ],
   ])("%s は違反", (_name, text) => {
-    expect(findApiSpecViolations(SUPPORT, text)).toEqual([
-      { rule: "api-spec-support-assembles-apis" },
-    ]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(SUPPORT, text);
+
+    // then
+    expect(violations).toEqual([{ rule: "api-spec-support-assembles-apis" }]);
   });
 
   // WHY 別に書く: dynamic import() と export … from は api ファイルを組み立て以外の形で読むので、api-spec-support-no-api-call にも当たる。
   it("dynamic import()・export … from・コメントの中の import は数えない（dynamic import() と export … from は no-api-call にも当たる）", () => {
-    expect(
-      findApiSpecViolations(
-        SUPPORT,
-        source(
-          'const m = await import("../../../features/x/internal/presentation/create-x.api");',
-          'export { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
-          '// import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
-        ),
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(
+      SUPPORT,
+      source(
+        'const m = await import("../../../features/x/internal/presentation/create-x.api");',
+        'export { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
+        '// import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
       ),
-    ).toEqual([
+    );
+
+    // then
+    expect(violations).toEqual([
       { rule: "api-spec-support-no-api-call", line: 1 },
       { rule: "api-spec-support-no-api-call", line: 2 },
       { rule: "api-spec-support-assembles-apis" },
@@ -2194,16 +2274,19 @@ describe("補助 support.ts の中身（findApiSpecViolations）", () => {
   });
 
   it("vitest から vi を import すれば、その行の違反（step と同じ判定。api を組み立てていても）", () => {
-    expect(
-      findApiSpecViolations(
-        SUPPORT,
-        source(
-          'import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
-          'import { expect, vi } from "vitest";',
-          'const m = await import("vitest");',
-        ),
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(
+      SUPPORT,
+      source(
+        'import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
+        'import { expect, vi } from "vitest";',
+        'const m = await import("vitest");',
       ),
-    ).toEqual([
+    );
+
+    // then
+    expect(violations).toEqual([
       { rule: "api-spec-no-vi", line: 2 },
       { rule: "api-spec-no-vi", line: 3 },
     ]);
@@ -2211,16 +2294,19 @@ describe("補助 support.ts の中身（findApiSpecViolations）", () => {
 
   // WHY support.ts では console の差し替えも止める（Issue #258）: 差し替えは step ごとに張って外すもので、組み立ての置き場所には要らない。
   it("console の差し替えだけに使う vi も違反（step だけの例外）", () => {
-    expect(
-      findApiSpecViolations(
-        SUPPORT,
-        source(
-          'import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
-          'import { vi } from "vitest";',
-          'vi.spyOn(console, "log");',
-        ),
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(
+      SUPPORT,
+      source(
+        'import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
+        'import { vi } from "vitest";',
+        'vi.spyOn(console, "log");',
       ),
-    ).toEqual([{ rule: "api-spec-no-vi", line: 2 }]);
+    );
+
+    // then
+    expect(violations).toEqual([{ rule: "api-spec-no-vi", line: 2 }]);
   });
 });
 
@@ -2306,7 +2392,12 @@ describe("補助 support.ts の組み立て（findApiSpecViolations）: must pas
       ),
     ],
   ])("%s は違反なし", (_name, text) => {
-    expect(findApiSpecViolations(SUPPORT, text)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findApiSpecViolations(SUPPORT, text);
+
+    // then
+    expect(violations).toEqual([]);
   });
 });
 
@@ -2523,7 +2614,12 @@ describe("補助 support.ts の組み立て（findApiSpecViolations）: must rej
       ],
     ],
   ])("%s は違反", (_name, text, expected) => {
-    expect(findApiSpecViolations(SUPPORT, text)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const violations = findApiSpecViolations(SUPPORT, text);
+
+    // then
+    expect(violations).toEqual(expected);
   });
 });
 
@@ -2564,6 +2660,7 @@ describe("API 仕様の列挙と検査（fixture）", () => {
     );
 
   it("spec/api/ の下・外の *.api-spec.test.*・api ファイルを対象にし、違反を「規則: パス(:行)（無いファイル）」で返す", () => {
+    // given
     const root = fixture({
       // 対がそろい、中身も違反なし（support.ts も）。
       [`${presentation}/create-x.api.ts`]: "export class CreateXApi {}\n",
@@ -2628,10 +2725,15 @@ describe("API 仕様の列挙と検査（fixture）", () => {
       "apps/backend/node_modules/x/x.api-spec.test.ts": "",
       "apps/frontend_customer/.next/x.api-spec.test.ts": "",
     });
-    expect({
+
+    // when
+    const result = {
       files: listApiSpecTargets(root),
       violations: collectApiSpecViolations(root),
-    }).toEqual({
+    };
+
+    // then
+    expect(result).toEqual({
       files: [
         "apps/backend/features/x/internal/presentation/create-x.api-spec.test.ts",
         "apps/backend/features/x/internal/presentation/create-x.api.ts",
@@ -2678,24 +2780,36 @@ describe("API 仕様の列挙と検査（fixture）", () => {
   });
 
   it("apps/ が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）", () => {
+    // given
     const root = fixture({ "README.md": "# x\n" });
-    expect({
+
+    // when
+    const result = {
       files: listApiSpecTargets(root),
       violations: collectApiSpecViolations(root),
-    }).toEqual({ files: [], violations: [] });
+    };
+
+    // then
+    expect(result).toEqual({ files: [], violations: [] });
   });
 });
 
 describe("API 仕様（実ファイル）", () => {
   it("presentation の api ファイルごとに apps/backend/spec/api/<feature>/ に <api>.feature と <api>.api-spec.test.ts があり、.feature は固定の見出しの Scenario と `*` の step を業務の言葉だけで書き、step の実装は vi と InMemory を使わず、実 DB を使って対の api を参照し、対象でない API の handler を手に入れず、support.ts が api を値で API ごとに組み立て、handler を呼ばない", () => {
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const apiSpecTargets = listApiSpecTargets(repoRoot);
+    const violations = collectApiSpecViolations(repoRoot);
+
+    // then
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
-    expect(listApiSpecTargets(repoRoot)).toEqual(
+    expect(apiSpecTargets).toEqual(
       expect.arrayContaining([
         "apps/backend/features/todo/internal/presentation/list-todos.api.ts",
         "apps/backend/spec/api/todo/list-todos.feature",
         "apps/backend/spec/api/todo/list-todos.api-spec.test.ts",
       ]),
     );
-    expect(collectApiSpecViolations(repoRoot)).toEqual([]);
+    expect(violations).toEqual([]);
   });
 });

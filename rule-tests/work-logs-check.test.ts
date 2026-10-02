@@ -119,7 +119,12 @@ describe("ワークフローの判定（checksLogsInPullRequests）", () => {
       ),
     ],
   ])("%s は許可する", (_name, yaml) => {
-    expect(checksLogsInPullRequests(yaml)).toBe(true);
+    // given: it.each の yaml
+    // when
+    const allowed = checksLogsInPullRequests(yaml);
+
+    // then
+    expect(allowed).toBe(true);
   });
 
   it.each([
@@ -228,18 +233,30 @@ describe("ワークフローの判定（checksLogsInPullRequests）", () => {
     ["checkout が無い", workflow(...checkStep, ...lint)],
     ["空文字", ""],
   ])("%s は拒否する", (_name, yaml) => {
-    expect(checksLogsInPullRequests(yaml)).toBe(false);
+    // given: it.each の yaml
+    // when
+    const allowed = checksLogsInPullRequests(yaml);
+
+    // then
+    expect(allowed).toBe(false);
   });
 });
 
 describe("作業ログの CI の検査（実ファイル）", () => {
   it(".github/workflows/ci.yml は PR のときだけ check-work-logs-diff.sh を失敗で止まる形で pnpm lint より前に実行し、checkout は fetch-depth: 0", () => {
+    // given
     const yaml = readFileSync(
       join(repoRoot, ".github/workflows/ci.yml"),
       "utf8",
     );
+
+    // when
+    const steps = readWorkflowSteps(yaml);
+    const allowed = checksLogsInPullRequests(yaml);
+
+    // then
     // 前提: ステップを読み取れていること（読み取りが壊れて 0 件になり、判定が素通りするのを防ぐ）。
-    expect(readWorkflowSteps(yaml).length).toBeGreaterThan(5);
-    expect(checksLogsInPullRequests(yaml)).toBe(true);
+    expect(steps.length).toBeGreaterThan(5);
+    expect(allowed).toBe(true);
   });
 });

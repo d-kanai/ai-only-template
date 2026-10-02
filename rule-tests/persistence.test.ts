@@ -1083,7 +1083,12 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       ),
     ],
   ])("%s は違反なし", (_name, path, text) => {
-    expect(findPersistenceViolations(path, text)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findPersistenceViolations(path, text);
+
+    // then
+    expect(violations).toEqual([]);
   });
 });
 
@@ -1669,7 +1674,12 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
       [{ rule: "lock-method-name-for-update", line: 2 }],
     ],
   ])("%s は違反", (_name, path, text, expected) => {
-    expect(findPersistenceViolations(path, text)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const violations = findPersistenceViolations(path, text);
+
+    // then
+    expect(violations).toEqual(expected);
   });
 });
 
@@ -1701,6 +1711,7 @@ describe("backend のソースの列挙と検査（fixture）", () => {
   );
 
   it("apps/backend の下のテスト以外の .ts を対象にし、違反を「規則: パス:行」で返す", () => {
+    // given
     const root = fixture({
       [POSTGRES]: source(IMPORT_CHANGED_PROPS, updateMethod),
       "apps/backend/features/y/internal/infra/y-repository.postgres.ts": source(
@@ -1794,10 +1805,15 @@ describe("backend のソースの列挙と検査（fixture）", () => {
       ),
       "apps/backend/node_modules/x/x.postgres.ts": updateMethod,
     });
-    expect({
+
+    // when
+    const result = {
       files: listBackendSources(root),
       violations: collectPersistenceViolations(root),
-    }).toEqual({
+    };
+
+    // then
+    expect(result).toEqual({
       files: [
         "apps/backend/features/x/internal/domain/x.ts",
         "apps/backend/features/x/internal/infra/schema.ts",
@@ -1844,18 +1860,29 @@ describe("backend のソースの列挙と検査（fixture）", () => {
   });
 
   it("apps/backend が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）", () => {
+    // given
     const root = fixture({ "README.md": "# x\n" });
-    expect({
+
+    // when
+    const result = {
       files: listBackendSources(root),
       violations: collectPersistenceViolations(root),
-    }).toEqual({ files: [], violations: [] });
+    };
+
+    // then
+    expect(result).toEqual({ files: [], violations: [] });
   });
 });
 
 describe("永続化（実ファイル）", () => {
   it("upsert を使わず、*.postgres.ts の update は changed-props を import し、reconstruct を持つ Entity は origin を持ち、insert のみの表を update / delete せず、その表を Changes / Events / Logs で終わる変数で宣言し、書き込みは PostgresWriter.of で得た Writer を通し（transaction と recordChange を直接呼ばず、change-log を import しない）、集約は子表の全件を JOIN で読み、行ロックをするメソッドの名前は ForUpdate で終わる", () => {
-    // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
+    // given: 実ファイル（repoRoot）
+    // when
     const files = listBackendSources(repoRoot);
+    const violations = collectPersistenceViolations(repoRoot);
+
+    // then
+    // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     expect(files).toContain(
       "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
     );
@@ -1866,6 +1893,6 @@ describe("永続化（実ファイル）", () => {
       "apps/backend/features/todo/internal/infra/schema.ts",
     );
     expect(files).toContain("apps/backend/shared/infra/schema.ts");
-    expect(collectPersistenceViolations(repoRoot)).toEqual([]);
+    expect(violations).toEqual([]);
   });
 });
