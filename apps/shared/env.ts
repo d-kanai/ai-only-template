@@ -256,8 +256,8 @@ export class DotEnvFile {
   // cwd から探したリポジトリ直下の .env を読む。読み込んだら true、ファイルが無ければ false（DotEnvFile.load と同じ）。
   // WHY リポジトリ直下の .env を 1 つだけ読む（Issue #68 のユーザー判断）: .env は app ごとに置かず、リポジトリ直下に 1 つにする。
   //   vitest はリポジトリ直下で動くが、workspace パッケージの script（pnpm --filter @repo/frontend-customer build /
-  //   pnpm --filter @repo/backend db:migrate・pnpm --filter @repo/e2e test（playwright。Issue #84）など。Issue #68 の段階 2）は
-  //   パッケージのディレクトリ（apps/frontend_customer・apps/backend・apps/e2e）で
+  //   pnpm --filter @repo/e2e test（playwright。Issue #84）など。Issue #68 の段階 2）は
+  //   パッケージのディレクトリ（apps/frontend_customer・apps/e2e）で
   //   動くため、カレントディレクトリの .env を読むだけでは見つからない。
   // WHY このファイルの場所から探さない（import.meta.dirname を使わない）: Next のビルドでバンドルされると元の場所を指さないため。
   static loadFromRepoRoot(cwd: string): boolean {

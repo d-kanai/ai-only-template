@@ -31,7 +31,7 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 
 ```
 pnpm-workspace.yaml     # packages: apps/*（workspace の範囲）と pnpm の設定
-package.json            # ツールと共通の devDependencies。pnpm dev/build/start・db:generate/db:migrate は pnpm --filter で apps の script を呼ぶ
+package.json            # ツールと共通の devDependencies。pnpm dev/build/start・db:generate は pnpm --filter で apps の script を呼ぶ。db:migrate は直下の script（入口を束ねて実行）
 apps/
   frontend_customer/    # @repo/frontend-customer。Next.js（apps/frontend_customer で next dev/build/start）
     package.json        # next / react / "@repo/backend"・"@repo/shared": "workspace:*"
@@ -45,7 +45,7 @@ apps/
     shared/             # 画面側で feature をまたぐ共通部品（必要になったら作る）
     instrumentation.ts  # 起動時の環境変数の検証（Next の規約ファイル）
   backend/
-    package.json        # @repo/backend。drizzle-orm / pg / @repo/shared、exports（外に公開するファイルの一覧）、db:generate / db:migrate
+    package.json        # @repo/backend。drizzle-orm / pg / @repo/shared、exports（外に公開するファイルの一覧）、db:generate
     features/           # 機能ごとのまとまり（frontend の features/ と同じ。Issue #98）
       todo/               # API 側の 1 機能 = 1 モジュール（直下は internal/ と、必要なら expose/ だけ。Issue #208）
         internal/           # feature の中だけで使う実装（DDD 4 層。Issue #208）
@@ -136,7 +136,7 @@ pnpm build     # 本番ビルド（pnpm --filter @repo/frontend-customer build�
 pnpm start     # 本番ビルドを起動（pnpm --filter @repo/frontend-customer start）
 ```
 
-- コマンドはリポジトリ直下で実行する。`dev` / `build` / `start` は `apps/frontend_customer`、`db:generate` / `db:migrate` は `apps/backend` の script を `pnpm --filter` で呼ぶ（そのパッケージのディレクトリで動くが、`.env` はリポジトリ直下の 1 つを読む）。依存の追加は `pnpm --filter @repo/backend add <pkg>@<x.y.z>` のように置き場所のパッケージを指定する（`.claude/rules/tooling/dependencies.md`）。
+- コマンドはリポジトリ直下で実行する。`dev` / `build` / `start` は `apps/frontend_customer`、`db:generate` は `apps/backend` の script を `pnpm --filter` で呼ぶ。`db:migrate` はリポジトリ直下の script で、`apps/backend/shared/drizzle/migrate.ts` を esbuild で `dist/migrate/` に束ねて実行する（Issue #326）（そのパッケージのディレクトリで動くが、`.env` はリポジトリ直下の 1 つを読む）。依存の追加は `pnpm --filter @repo/backend add <pkg>@<x.y.z>` のように置き場所のパッケージを指定する（`.claude/rules/tooling/dependencies.md`）。
 
 - どのコマンドも `.env` がある前提（上の「セットアップ」）。
 - `pnpm dev` は Postgres の起動とマイグレーションが前提（先に `pnpm db:up && pnpm db:migrate`）。

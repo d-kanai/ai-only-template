@@ -10,7 +10,7 @@ description: Drizzle のスキーマ変更とマイグレーション（schema.t
 
 ## 前提
 - Postgres が起動していること: `pnpm db:up`（`compose.yaml`）。接続先は `.env` の `DATABASE_URL`（無ければ `cp .env.example .env`）。
-- コマンドはリポジトリ直下で実行する。`pnpm db:generate` / `pnpm db:migrate` は `pnpm --filter @repo/backend <script>` を呼び、`apps/backend` をカレントディレクトリにして `drizzle-kit ... --config shared/drizzle/drizzle.config.ts` を動かす（`apps/backend` で直接実行しても、リポジトリ直下から `--config apps/backend/shared/drizzle/drizzle.config.ts` で実行しても同じ）。設定の WHY は `apps/backend/shared/drizzle/drizzle.config.ts` のコメント。
+- コマンドはリポジトリ直下で実行する。`pnpm db:generate` は `pnpm --filter @repo/backend db:generate` を呼び、`apps/backend` をカレントディレクトリにして `drizzle-kit generate --config shared/drizzle/drizzle.config.ts` を動かす（`apps/backend` で直接実行しても、リポジトリ直下から `--config apps/backend/shared/drizzle/drizzle.config.ts` で実行しても同じ）。設定の WHY は `apps/backend/shared/drizzle/drizzle.config.ts` のコメント。`pnpm db:migrate` はリポジトリ直下の script で、`apps/backend` には無い（入口 `migrate.ts` を束ねて実行する。Issue #326）。
 
 ## 手順
 1. **テスト（仕様）から**: 新しい列・表を使う Repository のテスト（`*.postgres.test.ts`）を先に書き、失敗することを確かめる。
