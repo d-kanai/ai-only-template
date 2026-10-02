@@ -11,7 +11,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
+import { afterAll, expect } from "vitest";
+import { casesByName } from "./case-table";
 
 // 「1 ユースケース = 1 API」（.claude/rules/backend.md、Issue #175）を、api ファイル（apps/backend/features/*/internal/presentation/*.api.ts）の
 // リクエストの項目の `.optional()` で機械的に検査するテスト。
@@ -93,297 +95,335 @@ const repoRoot = join(import.meta.dirname, "..");
 
 // テストの入力を行の配列で書き、1 行目を 1 として違反の行番号を読みやすくする。
 const source = (...lines: string[]) => lines.join("\n");
-
-describe("リクエストの任意項目の判定（findOptionalViolations）: must pass", () => {
-  it.each([
-    [
-      ".optional() が無い（必須の項目だけ）",
-      source(
-        "RequestBody.schema({",
-        "  title: z.string().trim(),",
-        "  completed: z.boolean(),",
-        "});",
-      ),
-    ],
-    [
-      "直前の行に // WHY 任意: がある",
-      source(
-        "RequestBody.schema({",
-        "  title: z.string(),",
-        "  // WHY 任意: 説明文は作成時に省略でき、省略は空文字と同じ意味。",
-        "  description: z.string().optional(),",
-        "});",
-      ),
-    ],
-    [
-      "複数行の WHY のコメントの 1 行目に // WHY 任意: がある（続きの行を挟む）",
-      source(
-        "RequestBody.schema({",
-        "  // WHY 任意: 期限は作成時に決まっていないことが多い。",
-        "  //   省略は「期限なし」で、別のユースケースではない。",
-        "  dueDate: z.string().optional(),",
-        "});",
-      ),
-    ],
-    [
-      "複数行の chain で、.optional() の行の直前に // WHY 任意: がある",
-      source(
-        "RequestBody.schema({",
-        "  note: z",
-        "    .string()",
-        "    .trim()",
-        "    // WHY 任意: メモは省略でき、省略は空文字と同じ意味。",
-        "    .optional(),",
-        "});",
-      ),
-    ],
-    [
-      "コメントの中の .optional() は数えない",
-      source(
-        "// .optional() は使わない（1 ユースケース = 1 API）。",
-        "RequestBody.schema({",
-        "  title: z.string(), // 部分更新の .optional() にしない",
-        "});",
-      ),
-    ],
-    [
-      "名前の一部が optional なだけの別のもの（isOptional / optionalFields / .optionalize）",
-      source(
-        "const a = isOptional(x);",
-        "const b = optionalFields;",
-        "const c = s.optionalize;",
-      ),
-    ],
-  ])("%s は違反なし", (_name, text) => {
-    // given: it.each の入力
-    // when
-    const violations = findOptionalViolations(text);
-
-    // then
-    expect(violations).toEqual([]);
-  });
+// WHY OS の一時ディレクトリに置く: リポジトリ内に置くと本番の検査や Biome・git の差分に混ざる。afterAll で消す。
+const roots: string[] = [];
+afterAll(() => {
+  for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
 
-describe("リクエストの任意項目の判定（findOptionalViolations）: must reject", () => {
-  it.each<[string, string, number[]]>([
-    [
-      "部分更新（title も completed も任意）",
-      source(
-        "RequestBody.schema({",
-        "  title: z.string().optional(),",
-        "  completed: z.boolean().optional(),",
-        "});",
-      ),
-      [2, 3],
-    ],
-    [
-      "複数行の chain の最後の行の .optional()（その行を報告する）",
-      source(
-        "RequestBody.schema({",
-        "  title: z",
-        "    .string()",
-        "    .trim()",
-        "    .optional(),",
-        "});",
-      ),
-      [5],
-    ],
-    [
-      "複数行の chain で、WHY が .optional() の行ではなく項目の先頭の行の直前にある",
-      source(
-        "RequestBody.schema({",
-        "  // WHY 任意: メモは省略できる。",
-        "  note: z",
-        "    .string()",
-        "    .optional(),",
-        "});",
-      ),
-      [5],
-    ],
-    [
-      "WHY のコメントと .optional() の行の間に空行がある（2 行上の WHY）",
-      source(
-        "RequestBody.schema({",
-        "  // WHY 任意: 説明文は省略できる。",
-        "",
-        "  description: z.string().optional(),",
-        "});",
-      ),
-      [4],
-    ],
-    [
-      "WHY の見出しが別の規則（長さ）",
-      source(
-        "RequestBody.schema({",
-        "  // WHY 長さ: 説明文は 1000 文字まで。",
-        "  description: z.string().max(1000).optional(),",
-        "});",
-      ),
-      [3],
-    ],
-    [
-      "WHY 任意: の理由が空",
-      source(
-        "RequestBody.schema({",
-        "  // WHY 任意:",
-        "  description: z.string().optional(),",
-        "});",
-      ),
-      [3],
-    ],
-    [
-      "WHY が同じ行の末尾にある（直前の行に書く）",
-      source(
-        "RequestBody.schema({",
-        "  description: z.string().optional(), // WHY 任意: 説明文は省略できる。",
-        "});",
-      ),
-      [2],
-    ],
-    [
-      "WHY がブロックコメント",
-      source(
-        "RequestBody.schema({",
-        "  /* WHY 任意: 説明文は省略できる。 */",
-        "  description: z.string().optional(),",
-        "});",
-      ),
-      [3],
-    ],
-    [
-      "WHY は直後の 1 項目だけに効き、次の項目の .optional() には効かない",
-      source(
-        "RequestBody.schema({",
-        "  // WHY 任意: 説明文は省略できる。",
-        "  description: z.string().optional(),",
-        "  completed: z.boolean().optional(),",
-        "});",
-      ),
-      [4],
-    ],
-    [
-      ".optional の前後に空白がある（. optional ()）",
-      source("RequestBody.schema({ completed: z.boolean(). optional () });"),
-      [1],
-    ],
-  ])("%s は違反", (_name, text, expected) => {
-    // given: it.each の入力
-    // when
-    const violations = findOptionalViolations(text);
-
-    // then
-    expect(violations).toEqual(expected);
-  });
-});
-
-// --- 列挙 → 読み取り → 判定を通した fixture テスト ---
-// WHY: 判定が正しくても、対象の列挙（presentation/*.api.ts の見つけ方）が漏れれば見逃す。一時ディレクトリに架空のツリーを置き、
-//   本番と同じ collectApiRequestViolations に通して、違反の集合を丸ごと比較する（見逃しも余分な検出も失敗にする）。
-describe("api ファイルの列挙と検査（fixture）", () => {
-  // WHY OS の一時ディレクトリに置く: リポジトリ内に置くと本番の検査や Biome・git の差分に混ざる。afterAll で消す。
-  const roots: string[] = [];
-  afterAll(() => {
-    for (const root of roots) rmSync(root, { recursive: true, force: true });
-  });
-
-  function fixture(files: Record<string, string>): string {
-    const root = mkdtempSync(join(tmpdir(), "api-request-"));
-    roots.push(root);
-    for (const [path, content] of Object.entries(files)) {
-      mkdirSync(dirname(join(root, path)), { recursive: true });
-      writeFileSync(join(root, path), content);
-    }
-    return root;
+function fixture(files: Record<string, string>): string {
+  const root = mkdtempSync(join(tmpdir(), "api-request-"));
+  roots.push(root);
+  for (const [path, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), content);
   }
+  return root;
+}
 
-  const partialUpdate = source(
-    "RequestBody.schema({",
-    "  title: z.string().optional(),",
-    "});",
+const partialUpdate = source(
+  "RequestBody.schema({",
+  "  title: z.string().optional(),",
+  "});",
+);
+
+const feature = await loadFeature("./api-request.feature");
+
+describeFeature(feature, ({ Scenario }) => {
+  Scenario(
+    "リクエストの任意項目の判定（findOptionalViolations）: must pass",
+    ({ And }) => {
+      And(
+        "WHY 任意: のある .optional() と .optional() の無い書き方は違反なし（必須の項目だけ・直前の行の WHY・複数行の chain・コメントの中など）",
+        () => {
+          // given
+          const cases: [string, string][] = [
+            [
+              ".optional() が無い（必須の項目だけ）",
+              source(
+                "RequestBody.schema({",
+                "  title: z.string().trim(),",
+                "  completed: z.boolean(),",
+                "});",
+              ),
+            ],
+            [
+              "直前の行に // WHY 任意: がある",
+              source(
+                "RequestBody.schema({",
+                "  title: z.string(),",
+                "  // WHY 任意: 説明文は作成時に省略でき、省略は空文字と同じ意味。",
+                "  description: z.string().optional(),",
+                "});",
+              ),
+            ],
+            [
+              "複数行の WHY のコメントの 1 行目に // WHY 任意: がある（続きの行を挟む）",
+              source(
+                "RequestBody.schema({",
+                "  // WHY 任意: 期限は作成時に決まっていないことが多い。",
+                "  //   省略は「期限なし」で、別のユースケースではない。",
+                "  dueDate: z.string().optional(),",
+                "});",
+              ),
+            ],
+            [
+              "複数行の chain で、.optional() の行の直前に // WHY 任意: がある",
+              source(
+                "RequestBody.schema({",
+                "  note: z",
+                "    .string()",
+                "    .trim()",
+                "    // WHY 任意: メモは省略でき、省略は空文字と同じ意味。",
+                "    .optional(),",
+                "});",
+              ),
+            ],
+            [
+              "コメントの中の .optional() は数えない",
+              source(
+                "// .optional() は使わない（1 ユースケース = 1 API）。",
+                "RequestBody.schema({",
+                "  title: z.string(), // 部分更新の .optional() にしない",
+                "});",
+              ),
+            ],
+            [
+              "名前の一部が optional なだけの別のもの（isOptional / optionalFields / .optionalize）",
+              source(
+                "const a = isOptional(x);",
+                "const b = optionalFields;",
+                "const c = s.optionalize;",
+              ),
+            ],
+          ];
+
+          // when
+          const violations = casesByName(cases, ([, text]) =>
+            findOptionalViolations(text),
+          );
+
+          // then
+          expect(violations).toEqual(casesByName(cases, () => []));
+        },
+      );
+    },
   );
 
-  it("features/<f>/internal/presentation/*.api.ts だけを対象にし、違反を「パス:行: 行の内容」で返す", () => {
-    // given
-    const root = fixture({
-      "apps/backend/features/a/internal/presentation/rename-a.api.ts": source(
-        "RequestBody.schema({",
-        "  title: z.string(),",
-        "});",
-      ),
-      "apps/backend/features/a/internal/presentation/update-a.api.ts": source(
-        "RequestBody.schema({",
-        "  title: z.string().optional(),",
-        "  completed: z.boolean().optional(),",
-        "});",
-      ),
-      "apps/backend/features/b/internal/presentation/create-b.api.ts": source(
-        "RequestBody.schema({",
-        "  // WHY 任意: 説明文は省略でき、省略は空文字と同じ意味。",
-        "  description: z.string().optional(),",
-        "});",
-      ),
-      // 対象外: api のテスト、presentation 以外の層、presentation の入れ子、api でないファイル、shared、features の外。
-      "apps/backend/features/a/internal/presentation/update-a.api.test.ts":
-        partialUpdate,
-      "apps/backend/features/a/internal/application/update-a.command.ts":
-        partialUpdate,
-      "apps/backend/features/a/internal/application/x.api.ts": partialUpdate,
-      "apps/backend/features/a/internal/presentation/nested/x.api.ts":
-        partialUpdate,
-      "apps/backend/features/a/internal/presentation/helper.ts": partialUpdate,
-      "apps/backend/shared/presentation/x.api.ts": partialUpdate,
-      // Issue #208: internal/ を挟まない旧の置き場所（置き場所の規則 backend-placement が違反にする）。
-      "apps/backend/features/a/presentation/old-a.api.ts": partialUpdate,
-      "apps/frontend_customer/features/a/presentation/x.api.ts": partialUpdate,
-    });
+  Scenario(
+    "リクエストの任意項目の判定（findOptionalViolations）: must reject",
+    ({ And }) => {
+      And(
+        "WHY 任意: の無い .optional() は、その行の番号で違反になる（部分更新・複数行の chain・空行を挟む・別の見出し・同じ行の末尾の WHY など）",
+        () => {
+          // given
+          const cases: [string, string, number[]][] = [
+            [
+              "部分更新（title も completed も任意）",
+              source(
+                "RequestBody.schema({",
+                "  title: z.string().optional(),",
+                "  completed: z.boolean().optional(),",
+                "});",
+              ),
+              [2, 3],
+            ],
+            [
+              "複数行の chain の最後の行の .optional()（その行を報告する）",
+              source(
+                "RequestBody.schema({",
+                "  title: z",
+                "    .string()",
+                "    .trim()",
+                "    .optional(),",
+                "});",
+              ),
+              [5],
+            ],
+            [
+              "複数行の chain で、WHY が .optional() の行ではなく項目の先頭の行の直前にある",
+              source(
+                "RequestBody.schema({",
+                "  // WHY 任意: メモは省略できる。",
+                "  note: z",
+                "    .string()",
+                "    .optional(),",
+                "});",
+              ),
+              [5],
+            ],
+            [
+              "WHY のコメントと .optional() の行の間に空行がある（2 行上の WHY）",
+              source(
+                "RequestBody.schema({",
+                "  // WHY 任意: 説明文は省略できる。",
+                "",
+                "  description: z.string().optional(),",
+                "});",
+              ),
+              [4],
+            ],
+            [
+              "WHY の見出しが別の規則（長さ）",
+              source(
+                "RequestBody.schema({",
+                "  // WHY 長さ: 説明文は 1000 文字まで。",
+                "  description: z.string().max(1000).optional(),",
+                "});",
+              ),
+              [3],
+            ],
+            [
+              "WHY 任意: の理由が空",
+              source(
+                "RequestBody.schema({",
+                "  // WHY 任意:",
+                "  description: z.string().optional(),",
+                "});",
+              ),
+              [3],
+            ],
+            [
+              "WHY が同じ行の末尾にある（直前の行に書く）",
+              source(
+                "RequestBody.schema({",
+                "  description: z.string().optional(), // WHY 任意: 説明文は省略できる。",
+                "});",
+              ),
+              [2],
+            ],
+            [
+              "WHY がブロックコメント",
+              source(
+                "RequestBody.schema({",
+                "  /* WHY 任意: 説明文は省略できる。 */",
+                "  description: z.string().optional(),",
+                "});",
+              ),
+              [3],
+            ],
+            [
+              "WHY は直後の 1 項目だけに効き、次の項目の .optional() には効かない",
+              source(
+                "RequestBody.schema({",
+                "  // WHY 任意: 説明文は省略できる。",
+                "  description: z.string().optional(),",
+                "  completed: z.boolean().optional(),",
+                "});",
+              ),
+              [4],
+            ],
+            [
+              ".optional の前後に空白がある（. optional ()）",
+              source(
+                "RequestBody.schema({ completed: z.boolean(). optional () });",
+              ),
+              [1],
+            ],
+          ];
 
-    // when
-    const result = {
-      files: listApiFiles(root),
-      violations: collectApiRequestViolations(root),
-    };
+          // when
+          const violations = casesByName(cases, ([, text]) =>
+            findOptionalViolations(text),
+          );
 
-    // then
-    expect(result).toEqual({
-      files: [
-        "apps/backend/features/a/internal/presentation/rename-a.api.ts",
-        "apps/backend/features/a/internal/presentation/update-a.api.ts",
-        "apps/backend/features/b/internal/presentation/create-b.api.ts",
-      ],
-      violations: [
-        "apps/backend/features/a/internal/presentation/update-a.api.ts:2: title: z.string().optional(),",
-        "apps/backend/features/a/internal/presentation/update-a.api.ts:3: completed: z.boolean().optional(),",
-      ],
-    });
-  });
+          // then
+          expect(violations).toEqual(
+            casesByName(cases, ([, , expected]) => expected),
+          );
+        },
+      );
+    },
+  );
 
-  it("apps/backend/features が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）", () => {
-    // given
-    const root = fixture({ "README.md": "# x\n" });
+  // --- 列挙 → 読み取り → 判定を通した fixture テスト ---
+  // WHY: 判定が正しくても、対象の列挙（presentation/*.api.ts の見つけ方）が漏れれば見逃す。一時ディレクトリに架空のツリーを置き、
+  //   本番と同じ collectApiRequestViolations に通して、違反の集合を丸ごと比較する（見逃しも余分な検出も失敗にする）。
+  Scenario("api ファイルの列挙と検査（fixture）", ({ And }) => {
+    And(
+      "features/<f>/internal/presentation/ の .api.ts だけを対象にし、違反を「パス:行: 行の内容」で返す",
+      () => {
+        // given
+        const root = fixture({
+          "apps/backend/features/a/internal/presentation/rename-a.api.ts":
+            source("RequestBody.schema({", "  title: z.string(),", "});"),
+          "apps/backend/features/a/internal/presentation/update-a.api.ts":
+            source(
+              "RequestBody.schema({",
+              "  title: z.string().optional(),",
+              "  completed: z.boolean().optional(),",
+              "});",
+            ),
+          "apps/backend/features/b/internal/presentation/create-b.api.ts":
+            source(
+              "RequestBody.schema({",
+              "  // WHY 任意: 説明文は省略でき、省略は空文字と同じ意味。",
+              "  description: z.string().optional(),",
+              "});",
+            ),
+          // 対象外: api のテスト、presentation 以外の層、presentation の入れ子、api でないファイル、shared、features の外。
+          "apps/backend/features/a/internal/presentation/update-a.api.test.ts":
+            partialUpdate,
+          "apps/backend/features/a/internal/application/update-a.command.ts":
+            partialUpdate,
+          "apps/backend/features/a/internal/application/x.api.ts":
+            partialUpdate,
+          "apps/backend/features/a/internal/presentation/nested/x.api.ts":
+            partialUpdate,
+          "apps/backend/features/a/internal/presentation/helper.ts":
+            partialUpdate,
+          "apps/backend/shared/presentation/x.api.ts": partialUpdate,
+          // Issue #208: internal/ を挟まない旧の置き場所（置き場所の規則 backend-placement が違反にする）。
+          "apps/backend/features/a/presentation/old-a.api.ts": partialUpdate,
+          "apps/frontend_customer/features/a/presentation/x.api.ts":
+            partialUpdate,
+        });
 
-    // when
-    const result = {
-      files: listApiFiles(root),
-      violations: collectApiRequestViolations(root),
-    };
+        // when
+        const result = {
+          files: listApiFiles(root),
+          violations: collectApiRequestViolations(root),
+        };
 
-    // then
-    expect(result).toEqual({ files: [], violations: [] });
-  });
-});
-
-describe("リクエストの任意項目（実ファイル）", () => {
-  it("apps/backend/features/*/internal/presentation/*.api.ts は .optional() を WHY 任意: 無しで使わない", () => {
-    // given: 実ファイル（repoRoot）
-    // when
-    const files = listApiFiles(repoRoot);
-    const violations = collectApiRequestViolations(repoRoot);
-
-    // then
-    // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
-    expect(files).toContain(
-      "apps/backend/features/todo/internal/presentation/create-todo.api.ts",
+        // then
+        expect(result).toEqual({
+          files: [
+            "apps/backend/features/a/internal/presentation/rename-a.api.ts",
+            "apps/backend/features/a/internal/presentation/update-a.api.ts",
+            "apps/backend/features/b/internal/presentation/create-b.api.ts",
+          ],
+          violations: [
+            "apps/backend/features/a/internal/presentation/update-a.api.ts:2: title: z.string().optional(),",
+            "apps/backend/features/a/internal/presentation/update-a.api.ts:3: completed: z.boolean().optional(),",
+          ],
+        });
+      },
     );
-    expect(violations).toEqual([]);
+
+    And(
+      "apps/backend/features が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）",
+      () => {
+        // given
+        const root = fixture({ "README.md": "# x\n" });
+
+        // when
+        const result = {
+          files: listApiFiles(root),
+          violations: collectApiRequestViolations(root),
+        };
+
+        // then
+        expect(result).toEqual({ files: [], violations: [] });
+      },
+    );
+  });
+
+  Scenario("リクエストの任意項目（実ファイル）", ({ And }) => {
+    And(
+      "apps/backend/features/<f>/internal/presentation/ の .api.ts は .optional() を WHY 任意: 無しで使わない",
+      () => {
+        // given: 実ファイル（repoRoot）
+        // when
+        const files = listApiFiles(repoRoot);
+        const violations = collectApiRequestViolations(repoRoot);
+
+        // then
+        // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
+        expect(files).toContain(
+          "apps/backend/features/todo/internal/presentation/create-todo.api.ts",
+        );
+        expect(violations).toEqual([]);
+      },
+    );
   });
 });

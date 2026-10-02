@@ -11,7 +11,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
+import { afterAll, expect } from "vitest";
+import { casesByName } from "./case-table";
 
 // drizzle のマイグレーションの SQL の決まり（.claude/rules/backend.md の「永続化」。Issue #192）を機械的に検査するテスト。
 // Issue #247 で、データの移行（backfill）の仕組みを消したのに合わせて、backfill の規則（idempotent-insert-select・
@@ -80,138 +82,164 @@ function collectMigrationViolations(root: string): string[] {
 const repoRoot = join(import.meta.dirname, "..");
 const lines = (...parts: string[]) => parts.join("\n");
 
-describe("public のスキーマ修飾（findPublicSchemaQualifiers）", () => {
-  it.each([
-    [
-      "修飾なしの外部キー（0002 の形）",
-      'ALTER TABLE "c" ADD CONSTRAINT "c_fk" FOREIGN KEY ("p_id") REFERENCES "p"("id") ON DELETE cascade;',
-    ],
-    [
-      'コメントの中の "public".（WHY の説明）',
-      lines(
-        '-- drizzle-kit は REFERENCES "public"."p" と書く',
-        "/* public.p */",
-        'CREATE TABLE "c" ("id" uuid);',
-      ),
-    ],
-    [
-      "public を含む別の名前（列 is_public・表 publications）",
-      'CREATE TABLE "publications" ("is_public" boolean, "public_id" uuid);',
-    ],
-    ["空", ""],
-  ])("%s は違反なし", (_name, sql) => {
-    // given: it.each の入力
-    // when
-    const result = findPublicSchemaQualifiers(sql);
-
-    // then
-    expect(result).toEqual([]);
-  });
-
-  it.each([
-    [
-      "drizzle-kit が .references() から生成する形",
-      lines(
-        'CREATE TABLE "c" ("id" uuid);--> statement-breakpoint',
-        'ALTER TABLE "c" ADD CONSTRAINT "c_fk" FOREIGN KEY ("p_id") REFERENCES "public"."p"("id");',
-      ),
-      [2],
-    ],
-    ["引用符なし", "insert into public.p select 1;", [1]],
-    ["大文字と空白", 'SELECT 1 FROM "PUBLIC" . "p";', [1]],
-    [
-      "複数の文",
-      'SELECT 1 FROM "public"."a";\nSELECT 1 FROM public.b;',
-      [1, 2],
-    ],
-  ])("%s は違反", (_name, sql, expected) => {
-    // given: it.each の入力
-    // when
-    const result = findPublicSchemaQualifiers(sql);
-
-    // then
-    expect(result).toEqual(expected);
-  });
+// WHY OS の一時ディレクトリに置く: リポジトリ内に置くと本番の検査や Biome・git の差分に混ざる。afterAll で消す。
+const roots: string[] = [];
+afterAll(() => {
+  for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
 
-describe("列挙と検査（fixture）", () => {
-  // WHY OS の一時ディレクトリに置く: リポジトリ内に置くと本番の検査や Biome・git の差分に混ざる。afterAll で消す。
-  const roots: string[] = [];
-  afterAll(() => {
-    for (const root of roots) rmSync(root, { recursive: true, force: true });
-  });
-
-  function fixture(files: Record<string, string>): string {
-    const root = mkdtempSync(join(tmpdir(), "migration-"));
-    roots.push(root);
-    for (const [path, content] of Object.entries(files)) {
-      mkdirSync(dirname(join(root, path)), { recursive: true });
-      writeFileSync(join(root, path), content);
-    }
-    return root;
+function fixture(files: Record<string, string>): string {
+  const root = mkdtempSync(join(tmpdir(), "migration-"));
+  roots.push(root);
+  for (const [path, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), content);
   }
+  return root;
+}
 
-  it("drizzle の下の *.sql（サブディレクトリを含む）だけを検査し、public で修飾した文をファイルと文の番号で返す", () => {
-    // given
-    const root = fixture({
-      [`${DRIZZLE_DIR}/0000_create.sql`]: "CREATE TABLE x (a int);",
-      [`${DRIZZLE_DIR}/0001_fk.sql`]: lines(
-        '-- REFERENCES "public"."t" はコメントなので数えない',
-        "CREATE TABLE y (a int);--> statement-breakpoint",
-        'ALTER TABLE y ADD CONSTRAINT c FOREIGN KEY (a) REFERENCES "public"."t"("id");',
-      ),
-      [`${DRIZZLE_DIR}/nested/0002_x.sql`]: "SELECT 1 FROM public.t;",
-      [`${DRIZZLE_DIR}/meta/_journal.json`]: '{"x": "public.t"}',
-      [`${DRIZZLE_DIR}/drizzle.config.ts`]: "// public.t\n",
-      "other/0000_x.sql": "SELECT 1 FROM public.t;",
-    });
+const feature = await loadFeature("./migration.feature");
 
-    // when
-    const result = {
-      sql: listDrizzleSqlFiles(root),
-      violations: collectMigrationViolations(root),
-    };
+describeFeature(feature, ({ Scenario }) => {
+  Scenario("public のスキーマ修飾の判定", ({ And }) => {
+    And(
+      '修飾の無い書き方は違反なし（修飾なしの外部キー・コメントの中の "public".・public を含む別の名前・空）',
+      () => {
+        // given
+        const cases: [string, string][] = [
+          [
+            "修飾なしの外部キー（0002 の形）",
+            'ALTER TABLE "c" ADD CONSTRAINT "c_fk" FOREIGN KEY ("p_id") REFERENCES "p"("id") ON DELETE cascade;',
+          ],
+          [
+            'コメントの中の "public".（WHY の説明）',
+            lines(
+              '-- drizzle-kit は REFERENCES "public"."p" と書く',
+              "/* public.p */",
+              'CREATE TABLE "c" ("id" uuid);',
+            ),
+          ],
+          [
+            "public を含む別の名前（列 is_public・表 publications）",
+            'CREATE TABLE "publications" ("is_public" boolean, "public_id" uuid);',
+          ],
+          ["空", ""],
+        ];
 
-    // then
-    expect(result).toEqual({
-      sql: [
-        `${DRIZZLE_DIR}/0000_create.sql`,
-        `${DRIZZLE_DIR}/0001_fk.sql`,
-        `${DRIZZLE_DIR}/nested/0002_x.sql`,
-      ],
-      violations: [
-        `no-public-schema-qualifier: ${DRIZZLE_DIR}/0001_fk.sql の 2 文目が表を "public". で修飾している`,
-        `no-public-schema-qualifier: ${DRIZZLE_DIR}/nested/0002_x.sql の 1 文目が表を "public". で修飾している`,
-      ],
-    });
+        // when
+        const result = casesByName(cases, ([, sql]) =>
+          findPublicSchemaQualifiers(sql),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => []));
+      },
+    );
+
+    And(
+      "表を public で修飾した文は、文の番号で違反になる（drizzle-kit が生成する形・引用符なし・大文字と空白・複数の文）",
+      () => {
+        // given
+        const cases: [string, string, number[]][] = [
+          [
+            "drizzle-kit が .references() から生成する形",
+            lines(
+              'CREATE TABLE "c" ("id" uuid);--> statement-breakpoint',
+              'ALTER TABLE "c" ADD CONSTRAINT "c_fk" FOREIGN KEY ("p_id") REFERENCES "public"."p"("id");',
+            ),
+            [2],
+          ],
+          ["引用符なし", "insert into public.p select 1;", [1]],
+          ["大文字と空白", 'SELECT 1 FROM "PUBLIC" . "p";', [1]],
+          [
+            "複数の文",
+            'SELECT 1 FROM "public"."a";\nSELECT 1 FROM public.b;',
+            [1, 2],
+          ],
+        ];
+
+        // when
+        const result = casesByName(cases, ([, sql]) =>
+          findPublicSchemaQualifiers(sql),
+        );
+
+        // then
+        expect(result).toEqual(
+          casesByName(cases, ([, , expected]) => expected),
+        );
+      },
+    );
   });
 
-  it("drizzle のディレクトリが無ければ対象は 0 件で違反も 0 件になる（本番の検査は 0 件を失敗にする）", () => {
-    // given
-    const root = fixture({ "README.md": "# x\n" });
+  Scenario("列挙と検査（fixture）", ({ And }) => {
+    And(
+      "drizzle の下の SQL のファイル（サブディレクトリを含む）だけを検査し、public で修飾した文をファイルと文の番号で返す",
+      () => {
+        // given
+        const root = fixture({
+          [`${DRIZZLE_DIR}/0000_create.sql`]: "CREATE TABLE x (a int);",
+          [`${DRIZZLE_DIR}/0001_fk.sql`]: lines(
+            '-- REFERENCES "public"."t" はコメントなので数えない',
+            "CREATE TABLE y (a int);--> statement-breakpoint",
+            'ALTER TABLE y ADD CONSTRAINT c FOREIGN KEY (a) REFERENCES "public"."t"("id");',
+          ),
+          [`${DRIZZLE_DIR}/nested/0002_x.sql`]: "SELECT 1 FROM public.t;",
+          [`${DRIZZLE_DIR}/meta/_journal.json`]: '{"x": "public.t"}',
+          [`${DRIZZLE_DIR}/drizzle.config.ts`]: "// public.t\n",
+          "other/0000_x.sql": "SELECT 1 FROM public.t;",
+        });
 
-    // when
-    const result = {
-      sql: listDrizzleSqlFiles(root),
-      violations: collectMigrationViolations(root),
-    };
+        // when
+        const result = {
+          sql: listDrizzleSqlFiles(root),
+          violations: collectMigrationViolations(root),
+        };
 
-    // then
-    expect(result).toEqual({ sql: [], violations: [] });
+        // then
+        expect(result).toEqual({
+          sql: [
+            `${DRIZZLE_DIR}/0000_create.sql`,
+            `${DRIZZLE_DIR}/0001_fk.sql`,
+            `${DRIZZLE_DIR}/nested/0002_x.sql`,
+          ],
+          violations: [
+            `no-public-schema-qualifier: ${DRIZZLE_DIR}/0001_fk.sql の 2 文目が表を "public". で修飾している`,
+            `no-public-schema-qualifier: ${DRIZZLE_DIR}/nested/0002_x.sql の 1 文目が表を "public". で修飾している`,
+          ],
+        });
+      },
+    );
+
+    And(
+      "drizzle のディレクトリが無ければ対象は 0 件で違反も 0 件になる（本番の検査は 0 件を失敗にする）",
+      () => {
+        // given
+        const root = fixture({ "README.md": "# x\n" });
+
+        // when
+        const result = {
+          sql: listDrizzleSqlFiles(root),
+          violations: collectMigrationViolations(root),
+        };
+
+        // then
+        expect(result).toEqual({ sql: [], violations: [] });
+      },
+    );
   });
-});
 
-describe("マイグレーション（実ファイル）", () => {
-  it("drizzle の SQL は表を public で修飾しない", () => {
-    // given: 実ファイル（repoRoot）
-    // when
-    const files = listDrizzleSqlFiles(repoRoot);
-    const violations = collectMigrationViolations(repoRoot);
+  Scenario("実ファイル", ({ And }) => {
+    And("drizzle の SQL は表を public で修飾しない", () => {
+      // given: 実ファイル（repoRoot）
+      // when
+      const files = listDrizzleSqlFiles(repoRoot);
+      const violations = collectMigrationViolations(repoRoot);
 
-    // then
-    // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
-    //   最初のマイグレーションは消えない（消すと migrate の記録とずれる）ので、それが列挙に入ることを見る。
-    expect(files).toContain(`${DRIZZLE_DIR}/0000_create_todos.sql`);
-    expect(violations).toEqual([]);
+      // then
+      // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
+      //   最初のマイグレーションは消えない（消すと migrate の記録とずれる）ので、それが列挙に入ることを見る。
+      expect(files).toContain(`${DRIZZLE_DIR}/0000_create_todos.sql`);
+      expect(violations).toEqual([]);
+    });
   });
 });

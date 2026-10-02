@@ -11,7 +11,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
+import { expect } from "vitest";
+import { casesByName } from "./case-table";
 
 // DB の列の型の既定（.claude/rules/backend.md の「列の型」。決定は ADR docs/adr/quality/20260930-db-column-types-default-text-and-integer.md、
 // Issue #145）を、Drizzle のスキーマ（apps/backend/**/infra/schema.ts）で機械的に検査するテスト。
@@ -473,686 +475,8 @@ const repoRoot = join(import.meta.dirname, "..");
 const source = (...lines: string[]) => lines.join("\n");
 const IMPORT = 'import * as pg from "drizzle-orm/pg-core";';
 
-describe("列の型の判定（findColumnTypeViolations）: must pass", () => {
-  it.each([
-    [
-      "既定の型（uuid / text / integer / bigint / numeric / boolean / timestamptz / jsonb）",
-      source(
-        'import { bigint, boolean, integer, jsonb, numeric, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";',
-        'export const t = pgTable("t", {',
-        '  id: uuid("id").primaryKey(),',
-        '  title: text("title").notNull(),',
-        '  count: integer("count").notNull(),',
-        '  total: bigint("total", { mode: "number" }),',
-        '  price: numeric("price", { precision: 12, scale: 2 }),',
-        '  done: boolean("done").notNull().default(false),',
-        '  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),',
-        '  data: jsonb("data"),',
-        "});",
-      ),
-    ],
-    [
-      "timestamp の options が複数行で、withTimezone: true が後ろにある",
-      source(
-        IMPORT,
-        "const c = {",
-        '  at: pg.timestamp("at", {',
-        '    mode: "date",',
-        "    withTimezone: true,",
-        "  }),",
-        "};",
-      ),
-    ],
-    [
-      "コメントの中の varchar( / json( / serial( は呼び出しではない",
-      source(
-        "// varchar(100) にしない。json( ではなく jsonb、serial( ではなく uuid。",
-        '/* char(3) も timestamp("x") も書かない */',
-        'const c = { title: text("title") };',
-      ),
-    ],
-    [
-      "文字列の中の varchar( は呼び出しではない（列名など）",
-      source('const c = { title: text("varchar(1)"), note: text(`json(`) };'),
-    ],
-    [
-      "名前の一部が一致するだけの別の関数（jsonb / toJson / myVarchar / charCode / timestampz）",
-      source(
-        'const c = { a: jsonb("a"), b: toJson("b"), c: myVarchar("c"), d: charCode("d"), e: timestampz("e") };',
-      ),
-    ],
-    [
-      "import しただけで呼んでいない",
-      source(
-        'import { json, serial, varchar } from "drizzle-orm/pg-core";',
-        'const c = { title: text("title") };',
-      ),
-    ],
-    [
-      "varchar の直前の行に // WHY 長さ: がある",
-      source(
-        IMPORT,
-        "const c = {",
-        "  // WHY 長さ: 外部の決済サービスの取引コードは 20 文字固定で、DB でも保証する。",
-        '  code: pg.varchar("code", { length: 20 }),',
-        "};",
-      ),
-    ],
-    [
-      "複数行の WHY のコメントの 1 行目に // WHY 長さ: がある（続きの行を挟む）",
-      source(
-        IMPORT,
-        "const c = {",
-        "  // WHY 長さ: 国コード（ISO 3166-1 alpha-2）は 2 文字固定。",
-        "  //   domain でも検証するが、他システムが直接書き込むので DB でも保証する。",
-        '  country: pg.char("country", { length: 2 }),',
-        "};",
-      ),
-    ],
-    [
-      "timestamp（timezone 無し）の直前の行に // WHY タイムゾーン: がある",
-      source(
-        IMPORT,
-        "const c = {",
-        "  // WHY タイムゾーン: 外部の CSV の現地時刻をそのまま保持する。",
-        '  localAt: pg.timestamp("local_at"),',
-        "};",
-      ),
-    ],
-    [
-      "serial の直前の行に // WHY 連番: がある",
-      source(
-        IMPORT,
-        "const c = {",
-        "  // WHY 連番: 外部に見せる請求書番号で、欠番の少ない連番が要る。",
-        '  invoiceNo: pg.bigserial("invoice_no", { mode: "number" }),',
-        "};",
-      ),
-    ],
-    [
-      "json の直前の行に // WHY json: がある",
-      source(
-        IMPORT,
-        "const c = {",
-        "  // WHY json: 受け取った本文をキーの順序も含めてそのまま残す。",
-        '  raw: pg.json("raw"),',
-        "};",
-      ),
-    ],
-  ])("%s は違反なし", (_name, text) => {
-    // given: it.each の入力
-    // when
-    const violations = findColumnTypeViolations(text);
-
-    // then
-    expect(violations).toEqual([]);
-  });
-});
-
-describe("列の型の判定（findColumnTypeViolations）: must reject", () => {
-  it.each<[string, string, ColumnTypeViolation[]]>([
-    [
-      "varchar（長さ付き）",
-      source(
-        IMPORT,
-        'const c = { title: pg.varchar("title", { length: 100 }) };',
-      ),
-      [{ rule: "varchar", line: 2 }],
-    ],
-    [
-      "varchar（長さ無し）を名前で import して呼ぶ",
-      source(
-        'import { varchar } from "drizzle-orm/pg-core";',
-        'const c = { title: varchar("title") };',
-      ),
-      [{ rule: "varchar", line: 2 }],
-    ],
-    [
-      "import の別名で varchar を呼ぶ",
-      source(
-        'import { text, varchar as vc } from "drizzle-orm/pg-core";',
-        'const c = { title: vc("title", { length: 255 }) };',
-      ),
-      [{ rule: "varchar", line: 2 }],
-    ],
-    [
-      "pg-core から import していない varchar / 名前空間の名前が違う other.json も名前で違反（安全側）",
-      source(
-        'import { varchar } from "./x";',
-        IMPORT,
-        'const c = { title: varchar("title"), raw: other.json("raw") };',
-      ),
-      [
-        { rule: "varchar", line: 3 },
-        { rule: "json", line: 3 },
-      ],
-    ],
-    [
-      "char（固定長）",
-      source(IMPORT, 'const c = { code: pg.char("code", { length: 3 }) };'),
-      [{ rule: "char", line: 2 }],
-    ],
-    [
-      "timestamp（options 無し）",
-      source(IMPORT, 'const c = { at: pg.timestamp("at") };'),
-      [{ rule: "timestamp-without-timezone", line: 2 }],
-    ],
-    [
-      "timestamp（withTimezone が無い options）",
-      source(IMPORT, 'const c = { at: pg.timestamp("at", { mode: "date" }) };'),
-      [{ rule: "timestamp-without-timezone", line: 2 }],
-    ],
-    [
-      "timestamp（withTimezone: false）",
-      source(
-        IMPORT,
-        'const c = { at: pg.timestamp("at", { withTimezone: false }) };',
-      ),
-      [{ rule: "timestamp-without-timezone", line: 2 }],
-    ],
-    [
-      "timestamp の options の withTimezone: true がコメントアウトされている",
-      source(
-        IMPORT,
-        "const c = {",
-        '  at: pg.timestamp("at", {',
-        "    // withTimezone: true,",
-        '    mode: "date",',
-        "  }),",
-        "};",
-      ),
-      [{ rule: "timestamp-without-timezone", line: 3 }],
-    ],
-    [
-      "同じ行の 2 つの timestamp のうち、1 つ目だけ timezone 無し（2 つ目の withTimezone を借りない）",
-      source(
-        IMPORT,
-        'const c = { a: pg.timestamp("a"), b: pg.timestamp("b", { withTimezone: true }) };',
-      ),
-      [{ rule: "timestamp-without-timezone", line: 2 }],
-    ],
-    [
-      "serial / bigserial / smallserial",
-      source(
-        'import { bigserial, serial, smallserial } from "drizzle-orm/pg-core";',
-        "const c = {",
-        '  a: serial("a"),',
-        '  b: bigserial("b", { mode: "number" }),',
-        '  c: smallserial("c"),',
-        "};",
-      ),
-      [
-        { rule: "serial", line: 3 },
-        { rule: "serial", line: 4 },
-        { rule: "serial", line: 5 },
-      ],
-    ],
-    [
-      "json（jsonb でない）",
-      source(IMPORT, 'const c = { data: pg.json("data") };'),
-      [{ rule: "json", line: 2 }],
-    ],
-    [
-      "WHY の見出しが別の規則（タイムゾーン）",
-      source(
-        IMPORT,
-        "const c = {",
-        "  // WHY タイムゾーン: 現地時刻を保持する。",
-        '  code: pg.varchar("code", { length: 20 }),',
-        "};",
-      ),
-      [{ rule: "varchar", line: 4 }],
-    ],
-    [
-      "WHY 長さ: の理由が空",
-      source(
-        IMPORT,
-        "const c = {",
-        "  // WHY 長さ:",
-        '  code: pg.varchar("code", { length: 20 }),',
-        "};",
-      ),
-      [{ rule: "varchar", line: 4 }],
-    ],
-    [
-      "WHY のコメントと列の間に空行がある",
-      source(
-        IMPORT,
-        "const c = {",
-        "  // WHY 長さ: 取引コードは 20 文字固定。",
-        "",
-        '  code: pg.varchar("code", { length: 20 }),',
-        "};",
-      ),
-      [{ rule: "varchar", line: 5 }],
-    ],
-    [
-      "WHY が同じ行の末尾にある（直前の行に書く）",
-      source(
-        IMPORT,
-        'const c = { code: pg.varchar("code", { length: 20 }) }; // WHY 長さ: 取引コードは 20 文字固定。',
-      ),
-      [{ rule: "varchar", line: 2 }],
-    ],
-    [
-      "WHY がブロックコメント",
-      source(
-        IMPORT,
-        "const c = {",
-        "  /* WHY 長さ: 取引コードは 20 文字固定。 */",
-        '  code: pg.varchar("code", { length: 20 }),',
-        "};",
-      ),
-      [{ rule: "varchar", line: 4 }],
-    ],
-    [
-      "WHY の見出しの無いコメント",
-      source(
-        IMPORT,
-        "const c = {",
-        "  // 長さ: 取引コードは 20 文字固定。",
-        '  code: pg.varchar("code", { length: 20 }),',
-        "};",
-      ),
-      [{ rule: "varchar", line: 4 }],
-    ],
-    [
-      "WHY は 1 つ目の列だけに効き、次の列の varchar には効かない",
-      source(
-        IMPORT,
-        "const c = {",
-        "  // WHY 長さ: 取引コードは 20 文字固定。",
-        '  code: pg.varchar("code", { length: 20 }),',
-        '  name: pg.varchar("name", { length: 255 }),',
-        "};",
-      ),
-      [{ rule: "varchar", line: 5 }],
-    ],
-  ])("%s は違反", (_name, text, expected) => {
-    // given: it.each の入力
-    // when
-    const violations = findColumnTypeViolations(text);
-
-    // then
-    expect(violations).toEqual(expected);
-  });
-});
-
 const TABLE_IMPORT =
   'import { pgTable, primaryKey, serial, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";';
-
-describe("サロゲートキーの判定（findSurrogateKeyViolations）: must pass", () => {
-  it.each([
-    [
-      'id: uuid("id").primaryKey()（名前で import）',
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", {',
-        '  id: uuid("id").primaryKey(),',
-        '  title: text("title").notNull(),',
-        "});",
-      ),
-    ],
-    [
-      ".primaryKey() の後ろに .defaultRandom() が続く",
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", { id: uuid("id").primaryKey().defaultRandom() });',
-      ),
-    ],
-    [
-      ".primaryKey() の前に許可の一覧のメソッド（.notNull() / .unique()）がある",
-      source(
-        TABLE_IMPORT,
-        'export const a = pgTable("a", { id: uuid("id").notNull().primaryKey() });',
-        'export const b = pgTable("b", { id: uuid("id").unique().primaryKey() });',
-      ),
-    ],
-    [
-      ".primaryKey() の後ろに既定値のメソッド（.$defaultFn / .$default / .default）が続く",
-      source(
-        TABLE_IMPORT,
-        'export const a = pgTable("a", { id: uuid("id").primaryKey().$defaultFn(() => randomUUID()) });',
-        'export const b = pgTable("b", { id: uuid("id").primaryKey().$default(() => randomUUID()) });',
-        'export const c = pgTable("c", { id: uuid("id").primaryKey().default(sql`gen_random_uuid()`) });',
-      ),
-    ],
-    [
-      "import が複数行で末尾にカンマ（実ファイルの書き方）",
-      source(
-        "import {",
-        "  pgTable,",
-        "  text,",
-        "  uuid,",
-        '} from "drizzle-orm/pg-core";',
-        'export const t = pgTable("t", { id: uuid("id").primaryKey(), title: text("title") });',
-      ),
-    ],
-    [
-      "名前空間（pg.pgTable / pg.uuid）",
-      source(
-        IMPORT,
-        'export const t = pg.pgTable("t", { id: pg.uuid("id").primaryKey() });',
-      ),
-    ],
-    [
-      "import の別名（pgTable as table / uuid as u）",
-      source(
-        'import { pgTable as table, uuid as u } from "drizzle-orm/pg-core";',
-        "export const t = table('t', { id: u('id').primaryKey() });",
-      ),
-    ],
-    [
-      "複数行のチェーンと、id の前のコメント・ほかの列",
-      source(
-        TABLE_IMPORT,
-        "export const t = pgTable(",
-        '  "t",',
-        "  {",
-        '    title: text("title").notNull(),',
-        "    // 行の id。",
-        '    id: uuid("id")',
-        "      .primaryKey()",
-        "      .defaultRandom(),",
-        "  },",
-        '  (table) => [uniqueIndex("t_title_index").on(table.title)],',
-        ");",
-      ),
-    ],
-    [
-      "1 つのファイルの複数の表がすべて id を持つ",
-      source(
-        TABLE_IMPORT,
-        'export const a = pgTable("a", { id: uuid("id").primaryKey() });',
-        'export const b = pgTable("b", { id: uuid("id").primaryKey(), aId: uuid("a_id").notNull() });',
-      ),
-    ],
-    [
-      "コメント・文字列の中の pgTable( は表の定義ではない",
-      source(
-        '// pgTable("x", { title: text("title") }) とは書かない。',
-        'const note = "pgTable(\\"y\\", {})";',
-      ),
-    ],
-    [
-      "pgTable を呼ばないオブジェクト（列の定義でない）は見ない",
-      source(TABLE_IMPORT, 'const c = { title: text("title") };'),
-    ],
-  ])("%s は違反なし", (_name, text) => {
-    // given: it.each の入力
-    // when
-    const violations = findSurrogateKeyViolations(text);
-
-    // then
-    expect(violations).toEqual([]);
-  });
-});
-
-describe("サロゲートキーの判定（findSurrogateKeyViolations）: must reject", () => {
-  it.each<[string, string, ColumnTypeViolation[]]>([
-    [
-      "id の列が無い",
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", { title: text("title").notNull() });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "複合主キー（primaryKey({ columns: [...] })）だけ",
-      source(
-        TABLE_IMPORT,
-        "export const t = pgTable(",
-        '  "t",',
-        '  { todoId: uuid("todo_id").notNull(), position: integer("position").notNull() },',
-        "  (table) => [primaryKey({ columns: [table.todoId, table.position] })],",
-        ");",
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "id が serial",
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", { id: serial("id").primaryKey() });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "id が text",
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", { id: text("id").primaryKey() });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "id が uuid を名前に含む別の関数（myUuid）",
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", { id: myUuid("id").primaryKey() });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "id は uuid だが .primaryKey() が無い",
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", { id: uuid("id").notNull().defaultRandom() });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "id は uuid だが主キーは第 3 引数の primaryKey({ columns: [table.id] })",
-      source(
-        TABLE_IMPORT,
-        "export const t = pgTable(",
-        '  "t",',
-        '  { id: uuid("id").notNull() },',
-        "  (table) => [primaryKey({ columns: [table.id] })],",
-        ");",
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      ".primaryKey() がコメントの中だけ",
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", {',
-        '  id: uuid("id"), // .primaryKey()',
-        "});",
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      ".primaryKey を呼んでいない（プロパティの参照だけ）",
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", { id: uuid("id").primaryKey });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "uuid の primaryKey の列が id 以外の名前（キーが todoId）",
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", { todoId: uuid("id").primaryKey() });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "キーは id だが DB の列名が id でない",
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", { id: uuid("row_id").primaryKey() });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "id が入れ子のオブジェクトの中（表の列ではない）",
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", { meta: { id: uuid("id").primaryKey() } });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "id が第 3 引数の中だけ",
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", { title: text("title") }, () => ({ id: uuid("id").primaryKey() }));',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "列の定義が変数（中は見ない = 安全側で違反）",
-      source(TABLE_IMPORT, 'export const t = pgTable("t", columns);'),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "列の定義のスプレッドの中の id は見ない（id を直接書く）",
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", { ...base, title: text("title") });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "名前空間（pg.pgTable）で id が無い",
-      source(
-        IMPORT,
-        'export const t = pg.pgTable("t", { title: pg.text("title") });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "import の別名（pgTable as table）で id が無い",
-      source(
-        'import { pgTable as table, text } from "drizzle-orm/pg-core";',
-        'export const t = table("t", { title: text("title") });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "uuid がローカルの変数（const uuid = text）で pg-core の uuid でない",
-      source(
-        'import { pgTable, text } from "drizzle-orm/pg-core";',
-        "const uuid = text;",
-        'export const t = pgTable("t", { id: uuid("id").primaryKey() });',
-      ),
-      [{ rule: "surrogate-key", line: 3 }],
-    ],
-    [
-      "uuid を pg-core でない別のモジュールから import している",
-      source(
-        'import { pgTable } from "drizzle-orm/pg-core";',
-        'import { uuid } from "./x";',
-        'export const t = pgTable("t", { id: uuid("id").primaryKey() });',
-      ),
-      [{ rule: "surrogate-key", line: 3 }],
-    ],
-    [
-      "import の別名 uuid が text を指す（text as uuid）",
-      source(
-        'import { pgTable, text as uuid } from "drizzle-orm/pg-core";',
-        'export const t = pgTable("t", { id: uuid("id").primaryKey() });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "uuid を import type だけで import している（値ではない）",
-      source(
-        'import { pgTable } from "drizzle-orm/pg-core";',
-        'import type { uuid } from "drizzle-orm/pg-core";',
-        'export const t = pgTable("t", { id: uuid("id").primaryKey() });',
-      ),
-      [{ rule: "surrogate-key", line: 3 }],
-    ],
-    [
-      "名前空間の名前が import と違う（import * as pg で other.uuid）",
-      source(
-        IMPORT,
-        'export const t = pg.pgTable("t", { id: other.uuid("id").primaryKey() });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "id のチェーンに .array()（uuid[] の列）",
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", { id: uuid("id").array().$type<string>().primaryKey() });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "id のチェーンに .array() だけ（ほかは許可の一覧）",
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", { id: uuid("id").primaryKey().array() });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "id のチェーンに .$type<string>()",
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", { id: uuid("id").$type<string>().primaryKey() });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "id のチェーンに .references(() => t.id)",
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", { id: uuid("id").primaryKey().references(() => other.id) });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "id のチェーンに .generatedAlwaysAs(...)",
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", { id: uuid("id").primaryKey().generatedAlwaysAs(sql`x`) });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "id のチェーンの後ろに呼び出しでない式（as による型の付け替え）",
-      source(
-        TABLE_IMPORT,
-        'export const t = pgTable("t", { id: uuid("id").primaryKey() as unknown as X });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "pgTable を pg-core 以外から import していても表として見る（安全側）",
-      source(
-        'import { pgTable } from "./db";',
-        'export const t = pgTable("t", { title: text("title") });',
-      ),
-      [{ rule: "surrogate-key", line: 2 }],
-    ],
-    [
-      "複数の表のうち id の無い表だけを、その pgTable( の行で返す",
-      source(
-        TABLE_IMPORT,
-        'export const a = pgTable("a", { id: uuid("id").primaryKey() });',
-        "export const b = pgTable(",
-        '  "b",',
-        '  { title: text("title") },',
-        ");",
-      ),
-      [{ rule: "surrogate-key", line: 3 }],
-    ],
-  ])("%s は違反", (_name, text, expected) => {
-    // given: it.each の入力
-    // when
-    const violations = findSurrogateKeyViolations(text);
-
-    // then
-    expect(violations).toEqual(expected);
-  });
-});
 
 // --- 列の分類表（column-classification。Issue #216） ---
 const CLASSIFY_IMPORT =
@@ -1161,244 +485,6 @@ const TODOS =
   'export const todos = pgTable("todos", { id: uuid("id").primaryKey(), title: text("title") });';
 const TODOS_COLUMNS =
   'export const todosColumns = ColumnClassifier.classify(todos, { id: "public", title: "sensitive" });';
-
-describe("列の分類表の判定（findColumnClassificationViolations）: must pass", () => {
-  it.each([
-    [
-      "表の隣に export const <表>Columns = ColumnClassifier.classify(<表>, { ... })",
-      source(TABLE_IMPORT, CLASSIFY_IMPORT, TODOS, TODOS_COLUMNS),
-    ],
-    [
-      "同じディレクトリからの import（shared/infra/schema.ts）と、pg.pgTable（名前空間）",
-      source(
-        IMPORT,
-        'import { ColumnClassifier, type ColumnClass } from "./column-classification";',
-        'export const logs = pg.pgTable("logs", { id: pg.uuid("id").primaryKey() });',
-        'export const logsColumns = ColumnClassifier.classify(logs, { id: "public" });',
-      ),
-    ],
-    [
-      "複数の表それぞれに分類表（複数行の呼び出し・第 3 引数のある pgTable）",
-      source(
-        TABLE_IMPORT,
-        CLASSIFY_IMPORT,
-        TODOS,
-        "export const todoStatusChanges = pgTable(",
-        '  "todo_status_changes",',
-        '  { id: uuid("id").primaryKey() },',
-        "  (table) => [],",
-        ");",
-        TODOS_COLUMNS,
-        "export const todoStatusChangesColumns = ColumnClassifier.classify(",
-        "  todoStatusChanges,",
-        '  { id: "public" },',
-        ");",
-      ),
-    ],
-    [
-      "変数名に $ を含む表",
-      source(
-        TABLE_IMPORT,
-        CLASSIFY_IMPORT,
-        'export const $t = pgTable("t", { id: uuid("id").primaryKey() });',
-        'export const $tColumns = ColumnClassifier.classify($t, { id: "public" });',
-      ),
-    ],
-    [
-      "pgTable の無いファイル（コメント・文字列の pgTable( は表ではない）",
-      source("// pgTable( は書かない", 'const s = "pgTable(";'),
-    ],
-  ])("%s", (_name, text) => {
-    // given: it.each の入力
-    // when
-    const violations = findColumnClassificationViolations(text);
-
-    // then
-    expect(violations).toEqual([]);
-  });
-});
-
-describe("列の分類表の判定（findColumnClassificationViolations）: must reject", () => {
-  it.each<[string, string, ColumnTypeViolation[]]>([
-    [
-      "分類表が無い",
-      source(TABLE_IMPORT, CLASSIFY_IMPORT, TODOS),
-      [{ rule: "column-classification", line: 3 }],
-    ],
-    [
-      "2 つの表の片方だけに分類表がある（無い表だけが違反）",
-      source(
-        TABLE_IMPORT,
-        CLASSIFY_IMPORT,
-        TODOS,
-        'export const others = pgTable("others", { id: uuid("id").primaryKey() });',
-        TODOS_COLUMNS,
-      ),
-      [{ rule: "column-classification", line: 4 }],
-    ],
-    [
-      "分類表の名前が <表>Columns でない（todoColumns）",
-      source(
-        TABLE_IMPORT,
-        CLASSIFY_IMPORT,
-        TODOS,
-        'export const todoColumns = ColumnClassifier.classify(todos, { id: "public", title: "sensitive" });',
-      ),
-      [{ rule: "column-classification", line: 3 }],
-    ],
-    [
-      "分類表が別の表を渡している（todosColumns = ColumnClassifier.classify(others, …)）",
-      source(
-        TABLE_IMPORT,
-        CLASSIFY_IMPORT,
-        TODOS,
-        'export const todosColumns = ColumnClassifier.classify(others, { id: "public" });',
-      ),
-      [{ rule: "column-classification", line: 3 }],
-    ],
-    [
-      "分類表を export していない",
-      source(
-        TABLE_IMPORT,
-        CLASSIFY_IMPORT,
-        TODOS,
-        'const todosColumns = ColumnClassifier.classify(todos, { id: "public", title: "sensitive" });',
-      ),
-      [{ rule: "column-classification", line: 3 }],
-    ],
-    [
-      "satisfies だけの分類表（ColumnClassifier.classify で登録しない）",
-      source(
-        TABLE_IMPORT,
-        CLASSIFY_IMPORT,
-        TODOS,
-        'export const todosColumns = { id: "public", title: "sensitive" } satisfies Record<keyof typeof todos.$inferSelect, string>;',
-      ),
-      [{ rule: "column-classification", line: 3 }],
-    ],
-    [
-      "分類表がコメントアウトされている",
-      source(TABLE_IMPORT, CLASSIFY_IMPORT, TODOS, `// ${TODOS_COLUMNS}`),
-      [{ rule: "column-classification", line: 3 }],
-    ],
-    [
-      "分類表が文字列の中にある",
-      source(
-        TABLE_IMPORT,
-        CLASSIFY_IMPORT,
-        TODOS,
-        `const s = \`${TODOS_COLUMNS}\`;`,
-      ),
-      [{ rule: "column-classification", line: 3 }],
-    ],
-    [
-      "ColumnClassifier を import していない（ローカルのクラス）",
-      source(
-        TABLE_IMPORT,
-        "class ColumnClassifier { static classify(t: unknown, c: unknown) { return c; } }",
-        TODOS,
-        TODOS_COLUMNS,
-      ),
-      [{ rule: "column-classification", line: 3 }],
-    ],
-    [
-      "ColumnClassifier の import がコメントアウトされている",
-      source(TABLE_IMPORT, `// ${CLASSIFY_IMPORT}`, TODOS, TODOS_COLUMNS),
-      [{ rule: "column-classification", line: 3 }],
-    ],
-    [
-      "ColumnClassifier を import type で import している",
-      source(
-        TABLE_IMPORT,
-        'import type { ColumnClassifier } from "../../../../shared/infra/column-classification";',
-        TODOS,
-        TODOS_COLUMNS,
-      ),
-      [{ rule: "column-classification", line: 3 }],
-    ],
-    [
-      "ColumnClassifier を inline の type で import している",
-      source(
-        TABLE_IMPORT,
-        'import { type ColumnClassifier } from "../../../../shared/infra/column-classification";',
-        TODOS,
-        TODOS_COLUMNS,
-      ),
-      [{ rule: "column-classification", line: 3 }],
-    ],
-    [
-      "別の名前を ColumnClassifier の別名で import している",
-      source(
-        TABLE_IMPORT,
-        'import { ColumnClassification as ColumnClassifier } from "../../../../shared/infra/column-classification";',
-        TODOS,
-        TODOS_COLUMNS,
-      ),
-      [{ rule: "column-classification", line: 3 }],
-    ],
-    [
-      "ColumnClassifier を別のモジュール（前方一致の column-classification-x）から import している",
-      source(
-        TABLE_IMPORT,
-        'import { ColumnClassifier } from "./column-classification-x";',
-        TODOS,
-        TODOS_COLUMNS,
-      ),
-      [{ rule: "column-classification", line: 3 }],
-    ],
-    [
-      "ColumnClassifier を別名で import して呼んでいる（import { ColumnClassifier as C } の C.classify）",
-      source(
-        TABLE_IMPORT,
-        'import { ColumnClassifier as C } from "../../../../shared/infra/column-classification";',
-        TODOS,
-        'export const todosColumns = C.classify(todos, { id: "public", title: "sensitive" });',
-      ),
-      [{ rule: "column-classification", line: 3 }],
-    ],
-    [
-      "ColumnClassifier の別のメソッド（maskRow）で分類表を作っている",
-      source(
-        TABLE_IMPORT,
-        CLASSIFY_IMPORT,
-        TODOS,
-        'export const todosColumns = ColumnClassifier.maskRow(todos, { id: "public", title: "sensitive" });',
-      ),
-      [{ rule: "column-classification", line: 3 }],
-    ],
-    [
-      "別のクラスの classify・素の classify で分類表を作っている",
-      source(
-        TABLE_IMPORT,
-        CLASSIFY_IMPORT,
-        TODOS,
-        'export const todosColumns = OtherClassifier.classify(todos, { id: "public", title: "sensitive" });',
-        'const others = pgTable("others", { id: uuid("id").primaryKey() });',
-        'export const othersColumns = classify(others, { id: "public" });',
-      ),
-      [
-        { rule: "column-classification", line: 3 },
-        { rule: "column-classification", line: 5 },
-      ],
-    ],
-    [
-      "pgTable を変数で受けていない（export default）",
-      source(
-        TABLE_IMPORT,
-        CLASSIFY_IMPORT,
-        'export default pgTable("t", { id: uuid("id").primaryKey() });',
-      ),
-      [{ rule: "column-classification", line: 3 }],
-    ],
-  ])("%s は違反", (_name, text, expected) => {
-    // given: it.each の入力
-    // when
-    const violations = findColumnClassificationViolations(text);
-
-    // then
-    expect(violations).toEqual(expected);
-  });
-});
 
 // --- 列挙 → 読み取り → 判定を通した fixture テスト ---
 // WHY: 判定が正しくても、対象の列挙（infra/schema.ts の見つけ方）が漏れれば見逃す。一時ディレクトリに架空のツリーを置き、
@@ -1422,88 +508,1101 @@ function violationsOfFixture(files: Record<string, string>): {
     rmSync(root, { recursive: true, force: true });
   }
 }
+const varcharColumn = source(
+  IMPORT,
+  'export const t = pg.pgTable("t", { title: pg.varchar("title") });',
+);
 
-describe("スキーマの列挙と検査（fixture）", () => {
-  const varcharColumn = source(
-    IMPORT,
-    'export const t = pg.pgTable("t", { title: pg.varchar("title") });',
+const feature = await loadFeature("./schema.feature");
+
+describeFeature(feature, ({ Scenario }) => {
+  Scenario("列の型の判定（findColumnTypeViolations）: must pass", ({ And }) => {
+    And(
+      "既定の列の型と、WHY のある既定外の型は違反なし（uuid / text / integer / numeric / timestamptz / jsonb・コメントや文字列の中・名前の一部だけが一致する別の関数など）",
+      () => {
+        // given
+        const cases: [string, string][] = [
+          [
+            "既定の型（uuid / text / integer / bigint / numeric / boolean / timestamptz / jsonb）",
+            source(
+              'import { bigint, boolean, integer, jsonb, numeric, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";',
+              'export const t = pgTable("t", {',
+              '  id: uuid("id").primaryKey(),',
+              '  title: text("title").notNull(),',
+              '  count: integer("count").notNull(),',
+              '  total: bigint("total", { mode: "number" }),',
+              '  price: numeric("price", { precision: 12, scale: 2 }),',
+              '  done: boolean("done").notNull().default(false),',
+              '  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),',
+              '  data: jsonb("data"),',
+              "});",
+            ),
+          ],
+          [
+            "timestamp の options が複数行で、withTimezone: true が後ろにある",
+            source(
+              IMPORT,
+              "const c = {",
+              '  at: pg.timestamp("at", {',
+              '    mode: "date",',
+              "    withTimezone: true,",
+              "  }),",
+              "};",
+            ),
+          ],
+          [
+            "コメントの中の varchar( / json( / serial( は呼び出しではない",
+            source(
+              "// varchar(100) にしない。json( ではなく jsonb、serial( ではなく uuid。",
+              '/* char(3) も timestamp("x") も書かない */',
+              'const c = { title: text("title") };',
+            ),
+          ],
+          [
+            "文字列の中の varchar( は呼び出しではない（列名など）",
+            source(
+              'const c = { title: text("varchar(1)"), note: text(`json(`) };',
+            ),
+          ],
+          [
+            "名前の一部が一致するだけの別の関数（jsonb / toJson / myVarchar / charCode / timestampz）",
+            source(
+              'const c = { a: jsonb("a"), b: toJson("b"), c: myVarchar("c"), d: charCode("d"), e: timestampz("e") };',
+            ),
+          ],
+          [
+            "import しただけで呼んでいない",
+            source(
+              'import { json, serial, varchar } from "drizzle-orm/pg-core";',
+              'const c = { title: text("title") };',
+            ),
+          ],
+          [
+            "varchar の直前の行に // WHY 長さ: がある",
+            source(
+              IMPORT,
+              "const c = {",
+              "  // WHY 長さ: 外部の決済サービスの取引コードは 20 文字固定で、DB でも保証する。",
+              '  code: pg.varchar("code", { length: 20 }),',
+              "};",
+            ),
+          ],
+          [
+            "複数行の WHY のコメントの 1 行目に // WHY 長さ: がある（続きの行を挟む）",
+            source(
+              IMPORT,
+              "const c = {",
+              "  // WHY 長さ: 国コード（ISO 3166-1 alpha-2）は 2 文字固定。",
+              "  //   domain でも検証するが、他システムが直接書き込むので DB でも保証する。",
+              '  country: pg.char("country", { length: 2 }),',
+              "};",
+            ),
+          ],
+          [
+            "timestamp（timezone 無し）の直前の行に // WHY タイムゾーン: がある",
+            source(
+              IMPORT,
+              "const c = {",
+              "  // WHY タイムゾーン: 外部の CSV の現地時刻をそのまま保持する。",
+              '  localAt: pg.timestamp("local_at"),',
+              "};",
+            ),
+          ],
+          [
+            "serial の直前の行に // WHY 連番: がある",
+            source(
+              IMPORT,
+              "const c = {",
+              "  // WHY 連番: 外部に見せる請求書番号で、欠番の少ない連番が要る。",
+              '  invoiceNo: pg.bigserial("invoice_no", { mode: "number" }),',
+              "};",
+            ),
+          ],
+          [
+            "json の直前の行に // WHY json: がある",
+            source(
+              IMPORT,
+              "const c = {",
+              "  // WHY json: 受け取った本文をキーの順序も含めてそのまま残す。",
+              '  raw: pg.json("raw"),',
+              "};",
+            ),
+          ],
+        ];
+
+        // when
+        const violations = casesByName(cases, ([, text]) =>
+          findColumnTypeViolations(text),
+        );
+
+        // then
+        expect(violations).toEqual(casesByName(cases, () => []));
+      },
+    );
+  });
+
+  Scenario(
+    "列の型の判定（findColumnTypeViolations）: must reject",
+    ({ And }) => {
+      And(
+        "WHY の無い既定外の列の型は、規則と行で違反になる（varchar・char・timezone 無しの timestamp・serial・json・WHY の書き方の誤りなど）",
+        () => {
+          // given
+          const cases: [string, string, ColumnTypeViolation[]][] = [
+            [
+              "varchar（長さ付き）",
+              source(
+                IMPORT,
+                'const c = { title: pg.varchar("title", { length: 100 }) };',
+              ),
+              [{ rule: "varchar", line: 2 }],
+            ],
+            [
+              "varchar（長さ無し）を名前で import して呼ぶ",
+              source(
+                'import { varchar } from "drizzle-orm/pg-core";',
+                'const c = { title: varchar("title") };',
+              ),
+              [{ rule: "varchar", line: 2 }],
+            ],
+            [
+              "import の別名で varchar を呼ぶ",
+              source(
+                'import { text, varchar as vc } from "drizzle-orm/pg-core";',
+                'const c = { title: vc("title", { length: 255 }) };',
+              ),
+              [{ rule: "varchar", line: 2 }],
+            ],
+            [
+              "pg-core から import していない varchar / 名前空間の名前が違う other.json も名前で違反（安全側）",
+              source(
+                'import { varchar } from "./x";',
+                IMPORT,
+                'const c = { title: varchar("title"), raw: other.json("raw") };',
+              ),
+              [
+                { rule: "varchar", line: 3 },
+                { rule: "json", line: 3 },
+              ],
+            ],
+            [
+              "char（固定長）",
+              source(
+                IMPORT,
+                'const c = { code: pg.char("code", { length: 3 }) };',
+              ),
+              [{ rule: "char", line: 2 }],
+            ],
+            [
+              "timestamp（options 無し）",
+              source(IMPORT, 'const c = { at: pg.timestamp("at") };'),
+              [{ rule: "timestamp-without-timezone", line: 2 }],
+            ],
+            [
+              "timestamp（withTimezone が無い options）",
+              source(
+                IMPORT,
+                'const c = { at: pg.timestamp("at", { mode: "date" }) };',
+              ),
+              [{ rule: "timestamp-without-timezone", line: 2 }],
+            ],
+            [
+              "timestamp（withTimezone: false）",
+              source(
+                IMPORT,
+                'const c = { at: pg.timestamp("at", { withTimezone: false }) };',
+              ),
+              [{ rule: "timestamp-without-timezone", line: 2 }],
+            ],
+            [
+              "timestamp の options の withTimezone: true がコメントアウトされている",
+              source(
+                IMPORT,
+                "const c = {",
+                '  at: pg.timestamp("at", {',
+                "    // withTimezone: true,",
+                '    mode: "date",',
+                "  }),",
+                "};",
+              ),
+              [{ rule: "timestamp-without-timezone", line: 3 }],
+            ],
+            [
+              "同じ行の 2 つの timestamp のうち、1 つ目だけ timezone 無し（2 つ目の withTimezone を借りない）",
+              source(
+                IMPORT,
+                'const c = { a: pg.timestamp("a"), b: pg.timestamp("b", { withTimezone: true }) };',
+              ),
+              [{ rule: "timestamp-without-timezone", line: 2 }],
+            ],
+            [
+              "serial / bigserial / smallserial",
+              source(
+                'import { bigserial, serial, smallserial } from "drizzle-orm/pg-core";',
+                "const c = {",
+                '  a: serial("a"),',
+                '  b: bigserial("b", { mode: "number" }),',
+                '  c: smallserial("c"),',
+                "};",
+              ),
+              [
+                { rule: "serial", line: 3 },
+                { rule: "serial", line: 4 },
+                { rule: "serial", line: 5 },
+              ],
+            ],
+            [
+              "json（jsonb でない）",
+              source(IMPORT, 'const c = { data: pg.json("data") };'),
+              [{ rule: "json", line: 2 }],
+            ],
+            [
+              "WHY の見出しが別の規則（タイムゾーン）",
+              source(
+                IMPORT,
+                "const c = {",
+                "  // WHY タイムゾーン: 現地時刻を保持する。",
+                '  code: pg.varchar("code", { length: 20 }),',
+                "};",
+              ),
+              [{ rule: "varchar", line: 4 }],
+            ],
+            [
+              "WHY 長さ: の理由が空",
+              source(
+                IMPORT,
+                "const c = {",
+                "  // WHY 長さ:",
+                '  code: pg.varchar("code", { length: 20 }),',
+                "};",
+              ),
+              [{ rule: "varchar", line: 4 }],
+            ],
+            [
+              "WHY のコメントと列の間に空行がある",
+              source(
+                IMPORT,
+                "const c = {",
+                "  // WHY 長さ: 取引コードは 20 文字固定。",
+                "",
+                '  code: pg.varchar("code", { length: 20 }),',
+                "};",
+              ),
+              [{ rule: "varchar", line: 5 }],
+            ],
+            [
+              "WHY が同じ行の末尾にある（直前の行に書く）",
+              source(
+                IMPORT,
+                'const c = { code: pg.varchar("code", { length: 20 }) }; // WHY 長さ: 取引コードは 20 文字固定。',
+              ),
+              [{ rule: "varchar", line: 2 }],
+            ],
+            [
+              "WHY がブロックコメント",
+              source(
+                IMPORT,
+                "const c = {",
+                "  /* WHY 長さ: 取引コードは 20 文字固定。 */",
+                '  code: pg.varchar("code", { length: 20 }),',
+                "};",
+              ),
+              [{ rule: "varchar", line: 4 }],
+            ],
+            [
+              "WHY の見出しの無いコメント",
+              source(
+                IMPORT,
+                "const c = {",
+                "  // 長さ: 取引コードは 20 文字固定。",
+                '  code: pg.varchar("code", { length: 20 }),',
+                "};",
+              ),
+              [{ rule: "varchar", line: 4 }],
+            ],
+            [
+              "WHY は 1 つ目の列だけに効き、次の列の varchar には効かない",
+              source(
+                IMPORT,
+                "const c = {",
+                "  // WHY 長さ: 取引コードは 20 文字固定。",
+                '  code: pg.varchar("code", { length: 20 }),',
+                '  name: pg.varchar("name", { length: 255 }),',
+                "};",
+              ),
+              [{ rule: "varchar", line: 5 }],
+            ],
+          ];
+
+          // when
+          const violations = casesByName(cases, ([, text]) =>
+            findColumnTypeViolations(text),
+          );
+
+          // then
+          expect(violations).toEqual(
+            casesByName(cases, ([, , expected]) => expected),
+          );
+        },
+      );
+    },
   );
 
-  it("apps/backend の features と shared の infra/schema.ts だけを対象にし、すべての規則（列の型・surrogate-key・column-classification）の違反を「規則: パス:行」の行の順で返す", () => {
-    // given
-    const fixtureFiles = {
-      "apps/backend/features/a/internal/infra/schema.ts": source(
-        IMPORT,
-        'export const a = pg.pgTable("a", {',
-        '  title: pg.varchar("title", { length: 100 }),',
-        '  at: pg.timestamp("at"),',
-        "});",
-      ),
-      // 違反の無いファイル（uuid の id と分類表）。
-      "apps/backend/features/b/internal/infra/schema.ts": source(
-        IMPORT,
-        'import { ColumnClassifier } from "../../../../shared/infra/column-classification";',
-        'export const b = pg.pgTable("b", { id: pg.uuid("id").primaryKey() });',
-        'export const bColumns = ColumnClassifier.classify(b, { id: "public" });',
-      ),
-      "apps/backend/shared/infra/schema.ts": source(
-        IMPORT,
-        'export const s = pg.pgTable("s", { id: pg.uuid("id").primaryKey(), raw: pg.json("raw") });',
-      ),
-      // 対象外: infra/schema.ts でないファイル、infra 以外の schema.ts、テスト、node_modules、apps/backend の外。
-      "apps/backend/features/c/internal/infra/other.ts": varcharColumn,
-      "apps/backend/features/c/internal/domain/schema.ts": varcharColumn,
-      "apps/backend/features/c/internal/infra/schema.test.ts": varcharColumn,
-      "apps/backend/node_modules/x/infra/schema.ts": varcharColumn,
-      "apps/frontend_customer/features/x/infra/schema.ts": varcharColumn,
-    };
+  Scenario(
+    "サロゲートキーの判定（findSurrogateKeyViolations）: must pass",
+    ({ And }) => {
+      And(
+        "表の id が uuid の primaryKey なら違反なし（名前で import・.defaultRandom() が続くなど）",
+        () => {
+          // given
+          const cases: [string, string][] = [
+            [
+              'id: uuid("id").primaryKey()（名前で import）',
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", {',
+                '  id: uuid("id").primaryKey(),',
+                '  title: text("title").notNull(),',
+                "});",
+              ),
+            ],
+            [
+              ".primaryKey() の後ろに .defaultRandom() が続く",
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", { id: uuid("id").primaryKey().defaultRandom() });',
+              ),
+            ],
+            [
+              ".primaryKey() の前に許可の一覧のメソッド（.notNull() / .unique()）がある",
+              source(
+                TABLE_IMPORT,
+                'export const a = pgTable("a", { id: uuid("id").notNull().primaryKey() });',
+                'export const b = pgTable("b", { id: uuid("id").unique().primaryKey() });',
+              ),
+            ],
+            [
+              ".primaryKey() の後ろに既定値のメソッド（.$defaultFn / .$default / .default）が続く",
+              source(
+                TABLE_IMPORT,
+                'export const a = pgTable("a", { id: uuid("id").primaryKey().$defaultFn(() => randomUUID()) });',
+                'export const b = pgTable("b", { id: uuid("id").primaryKey().$default(() => randomUUID()) });',
+                'export const c = pgTable("c", { id: uuid("id").primaryKey().default(sql`gen_random_uuid()`) });',
+              ),
+            ],
+            [
+              "import が複数行で末尾にカンマ（実ファイルの書き方）",
+              source(
+                "import {",
+                "  pgTable,",
+                "  text,",
+                "  uuid,",
+                '} from "drizzle-orm/pg-core";',
+                'export const t = pgTable("t", { id: uuid("id").primaryKey(), title: text("title") });',
+              ),
+            ],
+            [
+              "名前空間（pg.pgTable / pg.uuid）",
+              source(
+                IMPORT,
+                'export const t = pg.pgTable("t", { id: pg.uuid("id").primaryKey() });',
+              ),
+            ],
+            [
+              "import の別名（pgTable as table / uuid as u）",
+              source(
+                'import { pgTable as table, uuid as u } from "drizzle-orm/pg-core";',
+                "export const t = table('t', { id: u('id').primaryKey() });",
+              ),
+            ],
+            [
+              "複数行のチェーンと、id の前のコメント・ほかの列",
+              source(
+                TABLE_IMPORT,
+                "export const t = pgTable(",
+                '  "t",',
+                "  {",
+                '    title: text("title").notNull(),',
+                "    // 行の id。",
+                '    id: uuid("id")',
+                "      .primaryKey()",
+                "      .defaultRandom(),",
+                "  },",
+                '  (table) => [uniqueIndex("t_title_index").on(table.title)],',
+                ");",
+              ),
+            ],
+            [
+              "1 つのファイルの複数の表がすべて id を持つ",
+              source(
+                TABLE_IMPORT,
+                'export const a = pgTable("a", { id: uuid("id").primaryKey() });',
+                'export const b = pgTable("b", { id: uuid("id").primaryKey(), aId: uuid("a_id").notNull() });',
+              ),
+            ],
+            [
+              "コメント・文字列の中の pgTable( は表の定義ではない",
+              source(
+                '// pgTable("x", { title: text("title") }) とは書かない。',
+                'const note = "pgTable(\\"y\\", {})";',
+              ),
+            ],
+            [
+              "pgTable を呼ばないオブジェクト（列の定義でない）は見ない",
+              source(TABLE_IMPORT, 'const c = { title: text("title") };'),
+            ],
+          ];
 
-    // when
-    const result = violationsOfFixture(fixtureFiles);
+          // when
+          const violations = casesByName(cases, ([, text]) =>
+            findSurrogateKeyViolations(text),
+          );
 
-    // then
-    expect(result).toEqual({
-      files: [
-        "apps/backend/features/a/internal/infra/schema.ts",
-        "apps/backend/features/b/internal/infra/schema.ts",
-        "apps/backend/shared/infra/schema.ts",
-      ],
-      violations: [
-        "surrogate-key: apps/backend/features/a/internal/infra/schema.ts:2",
-        "column-classification: apps/backend/features/a/internal/infra/schema.ts:2",
-        "varchar: apps/backend/features/a/internal/infra/schema.ts:3",
-        "timestamp-without-timezone: apps/backend/features/a/internal/infra/schema.ts:4",
-        "json: apps/backend/shared/infra/schema.ts:2",
-        "column-classification: apps/backend/shared/infra/schema.ts:2",
-      ],
-    });
-  });
+          // then
+          expect(violations).toEqual(casesByName(cases, () => []));
+        },
+      );
+    },
+  );
 
-  it("apps/backend が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）", () => {
-    // given: 前提なし
-    // when
-    const result = violationsOfFixture({ "README.md": "# x\n" });
+  Scenario(
+    "サロゲートキーの判定（findSurrogateKeyViolations）: must reject",
+    ({ And }) => {
+      And(
+        "表の id が uuid の primaryKey でなければ違反（id の列が無い・serial・text・uuid を名前に含む別の関数・.primaryKey() が無いなど）",
+        () => {
+          // given
+          const cases: [string, string, ColumnTypeViolation[]][] = [
+            [
+              "id の列が無い",
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", { title: text("title").notNull() });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "複合主キー（primaryKey({ columns: [...] })）だけ",
+              source(
+                TABLE_IMPORT,
+                "export const t = pgTable(",
+                '  "t",',
+                '  { todoId: uuid("todo_id").notNull(), position: integer("position").notNull() },',
+                "  (table) => [primaryKey({ columns: [table.todoId, table.position] })],",
+                ");",
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "id が serial",
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", { id: serial("id").primaryKey() });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "id が text",
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", { id: text("id").primaryKey() });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "id が uuid を名前に含む別の関数（myUuid）",
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", { id: myUuid("id").primaryKey() });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "id は uuid だが .primaryKey() が無い",
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", { id: uuid("id").notNull().defaultRandom() });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "id は uuid だが主キーは第 3 引数の primaryKey({ columns: [table.id] })",
+              source(
+                TABLE_IMPORT,
+                "export const t = pgTable(",
+                '  "t",',
+                '  { id: uuid("id").notNull() },',
+                "  (table) => [primaryKey({ columns: [table.id] })],",
+                ");",
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              ".primaryKey() がコメントの中だけ",
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", {',
+                '  id: uuid("id"), // .primaryKey()',
+                "});",
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              ".primaryKey を呼んでいない（プロパティの参照だけ）",
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", { id: uuid("id").primaryKey });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "uuid の primaryKey の列が id 以外の名前（キーが todoId）",
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", { todoId: uuid("id").primaryKey() });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "キーは id だが DB の列名が id でない",
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", { id: uuid("row_id").primaryKey() });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "id が入れ子のオブジェクトの中（表の列ではない）",
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", { meta: { id: uuid("id").primaryKey() } });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "id が第 3 引数の中だけ",
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", { title: text("title") }, () => ({ id: uuid("id").primaryKey() }));',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "列の定義が変数（中は見ない = 安全側で違反）",
+              source(TABLE_IMPORT, 'export const t = pgTable("t", columns);'),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "列の定義のスプレッドの中の id は見ない（id を直接書く）",
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", { ...base, title: text("title") });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "名前空間（pg.pgTable）で id が無い",
+              source(
+                IMPORT,
+                'export const t = pg.pgTable("t", { title: pg.text("title") });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "import の別名（pgTable as table）で id が無い",
+              source(
+                'import { pgTable as table, text } from "drizzle-orm/pg-core";',
+                'export const t = table("t", { title: text("title") });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "uuid がローカルの変数（const uuid = text）で pg-core の uuid でない",
+              source(
+                'import { pgTable, text } from "drizzle-orm/pg-core";',
+                "const uuid = text;",
+                'export const t = pgTable("t", { id: uuid("id").primaryKey() });',
+              ),
+              [{ rule: "surrogate-key", line: 3 }],
+            ],
+            [
+              "uuid を pg-core でない別のモジュールから import している",
+              source(
+                'import { pgTable } from "drizzle-orm/pg-core";',
+                'import { uuid } from "./x";',
+                'export const t = pgTable("t", { id: uuid("id").primaryKey() });',
+              ),
+              [{ rule: "surrogate-key", line: 3 }],
+            ],
+            [
+              "import の別名 uuid が text を指す（text as uuid）",
+              source(
+                'import { pgTable, text as uuid } from "drizzle-orm/pg-core";',
+                'export const t = pgTable("t", { id: uuid("id").primaryKey() });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "uuid を import type だけで import している（値ではない）",
+              source(
+                'import { pgTable } from "drizzle-orm/pg-core";',
+                'import type { uuid } from "drizzle-orm/pg-core";',
+                'export const t = pgTable("t", { id: uuid("id").primaryKey() });',
+              ),
+              [{ rule: "surrogate-key", line: 3 }],
+            ],
+            [
+              "名前空間の名前が import と違う（import * as pg で other.uuid）",
+              source(
+                IMPORT,
+                'export const t = pg.pgTable("t", { id: other.uuid("id").primaryKey() });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "id のチェーンに .array()（uuid[] の列）",
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", { id: uuid("id").array().$type<string>().primaryKey() });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "id のチェーンに .array() だけ（ほかは許可の一覧）",
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", { id: uuid("id").primaryKey().array() });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "id のチェーンに .$type<string>()",
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", { id: uuid("id").$type<string>().primaryKey() });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "id のチェーンに .references(() => t.id)",
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", { id: uuid("id").primaryKey().references(() => other.id) });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "id のチェーンに .generatedAlwaysAs(...)",
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", { id: uuid("id").primaryKey().generatedAlwaysAs(sql`x`) });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "id のチェーンの後ろに呼び出しでない式（as による型の付け替え）",
+              source(
+                TABLE_IMPORT,
+                'export const t = pgTable("t", { id: uuid("id").primaryKey() as unknown as X });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "pgTable を pg-core 以外から import していても表として見る（安全側）",
+              source(
+                'import { pgTable } from "./db";',
+                'export const t = pgTable("t", { title: text("title") });',
+              ),
+              [{ rule: "surrogate-key", line: 2 }],
+            ],
+            [
+              "複数の表のうち id の無い表だけを、その pgTable( の行で返す",
+              source(
+                TABLE_IMPORT,
+                'export const a = pgTable("a", { id: uuid("id").primaryKey() });',
+                "export const b = pgTable(",
+                '  "b",',
+                '  { title: text("title") },',
+                ");",
+              ),
+              [{ rule: "surrogate-key", line: 3 }],
+            ],
+          ];
 
-    // then
-    expect(result).toEqual({
-      files: [],
-      violations: [],
-    });
-  });
-});
+          // when
+          const violations = casesByName(cases, ([, text]) =>
+            findSurrogateKeyViolations(text),
+          );
 
-describe("DB の列の型・サロゲートキー・列の分類表（実ファイル）", () => {
-  it("apps/backend の infra/schema.ts はすべて列の型の既定に従い、すべての表が uuid の id の primaryKey と列の分類表を持つ", () => {
-    // given: 実ファイル（repoRoot）
-    // when
-    const files = listSchemaFiles(repoRoot);
-    const violations = collectSchemaViolations(repoRoot);
+          // then
+          expect(violations).toEqual(
+            casesByName(cases, ([, , expected]) => expected),
+          );
+        },
+      );
+    },
+  );
 
-    // then
-    // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
-    expect(files).toContain(
-      "apps/backend/features/todo/internal/infra/schema.ts",
+  Scenario(
+    "列の分類表の判定（findColumnClassificationViolations）: must pass",
+    ({ And }) => {
+      And(
+        "表ごとに列の分類表があれば違反なし（名前空間の pgTable・複数の表・変数名に $ を含む表・pgTable の無いファイルなど）",
+        () => {
+          // given
+          const cases: [string, string][] = [
+            [
+              "表の隣に export const <表>Columns = ColumnClassifier.classify(<表>, { ... })",
+              source(TABLE_IMPORT, CLASSIFY_IMPORT, TODOS, TODOS_COLUMNS),
+            ],
+            [
+              "同じディレクトリからの import（shared/infra/schema.ts）と、pg.pgTable（名前空間）",
+              source(
+                IMPORT,
+                'import { ColumnClassifier, type ColumnClass } from "./column-classification";',
+                'export const logs = pg.pgTable("logs", { id: pg.uuid("id").primaryKey() });',
+                'export const logsColumns = ColumnClassifier.classify(logs, { id: "public" });',
+              ),
+            ],
+            [
+              "複数の表それぞれに分類表（複数行の呼び出し・第 3 引数のある pgTable）",
+              source(
+                TABLE_IMPORT,
+                CLASSIFY_IMPORT,
+                TODOS,
+                "export const todoStatusChanges = pgTable(",
+                '  "todo_status_changes",',
+                '  { id: uuid("id").primaryKey() },',
+                "  (table) => [],",
+                ");",
+                TODOS_COLUMNS,
+                "export const todoStatusChangesColumns = ColumnClassifier.classify(",
+                "  todoStatusChanges,",
+                '  { id: "public" },',
+                ");",
+              ),
+            ],
+            [
+              "変数名に $ を含む表",
+              source(
+                TABLE_IMPORT,
+                CLASSIFY_IMPORT,
+                'export const $t = pgTable("t", { id: uuid("id").primaryKey() });',
+                'export const $tColumns = ColumnClassifier.classify($t, { id: "public" });',
+              ),
+            ],
+            [
+              "pgTable の無いファイル（コメント・文字列の pgTable( は表ではない）",
+              source("// pgTable( は書かない", 'const s = "pgTable(";'),
+            ],
+          ];
+
+          // when
+          const violations = casesByName(cases, ([, text]) =>
+            findColumnClassificationViolations(text),
+          );
+
+          // then
+          expect(violations).toEqual(casesByName(cases, () => []));
+        },
+      );
+    },
+  );
+
+  Scenario(
+    "列の分類表の判定（findColumnClassificationViolations）: must reject",
+    ({ And }) => {
+      And(
+        "列の分類表の無い表は違反（分類表が無い・片方の表だけにある・名前が <表>Columns でないなど）",
+        () => {
+          // given
+          const cases: [string, string, ColumnTypeViolation[]][] = [
+            [
+              "分類表が無い",
+              source(TABLE_IMPORT, CLASSIFY_IMPORT, TODOS),
+              [{ rule: "column-classification", line: 3 }],
+            ],
+            [
+              "2 つの表の片方だけに分類表がある（無い表だけが違反）",
+              source(
+                TABLE_IMPORT,
+                CLASSIFY_IMPORT,
+                TODOS,
+                'export const others = pgTable("others", { id: uuid("id").primaryKey() });',
+                TODOS_COLUMNS,
+              ),
+              [{ rule: "column-classification", line: 4 }],
+            ],
+            [
+              "分類表の名前が <表>Columns でない（todoColumns）",
+              source(
+                TABLE_IMPORT,
+                CLASSIFY_IMPORT,
+                TODOS,
+                'export const todoColumns = ColumnClassifier.classify(todos, { id: "public", title: "sensitive" });',
+              ),
+              [{ rule: "column-classification", line: 3 }],
+            ],
+            [
+              "分類表が別の表を渡している（todosColumns = ColumnClassifier.classify(others, …)）",
+              source(
+                TABLE_IMPORT,
+                CLASSIFY_IMPORT,
+                TODOS,
+                'export const todosColumns = ColumnClassifier.classify(others, { id: "public" });',
+              ),
+              [{ rule: "column-classification", line: 3 }],
+            ],
+            [
+              "分類表を export していない",
+              source(
+                TABLE_IMPORT,
+                CLASSIFY_IMPORT,
+                TODOS,
+                'const todosColumns = ColumnClassifier.classify(todos, { id: "public", title: "sensitive" });',
+              ),
+              [{ rule: "column-classification", line: 3 }],
+            ],
+            [
+              "satisfies だけの分類表（ColumnClassifier.classify で登録しない）",
+              source(
+                TABLE_IMPORT,
+                CLASSIFY_IMPORT,
+                TODOS,
+                'export const todosColumns = { id: "public", title: "sensitive" } satisfies Record<keyof typeof todos.$inferSelect, string>;',
+              ),
+              [{ rule: "column-classification", line: 3 }],
+            ],
+            [
+              "分類表がコメントアウトされている",
+              source(
+                TABLE_IMPORT,
+                CLASSIFY_IMPORT,
+                TODOS,
+                `// ${TODOS_COLUMNS}`,
+              ),
+              [{ rule: "column-classification", line: 3 }],
+            ],
+            [
+              "分類表が文字列の中にある",
+              source(
+                TABLE_IMPORT,
+                CLASSIFY_IMPORT,
+                TODOS,
+                `const s = \`${TODOS_COLUMNS}\`;`,
+              ),
+              [{ rule: "column-classification", line: 3 }],
+            ],
+            [
+              "ColumnClassifier を import していない（ローカルのクラス）",
+              source(
+                TABLE_IMPORT,
+                "class ColumnClassifier { static classify(t: unknown, c: unknown) { return c; } }",
+                TODOS,
+                TODOS_COLUMNS,
+              ),
+              [{ rule: "column-classification", line: 3 }],
+            ],
+            [
+              "ColumnClassifier の import がコメントアウトされている",
+              source(
+                TABLE_IMPORT,
+                `// ${CLASSIFY_IMPORT}`,
+                TODOS,
+                TODOS_COLUMNS,
+              ),
+              [{ rule: "column-classification", line: 3 }],
+            ],
+            [
+              "ColumnClassifier を import type で import している",
+              source(
+                TABLE_IMPORT,
+                'import type { ColumnClassifier } from "../../../../shared/infra/column-classification";',
+                TODOS,
+                TODOS_COLUMNS,
+              ),
+              [{ rule: "column-classification", line: 3 }],
+            ],
+            [
+              "ColumnClassifier を inline の type で import している",
+              source(
+                TABLE_IMPORT,
+                'import { type ColumnClassifier } from "../../../../shared/infra/column-classification";',
+                TODOS,
+                TODOS_COLUMNS,
+              ),
+              [{ rule: "column-classification", line: 3 }],
+            ],
+            [
+              "別の名前を ColumnClassifier の別名で import している",
+              source(
+                TABLE_IMPORT,
+                'import { ColumnClassification as ColumnClassifier } from "../../../../shared/infra/column-classification";',
+                TODOS,
+                TODOS_COLUMNS,
+              ),
+              [{ rule: "column-classification", line: 3 }],
+            ],
+            [
+              "ColumnClassifier を別のモジュール（前方一致の column-classification-x）から import している",
+              source(
+                TABLE_IMPORT,
+                'import { ColumnClassifier } from "./column-classification-x";',
+                TODOS,
+                TODOS_COLUMNS,
+              ),
+              [{ rule: "column-classification", line: 3 }],
+            ],
+            [
+              "ColumnClassifier を別名で import して呼んでいる（import { ColumnClassifier as C } の C.classify）",
+              source(
+                TABLE_IMPORT,
+                'import { ColumnClassifier as C } from "../../../../shared/infra/column-classification";',
+                TODOS,
+                'export const todosColumns = C.classify(todos, { id: "public", title: "sensitive" });',
+              ),
+              [{ rule: "column-classification", line: 3 }],
+            ],
+            [
+              "ColumnClassifier の別のメソッド（maskRow）で分類表を作っている",
+              source(
+                TABLE_IMPORT,
+                CLASSIFY_IMPORT,
+                TODOS,
+                'export const todosColumns = ColumnClassifier.maskRow(todos, { id: "public", title: "sensitive" });',
+              ),
+              [{ rule: "column-classification", line: 3 }],
+            ],
+            [
+              "別のクラスの classify・素の classify で分類表を作っている",
+              source(
+                TABLE_IMPORT,
+                CLASSIFY_IMPORT,
+                TODOS,
+                'export const todosColumns = OtherClassifier.classify(todos, { id: "public", title: "sensitive" });',
+                'const others = pgTable("others", { id: uuid("id").primaryKey() });',
+                'export const othersColumns = classify(others, { id: "public" });',
+              ),
+              [
+                { rule: "column-classification", line: 3 },
+                { rule: "column-classification", line: 5 },
+              ],
+            ],
+            [
+              "pgTable を変数で受けていない（export default）",
+              source(
+                TABLE_IMPORT,
+                CLASSIFY_IMPORT,
+                'export default pgTable("t", { id: uuid("id").primaryKey() });',
+              ),
+              [{ rule: "column-classification", line: 3 }],
+            ],
+          ];
+
+          // when
+          const violations = casesByName(cases, ([, text]) =>
+            findColumnClassificationViolations(text),
+          );
+
+          // then
+          expect(violations).toEqual(
+            casesByName(cases, ([, , expected]) => expected),
+          );
+        },
+      );
+    },
+  );
+
+  Scenario("スキーマの列挙と検査（fixture）", ({ And }) => {
+    And(
+      "apps/backend の features と shared の infra/schema.ts だけを対象にし、すべての規則（列の型・surrogate-key・column-classification）の違反を「規則: パス:行」の行の順で返す",
+      () => {
+        // given
+        const fixtureFiles = {
+          "apps/backend/features/a/internal/infra/schema.ts": source(
+            IMPORT,
+            'export const a = pg.pgTable("a", {',
+            '  title: pg.varchar("title", { length: 100 }),',
+            '  at: pg.timestamp("at"),',
+            "});",
+          ),
+          // 違反の無いファイル（uuid の id と分類表）。
+          "apps/backend/features/b/internal/infra/schema.ts": source(
+            IMPORT,
+            'import { ColumnClassifier } from "../../../../shared/infra/column-classification";',
+            'export const b = pg.pgTable("b", { id: pg.uuid("id").primaryKey() });',
+            'export const bColumns = ColumnClassifier.classify(b, { id: "public" });',
+          ),
+          "apps/backend/shared/infra/schema.ts": source(
+            IMPORT,
+            'export const s = pg.pgTable("s", { id: pg.uuid("id").primaryKey(), raw: pg.json("raw") });',
+          ),
+          // 対象外: infra/schema.ts でないファイル、infra 以外の schema.ts、テスト、node_modules、apps/backend の外。
+          "apps/backend/features/c/internal/infra/other.ts": varcharColumn,
+          "apps/backend/features/c/internal/domain/schema.ts": varcharColumn,
+          "apps/backend/features/c/internal/infra/schema.test.ts":
+            varcharColumn,
+          "apps/backend/node_modules/x/infra/schema.ts": varcharColumn,
+          "apps/frontend_customer/features/x/infra/schema.ts": varcharColumn,
+        };
+
+        // when
+        const result = violationsOfFixture(fixtureFiles);
+
+        // then
+        expect(result).toEqual({
+          files: [
+            "apps/backend/features/a/internal/infra/schema.ts",
+            "apps/backend/features/b/internal/infra/schema.ts",
+            "apps/backend/shared/infra/schema.ts",
+          ],
+          violations: [
+            "surrogate-key: apps/backend/features/a/internal/infra/schema.ts:2",
+            "column-classification: apps/backend/features/a/internal/infra/schema.ts:2",
+            "varchar: apps/backend/features/a/internal/infra/schema.ts:3",
+            "timestamp-without-timezone: apps/backend/features/a/internal/infra/schema.ts:4",
+            "json: apps/backend/shared/infra/schema.ts:2",
+            "column-classification: apps/backend/shared/infra/schema.ts:2",
+          ],
+        });
+      },
     );
-    expect(violations).toEqual([]);
+
+    And(
+      "apps/backend が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）",
+      () => {
+        // given: 前提なし
+        // when
+        const result = violationsOfFixture({ "README.md": "# x\n" });
+
+        // then
+        expect(result).toEqual({
+          files: [],
+          violations: [],
+        });
+      },
+    );
   });
+
+  Scenario(
+    "DB の列の型・サロゲートキー・列の分類表（実ファイル）",
+    ({ And }) => {
+      And(
+        "apps/backend の infra/schema.ts はすべて列の型の既定に従い、すべての表が uuid の id の primaryKey と列の分類表を持つ",
+        () => {
+          // given: 実ファイル（repoRoot）
+          // when
+          const files = listSchemaFiles(repoRoot);
+          const violations = collectSchemaViolations(repoRoot);
+
+          // then
+          // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
+          expect(files).toContain(
+            "apps/backend/features/todo/internal/infra/schema.ts",
+          );
+          expect(violations).toEqual([]);
+        },
+      );
+    },
+  );
 });

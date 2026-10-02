@@ -5,11 +5,14 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
+import { afterAll, beforeAll, expect } from "vitest";
+import { casesByName } from "./case-table";
 
 // pnpm-workspace.yaml のサプライチェーン保護と版の書き方の設定（.claude/rules/dependencies.md）を仕様として固定するテスト。
 // ルール検査テスト（.claude/rules/testing.md）なので、読み取り（readTopLevelSettings）と判定（findWorkspaceSettingViolations）を
 // 関数に切り出し、許可される例（must pass）と違反の例（must reject）の両方で固定する。
+// .feature（pnpm-workspace.feature）と step の実装（このファイル）に分けた（Issue #282）。
 
 const repoRoot = join(import.meta.dirname, "..");
 
@@ -191,336 +194,365 @@ function replaceOnce(text: string, from: string, to: string): string {
   return text.replace(from, to);
 }
 
-describe("設定の読み取りと判定（must pass）", () => {
-  it("期待どおりの設定だけなら違反なし", () => {
-    // given: VALID_YAML（モジュールの定数）
-    // when
-    const violations = violationsOf(VALID_YAML);
+let dir: string;
 
-    // then
-    expect(violations).toEqual([]);
-  });
+beforeAll(() => {
+  // WHY: fixture をリポジトリ内に置くと、テストが途中で落ちたときに作業ツリーへ残る。OS の一時ディレクトリに置いて afterAll で消す。
+  dir = mkdtempSync(join(tmpdir(), "pnpm-workspace-test-"));
+});
 
-  it("値の後ろのコメントは値に含めない", () => {
-    // given
-    const yaml = replaceOnce(
-      VALID_YAML,
-      "minimumReleaseAge: 7200\n",
-      "minimumReleaseAge: 7200 # 5 日\n",
+afterAll(() => {
+  rmSync(dir, { recursive: true, force: true });
+});
+
+const feature = await loadFeature("./pnpm-workspace.feature");
+
+describeFeature(feature, ({ Scenario }) => {
+  Scenario("設定の読み取りと判定（must pass）", ({ And }) => {
+    And("期待どおりの設定だけなら違反なし", () => {
+      // given: VALID_YAML（モジュールの定数）
+      // when
+      const violations = violationsOf(VALID_YAML);
+
+      // then
+      expect(violations).toEqual([]);
+    });
+
+    And("値の後ろのコメントは値に含めない", () => {
+      // given
+      const yaml = replaceOnce(
+        VALID_YAML,
+        "minimumReleaseAge: 7200\n",
+        "minimumReleaseAge: 7200 # 5 日\n",
+      );
+
+      // when
+      const violations = violationsOf(yaml);
+
+      // then
+      expect(violations).toEqual([]);
+    });
+
+    And(
+      "子の間・子の値の後ろのコメントは読まない（違反なし）（インデントされた key: value 形式のコメント行・行頭の key: value 形式のコメント行・子の値の後ろのコメント）",
+      () => {
+        // given
+        const cases: [string, string, string][] = [
+          [
+            "子の間の、インデントされた `key: value` 形式のコメント行",
+            "  sharp: false\n",
+            "  sharp: false\n  # note: x\n",
+          ],
+          [
+            "子の間の、行頭の `key: value` 形式のコメント行",
+            "  sharp: false\n",
+            "  sharp: false\n# a: b\n",
+          ],
+          [
+            "子の値の後ろのコメント",
+            "  lefthook: true\n",
+            "  lefthook: true # 理由\n",
+          ],
+        ];
+
+        // when
+        const result = casesByName(cases, ([, from, to]) =>
+          violationsOf(replaceOnce(VALID_YAML, from, to)),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => []));
+      },
     );
 
-    // when
-    const violations = violationsOf(yaml);
+    And("改行が CRLF でも読める", () => {
+      // given
+      const yaml = VALID_YAML.replaceAll("\n", "\r\n");
 
-    // then
-    expect(violations).toEqual([]);
-  });
+      // when
+      const violations = violationsOf(yaml);
 
-  it.each([
-    [
-      "子の間の、インデントされた `key: value` 形式のコメント行",
-      "  sharp: false\n",
-      "  sharp: false\n  # note: x\n",
-    ],
-    [
-      "子の間の、行頭の `key: value` 形式のコメント行",
-      "  sharp: false\n",
-      "  sharp: false\n# a: b\n",
-    ],
-    [
-      "子の値の後ろのコメント",
-      "  lefthook: true\n",
-      "  lefthook: true # 理由\n",
-    ],
-  ])("%s は読まない（違反なし）", (_case, from, to) => {
-    // given: it.each の入力
-    // when
-    const result = violationsOf(replaceOnce(VALID_YAML, from, to));
+      // then
+      expect(violations).toEqual([]);
+    });
 
-    // then
-    expect(result).toEqual([]);
-  });
+    And("トップレベルと子の値を型付きで読む", () => {
+      // given: VALID_YAML（モジュールの定数）
+      // when
+      const settings = readTopLevelSettings(VALID_YAML);
 
-  it("改行が CRLF でも読める", () => {
-    // given
-    const yaml = VALID_YAML.replaceAll("\n", "\r\n");
-
-    // when
-    const violations = violationsOf(yaml);
-
-    // then
-    expect(violations).toEqual([]);
-  });
-
-  it("トップレベルと子の値を型付きで読む", () => {
-    // given: VALID_YAML（モジュールの定数）
-    // when
-    const settings = readTopLevelSettings(VALID_YAML);
-
-    // then
-    expect(settings).toEqual({
-      allowBuilds: {
-        esbuild: false,
-        sharp: false,
-        "unrs-resolver": false,
-        lefthook: true,
-      },
-      minimumReleaseAge: 7200,
-      minimumReleaseAgeStrict: true,
-      trustPolicy: "no-downgrade",
-      savePrefix: "",
-      patchedDependencies: {
-        "@scope/pkg@1.0.0": "patches/@scope__pkg@1.0.0.patch",
-      },
+      // then
+      expect(settings).toEqual({
+        allowBuilds: {
+          esbuild: false,
+          sharp: false,
+          "unrs-resolver": false,
+          lefthook: true,
+        },
+        minimumReleaseAge: 7200,
+        minimumReleaseAgeStrict: true,
+        trustPolicy: "no-downgrade",
+        savePrefix: "",
+        patchedDependencies: {
+          "@scope/pkg@1.0.0": "patches/@scope__pkg@1.0.0.patch",
+        },
+      });
     });
   });
-});
 
-describe("設定の読み取りと判定（must reject）", () => {
-  it.each([
-    [
-      "minimumReleaseAge が無い",
-      (yaml: string) => replaceOnce(yaml, "minimumReleaseAge: 7200\n", ""),
-      ["minimumReleaseAge"],
-    ],
-    [
-      "minimumReleaseAge の値が違う（1440 = 1 日）",
-      (yaml: string) =>
-        replaceOnce(
-          yaml,
-          "minimumReleaseAge: 7200\n",
-          "minimumReleaseAge: 1440\n",
-        ),
-      ["minimumReleaseAge"],
-    ],
-    [
-      "minimumReleaseAge がコメントアウトされている",
-      (yaml: string) =>
-        replaceOnce(
-          yaml,
-          "minimumReleaseAge: 7200\n",
-          "# minimumReleaseAge: 7200\n",
-        ),
-      ["minimumReleaseAge"],
-    ],
-    [
-      "minimumReleaseAge が別のキーのネストの中にだけある",
-      (yaml: string) =>
-        replaceOnce(
-          yaml,
-          "minimumReleaseAge: 7200\n",
-          "overrides:\n  minimumReleaseAge: 7200\n",
-        ),
-      ["minimumReleaseAge"],
-    ],
-    [
-      "minimumReleaseAge がインデントされて allowBuilds の子になっている",
-      (yaml: string) =>
-        replaceOnce(
-          yaml,
-          "minimumReleaseAge: 7200\n",
-          "  minimumReleaseAge: 7200\n",
-        ),
-      ["minimumReleaseAge", "allowBuilds"],
-    ],
-    [
-      "minimumReleaseAgeStrict が false",
-      (yaml: string) =>
-        replaceOnce(
-          yaml,
-          "minimumReleaseAgeStrict: true",
-          "minimumReleaseAgeStrict: false",
-        ),
-      ["minimumReleaseAgeStrict"],
-    ],
-    [
-      "minimumReleaseAgeStrict が無い",
-      (yaml: string) =>
-        replaceOnce(yaml, "minimumReleaseAgeStrict: true\n", ""),
-      ["minimumReleaseAgeStrict"],
-    ],
-    [
-      "savePrefix が '^'",
-      (yaml: string) => replaceOnce(yaml, "savePrefix: ''", "savePrefix: '^'"),
-      ["savePrefix"],
-    ],
-    [
-      "savePrefix が無い（pnpm の既定は '^'）",
-      (yaml: string) => replaceOnce(yaml, "savePrefix: ''\n", ""),
-      ["savePrefix"],
-    ],
-    [
-      "allowBuilds の lefthook が false",
-      (yaml: string) =>
-        replaceOnce(yaml, "  lefthook: true", "  lefthook: false"),
-      ["allowBuilds"],
-    ],
-    [
-      "allowBuilds に許可（true）のパッケージが増えている",
-      (yaml: string) =>
-        replaceOnce(
-          yaml,
-          "  lefthook: true\n",
-          "  lefthook: true\n  evil: true\n",
-        ),
-      ["allowBuilds"],
-    ],
-    [
-      "allowBuilds から不許可（false）のパッケージが消えている",
-      (yaml: string) => replaceOnce(yaml, "  sharp: false\n", ""),
-      ["allowBuilds"],
-    ],
-    [
-      "allowBuilds の lefthook が、さらに深いネストの中にだけある",
-      (yaml: string) =>
-        replaceOnce(yaml, "  lefthook: true", "  nested:\n    lefthook: true"),
-      ["allowBuilds"],
-    ],
-    [
-      "allowBuilds の lefthook がコメントアウトされている",
-      (yaml: string) =>
-        replaceOnce(yaml, "  lefthook: true", "  # lefthook: true"),
-      ["allowBuilds"],
-    ],
-    [
-      "allowBuilds がフローの書き方で書かれている（読み取りの対象外）",
-      (yaml: string) =>
-        replaceOnce(
-          yaml,
-          "allowBuilds:\n  esbuild: false\n  sharp: false\n  unrs-resolver: false\n  lefthook: true\n",
-          "allowBuilds: { esbuild: false, sharp: false, unrs-resolver: false, lefthook: true }\n",
-        ),
-      ["allowBuilds"],
-    ],
-    [
-      "allowBuilds が無い",
-      (yaml: string) =>
-        replaceOnce(
-          yaml,
-          "allowBuilds:\n  esbuild: false\n  sharp: false\n  unrs-resolver: false\n  lefthook: true\n",
-          "",
-        ),
-      ["allowBuilds"],
-    ],
-    // 安全側に倒して違反にするもの（pnpm は 7200 と読むが、書き方を 1 通りにする。上の「限界」）。
-    [
-      "minimumReleaseAge がクォートした文字列",
-      (yaml: string) =>
-        replaceOnce(
-          yaml,
-          "minimumReleaseAge: 7200\n",
-          'minimumReleaseAge: "7200"\n',
-        ),
-      ["minimumReleaseAge"],
-    ],
-    [
-      "minimumReleaseAge の値の後ろに空白がある",
-      (yaml: string) =>
-        replaceOnce(
-          yaml,
-          "minimumReleaseAge: 7200\n",
-          "minimumReleaseAge: 7200 \n",
-        ),
-      ["minimumReleaseAge"],
-    ],
-    // WHY: 読み取りが空（ファイルの取り違えなど）でも「違反なし」にならず、すべての設定が欠けていると報告すること。
-    [
-      "ファイルが空",
-      () => "",
-      [
-        "minimumReleaseAge",
-        "minimumReleaseAgeStrict",
-        "savePrefix",
-        "allowBuilds",
-      ],
-    ],
-  ])("%s と違反になる", (_case, mutate, expectedKeys) => {
-    // given: it.each の入力
-    // when
-    const result = violationsOf(mutate(VALID_YAML));
+  Scenario("設定の読み取りと判定（must reject）", ({ And }) => {
+    And(
+      "設定が無い・値が違う・コメントアウト・ネストの中にだけある設定は、違反の設定のキーで違反になる（minimumReleaseAge・minimumReleaseAgeStrict・savePrefix・allowBuilds の各形、クォートした文字列・値の後ろの空白、ファイルが空）",
+      () => {
+        // given
+        const cases: [string, (yaml: string) => string, string[]][] = [
+          [
+            "minimumReleaseAge が無い",
+            (yaml: string) =>
+              replaceOnce(yaml, "minimumReleaseAge: 7200\n", ""),
+            ["minimumReleaseAge"],
+          ],
+          [
+            "minimumReleaseAge の値が違う（1440 = 1 日）",
+            (yaml: string) =>
+              replaceOnce(
+                yaml,
+                "minimumReleaseAge: 7200\n",
+                "minimumReleaseAge: 1440\n",
+              ),
+            ["minimumReleaseAge"],
+          ],
+          [
+            "minimumReleaseAge がコメントアウトされている",
+            (yaml: string) =>
+              replaceOnce(
+                yaml,
+                "minimumReleaseAge: 7200\n",
+                "# minimumReleaseAge: 7200\n",
+              ),
+            ["minimumReleaseAge"],
+          ],
+          [
+            "minimumReleaseAge が別のキーのネストの中にだけある",
+            (yaml: string) =>
+              replaceOnce(
+                yaml,
+                "minimumReleaseAge: 7200\n",
+                "overrides:\n  minimumReleaseAge: 7200\n",
+              ),
+            ["minimumReleaseAge"],
+          ],
+          [
+            "minimumReleaseAge がインデントされて allowBuilds の子になっている",
+            (yaml: string) =>
+              replaceOnce(
+                yaml,
+                "minimumReleaseAge: 7200\n",
+                "  minimumReleaseAge: 7200\n",
+              ),
+            ["minimumReleaseAge", "allowBuilds"],
+          ],
+          [
+            "minimumReleaseAgeStrict が false",
+            (yaml: string) =>
+              replaceOnce(
+                yaml,
+                "minimumReleaseAgeStrict: true",
+                "minimumReleaseAgeStrict: false",
+              ),
+            ["minimumReleaseAgeStrict"],
+          ],
+          [
+            "minimumReleaseAgeStrict が無い",
+            (yaml: string) =>
+              replaceOnce(yaml, "minimumReleaseAgeStrict: true\n", ""),
+            ["minimumReleaseAgeStrict"],
+          ],
+          [
+            "savePrefix が '^'",
+            (yaml: string) =>
+              replaceOnce(yaml, "savePrefix: ''", "savePrefix: '^'"),
+            ["savePrefix"],
+          ],
+          [
+            "savePrefix が無い（pnpm の既定は '^'）",
+            (yaml: string) => replaceOnce(yaml, "savePrefix: ''\n", ""),
+            ["savePrefix"],
+          ],
+          [
+            "allowBuilds の lefthook が false",
+            (yaml: string) =>
+              replaceOnce(yaml, "  lefthook: true", "  lefthook: false"),
+            ["allowBuilds"],
+          ],
+          [
+            "allowBuilds に許可（true）のパッケージが増えている",
+            (yaml: string) =>
+              replaceOnce(
+                yaml,
+                "  lefthook: true\n",
+                "  lefthook: true\n  evil: true\n",
+              ),
+            ["allowBuilds"],
+          ],
+          [
+            "allowBuilds から不許可（false）のパッケージが消えている",
+            (yaml: string) => replaceOnce(yaml, "  sharp: false\n", ""),
+            ["allowBuilds"],
+          ],
+          [
+            "allowBuilds の lefthook が、さらに深いネストの中にだけある",
+            (yaml: string) =>
+              replaceOnce(
+                yaml,
+                "  lefthook: true",
+                "  nested:\n    lefthook: true",
+              ),
+            ["allowBuilds"],
+          ],
+          [
+            "allowBuilds の lefthook がコメントアウトされている",
+            (yaml: string) =>
+              replaceOnce(yaml, "  lefthook: true", "  # lefthook: true"),
+            ["allowBuilds"],
+          ],
+          [
+            "allowBuilds がフローの書き方で書かれている（読み取りの対象外）",
+            (yaml: string) =>
+              replaceOnce(
+                yaml,
+                "allowBuilds:\n  esbuild: false\n  sharp: false\n  unrs-resolver: false\n  lefthook: true\n",
+                "allowBuilds: { esbuild: false, sharp: false, unrs-resolver: false, lefthook: true }\n",
+              ),
+            ["allowBuilds"],
+          ],
+          [
+            "allowBuilds が無い",
+            (yaml: string) =>
+              replaceOnce(
+                yaml,
+                "allowBuilds:\n  esbuild: false\n  sharp: false\n  unrs-resolver: false\n  lefthook: true\n",
+                "",
+              ),
+            ["allowBuilds"],
+          ],
+          // 安全側に倒して違反にするもの（pnpm は 7200 と読むが、書き方を 1 通りにする。上の「限界」）。
+          [
+            "minimumReleaseAge がクォートした文字列",
+            (yaml: string) =>
+              replaceOnce(
+                yaml,
+                "minimumReleaseAge: 7200\n",
+                'minimumReleaseAge: "7200"\n',
+              ),
+            ["minimumReleaseAge"],
+          ],
+          [
+            "minimumReleaseAge の値の後ろに空白がある",
+            (yaml: string) =>
+              replaceOnce(
+                yaml,
+                "minimumReleaseAge: 7200\n",
+                "minimumReleaseAge: 7200 \n",
+              ),
+            ["minimumReleaseAge"],
+          ],
+          // WHY: 読み取りが空（ファイルの取り違えなど）でも「違反なし」にならず、すべての設定が欠けていると報告すること。
+          [
+            "ファイルが空",
+            () => "",
+            [
+              "minimumReleaseAge",
+              "minimumReleaseAgeStrict",
+              "savePrefix",
+              "allowBuilds",
+            ],
+          ],
+        ];
 
-    // then
-    expect(result).toEqual(expectedKeys);
-  });
+        // when
+        const result = casesByName(cases, ([, mutate]) =>
+          violationsOf(mutate(VALID_YAML)),
+        );
 
-  it("トップレベルのキーが重複していると例外にする", () => {
-    // WHY toThrow(Error) と message の両方: toThrow("文字列") は throw undefined でも通る（.claude/rules/testing.md）。
-    // given
-    const yaml = `${VALID_YAML}minimumReleaseAge: 1440\n`;
-
-    // when
-    const action = () => readTopLevelSettings(yaml);
-
-    // then
-    expect(action).toThrow(
-      expect.objectContaining({
-        message: expect.stringContaining("minimumReleaseAge"),
-      }),
-    );
-  });
-});
-
-describe("pnpm-workspace.yaml の実ファイル", () => {
-  let dir: string;
-
-  beforeAll(() => {
-    // WHY: fixture をリポジトリ内に置くと、テストが途中で落ちたときに作業ツリーへ残る。OS の一時ディレクトリに置いて afterAll で消す。
-    dir = mkdtempSync(join(tmpdir(), "pnpm-workspace-test-"));
-  });
-
-  afterAll(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  // 読み込み → 読み取り → 判定を、本番と同じ readWorkspaceSettings で実ファイルから通す
-  //   （.claude/rules/testing.md の「ルール検査テスト」）。
-  it("違反を含む pnpm-workspace.yaml からは、違反の設定と実際の値をすべて検出する", () => {
-    // given
-    const file = join(dir, "pnpm-workspace.yaml");
-    writeFileSync(
-      file,
-      [
-        "allowBuilds:",
-        "  esbuild: false",
-        "  lefthook: true",
-        "  sharp: true",
-        "# minimumReleaseAge: 7200",
-        "minimumReleaseAgeStrict: true",
-        "savePrefix: '^'",
-        "",
-      ].join("\n"),
-    );
-
-    // when
-    const violations = findWorkspaceSettingViolations(
-      readWorkspaceSettings(file),
-    );
-
-    // then
-    expect(violations).toEqual([
-      {
-        key: "minimumReleaseAge",
-        expected: 7200,
-        actual: undefined,
+        // then
+        expect(result).toEqual(
+          casesByName(cases, ([, , expectedKeys]) => expectedKeys),
+        );
       },
-      { key: "savePrefix", expected: "", actual: "^" },
-      {
-        key: "allowBuilds",
-        expected: EXPECTED_SETTINGS.allowBuilds,
-        actual: { esbuild: false, lefthook: true, sharp: true },
-      },
-    ]);
-  });
-
-  it("サプライチェーン保護と版の書き方の設定が期待どおり", () => {
-    // given: 実ファイル（repoRoot の pnpm-workspace.yaml）
-    // when
-    const violations = findWorkspaceSettingViolations(
-      readWorkspaceSettings(join(repoRoot, "pnpm-workspace.yaml")),
     );
 
-    // then
-    // 失敗時にどの設定がどの値かが出力に出るよう、違反の一覧を空配列と比較する。
-    expect(violations).toEqual([]);
+    And("トップレベルのキーが重複していると例外にする", () => {
+      // WHY toThrow(Error) と message の両方: toThrow("文字列") は throw undefined でも通る（.claude/rules/testing.md）。
+      // given
+      const yaml = `${VALID_YAML}minimumReleaseAge: 1440\n`;
+
+      // when
+      const action = () => readTopLevelSettings(yaml);
+
+      // then
+      expect(action).toThrow(
+        expect.objectContaining({
+          message: expect.stringContaining("minimumReleaseAge"),
+        }),
+      );
+    });
+  });
+
+  Scenario("pnpm-workspace.yaml の実ファイル", ({ And }) => {
+    // 読み込み → 読み取り → 判定を、本番と同じ readWorkspaceSettings で実ファイルから通す
+    //   （.claude/rules/testing.md の「ルール検査テスト」）。
+    And(
+      "違反を含む pnpm-workspace.yaml からは、違反の設定と実際の値をすべて検出する",
+      () => {
+        // given
+        const file = join(dir, "pnpm-workspace.yaml");
+        writeFileSync(
+          file,
+          [
+            "allowBuilds:",
+            "  esbuild: false",
+            "  lefthook: true",
+            "  sharp: true",
+            "# minimumReleaseAge: 7200",
+            "minimumReleaseAgeStrict: true",
+            "savePrefix: '^'",
+            "",
+          ].join("\n"),
+        );
+
+        // when
+        const violations = findWorkspaceSettingViolations(
+          readWorkspaceSettings(file),
+        );
+
+        // then
+        expect(violations).toEqual([
+          {
+            key: "minimumReleaseAge",
+            expected: 7200,
+            actual: undefined,
+          },
+          { key: "savePrefix", expected: "", actual: "^" },
+          {
+            key: "allowBuilds",
+            expected: EXPECTED_SETTINGS.allowBuilds,
+            actual: { esbuild: false, lefthook: true, sharp: true },
+          },
+        ]);
+      },
+    );
+
+    And("サプライチェーン保護と版の書き方の設定が期待どおり", () => {
+      // given: 実ファイル（repoRoot の pnpm-workspace.yaml）
+      // when
+      const violations = findWorkspaceSettingViolations(
+        readWorkspaceSettings(join(repoRoot, "pnpm-workspace.yaml")),
+      );
+
+      // then
+      // 失敗時にどの設定がどの値かが出力に出るよう、違反の一覧を空配列と比較する。
+      expect(violations).toEqual([]);
+    });
   });
 });
