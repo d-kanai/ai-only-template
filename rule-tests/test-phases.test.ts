@@ -34,6 +34,8 @@ import { afterAll, describe, expect, it } from "vitest";
 //     無いのでテストとして数えない。
 //   - API 仕様（`*.api-spec.test.ts`）の step（`Given(` / `When(` / `Then(` / `And(` / `But(`）。`*` の step 1 つが Vitest の
 //     テスト 1 つになり、前提から検証までを 1 つの step で書くため（.claude/rules/testing.md の「API 仕様テスト（spec/api）」）。
+//   - ルール検査テスト（rule-tests/ の直下の `*.test.ts`）の step。API 仕様と同じく `*` の step 1 つが前提から検証までの 1 テスト
+//     （Issue #282。rule-tests/rule-test-feature.test.ts）。
 //   WHY API ジャーニー（`*.api-journey.test.ts`）の step は対象外: step の Given / When / Then のキーワード自体がフェーズを表し、
 //     step 1 つが 1 つのフェーズしか持たない。
 //   直前が `.` の呼び出し（`/x/.test(s)`・`page.test(`）はテストではない。
@@ -441,11 +443,20 @@ function listTestFiles(root: string): string[] {
   return TARGET_DIRS.flatMap(walk).sort();
 }
 
+// step（`*`）1 つが前提から検証までの 1 テストになるファイル: API 仕様と、rule-tests/ の直下のルール検査テスト（Issue #282 で
+//   .feature と step の実装に分けた。rule-tests/rule-test-feature.test.ts）。
+function isStepFile(path: string): boolean {
+  return (
+    path.endsWith(".api-spec.test.ts") ||
+    /^rule-tests\/[^/]+\.test\.ts$/.test(path)
+  );
+}
+
 function collectPhaseViolations(root: string): string[] {
   return listTestFiles(root).flatMap((path) =>
     findPhaseViolations(
       readFileSync(join(root, path), "utf8"),
-      path.endsWith(".api-spec.test.ts"),
+      isStepFile(path),
     ).map((violation) => `test-phase-comments: ${path}:${violation}`),
   );
 }
@@ -830,6 +841,8 @@ describe("列挙と検査（fixture）", () => {
       "apps/e2e/z.spec.ts": bare,
       "apps/backend/spec/api/todo/a.api-spec.test.ts": step,
       "apps/backend/spec/journey/b.api-journey.test.ts": step,
+      "rule-tests/c.test.ts": step,
+      "rule-tests/nested/d.test.ts": step,
       "apps/backend/helper.ts": bare,
       "apps/frontend/w.spec.ts": bare,
       "apps/node_modules/p/q.test.ts": bare,
@@ -853,12 +866,15 @@ describe("列挙と検査（fixture）", () => {
         "apps/backend/x.test.ts",
         "apps/e2e/z.spec.ts",
         "apps/frontend/y.test.tsx",
+        "rule-tests/c.test.ts",
+        "rule-tests/nested/d.test.ts",
       ],
       violations: [
         missing("apps/backend/spec/api/todo/a.api-spec.test.ts", 1),
         missing("apps/backend/x.test.ts", 1),
         missing("apps/e2e/z.spec.ts", 1),
         missing("apps/frontend/y.test.tsx", 2),
+        missing("rule-tests/c.test.ts", 1),
       ],
     });
   });
