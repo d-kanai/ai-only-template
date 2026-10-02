@@ -114,7 +114,7 @@ import { containsForbiddenWord } from "./feature-business-language";
 //     WHY: 1 つの API だけなら presentation の単体テスト（*.api.test.ts）の範囲で、API ジャーニー（複数の API の流れ）ではない。
 //     数え方: 参照先を解決したパス（拡張子なし）で数える（`./x.api` と `./x.api.ts` は 1 つ）。`import type` と、すべてに inline の
 //       type が付いたもの（`{ type A }`）は数えない（handler を呼べない）。
-//   - api-journey-uses-real-database: apps/backend/test-support/database（createTestDatabase）を値として import する。
+//   - api-journey-uses-real-database: apps/backend/test-support/database（TestDatabase.create）を値として import する。
 //     WHY: 実 DB で流れを確かめるのが API ジャーニーの目的。型だけの import（TestDatabase）では実 DB を用意しない。
 //   - api-journey-no-skip（Issue #219 の reviewer の指摘）: `.skip` / `.only` / `.skipIf` / `.runIf`（`Scenario.skip(`・
 //     `describeFeature.skip(`・`it.skipIf(` など。直前が `.` のスプレッドは除く。文字列の中は見ない）と、タグの絞り込み

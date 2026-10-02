@@ -11,11 +11,11 @@ import {
 } from "vitest";
 import type { ChangeTodoCompletionResponse } from "../../../features/todo/internal/presentation/change-todo-completion.api";
 import type { ChangeEntry } from "../../../shared/infra/change-log";
+import { TestDatabase } from "../../../test-support/database";
 import {
-  createTestDatabase,
-  type TestDatabase,
-} from "../../../test-support/database";
-import { aTodo, type BuiltTodo } from "../../../test-support/todo/todo-builder";
+  type BuiltTodo,
+  TodoBuilder,
+} from "../../../test-support/todo/todo-builder";
 import {
   ChangeTodoCompletionApiAssembly,
   TodoSpecExpected,
@@ -41,7 +41,7 @@ let handler: ReturnType<typeof ChangeTodoCompletionApiAssembly.handler>;
 let log: MockInstance<typeof console.log>;
 
 beforeAll(async () => {
-  database = await createTestDatabase();
+  database = await TestDatabase.create();
   await database.migrate();
   handler = ChangeTodoCompletionApiAssembly.handler(database.db);
 });
@@ -84,11 +84,11 @@ async function putCompletion(id: string, body: unknown): Promise<Response> {
 
 // 未完了の Todo（履歴は作成時の未完了の 1 件）と、完了の Todo（履歴は作成時の未完了と完了の 2 件）。ビルダーの既定の履歴。
 function uncompletedTodo(title: string): Promise<BuiltTodo> {
-  return aTodo(database.db).title(title).build();
+  return TodoBuilder.of(database.db).title(title).build();
 }
 
 function completedTodo(title: string): Promise<BuiltTodo> {
-  return aTodo(database.db).title(title).completed(true).build();
+  return TodoBuilder.of(database.db).title(title).completed(true).build();
 }
 
 // 完了の履歴が、前提の履歴（TodoSpecExpected.statusRows）の後ろに added の 1 件ずつが足されたものになっている。足した行の日時は API が now() で
@@ -129,7 +129,7 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "未完了の Todo を完了にすると、完了として保存され、ほかの Todo は変わらない",
       async () => {
-        const bread = await aTodo(database.db)
+        const bread = await TodoBuilder.of(database.db)
           .title("パンを買う")
           .createdAt(new Date("2026-09-01T00:00:00.000Z"))
           .build();

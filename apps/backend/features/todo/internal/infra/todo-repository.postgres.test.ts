@@ -18,10 +18,7 @@ import type { ChangeEntry } from "../../../../shared/infra/change-log";
 import { changeLogs } from "../../../../shared/infra/schema";
 import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";
 import { PostgresWriter } from "../../../../shared/infra/writer";
-import {
-  createTestDatabase,
-  type TestDatabase,
-} from "../../../../test-support/database";
+import { TestDatabase } from "../../../../test-support/database";
 import { Todo } from "../domain/todo";
 import { todoStatusChanges, todos } from "./schema";
 import { PostgresTodoRepository } from "./todo-repository.postgres";
@@ -45,7 +42,7 @@ afterEach(() => {
 let database: TestDatabase;
 
 beforeAll(async () => {
-  database = await createTestDatabase();
+  database = await TestDatabase.create();
   await database.migrate();
 });
 

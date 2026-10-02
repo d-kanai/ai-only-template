@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { resetTodos } from "./database";
+import { E2eDatabase } from "./database";
 
 // 画面の言語（Issue #116）が、ブラウザの言語（Accept-Language）と Cookie NEXT_LOCALE で決まり、クライアントが送った
 //   x-locale では変わらないことを本番ビルドで確かめる E2E テスト。
@@ -9,7 +9,7 @@ import { resetTodos } from "./database";
 
 // データは Postgres に残るので、テストごとに空にする（todo.spec.ts と同じ理由）。
 test.beforeEach(async () => {
-  await resetTodos();
+  await E2eDatabase.resetTodos();
 });
 
 // ブラウザの言語が ja-JP（playwright.config.ts の既定）のまま、Accept-Language 以外の口で言語が変わるか・変わらないかを見る。
@@ -96,6 +96,6 @@ test.describe("ブラウザの言語が en-US", () => {
     await expect(page.getByRole("button", { name: "Save" })).toBeVisible();
 
     // 後片付け（todo.spec.ts と同じく、作ったデータを残さない。次のテストの beforeEach でも消える）。
-    await resetTodos();
+    await E2eDatabase.resetTodos();
   });
 });

@@ -2,10 +2,7 @@
 import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";
 import type { CreateTodoResponse } from "../../../features/todo/internal/presentation/create-todo.api";
-import {
-  createTestDatabase,
-  type TestDatabase,
-} from "../../../test-support/database";
+import { TestDatabase } from "../../../test-support/database";
 import {
   CreateTodoApiAssembly,
   TodoSpecLogs,
@@ -22,14 +19,14 @@ import {
 //   変更の記録は Writer（shared/infra/writer.ts）が文ごとに自動で残す技術の仕組みで、業務の仕様ではない（.feature の禁止語。
 //   rule-tests/feature-business-language.ts）。記録の書き忘れ・中身のずれを見逃さないよう、検証そのものは step の実装に残す。
 //   ほかの api-spec（rename / change-todo-completion / delete）も同じ。
-// 前提の Todo が要る step は、ほかの api-spec と同じくテストデータビルダー（aTodo）で作る（list-todos.api-spec.test.ts の冒頭）。
+// 前提の Todo が要る step は、ほかの api-spec と同じくテストデータビルダー（TodoBuilder.of）で作る（list-todos.api-spec.test.ts の冒頭）。
 //   今の step はどれも空の状態から作るので、前提は無い。
 
 let database: TestDatabase;
 let handler: ReturnType<typeof CreateTodoApiAssembly.handler>;
 
 beforeAll(async () => {
-  database = await createTestDatabase();
+  database = await TestDatabase.create();
   await database.migrate();
   handler = CreateTodoApiAssembly.handler(database.db);
 });

@@ -5,16 +5,12 @@ import { env } from "@repo/shared/env";
 import { sql } from "drizzle-orm";
 import { Client } from "pg";
 import { describe, expect, test, vi } from "vitest";
-import {
-  cleanupTestSchemas,
-  createTestDatabase,
-  testSchemaPrefix,
-} from "./database";
+import { TestDatabase } from "./database";
 
 // 実 Postgres（compose.yaml）に対して実行する。
-describe("createTestDatabase", () => {
+describe("TestDatabase.create", () => {
   async function schemaExists(name: string): Promise<boolean> {
-    const other = await createTestDatabase();
+    const other = await TestDatabase.create();
     try {
       const result = await other.db.execute<{ found: boolean }>(
         sql`select exists (select 1 from information_schema.schemata where schema_name = ${name}) as found`,
@@ -26,7 +22,7 @@ describe("createTestDatabase", () => {
   }
 
   test("接続先は env の DATABASE_URL（.env / 環境変数。既定値は持たない）", async () => {
-    const database = await createTestDatabase();
+    const database = await TestDatabase.create();
     try {
       expect(database.url).toBe(env.DATABASE_URL);
     } finally {
@@ -35,7 +31,7 @@ describe("createTestDatabase", () => {
   });
 
   test("テスト用のスキーマを作って search_path にし、close でスキーマごと消す", async () => {
-    const database = await createTestDatabase();
+    const database = await TestDatabase.create();
     const current = await database.db.execute<{ schema: string }>(
       sql`select current_schema() as schema`,
     );
@@ -50,8 +46,8 @@ describe("createTestDatabase", () => {
   });
 
   test("作るたびに別のスキーマになる（並行して動くテストの表が重ならない）", async () => {
-    const first = await createTestDatabase();
-    const second = await createTestDatabase();
+    const first = await TestDatabase.create();
+    const second = await TestDatabase.create();
     try {
       await first.db.execute(sql`create table items (name text)`);
       await first.db.execute(sql`insert into items values ('a')`);
@@ -66,7 +62,7 @@ describe("createTestDatabase", () => {
   });
 
   test("migrate で drizzle/ のマイグレーションをテスト用のスキーマに当てる（todos・完了の履歴・変更履歴の表ができる）", async () => {
-    const database = await createTestDatabase();
+    const database = await TestDatabase.create();
     try {
       await database.migrate();
       const tables = await database.db.execute<{ table_name: string }>(
@@ -87,7 +83,7 @@ describe("createTestDatabase", () => {
   //   手書きのマイグレーション（shared/drizzle/0002_*.sql）でスキーマを書かずに張る（Issue #188。features/todo/internal/infra/schema.ts）。
   //   public を指すと、テスト用のスキーマの Todo に履歴を足せず、テストのスキーマを消しても public の todos に参照が残る。
   test("migrate した外部キー（todo_status_changes → todos）は、テスト用のスキーマの todos を指す（public を指さない）", async () => {
-    const database = await createTestDatabase();
+    const database = await TestDatabase.create();
     try {
       await database.migrate();
       const references = await database.db.execute<{
@@ -104,9 +100,9 @@ describe("createTestDatabase", () => {
 });
 
 // 実 Postgres（compose.yaml）に対して実行する。
-// WHY 接頭辞を "test_" にせずテストごとに変える: cleanupTestSchemas("test_") をここで呼ぶと、並列に動いている
+// WHY 接頭辞を "test_" にせずテストごとに変える: TestDatabase.cleanupSchemas("test_") をここで呼ぶと、並列に動いている
 //   他のテストファイルのスキーマまで消してしまう。このテストだけが作るスキーマの接頭辞で確かめる。
-describe("cleanupTestSchemas", () => {
+describe("TestDatabase.cleanupSchemas", () => {
   // 後始末する側の設定。接続先は単体テストと同じ DB で、Stryker の worker の外として動かす。
   const options = { databaseUrl: env.DATABASE_URL, insideStrykerWorker: false };
 
@@ -131,13 +127,13 @@ describe("cleanupTestSchemas", () => {
   }
 
   // test_ で始めておく: テストが途中で失敗して残っても、次の実行の globalSetup が消す。
-  //   "test_cleanup_" の "l" は 16 進に無い文字なので、createTestDatabase のスキーマ（test_<16 進 32 桁>）とは重ならない。
+  //   "test_cleanup_" の "l" は 16 進に無い文字なので、TestDatabase.create のスキーマ（test_<16 進 32 桁>）とは重ならない。
   function uniquePrefix(): string {
-    return `${testSchemaPrefix()}cleanup_${randomUUID().replaceAll("-", "")}_`;
+    return `${TestDatabase.schemaPrefix()}cleanup_${randomUUID().replaceAll("-", "")}_`;
   }
 
-  test("createTestDatabase が作るスキーマの接頭辞は test_", () => {
-    expect(testSchemaPrefix()).toBe("test_");
+  test("TestDatabase.create が作るスキーマの接頭辞は test_", () => {
+    expect(TestDatabase.schemaPrefix()).toBe("test_");
   });
 
   test("接頭辞で始まるスキーマを、中の表ごとすべて消し、消した名前を返す", async () => {
@@ -148,7 +144,7 @@ describe("cleanupTestSchemas", () => {
       await client.query(`create schema ${prefix}b`);
     });
 
-    const dropped = await cleanupTestSchemas(options, prefix);
+    const dropped = await TestDatabase.cleanupSchemas(options, prefix);
 
     expect([...dropped].sort()).toEqual([`${prefix}a`, `${prefix}b`]);
     await expect(schemasStartingWith(prefix)).resolves.toEqual([]);
@@ -160,7 +156,9 @@ describe("cleanupTestSchemas", () => {
     const lookalike = `${prefix.slice(0, -1)}x_keep`;
     await withClient((client) => client.query(`create schema ${lookalike}`));
     try {
-      await expect(cleanupTestSchemas(options, prefix)).resolves.toEqual([]);
+      await expect(
+        TestDatabase.cleanupSchemas(options, prefix),
+      ).resolves.toEqual([]);
       await expect(schemasStartingWith(prefix.slice(0, -1))).resolves.toEqual([
         lookalike,
       ]);
@@ -176,13 +174,16 @@ describe("cleanupTestSchemas", () => {
     await withClient((client) => client.query(`create schema ${prefix}a`));
     try {
       await expect(
-        cleanupTestSchemas({ ...options, insideStrykerWorker: true }, prefix),
+        TestDatabase.cleanupSchemas(
+          { ...options, insideStrykerWorker: true },
+          prefix,
+        ),
       ).resolves.toEqual([]);
       await expect(schemasStartingWith(prefix)).resolves.toEqual([
         `${prefix}a`,
       ]);
     } finally {
-      await cleanupTestSchemas(options, prefix);
+      await TestDatabase.cleanupSchemas(options, prefix);
     }
   });
 
@@ -191,10 +192,10 @@ describe("cleanupTestSchemas", () => {
   test("終わったら接続を閉じる（Stryker の worker の中で何も消さないときも閉じる）", async () => {
     const end = vi.spyOn(Client.prototype, "end");
     try {
-      await cleanupTestSchemas(options, uniquePrefix());
+      await TestDatabase.cleanupSchemas(options, uniquePrefix());
       expect(end).toHaveBeenCalledTimes(1);
 
-      await cleanupTestSchemas(
+      await TestDatabase.cleanupSchemas(
         { ...options, insideStrykerWorker: true },
         uniquePrefix(),
       );
@@ -206,7 +207,7 @@ describe("cleanupTestSchemas", () => {
 
   test("Postgres に接続できなければ、起動を促すエラーで失敗し、元の接続エラーを cause に残す", async () => {
     await expect(
-      cleanupTestSchemas(
+      TestDatabase.cleanupSchemas(
         {
           databaseUrl: "postgresql://u:p@127.0.0.1:1/x",
           insideStrykerWorker: false,

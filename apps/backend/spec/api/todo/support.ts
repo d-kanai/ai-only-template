@@ -30,7 +30,7 @@ import type { Problem } from "../../../shared/presentation/problem";
 // Todo の API 仕様（spec/api/todo/*.api-spec.test.ts。Issue #219）が共有する補助: API ごとの組み立て（<Api>Assembly）・DB の行
 //   （TodoSpecRows）・期待値（TodoSpecExpected）・変更の記録（TodoSpecLogs）・要求（TodoSpecRequests）・失敗の本文（TodoSpecProblems）。
 // WHY spec/api の中に置く（test-support/ に置かない）: API 仕様のためだけの補助。test-support/ はテストダブル・DB の基盤・テストデータ
-//   ビルダー（前提の行を入れる aTodo。test-support/todo/todo-builder.ts）を置く場所で、ほかのテストからも使う。
+//   ビルダー（前提の行を入れる TodoBuilder.of。test-support/todo/todo-builder.ts）を置く場所で、ほかのテストからも使う。
 // WHY 6 つの API 仕様で 1 つにまとめる: 組み立て（本番と同じ部品の並び）・要求の形・DB の行の読み方は API ごとに変わらず、
 //   ファイルごとに書くと、本番の組み立てが変わったときに直し漏れる。
 // WHY クラスの static メソッドにする（関数を export しない）: backend はクラスを基本にし、関数の import をやめる（daiki の判断
@@ -39,7 +39,7 @@ import type { Problem } from "../../../shared/presentation/problem";
 // WHY 用途ごとにクラスを分ける（1 つのクラスにまとめない）: step が import するクラスの名前で、手に入るものが決まる。組み立ては Api ごとの
 //   クラスに分け、step は自分の仕様の対象の組み立てのクラスだけを import する（rule-tests/api-spec.test.ts の api-spec-own-api-only）。
 //   ほかの補助をそのクラスに混ぜると、補助のために対象でない組み立てのクラスを import する口ができる。
-// WHY 前提の Todo は API で作らずビルダー（aTodo）で表に直接入れる（ユーザー判断 2026-10-01、Issue #240）: step が呼ぶ API を自分の仕様の
+// WHY 前提の Todo は API で作らずビルダー（TodoBuilder.of）で表に直接入れる（ユーザー判断 2026-10-01、Issue #240）: step が呼ぶ API を自分の仕様の
 //   対象の 1 つだけにし、前提の用意を対象でない API の組み合わせに依存させない（理由の詳細は todo-builder.ts の冒頭）。そのため
 //   ここには前提を API で作るメソッドを置かない。step も support.ts も対象でない API の handler を呼ばないことは
 //   rule-tests/api-spec.test.ts（api-spec-own-api-only・api-spec-support-no-api-call・api-spec-support-assembler-per-api）が止める。
@@ -48,7 +48,7 @@ import type { Problem } from "../../../shared/presentation/problem";
 
 // API ごとの組み立て。本番の api ファイルの最下部と同じ組み立てで、渡した db（テスト用のスキーマ）を使う handler を返す。
 // WHY 本番の export（GET / POST など）を使わない: 本番は AppDatabase.get()（.env の public スキーマ）を使い、テストファイルごとの
-//   スキーマ（createTestDatabase）に向けられない。
+//   スキーマ（TestDatabase.create）に向けられない。
 // WHY API ごとに 1 つのクラスにする（すべての handler をまとめて返さない）: step は自分の仕様の対象の組み立てのクラス（<api> の
 //   PascalCase + ApiAssembly。rename-todo なら RenameTodoApiAssembly）だけを import し、ほかの API の handler を手に入れない
 //   （rule-tests/api-spec.test.ts の api-spec-own-api-only が import の名前で、api-spec-support-assembler-per-api が 1 つのクラスに

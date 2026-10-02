@@ -20,7 +20,7 @@ import { afterAll, describe, expect, it } from "vitest";
 //   - no-public-schema-qualifier: apps/backend/shared/drizzle/ の下の *.sql の文に、表のスキーマ修飾 `"public".`
 //     （引用符なしの `public.` も。大文字小文字と `.` の前後の空白は問わない）がある（Issue #192）。
 //     WHY: drizzle-kit 0.31.11 の generate は schema.ts の `.references()` を `REFERENCES "public"."todos"` と書く。
-//     createTestDatabase() はテストファイルごとの別スキーマ（search_path）にマイグレーションを当てるので、public を指す SQL は
+//     TestDatabase.create() はテストファイルごとの別スキーマ（search_path）にマイグレーションを当てるので、public を指す SQL は
 //     テストのスキーマの表を指さず、外部キーが public の表を参照して壊れる。外部キーは --custom の SQL にスキーマなしで書く
 //     （.claude/skills/db-migration/SKILL.md）。
 //     読み方: `--` から行末と `/* … */` をコメントとして消し（コメントの中の WHY の説明で落とさない）、`;` と drizzle の区切り

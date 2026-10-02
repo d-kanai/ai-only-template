@@ -4,7 +4,7 @@ import { env } from "@repo/shared/env";
 import { sql } from "drizzle-orm";
 import type { Pool, PoolConfig } from "pg";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { createTestDatabase } from "../../test-support/database";
+import { TestDatabase } from "../../test-support/database";
 import { AppDatabase, type DatabaseConfig } from "./database";
 
 // AppDatabase.create に渡す設定の例。接続先は架空（プールは作るだけなら接続しない）。
@@ -98,7 +98,7 @@ describe("AppDatabase.create", () => {
   // WHY 実 Postgres で確かめる: node-postgres は 0 などの偽の値を接続パラメータに載せない（pg 8.23.0 の client.js の
   //   getStartupConf）。名前の取り違えや値の落ちは、DB のセッションの設定（SHOW）を見ないと分からない。
   test("DB 側のタイムアウトが接続ごとのセッションの設定になる", async () => {
-    const database = await createTestDatabase();
+    const database = await TestDatabase.create();
     try {
       const { pool } = AppDatabase.create({
         ...CONFIG,
@@ -117,7 +117,7 @@ describe("AppDatabase.create", () => {
   });
 
   test("statement_timeout を超えたクエリは DB が打ち切る（SQLSTATE 57014 query_canceled）", async () => {
-    const database = await createTestDatabase();
+    const database = await TestDatabase.create();
     try {
       const { pool } = AppDatabase.create({
         ...CONFIG,
@@ -134,7 +134,7 @@ describe("AppDatabase.create", () => {
   });
 
   test("作った db で実際にクエリを実行できる", async () => {
-    const database = await createTestDatabase();
+    const database = await TestDatabase.create();
     try {
       const { db, pool } = AppDatabase.create({
         ...CONFIG,

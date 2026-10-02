@@ -21,7 +21,7 @@
 #   .dockerignore への追加を求めている。
 gha-creds-*.json
 # テストだけが使うコード（apps/backend/test-support/・apps/frontend_customer/test-support/。Issue #181）。
-# WHY: テスト用の DB の準備（createTestDatabase）や翻訳の期待値（tJa）などのテストだけが使うコードと、テスト用の endpoint
+# WHY: テスト用の DB の準備（TestDatabase.create）や翻訳の期待値（tJa）などのテストだけが使うコードと、テスト用の endpoint
 #   （置くなら app/api/test-support/ の下。パスの要素が test-support なので同じ行で外れる）をイメージに入れない。
 #   本番では /api/test-support/* が 404 になる。
 #   この行があること・test-support/ のすべてのファイルがこれで外れることは rule-tests/test-support.test.ts が、push した runtime の

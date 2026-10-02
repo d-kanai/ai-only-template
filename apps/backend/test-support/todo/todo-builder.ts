@@ -7,7 +7,7 @@ import {
 import type { Database } from "../../shared/infra/database";
 
 // Todo のテストデータビルダー（Issue #240）。テストの前提の Todo を、todos と todo_status_changes に直接 INSERT して用意する。
-//   使い方: `await aTodo(db).title("牛乳を買う").completed(true).createdAt(date).build()`。指定しなかった値は既定値になり、
+//   使い方: `await TodoBuilder.of(db).title("牛乳を買う").completed(true).createdAt(date).build()`。指定しなかった値は既定値になり、
 //   build() が入れた値（BuiltTodo）を返す。
 // WHY API（作成・完了の handler）を通さずに表に直接入れる（ユーザー判断 2026-10-01、Issue #240）:
 //   - 前提の用意を、仕様の対象でない API の組み合わせに依存させない。表（集約の子表など）が増えるたびに「前提を作る API の手順」が
@@ -34,17 +34,20 @@ export type BuiltTodo = {
   statusChanges: readonly BuiltTodoStatusChange[];
 };
 
-export function aTodo(db: Database): TodoBuilder {
-  return new TodoBuilder(db, {});
-}
-
 // WHY setter ごとに新しいビルダーを返す（自分を書き換えない）: 共通の前提のビルダーを変数に入れて何度も build するときに、ある Todo
 //   だけに足した指定（completed(true) など）がほかの Todo に漏れない。
+// WHY 入口を static の of にする（Issue #262。以前は関数 aTodo(db)）: テストの補助も最上位に関数を置かない（ADR
+//   docs/adr/architecture/20261002-class-based-shared-and-test-support.md。rule-tests/architecture.test.ts の class-based）。
+//   コンストラクタは private にし、指定の無いビルダーは of からだけ作る（指定の途中の値を外から渡させない）。
 export class TodoBuilder {
-  constructor(
+  private constructor(
     private readonly db: Database,
     private readonly specified: Partial<BuiltTodo>,
   ) {}
+
+  static of(db: Database): TodoBuilder {
+    return new TodoBuilder(db, {});
+  }
 
   id(id: string): TodoBuilder {
     return this.with({ id });
@@ -108,20 +111,20 @@ export class TodoBuilder {
       createdAt,
       statusChanges:
         this.specified.statusChanges ??
-        defaultStatusChanges(completed, createdAt),
+        TodoBuilder.defaultStatusChanges(completed, createdAt),
     };
   }
-}
 
-// 履歴を指定しないときの完了の履歴。作成時の未完了の 1 件、完了なら作成日時の完了をもう 1 件。
-// WHY この規則: 不変条件
-//   （履歴は 1 件以上・作成日時より前にならない・最後の completed が今の値）を満たす最小の履歴で、前提の Todo を正しい Todo にする。
-function defaultStatusChanges(
-  completed: boolean,
-  createdAt: Date,
-): BuiltTodoStatusChange[] {
-  const created = { completed: false, changedAt: createdAt };
-  return completed
-    ? [created, { completed: true, changedAt: createdAt }]
-    : [created];
+  // 履歴を指定しないときの完了の履歴。作成時の未完了の 1 件、完了なら作成日時の完了をもう 1 件。
+  // WHY この規則: 不変条件
+  //   （履歴は 1 件以上・作成日時より前にならない・最後の completed が今の値）を満たす最小の履歴で、前提の Todo を正しい Todo にする。
+  private static defaultStatusChanges(
+    completed: boolean,
+    createdAt: Date,
+  ): BuiltTodoStatusChange[] {
+    const created = { completed: false, changedAt: createdAt };
+    return completed
+      ? [created, { completed: true, changedAt: createdAt }]
+      : [created];
+  }
 }

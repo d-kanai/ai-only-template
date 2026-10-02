@@ -2,11 +2,8 @@
 import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";
 import type { ListTodosResponse } from "../../../features/todo/internal/presentation/list-todos.api";
-import {
-  createTestDatabase,
-  type TestDatabase,
-} from "../../../test-support/database";
-import { aTodo } from "../../../test-support/todo/todo-builder";
+import { TestDatabase } from "../../../test-support/database";
+import { TodoBuilder } from "../../../test-support/todo/todo-builder";
 import {
   ListTodosApiAssembly,
   TodoSpecExpected,
@@ -23,7 +20,7 @@ import {
 //   （node_modules/@amiceli/vitest-cucumber の parser の lang.json で "and": ["* ", "And "]。2026-09-30 に実測）。
 // WHY 各 step の前に表を空にする（beforeEach）: vitest-cucumber は step 1 つを Vitest の test 1 つとして実行する。ファイルの
 //   最上位の beforeEach はすべての test（= step）の前に動くので、どの step も空の状態から自分で前提を用意する（前の step に依存しない）。
-// WHY 前提の Todo はテストデータビルダー（aTodo。test-support/todo/todo-builder.ts）で表に直接入れ、step が呼ぶ API は仕様の対象の 1 つ
+// WHY 前提の Todo はテストデータビルダー（TodoBuilder.of。test-support/todo/todo-builder.ts）で表に直接入れ、step が呼ぶ API は仕様の対象の 1 つ
 //   だけにする（ユーザー判断 2026-10-01、Issue #240）: 前提の用意を対象でない API（作成・完了など）に依存させず、作成日時を決めた Todo・
 //   壊れた Todo も同じ書き方で作る。ほかの API の handler を呼ばないことは rule-tests/api-spec.test.ts の api-spec-own-api-only が止める。
 //   ほかの api-spec も同じ。
@@ -32,7 +29,7 @@ let database: TestDatabase;
 let handler: ReturnType<typeof ListTodosApiAssembly.handler>;
 
 beforeAll(async () => {
-  database = await createTestDatabase();
+  database = await TestDatabase.create();
   await database.migrate();
   handler = ListTodosApiAssembly.handler(database.db);
 });
@@ -51,7 +48,7 @@ async function listTodos(): Promise<Response> {
 
 // 作成日時と id を決めた未完了の Todo（完了の履歴は作成時の未完了の 1 件。ビルダーの既定）。
 function uncompletedTodo(id: string, title: string, createdAt: Date) {
-  return aTodo(database.db).id(id).title(title).createdAt(createdAt);
+  return TodoBuilder.of(database.db).id(id).title(title).createdAt(createdAt);
 }
 
 const feature = await loadFeature("./list-todos.feature");
@@ -69,7 +66,9 @@ describeFeature(feature, ({ Scenario }) => {
 
     // 表の Todo（id・タイトル・完了かどうか・作成日時）と同じ内容が一覧に出る。作成日時は ISO 8601 の文字列。
     And("各 Todo は、タイトル・完了かどうか・作成日時を持つ", async () => {
-      const milk = await aTodo(database.db).title("牛乳を買う").build();
+      const milk = await TodoBuilder.of(database.db)
+        .title("牛乳を買う")
+        .build();
 
       const response = await listTodos();
 
@@ -80,7 +79,7 @@ describeFeature(feature, ({ Scenario }) => {
     });
 
     And("完了にした Todo も一覧に含まれる", async () => {
-      const milk = await aTodo(database.db)
+      const milk = await TodoBuilder.of(database.db)
         .title("牛乳を買う")
         .completed(true)
         .build();
