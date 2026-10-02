@@ -60,7 +60,7 @@ import { expect } from "vitest";
 import { casesByName } from "./case-table";
 
 // ディレクトリ構成ルール（.claude/rules/code/backend.md・frontend.md。規則の一覧は .claude/rules/code/architecture-check.md）の依存の向きを、仕様として機械的に検査するテスト。
-// 対象は「依存の向き（全体）」「画面側とサーバ側の境界」「backend の 4 層の依存してよい先」、apps/frontend_customer と apps/backend の
+// 対象は frontend.md・backend.md の「依存の向き」の表（全体・画面側とサーバ側・backend の 4 層の依存してよい先）、apps/frontend_customer と apps/backend の
 // 境界（Issue #68。backend → frontend の禁止、backend の中は相対パスだけ、frontend などから backend へは "@repo/backend/..." の
 // 書き方だけ、apps/backend/package.json の exports の過不足）、frontend と backend で共通の apps/shared（Issue #90。置き場所、
 // "@repo/shared/..." の書き方、画面側から参照しない、apps/shared/package.json の exports の過不足）と、環境変数の直参照の禁止
@@ -976,7 +976,7 @@ const RULES: Rule[] = [
   },
   {
     // 「`features/<feature>/` の `api/` 以外は backend を参照せず、`api/` が re-export した型を使う」
-    // WHY 画面側の shared/ も含める: 画面側で backend を参照してよいのは features/<f>/api/ だけ（「画面側とサーバ側の境界」）で、
+    // WHY 画面側の shared/ も含める: 画面側で backend を参照してよいのは features/<f>/api/ だけ（frontend.md の「依存の向き」）で、
     //   shared/ から参照すると境界が api/ の 1 か所に集まらなくなるため。
     id: "screen-to-backend",
     name: "apps/frontend_customer/features/<f>/ の api/ 以外と apps/frontend_customer/shared/ は apps/backend/ を参照しない",

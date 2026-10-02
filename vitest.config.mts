@@ -87,7 +87,7 @@ export default defineConfig({
       //   テストが 1 度も触らないファイルが計測から漏れる（Vitest 5.0.1 の型定義「By default only files covered by
       //   tests are included」）。テストを置くべきディレクトリを明示し、触られていないファイルも 0% として数える。
       //   含めないもの（ユーザー判断。Issue #45）:
-      //   - apps/frontend_customer/app/: ルーティングだけで、テストを置かない方針（.claude/rules/code/frontend.md の「app/（ルーティングだけ）」）。
+      //   - apps/frontend_customer/app/: ルーティングだけで、テストを置かない方針（.claude/rules/code/frontend.md の「ルーティング」）。
       //     仕様は screen と api ファイルのテストで固定し、app/ の結線は E2E（pnpm test:e2e）で確かめる。
       //   - 設定ファイル（リポジトリ直下の vitest.config.mts など、apps/frontend_customer/next.config.ts、
       //     apps/backend/shared/drizzle/drizzle.config.ts）: ツールに渡す値を並べるだけで、単体テストで検証する振る舞いを持たない。

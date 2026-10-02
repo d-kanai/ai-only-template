@@ -52,7 +52,7 @@ paths:
 | カテゴリ | WHAT | WHY | 強制 |
 | --- | --- | --- | --- |
 | 規則 | アプリのコード（`apps/frontend_customer`・`apps/backend`・`apps/shared` のテスト以外）で現在時刻が要るときは `Clock.now()` を呼ぶ。引数の無い `new Date()`・`Date.now()`・`new` の無い `Date()` を書いてよいのは `now.ts` だけ（規則 `now-single-source`。`rule-tests/architecture.test.ts`）。引数のある `new Date(x)`（解析）・`Date.parse`・`Date.UTC` は可 | 時刻を各所で直接読むと、時刻に依存する振る舞い（Entity の作成日時・一覧の並び順・ログの時刻）のテストが実行した瞬間で結果を変え、決定的にならない。出口が 1 つなら、テストは `vi.mock` でそのモジュールを差し替えるだけで時刻を決められる（`.claude/rules/quality/testing.md` の「テストダブル」） | `rule-tests/architecture.test.ts` の `now-single-source` |
-| 規則 | テスト・テストの補助（アプリの直下の `test-support/` の下。Issue #181）、`apps/e2e/`、`scripts/`・リポジトリ直下の設定 | `apps/e2e/` は別プロセスの本番ビルドを操作し now を差し替えられない。現在時刻は一意なタイトルを作るためだけ | 説明 |
+| 規則 | 対象外: テスト・テストの補助（アプリの直下の `test-support/` の下。Issue #181）、`apps/e2e/`、`scripts/`・リポジトリ直下の設定 | `apps/e2e/` は別プロセスの本番ビルドを操作し now を差し替えられない。現在時刻は一意なタイトルを作るためだけ | 説明 |
 | 規則 | 決定は ADR `docs/adr/architecture/20260930-now-single-source.md`、検査の書き方と限界は `.claude/rules/code/architecture-check.md` | - | 説明 |
 | 形 | 引数で時刻を受け取る形（`Todo.create(title, createdAt)`・Clock の注入）にしない | 「作ったときの時刻が入る」は Entity の生成ルールで、呼び出し側が時刻を渡せるとルールが呼び出し側に漏れる（ユーザー判断） | レビュー |
 | 形 | クラスの static メソッドにする（関数 `now()` にしない。Issue #262） | apps/shared も最上位に関数を置かない（下の「クラスと文言」）。インスタンスの注入にしないのは上の WHY と同じで、差し替えは `vi.mock` の 1 つのまま（自動モックは static メソッドも差し替える） | `rule-tests/architecture.test.ts` の `class-based` |

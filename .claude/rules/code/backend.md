@@ -22,11 +22,11 @@ paths:
 | feature | feature の直下は `expose/`（他のモジュールへ公開する入口）と `internal/`（4 層。feature の中だけで使う実装）だけにする（Issue #208。モジュラーモノリス）。`internal/` を挟まない `features/<feature>/<層>/`（Issue #208 より前の置き場所）と `internal/` の直下のファイルは `backend-placement` の違反 | - | `rule-tests/architecture.test.ts` の `backend-placement` |
 | feature | `expose/` は直下のファイルだけ（`expose/<name>.ts`。下にディレクトリを作らない。深くしたくなったら規則を変える） | - | `rule-tests/architecture.test.ts` の `backend-placement` |
 | feature | 境界の規則は「依存の向き」の表の「モジュールの境界」 | - | 説明 |
-| 層ごとに置くもの | feature の層（`features/<feature>/internal/<層>/`）ごとに、置くものと参照してよい先（許可の一覧。無いものは不可。`apps/backend/shared/` はどの層からもどの単位も可）を下の行で決める | 許可の一覧にする: 禁止の一覧だと、書き忘れた参照先が黙って通る | 説明 |
-| 層ごとに置くもの | 置くもの: api ファイル（1 API = 1 ファイル `<verb>-<noun>.api.ts`）。クラス `<Verb><Noun>Api`（コンストラクタで query / command を受け取り、`handle` が Route Handler）、ファイルの最下部で組み立てた本番用の HTTP メソッド名の定数（`export const GET = new ListTodosApi(new ListTodosQuery(new PostgresTodoRepository(AppDatabase.get().db))).handle`）、その API のリクエスト / レスポンスの型 | - | 説明 |
-| 層ごとに置くもの | 置くもの: ユースケース 1 つ = 1 ファイル。読むだけは `<verb>-<noun>.query.ts`、状態を変えるものは `<verb>-<noun>.command.ts` | - | 説明 |
-| 層ごとに置くもの | 置くもの: Entity / Value Object / Repository の interface | - | 説明 |
-| 層ごとに置くもの | 置くもの: Repository の Postgres の実装（テスト用の InMemory は `apps/backend/test-support/<feature>/`）、Drizzle のスキーマ `schema.ts`、プール（`shared/drizzle/database.ts`） | - | 説明 |
+| 層 | feature の層（`features/<feature>/internal/<層>/`）ごとに、置くものを下の行で、参照してよい先（許可の一覧。無いものは不可。`apps/backend/shared/` はどの層からもどの単位も可）を「依存の向き」の表で決める | 許可の一覧にする: 禁止の一覧だと、書き忘れた参照先が黙って通る | 説明 |
+| `presentation/` | 置くもの: api ファイル（1 API = 1 ファイル `<verb>-<noun>.api.ts`）。クラス `<Verb><Noun>Api`（コンストラクタで query / command を受け取り、`handle` が Route Handler）、ファイルの最下部で組み立てた本番用の HTTP メソッド名の定数（`export const GET = new ListTodosApi(new ListTodosQuery(new PostgresTodoRepository(AppDatabase.get().db))).handle`）、その API のリクエスト / レスポンスの型 | - | 説明 |
+| `application/` | 置くもの: ユースケース 1 つ = 1 ファイル。読むだけは `<verb>-<noun>.query.ts`、状態を変えるものは `<verb>-<noun>.command.ts` | - | 説明 |
+| `domain/` | 置くもの: Entity / Value Object / Repository の interface | - | 説明 |
+| `infra/` | 置くもの: Repository の Postgres の実装（テスト用の InMemory は `apps/backend/test-support/<feature>/`）、Drizzle のスキーマ `schema.ts`、プール（`shared/drizzle/database.ts`） | - | 説明 |
 | shared | `apps/backend/shared/` は層ではなく意味の単位に分ける（Issue #310。ユーザー判断「意味の単位での colocation にしたい。drizzle みたいに」） | shared の中身は feature をまたぐ道具で、層に分けると 1 つの関心（変更履歴・HTTP のエラー応答など）が `domain/`・`infra/`・`presentation/` に散る。単位にまとめると、関わるファイルが 1 か所に並ぶ。ADR `docs/adr/architecture/20261002-backend-shared-colocated-by-meaning.md` | `rule-tests/architecture.test.ts` の `backend-placement` |
 | shared | feature の層から shared のどの単位を使うかは縛らない（ユーザー判断） | - | 説明 |
 | shared | `apps/backend/shared/`: feature をまたぐもの。意味の単位ごとにディレクトリを分ける（Issue #310） | - | `rule-tests/architecture.test.ts` の `backend-placement` |
@@ -54,13 +54,13 @@ paths:
 | カテゴリ | WHAT | WHY | 強制 |
 | --- | --- | --- | --- |
 | 層 | 向きは `apps/frontend_customer/app/api → presentation → application → domain`。infra は domain の interface（Repository）を実装する（依存性の逆転）。他 feature・`apps/frontend_customer/`・層や単位に属さない場所は参照しない | 許可の一覧にする: 禁止の一覧だと、書き忘れた参照先が黙って通る | `rule-tests/architecture.test.ts` の `domain`・`application`・`presentation`・`infra` |
-| 層 | 参照してよい先: 自 feature の `application`・`domain`（feature の domain は `import type` と、UPPER_SNAKE_CASE の名前の定数だけの値の import（`import { TODO_TITLE_MAX_LENGTH } from "../domain/todo"`。Issue #144））、組み立てに使う自 feature の `infra/<名前>-repository.postgres`（InMemory の実装・`schema` は不可）、`apps/backend/shared/` のどの単位も（Issue #310）、`@repo/shared/logger`・`@repo/shared/now`。パッケージは `next` / `react` / `react-dom` 以外 | - | `rule-tests/architecture.test.ts` の `presentation` |
-| 層 | 参照してよい先: 自 feature の `domain`、`apps/backend/shared/` のどの単位も（Issue #310）、`@repo/shared/now`。パッケージは `next` / `react` / `react-dom` と DB（`drizzle-orm` とサブパス、`pg`。型だけでも不可）以外 | - | `rule-tests/architecture.test.ts` の `application`・`core-to-persistence` |
-| 層 | 参照してよい先: 自 feature の `domain`、`apps/backend/shared/` のどの単位も（Issue #310）、`@repo/shared/now` だけ。パッケージは application と同じ制限（`node:crypto` などは可） | - | `rule-tests/architecture.test.ts` の `domain`・`core-to-persistence` |
-| 層 | 参照してよい先: 自 feature の `domain`、`apps/backend/shared/` のどの単位も（Issue #310）、`@repo/shared/env`・`@repo/shared/logger`・`@repo/shared/now`。パッケージは `next` / `react` / `react-dom` 以外 | - | `rule-tests/architecture.test.ts` の `infra` |
-| 層 | domain は Next・React・DB に依存させない | ビジネスルールを永続化やフレームワークから切り離し、純粋な単体テストで検証する | `rule-tests/architecture.test.ts` の `domain`・`core-to-persistence` |
-| 層 | presentation の本番コードが参照してよい自 feature の infra は、組み立てに使う `infra/<名前>-repository.postgres` だけ（規則 `presentation`）。InMemory の実装（`*.in-memory`）と `schema` は参照しない | 本番の handler が InMemory で動くと、データが保存されないまま気づけない（Issue #59） | `rule-tests/architecture.test.ts` の `presentation` |
-| 層 | 組み立てに使う `apps/backend/shared/drizzle/database`・`transaction.postgres` は shared の単位なので縛らない（Issue #310） | - | 説明 |
+| `presentation/` | 参照してよい先: 自 feature の `application`・`domain`（feature の domain は `import type` と、UPPER_SNAKE_CASE の名前の定数だけの値の import（`import { TODO_TITLE_MAX_LENGTH } from "../domain/todo"`。Issue #144））、組み立てに使う自 feature の `infra/<名前>-repository.postgres`（InMemory の実装・`schema` は不可）、`apps/backend/shared/` のどの単位も（Issue #310）、`@repo/shared/logger`・`@repo/shared/now`。パッケージは `next` / `react` / `react-dom` 以外 | - | `rule-tests/architecture.test.ts` の `presentation` |
+| `presentation/` | presentation の本番コードが参照してよい自 feature の infra は、組み立てに使う `infra/<名前>-repository.postgres` だけ（規則 `presentation`）。InMemory の実装（`*.in-memory`）と `schema` は参照しない | 本番の handler が InMemory で動くと、データが保存されないまま気づけない（Issue #59） | `rule-tests/architecture.test.ts` の `presentation` |
+| `presentation/` | 組み立てに使う `apps/backend/shared/drizzle/database`・`transaction.postgres` は shared の単位なので縛らない（Issue #310） | - | 説明 |
+| `application/` | 参照してよい先: 自 feature の `domain`、`apps/backend/shared/` のどの単位も（Issue #310）、`@repo/shared/now`。パッケージは `next` / `react` / `react-dom` と DB（`drizzle-orm` とサブパス、`pg`。型だけでも不可）以外 | - | `rule-tests/architecture.test.ts` の `application`・`core-to-persistence` |
+| `domain/` | 参照してよい先: 自 feature の `domain`、`apps/backend/shared/` のどの単位も（Issue #310）、`@repo/shared/now` だけ。パッケージは application と同じ制限（`node:crypto` などは可） | - | `rule-tests/architecture.test.ts` の `domain`・`core-to-persistence` |
+| `domain/` | domain は Next・React・DB に依存させない | ビジネスルールを永続化やフレームワークから切り離し、純粋な単体テストで検証する | `rule-tests/architecture.test.ts` の `domain`・`core-to-persistence` |
+| `infra/` | 参照してよい先: 自 feature の `domain`、`apps/backend/shared/` のどの単位も（Issue #310）、`@repo/shared/env`・`@repo/shared/logger`・`@repo/shared/now`。パッケージは `next` / `react` / `react-dom` 以外 | - | `rule-tests/architecture.test.ts` の `infra` |
 | shared | `apps/backend/shared/` は feature の層の向きの外にあり、どの層からもどの単位も参照してよい（Issue #310。ユーザー判断「feature => shared は全部呼べるでいいよ。縛りなし」） | shared を縛らない（Issue #310）: shared は feature をまたぐ道具（エラー・トランザクション・HTTP・Drizzle・変更履歴）で、層の向きは feature の中で守れば足りる。以前は shared も 4 層に分け、feature の層ごとに shared のどの層を使えるか（transaction の port は型だけ、など。Issue #220 / #224 / #230）を縛っていた | 説明 |
 | shared | 限界: feature の domain・application が shared の `drizzle/` などを経由して DB に触れる参照は止まらない（`drizzle-orm`・`pg` の直接の import だけを `core-to-persistence` が止める） | 機械は直接の import だけを見る（見逃す方向） | レビュー |
 | shared | `apps/backend/shared/` が参照してよい自前コードは shared の中（単位をまたいでどの向きも可）と `apps/shared`（`@repo/shared`）だけ。`next` / `react` / `react-dom` も不可 | - | `rule-tests/architecture.test.ts` の `backend-shared` |
@@ -152,6 +152,7 @@ paths:
 | 方針 | 3. 数値は domain の定数を presentation が参照する（`TODO_TITLE_MAX_LENGTH`。2 か所に書かない） | - | レビュー |
 | 方針 | presentation が feature の domain から値で import してよいのは UPPER_SNAKE_CASE の定数だけ（規則 `presentation`） | - | `rule-tests/architecture.test.ts` の `presentation` |
 | 方針 | 4. presentation は「形」（JSON・オブジェクト・未知の項目・型）を必ず検査し、そのうえで必須・長さを domain と同じキー・同じ数え方・同じ定数で重ねてよい。誤りは項目ごとの `errors[]` にまとめて返す | WHY 重ねる: domain の DomainError はキー 1 つで、どの項目の誤りかを持たない（domain はリクエストの項目名を知らない）。presentation で重ねると、形の誤りと値の誤りを項目ごと（`pointer`）に 1 回の応答で返せ、画面が項目の横に出せる | レビュー |
+| 方針 | スキーマは関数の中で作る（最上位の定数にしない） | static な変異になり mutation testing で数えない（`stryker.config.mjs` の `ignoreStatic`） | レビュー |
 | リクエスト | 各 api ファイルにリクエストの zod スキーマを置き（`RequestBody.schema({ 項目: z.string() })`。型の検査に `error` は書かない。必須・長さは `refine` に `KeyedIssue.of` / `KeyedIssue.refine`（`apps/backend/shared/error/keyed-issue.ts`）で domain と同じキーを付ける）、`RequestBody.parse(request, schema)` で読む。型は `z.infer` でスキーマから導出する | 各 api ファイルの型の検査の `error` にキーを書かない: 同じ対応（文字列の項目 → notString）を項目ごとに重ねて書くことになる | レビュー |
 | リクエスト | 違反は `InvalidRequestError`（`errors` 付き）→ 400（`/problems/validation-error`、Problem の `errors` に `{ pointer, key, params, detail }` の一覧、`key`・`params` は最初の 1 件） | - | 説明 |
 | リクエスト | zod の issue からキーと `pointer` を決める対応は `json-body.ts` の `toProblemError` 1 か所だけに書く（message が ErrorKey（`KeyedIssue.of` / `KeyedIssue.refine` で付けた）→ そのキーと refine の params、未知の項目 → `request.body.unknownKeys`、本文がオブジェクトでない → `request.body.notObject`、文字列・真偽値の項目の型違い → `request.field.notString` / `notBoolean`） | - | レビュー |
@@ -168,7 +169,6 @@ paths:
 | domain | `no-zod-length-in-domain` の限界: `.length(`・`.nonempty(`・`z.minLength(` / `z.maxLength(`（`.check(...)` の中も）は見ない（どれも `String#length` で数える） | 限界（見逃す方向） | レビュー |
 | domain | `no-literal-error-in-domain-schema` の限界: `message:`・`z.string("...")`・`.refine(fn, "...")`・変数経由の文字列は見ない。型注釈の `error: "a" \| "b"` も違反に数える（誤検知） | 限界 | レビュー |
 | domain | params は zod の refine の `params` で運ぶ。`DomainValidation.validated` が最初の issue の message（= キー）と params を DomainError に戻す | zod 4.6.5 は refine の `params` を失敗した custom の issue にそのまま載せる（実測 2026-09-29） | 説明 |
-| domain | スキーマは関数の中で作る（最上位の定数にしない） | static な変異になり mutation testing で数えない（`stryker.config.mjs` の `ignoreStatic`） | レビュー |
 
 ## Entity
 
@@ -211,6 +211,7 @@ paths:
 | 常に Postgres | api ファイルの本番の handler は常に `new PostgresTodoRepository(AppDatabase.get().db)`（書き込みの command には `new PostgresTransactionRunner(AppDatabase.get().db)` も）で組み立てる。環境変数で InMemory に切り替える分岐は持たない（Issue #59） | 以前は `DATABASE_URL` が無いと InMemory に落ち、書き忘れでもデータが保存されないまま動いた | `rule-tests/architecture.test.ts` の `presentation` |
 | 常に Postgres | 各 api ファイルのテストが、本番の handler が Postgres の Repository（と runner）を呼ぶことを確かめる（prototype の spy。DB には接続しない） | - | 説明 |
 | 常に Postgres | そのため `pnpm dev` の前にも `pnpm db:up` と `pnpm db:migrate` が要る。api ファイルを読み込むテストは `.env` が要る（プールは作るが、接続は最初のクエリまで張らない） | - | 説明 |
+| 接続とプール | 接続とプール（`database.ts`）: `pg.Pool` を `env` の値で作る（変数の一覧は `.claude/rules/tooling/env.md`）。アイドル中の接続のエラーは `pool.on("error")` で `logger.emit`（`db_pool_error`。ERROR）に出すだけ。プールは `globalThis` に 1 つ（`next dev` の HMR で増やさない）。終了時は `AppDatabase.close()` | 値は開発・CI・E2E 用の暫定で、本番用は Issue #58 | 説明 |
 | 書き込み | `PostgresTodoRepository` はコンストラクタで `Database`（Drizzle の db。query の読み取りに使う）だけを受け取る。トランザクションは張らない（command が張って `tx` を渡す。「ユースケースとトランザクション」の表） | - | `rule-tests/persistence.test.ts` の `no-direct-transaction` |
 | 書き込み | 書き込みは `PostgresWriter.of(tx)` で取り出した Writer に渡すだけで、変更履歴とログは Writer が書く（「変更履歴と Writer」の表） | - | `rule-tests/persistence.test.ts` の `writes-through-writer` |
 | insert / update | `insert` / `update`（Issue #165・#215。`save` を分けた）: Entity は読み込んだとき（`reconstruct`）の値を `origin` に持ち（新規の `create` は `undefined`。遷移メソッドは引き継ぐ）、`update` がそれと今の値を `ChangedProps.of`（`shared/drizzle/changed-props.ts`）で比べる | WHY 差分を遷移メソッドに記録させず origin との比較で取る: Entity は不変で遷移メソッドは何も記録しない。記録させると遷移メソッドを足すたびに書く必要があり、書き漏れた変更は保存されない。「読み込んだときの値」は Entity の事実として持ち、どの列・どの SQL にするか（永続化の都合）は infra に置く | `rule-tests/persistence.test.ts` の `update-uses-changed-props`・`entity-with-reconstruct-has-origin` |
@@ -280,7 +281,6 @@ paths:
 | 列の分類 | sensitive にするのは、利用者の入力に由来する値・人を指しうる値（`title` など）。public は id・状態・日時のようにコードが決める値 | - | レビュー |
 | 列の分類 | Writer が `db_write` のログの `changes` の before / after を logger に渡す前に、`ColumnClassifier.maskRow` が DB の列名をプロパティ名に対応づけ、public 以外の列の値を `***` にする（分類の無い表は全列 `***`、表に無い列も `***` = fail closed。`null` は `null` のまま）。`change_logs` の表には生の値を書く | WHY Writer で行う（logger でない）: `apps/shared` の logger は backend の表を参照できない（規則 `shared-self-contained`） | `rule-tests/architecture.test.ts` の `shared-self-contained` |
 | 列の分類 | 規則 `column-classification`: `pgTable(` ごとに、同じファイルに `<名前>Columns = ColumnClassifier.classify(<名前>,` が無い、または `ColumnClassifier` を `column-classification` から値で名前の import をしていない（`import type`・別名・ほかのモジュールは不可。呼ぶのは static メソッド `classify` だけで `ColumnClassifier.maskRow(` などは不可）と違反。表を変数で受けない `pgTable(` も違反。例外（`// WHY`）は認めない | - | `rule-tests/schema.test.ts` の `column-classification` |
-| 接続とプール | 接続とプール（`database.ts`）: `pg.Pool` を `env` の値で作る（変数の一覧は `.claude/rules/tooling/env.md`）。アイドル中の接続のエラーは `pool.on("error")` で `logger.emit`（`db_pool_error`。ERROR）に出すだけ。プールは `globalThis` に 1 つ（`next dev` の HMR で増やさない）。終了時は `AppDatabase.close()` | 値は開発・CI・E2E 用の暫定で、本番用は Issue #58 | 説明 |
 
 ## 変更履歴と Writer
 
@@ -321,6 +321,7 @@ paths:
 | マスク | (2) 印: `LogFieldMarks.sensitive()`（値を常に `***`。クエリの値・`referer`・`client.address`）と、DB の列の分類表（「DB スキーマ」の表の「列の分類」。`db_write` の `changes` の before / after。これだけは Writer が logger に渡す前に行う） | - | `apps/shared/logger.test.ts` |
 | マスク | (3) 自由文の正規表現: `LogFieldMarks.freeText()` の項目（`message`・`url.path`・`error.message` など）だけに、メール・JWT・Bearer・Luhn に合う 13〜19 桁を `***` にする線形の正規表現をかける | WHY 正規表現を最後の網に限る: 見逃し（自由文の氏名・住所）・誤検知（電話番号と日付・id）・ReDoS・費用があるので、値を出すかの主な判断はスキーマと印で行う（OWASP Logging Cheat Sheet・OTel の redaction processor と同じ allowlist の考え方。ADR） | 説明 |
 | マスク | 保証: `logger.test.ts` が全種類の sensitive の項目と一覧に無いキーに番兵の値を入れ、行を丸ごと比べて出力に含まれないことを確かめる | - | `apps/shared/logger.test.ts` |
+| マスク | 印の無い文字列の項目（`http.request.id`・`server.address`・`accept`・`content-type`・`user_agent.original`・`url.path`・`url.query` のキー）は `LogFieldMarks.bounded()` で 256 文字に切る（クライアントが自由に決められる値） | - | 説明 |
 | 使ってよい場所 | 使ってよい場所: backend の `presentation`（`problem.ts` の想定外の例外。`server_error`）・`infra`（`database.ts` の `db_pool_error`・`writer.ts` の `db_write`・notification の `notification-sender.log.ts` の `notification`）・モジュールの `expose/`（notification の `notifier.ts` の送信の失敗。`notification` の `phase: failed`。Issue #208）、frontend 直下の `proxy.ts`（`page_request` / `api_request`）・`instrumentation-node.ts`（`app_start_failed`）（規則 `presentation`・`infra`・`expose-imports`・`frontend-to-shared-specifier`） | - | `rule-tests/architecture.test.ts` の `presentation`・`infra`・`expose-imports`・`frontend-to-shared-specifier` |
 | 使ってよい場所 | domain・application は使わない（`SHARED_MODULES_BY_LAYER`）。画面側（`app/`・`features/`・`shared/`）も使わない（規則 `screen-to-shared`） | - | `rule-tests/architecture.test.ts` の `SHARED_MODULES_BY_LAYER`・`screen-to-shared` |
 | 使ってよい場所 | 通知の失敗を `server_error` にしない | `server_error` は HTTP の境界の 500（`ProblemResponse.from`）だけの種類。通知の失敗は応答を 500 にしない（完了は成功している） | レビュー |
@@ -330,7 +331,6 @@ paths:
 | db_write | Repository のテスト（`todo-repository.postgres.test.ts`）は `beforeEach` で `console.log` / `console.warn` を黙らせる（書き込みのたびに行が出る） | - | 説明 |
 | DB のエラー | DB のエラー（DrizzleQueryError）: `error` は元の pg のエラー（cause）の `{ type, message }`。message は pg の message の最初の `"` から最後の `"` までを `"***"` にしてから渡し（Writer の `maskQuoted`）、さらに logger の `freeText` を通る。SQLSTATE を `db.response.status_code`、制約の名前を `constraint`、SQL に渡した値を `params` に出す（`params` は logger のスキーマ `z.array(sensitive(z.unknown()))` で全要素が `***`。個数は残る）。cause が Error でなければ `error` は `{ type }`（DrizzleQueryError の name）と `params` だけ | WHY pg の message の引用符の中を消す: データ例外（SQLSTATE 22 系。22P02 の `invalid input syntax for type uuid: "<入力>"` など）は入力値を引用符で囲んで含み、自由文の正規表現では消せない。WHY 組ごとでなく最初から最後の `"` までをまとめて置き換える: pg は入力値の中の `"` を逃がさずに書く（入力 `ab"cd x` → `"ab"cd x"`。2026-10-01 の実測）ので、組ごとだと一部が残る。限界: 引用符の中の識別子（not-null 違反の列名など）も消える（制約名は `constraint`、表名は `db.collection.name` に別に出る） | `apps/backend/shared/drizzle/writer.test.ts` |
 | DB のエラー | Writer を通らずに `server_error`（`ProblemResponse.from`）へ届く DrizzleQueryError（Writer は失敗の行を出した後に同じ例外を投げ直す）は、logger の `LogFieldMarks.error()`（`toErrorShape`）が「`query` か `params` のプロパティを持つ Error の message は `***`」にする（`apps/shared/log-event.ts`。クラスでなくプロパティで見るのは apps/shared が drizzle-orm を参照できないため。reviewer の実測 2026-10-01: 直す前は `Failed query: … params: <生の値>` が出ていた）。`problem.test.ts` が本物の DrizzleQueryError で番兵が出ないことを固定する | WHY DrizzleQueryError の message を出さない: SQL とパラメータの値を含む（`Failed query: <SQL>\nparams: <値>`） | `apps/backend/shared/http/problem.test.ts` |
-| DB のエラー | 印の無い文字列の項目（`http.request.id`・`server.address`・`accept`・`content-type`・`user_agent.original`・`url.path`・`url.query` のキー）は `LogFieldMarks.bounded()` で 256 文字に切る（クライアントが自由に決められる値） | - | 説明 |
 | テスト | テストは `vi.spyOn(console, "error")` などで出力を抑え、渡された 1 行を `JSON.parse` して確かめる（`logger.test.ts`・`problem.test.ts`） | - | レビュー |
 
 ## クラスと命名

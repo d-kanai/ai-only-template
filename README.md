@@ -113,7 +113,7 @@ pnpm db:generate # apps/backend/features/*/internal/infra/schema.ts を変えた
 ```
 
 - 接続先は `.env` の `DATABASE_URL`（`.env.example` の値は `postgresql://app:app@localhost:5432/app`。開発用の固定値で秘密ではない）。アプリは常に Postgres を使うので、`pnpm dev` の前にも `pnpm db:up` と `pnpm db:migrate` が要る。
-- 接続・プールの環境変数（`DATABASE_POOL_MAX` など）は `.claude/rules/code/backend.md` の「DB スキーマ」の表の「接続とプール」、スキーマの変え方はスキル `db-migration` を参照。
+- 接続・プールの環境変数（`DATABASE_POOL_MAX` など）は `.claude/rules/code/backend.md` の「Repository」の表の「接続とプール」、スキーマの変え方はスキル `db-migration` を参照。
 - Docker Desktop は、従業員 250 人以上または年間売上 1,000 万ドル以上の企業での業務利用などに有料サブスクリプションが必要になる（[Docker Desktop license agreement](https://docs.docker.com/subscription-billing/desktop-license/)）。該当する場合は [Podman](https://podman.io/) の `podman compose up -d --wait` でも同じ `compose.yaml` を使える想定（Podman での実動作は未確認）。
 
 Claude Code のクラウドセッション（asdf が無い環境）では、`scripts/cloud-session-start.sh` で `.tool-versions` どおりの Node.js / pnpm を用意する（環境設定の setup script に `bash scripts/cloud-session-start.sh --install-only` を書くと初回だけで済む）。`.tool-versions` の版を上げたら setup script も更新してキャッシュを作り直す。あわせて SessionStart フックが毎セッション `dockerd` を起動し、`docker compose pull`（最大 3 回再試行）と `docker compose up -d --wait --wait-timeout 120` で Postgres を立ち上げ、`.env` が無ければ `.env.example` からコピーして、`pnpm db:migrate` でマイグレーションを当てる。詳細は `.claude/rules/tooling/cloud-session.md`（規則）・スキル `cloud-session`（確認と復旧）・ADR `docs/adr/workflow/20260928-cloud-session-setup-script-and-hook.md`（決定）を参照。
