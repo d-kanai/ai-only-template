@@ -1,9 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   DEFAULT_LOCALE,
-  isLocale,
-  localeFromHeader,
-  negotiateLocale,
+  Locales,
   SUPPORTED_LOCALES,
 } from "@/shared/i18n/locale";
 
@@ -27,22 +25,22 @@ describe("対応するロケール", () => {
     ["en-US", false],
     ["", false],
     [null, false],
-  ])("isLocale(%j) は %s", (value, expected) => {
+  ])("Locales.is(%j) は %s", (value, expected) => {
     // given: 前提なし（value は test.each の引数）
     // when
-    const result = isLocale(value);
+    const result = Locales.is(value);
 
     // then
     expect(result).toBe(expected);
   });
 });
 
-describe("negotiateLocale（Cookie NEXT_LOCALE → Accept-Language の順で決める）", () => {
+describe("Locales.negotiate（Cookie NEXT_LOCALE → Accept-Language の順で決める）", () => {
   test("Cookie が対応するロケールなら、Accept-Language より優先する", () => {
     // given: 前提なし
     // when
-    const cookieEn = negotiateLocale("ja,en;q=0.9", "en");
-    const cookieJa = negotiateLocale("en", "ja");
+    const cookieEn = Locales.negotiate("ja,en;q=0.9", "en");
+    const cookieJa = Locales.negotiate("en", "ja");
 
     // then
     expect(cookieEn).toBe("en");
@@ -53,8 +51,8 @@ describe("negotiateLocale（Cookie NEXT_LOCALE → Accept-Language の順で決�
   test("Cookie が対応していない値なら、Accept-Language で決める", () => {
     // given: 前提なし
     // when
-    const unsupported = negotiateLocale("en", "fr");
-    const empty = negotiateLocale("en", "");
+    const unsupported = Locales.negotiate("en", "fr");
+    const empty = Locales.negotiate("en", "");
 
     // then
     expect(unsupported).toBe("en");
@@ -64,7 +62,7 @@ describe("negotiateLocale（Cookie NEXT_LOCALE → Accept-Language の順で決�
   test("Cookie が無ければ、Accept-Language で決める", () => {
     // given: 前提なし
     // when
-    const locale = negotiateLocale("en", null);
+    const locale = Locales.negotiate("en", null);
 
     // then
     expect(locale).toBe("en");
@@ -73,8 +71,8 @@ describe("negotiateLocale（Cookie NEXT_LOCALE → Accept-Language の順で決�
   test("地域の付いたタグ（en-US・ja-JP）は言語の部分で照合する", () => {
     // given: 前提なし
     // when
-    const en = negotiateLocale("en-US", null);
-    const ja = negotiateLocale("ja-JP", null);
+    const en = Locales.negotiate("en-US", null);
+    const ja = Locales.negotiate("ja-JP", null);
 
     // then
     expect(en).toBe("en");
@@ -84,7 +82,7 @@ describe("negotiateLocale（Cookie NEXT_LOCALE → Accept-Language の順で決�
   test("大文字・前後の空白を含むタグも照合する", () => {
     // given: 前提なし
     // when
-    const locale = negotiateLocale(" EN-us ", null);
+    const locale = Locales.negotiate(" EN-us ", null);
 
     // then
     expect(locale).toBe("en");
@@ -93,8 +91,8 @@ describe("negotiateLocale（Cookie NEXT_LOCALE → Accept-Language の順で決�
   test("q 値の高い順に、最初に対応するロケールを選ぶ（書いた順ではない）", () => {
     // given: 前提なし
     // when
-    const en = negotiateLocale("ja;q=0.5, en;q=0.8", null);
-    const ja = negotiateLocale("en;q=0.1,ja", null);
+    const en = Locales.negotiate("ja;q=0.5, en;q=0.8", null);
+    const ja = Locales.negotiate("en;q=0.1,ja", null);
 
     // then
     expect(en).toBe("en");
@@ -104,8 +102,8 @@ describe("negotiateLocale（Cookie NEXT_LOCALE → Accept-Language の順で決�
   test("q 値が同じなら、書いた順で先のものを選ぶ", () => {
     // given: 前提なし
     // when
-    const en = negotiateLocale("en;q=0.5,ja;q=0.5", null);
-    const ja = negotiateLocale("ja,en", null);
+    const en = Locales.negotiate("en;q=0.5,ja;q=0.5", null);
+    const ja = Locales.negotiate("ja,en", null);
 
     // then
     expect(en).toBe("en");
@@ -116,7 +114,7 @@ describe("negotiateLocale（Cookie NEXT_LOCALE → Accept-Language の順で決�
   test("q 値の前後の空白を許す", () => {
     // given: 前提なし
     // when
-    const locale = negotiateLocale("en ; q=0.1, ja", null);
+    const locale = Locales.negotiate("en ; q=0.1, ja", null);
 
     // then
     expect(locale).toBe("ja");
@@ -125,7 +123,7 @@ describe("negotiateLocale（Cookie NEXT_LOCALE → Accept-Language の順で決�
   test("対応していない言語は飛ばし、次に対応するロケールを選ぶ", () => {
     // given: 前提なし
     // when
-    const locale = negotiateLocale("fr-FR,fr;q=0.9,en;q=0.8,ja;q=0.7", null);
+    const locale = Locales.negotiate("fr-FR,fr;q=0.9,en;q=0.8,ja;q=0.7", null);
 
     // then
     expect(locale).toBe("en");
@@ -135,8 +133,8 @@ describe("negotiateLocale（Cookie NEXT_LOCALE → Accept-Language の順で決�
   test("q=0 の言語は選ばない", () => {
     // given: 前提なし
     // when
-    const fallbackToJa = negotiateLocale("en;q=0,ja;q=0.1", null);
-    const onlyRejected = negotiateLocale("en;q=0", null);
+    const fallbackToJa = Locales.negotiate("en;q=0,ja;q=0.1", null);
+    const onlyRejected = Locales.negotiate("en;q=0", null);
 
     // then
     expect(fallbackToJa).toBe("ja");
@@ -148,7 +146,7 @@ describe("negotiateLocale（Cookie NEXT_LOCALE → Accept-Language の順で決�
   test("q 値の q は大文字でもよい", () => {
     // given: 前提なし
     // when
-    const locale = negotiateLocale("en;Q=0.1, ja", null);
+    const locale = Locales.negotiate("en;Q=0.1, ja", null);
 
     // then
     expect(locale).toBe("ja");
@@ -165,7 +163,7 @@ describe("negotiateLocale（Cookie NEXT_LOCALE → Accept-Language の順で決�
   ])("q 値が 0〜1 の範囲外（%s）なら、その言語は選ばない", (_label, q) => {
     // given: 前提なし（q は test.each の引数）
     // when
-    const locale = negotiateLocale(`en;q=${q}`, null);
+    const locale = Locales.negotiate(`en;q=${q}`, null);
 
     // then
     expect(locale).toBe(DEFAULT_LOCALE);
@@ -183,7 +181,7 @@ describe("negotiateLocale（Cookie NEXT_LOCALE → Accept-Language の順で決�
     (_label, q) => {
       // given: 前提なし（q は test.each の引数）
       // when
-      const locale = negotiateLocale(`en;q=${q}`, null);
+      const locale = Locales.negotiate(`en;q=${q}`, null);
 
       // then
       expect(locale).toBe(DEFAULT_LOCALE);
@@ -198,7 +196,7 @@ describe("negotiateLocale（Cookie NEXT_LOCALE → Accept-Language の順で決�
   ])("q 値 %s は有効な qvalue として扱う", (_label, q) => {
     // given: 前提なし（q は test.each の引数）
     // when
-    const locale = negotiateLocale(`ja;q=0, en;q=${q}`, null);
+    const locale = Locales.negotiate(`ja;q=0, en;q=${q}`, null);
 
     // then
     expect(locale).toBe("en");
@@ -207,7 +205,7 @@ describe("negotiateLocale（Cookie NEXT_LOCALE → Accept-Language の順で決�
   test("q 以外のパラメータは無視する", () => {
     // given: 前提なし
     // when
-    const locale = negotiateLocale("en;level=1", null);
+    const locale = Locales.negotiate("en;level=1", null);
 
     // then
     expect(locale).toBe("en");
@@ -222,19 +220,19 @@ describe("negotiateLocale（Cookie NEXT_LOCALE → Accept-Language の順で決�
   ])("%s ときは既定の ja", (_label, acceptLanguage) => {
     // given: 前提なし（acceptLanguage は test.each の引数）
     // when
-    const locale = negotiateLocale(acceptLanguage, null);
+    const locale = Locales.negotiate(acceptLanguage, null);
 
     // then
     expect(locale).toBe(DEFAULT_LOCALE);
   });
 });
 
-describe("localeFromHeader（Proxy が載せた x-locale を layout で読む）", () => {
+describe("Locales.fromHeader（Proxy が載せた x-locale を layout で読む）", () => {
   test("対応するロケールならそのまま返す", () => {
     // given: 前提なし
     // when
-    const en = localeFromHeader("en");
-    const ja = localeFromHeader("ja");
+    const en = Locales.fromHeader("en");
+    const ja = Locales.fromHeader("ja");
 
     // then
     expect(en).toBe("en");
@@ -245,8 +243,8 @@ describe("localeFromHeader（Proxy が載せた x-locale を layout で読む）
   test("無い・対応していない値なら既定の ja", () => {
     // given: 前提なし
     // when
-    const missing = localeFromHeader(null);
-    const unsupported = localeFromHeader("fr");
+    const missing = Locales.fromHeader(null);
+    const unsupported = Locales.fromHeader("fr");
 
     // then
     expect(missing).toBe(DEFAULT_LOCALE);

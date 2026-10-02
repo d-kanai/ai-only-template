@@ -231,7 +231,7 @@ export function LocaleProvider({
   return <LocaleContext value={locale}>{children}</LocaleContext>;
 }
 
-// 画面のロケール（LocaleProvider が配る値）。日付の表示（format.ts）や、実行時のキーの翻訳（toErrorMessage）に渡す。
+// 画面のロケール（LocaleProvider が配る値）。日付の表示（format.ts）や、実行時のキーの翻訳（ApiErrorMessage.toMessage）に渡す。
 export function useLocale(): Locale {
   return use(LocaleContext);
 }

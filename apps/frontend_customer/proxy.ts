@@ -2,12 +2,8 @@ import { env } from "@repo/shared/env";
 import { logger } from "@repo/shared/logger";
 import { Clock } from "@repo/shared/now";
 import { type NextRequest, NextResponse } from "next/server";
-import {
-  LOCALE_COOKIE,
-  LOCALE_HEADER,
-  negotiateLocale,
-} from "@/shared/i18n/locale";
-import { buildRequestLog } from "@/shared/request-log/request-log";
+import { LOCALE_COOKIE, LOCALE_HEADER, Locales } from "@/shared/i18n/locale";
+import { RequestLogBuilder } from "@/shared/request-log/request-log";
 
 // Next.js の規約ファイル（Proxy。旧 middleware）。ルート（app/ と同じ階層）に置き、matcher に一致するリクエストごとに、
 // ルーティングの前に Node.js runtime で 1 回呼ばれる（Next.js 16.3.6 同梱
@@ -16,13 +12,13 @@ import { buildRequestLog } from "@/shared/request-log/request-log";
 // あわせて、画面アクセスのロケールを決めてリクエストヘッダ x-locale に載せ、app/layout.tsx に渡す（Issue #116。withLocale）。
 // 出力はサーバ側のログの唯一の出口 logger（apps/shared/logger.ts。Issue #85。Issue #90 で apps/shared に移した）を通す。
 // WHY 薄く保つ: 1 行の中身の決め方は shared/request-log/request-log.ts（純粋関数。テストで固定）に、ロケールの決め方は
-//   shared/i18n/locale.ts の negotiateLocale（純粋関数。テストで固定）に置き、ここは NextRequest の値を渡して出力し、
+//   shared/i18n/locale.ts の Locales.negotiate（純粋関数。テストで固定）に置き、ここは NextRequest の値を渡して出力し、
 //   応答に x-request-id を付け、リクエストに x-locale を足すだけにする。このファイルは next start / next dev の中でだけ動くので
-//   カバレッジの対象外にし（vitest.config.mts）、結線は E2E（apps/e2e/request-log.spec.ts）で確かめる。
+//   カバレッジの対象外にし（vitest.config.mts）、結線は E2E（apps/e2e/request-log.feature）で確かめる。
 // 限界（.claude/rules/frontend.md）: 応答の前に動くので status と所要時間は取れない。
 // WHY 第 2 引数（NextFetchEvent）を受け取らない: event.waitUntil を使わないため（下の logger.emit の WHY）。
 export function proxy(request: NextRequest): NextResponse {
-  const log = buildRequestLog({
+  const log = RequestLogBuilder.build({
     method: request.method,
     url: request.url,
     headers: request.headers,
@@ -61,12 +57,12 @@ export function proxy(request: NextRequest): NextResponse {
 // WHY 常に set する（クライアントが送った x-locale を残さない）: layout はこのヘッダを信じるので、Proxy が決めた値で上書きする。
 // 限界: matcher で除いたリクエスト（next/link のプリフェッチ）では Proxy が動かず、x-locale が付かない（layout は既定の ja になる）。
 //   root layout はクライアント遷移では描き直されず、最初の document の読み込み（Proxy を通る）で決めたロケールが画面に残るので、
-//   表示には影響しない（英語で開いてリンクで詳細に遷移しても英語のままであることを E2E の apps/e2e/i18n.spec.ts で確かめている）。
+//   表示には影響しない（英語で開いてリンクで詳細に遷移しても英語のままであることを E2E の apps/e2e/i18n.feature で確かめている）。
 function withLocale(request: NextRequest): Headers {
   const headers = new Headers(request.headers);
   headers.set(
     LOCALE_HEADER,
-    negotiateLocale(
+    Locales.negotiate(
       request.headers.get("accept-language"),
       request.cookies.get(LOCALE_COOKIE)?.value ?? null,
     ),

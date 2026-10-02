@@ -2,13 +2,14 @@
   "name": "@repo/e2e",
   "private": true,
   "scripts": {
-    "test": "playwright test",
+    "test": "bddgen && playwright test",
     "install-browser": "playwright install --with-deps chromium"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
     "@repo/shared": "workspace:*",
     "@types/pg": "8.23.1",
-    "pg": "8.23.0"
+    "pg": "8.23.0",
+    "playwright-bdd": "9.2.1"
   }
 }

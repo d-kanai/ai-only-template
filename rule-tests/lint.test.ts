@@ -338,10 +338,13 @@ describe("biome check（pnpm lint と同じ引数）", () => {
   });
 });
 
-// complexity/noStaticOnlyClass の override（Issue #262）: apps/backend/**・apps/shared/**・apps/e2e/** だけ off にする。どれも最上位に
-//   関数を置かず（apps/e2e は spec 以外の補助。database.ts の E2eDatabase）、状態の無い補助を static だけのクラスにする（ADR
-//   docs/adr/architecture/20261002-class-based-backend.md・20261002-class-based-shared-and-test-support.md）。apps/frontend_customer は関数のまま（React component / hook と Next の規約の
-//   関数）なので、static だけのクラスは recommended どおり警告（--error-on-warnings で失敗）のままにする。
+// complexity/noStaticOnlyClass の override（Issue #262）: apps/backend/**・apps/shared/**・apps/e2e/** と、apps/frontend_customer の
+//   features/**・shared/**・test-support/** のうち *.tsx・*.jsx・*.hook.*・*.test.* 以外だけ off にする。どれも最上位に関数を置かず（apps/e2e は
+//   spec 以外の補助。database.ts の E2eDatabase。frontend は React 以外のモジュール。todo-api.ts の TodoApi）、状態の無い補助を
+//   static だけのクラスにする（ADR docs/adr/architecture/20261002-class-based-backend.md・20261002-class-based-shared-and-test-support.md・
+//   20261002-class-based-frontend-modules.md）。範囲は rule-tests/architecture.test.ts の規則 class-based の対象と同じにする。
+//   frontend の React の component（*.tsx・*.jsx）・hook（*.hook.*）・app/・直下のファイル（Next の規約）は関数のままなので、
+//   static だけのクラスは recommended どおり警告（--error-on-warnings で失敗）のままにする。
 // WHY 一時ディレクトリにリポジトリの biome.json を写して、その下の apps/... に置いたファイルを検査する: overrides の includes は
 //   設定ファイルのディレクトリからの相対パスで照合され、リポジトリの外のファイル（noProcessEnv の検査の一時ファイル）には
 //   apps/backend/** が一致しない。リポジトリの中の apps/backend に一時ファイルを置くと、並行して走る architecture.test.ts の
@@ -350,7 +353,7 @@ describe("biome check（pnpm lint と同じ引数）", () => {
 //   「couldn't find an ignore file」で設定エラーになり、違反の有無と関係なく非 0 で終わる。空の .gitignore も無いものとして
 //   同じエラーになった（Biome 2.5.13、2026-10-02 実測）。
 // WHY node_modules/.bin/biome を直接起動する: cwd を一時ディレクトリにするため、pnpm exec はリポジトリの workspace を見つけられない。
-describe("biome check の noStaticOnlyClass は apps/backend・apps/shared・apps/e2e だけで off（Issue #262）", () => {
+describe("biome check の noStaticOnlyClass は apps/backend・apps/shared・apps/e2e と frontend の React 以外のモジュールだけで off（Issue #262）", () => {
   let dir: string;
 
   beforeAll(() => {
@@ -392,8 +395,12 @@ describe("biome check の noStaticOnlyClass は apps/backend・apps/shared・app
     ["apps/shared/static-only.ts"],
     ["apps/backend/test-support/static-only.ts"],
     ["apps/e2e/static-only.ts"],
+    ["apps/frontend_customer/features/todo/api/static-only.ts"],
+    ["apps/frontend_customer/shared/i18n/static-only.ts"],
+    ["apps/frontend_customer/shared/request-log/nested/static-only.mts"],
+    ["apps/frontend_customer/test-support/static-only.ts"],
   ])(
-    "%s（apps/backend・apps/shared・apps/e2e）では static だけのクラスが 0 で終わる",
+    "%s（apps/backend・apps/shared・apps/e2e・frontend の React 以外のモジュール）では static だけのクラスが 0 で終わる",
     (path) => {
       // given: 前提なし（入力は when の呼び出しに直接書く）
       // when
@@ -406,7 +413,28 @@ describe("biome check の noStaticOnlyClass は apps/backend・apps/shared・app
 
   it.each([
     ["apps/shared-x/static-only.ts", "名前の前方一致だけが同じ別ディレクトリ"],
-    ["apps/frontend_customer/shared/static-only.ts", "apps/frontend_customer"],
+    [
+      "apps/frontend_customer/features/todo/components/static-only.tsx",
+      "frontend の React の component",
+    ],
+    [
+      "apps/frontend_customer/shared/ui/static-only.jsx",
+      "frontend の React の component",
+    ],
+    [
+      "apps/frontend_customer/features/todo/screens/x/static-only.hook.ts",
+      "frontend の React の hook",
+    ],
+    [
+      "apps/frontend_customer/features/todo/api/static-only.test.ts",
+      "frontend のテスト（規則 class-based の対象外）",
+    ],
+    ["apps/frontend_customer/app/static-only.ts", "frontend の app/"],
+    ["apps/frontend_customer/static-only.ts", "frontend の直下"],
+    [
+      "apps/frontend_customer/features-x/static-only.ts",
+      "名前の前方一致だけが同じ別ディレクトリ",
+    ],
     ["apps/backend-x/static-only.ts", "名前の前方一致だけが同じ別ディレクトリ"],
     ["apps/e2e-x/static-only.ts", "名前の前方一致だけが同じ別ディレクトリ"],
     ["static-only.ts", "リポジトリ直下"],
@@ -425,11 +453,11 @@ describe("biome check の noStaticOnlyClass は apps/backend・apps/shared・app
 
   // WHY: 上の非 0 が、設定の読み込みの失敗など noStaticOnlyClass 以外の理由ではないことを示す（同じ場所でインスタンスのメンバーを
   //   持つクラスは通る）。
-  it("apps/frontend_customer でもインスタンスのメンバーを持つクラスは 0 で終わる", () => {
+  it("apps/frontend_customer の app/ でもインスタンスのメンバーを持つクラスは 0 で終わる", () => {
     // given: 前提なし（入力は when の呼び出しに直接書く）
     // when
     const { status, output } = checkAt(
-      "apps/frontend_customer/shared/instance-class.ts",
+      "apps/frontend_customer/app/instance-class.ts",
       [
         "export class Paths {",
         "  of(name: string): string {",
