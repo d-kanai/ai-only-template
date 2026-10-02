@@ -7,7 +7,7 @@ flowchart TB
     dbmb[("database metabase<br/>Metabase の設定・質問")]:::data
     uapp["user app（パスワード）"]:::user
     umb["user metabase（パスワード）"]:::user
-    uiam["IAM ユーザー（MCP 用）"]:::user
+    uiam["IAM ユーザー（MCP 用）<br/>GRANT bi_readonly は psql で手作業"]:::user
     uro["bi_readonly 読み取り専用（psql で手作業）<br/>Metabase の分析・Data Studio"]:::user
   end
   uapp --> dbapp
