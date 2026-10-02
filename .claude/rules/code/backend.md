@@ -94,7 +94,8 @@ paths:
 | exports | 値はキーのパスに `.ts` を付けた TS のソース（ビルドしない）。feature を足したら `./features/<feature>/internal/presentation/*.api` を足す。それ以外は 1 ファイルずつ。使わなくなったキーは消す（規則 `backend-exports` が過不足を止める） | feature ごとにキーを分ける: Node の exports のパターンは `*` を 1 つしか持てない | `rule-tests/architecture.test.ts` の `backend-exports` |
 | exports | テスト基盤（`test-support/database`）は公開しない。`vitest.global-setup.ts` からだけ相対パスで読む（唯一の例外） | - | `rule-tests/test-support.test.ts` の `exports-test-support` |
 | 依存 | 依存（`package.json`）: backend のコードが import するもの（`drizzle-orm` / `pg` / `zod` / `@repo/shared`、devDependencies に `drizzle-kit` / `@types/pg`）を `apps/backend/package.json` に置く（`.claude/rules/tooling/dependencies.md`） | - | 説明 |
-| tsconfig | `apps/backend/tsconfig.json` は Next の plugin・jsx・DOM の型を持たない（backend 単体の型チェック。`Response#json()` は `unknown` なのでテストでは `as` で型を付ける） | - | `pnpm typecheck` |
+| tsconfig | `apps/backend/tsconfig.json` は Next の plugin・jsx・DOM の型を持たない（backend 単体の型チェック。`Response#json()` は `unknown` なのでテストでは `as` で型を付ける） | 限界: `pnpm typecheck` は backend を単体で型チェックするだけで、tsconfig の中身（`lib` に `dom` を足すなど）はどの検査も見ない | レビュー |
+| tsconfig | `pnpm typecheck` が backend を単体で型チェックする | - | `pnpm typecheck` |
 
 ## presentation（api ファイル）
 
@@ -113,7 +114,8 @@ paths:
 | 組み立て | 組み立てはファイルの最下部: `export const POST = new CreateTodoApi(new CreateTodoCommand(new PostgresTodoRepository(AppDatabase.get().db), new PostgresTransactionRunner(AppDatabase.get().db))).handle;`（書き込みの command は Repository の次にトランザクションの runner を受け取る。Issue #215。下の「永続化」の「トランザクション」）。本番は常に Postgres（下の「永続化」） | api ファイルで組み立てる（DI コンテナを置かない）: コンテナ（以前の `infra/container.ts`）は分かりにくい（ユーザー判断）。その API が何で動くかを、api ファイル 1 つで読める | レビュー |
 | 組み立て | api ファイルごとに `new PostgresTodoRepository(AppDatabase.get().db)` してよい | プールは `AppDatabase.get` が `globalThis` に 1 つだけ持つので、Repository を api ファイルの数だけ作ってもプールは 1 つ。テストは全 feature の `features/*/internal/presentation/*.api.ts` を読み込み、`features/*/internal/infra/*-repository.postgres.ts` のクラスを受け取った db を記録するサブクラスに差し替えて、渡る db が api ファイルの数だけあり、すべて `AppDatabase.get().db` の 1 つであることを確かめる。feature をまたぐ検査なので shared に置く（Issue #180） | `apps/backend/shared/http/route-handlers-share-database.test.ts` |
 | テスト | テストは `new CreateTodoApi(new CreateTodoCommand(new InMemoryTodoRepository())).handle(request)` のように、空の InMemory のリポジトリで組み立てる（前のテストのデータに依存しない） | - | レビュー |
-| テスト | 差し替えはコンストラクタで行い `vi.mock` は使わない（backend のテストの `vi.mock` は `@repo/shared/now` だけ。InMemory で起こせない検証（`route-handlers-share-database.test.ts` など）は呼び出しの直前の行の `// WHY モック: <理由>` で通す） | 型で縛られ、query / command の形が変わればテストがコンパイルエラーになる | `rule-tests/test-doubles.test.ts` の `vi-mock-only-now` |
+| テスト | `vi.mock` は使わない（backend のテストの `vi.mock` は `@repo/shared/now` だけ。InMemory で起こせない検証（`route-handlers-share-database.test.ts` など）は呼び出しの直前の行の `// WHY モック: <理由>` で通す） | 型で縛られ、query / command の形が変わればテストがコンパイルエラーになる | `rule-tests/test-doubles.test.ts` の `vi-mock-only-now` |
+| テスト | 差し替えはコンストラクタで行う（InMemory のリポジトリ・記録するオブジェクトを渡す） | 型で縛られ、query / command の形が変わればテストがコンパイルエラーになる。`vi-mock-only-now` が止めるのは `vi.mock` だけで、ほかの差し替え方（`vi.spyOn` で本番の依存を書き換えるなど）は止めない | レビュー |
 | infra の参照 | presentation の本番コードが参照してよい自 feature の infra は、組み立てに使う `infra/<名前>-repository.postgres` だけ（規則 `presentation`）。InMemory の実装（`*.in-memory`）と `schema` は参照しない | 本番の handler が InMemory で動くと、データが保存されないまま気づけない（Issue #59） | `rule-tests/architecture.test.ts` の `presentation` |
 | infra の参照 | 組み立てに使う `apps/backend/shared/drizzle/database`・`transaction.postgres` は shared の単位なので縛らない（Issue #310） | - | 説明 |
 | エラーのキー | エラーは安定したキー（`ErrorKey`）と params で表す（Issue #116。設計 (a)）。画面に出す文言は画面（apps/frontend_customer）の辞書が key と params から翻訳する | 文言（言語・言い回し）は画面の関心で、backend が持つと言語を足すたび・言い回しを変えるたびに API を変えることになる。key は分岐にも翻訳にも使える機械可読な契約になる | 説明 |
@@ -181,7 +183,8 @@ paths:
 | Repository | 書き込みは `PostgresWriter.of(tx)` で取り出した Writer に渡すだけで、変更履歴とログは Writer が書く（下の「書き込みの口 Writer」） | - | `rule-tests/persistence.test.ts` の `writes-through-writer` |
 | insert / update | `insert` / `update`（Issue #165・#215。`save` を分けた）: Entity は読み込んだとき（`reconstruct`）の値を `origin` に持ち（新規の `create` は `undefined`。遷移メソッドは引き継ぐ）、`update` がそれと今の値を `ChangedProps.of`（`shared/drizzle/changed-props.ts`）で比べる | WHY 差分を遷移メソッドに記録させず origin との比較で取る: Entity は不変で遷移メソッドは何も記録しない。記録させると遷移メソッドを足すたびに書く必要があり、書き漏れた変更は保存されない。「読み込んだときの値」は Entity の事実として持ち、どの列・どの SQL にするか（永続化の都合）は infra に置く | `rule-tests/persistence.test.ts` の `update-uses-changed-props`・`entity-with-reconstruct-has-origin` |
 | insert / update | 検査の一覧: upsert の禁止、`*.postgres.ts` の update は `changed-props` を import（`update-uses-changed-props`）、`reconstruct` を持つ Entity は `origin` を持つ、insert のみの表を update / delete しない、書き込みは Writer を通す、集約は子表の全件を JOIN で読む | - | `rule-tests/persistence.test.ts` の `no-upsert`・`update-uses-changed-props`・`entity-with-reconstruct-has-origin`・`no-update-delete-on-append-only-tables`・`writes-through-writer`・`aggregate-loads-all-children` |
-| insert / update | `insert(todo, tx)` は新規（`origin` が `undefined`）だけを受け付け、根（`todos`）の全列と完了の履歴の全件を素の `INSERT` で書く。`origin` のある Todo は Error。同じ新規のインスタンスを 2 回 insert すると一意制約違反（SQLSTATE 23505）→ 500。InMemory も同じ id があれば Error を投げる | WHY upsert にしない: 2 回 insert する呼び出しは無く（create の command は 1 回だけ）、あれば実装ミス。upsert は黙って通し、id が衝突した別の行も上書きする | `rule-tests/persistence.test.ts` の `no-upsert` |
+| insert / update | `insert(todo, tx)` は新規（`origin` が `undefined`）だけを受け付け、根（`todos`）の全列と完了の履歴の全件を素の `INSERT` で書く。`origin` のある Todo は Error。同じ新規のインスタンスを 2 回 insert すると一意制約違反（SQLSTATE 23505）→ 500。InMemory も同じ id があれば Error を投げる | 振る舞いは Repository の契約テスト（`todo-repository.postgres.test.ts`・`todo-repository.in-memory.test.ts`）が固定する | レビュー |
+| insert / update | insert を upsert（`onConflictDoUpdate` / `onConflictDoNothing`）で書かない | 2 回 insert する呼び出しは無く（create の command は 1 回だけ）、あれば実装ミス。upsert は黙って通し、id が衝突した別の行も上書きする | `rule-tests/persistence.test.ts` の `no-upsert` |
 | insert / update | `update(todo, tx)` は読み込み済み（`origin` がある）だけを受け付け（無ければ Error）、変わった列だけを `UPDATE ... WHERE id = ...`（id・作成日時は比べない）と、`origin` の件数より後ろに増えた履歴だけの `INSERT` を書く。変わった列も増えた履歴も無ければ SQL を発行しない。行が無ければ（ロックせずに読んだ後に消された。command は行をロックして読むので起きない）Writer が Error（not_found にはしない。呼び出し側の誤り）、履歴だけなら外部キー違反（23503）で失敗する | WHY 全列の upsert をやめた: 同じ Todo を同時に別の列で更新すると、後から save した方が先の変更を巻き戻していた（lost update。Issue #165）。command が行をロックするようになった（Issue #215）後も、書く列を最小にしておけば、ロックせずに読んだ値で書いたときにも lost update が戻らない | `apps/backend/features/todo/internal/infra/todo-repository.postgres.test.ts` |
 | insert / update | 呼び出し側（command）は新規なら `insert`、読み込み済みなら `update` を呼ぶ | WHY `save` を `insert` / `update` に分けた（Issue #215）: 呼び出し側（command）は新規か読み込み済みかを知っている。Repository が `origin` で分岐せず、`update` は読み込んだ後に消された場合（以前の `updateOrLock` の `for key share`）を考えずに済む（同じトランザクションで行をロックして読むため） | レビュー |
 | insert / update | `origin` は Todo の private フィールド（getter で読む）で、列挙されるプロパティに出さない（値の等価と直列化に混ざらない） | - | レビュー |
@@ -310,7 +313,7 @@ paths:
 | --- | --- | --- | --- |
 | 大小 | ディレクトリ・ファイルは kebab-case。型は PascalCase（`ListTodosResponse`） | - | レビュー |
 | 名前 | api ファイル・query・command は `<verb>-<noun>`（`list-todos`・`get-todo`・`create-todo`・`rename-todo`・`change-todo-completion`・`delete-todo`）に役割の接尾辞（`.api.ts`・`.query.ts`・`.command.ts`・`.in-memory.ts`・`.postgres.ts`・`.test.ts`）。クラス名は `<Verb><Noun>` に役割（`ListTodosApi`・`ListTodosQuery`・`CreateTodoCommand`） | - | レビュー |
-| 名前 | Repository の実装は `<名前>-repository.<実装>.ts`（規則 `presentation` がファイル名 `*-repository.postgres` で組み立てに使う実装を見分ける） | - | `rule-tests/architecture.test.ts` の `presentation` |
+| 名前 | Repository の実装は `<名前>-repository.<実装>.ts`（規則 `presentation` がファイル名 `*-repository.postgres` で組み立てに使う実装を見分ける） | 限界: `presentation` が見るのは presentation から参照する `*-repository.postgres` だけで、ほかの名前の付け方は止めない | レビュー |
 
 ## 後で別プロセスに分けるとき
 

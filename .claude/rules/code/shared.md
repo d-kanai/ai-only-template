@@ -86,7 +86,8 @@ paths:
 
 | カテゴリ | WHAT | WHY | 強制 |
 | --- | --- | --- | --- |
-| 型チェック | `apps/shared/tsconfig.json` は `apps/backend/tsconfig.json` と同じ方針（Next の plugin・jsx・DOM の型なし）。`pnpm typecheck` が `tsc -p apps/shared --noEmit` で検査する | - | `rule-tests/typecheck.test.ts` の `apps/shared` |
+| 型チェック | `apps/shared/tsconfig.json` は `apps/backend/tsconfig.json` と同じ方針（Next の plugin・jsx・DOM の型なし） | 限界: tsconfig の中身（`lib` など）はどの検査も見ない | レビュー |
+| 型チェック | `pnpm typecheck` が `tsc -p apps/shared --noEmit` で検査する | - | `rule-tests/typecheck.test.ts` の `apps/shared` |
 | テスト | テストは隣に置き、先頭に `// @vitest-environment node` | - | レビュー |
 | テスト | カバレッジ（`vitest.config.mts` の `coverage.include`）と Stryker（`stryker.config.mjs` の `mutate`）の対象（`.claude/rules/quality/testing.md`） | - | 説明 |
 | テスト | テストは同じディレクトリのファイルを相対パス（`./env`）で import する | Stryker のサンドボックスで `@repo/shared/...` から読むと、変異していない元のファイルに解決される（`stryker.config.mjs` の注意） | レビュー |
