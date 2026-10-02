@@ -19,6 +19,7 @@ paths:
 - 分岐を通すだけのテストにしない。その分岐で起きること（返り値・状態・呼び出し・出力）を検証する。WHY: 何も検証しないテストでもカバレッジは上がる。
 - `it.skip` / `it.only` を残さない（Biome の `noSkippedTests` / `noFocusedTests` で止まる。`.claude/rules/lint.md`）。WHY: skip は仕様を黙って外し、only はほかのテストを黙って止める。vitest-cucumber の `Scenario.skip(` / `.only(` と `.feature` の `@` のタグ（既定の excludeTags の `@ignore` などで skip になる）は Biome が止めないので、API ジャーニーと API 仕様では `rule-tests/api-journey.test.ts` / `rule-tests/api-spec.test.ts` が止める（`*-no-skip` / `*-tag`。Issue #219）。
 - 失敗（reject / throw）の検証は `rejects.toEqual(new Error("..."))` のようにクラスと message を比べる（クラスが決まらなければ `rejects.toBeInstanceOf(Error)` と `rejects.toMatchObject({ message })`）。WHY: Vitest 5.0.1 の `rejects.toThrow("文字列")` / `toThrowError("文字列")`（同期の `toThrow("文字列")` も）は、値が `undefined` だと文字列を照合せずに通る（実測）。
+- 複数件を扱う処理（一覧・1 対多の組み立て・グループ化・集計）は、件数の境界を組み合わせてテストする。親と子の 0 件 / 1 件 / 複数件のうち仕様上ありうる組み合わせを並べ、**親が複数で、それぞれの子も複数**の組み合わせは必ず含める。結果は件数だけでなく全体を `toEqual` / `toStrictEqual` で比べ、子の値（日時など）を親ごとに変えて取り違えが値で分かるようにする。並びが決まるなら、保存する順を期待する並びと変える（親をまたいで交互に入れるなど）。WHY: まとめる処理の誤り（境目で子が隣の親に混ざる・最後の親の子が落ちる・最初の親だけ正しい）は、親か子のどちらかが 1 件のテストでは起きない。Todo の一覧（`todo-repository.postgres.test.ts` の findAll）に「両方が複数件」のテストが無かった（ユーザー指摘 2026-10-02、Issue #271）。機械化: 縛れない（どの処理が複数件を扱い、どの組み合わせが仕様上ありうるかは字句で決まらない）。mutation testing（下の「mutation testing」）が残った誤りの一部を拾う。
 - テストを足す・書き換えたら、そのテストが守るコードを 1 度壊して落ちることを確かめ、元に戻す（条件の反転・戻り値の変更・呼び出しの削除など）。WHY: 検証が弱いと壊しても緑のまま。書き換えで既存の検証が消えることもある。
 
 ## 置き方と環境
