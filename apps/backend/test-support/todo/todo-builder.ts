@@ -63,7 +63,7 @@ export class TodoBuilder {
   }
 
   // 完了の履歴をそのまま指定する（completed から導かない）。日時を createdAt より前・逆順にすると壊れた Todo、空にすると履歴の無い
-  //   Todo（Repository が補って読む。Issue #194）になる。
+  //   Todo（これも壊れた Todo。Repository は補わない。Issue #260）になる。
   statusChanges(statusChanges: readonly BuiltTodoStatusChange[]): TodoBuilder {
     return this.with({ statusChanges });
   }
@@ -114,7 +114,7 @@ export class TodoBuilder {
 }
 
 // 履歴を指定しないときの完了の履歴。作成時の未完了の 1 件、完了なら作成日時の完了をもう 1 件。
-// WHY backfill（shared/drizzle/backfill/0001_todo_status_changes.sql）と Repository の補い（repairHistory）と同じ規則: 不変条件
+// WHY backfill（shared/drizzle/backfill/0001_todo_status_changes.sql）と同じ規則: 不変条件
 //   （履歴は 1 件以上・作成日時より前にならない・最後の completed が今の値）を満たす最小の履歴で、前提の Todo を正しい Todo にする。
 function defaultStatusChanges(
   completed: boolean,

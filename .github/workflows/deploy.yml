@@ -222,7 +222,7 @@ jobs:
       #   （Issue #194。決定は ADR docs/adr/workflow/20261001-backfill-after-traffic-switch.md）。
       # WHY 切替の後: 切替の前（Run migrations の時点など）に流すと、切替までの間に旧アプリが書いた行（新しいコードの前提を満たさない行。
       #   例: 完了の履歴の無い Todo）が漏れる。切替の後は旧アプリが書かないので、ここで流せば漏れが残らない。切替から流し終えるまでの
-      #   間は、新しいアプリの Repository が履歴の無い Todo を補って読み書きする（repair on read / write）。
+      #   間、対象の行は読むと 500 になる（Repository は補わない。Issue #260、ADR docs/adr/workflow/20261002-drop-repair-on-read-without-production.md）。
       # WHY migrate のジョブを使う: 同じイメージ（deps ステージ）に backfill の SQL と apps/backend/shared/infra/backfill.ts が入り、
       #   接続先（DATABASE_* の環境変数・Cloud SQL の接続）もジョブの定義にある。別のジョブを Terraform で足さずに済む。
       # --args=pnpm,db:backfill: この実行 1 回だけ、コンテナの CMD（Dockerfile の migrate ステージの CMD ["pnpm", "db:migrate"]）を
