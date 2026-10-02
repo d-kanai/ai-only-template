@@ -1125,10 +1125,11 @@ describe("PostgresTodoRepository", () => {
     ]);
   });
 
-  // WHY before は DB が UPDATE の直前に持っていた値（Issue #215）: Writer が同じトランザクションで行を読んで before にする。以前
-  //   （Repository が組み立てていたとき）は読み込んだときの値（origin）だった。ロックせずに読んだ Todo で、読んだ後に別の update が
-  //   同じ列を変えていたら、その値が before になる。
-  test("ロックせずに読んだ後に別の update が名前を変えていたら、変更履歴の before はその名前（DB が UPDATE の直前に持っていた値）になる", async () => {
+  // WHY before は読み込んだときの値（origin。Issue #312）: Writer は before のために行を読み直さない。command は
+  //   findByIdForUpdate で行をロックしてから読むので、origin は DB が UPDATE の直前に持っていた値と同じになる。ロックせずに
+  //   読んだ Todo で書くのは呼び出し側の誤りで、そのときは読んだ後の別の update の値ではなく origin が before に残る
+  //   （Issue #215〜#312 は Writer が読み直し、DB の値を before にしていた）。
+  test("ロックせずに読んだ後に別の update が名前を変えていても、変更履歴の before は読み込んだときの名前（origin）になる", async () => {
     // given
     const todo = Todo.create("牛乳を買う");
     await insert(todo);
@@ -1142,7 +1143,7 @@ describe("PostgresTodoRepository", () => {
 
     // then
     expect(written).toMatchObject([
-      { changes: { title: { before: "卵を買う", after: "パンを買う" } } },
+      { changes: { title: { before: "牛乳を買う", after: "パンを買う" } } },
     ]);
   });
 

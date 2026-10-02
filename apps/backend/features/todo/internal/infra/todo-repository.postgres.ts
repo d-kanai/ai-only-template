@@ -112,6 +112,8 @@ export class PostgresTodoRepository implements TodoRepository {
   // WHY 履歴の増分を件数で見る（ChangedProps.of で配列を比べない）: 履歴は末尾に足すだけ（Todo.changeCompletion）なので、読み込んだ
   //   ときの件数より後ろが増えた分。ChangedProps.of は配列を参照で比べるが、Todo のコンストラクタが検証するたびに zod が新しい配列を
   //   作る（zod 4.6.5 の parse は配列をコピーする）ので、rename だけでも「変わった」と判定されてしまう。
+  // WHY origin を Writer に渡す: 変更履歴の before にする。command は行を FOR UPDATE でロックしてから読むので、origin は DB が
+  //   UPDATE の直前に持っていた値と同じで、Writer は before のために行を読み直さない（Issue #312）。
   // 同じ position の履歴が既にあれば (todo_id, position) の一意制約違反（23505）で失敗し、同じ tx の UPDATE も戻る（schema.ts）。
   // 行が無ければ（ロックせずに読んだ後に消された）、Writer の update が Error、履歴だけなら外部キー違反（23503）で失敗する。
   //   command は行をロックして読むので起きない（not_found にはしない。呼び出し側の誤り）。
@@ -126,6 +128,7 @@ export class PostgresTodoRepository implements TodoRepository {
     await writer.update(
       todos,
       todo.id,
+      origin,
       ChangedProps.of(origin, { title: todo.title, completed: todo.completed }),
     );
     await writer.insert(

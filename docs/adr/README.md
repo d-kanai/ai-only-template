@@ -79,10 +79,11 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-30 | presentation の入力検証は domain の規則を重ねてよい（presentation ⊆ domain）。domain は常に完全で、presentation は domain より厳しくしない | 採用 | [20260930-presentation-overlaps-domain-validation.md](architecture/20260930-presentation-overlaps-domain-validation.md) |
 | 2026-09-30 | Repository の書き込みは唯一の入口 writeInTransaction を通し、その前後に 1 行ずつログを自動で出す | 置き換え（→ architecture/20260930-transaction-from-application.md） | [20260930-repository-write-log.md](architecture/20260930-repository-write-log.md) |
 | 2026-09-30 | Todo の完了の遷移は集約の子表（insert のみ）に積み、最新の状態は集約の現在値の列にも持つ | 採用 | [20260930-status-transitions-as-append-only-child-table.md](architecture/20260930-status-transitions-as-append-only-child-table.md) |
-| 2026-09-30 | command がトランザクションを張って Repository に渡し、Repository は insert / update に分け、変更履歴とログは書き込みの口 Writer が文ごとに記録する | 採用 | [20260930-transaction-from-application.md](architecture/20260930-transaction-from-application.md) |
+| 2026-09-30 | command がトランザクションを張って Repository に渡し、Repository は insert / update に分け、変更履歴とログは書き込みの口 Writer が文ごとに記録する | 置き換え（→ architecture/20261002-update-before-from-origin.md） | [20260930-transaction-from-application.md](architecture/20260930-transaction-from-application.md) |
 | 2026-10-02 | apps/backend の本番コードはクラスを基本にし、関数を export せず、補助の関数もクラスのメソッドにする | 採用 | [20261002-class-based-backend.md](architecture/20261002-class-based-backend.md) |
 | 2026-10-02 | クラスベースの対象を apps/shared とテストの補助（test-support・e2e の補助・spec の support.ts）に広げる | 採用 | [20261002-class-based-shared-and-test-support.md](architecture/20261002-class-based-shared-and-test-support.md) |
 | 2026-10-02 | クラスベースの対象を frontend の React 以外のモジュールに広げる | 採用 | [20261002-class-based-frontend-modules.md](architecture/20261002-class-based-frontend-modules.md) |
+| 2026-10-02 | Writer の update は変更履歴の before に呼び出し側の origin を使い、before のために行を読み直さない | 採用 | [20261002-update-before-from-origin.md](architecture/20261002-update-before-from-origin.md) |
 
 ### tech-stack/
 言語・ツール・ライブラリの選定
