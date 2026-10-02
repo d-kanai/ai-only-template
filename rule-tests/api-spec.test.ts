@@ -83,6 +83,8 @@ import { containsForbiddenWord } from "./feature-business-language";
 //   - api-spec-no-vi: `vitest` から `vi`（と同じものの別名 `vitest`）を import しない。別名・名前空間・既定の import・dynamic
 //     `import("vitest")` も違反。`import type` と inline の `type` は通す（api-journey-no-vi と同じ判定）。
 //     WHY: 仕様は本番と同じ部品のつながりで確かめる。テストダブル（vi.mock・spyOn・fake timers）は差し替えた部分を確かめなくする。
+//     例外（Issue #258。daiki の判断 2026-10-02）: step の実装で、別名なしの `import { vi }` を console の差し替え（`vi.spyOn(console, ...)`）
+//       だけに使うなら通す（ログの行をアサートするため。WHY と限界は usesViOnlyForConsoleSpy）。support.ts は例外にしない。
 //   - api-spec-no-in-memory: *.in-memory（InMemory の Repository）を import しない（`import type`・`import()`・`export … from` も）。
 //     WHY: 実 DB で本番の組み立てを通すのが API 仕様の目的（Issue #219。InMemory は presentation の単体テストの道具）。
 //   - api-spec-uses-real-database: apps/backend/test-support/database（createTestDatabase）を値として import する。
@@ -542,6 +544,41 @@ function reachesVi(ref: ImportRef): boolean {
   );
 }
 
+// 名前付きの import で vi を別名なしに取り出すだけか（`{ expect, vi }`。vitest・別名・既定の import・名前空間・dynamic は除く）。
+// WHY 別名を許さない: usesViOnlyForConsoleSpy は `vi` の名前で使い方を数えるので、別名で取り出すと数えられない。
+function importsPlainVi(ref: ImportRef): boolean {
+  if (ref.kind !== "value") {
+    return false;
+  }
+  const braces = /^\{([\s\S]*)\}$/.exec(ref.clause.trim());
+  const names = (braces?.[1] ?? "").split(",").map((name) => name.trim());
+  return (
+    names.includes("vi") &&
+    !names.some((name) => /^(?:vi\s+as\s|vitest\b)/.test(name))
+  );
+}
+
+// step の実装が vi を console の差し替え（`vi.spyOn(console, ...)`）だけに使っているか。code はコメントを消したもの。
+// 数えるのは、前が `.`・名前の文字でない `vi` の出現（import の句の 1 つを除く）。すべてが `vi.spyOn(console,`（改行・空白を挟むものも）で、
+//   1 つ以上あれば true。
+// WHY ログに限って console の差し替えを許す（daiki の判断 2026-10-02、Issue #258）: notification の送り先は今はログ（console.log の
+//   JSON 1 行）だけで、差し替えずには仕様から読めない。console は本番の部品の外（実行環境の出力先）で、差し替えても本番の組み立ては
+//   そのまま通る。vi.fn・console 以外の spyOn・vi.mock は本番の部品を差し替えるので、今どおり止める。
+// WHY 文字列を消さずに数える（blankStrings を使わない。reviewer の指摘、Issue #258）: blankStrings はテンプレート文字列の `${...}` の
+//   中まで消すので、補間の中の `vi.fn()` を数えず通していた。文字列の中の `vi` の語も数えるが、違反に倒れるだけ（安全側）。
+// 限界（字句の推定）: `vi` を別の変数に入れる・オブジェクトに置くのは「console の差し替え以外の出現」として違反にする（安全側）。
+//   `const console = repository;` のように console の名前を上書きしたものは見ない（自然には書かない）。後始末の
+//   `vi.restoreAllMocks()` と型の `ReturnType<typeof vi.spyOn>` も違反になるので、後始末は戻り値の `mockRestore()`、型は
+//   vitest の `MockInstance` で書く。
+//   `vi.spyOn(console, ...)` の戻り値に対する呼び出し（mockImplementation・mockRestore）は見ない。
+function usesViOnlyForConsoleSpy(code: string): boolean {
+  const uses = [...code.matchAll(/(?<![\w$.])vi(?![\w$])/g)].length;
+  const consoleSpies = [
+    ...code.matchAll(/(?<![\w$.])vi\s*\.\s*spyOn\s*\(\s*console\s*,/g),
+  ].length;
+  return consoleSpies > 0 && uses === consoleSpies + 1;
+}
+
 // 実 Postgres のテスト用の DB を用意するモジュール（リポジトリ相対、拡張子なし）。
 const TEST_DATABASE_MODULE = "apps/backend/test-support/database";
 
@@ -695,7 +732,9 @@ function findStepContentViolations(
       ...(/\.in-memory$/.test(moduleBaseName(ref.specifier))
         ? [{ rule: "api-spec-no-in-memory" as const, line: ref.line }]
         : []),
-      ...(ref.specifier === "vitest" && reachesVi(ref)
+      ...(ref.specifier === "vitest" &&
+      reachesVi(ref) &&
+      !(importsPlainVi(ref) && usesViOnlyForConsoleSpy(code))
         ? [{ rule: "api-spec-no-vi" as const, line: ref.line }]
         : []),
     ]),
@@ -1511,6 +1550,16 @@ describe("step の実装の中身（findApiSpecViolations）: must pass", () => 
       ),
     ],
     [
+      "vi を console の差し替え（vi.spyOn(console, ...)）だけに使う（ログに限る。Issue #258。改行・空白を挟むものも）",
+      source(
+        ...REQUIRED_IMPORTS,
+        'import { afterEach, expect, vi } from "vitest";',
+        'const log = vi.spyOn(console, "log").mockImplementation(() => undefined);',
+        "const error = vi",
+        "  .spyOn( console , 'error');",
+      ),
+    ],
+    [
       "コメントの中の vi・InMemory の import",
       source(
         ...REQUIRED_IMPORTS,
@@ -1567,6 +1616,44 @@ describe("step の実装の中身（findApiSpecViolations）: must reject", () =
         'const m = await import("vitest");',
       ),
       [3, 4, 5, 6, 7, 8].map((line) => ({ rule: "api-spec-no-vi", line })),
+    ],
+    ...[
+      ["vi.fn", "const f = vi.fn();"],
+      ["console 以外の spyOn", 'vi.spyOn(repository, "update");'],
+      ["vi.mock", 'vi.mock("../../../x");'],
+      ["別の変数に入れる", "const v = vi;"],
+      ["オブジェクトのプロパティに置く", "const o = { vi };"],
+      [
+        "console の別名（globalThis.console）",
+        'vi.spyOn(globalThis.console, "log");',
+      ],
+      ["プロパティの文字列で呼ぶ", 'vi["fn"]();'],
+      // WHY テンプレートリテラルで書く: 文字列リテラルに `${` を書くと noTemplateCurlyInString に掛かるため、エスケープして書く。
+      [
+        "テンプレート文字列の補間の中（reviewer の指摘）",
+        `const x = \`\${vi.spyOn(repository, "update")}\`;`,
+      ],
+      ["テンプレート文字列の補間の中の vi.fn", `const y = \`a\${vi.fn()}b\`;`],
+    ].map(([name, use]): [string, string, ApiSpecViolation[]] => [
+      `console の差し替えと一緒に、vi を ${name} に使う（import の行）`,
+      source(
+        ...REQUIRED_IMPORTS,
+        'import { vi } from "vitest";',
+        'vi.spyOn(console, "log");',
+        use ?? "",
+      ),
+      [{ rule: "api-spec-no-vi", line: 3 }],
+    ]),
+    [
+      "console の差し替えに使っていても、vi の別名・vitest・名前空間の import は違反（import の行）",
+      source(
+        ...REQUIRED_IMPORTS,
+        'import { vi as v } from "vitest";',
+        'v.spyOn(console, "log");',
+        'import * as V from "vitest";',
+        'V.vi.spyOn(console, "log");',
+      ),
+      [3, 5].map((line) => ({ rule: "api-spec-no-vi", line })),
     ],
     [
       "*.in-memory の値の import・import type・dynamic import()・export … from・拡張子付き",
@@ -1963,6 +2050,20 @@ describe("補助 support.ts の中身（findApiSpecViolations）", () => {
       { rule: "api-spec-no-vi", line: 2 },
       { rule: "api-spec-no-vi", line: 3 },
     ]);
+  });
+
+  // WHY support.ts では console の差し替えも止める（Issue #258）: 差し替えは step ごとに張って外すもので、組み立ての置き場所には要らない。
+  it("console の差し替えだけに使う vi も違反（step だけの例外）", () => {
+    expect(
+      findApiSpecViolations(
+        SUPPORT,
+        source(
+          'import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
+          'import { vi } from "vitest";',
+          'vi.spyOn(console, "log");',
+        ),
+      ),
+    ).toEqual([{ rule: "api-spec-no-vi", line: 2 }]);
   });
 });
 

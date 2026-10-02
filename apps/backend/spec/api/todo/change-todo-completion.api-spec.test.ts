@@ -1,6 +1,14 @@
 // @vitest-environment node
 import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
-import { afterAll, beforeAll, beforeEach, expect } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  type MockInstance,
+  vi,
+} from "vitest";
 import type { ChangeTodoCompletionResponse } from "../../../features/todo/internal/presentation/change-todo-completion.api";
 import type { ChangeEntry } from "../../../shared/infra/change-log";
 import {
@@ -34,16 +42,18 @@ import {
 
 let database: TestDatabase;
 let handler: ReturnType<typeof changeTodoCompletionApi>;
-// notification の入口（本物の notify。support.ts の changeTodoCompletionApi が呼ぶ）に渡されたメッセージ（呼ばれた順）。
-// WHY 本物の notify と並べて記録する: notify はログに出すだけで、仕様から結果を読めない（vi は使わない）。WHY の詳細は support.ts。
-const notifications: string[] = [];
+// 完了の通知は本物の notification モジュール（expose の notify。support.ts の組み立て）が送り、今の送り先はログ（console.log の
+//   JSON 1 行）だけ。通知の確かめは、そのログの行を読んで行う。
+// WHY console.log を差し替える（テストダブル無しの例外。Issue #258）: ログは本番の部品の外（実行環境の出力先）で、差し替えずには
+//   仕様から読めない。ログに限って差し替えてよい（daiki の判断 2026-10-02。rule-tests/api-spec.test.ts の api-spec-no-vi が
+//   vi.spyOn(console, ...) だけを通す）。mockImplementation で出力も止める（db_write の行などでテストの出力を埋めない）。
+// WHY step ごとに張って外す: 前の step の行を数えない。
+let log: MockInstance<typeof console.log>;
 
 beforeAll(async () => {
   database = await createTestDatabase();
   await database.migrate();
-  handler = changeTodoCompletionApi(database.db, (message) => {
-    notifications.push(message);
-  });
+  handler = changeTodoCompletionApi(database.db);
 });
 
 afterAll(async () => {
@@ -52,8 +62,28 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await emptyTodos(database.db);
-  notifications.length = 0;
+  log = vi.spyOn(console, "log").mockImplementation(() => undefined);
 });
+
+afterEach(() => {
+  log.mockRestore();
+});
+
+// ログに出た通知の本文（出た順）。ログの行のうち event.name が notification のもの（notification-sender.log.ts）だけを読む。
+// 限界: 通知の行は notify の中で同期に出る（send の本体が await の前に logger.emit を呼ぶ）ので、handler の応答の後に読めば揃っている。
+//   送信が本当に非同期になった（await の後にログを出す）ら、ここで待つ必要がある。
+function notifications(): string[] {
+  return log.mock.calls
+    .map(
+      ([line]) =>
+        JSON.parse(String(line)) as {
+          event: { name: string };
+          notification?: string;
+        },
+    )
+    .filter((entry) => entry.event.name === "notification")
+    .map((entry) => entry.notification ?? "");
+}
 
 async function putCompletion(id: string, body: unknown): Promise<Response> {
   return handler(
@@ -230,7 +260,7 @@ describeFeature(feature, ({ Scenario }) => {
         await putCompletion(milk.id, { completed: true });
         await putCompletion(milk.id, { completed: true });
 
-        expect(notifications).toStrictEqual([`Todo completed: ${milk.id}`]);
+        expect(notifications()).toStrictEqual([`Todo completed: ${milk.id}`]);
       },
     );
 
@@ -240,7 +270,7 @@ describeFeature(feature, ({ Scenario }) => {
       const response = await putCompletion(milk.id, { completed: false });
 
       expect(response.status).toBe(200);
-      expect(notifications).toStrictEqual([]);
+      expect(notifications()).toStrictEqual([]);
     });
   });
 
@@ -255,7 +285,7 @@ describeFeature(feature, ({ Scenario }) => {
         response,
         notFoundProblem(MISSING_ID, `/api/todos/${MISSING_ID}/completion`),
       );
-      expect(notifications).toStrictEqual([]);
+      expect(notifications()).toStrictEqual([]);
     });
 
     // 文字列の "true" も拒否する（型の違い。json-body.ts の toProblemError の request.field.notBoolean）。
@@ -286,7 +316,7 @@ describeFeature(feature, ({ Scenario }) => {
           todoRowOf(milk),
         ]);
         await expect(logEntries(database.db)).resolves.toStrictEqual([]);
-        expect(notifications).toStrictEqual([]);
+        expect(notifications()).toStrictEqual([]);
       },
     );
   });
