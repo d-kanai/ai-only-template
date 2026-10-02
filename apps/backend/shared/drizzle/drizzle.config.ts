@@ -43,12 +43,16 @@ export default defineConfig({
   dialect: "postgresql",
   // schema: テーブル定義のファイル。feature ごとに apps/backend/features/<feature>/internal/infra/schema.ts に置く（feature を足しても
   //   ここを直さずに済むよう glob で指す）。feature をまたぐ横断の表（変更履歴の change_logs。Issue #189）だけは
-  //   apps/backend/shared/change-log/change-log.schema.ts に置く（どの feature にも属さないため）。drizzle-kit は配列で複数の場所を受け取る。
+  //   apps/backend/shared/change-log/change-log.schema.ts に置く（どの feature にも属さないため）。shared の下は glob で読む。drizzle-kit は配列で複数の場所を受け取る。
   schema: [
     DrizzleConfigPath.fromConfigDir(
       "../../features/*/internal/infra/schema.ts",
     ),
-    DrizzleConfigPath.fromConfigDir("../change-log/change-log.schema.ts"),
+    // WHY shared は glob で読む（Issue #310）: rule-tests の schema・persistence は shared の下の schema.ts と *.schema.ts を
+    //   表の定義として検査する。ここを 1 ファイルに固定すると、shared に足した表は検査を通るのに drizzle-kit が読まず、
+    //   マイグレーションが作られないまま気づけない。検査の対象と同じ範囲を読む。
+    DrizzleConfigPath.fromConfigDir("../**/*.schema.ts"),
+    DrizzleConfigPath.fromConfigDir("../**/schema.ts"),
   ],
   // out: 生成したマイグレーション（SQL と meta/ のスナップショット）の置き場所。この設定ファイルの隣の
   //   apps/backend/shared/drizzle/migrations/（Issue #98 で設定と生成物を shared/drizzle/ にまとめ、Issue #310 で drizzle/ に
