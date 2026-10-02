@@ -134,7 +134,7 @@ export default {
   //   apps/backend/test-support/database.ts の TestDatabase.schemaPrefix）。最上位の定数のままだと、既定の実行では killed になる変異も
   //   ignoreStatic で数えなくなるため（reviewer 指摘。Issue #55 で 18 件が該当した）。
   //   残る static（数えないもの）: features/todo/internal/infra/schema.ts の todos の 10 件（下の実測）と、Issue #188 / #189 で加わった
-  //   todo_status_changes の宣言（11 件）・shared/infra/schema.ts（change_logs。14 件）・shared/domain/change-operation.ts
+  //   todo_status_changes の宣言（11 件）・shared/change-log/change-log.schema.ts（change_logs。14 件）・shared/change-log/change-operation.ts
   //   （操作の一覧の定数）。件数は Issue #202 の --mutate の実測（change-operation.ts は未計測）。後者の等価の確認は未実施
   //   （.claude/rules/testing.md）。
   //   static のままにする条件: テスト本体（test / it の中）で schema.ts を読み込まない。vitest-runner は beforeEach でテスト id を
@@ -146,11 +146,11 @@ export default {
   //     （drizzle-orm 0.45.3 の column-builder.js の setName は、名前が "" のときだけキー名を入れる）。キー名が列名と同じ
   //     なので同じ SQL になる（"created_at" はキー名 createdAt と違うので Killed になる）。
   //   - completed の .default(false) → true: Repository は保存時に completed を必ず渡すので、drizzle の既定値は使われない
-  //     （表の既定値は apps/backend/shared/drizzle/ の生成済み SQL で決まる）。
+  //     （表の既定値は apps/backend/shared/drizzle/migrations/ の生成済み SQL で決まる）。
   //   - timestamp の { withTimezone: true, mode: "date" } → {}、withTimezone → false、mode → "": mode が "string" で
   //     なければ Date の列になる点は同じ（pg-core/columns/timestamp.js）。withTimezone は型名（DDL）と、ドライバが
   //     文字列を返したときの変換にだけ使われ、node-postgres は timestamptz を Date で返すので実行時の結果は変わらない。
-  //   schema.ts はテーブルの形の宣言で、DDL は drizzle-kit が apps/backend/shared/drizzle/ に生成した SQL で当てる（.claude/rules/backend.md）。
+  //   schema.ts はテーブルの形の宣言で、DDL は drizzle-kit が apps/backend/shared/drizzle/migrations/ に生成した SQL で当てる（.claude/rules/backend.md）。
   //   Ignored は score の分母に入らない（mutation score = killed / (killed + survived)。ignoreStatic だけを有効にした実行で
   //   killed 505・survived 57・ignored 25 → 89.86% となり、505 / 562 と一致することを確認した）。
   ignoreStatic: true,

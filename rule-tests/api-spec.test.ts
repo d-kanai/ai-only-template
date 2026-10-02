@@ -41,7 +41,7 @@ import { containsForbiddenWord } from "./feature-business-language";
 //       ファイルだけでは読む仕様が無い。api の無い仕様は、消した・改名した API の仕様が残ったもの。
 //     step のファイルが対の .feature を読むことは api-spec-load-feature が見る。
 //     限界: presentation の下のサブディレクトリの api ファイルと、
-//       apps/backend/shared/presentation/ の api ファイルは対の対象外（今は無い）。
+//       apps/backend/shared/ の下（presentation の部品の shared/http/ など）の api ファイルは対の対象外（今は無い）。
 //   以下は .feature（spec/api/<feature>/ の直下の *.feature）の中身の規則。行ごとに見る（行は 1 始まり。行の区切りは \r\n・\r・\n。
 //   vitest-cucumber は readline で読み、単独の \r でも行を分けるので同じにする。reviewer の指摘）:
 //   - api-spec-scenario-heading: `Scenario:` の見出し（`:` の後ろの前後の空白を除いた文字）が SCENARIO_HEADINGS（作成 / 更新 /
@@ -1247,8 +1247,8 @@ describeFeature(feature, ({ Scenario }) => {
           files(),
         ],
         [
-          "presentation の外の .api.ts（shared/presentation）は対の対象外",
-          "apps/backend/shared/presentation/x.api.ts",
+          "presentation の外の .api.ts（shared/http）は対の対象外",
+          "apps/backend/shared/http/x.api.ts",
           files(),
         ],
         [

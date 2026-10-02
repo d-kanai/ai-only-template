@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { Clock } from "@repo/shared/now";
 import { z } from "zod";
-import { KeyedIssue } from "../../../../shared/domain/keyed-issue";
-import { DomainValidation } from "../../../../shared/domain/validate";
+import { KeyedIssue } from "../../../../shared/error/keyed-issue";
+import { DomainValidation } from "../../../../shared/error/validate";
 
 // タイトルの上限の文字数（前後の空白を除いたコードポイント数）。
 // WHY export する（Issue #144）: presentation のリクエストのスキーマ（create-todo.api.ts・rename-todo.api.ts）が同じ上限を
@@ -52,7 +52,7 @@ export class Todo {
   // 読み込んだとき（reconstruct）の値。新規（create）なら undefined。外からは origin（getter）で読む（Issue #165）。
   // WHY Entity が持つ: Repository の update が「読み込んだときから変わった列だけ」を書き（別の列の同時更新を巻き戻さない）、
   //   新規か読み込み済みかを見分けるため。「自分が読み込まれたときに何だったか」は Entity の事実で、差分をどの列・
-  //   どの SQL にするか（永続化の都合）は infra（Repository と shared/infra/changed-props.ts）に置く。
+  //   どの SQL にするか（永続化の都合）は infra（Repository と shared/drizzle/changed-props.ts）に置く。
   // WHY 遷移メソッドに「何を変えたか」を記録させない: 記録させると遷移メソッドを足すたびに書く必要があり、書き忘れた
   //   変更は保存されない。読み込んだときの値と今の値を比べれば、どの遷移を通っても差分が取れる。
   // WHY private フィールド（#）と getter にする（readonly の公開フィールドにしない）: 公開フィールドは列挙される
@@ -176,7 +176,7 @@ export class Todo {
   // WHY タイトル以外（id・完了状態・作成日時）も規則に含める: どの口から来た値も、すべてが規則を満たすことを 1 つの
   //   スキーマで宣言する。create の id は randomUUID で常に満たすが、reconstruct は DB の行（Postgres の uuid 型は
   //   版の桁が 0 の値も受け付ける）を受け取る。create の作成日時（Clock.now()）も Date であることを型でしか保証しないので、同じく検証する。
-  // WHY 項目ごとにキーを付ける: DomainValidation.validated（shared/domain/validate.ts）が最初の issue の message（= キー）を DomainError の key にする。
+  // WHY 項目ごとにキーを付ける: DomainValidation.validated（shared/error/validate.ts）が最初の issue の message（= キー）を DomainError の key にする。
   //   zod の既定の文言（英語で zod の語彙を含む）を domain の外に出さない。キーの無い issue を作らないよう、検査を持つ
   //   zod のスキーマ・refine にはすべて KeyedIssue.of / KeyedIssue.refine を渡す（z.object 自身は、値が型の上でオブジェクトなので
   //   失敗しない）。渡し忘れは DomainValidation.validated が DomainError ではない Error（500）にする。

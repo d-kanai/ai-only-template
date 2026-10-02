@@ -445,11 +445,11 @@ describeFeature(feature, ({ Scenario }) => {
     "biome check の noStaticOnlyClass は apps/backend・apps/shared・apps/e2e と frontend の React 以外のモジュールだけで off（Issue #262）",
     ({ And }) => {
       And(
-        "apps/backend・apps/shared・apps/e2e・frontend の React 以外のモジュールでは static だけのクラスが 0 で終わる（backend の shared/domain・features の infra・test-support、apps/shared、apps/e2e、frontend の features・shared・test-support の .ts と .mts）",
+        "apps/backend・apps/shared・apps/e2e・frontend の React 以外のモジュールでは static だけのクラスが 0 で終わる（backend の shared/error・features の infra・test-support、apps/shared、apps/e2e、frontend の features・shared・test-support の .ts と .mts）",
         () => {
           // given
           const cases: [string][] = [
-            ["apps/backend/shared/domain/static-only.ts"],
+            ["apps/backend/shared/error/static-only.ts"],
             ["apps/backend/features/todo/internal/infra/static-only.ts"],
             ["apps/shared/static-only.ts"],
             ["apps/backend/test-support/static-only.ts"],

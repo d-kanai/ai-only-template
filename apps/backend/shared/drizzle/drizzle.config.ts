@@ -22,9 +22,8 @@ class DrizzleConfigPath {
   //   ".//home/.../drizzle/meta/0000_snapshot.json" を開こうとして ENOENT で失敗した（2026-09-28 実測）。
   // WHY import.meta.url を使う（import.meta.dirname を使わない）: drizzle-kit は設定ファイルを CommonJS に変換して読み込み、
   //   import.meta.url は元のファイルの URL になるが、import.meta.dirname は undefined になった（2026-09-28 実測）。
-  // WHY 空文字を "." にする: out はこのファイルと同じディレクトリなので、そこをカレントディレクトリにして実行すると relative が
-  //   "" を返す。drizzle-kit は out が空だと既定の "drizzle" として扱い、shared/drizzle/drizzle/ に新しい SQL を作った
-  //   （Issue #98、2026-09-29 実測）。
+  // WHY 空文字を "." にする: 渡したパスがカレントディレクトリそのものだと relative が "" を返す。drizzle-kit は out が空だと
+  //   既定の "drizzle" として扱い、そこに新しい SQL を作った（Issue #98、2026-09-29 実測。当時は out が設定と同じディレクトリだった）。
   static fromConfigDir(path: string): string {
     return (
       relative(process.cwd(), fileURLToPath(new URL(path, import.meta.url))) ||
@@ -34,8 +33,8 @@ class DrizzleConfigPath {
 }
 
 // drizzle-kit（マイグレーションの生成と適用）の設定。使い方は .claude/rules/backend.md の「永続化（Drizzle + Postgres）」。
-//   pnpm db:generate … drizzle-kit generate: schema のファイルと前回のスナップショット（shared/drizzle/meta/）の差分から、
-//                      マイグレーションの SQL を out（shared/drizzle/）に作る。DB には接続しない。
+//   pnpm db:generate … drizzle-kit generate: schema のファイルと前回のスナップショット（shared/drizzle/migrations/meta/）の差分から、
+//                      マイグレーションの SQL を out（shared/drizzle/migrations/）に作る。DB には接続しない。
 //   pnpm db:migrate  … drizzle-kit migrate: out の SQL のうち、DB にまだ当てていないものを当てる。
 //                      当てた記録は DB の drizzle.__drizzle_migrations 表に残る（何度実行しても同じ結果になる）。
 // drizzle-kit push（DB を schema に直接合わせる）は使わない。理由は .claude/rules/backend.md。
@@ -44,16 +43,17 @@ export default defineConfig({
   dialect: "postgresql",
   // schema: テーブル定義のファイル。feature ごとに apps/backend/features/<feature>/internal/infra/schema.ts に置く（feature を足しても
   //   ここを直さずに済むよう glob で指す）。feature をまたぐ横断の表（変更履歴の change_logs。Issue #189）だけは
-  //   apps/backend/shared/infra/schema.ts に置く（どの feature にも属さないため）。drizzle-kit は配列で複数の場所を受け取る。
+  //   apps/backend/shared/change-log/change-log.schema.ts に置く（どの feature にも属さないため）。drizzle-kit は配列で複数の場所を受け取る。
   schema: [
     DrizzleConfigPath.fromConfigDir(
       "../../features/*/internal/infra/schema.ts",
     ),
-    DrizzleConfigPath.fromConfigDir("../infra/schema.ts"),
+    DrizzleConfigPath.fromConfigDir("../change-log/change-log.schema.ts"),
   ],
-  // out: 生成したマイグレーション（SQL と meta/ のスナップショット）の置き場所。この設定ファイルと同じ
-  //   apps/backend/shared/drizzle/（Issue #98。設定と生成物を 1 か所にまとめる）。コミットして、すべての環境で同じ SQL を当てる。
-  out: DrizzleConfigPath.fromConfigDir("."),
+  // out: 生成したマイグレーション（SQL と meta/ のスナップショット）の置き場所。この設定ファイルの隣の
+  //   apps/backend/shared/drizzle/migrations/（Issue #98 で設定と生成物を shared/drizzle/ にまとめ、Issue #310 で drizzle/ に
+  //   接続・書き込みのソースも置くようにしたので、生成物だけを migrations/ に分けた）。コミットして、すべての環境で同じ SQL を当てる。
+  out: DrizzleConfigPath.fromConfigDir("./migrations"),
   dbCredentials: {
     // url: db:migrate の接続先。env.ts が .env / 環境変数から読んで検証した DATABASE_URL（既定値は持たない。WHY は env.ts）。
     //   drizzle-kit 自身は .env を読まないが、env.ts が読み込み時に .env を読む。ほかの DB に当てるときは

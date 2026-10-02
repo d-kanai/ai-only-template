@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import type { ErrorKey } from "../domain/error-key";
-import { KeyedIssue } from "../domain/keyed-issue";
+import type { ErrorKey } from "../error/error-key";
+import { KeyedIssue } from "../error/keyed-issue";
 import { RequestBody } from "./json-body";
 import { InvalidRequestError, type ProblemErrorInput } from "./problem";
 

@@ -21,7 +21,7 @@ import {
 } from "vitest";
 import { TestDatabase } from "../../test-support/database";
 import { ChangeRecords } from "./change-log";
-import { changeLogs } from "./schema";
+import { changeLogs } from "./change-log.schema";
 
 // WHY 時計（Clock.now）を差し替える: ChangeRecords.recordChange が occurred_at に入れる時刻を決めた値で確かめるため。
 vi.mock("@repo/shared/now", { spy: true });

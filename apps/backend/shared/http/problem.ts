@@ -1,11 +1,11 @@
 import { logger } from "@repo/shared/logger";
-import { DomainError, type DomainErrorCode } from "../domain/domain-error";
+import { DomainError, type DomainErrorCode } from "../error/domain-error";
 import {
   type ErrorKey,
   type ErrorKeyParams,
   ErrorKeys,
   type ErrorParamsArgs,
-} from "../domain/error-key";
+} from "../error/error-key";
 import { EnglishProblemDetail } from "./problem-detail.en";
 
 // エラー応答を RFC 9457（Problem Details for HTTP APIs。https://www.rfc-editor.org/rfc/rfc9457.html ）の形にする（Issue #126）。
@@ -15,7 +15,7 @@ import { EnglishProblemDetail } from "./problem-detail.en";
 //   決定と採用しなかった案は ADR docs/adr/architecture/20260929-error-response-rfc9457.md。
 
 // WHY ここから再公開する: 画面（apps/frontend_customer）が backend から import してよいのは apps/backend/package.json の exports に
-//   書いたファイルだけで、shared/domain/error-key.ts は公開していない。画面の辞書はキーと params の形をこの型から作る
+//   書いたファイルだけで、shared/error/error-key.ts は公開していない。画面の辞書はキーと params の形をこの型から作る
 //   （キーを足すと画面の辞書が型エラーで追従を求める。Issue #116）。exports を増やさずに済むよう、Problem と同じ
 //   このファイルから出す。
 export type { ErrorKey, ErrorKeyParams };

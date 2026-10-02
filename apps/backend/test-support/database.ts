@@ -4,7 +4,7 @@ import { env } from "@repo/shared/env";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Client, Pool } from "pg";
-import type { Database } from "../shared/infra/database";
+import type { Database } from "../shared/drizzle/database";
 
 // 実 Postgres を使う単体テスト（*.postgres.test.ts など）のための、テスト専用の DB を用意する部品。
 // 本番のコードからは使わない。test-support/ に置くのが目印で、本番のコードからの import は rule-tests/test-support.test.ts が止め、
@@ -73,9 +73,10 @@ export class TestDatabase {
     return new TestDatabase(drizzle({ client: pool }), pool, url, schema);
   }
 
-  // drizzle/ のマイグレーションをテスト用のスキーマに当てる。
-  // migrationsFolder: apps/backend/shared/drizzle/（このファイルから ../shared/drizzle。Issue #98 で apps/backend 直下の drizzle/ から移し、
-  //   Issue #181 でこのファイルを apps/backend/shared/infra/ から apps/backend/test-support/ に移した）。
+  // drizzle/migrations/ のマイグレーションをテスト用のスキーマに当てる。
+  // migrationsFolder: apps/backend/shared/drizzle/migrations/（このファイルから ../shared/drizzle/migrations。Issue #98 で apps/backend 直下の
+  //   drizzle/ から移し、Issue #181 でこのファイルを apps/backend/shared/infra/ から apps/backend/test-support/ に移し、Issue #310 で
+  //   生成物を shared/drizzle/ の下の migrations/ に分けた）。
   //   WHY このファイルの場所から決める: カレントディレクトリからのパス（"drizzle"）だと、ディレクトリを apps/backend に
   //   移したとき（Issue #68）や、テストをリポジトリ直下以外から動かしたときに見つからない。このファイルは Vitest だけが
   //   読み込み（Next のバンドルには入らない）、import.meta.dirname は元のファイルの場所を指す。
@@ -83,7 +84,13 @@ export class TestDatabase {
   //   pnpm db:migrate の記録と混ざり、「当て済み」と判断されてテスト用のスキーマに表が作られない。
   async migrate(): Promise<void> {
     await migrate(this.db, {
-      migrationsFolder: join(import.meta.dirname, "..", "shared", "drizzle"),
+      migrationsFolder: join(
+        import.meta.dirname,
+        "..",
+        "shared",
+        "drizzle",
+        "migrations",
+      ),
       migrationsSchema: this.schema,
     });
   }

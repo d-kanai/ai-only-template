@@ -7,7 +7,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { ColumnClassifier } from "../../../../shared/infra/column-classification";
+import { ColumnClassifier } from "../../../../shared/drizzle/column-classification";
 
 // todos テーブルの定義（Drizzle のスキーマ）。
 // WHY スキーマを TypeScript で宣言し、SQL はここから生成する（codebase-first）: テーブルの形の正をこのファイルに置き、
@@ -31,7 +31,7 @@ export const todos = pgTable("todos", {
     .defaultNow(),
 });
 
-// todos の列の分類（Issue #216。書き込みのログの before / after のマスクに使う。shared/infra/column-classification.ts）。
+// todos の列の分類（Issue #216。書き込みのログの before / after のマスクに使う。shared/drizzle/column-classification.ts）。
 // WHY title だけ sensitive: 利用者が自由に書く文で、名前・連絡先などの個人情報が入りうる。id（Todo.create が作る uuid）・
 //   完了状態・作成日時はアプリが決める値で、利用者の値を含まない（障害の調査でログから追えるよう値のまま出す）。
 export const todosColumns = ColumnClassifier.classify(todos, {
@@ -48,11 +48,11 @@ export const todoStatusChanges = pgTable(
   "todo_status_changes",
   {
     // 行の id。domain（TodoStatusChange）は持たない（履歴は Todo の中の値で、1 件を外から指すことは無い）。アプリの書き込みでは
-    //   Writer（shared/infra/writer.ts）が randomUUID で作る（前のログと変更履歴に INSERT の前の id が要る。Issue #215）。DB の既定値
+    //   Writer（shared/drizzle/writer.ts）が randomUUID で作る（前のログと変更履歴に INSERT の前の id が要る。Issue #215）。DB の既定値
     //   （defaultRandom = gen_random_uuid()）は、手で行を足すときとマイグレーション（既存の Todo の履歴の補完）のために残す。
     id: uuid("id").primaryKey().defaultRandom(),
     // 親の Todo の id。外部キー（references todos(id) on delete cascade）は、ここで .references() と書かず、手書きの
-    //   マイグレーション（shared/drizzle/0002_todo_status_changes_foreign_key_and_backfill.sql）で張る。
+    //   マイグレーション（shared/drizzle/migrations/0002_todo_status_changes_foreign_key_and_backfill.sql）で張る。
     // WHY on delete cascade: Todo を消したら履歴も消す（delete は todos の 1 文のまま。履歴の DELETE は書かない）。
     // WHY .references() を使わない: drizzle-kit 0.31.11 の generate は、スキーマを指定しない表への外部キーを必ず
     //   REFERENCES "public"."todos" と書く（drizzle-kit の bin.cjs の PgSquasher.squashFK が schemaTo || "public"）。

@@ -239,7 +239,7 @@ describe("TodoApi.delete", () => {
   });
 });
 
-// backend の失敗の応答（RFC 9457 の Problem Details。apps/backend/shared/presentation/problem.ts）。Content-Type も本番と同じにし、
+// backend の失敗の応答（RFC 9457 の Problem Details。apps/backend/shared/http/problem.ts）。Content-Type も本番と同じにし、
 //   application/problem+json でも response.json() で読めることを確かめる。
 function problemResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -342,7 +342,7 @@ describe("エラー時", () => {
     });
   });
 
-  // 400 の項目ごとの誤り（拡張メンバー errors。apps/backend/shared/presentation/problem.ts の ProblemError）。
+  // 400 の項目ごとの誤り（拡張メンバー errors。apps/backend/shared/http/problem.ts の ProblemError）。
   //   detail は読まない（ApiError のコンストラクタが落とす）。params の無い要素は空の params にする。
   test("Problem Details に errors があれば、各要素の pointer・key・params を持つ ApiError を投げる", async () => {
     // given

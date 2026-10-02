@@ -1,5 +1,5 @@
-import type { Transaction } from "../../../../shared/application/transaction";
-import { DomainError } from "../../../../shared/domain/domain-error";
+import { DomainError } from "../../../../shared/error/domain-error";
+import type { Transaction } from "../../../../shared/transaction/transaction";
 import type { Todo } from "./todo";
 
 // Todo の永続化の窓口（interface）。
@@ -9,7 +9,7 @@ import type { Todo } from "./todo";
 // WHY すべて Promise を返す: InMemory の実装は同期で済むが、DB の実装は非同期になる。同じ形にそろえ、
 //   実装を差し替えても呼び出し側（application 層）を直さずに済むようにする。
 // WHY 書き込みと command の読み込みは Transaction を受け取る（Issue #215。ADR docs/adr/architecture/20260930-transaction-from-application.md）:
-//   Transaction は port（TransactionRunner）と同じ shared/application/transaction に置き、domain からは型だけ参照する
+//   Transaction は port（TransactionRunner）と同じ shared/transaction/transaction に置き、domain からは型だけ参照する
 //   （Issue #230。rule-tests/architecture.test.ts の規則 domain が import type のときだけ許す）。
 //   トランザクションの範囲は command が決める（TransactionRunner の run）。command は同じ tx で findByIdForUpdate（行ロック）と
 //   insert / update / delete を呼び、読み込みから書き込みまでを 1 つのトランザクションにする。Repository はトランザクションを張らない。

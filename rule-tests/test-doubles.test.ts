@@ -37,7 +37,7 @@ import { casesByName } from "./case-table";
 //       書き方を 1 つにしておけば判定が単純で見逃しが無い（安全側で違反）。
 //   - db-tests-in-infra-only: apps/backend/test-support/database（実 Postgres。TestDatabase.create。Issue #181 で
 //     apps/backend/shared/infra/database.test-support から移した）を import する（`from` / `import "…"` / `import("…")`。
-//     `import type` も）のは、apps/backend/**/infra/ の直下のテスト、apps/backend/test-support/ の直下のテスト（test-support 自身のテスト）、
+//     `import type` も）のは、apps/backend/features/<f>/internal/infra/ と apps/backend/shared/drizzle/・shared/change-log/ の直下のテスト、apps/backend/test-support/ の直下のテスト（test-support 自身のテスト）、
 //     apps/backend/test-support/<feature>/ の直下のテストデータビルダーのテスト（*-builder.test.ts。Issue #240）、
 //     apps/backend/spec/journey/ の直下の API ジャーニーテスト（*.api-journey.test.ts。Issue #187 / #200）、
 //     apps/backend/spec/api/<feature>/ の直下の API 仕様テスト（*.api-spec.test.ts。Issue #219）、vitest.global-setup.ts だけ。
@@ -123,8 +123,13 @@ const TEST_DATABASE_MODULE = "apps/backend/test-support/database";
 
 // test-support/database を import してよいファイルか。
 // WHY infra の直下のテストだけ: 実 Postgres のテストは Repository（*.postgres.ts）と database.ts の隣に置く（testing.md の表）。
-//   features/<f>/internal/infra と shared/infra の 2 か所だけを許し、infra の下の入れ子、名前が infra の feature の別の層
+//   features/<f>/internal/infra と、shared の DB に触れる意味の単位 shared/drizzle（接続・トランザクション・書き込みの口）・
+//   shared/change-log（変更履歴の記録と表）の 3 か所だけを許し、infra の下の入れ子、名前が infra の feature の別の層
 //   （features/infra/internal/application/）、別の層の下の infra/（features/x/internal/application/infra/）は通さない。
+// WHY shared は単位を名前で挙げる（shared の下すべてにしない）: Issue #310 で shared/ を層（infra など）から意味の単位に分けた。
+//   以前の shared/infra に当たるのは drizzle と change-log で、shared/error（domain の部品）・shared/http（presentation の部品）・
+//   shared/transaction（application の port）のテストは DB に接続しない層のテストなので、以前の shared/domain などと同じく通さない。
+//   shared に DB を使う単位を足したら、ここに足す（足さなければ違反になり、気づける）。
 // WHY apps/backend/test-support/ の直下のテストも許す: test-support/database.ts 自身のテスト（database.test.ts）が、テスト用の
 //   スキーマの作成と後始末を実 Postgres で確かめる。
 // WHY apps/backend/spec/journey/ の直下の *.api-journey.test.ts も許す（Issue #187 / #200）: API ジャーニーテストは実 Postgres で
@@ -141,7 +146,7 @@ const TEST_DATABASE_MODULE = "apps/backend/test-support/database";
 function mayImportTestDatabase(path: string): boolean {
   return (
     path === "vitest.global-setup.ts" ||
-    /^apps\/backend\/(?:(?:features\/[^/]+\/internal|shared)\/infra|test-support)\/[^/]+\.test\.tsx?$/.test(
+    /^apps\/backend\/(?:features\/[^/]+\/internal\/infra|shared\/(?:drizzle|change-log)|test-support)\/[^/]+\.test\.tsx?$/.test(
       path,
     ) ||
     /^apps\/backend\/test-support\/[^/]+\/[^/]+-builder\.test\.ts$/.test(
@@ -260,7 +265,9 @@ const PRESENTATION_TEST =
   "apps/backend/features/x/internal/presentation/x.api.test.ts";
 const INFRA_TEST =
   "apps/backend/features/x/internal/infra/x-repository.postgres.test.ts";
-const SHARED_INFRA_TEST = "apps/backend/shared/infra/database.test.ts";
+const SHARED_DRIZZLE_TEST = "apps/backend/shared/drizzle/database.test.ts";
+const SHARED_CHANGE_LOG_TEST =
+  "apps/backend/shared/change-log/change-log.test.ts";
 const TEST_SUPPORT = "../../../../test-support/database";
 const API_JOURNEY_TEST = "apps/backend/spec/journey/x.api-journey.test.ts";
 // WHY OS の一時ディレクトリに置く: リポジトリ内に置くと本番の検査や Biome・git の差分に混ざる。afterAll で消す。
@@ -390,8 +397,15 @@ describeFeature(feature, ({ Scenario }) => {
               ),
             ],
             [
-              "shared/infra のテストから ../../test-support/database を import",
-              SHARED_INFRA_TEST,
+              "shared/drizzle のテストから ../../test-support/database を import",
+              SHARED_DRIZZLE_TEST,
+              source(
+                'import { createTestDatabase } from "../../test-support/database";',
+              ),
+            ],
+            [
+              "shared/change-log のテストから ../../test-support/database を import",
+              SHARED_CHANGE_LOG_TEST,
               source(
                 'import { createTestDatabase } from "../../test-support/database";',
               ),
@@ -445,10 +459,10 @@ describeFeature(feature, ({ Scenario }) => {
               ),
             ],
             [
-              "application のテストから名前・場所の一部が同じ別のモジュール（shared/infra/database・database-x・database/x・別の場所の test-support/database・パッケージ・以前の置き場所）",
+              "application のテストから名前・場所の一部が同じ別のモジュール（shared/drizzle/database・database-x・database/x・別の場所の test-support/database・パッケージ・以前の置き場所）",
               APPLICATION_TEST,
               source(
-                'import { AppDatabase } from "../../../../shared/infra/database";',
+                'import { AppDatabase } from "../../../../shared/drizzle/database";',
                 'import { a } from "../../../../test-support/database-x";',
                 'import { b } from "../../../../test-support/database/x";',
                 'import { c } from "./test-support/database";',
@@ -542,8 +556,8 @@ describeFeature(feature, ({ Scenario }) => {
               [{ rule: "vi-mock-only-now", line: 2 }],
             ],
             [
-              "shared/infra のテストで外部のパッケージ（pg）を vi.mock",
-              SHARED_INFRA_TEST,
+              "shared/drizzle のテストで外部のパッケージ（pg）を vi.mock",
+              SHARED_DRIZZLE_TEST,
               source('vi.mock("pg");'),
               [{ rule: "vi-mock-only-now", line: 1 }],
             ],
@@ -721,6 +735,32 @@ describeFeature(feature, ({ Scenario }) => {
               ),
               [{ rule: "db-tests-in-infra-only", line: 1 }],
             ],
+            ...(
+              [
+                // shared の DB に触れない意味の単位（Issue #310）: domain・presentation・application の部品。
+                "apps/backend/shared/error/validate.test.ts",
+                "apps/backend/shared/http/json-body.test.ts",
+                "apps/backend/shared/transaction/transaction.test.ts",
+                // 前方一致だけが同じ別のディレクトリ・Issue #310 より前の置き場所 shared/infra。
+                "apps/backend/shared/drizzle-x/x.test.ts",
+                "apps/backend/shared/infra/x.test.ts",
+              ] as const
+            ).map((path): [string, string, string, TestDoubleViolation[]] => [
+              `DB に触れない shared の単位などのテストから import（${path}）`,
+              path,
+              source(
+                'import { createTestDatabase } from "../../test-support/database";',
+              ),
+              [{ rule: "db-tests-in-infra-only", line: 1 }],
+            ]),
+            [
+              "shared/drizzle の下の入れ子のテストから import（shared/drizzle の直下だけ）",
+              "apps/backend/shared/drizzle/migrations/x.test.ts",
+              source(
+                'import { createTestDatabase } from "../../../test-support/database";',
+              ),
+              [{ rule: "db-tests-in-infra-only", line: 1 }],
+            ],
             [
               "apps/backend/spec/journey/ の .api-journey の無いテストから import",
               "apps/backend/spec/journey/x.test.ts",
@@ -852,7 +892,13 @@ describeFeature(feature, ({ Scenario }) => {
             importTestSupport,
             'vi.mock("@repo/shared/now", { spy: true });',
           ),
-          [SHARED_INFRA_TEST]: source(
+          [SHARED_DRIZZLE_TEST]: source(
+            'import { createTestDatabase } from "../../test-support/database";',
+          ),
+          [SHARED_CHANGE_LOG_TEST]: source(
+            'import { createTestDatabase } from "../../test-support/database";',
+          ),
+          "apps/backend/shared/error/x.test.ts": source(
             'import { createTestDatabase } from "../../test-support/database";',
           ),
           "apps/backend/test-support/database.test.ts": source(
@@ -909,7 +955,9 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/backend/features/x/internal/domain/y.test.ts",
             "apps/backend/features/x/internal/infra/x-repository.postgres.test.ts",
             "apps/backend/features/x/internal/presentation/x.api.test.ts",
-            "apps/backend/shared/infra/database.test.ts",
+            "apps/backend/shared/change-log/change-log.test.ts",
+            "apps/backend/shared/drizzle/database.test.ts",
+            "apps/backend/shared/error/x.test.ts",
             "apps/backend/spec/api/x/create-x.api-spec.test.ts",
             "apps/backend/spec/api/x/y.test.ts",
             "apps/backend/spec/journey/x.api-journey.test.ts",
@@ -926,6 +974,7 @@ describeFeature(feature, ({ Scenario }) => {
             "vi-mock-only-now: apps/backend/features/x/internal/domain/y.test.ts:2",
             "db-tests-in-infra-only: apps/backend/features/x/internal/presentation/x.api.test.ts:2",
             "vi-mock-only-now: apps/backend/features/x/internal/presentation/x.api.test.ts:5",
+            "db-tests-in-infra-only: apps/backend/shared/error/x.test.ts:1",
             "db-tests-in-infra-only: apps/backend/spec/api/x/y.test.ts:1",
             "db-tests-in-infra-only: apps/backend/spec/journey/y.test.ts:1",
             "db-tests-in-infra-only: apps/frontend_customer/features/x/x-screen.test.tsx:1",
@@ -954,7 +1003,7 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("テストダブル（実ファイル）", ({ And }) => {
     And(
-      "backend のテストの vi.mock は @repo/shared/now だけ、test-support/database の import は infra のテスト・test-support のテスト（直下とテストデータビルダー）・API ジャーニーテスト・API 仕様テスト・global-setup だけ",
+      "backend のテストの vi.mock は @repo/shared/now だけ、test-support/database の import は infra と shared/drizzle・shared/change-log のテスト・test-support のテスト（直下とテストデータビルダー）・API ジャーニーテスト・API 仕様テスト・global-setup だけ",
       () => {
         // given: 実ファイル（repoRoot）
         // when

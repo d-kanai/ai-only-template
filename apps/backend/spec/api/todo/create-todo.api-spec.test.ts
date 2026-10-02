@@ -16,7 +16,7 @@ import {
 // WHY 応答に加えて DB の行も見る: 応答が正しくても永続化がずれる誤り（列の取り違え・履歴や変更の記録の書き忘れ）は応答だけでは
 //   見逃す（API ジャーニーと同じ方針。Issue #187）。拒否した要求は何も書かないこと（表と変更の記録が空のまま）も見る。
 // WHY 変更の記録（change_logs）は .feature に書かず、同じ操作の結果を確かめる step の中で確かめる（ユーザー指示 2026-10-01）:
-//   変更の記録は Writer（shared/infra/writer.ts）が文ごとに自動で残す技術の仕組みで、業務の仕様ではない（.feature の禁止語。
+//   変更の記録は Writer（shared/drizzle/writer.ts）が文ごとに自動で残す技術の仕組みで、業務の仕様ではない（.feature の禁止語。
 //   rule-tests/feature-business-language.ts）。記録の書き忘れ・中身のずれを見逃さないよう、検証そのものは step の実装に残す。
 //   ほかの api-spec（rename / change-todo-completion / delete）も同じ。
 // 前提の Todo が要る step は、ほかの api-spec と同じくテストデータビルダー（TodoBuilder.of）で作る（list-todos.api-spec.test.ts の冒頭）。

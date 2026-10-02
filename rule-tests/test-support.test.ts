@@ -52,7 +52,7 @@ import { casesByName } from "./case-table";
 //     限界: ステップは「行頭が `- key:` の行」で区切り、コメントの行（`#` で始まる）は除いて読む。パターンのほか（find の結果を
 //     判定に使っているか・対象のイメージ）は見ない（手元のイメージで exit 0 / 混入で exit 1 を実測した。Issue #181 の work-logs）。
 //   - in-memory-placement: apps/backend の下の InMemory の実装（名前が `.in-memory.<ソースの拡張子>` で終わるファイル）が
-//     apps/backend/test-support/ の下に無い（Issue #191。features/<f>/internal/infra/・shared/infra/・features/<f>/test-support/ は違反）。
+//     apps/backend/test-support/ の下に無い（Issue #191。features/<f>/internal/infra/・shared の下（shared/drizzle/ など）・features/<f>/test-support/ は違反）。
 //     WHY: InMemory の Repository はテストだけが使うコードで、infra に置くと本番のコードと見分けが付かず、本番の api ファイルが
 //     参照でき（architecture.test.ts の規則 presentation の例外の絞り込みだけが頼り）、イメージにも入る。test-support に置けば
 //     production-imports-test-support と .dockerignore が本番とイメージから外す。
@@ -462,7 +462,7 @@ const apiSpecFiles = {
 };
 const allowedFiles = {
   "apps/backend/test-support/database.ts": lines(
-    'import type { Database } from "../shared/infra/database";',
+    'import type { Database } from "../shared/drizzle/database";',
   ),
   "apps/backend/test-support/nested/x.ts": "export const x = 1;\n",
   "apps/frontend_customer/test-support/i18n.tsx": lines(
@@ -481,7 +481,7 @@ const allowedFiles = {
   ),
   // 本番のコードの test-support と関係の無い import・コメントの中。
   "apps/backend/features/x/internal/infra/x.postgres.ts": lines(
-    'import { AppDatabase } from "../../../../shared/infra/database";',
+    'import { AppDatabase } from "../../../../shared/drizzle/database";',
     `// ${importDatabase}`,
   ),
   // 依存と生成物の中は見ない。
@@ -491,7 +491,7 @@ const allowedFiles = {
   "apps/backend/package.json": JSON.stringify({
     name: "@repo/backend",
     exports: {
-      "./shared/presentation/problem": "./shared/presentation/problem.ts",
+      "./shared/http/problem": "./shared/http/problem.ts",
     },
   }),
   "apps/frontend_customer/package.json": JSON.stringify({
@@ -1050,12 +1050,12 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And(
-      "apps/backend/test-support/ の外の apps/backend の .in-memory のソースは違反（features の infra・shared の infra・application・features の下の test-support・前方一致の test-support-x など）",
+      "apps/backend/test-support/ の外の apps/backend の .in-memory のソースは違反（features の infra・shared の drizzle・application・features の下の test-support・前方一致の test-support-x など）",
       () => {
         // given
         const cases: [string][] = [
           ["apps/backend/features/x/internal/infra/x-repository.in-memory.ts"],
-          ["apps/backend/shared/infra/x.in-memory.ts"],
+          ["apps/backend/shared/drizzle/x.in-memory.ts"],
           ["apps/backend/features/x/internal/application/x.in-memory.mts"],
           ["apps/backend/features/x/internal/infra/x.in-memory.tsx"],
           ["apps/backend/x.in-memory.cjs"],
@@ -1152,7 +1152,7 @@ describeFeature(feature, ({ Scenario }) => {
         // 行が無く、別の書き方（/ 付き）だけ → test-support/ のすべてのファイルが除外されない。
         ".dockerignore": lines(".git", "**/test-support/"),
         "apps/backend/features/x/internal/infra/bad.postgres.ts": lines(
-          'import { AppDatabase } from "../../../../shared/infra/database";',
+          'import { AppDatabase } from "../../../../shared/drizzle/database";',
           importDatabase,
         ),
         "apps/frontend_customer/features/x/components/bad.tsx": lines(
@@ -1280,7 +1280,7 @@ describeFeature(feature, ({ Scenario }) => {
           // 違反。
           "apps/backend/features/x/internal/infra/x-repository.in-memory.ts":
             "export class InMemoryXRepository {}\n",
-          "apps/backend/shared/infra/z.in-memory.js": "export const z = 1;\n",
+          "apps/backend/shared/drizzle/z.in-memory.js": "export const z = 1;\n",
           "apps/backend/features/x/test-support/w.in-memory.ts":
             "export const w = 1;\n",
         });
@@ -1296,7 +1296,7 @@ describeFeature(feature, ({ Scenario }) => {
           inMemory: [
             "apps/backend/features/x/internal/infra/x-repository.in-memory.ts",
             "apps/backend/features/x/test-support/w.in-memory.ts",
-            "apps/backend/shared/infra/z.in-memory.js",
+            "apps/backend/shared/drizzle/z.in-memory.js",
             "apps/backend/test-support/x/x-repository.in-memory.ts",
             "apps/backend/test-support/y.in-memory.mts",
           ],
@@ -1308,7 +1308,7 @@ describeFeature(feature, ({ Scenario }) => {
             "in-memory-placement": [
               "in-memory-placement: apps/backend/features/x/internal/infra/x-repository.in-memory.ts",
               "in-memory-placement: apps/backend/features/x/test-support/w.in-memory.ts",
-              "in-memory-placement: apps/backend/shared/infra/z.in-memory.js",
+              "in-memory-placement: apps/backend/shared/drizzle/z.in-memory.js",
             ],
           },
         });
@@ -1568,7 +1568,7 @@ describeFeature(feature, ({ Scenario }) => {
         const files = listProductionSources(repoRoot);
 
         // then
-        expect(files).toContain("apps/backend/shared/infra/database.ts");
+        expect(files).toContain("apps/backend/shared/drizzle/database.ts");
         expect(files).toContain("apps/frontend_customer/shared/i18n/i18n.tsx");
         expect(violations["production-imports-test-support"]).toEqual([]);
       },

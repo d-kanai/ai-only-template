@@ -43,7 +43,7 @@ export const FORBIDDEN_WORDS_IN_FEATURE: readonly RegExp[] = [
   // 表名（apps/backend の schema.ts の pgTable）。
   /\btodos\b/i,
   /todo_status_changes/i,
-  // 表名 change_logs と、その業務風の言い換え。WHY: 変更の記録は Writer（shared/infra/writer.ts）が文ごとに自動で残す技術の
+  // 表名 change_logs と、その業務風の言い換え。WHY: 変更の記録は Writer（shared/drizzle/writer.ts）が文ごとに自動で残す技術の
   //   仕組みで、業務の仕様ではない（ユーザー指示 2026-10-01）。記録の内容は、同じ操作の結果を確かめる step の実装の中で確かめる。
   //   区切りに空白・_・- を許し、単数形（change log）も止める。
   /change[\s_-]*logs?/i,

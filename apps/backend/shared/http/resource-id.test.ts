@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { randomUUID } from "node:crypto";
 import { describe, expect, test } from "vitest";
-import { DomainError } from "../domain/domain-error";
+import { DomainError } from "../error/domain-error";
 import { ResourceId } from "./resource-id";
 
 describe("ResourceId.parseUuid", () => {

@@ -10,7 +10,7 @@ import { defineMessages } from "./i18n";
 // placeholder は {name}（name は英数字と _）。キー・placeholder の型と en の検査は defineMessages（i18n.tsx）。
 export const commonMessages = defineMessages({
   ja: {
-    // サーバのエラー（backend の ErrorKey。apps/backend/shared/presentation/problem.ts）
+    // サーバのエラー（backend の ErrorKey。apps/backend/shared/http/problem.ts）
     "todo.title.empty": "タイトルを入力してください",
     "todo.title.tooLong": "タイトルは {max} 文字以内で入力してください",
     "todo.title.invalid": "タイトルが不正です",

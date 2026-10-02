@@ -1,4 +1,4 @@
-import type { ErrorKey } from "@repo/backend/shared/presentation/problem";
+import type { ErrorKey } from "@repo/backend/shared/http/problem";
 import { commonMessages } from "@/shared/i18n/common.messages";
 import {
   formatMessage,
@@ -22,7 +22,7 @@ type TranslatedKey<K extends MessageKey<typeof commonMessages>> = K;
 //   サーバが返しうるキーと error.unknown に絞る。
 export type ApiErrorKey = TranslatedKey<ErrorKey | "error.unknown">;
 
-// 400 の項目ごとの誤り 1 件（Problem Details の拡張メンバー errors の要素。apps/backend/shared/presentation/problem.ts の ProblemError）。
+// 400 の項目ごとの誤り 1 件（Problem Details の拡張メンバー errors の要素。apps/backend/shared/http/problem.ts の ProblemError）。
 // pointer は誤りのある項目を指す JSON Pointer（RFC 6901）の URI の fragment の形（"#/title"。本文全体は "#"）。
 // WHY key を ErrorKey に絞る（error.unknown を含めない）: 項目ごとの誤りはサーバが返すものだけで、画面側だけのキーは入らない。
 // WHY detail を持たない: ApiError と同じく、開発者向けの英語で画面に出さない（契約外）。
@@ -36,7 +36,7 @@ export type ApiFieldError = {
 export type ApiErrorInit = {
   // HTTP の応答のステータス（本文の status ではない。todo-api.ts の toError）。
   status: number;
-  // Problem Details（RFC 9457）の type（"/problems/not-found" など。apps/backend/shared/presentation/problem.ts）。
+  // Problem Details（RFC 9457）の type（"/problems/not-found" など。apps/backend/shared/http/problem.ts）。
   //   本文が Problem Details でない失敗（error.unknown）では分からないので省く。
   type?: string;
   key: ApiErrorKey;
@@ -119,7 +119,7 @@ export class ApiErrorMessage {
   //   項目名は英字の識別子（~ や / を含まず、RFC 6901 のエスケープが要らない）。入れ子の位置（"#/title/0"）は項目の入力に
   //   結び付けず form に出す。
   // WHY 項目ごと・form とも最初の 1 件だけ: 入力の下とフォームの上には文言を 1 つずつ出す。backend の errors は zod の issue の
-  //   順で本文の key は最初の 1 件（apps/backend/shared/presentation/json-body.ts）。今の画面が送る本文（項目 1 つ）では、
+  //   順で本文の key は最初の 1 件（apps/backend/shared/http/json-body.ts）。今の画面が送る本文（項目 1 つ）では、
   //   同じ項目の誤りも、本文全体の誤り（"#" の notObject と unknownKeys は同時に起きない）も 1 件までしか返らない。
   // WHY F を型引数にする: 呼び出し側（hook）が渡した項目名だけを fields のキーにし、画面が fieldErrors.title を型で読めるようにする。
   static toMessages<F extends string>(

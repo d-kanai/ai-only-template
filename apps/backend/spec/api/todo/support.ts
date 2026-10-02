@@ -21,11 +21,11 @@ import { DeleteTodoApi } from "../../../features/todo/internal/presentation/dele
 import { GetTodoApi } from "../../../features/todo/internal/presentation/get-todo.api";
 import { ListTodosApi } from "../../../features/todo/internal/presentation/list-todos.api";
 import { RenameTodoApi } from "../../../features/todo/internal/presentation/rename-todo.api";
-import type { ChangeEntry } from "../../../shared/infra/change-log";
-import type { Database } from "../../../shared/infra/database";
-import { changeLogs } from "../../../shared/infra/schema";
-import { PostgresTransactionRunner } from "../../../shared/infra/transaction.postgres";
-import type { Problem } from "../../../shared/presentation/problem";
+import type { ChangeEntry } from "../../../shared/change-log/change-log";
+import { changeLogs } from "../../../shared/change-log/change-log.schema";
+import type { Database } from "../../../shared/drizzle/database";
+import { PostgresTransactionRunner } from "../../../shared/drizzle/transaction.postgres";
+import type { Problem } from "../../../shared/http/problem";
 
 // Todo の API 仕様（spec/api/todo/*.api-spec.test.ts。Issue #219）が共有する補助: API ごとの組み立て（<Api>Assembly）・DB の行
 //   （TodoSpecRows）・期待値（TodoSpecExpected）・変更の記録（TodoSpecLogs）・要求（TodoSpecRequests）・失敗の本文（TodoSpecProblems）。
@@ -218,7 +218,7 @@ export class TodoSpecExpected {
 // 変更の記録（change_logs）の読み出しと期待値。
 export class TodoSpecLogs {
   // 変更の記録を、id と occurred_at を除いた形にして並べる。
-  // WHY id と occurred_at を除く: id は DB が乱数で作り、occurred_at は要求を処理した時刻（shared/infra/change-log.test.ts が固定する）。
+  // WHY id と occurred_at を除く: id は DB が乱数で作り、occurred_at は要求を処理した時刻（shared/change-log/change-log.test.ts が固定する）。
   // WHY 表・行・操作・変わった列の名前で並べる: 同じ要求の記録は同じ occurred_at で、DB が返す順は決まらない。期待値も
   //   sorted で同じ規則で並べて比べる（changes のキーの順は jsonb が並べ替えるので、鍵には列の名前の集合を使う）。
   static async entries(db: Database): Promise<ChangeEntry[]> {

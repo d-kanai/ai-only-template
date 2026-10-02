@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
-import { DomainError } from "../../../../shared/domain/domain-error";
+import { DomainError } from "../../../../shared/error/domain-error";
 import { InMemoryTodoRepository } from "../../../../test-support/todo/todo-repository.in-memory";
 import { inMemoryTransaction } from "../../../../test-support/transaction-runner.in-memory";
 import { Todo } from "../domain/todo";

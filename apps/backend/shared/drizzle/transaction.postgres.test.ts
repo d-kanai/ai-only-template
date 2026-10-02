@@ -12,7 +12,7 @@ import {
   vi,
 } from "vitest";
 import { TestDatabase } from "../../test-support/database";
-import { changeLogs } from "./schema";
+import { changeLogs } from "../change-log/change-log.schema";
 import { PostgresTransactionRunner } from "./transaction.postgres";
 import { PostgresWriter } from "./writer";
 

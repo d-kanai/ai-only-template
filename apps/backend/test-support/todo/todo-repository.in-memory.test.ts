@@ -2,7 +2,7 @@
 import { Clock } from "@repo/shared/now";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { Todo } from "../../features/todo/internal/domain/todo";
-import { DomainError } from "../../shared/domain/domain-error";
+import { DomainError } from "../../shared/error/domain-error";
 import { inMemoryTransaction } from "../transaction-runner.in-memory";
 import { InMemoryTodoRepository } from "./todo-repository.in-memory";
 
@@ -286,7 +286,7 @@ describe("InMemoryTodoRepository", () => {
     });
   });
 
-  // Postgres は Writer が「表と id」の message の Error を投げる（shared/infra/writer.ts）。InMemory も同じ message にする。
+  // Postgres は Writer が「表と id」の message の Error を投げる（shared/drizzle/writer.ts）。InMemory も同じ message にする。
   test("ロックせずに読んだ後に delete された Todo を変えて update すると、Error を投げ、Todo を戻さない", async () => {
     // given
     const repository = new InMemoryTodoRepository();
