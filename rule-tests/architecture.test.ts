@@ -60,7 +60,7 @@ import { expect } from "vitest";
 import { casesByName } from "./case-table";
 
 // ディレクトリ構成ルール（.claude/rules/code/backend.md・frontend.md。規則の一覧は .claude/rules/code/architecture-check.md）の依存の向きを、仕様として機械的に検査するテスト。
-// 対象は「依存の向き（全体）」「画面側とサーバ側の境界」「backend の 4 層の依存してよい先」、apps/frontend_customer と apps/backend の
+// 対象は frontend.md・backend.md の「依存の向き」の表（全体・画面側とサーバ側・backend の 4 層の依存してよい先）、apps/frontend_customer と apps/backend の
 // 境界（Issue #68。backend → frontend の禁止、backend の中は相対パスだけ、frontend などから backend へは "@repo/backend/..." の
 // 書き方だけ、apps/backend/package.json の exports の過不足）、frontend と backend で共通の apps/shared（Issue #90。置き場所、
 // "@repo/shared/..." の書き方、画面側から参照しない、apps/shared/package.json の exports の過不足）と、環境変数の直参照の禁止
@@ -976,7 +976,7 @@ const RULES: Rule[] = [
   },
   {
     // 「`features/<feature>/` の `api/` 以外は backend を参照せず、`api/` が re-export した型を使う」
-    // WHY 画面側の shared/ も含める: 画面側で backend を参照してよいのは features/<f>/api/ だけ（「画面側とサーバ側の境界」）で、
+    // WHY 画面側の shared/ も含める: 画面側で backend を参照してよいのは features/<f>/api/ だけ（frontend.md の「依存の向き」）で、
     //   shared/ から参照すると境界が api/ の 1 か所に集まらなくなるため。
     id: "screen-to-backend",
     name: "apps/frontend_customer/features/<f>/ の api/ 以外と apps/frontend_customer/shared/ は apps/backend/ を参照しない",
@@ -1209,7 +1209,7 @@ const RULES: Rule[] = [
           ))),
   },
   {
-    // 「他のモジュールの internal/ は参照しない」（Issue #208。モジュラーモノリス。.claude/rules/code/backend.md の「モジュールの境界」）。
+    // 「他のモジュールの internal/ は参照しない」（Issue #208。モジュラーモノリス。.claude/rules/code/backend.md の「依存の向き」の表の「モジュールの境界」）。
     //   backend の feature を 1 つのモジュールとし、直下を公開の入口 expose/ と中身 internal/ に分ける。
     // WHY: internal はモジュールの中身で、他のモジュールが依存すると、中身を変えるたびに他のモジュールが壊れ、境界が無くなる。
     //   他のモジュールが使えるのは expose/ だけにし、公開するものをディレクトリで決める。
@@ -2510,8 +2510,7 @@ function findStaticInInstanceClassViolations(root: string): string[] {
 
 // --- workspace パッケージの exports（規則 backend-exports。Issue #68 の段階 2。規則 shared-exports。Issue #90） ---
 // exports は、@repo/backend・@repo/shared として外（そのパッケージのディレクトリの外）に公開するファイルの一覧。
-//   ユーザー判断で、全ファイル（"./*"）ではなく、外が使う入口だけを明示する（.claude/rules/code/backend.md の「import の書き方と
-//   公開の範囲（exports）」、.claude/rules/code/shared.md）。
+//   ユーザー判断で、全ファイル（"./*"）ではなく、外が使う入口だけを明示する（.claude/rules/code/backend.md の「import と exports」の表の「exports」、.claude/rules/code/shared.md）。
 // 検査すること（1 つでも破ると「<規則の id>: ...」の行を出す）:
 //   (1) 外から "<パッケージ名>/<path>" で参照するものは、すべて exports のどれかのキーに当たる。
 //       WHY: 当たらないと Next / Vitest / tsc の解決で失敗するが、その前に「どのファイルのどの参照か」を一覧で出す。

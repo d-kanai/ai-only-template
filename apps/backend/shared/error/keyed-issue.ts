@@ -5,7 +5,7 @@ import type { ErrorKey, ErrorKeyParams, ParamlessErrorKey } from "./error-key";
 //   それを DomainError の key に、presentation の toProblemError（shared/http/json-body.ts）は Problem の errors の key に戻す。
 //   domain は自然言語の文言を持たない（画面がキーを辞書で翻訳する）。
 // WHY shared に置く（Issue #144 で todo.ts から shared/domain に移し、Issue #310 で shared/error に移した）: presentation の
-//   リクエストのスキーマも、domain と同じ規則（必須・長さ）を同じキーで重ねる（.claude/rules/code/backend.md の presentation）。
+//   リクエストのスキーマも、domain と同じ規則（必須・長さ）を同じキーで重ねる（.claude/rules/code/backend.md の「入力検証」の表の「リクエスト」）。
 //   feature の domain は presentation から値で import できない（定数を除く。規則 presentation）が、shared はどの層からも値で import できる。
 // WHY このクラスを通す（{ error: "todo.title.empty" } と直接書かない）: zod の error は任意の文字列を受け付けるので、
 //   キーの打ち間違いを型で止めるため。

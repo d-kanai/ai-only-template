@@ -78,7 +78,7 @@ export type Problem = {
   //   項目ごとの誤りの一覧（Issue #88）。
   // WHY presentation の誤りだけ: domain の不変条件の誤り（DomainError）は key 1 つで、domain はリクエストの項目名を知らない
   //   （domain にリクエストの都合を持ち込まない）。項目ごとに返したい値の規則は presentation のスキーマで重ねる
-  //   （.claude/rules/code/backend.md の presentation）。JSON として読めない誤りも項目が無いので付けない。
+  //   （.claude/rules/code/backend.md の「入力検証」の表の「リクエスト」）。JSON として読めない誤りも項目が無いので付けない。
   // WHY 省略可能にする（空配列にしない）: 誤りが項目に結び付かないとき（404・500・JSON でない）は一覧自体が無い。
   errors?: ProblemError[];
 };

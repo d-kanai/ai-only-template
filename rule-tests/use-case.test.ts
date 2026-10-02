@@ -15,7 +15,7 @@ import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, expect } from "vitest";
 import { casesByName } from "./case-table";
 
-// 「1 ユースケース = 1 API = 1 command」（.claude/rules/code/backend.md、Issue #175・#177）を、application の command / query
+// 「1 ユースケース = 1 API = 1 command」（.claude/rules/code/backend.md の「API の書き方」の表の「1 API = 1 command」、Issue #175・#177）を、application の command / query
 // （apps/backend/features/*/internal/application/*.command.ts・*.query.ts）の入力で機械的に検査するテスト。
 // WHY 検査する: 入力の任意の項目は「指定されたときだけ変える」分岐を command に生み、1 つの command に複数のユースケース
 //   （改名・完了の切り替え）が混ざる。ユースケースが違うなら command を分ける（Issue #175）。api 側は rule-tests/api-request.test.ts が
@@ -55,7 +55,7 @@ import { casesByName } from "./case-table";
 //       runner の run が渡した tx で Repository が呼ばれることを確かめる）。`const { run } = this.transactions` のような分割代入・
 //       別名の変数（`const t = this.transactions; t.run(…)`）は見逃さず違反と数える（安全側）。本体の範囲は括弧の対応で決めるので、
 //       文字列・正規表現の中の `{` `}` があるとずれる。
-// query の規則（Issue #332。.claude/rules/code/backend.md の application の「読むだけは query」「query はトランザクションを張らない」）:
+// query の規則（Issue #332。.claude/rules/code/backend.md の「ユースケースとトランザクション」の表の「query / command」「トランザクションの張り方」）:
 //   - query-without-writes: *.query.ts で、トランザクションの `.run(` と Repository の書き込み `.insert(` / `.update(` / `.delete(` を
 //     呼ぶ（`.` と名前と `(` の間の空白・改行、型引数 `.run<T>(`、`?.` は可）。行は名前の行（呼び出しごと）。command（*.command.ts）は対象外。
 //     WHY: query は読むだけ（副作用なし）で、状態を変えるなら command に分ける。query がトランザクションを張ると、command の

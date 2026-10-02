@@ -35,7 +35,7 @@ export class RequestBody {
   //   JSON として読めるかだけは zod の前の段階（request.json()）なので、ここで InvalidRequestError にする。
   // WHY 値の中身の規則を持つかはスキーマ次第: 形（JSON・オブジェクト・未知の項目・型）は必ずここで見る。必須・長さは各 api の
   //   スキーマが domain と同じキー・同じ定数で重ねてよい（domain より厳しくしない。domain は常に完全に検証する。Issue #144。
-  //   .claude/rules/code/backend.md の「presentation」）。重ねると、項目ごとの誤りを 1 回の応答（errors）でまとめて返せる。
+  //   .claude/rules/code/backend.md の「入力検証」の表の「方針」）。重ねると、項目ごとの誤りを 1 回の応答（errors）でまとめて返せる。
   static async parse<Schema extends z.ZodType>(
     request: Request,
     schema: Schema,

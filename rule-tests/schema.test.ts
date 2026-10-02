@@ -15,7 +15,7 @@ import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { expect } from "vitest";
 import { casesByName } from "./case-table";
 
-// DB の列の型の既定（.claude/rules/code/backend.md の「列の型」。決定は ADR docs/adr/quality/20260930-db-column-types-default-text-and-integer.md、
+// DB の列の型の既定（.claude/rules/code/backend.md の「DB スキーマ」の表の「列の型」。決定は ADR docs/adr/quality/20260930-db-column-types-default-text-and-integer.md、
 // Issue #145）を、Drizzle のスキーマ（apps/backend/**/infra/schema.ts と apps/backend/shared/ の下の *.schema.ts）で機械的に検査するテスト。
 // WHY 検査する: 「文字列は text、長さは domain が持つ」は文章だけだと、varchar(255) を書き慣れた人や AI が既定のように書き、
 //   domain（zod）と DB の 2 か所に上限ができてずれる。DB の制約違反は 500 になり、domain の 400（errors[] 付き）に負ける。

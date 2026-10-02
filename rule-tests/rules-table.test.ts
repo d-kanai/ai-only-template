@@ -35,6 +35,12 @@ import { casesByName } from "./case-table";
 //   - rules-table-rows: ファイルの表のデータ行（3 行目から）が合わせて 1 行以上ある。WHY: 表が 1 つも無い（見出しとコードだけの）
 //     ファイルや、表を消してヘッダだけ残したファイルは、ほかの規則に何もかからずに通り、規範を表で書く決まりが素通りする
 //     （PR #327 の Codex のレビューの指摘）。
+//   - rules-table-heading: 見出しは `#` と `##` の 2 つの深さだけ（`###` 以下は違反）、`#` はファイルに 1 つまで（2 つ目が違反）、見出しに括弧の注記
+//     （`（` `(`）を書かない。表はどれも直前の見出しが `##` で、1 つの `##` の下に表は 1 つ（表の前に `##` が無い・同じ `##` の
+//     下の 2 つ目の表・表の無い `##` は違反）。WHY（daiki の判断 2026-10-02、Issue #336）: 分類は「1 段目 = 表（`##` の見出し）、
+//     2 段目 = カテゴリの列」の 2 段にそろえる。`###` で 3 段目を作ったり、1 つの見出しに表を並べたりすると、どの表に何があるかが
+//     見出しから読めなくなる。括弧の注記（Issue 番号・パス・補足）は見出しを長くして何の表かを読みにくくした（「backend（API 側。
+//     apps/backend）」「置き場所（feature は DDD 4 層、shared は意味の単位）」）ので、注記は表の行に書く。
 //   - rules-table-enforce: 強制のセル（空でないもの）が `レビュー`（機械で止めていない規範）・`説明`（規範でない説明・一覧・経緯）・
 //     機械の検査への参照を `、` で区切った並びのどれか。参照の 1 項目は `` `<パス>` `` か `` `<パス>` の `<名前>` ``（名前が複数なら
 //     `` `a`・`b` ``）か `` `pnpm typecheck` `` / `` `pnpm lint` ``。パスはリポジトリ相対（`/` 始まり・`..` を含むものは違反）で、
@@ -48,6 +54,7 @@ import { casesByName } from "./case-table";
 //   - 書き換えで内容を削っていないか（コードスパン・Issue・ADR の数）は見ない（Issue #322 の書き換えのときにスクリプトで確かめる）。
 
 const RULES_DIR = ".claude/rules/code";
+const PAREN = /[（(]/;
 const HEADER = ["カテゴリ", "WHAT", "WHY", "強制"];
 const SEPARATOR_CELL = "---";
 // WHY この 2 つだけ参照として許す: パスで指せる検査ファイルが無い（tsc と Biome の全体の実行）。Biome の個々のルールは
@@ -106,6 +113,96 @@ function findBodyViolations(content: string): Located[] {
   if (openFence !== undefined) {
     violations.push({ line: openFence, message: "フェンスが閉じていない" });
   }
+  return violations;
+}
+
+// rules-table-heading の判定に使う、フェンスの外の見出しと表（表は 1 行目の行番号）の並び。
+type Block =
+  | { kind: "heading"; level: number; line: number; text: string }
+  | { kind: "table"; line: number };
+
+function headingsAndTables(content: string): Block[] {
+  const tableStarts = new Set(tables(content).map((rows) => rows[0]?.line));
+  const result: Block[] = [];
+  let inFence = false;
+  for (const { line, text } of bodyLines(content)) {
+    if (isFence(text)) inFence = !inFence;
+    if (inFence || isFence(text)) continue;
+    if (isHeading(text)) {
+      const level = /^#+/.exec(text)?.[0].length ?? 0;
+      result.push({ kind: "heading", level, line, text });
+    } else if (tableStarts.has(line)) {
+      result.push({ kind: "table", line });
+    }
+  }
+  return result;
+}
+
+// rules-table-heading: 見出しの深さ・括弧の注記・2 つ目の `#` と、表と `##` の 1 対 1。行の順（同じ行は判定の順）。
+function findHeadingViolations(content: string): Located[] {
+  const blocks = headingsAndTables(content);
+  const headings = blocks.flatMap((block) =>
+    block.kind === "heading" ? [block] : [],
+  );
+  const text = headings.flatMap((heading) => [
+    ...(heading.level >= 3
+      ? [
+          {
+            line: heading.line,
+            message: "見出しは # と ## だけ（### 以下は使わない）",
+          },
+        ]
+      : []),
+    ...(PAREN.test(heading.text)
+      ? [{ line: heading.line, message: "見出しに括弧の注記を書かない" }]
+      : []),
+  ]);
+  const extraH1 = headings
+    .filter((heading) => heading.level === 1)
+    .slice(1)
+    .map((heading) => ({ line: heading.line, message: "# の見出しが 2 つ目" }));
+  return [...text, ...extraH1, ...findSectionViolations(blocks)]
+    .map((v, order) => ({ ...v, order }))
+    .sort((x, y) => x.line - y.line || x.order - y.order)
+    .map(({ line, message }) => ({ line, message }));
+}
+
+// 表と `##` の 1 対 1。`###` 以下は区切りにしない（深さの違反は別に出す）。
+function findSectionViolations(blocks: Block[]): Located[] {
+  const violations: Located[] = [];
+  // 今の `##` の行と、その下の表の数。`##` の前（または `#` の後）は undefined。
+  let section: { line: number; tables: number } | undefined;
+  const closeSection = () => {
+    if (section?.tables === 0) {
+      violations.push({
+        line: section.line,
+        message: "## の見出しの下に表が無い",
+      });
+    }
+  };
+  for (const block of blocks) {
+    if (block.kind === "heading") {
+      if (block.level > 2) continue;
+      closeSection();
+      section = block.level === 2 ? { line: block.line, tables: 0 } : undefined;
+      continue;
+    }
+    if (section === undefined) {
+      violations.push({
+        line: block.line,
+        message: "表の前に ## の見出しが無い",
+      });
+      continue;
+    }
+    section.tables += 1;
+    if (section.tables > 1) {
+      violations.push({
+        line: block.line,
+        message: "1 つの ## の下に 2 つ目の表",
+      });
+    }
+  }
+  closeSection();
   return violations;
 }
 
@@ -286,6 +383,10 @@ function checkRulesFile(
   const all: RuleViolation[] = [
     ...findBodyViolations(content).map((v) => ({
       rule: "rules-table-body",
+      ...v,
+    })),
+    ...findHeadingViolations(content).map((v) => ({
+      rule: "rules-table-heading",
       ...v,
     })),
     ...findTableViolations(content, referenceRoot),
@@ -653,6 +754,131 @@ describeFeature(feature, ({ Scenario }) => {
     );
   });
 
+  Scenario("見出しと表の対応（rules-table-heading）", ({ And }) => {
+    And(
+      "# が 1 つまで、表ごとに直前の ## が 1 つ、括弧の注記の無い見出しは違反なし",
+      () => {
+        // given
+        const row = "| a | b | c | 説明 |";
+        const cases: [string, string][] = [
+          [
+            "# と ## ごとの表",
+            lines(
+              FRONT,
+              "# a",
+              "",
+              "## b",
+              "",
+              TABLE_HEAD,
+              row,
+              "",
+              "## c",
+              TABLE_HEAD,
+            ),
+          ],
+          [
+            "表の後のコードブロック（中の # は見出しに数えない）",
+            lines(
+              "# a",
+              "## b",
+              TABLE_HEAD,
+              row,
+              "```",
+              "# コードの中の見出し",
+              "| x |",
+              "```",
+            ),
+          ],
+          ["# だけ", lines("# a")],
+          ["空", ""],
+        ];
+
+        // when
+        const result = casesByName(cases, ([, content]) =>
+          findHeadingViolations(content),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => []));
+      },
+    );
+
+    And(
+      "### 以下の見出し・括弧の注記・2 つ目の #・## の無い表・同じ ## の下の 2 つ目の表・表の無い ## は、ファイルと行で違反になる",
+      () => {
+        // given
+        const row = "| a | b | c | 説明 |";
+        const cases: [string, string, Located[]][] = [
+          [
+            "### と ######",
+            lines("## a", TABLE_HEAD, "### b", "###### c"),
+            [
+              {
+                line: 4,
+                message: "見出しは # と ## だけ（### 以下は使わない）",
+              },
+              {
+                line: 5,
+                message: "見出しは # と ## だけ（### 以下は使わない）",
+              },
+            ],
+          ],
+          [
+            "全角と半角の括弧",
+            lines("# a（x）", "## b (y)", TABLE_HEAD),
+            [
+              { line: 1, message: "見出しに括弧の注記を書かない" },
+              { line: 2, message: "見出しに括弧の注記を書かない" },
+            ],
+          ],
+          [
+            "2 つ目の #",
+            lines("# a", "# b"),
+            [{ line: 2, message: "# の見出しが 2 つ目" }],
+          ],
+          [
+            "見出しの無い表と、# の直後の表",
+            lines(TABLE_HEAD, row, "", "# a", TABLE_HEAD),
+            [
+              { line: 1, message: "表の前に ## の見出しが無い" },
+              { line: 6, message: "表の前に ## の見出しが無い" },
+            ],
+          ],
+          [
+            "同じ ## の下の 2 つ目の表（### を挟んでも）",
+            lines("## a", TABLE_HEAD, "", TABLE_HEAD, "### b", TABLE_HEAD),
+            [
+              { line: 5, message: "1 つの ## の下に 2 つ目の表" },
+              {
+                line: 7,
+                message: "見出しは # と ## だけ（### 以下は使わない）",
+              },
+              { line: 8, message: "1 つの ## の下に 2 つ目の表" },
+            ],
+          ],
+          [
+            "表の無い ##（# の前と、ファイルの最後）",
+            lines("## a", "# b", "## c", "```", "| x |", "```"),
+            [
+              { line: 1, message: "## の見出しの下に表が無い" },
+              { line: 3, message: "## の見出しの下に表が無い" },
+            ],
+          ],
+        ];
+
+        // when
+        const result = casesByName(cases, ([, content]) =>
+          findHeadingViolations(content),
+        );
+
+        // then
+        expect(result).toEqual(
+          casesByName(cases, ([, , expected]) => expected),
+        );
+      },
+    );
+  });
+
   Scenario("強制の書き方（rules-table-enforce）", ({ And }) => {
     And(
       "レビュー・説明・実在するファイルへの参照・そのファイルに出てくる名前・複数の参照と名前・pnpm typecheck と pnpm lint は違反なし",
@@ -775,6 +1001,7 @@ describeFeature(feature, ({ Scenario }) => {
             "",
             "地の文",
             "",
+            "### x（y）",
             TABLE_HEAD,
             "| x | y | z | `rule-tests/r.test.ts` の `rule-r` |",
             "| x | y | | テスト |",
@@ -787,6 +1014,7 @@ describeFeature(feature, ({ Scenario }) => {
           [`${RULES_DIR}/b.md`]: lines(
             FRONT,
             "# b",
+            "## c",
             TABLE_HEAD,
             "| x | y | - | `rule-tests/r.test.ts` の `rule-r` |",
           ),
@@ -809,20 +1037,23 @@ describeFeature(feature, ({ Scenario }) => {
           files: [a, `${RULES_DIR}/b.md`],
           violations: [
             `rules-table-body: ${a}:8 見出し・表の行・コードブロックのどれでもない行`,
-            `rules-table-cell: ${a}:13 WHY のセルが空（WHY が無ければ - と書く）`,
-            `rules-table-enforce: ${a}:13 強制が「レビュー」「説明」か検査への参照（\`<パス>\` / \`<パス>\` の \`<名前>\`）でない: テスト`,
-            `rules-table-header: ${a}:14 セルが 2 個（4 個にする。セルの中の | は \\| と書く）`,
+            `rules-table-heading: ${a}:10 見出しは # と ## だけ（### 以下は使わない）`,
+            `rules-table-heading: ${a}:10 見出しに括弧の注記を書かない`,
+            `rules-table-heading: ${a}:11 表の前に ## の見出しが無い`,
+            `rules-table-cell: ${a}:14 WHY のセルが空（WHY が無ければ - と書く）`,
+            `rules-table-enforce: ${a}:14 強制が「レビュー」「説明」か検査への参照（\`<パス>\` / \`<パス>\` の \`<名前>\`）でない: テスト`,
+            `rules-table-header: ${a}:15 セルが 2 個（4 個にする。セルの中の | は \\| と書く）`,
           ],
         });
       },
     );
 
     And("仕様の例の表は、実リポジトリの参照で違反なし", () => {
-      // given: Issue #322 の書き換えの仕様の「例」（backend.md の「モジュールの境界」）。参照は実リポジトリの rule-tests/architecture.test.ts。
+      // given: Issue #322 の書き換えの仕様の「例」（backend.md の「依存の向き」の表の「モジュールの境界」）。参照は実リポジトリの rule-tests/architecture.test.ts。
       const example = lines(
         FRONT,
         "",
-        "## モジュールの境界（expose / internal。Issue #208）",
+        "## モジュールの境界",
         "",
         TABLE_HEAD,
         "| 概要 | backend の feature を 1 つのモジュールとし、他のモジュールとは `expose/` を通してだけつながる（モジュラーモノリス） | 決定と採用しなかった案は ADR `docs/adr/architecture/20260930-modular-monolith-expose-internal.md` | 説明 |",

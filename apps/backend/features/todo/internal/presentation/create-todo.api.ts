@@ -52,7 +52,7 @@ export class CreateTodoApi {
   //   まとめて返すため。domain の DomainError(validation_error) は key 1 つで、どの項目の誤りかを持たない。
   // WHY domain と同じキー・同じ数え方・同じ上限（TODO_TITLE_MAX_LENGTH）にする: presentation は domain より厳しくしない
   //   （domain が通す値を弾かない）。上限の数値は domain の定数を参照し、2 か所に書かない。規則の正は domain で、domain は
-  //   ここを通った値も含めて常に完全に検証する（todo.ts の todoPropsSchema。.claude/rules/code/backend.md の presentation）。
+  //   ここを通った値も含めて常に完全に検証する（todo.ts の todoPropsSchema。.claude/rules/code/backend.md の「入力検証」の表の「方針」）。
   // WHY メソッドにする（スキーマを最上位の定数・static フィールドにしない）: 読み込み時にだけ評価される static な変異になり
   //   mutation testing で数えない（json-body.ts の RequestBody.schema。stryker.config.mjs の ignoreStatic）。呼び出しのたびに作る。
   private createTodoRequestSchema() {

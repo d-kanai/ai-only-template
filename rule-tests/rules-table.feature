@@ -1,4 +1,4 @@
-# .claude/rules/code/*.md を カテゴリ・WHAT・WHY・強制 の表で書く形（Issue #322）を検査するルール検査テストの仕様。step の実装は対の rules-table.test.ts。
+# .claude/rules/code/*.md を カテゴリ・WHAT・WHY・強制 の表で書く形（Issue #322）と、## の見出し 1 つに表 1 つの 2 段の分類（Issue #336）を検査するルール検査テストの仕様。step の実装は対の rules-table.test.ts。
 # 規則の WHY と限界は rules-table.test.ts の冒頭。
 Feature: コードのルール文書の表の形
   Scenario: 本文の行（rules-table-body）
@@ -12,6 +12,9 @@ Feature: コードのルール文書の表の形
     * 表が無い・ヘッダと区切り行だけの表しか無いファイルは、1 行目で違反になる
   Scenario: 空でないセル（rules-table-cell）
     * カテゴリ・WHAT・WHY・強制が空なら違反になり、WHY の - は違反なし
+  Scenario: 見出しと表の対応（rules-table-heading）
+    * # が 1 つまで、表ごとに直前の ## が 1 つ、括弧の注記の無い見出しは違反なし
+    * ### 以下の見出し・括弧の注記・2 つ目の #・## の無い表・同じ ## の下の 2 つ目の表・表の無い ## は、ファイルと行で違反になる
   Scenario: 強制の書き方（rules-table-enforce）
     * レビュー・説明・実在するファイルへの参照・そのファイルに出てくる名前・複数の参照と名前・pnpm typecheck と pnpm lint は違反なし
     * 未知の語・参照の書き方の崩れ・存在しないパス・ディレクトリ・リポジトリの外のパス・ファイルに出てこない名前は違反になる

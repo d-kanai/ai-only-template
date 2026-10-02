@@ -91,7 +91,7 @@ import { casesByName } from "./case-table";
 //     `'use client';`。前にコメントがあってもよい）。無い・import や別のディレクティブ（"use strict"）の後・バッククォート・
 //     かっこで包んだもの・式の一部（`"use client".trim()`）・エスケープを含むもの（`"use\u0020client"`）は違反。
 //     WHY: 画面は hook（useState・useEffect）を使うので Client Component でなければならない（.claude/rules/code/frontend.md の
-//     「screens」）。"use client" が無いと、app/ の page.tsx（Server Component）から import したときに Server Component として
+//     「画面の骨組み」の表の「画面の関数」）。"use client" が無いと、app/ の page.tsx（Server Component）から import したときに Server Component として
 //     扱われ、hook の呼び出しでビルド・描画が失敗する。レビューでは書き忘れを見落としうる。
 //     WHY 最初の文（コメントの後は可）: Next 16.3.6 の文書（node_modules/next/dist/docs/01-app/03-api-reference/01-directives/
 //     index.md）は「must appear at the top of a file, before any imports」とする。コメントは文ではない（構文木の statements に

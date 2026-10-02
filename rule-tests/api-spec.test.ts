@@ -150,7 +150,7 @@ import { containsForbiddenWord } from "./feature-business-language";
 //     その行の違反。
 //     WHY: すべての handler をまとめて返す入口（以前の todoApis）があると、step は ApiAssembly で終わらない名前で import して、どの API も
 //       呼べる（api-spec-own-api-only を素通りする）。組み立てを Api ごとのクラスに分け、名前を Api のクラスから決めると、step の
-//       import の名前と組み立てる Api が 1 対 1 になる（api ファイルの名前とクラス名は .claude/rules/code/backend.md の「命名」で対になる）。
+//       import の名前と組み立てる Api が 1 対 1 になる（api ファイルの名前とクラス名は .claude/rules/code/backend.md の「クラスと命名」の表の「命名」で対になる）。
 //     WHY 行頭の宣言だけを組み立てのクラスと認める: クラス式（`export const Rows = class CreateTodoApiAssembly {`）は別の名前で export でき、
 //       宣言の名前が step の import の名前にならない。
 //   - api-spec-support-assembles-apis: 自 feature の api（apps/backend/features/<feature>/internal/presentation/<名前>.api）を少なくとも
@@ -685,7 +685,7 @@ function isApiModule(module: string | undefined): boolean {
 // api ファイルの名前（kebab-case）から、support.ts の組み立てのクラスの名前を作る
 //   （"change-todo-completion" → "ChangeTodoCompletionApiAssembly"）。
 // WHY Api のクラス名に Assembly を足したものと同じになる: api ファイルとクラスは `<verb>-<noun>.api.ts` と `<Verb><Noun>Api` で対になる
-//   （.claude/rules/code/backend.md の「命名」）。support.ts の側は api-spec-support-assembler-per-api が new する Api のクラス名から同じ名前を求める。
+//   （.claude/rules/code/backend.md の「クラスと命名」の表の「命名」）。support.ts の側は api-spec-support-assembler-per-api が new する Api のクラス名から同じ名前を求める。
 function assemblerNameOf(api: string): string {
   return `${api.replace(/(?:^|-)([a-z0-9])/g, (_, char: string) => char.toUpperCase())}ApiAssembly`;
 }

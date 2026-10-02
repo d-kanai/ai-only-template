@@ -16,7 +16,7 @@ import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, expect } from "vitest";
 import { casesByName } from "./case-table";
 
-// 永続化の規則（.claude/rules/code/backend.md の「永続化」。Issue #165 / #172 / #177 / #188 / #189 / #205 / #215 / #221）を、backend のソースで
+// 永続化の規則（.claude/rules/code/backend.md の「Repository」「DB スキーマ」「変更履歴と Writer」「ユースケースとトランザクション」。Issue #165 / #172 / #177 / #188 / #189 / #205 / #215 / #221）を、backend のソースで
 // 機械的に検査するテスト。対象は apps/backend/ の下のテスト以外の .ts（*.test.ts を除く）。
 // 違反にするもの:
 //   - no-upsert: `onConflictDoUpdate` / `onConflictDoNothing`（Drizzle の upsert）の名前がコードにあること。
@@ -136,7 +136,7 @@ import { casesByName } from "./case-table";
 //     `(` の間の空白・改行は可）。直前の識別子が組み込みの JSON / Date（`JSON.parse(` / `Date.parse(`）は zod ではないので除く。
 //     行は名前の行（呼び出しごと）。
 //     WHY: DB の行から戻した値の検証は Entity の reconstruct（private コンストラクタの完全コンストラクタ）が行う（.claude/rules/code/backend.md
-//       の「完全コンストラクタ」）。Repository でも parse すると規則が 2 か所に分かれ、ずれたときにどちらが正か分からなくなる。
+//       の「Entity」の表の「完全コンストラクタ」）。Repository でも parse すると規則が 2 か所に分かれ、ずれたときにどちらが正か分からなくなる。
 //     WHY async の名前も含める: 同じ働きの別の名前で逃れさせない（rule-tests/domain-validation.test.ts の no-direct-zod-parse-in-domain と
 //       同じ考え方。decode 系・validate 系は今は見ない）。
 //     限界: 名前で見るので、zod でない `.parse(`（`URL.parse(` など。JSON / Date 以外）も違反と数える（安全側）。`.decode(` /
