@@ -1,0 +1,130 @@
+# main に前回のレビュー以降に入った差分を、Claude Code でセキュリティの観点からレビューする日次ジョブ（Issue #354）。
+# WHY 日次で main の差分: PR ごとの /security-review は PR のたびに消費が増える（ADR docs/adr/workflow/20260929-save-usage-limit.md）。
+#   前回からの差分だけを 1 日 1 回見れば、1 回のコストは小さく、main に入ったものは漏れなく 1 度見られる（daiki の判断 2026-10-02）。
+# 決定と採用しなかった案は ADR docs/adr/workflow/20261002-daily-security-review-in-actions.md、規則は .claude/rules/tooling/github-actions.md。
+name: Security review
+
+on:
+  # 毎日 23:47 UTC（= 08:47 JST）。WHY 47 分: 毎時 0 分は GitHub の schedule が混んで遅れやすい（公式 docs の schedule の注意）。
+  #   mutation（23:55 UTC）と時刻をずらす。
+  schedule:
+    - cron: "47 23 * * *"
+  # 手動実行（Actions の画面の Run workflow）。初回の動作確認や、見逃した日の再実行に使う。
+  workflow_dispatch:
+
+# 同じジョブが重なって動かないようにする（手動実行と schedule が重なったとき、後から来た方を待たせる）。
+concurrency:
+  group: security-review
+  cancel-in-progress: false
+
+# GITHUB_TOKEN の権限。
+#   contents: read  … checkout と git の履歴を読む。
+#   actions: read   … 前回の成功した実行の対象のコミットを読み、そこから続ける（下の range のステップ）。
+#   id-token: write … claude-code-action が GitHub の OIDC トークンで Claude GitHub App のトークンを取る（action の docs/setup.md）。
+# 指摘の書き込み（非公開の security advisory の下書き）は GITHUB_TOKEN ではできない（API が security manager か管理者のユーザーを
+#   求める）ので、repo の Secret SECURITY_ADVISORY_TOKEN（daiki の fine-grained PAT。Repository security advisories: write だけ）を使う。
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    # WHY 20 分: 1 日分の差分を読むだけで、Claude の turn も --max-turns で抑える。ci（中央値 145 秒）より長い見込みだが、
+    #   実際の所要時間は未確認（初回の実行で確かめて直す）。
+    timeout-minutes: 20
+    steps:
+      # fetch-depth: 0 … 前回のレビューの時点（か 24 時間前）の main のコミットを起点にするため、履歴をすべて取る（既定の 1 だと起点が無い）。
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      # 起点（前回の成功した実行が見た main の先頭）と、それ以降に main に入ったコミットの数を出す。
+      # WHY 前回の実行から続ける: 「実行した時刻から 24 時間前」で区切ると、schedule の遅れが日によって違うとき、その差の時間に
+      #   入ったマージがどちらの回にも入らない（reviewer の指摘）。止まった日があっても、次の回がまとめて見る。
+      # 前回が無い（初回）・前回のコミットが今の main の祖先でないときは、24 時間前の main の先頭を起点にする。
+      # --first-parent: main に直接入ったコミット（PR のマージコミット）だけを数える。
+      - name: Find the range since the last successful review
+        id: range
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          base=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow security-review.yml --branch "$GITHUB_REF_NAME" \
+            --status success --limit 1 --json headSha --jq '.[0].headSha // ""')
+          if [ -z "$base" ] || ! git merge-base --is-ancestor "$base" HEAD 2>/dev/null; then
+            base=$(git rev-list -1 --first-parent --before="24 hours ago" HEAD)
+          fi
+          if [ -z "$base" ]; then base=4b825dc642cb6eb9a060e54bf8d69288fbee4904; fi
+          count=$(git rev-list --count --first-parent "$base"..HEAD)
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "commits since $base: $count"
+
+      # リポジトリの Claude Code のフック（.claude/settings.json の hooks）とモデルの指定をこの runner の中だけ外す。
+      # WHY: claude-code-action は OAuth のトークンで動かすので --bare（フックを読まない。ただし OAuth を使わない）は使えない。
+      #   --bare なしでは project の hooks が動き（https://code.claude.com/docs/en/headless.md の bare mode）、Stop フック
+      #   require-work-log.sh が作業ログを求めて止め、turn を無駄にする。model（オーケストレータ用の Fable）は外し、下の --model で決める。
+      #   それ以外（permissions など）は残り、CI の Claude にも効く。
+      #   checkout したての runner のファイルを変えるだけで、リポジトリには何も残らない。
+      - name: Disable repository Claude hooks in this runner
+        if: steps.range.outputs.count != '0'
+        run: |
+          jq 'del(.hooks, .model)' .claude/settings.json > "$RUNNER_TEMP/settings.json"
+          mv "$RUNNER_TEMP/settings.json" .claude/settings.json
+
+      # 差分が 0 件の日は呼ばない（消費 0）。
+      # claude_code_oauth_token: daiki が `claude setup-token` で作ったトークン（サブスクの枠を使う。repo の Secret）。
+      # claude_args:
+      #   --model claude-sonnet-5-5 … 1 日分の差分を読むだけなので、消費の小さい Sonnet にする（足りなければ Opus に上げる）。
+      #   --max-turns 40 … 読みすぎて長引かないよう上限を置く。
+      #   --allowedTools … 読むことだけを許す（ファイルの書き込みも無し）。git は読み取りのサブコマンドだけ。
+      #     WHY: action は Claude GitHub App のトークン（書き込み権限あり）を GITHUB_TOKEN / GH_TOKEN として Claude の環境に渡す
+      #     （claude-code-action の src/entrypoints/run.ts。reviewer が確認）。プロンプトインジェクションで使われないよう、
+      #     ツールの許可で読み取りに絞る（docs/security.md の「権限は最小に」）。Write があると .git/config を書き換えて
+      #     許可した git diff から任意のコマンドを動かす経路がありうる（reviewer の指摘）。
+      #   --json-schema … 結果を決まった形の JSON（action の出力 structured_output）で返させ、書き込みは次のステップが行う。
+      - name: Review the diff with Claude
+        id: claude
+        if: steps.range.outputs.count != '0'
+        uses: anthropics/claude-code-action@ed670b4cf9de2a5a570d130d2f6197b9e543cd64 # v1.0.240
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: >-
+            --model claude-sonnet-5-5
+            --max-turns 40
+            --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
+            --json-schema '{"type":"object","properties":{"findings":{"type":"array","items":{"type":"object","properties":{"severity":{"type":"string","enum":["critical","high","medium","low"]},"summary":{"type":"string"},"location":{"type":"string"},"exploit":{"type":"string"},"fix":{"type":"string"},"commit":{"type":"string"}},"required":["severity","summary","location","exploit","fix"]}}},"required":["findings"]}'
+
+          prompt: |
+            このリポジトリの main に前回のレビュー以降に入った変更を、セキュリティの観点でレビューしてください。日本語で書きます。
+
+            - 対象: `git diff ${{ steps.range.outputs.base }} HEAD`（コミットは `git log --oneline --first-parent ${{ steps.range.outputs.base }}..HEAD`）。docs/work-logs/ と画像は対象外。
+            - 観点: インジェクション（SQL・コマンド）、XSS、認証・認可の抜け、秘密情報や個人情報の漏れ（ログへの出力を含む）、入力検証、暗号の使い方、危ない設定、依存とサプライチェーン（GitHub Actions を含む）、業務ロジックの穴。
+            - 差分の周りのコードも開いて読み、実際に悪用できる経路があるものだけを残してください（推測だけの指摘・一般論・スタイルは出さない）。
+            - コードは変更しないでください。
+
+            結果は指定の JSON で返してください。指摘ごとに severity（critical / high / medium / low）・summary（1 行の要約）・location（`file:line`）・exploit（悪用の経路）・fix（直し方の案）・commit（対象のコミット）。指摘が無ければ findings を空の配列にしてください。
+
+      # 指摘があるときだけ、指摘ごとに非公開の security advisory の下書きを作る（公開されない。repo の Security タブで管理者だけが読める）。
+      # WHY Issue にしない: この repo は public で、直す前の脆弱性と悪用の手順が誰でも読める状態になる（reviewer の指摘。daiki の判断）。
+      # WHY !cancelled(): Claude のステップが --max-turns などで失敗しても、返した指摘があれば拾う。
+      # 結果の JSON は env で渡し、run: に式で埋め込まない（中身は Claude の出力なので、シェルとして解釈させない）。
+      # vulnerabilities は API の必須項目。パッケージとして公開していないので ecosystem は other、名前は repo の名前にする。
+      - name: Open private security advisories for findings
+        if: ${{ !cancelled() && steps.claude.outputs.structured_output != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.SECURITY_ADVISORY_TOKEN }}
+          RESULT: ${{ steps.claude.outputs.structured_output }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BASE: ${{ steps.range.outputs.base }}
+        run: |
+          echo "$RESULT" | jq -c '.findings[]' | while read -r finding; do
+            jq -n --argjson f "$finding" --arg run "$RUN_URL" --arg base "$BASE" --arg repo "${GITHUB_REPOSITORY#*/}" '{
+              summary: ("セキュリティレビュー: " + $f.summary)[0:1000],
+              severity: $f.severity,
+              description: ("- 場所: " + $f.location + "\n- 悪用の経路: " + $f.exploit + "\n- 直し方の案: " + $f.fix
+                + "\n- 対象のコミット: " + ($f.commit // "") + "\n- 見た範囲: " + $base + "..main\n- 日次のセキュリティレビュー: " + $run),
+              vulnerabilities: [{package: {ecosystem: "other", name: $repo}}]
+            }' | gh api --method POST "repos/$GITHUB_REPOSITORY/security-advisories" --input - --jq '.html_url'
+          done
