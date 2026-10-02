@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { LocaleProvider } from "@/shared/i18n/i18n";
-import { LOCALE_HEADER, localeFromHeader } from "@/shared/i18n/locale";
+import { LOCALE_HEADER, Locales } from "@/shared/i18n/locale";
 
 export const metadata: Metadata = {
   title: "ai-only-template",
@@ -17,13 +17,13 @@ export const metadata: Metadata = {
 // WHY headers() を使うと全画面が動的レンダリングになる（ビルド時の prerender をしない）ことを受け入れる: ロケールはリクエストごとに
 //   決まるので、パスを分けない限り静的な HTML にできない（Next.js 16.3.6 同梱
 //   node_modules/next/dist/docs/01-app/03-api-reference/04-functions/headers.md の「Good to know」）。
-// ヘッダが無い（Proxy を通らない）・対応していない値のときは既定の ja（localeFromHeader）。
+// ヘッダが無い（Proxy を通らない）・対応していない値のときは既定の ja（Locales.fromHeader）。
 export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const locale = localeFromHeader((await headers()).get(LOCALE_HEADER));
+  const locale = Locales.fromHeader((await headers()).get(LOCALE_HEADER));
   return (
     <html lang={locale}>
       <body>

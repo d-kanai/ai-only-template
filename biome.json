@@ -114,6 +114,24 @@
           }
         }
       }
+    },
+    {
+      "includes": [
+        "apps/frontend_customer/features/**",
+        "apps/frontend_customer/shared/**",
+        "apps/frontend_customer/test-support/**",
+        "!**/*.tsx",
+        "!**/*.jsx",
+        "!**/*.hook.*",
+        "!**/*.test.*"
+      ],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noStaticOnlyClass": "off"
+          }
+        }
+      }
     }
   ],
   "assist": {

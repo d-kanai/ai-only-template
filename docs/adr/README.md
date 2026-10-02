@@ -82,6 +82,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-30 | command がトランザクションを張って Repository に渡し、Repository は insert / update に分け、変更履歴とログは書き込みの口 Writer が文ごとに記録する | 採用 | [20260930-transaction-from-application.md](architecture/20260930-transaction-from-application.md) |
 | 2026-10-02 | apps/backend の本番コードはクラスを基本にし、関数を export せず、補助の関数もクラスのメソッドにする | 採用 | [20261002-class-based-backend.md](architecture/20261002-class-based-backend.md) |
 | 2026-10-02 | クラスベースの対象を apps/shared とテストの補助（test-support・e2e の補助・spec の support.ts）に広げる | 採用 | [20261002-class-based-shared-and-test-support.md](architecture/20261002-class-based-shared-and-test-support.md) |
+| 2026-10-02 | クラスベースの対象を frontend の React 以外のモジュールに広げる | 採用 | [20261002-class-based-frontend-modules.md](architecture/20261002-class-based-frontend-modules.md) |
 
 ### tech-stack/
 言語・ツール・ライブラリの選定

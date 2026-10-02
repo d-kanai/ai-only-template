@@ -8,11 +8,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { TodoDetailScreen } from "@/features/todo";
 import { ApiError } from "@/features/todo/api/api-error";
-import {
-  changeTodoCompletion,
-  getTodo,
-  renameTodo,
-} from "@/features/todo/api/todo-api";
+import { TodoApi } from "@/features/todo/api/todo-api";
 import { commonMessages } from "@/shared/i18n/common.messages";
 import { LocaleProvider } from "@/shared/i18n/i18n";
 import { JaLocale, tJa } from "@/test-support/i18n";
@@ -38,7 +34,7 @@ const milk = {
 
 test("取得中は読み込み中と表示され、取得後は level 1 の見出しに title が表示される", async () => {
   // given
-  vi.mocked(getTodo).mockResolvedValue(milk);
+  vi.mocked(TodoApi.get).mockResolvedValue(milk);
 
   // when
   render(<TodoDetailScreen todoId={milk.id} />, { wrapper: JaLocale });
@@ -53,12 +49,12 @@ test("取得中は読み込み中と表示され、取得後は level 1 の見�
   expect(
     screen.queryByText(tJa(todoDetailScreenMessages, "loading")),
   ).toBeNull();
-  expect(getTodo).toHaveBeenCalledWith("todo-1");
+  expect(TodoApi.get).toHaveBeenCalledWith("todo-1");
 });
 
 test("エラーが無いときは alert を表示しない", async () => {
   // given
-  vi.mocked(getTodo).mockResolvedValue(milk);
+  vi.mocked(TodoApi.get).mockResolvedValue(milk);
 
   // when
   render(<TodoDetailScreen todoId={milk.id} />, { wrapper: JaLocale });
@@ -73,8 +69,8 @@ test("エラーが無いときは alert を表示しない", async () => {
 // fireEvent.submit は、ハンドラが preventDefault したときだけ false を返す（dispatchEvent の戻り値）。
 test("title のフォームを送信しても、ブラウザの既定の送信（ページの再読み込み）はしない", async () => {
   // given
-  vi.mocked(getTodo).mockResolvedValue(milk);
-  vi.mocked(renameTodo).mockResolvedValue(milk);
+  vi.mocked(TodoApi.get).mockResolvedValue(milk);
+  vi.mocked(TodoApi.rename).mockResolvedValue(milk);
   render(<TodoDetailScreen todoId={milk.id} />, { wrapper: JaLocale });
   const form = (
     await screen.findByRole("button", {
@@ -88,15 +84,15 @@ test("title のフォームを送信しても、ブラウザの既定の送信�
 
   // then
   expect(notPrevented).toBe(false);
-  // 送信で始まった保存（renameTodo）の反映を待ってからテストを終える（終了後の state 更新を残さないため）。
+  // 送信で始まった保存（TodoApi.rename）の反映を待ってからテストを終える（終了後の state 更新を残さないため）。
   await waitFor(() =>
-    expect(renameTodo).toHaveBeenCalledWith("todo-1", "牛乳を買う"),
+    expect(TodoApi.rename).toHaveBeenCalledWith("todo-1", "牛乳を買う"),
   );
 });
 
 test("一覧へ戻るリンクは / を指す", async () => {
   // given
-  vi.mocked(getTodo).mockResolvedValue(milk);
+  vi.mocked(TodoApi.get).mockResolvedValue(milk);
 
   // when
   render(<TodoDetailScreen todoId={milk.id} />, { wrapper: JaLocale });
@@ -113,7 +109,7 @@ test("一覧へ戻るリンクは / を指す", async () => {
 
 test("取得に失敗すると（not_found など）、エラーのキーを翻訳した文言が alert として表示され、一覧へ戻るリンクは残る", async () => {
   // given
-  vi.mocked(getTodo).mockRejectedValue(
+  vi.mocked(TodoApi.get).mockRejectedValue(
     new ApiError({
       status: 404,
       type: "/problems/not-found",
@@ -137,8 +133,8 @@ test("取得に失敗すると（not_found など）、エラーのキーを翻�
 
 test("title を編集して保存ボタンを押すと、その title で更新され見出しに反映される", async () => {
   // given
-  vi.mocked(getTodo).mockResolvedValue(milk);
-  vi.mocked(renameTodo).mockResolvedValue({ ...milk, title: "豆乳を買う" });
+  vi.mocked(TodoApi.get).mockResolvedValue(milk);
+  vi.mocked(TodoApi.rename).mockResolvedValue({ ...milk, title: "豆乳を買う" });
   render(<TodoDetailScreen todoId={milk.id} />, { wrapper: JaLocale });
   const input = (await screen.findByRole("textbox", {
     name: tJa(todoDetailScreenMessages, "titleLabel"),
@@ -157,13 +153,13 @@ test("title を編集して保存ボタンを押すと、その title で更新�
   expect(
     await screen.findByRole("heading", { level: 1, name: "豆乳を買う" }),
   ).toBeDefined();
-  expect(renameTodo).toHaveBeenCalledWith("todo-1", "豆乳を買う");
+  expect(TodoApi.rename).toHaveBeenCalledWith("todo-1", "豆乳を買う");
 });
 
 test("完了チェックボックスを押すと、完了に更新されチェックが付く", async () => {
   // given
-  vi.mocked(getTodo).mockResolvedValue(milk);
-  vi.mocked(changeTodoCompletion).mockResolvedValue({
+  vi.mocked(TodoApi.get).mockResolvedValue(milk);
+  vi.mocked(TodoApi.changeCompletion).mockResolvedValue({
     ...milk,
     completed: true,
   });
@@ -185,13 +181,13 @@ test("完了チェックボックスを押すと、完了に更新されチェ�
       ).checked,
     ).toBe(true),
   );
-  expect(changeTodoCompletion).toHaveBeenCalledWith("todo-1", true);
+  expect(TodoApi.changeCompletion).toHaveBeenCalledWith("todo-1", true);
 });
 
 // 画面の文言が LocaleProvider のロケールに従うこと（ja と en で違う文言のキーで見る）。
 test("LocaleProvider のロケールが en なら、英語の文言で表示する", async () => {
   // given
-  vi.mocked(getTodo).mockResolvedValue(milk);
+  vi.mocked(TodoApi.get).mockResolvedValue(milk);
 
   // when
   render(
@@ -211,8 +207,8 @@ test("LocaleProvider のロケールが en なら、英語の文言で表示す�
 // 400 の項目ごとの誤り（ApiError の errors）は、その入力の直下に出し、aria-describedby と aria-invalid で入力と結び付ける。
 // WHY role="alert" はフォーム全体の文言だけ: 項目の文言は入力の説明（accessible description）として読まれる。
 async function saveTitleWithFailure(reason: unknown) {
-  vi.mocked(getTodo).mockResolvedValue(milk);
-  vi.mocked(renameTodo).mockRejectedValue(reason);
+  vi.mocked(TodoApi.get).mockResolvedValue(milk);
+  vi.mocked(TodoApi.rename).mockRejectedValue(reason);
   render(<TodoDetailScreen todoId={milk.id} />, { wrapper: JaLocale });
   fireEvent.click(
     await screen.findByRole("button", {
@@ -223,7 +219,7 @@ async function saveTitleWithFailure(reason: unknown) {
 
 test("エラーが無いときは、title の入力は invalid でなく、説明も無い", async () => {
   // given
-  vi.mocked(getTodo).mockResolvedValue(milk);
+  vi.mocked(TodoApi.get).mockResolvedValue(milk);
 
   // when
   render(<TodoDetailScreen todoId={milk.id} />, { wrapper: JaLocale });
