@@ -1,0 +1,45 @@
+%% 全体の構成。元: infra/modules/app/*.tf と .github/workflows/deploy.yml（作り直しはスキル infra-diagram）
+flowchart LR
+  classDef ext fill:#eef1f4,stroke:#7b8794,color:#1d2622
+  classDef run fill:#e3edfd,stroke:#1a73e8,color:#0b2a5b
+  classDef data fill:#e6f4ea,stroke:#1e8e3e,color:#0d3b1e
+  classDef sec fill:#fef7e0,stroke:#e3a008,color:#4a3500
+  classDef ci fill:#f3e8fd,stroke:#8430ce,color:#33134f
+
+  user(["利用者"]):::ext
+  analyst(["分析する人"]):::ext
+  ds(["Data Studio"]):::ext
+  dev(["開発者 MCP"]):::ext
+  gha["GitHub Actions<br/>deploy.yml"]:::ci
+
+  subgraph GCP["GCP プロジェクト（stg / prod で 1 つずつ）"]
+    ar[("Artifact Registry<br/>app")]:::ci
+    subgraph RUN["Cloud Run"]
+      customer["frontend-customer<br/>service"]:::run
+      migrate["frontend-customer-migrate<br/>job"]:::run
+      metabase["metabase service<br/>+ Auth Proxy"]:::run
+    end
+    subgraph SM["Secret Manager"]
+      s1["database-url"]:::sec
+      s2["metabase-db-uri"]:::sec
+      s3["metabase-encryption-key"]:::sec
+    end
+    subgraph SQL["Cloud SQL インスタンス app-db（1 台）"]
+      dbapp[("DB app")]:::data
+      dbmb[("DB metabase")]:::data
+    end
+  end
+
+  gha -- "build & push" --> ar
+  gha -- "image 更新・実行" --> migrate
+  gha -- "deploy" --> customer
+  ar -. "同じ image（コマンド違い）" .-> customer & migrate
+  user -- HTTPS --> customer
+  analyst -- HTTPS --> metabase
+  customer & migrate -- "Unix socket" --> dbapp
+  metabase -- "Auth Proxy" --> dbmb
+  metabase -- "Auth Proxy（bi_readonly・手作業）" --> dbapp
+  ds -- "公開 IP + TLS（bi_readonly・手作業）" --> dbapp
+  dev -- "Data API" --> dbapp
+  s1 -.-> customer & migrate
+  s2 & s3 -.-> metabase
