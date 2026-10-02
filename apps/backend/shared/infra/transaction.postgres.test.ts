@@ -17,7 +17,7 @@ import {
 } from "../../test-support/database";
 import { changeLogs } from "./schema";
 import { PostgresTransactionRunner } from "./transaction.postgres";
-import { PostgresWriter, writerOf } from "./writer";
+import { PostgresWriter } from "./writer";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -58,7 +58,7 @@ describe("PostgresTransactionRunner", () => {
     const runner = new PostgresTransactionRunner(database.db);
 
     const result = await runner.run(async (tx) => {
-      await writerOf(tx).insert(items, [{ id: ID, itemName: "牛乳" }]);
+      await PostgresWriter.of(tx).insert(items, [{ id: ID, itemName: "牛乳" }]);
       return "done";
     });
 
@@ -74,7 +74,9 @@ describe("PostgresTransactionRunner", () => {
 
     await expect(
       runner.run(async (tx) => {
-        await writerOf(tx).insert(items, [{ id: ID, itemName: "牛乳" }]);
+        await PostgresWriter.of(tx).insert(items, [
+          { id: ID, itemName: "牛乳" },
+        ]);
         throw failure;
       }),
     ).rejects.toBe(failure);
@@ -90,7 +92,7 @@ describe("PostgresTransactionRunner", () => {
     const runner = new PostgresTransactionRunner(database.db);
 
     const seen = await runner.run(async (tx) => {
-      const writer = writerOf(tx);
+      const writer = PostgresWriter.of(tx);
       await writer.insert(items, [{ id: ID, itemName: "牛乳" }]);
       return {
         isWriter: writer instanceof PostgresWriter,
@@ -109,10 +111,10 @@ describe("PostgresTransactionRunner", () => {
   // WHY actorId を runner が持つ: 変更履歴の actor は要求の文脈（ログインした利用者）で、要求ごとに組み立てる runner に渡す。
   test("組み立てで渡した actorId を変更履歴の actorId に入れる（既定は null）", async () => {
     await new PostgresTransactionRunner(database.db, ACTOR_ID).run((tx) =>
-      writerOf(tx).insert(items, [{ id: ID, itemName: "牛乳" }]),
+      PostgresWriter.of(tx).insert(items, [{ id: ID, itemName: "牛乳" }]),
     );
     await new PostgresTransactionRunner(database.db).run((tx) =>
-      writerOf(tx).delete(items, ID),
+      PostgresWriter.of(tx).delete(items, ID),
     );
 
     const actors = await database.db

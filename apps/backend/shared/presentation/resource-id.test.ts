@@ -2,13 +2,13 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, test } from "vitest";
 import { DomainError } from "../domain/domain-error";
-import { parseUuidParam } from "./resource-id";
+import { ResourceId } from "./resource-id";
 
-describe("parseUuidParam", () => {
+describe("ResourceId.parseUuid", () => {
   test("uuid の形なら、同じ値をそのまま返す", () => {
     const id = randomUUID();
 
-    expect(parseUuidParam(id, "todo.notFound", { id })).toBe(id);
+    expect(ResourceId.parseUuid(id, "todo.notFound", { id })).toBe(id);
   });
 
   // toEqual は Error の name / message を比べるが、独自のプロパティ（code・key・params）まで比べるとは限らない（未確認）ので、
@@ -21,11 +21,11 @@ describe("parseUuidParam", () => {
   ])(
     "%sなら、渡したキーと params の DomainError(not_found) を投げる",
     (_label, id) => {
-      expect(() => parseUuidParam(id, "todo.notFound", { id })).toThrow(
+      expect(() => ResourceId.parseUuid(id, "todo.notFound", { id })).toThrow(
         new DomainError("not_found", "todo.notFound", { id }),
       );
       try {
-        parseUuidParam(id, "todo.notFound", { id });
+        ResourceId.parseUuid(id, "todo.notFound", { id });
       } catch (error) {
         expect(error).toBeInstanceOf(DomainError);
         const { code, key, params } = error as DomainError;
@@ -42,7 +42,7 @@ describe("parseUuidParam", () => {
   test("params の要るキーに渡し忘れると、コンパイルエラーになる", () => {
     const typeOnly = () =>
       // @ts-expect-error todo.notFound は { id: string } が必須
-      parseUuidParam("missing", "todo.notFound");
+      ResourceId.parseUuid("missing", "todo.notFound");
 
     expect(typeof typeOnly).toBe("function");
   });

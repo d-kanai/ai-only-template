@@ -1087,7 +1087,7 @@ describe("API ジャーニーの中身（findApiJourneyViolations）: must rejec
     [
       "名前・場所の一部だけが同じ別のモジュール（shared/infra/database・database-x・別の場所の test-support/database）",
       source(
-        'import { getDatabase } from "../../shared/infra/database";',
+        'import { AppDatabase } from "../../shared/infra/database";',
         'import { a } from "../../test-support/database-x";',
         'import { b } from "./test-support/database";',
         CREATE_API_IMPORT,

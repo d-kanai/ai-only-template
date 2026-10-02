@@ -41,7 +41,7 @@ import type { Problem } from "../../../shared/presentation/problem";
 //   ジャーニーは Issue #219・#240 では触らない（担当外）ので、今は重複を許す。
 
 // API ごとの組み立て。本番の api ファイルの最下部と同じ組み立てで、渡した db（テスト用のスキーマ）を使う handler を返す。
-// WHY 本番の export（GET / POST など）を使わない: 本番は getDatabase()（.env の public スキーマ）を使い、テストファイルごとの
+// WHY 本番の export（GET / POST など）を使わない: 本番は AppDatabase.get()（.env の public スキーマ）を使い、テストファイルごとの
 //   スキーマ（createTestDatabase）に向けられない。
 // WHY API ごとに 1 つの関数にする（すべての handler をまとめて返さない）: step は自分の仕様の対象の組み立て（<api> の camelCase + Api。
 //   rename-todo なら renameTodoApi）だけを import し、ほかの API の handler を手に入れない（rule-tests/api-spec.test.ts の

@@ -6,8 +6,7 @@ import {
   InvalidRequestError,
   type Problem,
   type ProblemErrorInput,
-  toProblemResponse,
-  withProblemResponse,
+  ProblemResponse,
 } from "./problem";
 
 describe("InvalidRequestError", () => {
@@ -77,13 +76,13 @@ function request(path: string): Request {
   return new Request(`http://localhost${path}?q=1`, { method: "POST" });
 }
 
-describe("toProblemResponse", () => {
+describe("ProblemResponse.from", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   test("DomainError の validation_error は 400 の /problems/validation-error になり、key・params と英語の detail を持つ", async () => {
-    const response = toProblemResponse(
+    const response = ProblemResponse.from(
       new DomainError("validation_error", "todo.title.tooLong", { max: 100 }),
       request("/api/todos"),
     );
@@ -100,7 +99,7 @@ describe("toProblemResponse", () => {
   });
 
   test("DomainError の params が無ければ、本文に params のキーを出さない", async () => {
-    const response = toProblemResponse(
+    const response = ProblemResponse.from(
       new DomainError("validation_error", "todo.title.empty"),
       request("/api/todos"),
     );
@@ -118,7 +117,7 @@ describe("toProblemResponse", () => {
   // instance はクエリを含まない URL のパス（new URL(request.url).pathname）。
   // WHY パスだけ: リクエストログと同じ方針でクエリの値は出さない（Issue #85）。パスの id は params と detail にも出る。
   test("DomainError の not_found は 404 の /problems/not-found になり、instance はリクエストのパス（クエリを除く）", async () => {
-    const response = toProblemResponse(
+    const response = ProblemResponse.from(
       new DomainError("not_found", "todo.notFound", { id: "abc" }),
       request("/api/todos/abc"),
     );
@@ -135,7 +134,7 @@ describe("toProblemResponse", () => {
   });
 
   test("リクエストの形の誤り（InvalidRequestError）は 400 の /problems/validation-error になる（errors が無ければキーを出さない）", async () => {
-    const response = toProblemResponse(
+    const response = ProblemResponse.from(
       new InvalidRequestError("request.body.notJson"),
       request("/api/todos"),
     );
@@ -151,7 +150,7 @@ describe("toProblemResponse", () => {
   });
 
   test("InvalidRequestError の errors は、各要素に英語の detail を足して本文の errors に入れる", async () => {
-    const response = toProblemResponse(
+    const response = ProblemResponse.from(
       new InvalidRequestError("request.field.notString", { path: "title" }, [
         {
           pointer: "#/title",
@@ -202,7 +201,7 @@ describe("toProblemResponse", () => {
     // 500 のときはサーバのログに原因を残す実装なので、テスト出力を汚さないよう黙らせる。
     vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    const response = toProblemResponse(
+    const response = ProblemResponse.from(
       new Error("DB のパスワードが違います"),
       request("/api/todos"),
     );
@@ -224,7 +223,7 @@ describe("toProblemResponse", () => {
       .mockImplementation(() => undefined);
     const error = new Error("想定外");
 
-    toProblemResponse(error, request("/api/todos"));
+    ProblemResponse.from(error, request("/api/todos"));
 
     expect(consoleError).toHaveBeenCalledTimes(1);
     const [line] = consoleError.mock.calls[0] as [string];
@@ -251,7 +250,7 @@ describe("toProblemResponse", () => {
       new Error(`duplicate key value (title)=(${sentinel})`),
     );
 
-    toProblemResponse(error, request("/api/todos"));
+    ProblemResponse.from(error, request("/api/todos"));
 
     const [line] = consoleError.mock.calls[0] as [string];
     expect(line).not.toContain(sentinel);
@@ -269,11 +268,11 @@ describe("toProblemResponse", () => {
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
 
-    toProblemResponse(
+    ProblemResponse.from(
       new DomainError("not_found", "todo.notFound", { id: "a" }),
       request("/api/todos/a"),
     );
-    toProblemResponse(
+    ProblemResponse.from(
       new InvalidRequestError("request.body.notJson"),
       request("/api/todos"),
     );
@@ -282,24 +281,24 @@ describe("toProblemResponse", () => {
   });
 });
 
-// withProblemResponse: handler を包み、handler が投げた例外（reject も同期の throw も）を toProblemResponse で Problem Details の
-//   Response にする（Issue #141）。変換の規則は上の toProblemResponse のテストが固定しているので、ここでは「包んだ handler が
-//   どの経路の例外でも toProblemResponse を通ること」と「引数・戻り値を素通しすること」を確かめる。
-describe("withProblemResponse", () => {
+// ProblemResponse.wrap: handler を包み、handler が投げた例外（reject も同期の throw も）を ProblemResponse.from で Problem Details の
+//   Response にする（Issue #141）。変換の規則は上の ProblemResponse.from のテストが固定しているので、ここでは「包んだ handler が
+//   どの経路の例外でも ProblemResponse.from を通ること」と「引数・戻り値を素通しすること」を確かめる。
+describe("ProblemResponse.wrap", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   test("handler が返した Response を、そのまま（同じオブジェクトで）返す", async () => {
     const ok = Response.json({ ok: true }, { status: 201 });
-    const handle = withProblemResponse(async (_request: Request) => ok);
+    const handle = ProblemResponse.wrap(async (_request: Request) => ok);
 
     await expect(handle(request("/api/todos"))).resolves.toBe(ok);
   });
 
   test("handler に渡した引数（request と、動的セグメントの ctx）を、そのまま handler に渡す", async () => {
     const received: unknown[] = [];
-    const handle = withProblemResponse(
+    const handle = ProblemResponse.wrap(
       async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
         received.push(req, await ctx.params);
         return new Response(null, { status: 204 });
@@ -317,7 +316,7 @@ describe("withProblemResponse", () => {
   });
 
   test("handler が DomainError(not_found) で reject すると、404 の Problem を返す（instance は第 1 引数の request のパス）", async () => {
-    const handle = withProblemResponse(
+    const handle = ProblemResponse.wrap(
       async (_request: Request, _ctx: { params: Promise<{ id: string }> }) => {
         throw new DomainError("not_found", "todo.notFound", { id: "abc" });
       },
@@ -339,7 +338,7 @@ describe("withProblemResponse", () => {
   });
 
   test("handler が DomainError(validation_error) で reject すると、400 の Problem を返す", async () => {
-    const handle = withProblemResponse(async (_request: Request) => {
+    const handle = ProblemResponse.wrap(async (_request: Request) => {
       throw new DomainError("validation_error", "todo.title.empty");
     });
 
@@ -354,7 +353,7 @@ describe("withProblemResponse", () => {
   });
 
   test("handler が InvalidRequestError で reject すると、400 の Problem を返す", async () => {
-    const handle = withProblemResponse(async (_request: Request) => {
+    const handle = ProblemResponse.wrap(async (_request: Request) => {
       throw new InvalidRequestError("request.body.notJson");
     });
 
@@ -372,7 +371,7 @@ describe("withProblemResponse", () => {
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
-    const handle = withProblemResponse(async (_request: Request) => {
+    const handle = ProblemResponse.wrap(async (_request: Request) => {
       throw new Error("DB のパスワードが違います");
     });
 
@@ -398,7 +397,7 @@ describe("withProblemResponse", () => {
   // WHY 同期の throw も確かめる: 型は Promise を返す関数だが、async でない関数（(request) => { throw ... }）も渡せる。
   //   handler(...args) の呼び出しを try の外に置く実装だと、同期の throw が変換されずに素の例外として漏れる。
   test("handler が（Promise を返さずに）同期で throw しても、reject せずに Problem を返す", async () => {
-    const handle = withProblemResponse(
+    const handle = ProblemResponse.wrap(
       (_request: Request): Promise<Response> => {
         throw new DomainError("not_found", "todo.notFound", { id: "x" });
       },

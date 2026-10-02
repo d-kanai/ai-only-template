@@ -20,5 +20,5 @@ export class InMemoryTransactionRunner implements TransactionRunner {
 // WHY export する: テストが Repository に直接 Todo を置く（`repository.insert(todo, inMemoryTransaction)`）ときに使う。
 // WHY cast: Transaction（shared/application/transaction）は brand の型で、infra の実体（Postgres の Writer）以外は作れない。InMemory は中身の要らない
 //   印だけを渡す（本番のコードは test-support を参照できないので、この値が本番に混ざることはない。rule-tests/test-support.test.ts）。
-//   Postgres の Repository に渡すと writerOf が Error にする（shared/infra/writer.ts）。
+//   Postgres の Repository に渡すと PostgresWriter.of が Error にする（shared/infra/writer.ts）。
 export const inMemoryTransaction = Object.freeze({}) as unknown as Transaction;

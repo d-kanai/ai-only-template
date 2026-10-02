@@ -39,12 +39,12 @@ export type ErrorKey = keyof ErrorKeyParams;
 
 // params を持たないキー（ErrorKeyParams の値が Record<string, never>）。
 // WHY 分ける: zod の型の検査（z.string など）の issue は params を運ばない（refine の custom の issue だけが載せる。zod 4.6.5）。
-//   型の検査に付けられるキーをこれに限り、params の要るキーを付けて実行時に params が落ちるのを型で止める（shared/domain/keyed-issue.ts の keyedIssue）。
+//   型の検査に付けられるキーをこれに限り、params の要るキーを付けて実行時に params が落ちるのを型で止める（shared/domain/keyed-issue.ts の KeyedIssue.of）。
 export type ParamlessErrorKey = {
   [K in ErrorKey]: ErrorKeyParams[K] extends Record<string, never> ? K : never;
 }[ErrorKey];
 
-// ErrorKey の実行時の一覧（isErrorKey が使う）。型の ErrorKeyParams は実行時に残らないので、同じ集合を値でも持つ。
+// ErrorKey の実行時の一覧（ErrorKeys.includes が使う）。型の ErrorKeyParams は実行時に残らないので、同じ集合を値でも持つ。
 // WHY satisfies readonly ErrorKey[]: ErrorKeyParams に無いキー（打ち間違い）を型エラーにする。
 // 足し忘れ（ErrorKeyParams にあって、ここに無いキー）は error-key.test.ts の型の検査（toEqualTypeOf）が pnpm typecheck で止める。
 //   WHY テストで検査する: satisfies は「要素がどれも ErrorKey」だけを見て、網羅は見ない。網羅を型で書くには使われない
@@ -67,14 +67,6 @@ export const ERROR_KEYS = [
   "server.internalError",
 ] as const satisfies readonly ErrorKey[];
 
-// 実行時の文字列が ErrorKey かを確かめる。zod の issue の message（キーを付け忘れた項目では zod の英語の文言）を
-//   DomainError の key に戻す前に使う（todo.ts の validate）。
-// WHY 配列の includes で判定する（オブジェクトのプロパティで引かない）: "constructor" など Object.prototype の名前を
-//   キーと取り違えない。
-export function isErrorKey(value: string): value is ErrorKey {
-  return (ERROR_KEYS as readonly string[]).includes(value);
-}
-
 // キー K に渡す params の残り引数の型。params の無いキー（Record<string, never>）は省略でき、あるキーは必須にする。
 //   例: new DomainError("not_found", "todo.notFound", { id }) / new DomainError("validation_error", "todo.title.empty")
 // WHY [params?: undefined] にする（[] にしない）: params の後ろに引数を続ける InvalidRequestError（key, params, errors）で、
@@ -89,12 +81,25 @@ export type ErrorParamsArgs<K extends ErrorKey> = K extends ErrorKey
     : [params: ErrorKeyParams[K]]
   : never;
 
-// Error#message に入れる開発者向けの文字列（ログ・スタックトレース用）。例: todo.notFound {"id":"..."}
-// WHY 自然言語にしない: 画面に出す文言は画面の辞書が決める。message は原因の切り分けに使うだけなので、キーと params を
-//   そのまま読める形にする（ログから画面の辞書を引ける）。
-export function describeErrorKey(
-  key: ErrorKey,
-  params?: Readonly<Record<string, string | number>>,
-): string {
-  return params === undefined ? key : `${key} ${JSON.stringify(params)}`;
+// ErrorKey を実行時に扱う処理（実行時の文字列がキーかの判定と、開発者向けの文字列）。
+// WHY クラスの static メソッドにする: backend の本番コードは単独の関数を export しない（ADR
+//   docs/adr/architecture/20261002-class-based-backend.md）。状態を持たない変換なので static にする。
+export class ErrorKeys {
+  // 実行時の文字列が ErrorKey かを確かめる。zod の issue の message（キーを付け忘れた項目では zod の英語の文言）を
+  //   DomainError の key に戻す前に使う（shared/domain/validate.ts の DomainValidation.validated・json-body.ts）。
+  // WHY 配列の includes で判定する（オブジェクトのプロパティで引かない）: "constructor" など Object.prototype の名前を
+  //   キーと取り違えない。
+  static includes(value: string): value is ErrorKey {
+    return (ERROR_KEYS as readonly string[]).includes(value);
+  }
+
+  // Error#message に入れる開発者向けの文字列（ログ・スタックトレース用）。例: todo.notFound {"id":"..."}
+  // WHY 自然言語にしない: 画面に出す文言は画面の辞書が決める。message は原因の切り分けに使うだけなので、キーと params を
+  //   そのまま読める形にする（ログから画面の辞書を引ける）。
+  static describe(
+    key: ErrorKey,
+    params?: Readonly<Record<string, string | number>>,
+  ): string {
+    return params === undefined ? key : `${key} ${JSON.stringify(params)}`;
+  }
 }

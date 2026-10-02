@@ -99,7 +99,7 @@ describe("リクエストの任意項目の判定（findOptionalViolations）: m
     [
       ".optional() が無い（必須の項目だけ）",
       source(
-        "requestBodySchema({",
+        "RequestBody.schema({",
         "  title: z.string().trim(),",
         "  completed: z.boolean(),",
         "});",
@@ -108,7 +108,7 @@ describe("リクエストの任意項目の判定（findOptionalViolations）: m
     [
       "直前の行に // WHY 任意: がある",
       source(
-        "requestBodySchema({",
+        "RequestBody.schema({",
         "  title: z.string(),",
         "  // WHY 任意: 説明文は作成時に省略でき、省略は空文字と同じ意味。",
         "  description: z.string().optional(),",
@@ -118,7 +118,7 @@ describe("リクエストの任意項目の判定（findOptionalViolations）: m
     [
       "複数行の WHY のコメントの 1 行目に // WHY 任意: がある（続きの行を挟む）",
       source(
-        "requestBodySchema({",
+        "RequestBody.schema({",
         "  // WHY 任意: 期限は作成時に決まっていないことが多い。",
         "  //   省略は「期限なし」で、別のユースケースではない。",
         "  dueDate: z.string().optional(),",
@@ -128,7 +128,7 @@ describe("リクエストの任意項目の判定（findOptionalViolations）: m
     [
       "複数行の chain で、.optional() の行の直前に // WHY 任意: がある",
       source(
-        "requestBodySchema({",
+        "RequestBody.schema({",
         "  note: z",
         "    .string()",
         "    .trim()",
@@ -141,7 +141,7 @@ describe("リクエストの任意項目の判定（findOptionalViolations）: m
       "コメントの中の .optional() は数えない",
       source(
         "// .optional() は使わない（1 ユースケース = 1 API）。",
-        "requestBodySchema({",
+        "RequestBody.schema({",
         "  title: z.string(), // 部分更新の .optional() にしない",
         "});",
       ),
@@ -164,7 +164,7 @@ describe("リクエストの任意項目の判定（findOptionalViolations）: m
     [
       "部分更新（title も completed も任意）",
       source(
-        "requestBodySchema({",
+        "RequestBody.schema({",
         "  title: z.string().optional(),",
         "  completed: z.boolean().optional(),",
         "});",
@@ -174,7 +174,7 @@ describe("リクエストの任意項目の判定（findOptionalViolations）: m
     [
       "複数行の chain の最後の行の .optional()（その行を報告する）",
       source(
-        "requestBodySchema({",
+        "RequestBody.schema({",
         "  title: z",
         "    .string()",
         "    .trim()",
@@ -186,7 +186,7 @@ describe("リクエストの任意項目の判定（findOptionalViolations）: m
     [
       "複数行の chain で、WHY が .optional() の行ではなく項目の先頭の行の直前にある",
       source(
-        "requestBodySchema({",
+        "RequestBody.schema({",
         "  // WHY 任意: メモは省略できる。",
         "  note: z",
         "    .string()",
@@ -198,7 +198,7 @@ describe("リクエストの任意項目の判定（findOptionalViolations）: m
     [
       "WHY のコメントと .optional() の行の間に空行がある（2 行上の WHY）",
       source(
-        "requestBodySchema({",
+        "RequestBody.schema({",
         "  // WHY 任意: 説明文は省略できる。",
         "",
         "  description: z.string().optional(),",
@@ -209,7 +209,7 @@ describe("リクエストの任意項目の判定（findOptionalViolations）: m
     [
       "WHY の見出しが別の規則（長さ）",
       source(
-        "requestBodySchema({",
+        "RequestBody.schema({",
         "  // WHY 長さ: 説明文は 1000 文字まで。",
         "  description: z.string().max(1000).optional(),",
         "});",
@@ -219,7 +219,7 @@ describe("リクエストの任意項目の判定（findOptionalViolations）: m
     [
       "WHY 任意: の理由が空",
       source(
-        "requestBodySchema({",
+        "RequestBody.schema({",
         "  // WHY 任意:",
         "  description: z.string().optional(),",
         "});",
@@ -229,7 +229,7 @@ describe("リクエストの任意項目の判定（findOptionalViolations）: m
     [
       "WHY が同じ行の末尾にある（直前の行に書く）",
       source(
-        "requestBodySchema({",
+        "RequestBody.schema({",
         "  description: z.string().optional(), // WHY 任意: 説明文は省略できる。",
         "});",
       ),
@@ -238,7 +238,7 @@ describe("リクエストの任意項目の判定（findOptionalViolations）: m
     [
       "WHY がブロックコメント",
       source(
-        "requestBodySchema({",
+        "RequestBody.schema({",
         "  /* WHY 任意: 説明文は省略できる。 */",
         "  description: z.string().optional(),",
         "});",
@@ -248,7 +248,7 @@ describe("リクエストの任意項目の判定（findOptionalViolations）: m
     [
       "WHY は直後の 1 項目だけに効き、次の項目の .optional() には効かない",
       source(
-        "requestBodySchema({",
+        "RequestBody.schema({",
         "  // WHY 任意: 説明文は省略できる。",
         "  description: z.string().optional(),",
         "  completed: z.boolean().optional(),",
@@ -258,7 +258,7 @@ describe("リクエストの任意項目の判定（findOptionalViolations）: m
     ],
     [
       ".optional の前後に空白がある（. optional ()）",
-      source("requestBodySchema({ completed: z.boolean(). optional () });"),
+      source("RequestBody.schema({ completed: z.boolean(). optional () });"),
       [1],
     ],
   ])("%s は違反", (_name, text, expected) => {
@@ -287,7 +287,7 @@ describe("api ファイルの列挙と検査（fixture）", () => {
   }
 
   const partialUpdate = source(
-    "requestBodySchema({",
+    "RequestBody.schema({",
     "  title: z.string().optional(),",
     "});",
   );
@@ -295,18 +295,18 @@ describe("api ファイルの列挙と検査（fixture）", () => {
   it("features/<f>/internal/presentation/*.api.ts だけを対象にし、違反を「パス:行: 行の内容」で返す", () => {
     const root = fixture({
       "apps/backend/features/a/internal/presentation/rename-a.api.ts": source(
-        "requestBodySchema({",
+        "RequestBody.schema({",
         "  title: z.string(),",
         "});",
       ),
       "apps/backend/features/a/internal/presentation/update-a.api.ts": source(
-        "requestBodySchema({",
+        "RequestBody.schema({",
         "  title: z.string().optional(),",
         "  completed: z.boolean().optional(),",
         "});",
       ),
       "apps/backend/features/b/internal/presentation/create-b.api.ts": source(
-        "requestBodySchema({",
+        "RequestBody.schema({",
         "  // WHY 任意: 説明文は省略でき、省略は空文字と同じ意味。",
         "  description: z.string().optional(),",
         "});",

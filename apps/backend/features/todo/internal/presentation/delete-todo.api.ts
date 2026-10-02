@@ -1,7 +1,7 @@
-import { getDatabase } from "../../../../shared/infra/database";
+import { AppDatabase } from "../../../../shared/infra/database";
 import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";
-import { withProblemResponse } from "../../../../shared/presentation/problem";
-import { parseUuidParam } from "../../../../shared/presentation/resource-id";
+import { ProblemResponse } from "../../../../shared/presentation/problem";
+import { ResourceId } from "../../../../shared/presentation/resource-id";
 import { DeleteTodoCommand } from "../application/delete-todo.command";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 
@@ -12,19 +12,19 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 type Context = { params: Promise<{ id: string }> };
 
 // DELETE /api/todos/:id の Route Handler を持つクラス。コンストラクタで command を受け取り、handle を Route Handler として export する
-//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包むは
+//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・ProblemResponse.wrap で包むは
 //   list-todos.api.ts の ListTodosApi のコメント）。
 export class DeleteTodoApi {
   constructor(
     private readonly deleteTodo: Pick<DeleteTodoCommand, "execute">,
   ) {}
 
-  readonly handle = withProblemResponse(
+  readonly handle = ProblemResponse.wrap(
     async (_request: Request, ctx: Context): Promise<Response> => {
       const { id: rawId } = await ctx.params;
       // uuid の形でない id のキーと params は、query / command が無い id に投げる not_found と同じにそろえる
       //   （画面から見て「無い Todo」と同じ契約）。
-      const id = parseUuidParam(rawId, "todo.notFound", { id: rawId });
+      const id = ResourceId.parseUuid(rawId, "todo.notFound", { id: rawId });
       await this.deleteTodo.execute(id);
       // WHY 204 で本文なし: 削除後に返す内容が無いため。Response.json は本文を持つので使わない。
       return new Response(null, { status: 204 });
@@ -35,11 +35,11 @@ export class DeleteTodoApi {
 // app/api/todos/[id]/route.ts が re-export する Route Handler。本番は常に Postgres で組み立てる。
 // 組み立ての WHY（ここで組み立てる・Repository を api ファイルごとに作ってよい・InMemory に切り替えない）は list-todos.api.ts の GET のコメント。
 // 書き込みの command には、トランザクションを張る PostgresTransactionRunner を Repository と同じ db で渡す（Issue #215）。
-//   WHY 同じ getDatabase().db: command の読み込み（findByIdForUpdate）と書き込みは runner の tx で、Repository の query（findAll /
+//   WHY 同じ AppDatabase.get().db: command の読み込み（findByIdForUpdate）と書き込みは runner の tx で、Repository の query（findAll /
 //   findById）は Repository の db で行う。どちらも同じプールを使う。
 export const DELETE = new DeleteTodoApi(
   new DeleteTodoCommand(
-    new PostgresTodoRepository(getDatabase().db),
-    new PostgresTransactionRunner(getDatabase().db),
+    new PostgresTodoRepository(AppDatabase.get().db),
+    new PostgresTransactionRunner(AppDatabase.get().db),
   ),
 ).handle;

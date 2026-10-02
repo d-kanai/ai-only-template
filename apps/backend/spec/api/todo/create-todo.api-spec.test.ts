@@ -231,7 +231,7 @@ describeFeature(feature, ({ Scenario }) => {
       },
     );
 
-    // 作成で完了かどうかは受け付けない（作った Todo は常に未完了）。黙って捨てずに拒否する（json-body.ts の requestBodySchema）。
+    // 作成で完了かどうかは受け付けない（作った Todo は常に未完了）。黙って捨てずに拒否する（json-body.ts の RequestBody.schema）。
     And(
       "決められていない項目があると、拒否され、何も保存されない",
       async () => {

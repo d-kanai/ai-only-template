@@ -23,15 +23,10 @@ import {
   createTestDatabase,
   type TestDatabase,
 } from "../../test-support/database";
-import {
-  deleteEntry,
-  insertEntry,
-  recordChange,
-  updateEntries,
-} from "./change-log";
+import { ChangeRecords } from "./change-log";
 import { changeLogs } from "./schema";
 
-// WHY 時計（now）を差し替える: recordChange が occurred_at に入れる時刻を決めた値で確かめるため。
+// WHY 時計（now）を差し替える: ChangeRecords.recordChange が occurred_at に入れる時刻を決めた値で確かめるため。
 vi.mock("@repo/shared/now", { spy: true });
 
 afterEach(() => {
@@ -61,9 +56,9 @@ const ROW = {
   createdAt: new Date("2026-09-30T01:02:03.456Z"),
 };
 
-describe("insertEntry", () => {
+describe("ChangeRecords.insertEntry", () => {
   test("行の全列を DB の列名で after に持つ insert の記録にする（日時は ISO 8601 の文字列）", () => {
-    expect(insertEntry(items, ROW, ACTOR_ID)).toStrictEqual({
+    expect(ChangeRecords.insertEntry(items, ROW, ACTOR_ID)).toStrictEqual({
       tableName: "items",
       rowId: ROW.id,
       operation: "insert",
@@ -79,7 +74,9 @@ describe("insertEntry", () => {
   });
 
   test("actorId が null（ログインが無い）なら actorId は null", () => {
-    expect(insertEntry(items, ROW, null)).toMatchObject({ actorId: null });
+    expect(ChangeRecords.insertEntry(items, ROW, null)).toMatchObject({
+      actorId: null,
+    });
   });
 
   test("null の列は null のまま記録する", () => {
@@ -89,14 +86,15 @@ describe("insertEntry", () => {
     });
 
     expect(
-      insertEntry(nullable, { id: ROW.id, note: null }, null).changes,
+      ChangeRecords.insertEntry(nullable, { id: ROW.id, note: null }, null)
+        .changes,
     ).toStrictEqual({ id: { after: ROW.id }, note: { after: null } });
   });
 });
 
-describe("deleteEntry", () => {
+describe("ChangeRecords.deleteEntry", () => {
   test("消した行の全列を DB の列名で before に持つ delete の記録にする", () => {
-    expect(deleteEntry(items, ROW, ACTOR_ID)).toStrictEqual({
+    expect(ChangeRecords.deleteEntry(items, ROW, ACTOR_ID)).toStrictEqual({
       tableName: "items",
       rowId: ROW.id,
       operation: "delete",
@@ -112,10 +110,10 @@ describe("deleteEntry", () => {
   });
 });
 
-describe("updateEntries", () => {
-  test("変わった列（changedProps の差分）だけを、origin の値を before・差分の値を after にした update の記録 1 件にする", () => {
+describe("ChangeRecords.updateEntries", () => {
+  test("変わった列（ChangedProps.of の差分）だけを、origin の値を before・差分の値を after にした update の記録 1 件にする", () => {
     expect(
-      updateEntries(
+      ChangeRecords.updateEntries(
         items,
         ROW.id,
         ROW,
@@ -141,7 +139,9 @@ describe("updateEntries", () => {
 
   // WHY 空にする: 差分の無い update は何も書かない（SQL を発行しない）ので、変更の記録も残さない。
   test("変わった列が無ければ記録しない（空配列）", () => {
-    expect(updateEntries(items, ROW.id, ROW, {}, ACTOR_ID)).toStrictEqual([]);
+    expect(
+      ChangeRecords.updateEntries(items, ROW.id, ROW, {}, ACTOR_ID),
+    ).toStrictEqual([]);
   });
 
   // WHY origin に表の列でない項目（Entity の statusChanges など）があってもよい: 比べるのは差分の key だけ。
@@ -149,7 +149,7 @@ describe("updateEntries", () => {
     const origin = { ...ROW, history: [1, 2] };
 
     expect(
-      updateEntries(items, ROW.id, origin, { done: true }, null),
+      ChangeRecords.updateEntries(items, ROW.id, origin, { done: true }, null),
     ).toStrictEqual([
       {
         tableName: "items",
@@ -167,13 +167,23 @@ describe("updateEntries", () => {
 describe("組み立てられない入力", () => {
   test("表に無い key があれば、表と key の名前を持つ Error を投げる", () => {
     expect(() =>
-      insertEntry(items, { ...ROW, history: "x" } as typeof ROW, null),
+      ChangeRecords.insertEntry(
+        items,
+        { ...ROW, history: "x" } as typeof ROW,
+        null,
+      ),
     ).toThrow(new Error("items has no column: history"));
   });
 
   test("Object.prototype にある名前（toString）も表に無い key として扱う", () => {
     expect(() =>
-      updateEntries(items, ROW.id, ROW, { toString: "x" } as never, null),
+      ChangeRecords.updateEntries(
+        items,
+        ROW.id,
+        ROW,
+        { toString: "x" } as never,
+        null,
+      ),
     ).toThrow(new Error("items has no column: toString"));
   });
 
@@ -186,14 +196,18 @@ describe("組み立てられない入力", () => {
     "列の値が文字列・数値・真偽値・null・Date でない（%s）なら Error を投げる",
     (_label, value) => {
       expect(() =>
-        deleteEntry(items, { ...ROW, count: value } as never, null),
+        ChangeRecords.deleteEntry(
+          items,
+          { ...ROW, count: value } as never,
+          null,
+        ),
       ).toThrow(new Error("items.count has a value that cannot be recorded"));
     },
   );
 });
 
 // 実 Postgres（compose.yaml）に対して実行する。
-describe("recordChange", () => {
+describe("ChangeRecords.recordChange", () => {
   let database: TestDatabase;
 
   beforeAll(async () => {
@@ -212,10 +226,16 @@ describe("recordChange", () => {
   test("記録を change_logs に 1 行ずつ入れる（id は DB が作り、occurred_at は now()、同じ呼び出しの行は同じ時刻）", async () => {
     const occurredAt = new Date("2026-09-30T09:00:00.000Z");
     vi.mocked(now).mockReturnValueOnce(occurredAt);
-    const inserted = insertEntry(items, ROW, ACTOR_ID);
-    const updated = updateEntries(items, ROW.id, ROW, { count: 3 }, null);
+    const inserted = ChangeRecords.insertEntry(items, ROW, ACTOR_ID);
+    const updated = ChangeRecords.updateEntries(
+      items,
+      ROW.id,
+      ROW,
+      { count: 3 },
+      null,
+    );
 
-    await recordChange(database.db, [inserted, ...updated]);
+    await ChangeRecords.recordChange(database.db, [inserted, ...updated]);
 
     const rows = await database.db
       .select()
@@ -233,7 +253,7 @@ describe("recordChange", () => {
   test("記録が 0 件なら SQL を発行しない", async () => {
     const insert = vi.spyOn(database.db, "insert");
 
-    await recordChange(database.db, []);
+    await ChangeRecords.recordChange(database.db, []);
 
     expect(insert).not.toHaveBeenCalled();
     await expect(database.db.select().from(changeLogs)).resolves.toEqual([]);

@@ -234,7 +234,7 @@ describe("db_write の changes（before / after）と params", () => {
 describe("error 項目（Error を { type, message } にする）", () => {
   // WHY クエリのパラメータを抱えた例外の message を出さない（reviewer の指摘。Issue #216）: drizzle-orm の DrizzleQueryError の
   //   message は「Failed query: <SQL>\nparams: <生の値>」で、Writer が db_write の行でマスクした後に同じ例外を投げ直し、
-  //   toProblemResponse の server_error にそのまま届く。どのライブラリの例外でも、query / params を持つ例外の message は生の値を
+  //   ProblemResponse.from の server_error にそのまま届く。どのライブラリの例外でも、query / params を持つ例外の message は生の値を
   //   含みうるので、呼び出し側に依らず logger の中で *** にする（fail closed）。
   test.each([
     ["query と params", { query: "insert into todos", params: [SENTINEL] }],

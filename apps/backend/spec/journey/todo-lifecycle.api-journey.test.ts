@@ -56,7 +56,7 @@ import {
 //   API 同士のつながり（作った Todo が一覧・詳細・改名・削除で同じものとして扱われるか）は確かめない。E2E は画面とビルドを
 //   通すので遅く、失敗の原因が画面か API か DB かを切り分けにくい。ここは本番と同じ組み立て（Postgres の Repository → command /
 //   query → Api）で、画面を通さずに API の流れだけを見る。
-// WHY 本番の export（GET / POST など）を使わず、ここで組み立てる: 本番の handler は getDatabase()（.env の DATABASE_URL の public
+// WHY 本番の export（GET / POST など）を使わず、ここで組み立てる: 本番の handler は AppDatabase.get()（.env の DATABASE_URL の public
 //   スキーマ）を使い、テストファイルごとの別スキーマ（createTestDatabase）に向けられない。組み立ての形は各 *.api.ts の最下部と同じ。
 // WHY テストダブルを使わない（vitest から vi を import しない・InMemory も無し。rule-tests/api-journey.test.ts が止める）: 本番と同じ
 //   部品の組み合わせで動くことを確かめるのが目的で、差し替えるとその部分のつながりを確かめなくなる。

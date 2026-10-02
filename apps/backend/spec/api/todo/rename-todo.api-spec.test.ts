@@ -131,7 +131,7 @@ describeFeature(feature, ({ Scenario }) => {
       ]);
     });
 
-    // 差分の無い変更は書かない（changedProps が空なら Writer は SQL も記録も出さない）。応答は成功。Todo の行に加えて、
+    // 差分の無い変更は書かない（ChangedProps.of が空なら Writer は SQL も記録も出さない）。応答は成功。Todo の行に加えて、
     //   変更の記録が無いことも見る（expectUnchanged。.feature には書かない）。
     And("同じタイトルに変えても、何も変わらない", async () => {
       const milk = await aTodo(database.db).title("牛乳を買う").build();
@@ -260,7 +260,7 @@ describeFeature(feature, ({ Scenario }) => {
       },
     );
 
-    // 完了かどうかの変更は別の API（/completion）。黙って捨てずに拒否し、名前も変えない（json-body.ts の requestBodySchema）。
+    // 完了かどうかの変更は別の API（/completion）。黙って捨てずに拒否し、名前も変えない（json-body.ts の RequestBody.schema）。
     And("完了かどうかを一緒に送ると、拒否され、何も変わらない", async () => {
       const milk = await aTodo(database.db).title("牛乳を買う").build();
 

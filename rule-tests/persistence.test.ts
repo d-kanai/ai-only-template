@@ -26,7 +26,7 @@ import { afterAll, describe, expect, it } from "vitest";
 //   - update-uses-changed-props（Issue #215 で save-uses-changed-props から改名）: *.postgres.ts に update のメソッド定義（行の先頭が
 //     `update(` / `async update(`。`public` などの修飾子も可）があるのに、shared/infra/changed-props を値として import していない
 //     （`import type` は数えない）。
-//     WHY: Repository の update は、読み込んだときの値（origin）と今の値を changedProps で比べて変わった列だけを書く。
+//     WHY: Repository の update は、読み込んだときの値（origin）と今の値を ChangedProps.of で比べて変わった列だけを書く。
 //       自前の比較や全列の UPDATE に戻ると lost update が再発する。
 //     WHY 行の先頭の `update(` だけを定義と見る: Biome の整形では、drizzle の chain の `.update(` は行の先頭が `.` になり、Writer の
 //       呼び出しは `await writer.update(` の形になるので、定義と取り違えない。
@@ -59,14 +59,17 @@ import { afterAll, describe, expect, it } from "vitest";
 //   - writes-through-writer（Issue #215 で writes-through-write-in-transaction を置き換え。その前は Issue #189 の writes-record-change-log）:
 //     *.postgres.ts の書き込み（`.insert(` / `.update(` / `.delete(`。`.` と名前と `(` の間の空白・改行は可）が、書き込みの唯一の口
 //     Writer を通っていない。(a) shared/infra/writer を値として import していなければ、すべての書き込みが違反。(b) import していても、
-//     書き込みの受け手が `writerOf(` で得た変数（`const <名前> = writerOf(`）か `writerOf(…)` の呼び出しそのものでなければ違反。
+//     書き込みの受け手が `PostgresWriter.of(` で得た変数（`const <名前> = PostgresWriter.of(`）か `PostgresWriter.of(…)` の呼び出しそのものでなければ違反。
+//     `PostgresWriter` と `.` と `of` の間の空白・改行は可。受け手が `x.PostgresWriter`（メンバー）・前方一致の別のクラス（`MyPostgresWriter.of(`）・
+//     別のメソッド（`PostgresWriter.from(`・`PostgresWriter.ofTx(`）は Writer とみなさない。Issue #262 で関数 writerOf を
+//     クラス PostgresWriter の static メソッド of にした（ADR docs/adr/architecture/20261002-class-based-backend.md）。
 //     行は書き込みの名前の行（書き込みごと）。
-//     WHY: 書き込みは Writer（writerOf(tx)）に渡す。Writer が文ごとに変更履歴（change_logs）を同じトランザクションで書き、前後のログを
+//     WHY: 書き込みは Writer（PostgresWriter.of(tx)）に渡す。Writer が文ごとに変更履歴（change_logs）を同じトランザクションで書き、前後のログを
 //       出す（ADR docs/adr/architecture/20260930-transaction-from-application.md）。Repository が drizzle の tx・db で直接書くと、
 //       記録もログも残らない。
 //     WHY 受け手を見る（import だけにしない）: writer を import したうえで tx.insert(…)（drizzle の tx）や this.db.insert(…) と書くと、
 //       import だけでは通ってしまう。
-//     限界: 受け手の変数は同じファイルの `const|let|var <名前> = writerOf(` の宣言で見分け、スコープは見ない（別の関数の同じ名前の
+//     限界: 受け手の変数は同じファイルの `const|let|var <名前> = PostgresWriter.of(` の宣言で見分け、スコープは見ない（別の関数の同じ名前の
 //       変数に drizzle の tx を入れると見逃す）。別名への入れ直し（`const v = w;`）は違反と数える（安全側）。生の SQL
 //       （`this.db.execute(sql\`insert …\`)`）・ドライバの直接の呼び出し（`this.db.$client.query(…)`）の書き込みは `.insert(` などの形で
 //       ないので見ない。import はブロックコメント（`/* … */`）の中にあるだけでも満たしたと見なす。Writer の中身（記録とログ）は
@@ -74,7 +77,7 @@ import { afterAll, describe, expect, it } from "vitest";
 //   - no-change-log-in-repository（Issue #215）: *.postgres.ts が shared/infra/change-log を import する（`import type` も、
 //     `export … from` も）。行は import / export の行。
 //     WHY: 変更履歴の記録は Writer が文ごとに組み立てる（ユーザー判断「AOP のように共通で記録したい」）。Repository が記録
-//       （insertEntry など）を組み立てると、Repository ごとに同じ組み立てを書き、書き忘れた書き込みは記録されない。
+//       （ChangeRecords.insertEntry など）を組み立てると、Repository ごとに同じ組み立てを書き、書き忘れた書き込みは記録されない。
 //     限界: dynamic import（`import("…/change-log")`）と、change-log の関数を別のモジュール経由で使う書き方は見ない。
 //   - no-direct-transaction（Issue #205）: *.postgres.ts に `transaction` の名前（語の境界。`db.transaction(`・`tx.transaction(`
 //     （セーブポイント）・ブラケット `db["transaction"]`・分割代入 `const { transaction } = db`・`.` の後の改行）がある。行はその名前の行。
@@ -89,7 +92,9 @@ import { afterAll, describe, expect, it } from "vitest";
 //       生の SQL（`this.db.execute(sql\`begin\`)`）・ドライバの直接の呼び出し（`this.db.$client.query("begin")`）でのトランザクションは
 //       名前が出ないので見ない。文字列の中の `//` の後ろ（`"a//b"; db.transaction(…)` の同じ行）は、行の `//` 以降を落とすので見逃す。
 //   - no-direct-record-change（Issue #205。Issue #189 の record-change-in-transaction を置き換え）: *.postgres.ts に `recordChange` の
-//     名前（語の境界。呼び出し・import・別名の import の元の名前・名前空間の `changeLog.recordChange`）がある。行はその名前の行。
+//     名前（語の境界。呼び出し・import・別名の import の元の名前・名前空間の `changeLog.recordChange`・クラスの static メソッドの
+//     `ChangeRecords.recordChange`（Issue #262 で関数からクラスの static メソッドにした。名前を同じに保ち、この規則で拾う））がある。
+//     行はその名前の行。
 //     WHY: 変更履歴は Writer（shared/infra/writer.ts）が文ごとに同じトランザクションで書く。Repository が直接書くと、記録を 2 度書く・
 //       トランザクションの外で書く（記録の失敗で本体だけが残る）書き方ができる。以前の record-change-in-transaction（`recordChange(` が
 //       `transaction(` の括弧の中か）は、記録の書き込みが書き込みの口の中だけになり、要らなくなった（記録が本体と同じトランザクションで
@@ -97,7 +102,7 @@ import { afterAll, describe, expect, it } from "vitest";
 //     限界: 文字列の中の `recordChange` も違反と数える（安全側）。名前を組み立てて参照する書き方は見ない。
 //   - no-direct-db-write（Issue #205）: *.postgres.ts で `db` を受け手にした書き込み（`db.insert(` / `db.update(` / `db.delete(`。
 //     `this.db.` も `database.db.` も。`db` と `.` と名前と `(` の間の空白・改行は可）がある。行は書き込みの名前の行。
-//     WHY: `this.db.insert(` と書くと、トランザクションもログも変更履歴も無しに書けてしまう。書き込みは writerOf(tx) で得た Writer で
+//     WHY: `this.db.insert(` と書くと、トランザクションもログも変更履歴も無しに書けてしまう。書き込みは PostgresWriter.of(tx) で得た Writer で
 //       行う。writes-through-writer も同じ行を違反にする（受け手が Writer でない）が、db の直接の書き込みは名前で分かるように重ねて持つ。
 //     WHY 受け手の名前 `db`（語の境界）で見る: Repository は db をコンストラクタで受け取り `this.db` で使う（.claude/rules/backend.md）。
 //       `mydb`・`this.dbx` のような名前に db を含むだけの受け手は通す。
@@ -130,11 +135,11 @@ import { afterAll, describe, expect, it } from "vitest";
 //   文字列の中身は解釈しない。そのため、文字列の中の `//` の後ろは見逃し、文字列の中の `.onConflictDoUpdate(` は違反と数える。
 //   ブロックコメント（`/* … */`）の中はコードと同じに扱う（upsert は安全側で違反になるが、`get origin()` と changed-props の
 //   import は、ブロックコメントの中にあるだけで満たしたと見なす）。生の SQL（sql`… ON CONFLICT …`）、`update = async (…) =>`
-//   のようなプロパティでの定義、import した changedProps を実際に呼んでいるかは見ない。
+//   のようなプロパティでの定義、import した ChangedProps.of を実際に呼んでいるかは見ない。
 // 判定の粒度の限界:
 //   - `get origin()` の有無はファイル単位で見る（1 ファイルに class が 2 つあると、片方だけが origin を持っていても通る）。
 //   - `static async reconstruct(` / `static reconstruct = …` のような書き方の reconstruct は見ない。
-//   - `import { type changedProps } from "…/changed-props"`（inline の type）も値の import と数える（`import type` だけを除く）。
+//   - `import { type ChangedProps } from "…/changed-props"`（inline の type）も値の import と数える（`import type` だけを除く）。
 //   - 行頭が `update(` の行は定義と見なすので、行頭の素の呼び出し（`update(x);`）も定義として数える（安全側）。
 // WHY 文字列で判定する（AST にしない）: 見るのはメソッド名・import の参照先・getter の有無だけで、行単位の正規表現で足りる。
 
@@ -288,8 +293,8 @@ function openingParen(code: string, close: number): number {
   return -1;
 }
 
-// 書き込みの受け手（`.insert(` などの `.` の直前）が、writerOf で得た Writer か。
-//   `writerOf(…).insert(` の呼び出しそのもの、または `const <名前> = writerOf(` で宣言した変数 <名前>（`this.<名前>` のような
+// 書き込みの受け手（`.insert(` などの `.` の直前）が、PostgresWriter.of で得た Writer か。
+//   `PostgresWriter.of(…).insert(` の呼び出しそのもの、または `const <名前> = PostgresWriter.of(` で宣言した変数 <名前>（`this.<名前>` のような
 //   メンバーは除く）なら Writer とみなす。
 function receivesFromWriterOf(
   code: string,
@@ -299,7 +304,9 @@ function receivesFromWriterOf(
   const before = code.slice(0, dot).trimEnd();
   if (before.endsWith(")")) {
     const open = openingParen(code, before.length - 1);
-    return /(?:^|[^\w$.])writerOf\s*$/.test(code.slice(0, Math.max(open, 0)));
+    return /(?:^|[^\w$.])PostgresWriter\s*\.\s*of\s*$/.test(
+      code.slice(0, Math.max(open, 0)),
+    );
   }
   const name = /[A-Za-z_$][\w$]*$/.exec(before);
   if (name === null) {
@@ -309,12 +316,12 @@ function receivesFromWriterOf(
   return !isMember && writers.has(name[0]);
 }
 
-// 書き込み（`.insert(` / `.update(` / `.delete(`）のうち、受け手が writerOf で得た Writer でないものの、名前の行番号（1 始まり）。
+// 書き込み（`.insert(` / `.update(` / `.delete(`）のうち、受け手が PostgresWriter.of で得た Writer でないものの、名前の行番号（1 始まり）。
 function writesNotThroughWriter(code: string): number[] {
   const writers = new Set(
     [
       ...code.matchAll(
-        /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*writerOf\s*\(/g,
+        /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*PostgresWriter\s*\.\s*of\s*\(/g,
       ),
     ].map(({ 1: name = "" }) => name),
   );
@@ -609,20 +616,20 @@ const ENTITY = "apps/backend/features/x/internal/domain/x.ts";
 const SCHEMA = "apps/backend/features/x/internal/infra/schema.ts";
 const SHARED_SCHEMA = "apps/backend/shared/infra/schema.ts";
 const IMPORT_CHANGED_PROPS =
-  'import { changedProps } from "../../../../shared/infra/changed-props";';
+  'import { ChangedProps } from "../../../../shared/infra/changed-props";';
 const IMPORT_WRITER =
-  'import { writerOf } from "../../../../shared/infra/writer";';
+  'import { PostgresWriter } from "../../../../shared/infra/writer";';
 const IMPORT_CHILD = 'import { todoStatusChanges, todos } from "./schema";';
 const RUNNER = "apps/backend/shared/infra/transaction.postgres.ts";
-// 書き込み（insert / update / delete）を含む例に、writer の import と、writerOf で得た Writer の変数 tx・writer の宣言を最後の行に
+// 書き込み（insert / update / delete）を含む例に、writer の import と、PostgresWriter.of で得た Writer の変数 tx・writer の宣言を最後の行に
 //   足す（writes-through-writer を満たす）。
 // WHY 最後の行に足す: ほかの規則の例の行番号を変えずに、その規則だけを見る例にする（検査は import と宣言の位置を問わない）。
 const withWriter = (...lines: string[]) =>
   source(
     ...lines,
     IMPORT_WRITER,
-    "const tx = writerOf(t);",
-    "const writer = writerOf(t);",
+    "const tx = PostgresWriter.of(t);",
+    "const writer = PostgresWriter.of(t);",
   );
 
 describe("永続化の判定（findPersistenceViolations）: must pass", () => {
@@ -634,7 +641,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
         IMPORT_CHANGED_PROPS,
         "export class XRepository {",
         "  async update(x: X, t: Transaction): Promise<void> {",
-        "    await writer.update(xs, x.id, changedProps(x.origin, { name: x.name }));",
+        "    await writer.update(xs, x.id, ChangedProps.of(x.origin, { name: x.name }));",
         "  }",
         "}",
       ),
@@ -644,7 +651,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       POSTGRES,
       source(
         "import {",
-        "  changedProps,",
+        "  ChangedProps,",
         '} from "../../../../shared/infra/changed-props.ts";',
         "class XRepository {",
         "  update(x: X) {}",
@@ -725,7 +732,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
         "q.onConflictDoUpdate({});",
         "static reconstruct(v) {}",
         "await this.db.transaction(async (tx) => tx.insert(xs).values(r));",
-        'import { insertEntry } from "../../../../shared/infra/change-log";',
+        'import { ChangeRecords } from "../../../../shared/infra/change-log";',
       ),
     ],
     [
@@ -844,28 +851,28 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       source('export const statusLog = pgTable("todo_status_changes", {});'),
     ],
     [
-      "*.postgres.ts の書き込みが writer を import し、writerOf(tx) で得た Writer で書く（複数行の import・拡張子付き・改行を挟む・writerOf( に直接続ける）",
+      "*.postgres.ts の書き込みが writer を import し、PostgresWriter.of(tx) で得た Writer で書く（複数行の import・拡張子付き・改行を挟む・PostgresWriter.of( に直接続ける）",
       POSTGRES,
       source(
         IMPORT_CHANGED_PROPS,
         'import type { Transaction } from "../../../../shared/application/transaction";',
         "import {",
-        "  writerOf,",
+        "  PostgresWriter,",
         '} from "../../../../shared/infra/writer.ts";',
         "class A {",
         "  async insert(x: X, tx: Transaction) {",
-        "    const writer = writerOf(tx);",
+        "    const writer = PostgresWriter.of(tx);",
         "    await writer.insert(xs, [row]);",
         "    await writer",
         "      .insert(xChanges, rows);",
         "  }",
         "  async update(x: X, tx: Transaction) {",
-        "    let w = writerOf(tx);",
-        "    await w.update(xs, x.id, changedProps(x.origin, { name: x.name }));",
+        "    let w = PostgresWriter.of(tx);",
+        "    await w.update(xs, x.id, ChangedProps.of(x.origin, { name: x.name }));",
         "  }",
         "  async delete(id: string, tx: Transaction) {",
-        "    await writerOf(tx).delete(xs, id);",
-        "    await writerOf ( tx ) . delete (ys, id);",
+        "    await PostgresWriter.of(tx).delete(xs, id);",
+        "    await PostgresWriter.of ( tx ) . delete (ys, id);",
         "  }",
         "}",
       ),
@@ -874,16 +881,16 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       "change-log を名前が同じ別のモジュール（./change-log・shared/infra/change-log-x）やコメントの中で読むだけ",
       POSTGRES,
       source(
-        'import { insertEntry } from "./change-log";',
+        'import { ChangeRecords } from "./change-log";',
         'import { x } from "../../../../shared/infra/change-log-x";',
-        '// import { insertEntry } from "../../../../shared/infra/change-log";',
+        '// import { ChangeRecords } from "../../../../shared/infra/change-log";',
       ),
     ],
     [
       "*.postgres.ts でない書き込みの口（shared/infra/writer.ts）と InMemory は change-log を import してよい",
       "apps/backend/shared/infra/writer.ts",
       source(
-        'import { insertEntry, recordChange } from "./change-log";',
+        'import { ChangeRecords } from "./change-log";',
         'import type { ChangeEntry } from "../../shared/infra/change-log";',
       ),
     ],
@@ -902,12 +909,12 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       ),
     ],
     [
-      "db でない受け手（writerOf で得た tx / writer / 名前に db を含むだけの mydb）の書き込みと、db の読み取り（select / execute）",
+      "db でない受け手（PostgresWriter.of で得た tx / writer / 名前に db を含むだけの mydb）の書き込みと、db の読み取り（select / execute）",
       POSTGRES,
       withWriter(
         "await tx.insert(xs, rows);",
         "await writer.update(xs, id, changes);",
-        "const mydb = writerOf(t);",
+        "const mydb = PostgresWriter.of(t);",
         "await mydb.delete(xs, id);",
         "await this.db.select().from(xs);",
         "await this.db.execute(sql`select 1`);",
@@ -918,7 +925,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       "apps/backend/shared/infra/writer.ts",
       source(
         "const inserted = await this.tx.insert(table).values(rows).returning();",
-        "await recordChange(this.tx, entries);",
+        "await ChangeRecords.recordChange(this.tx, entries);",
       ),
     ],
     [
@@ -927,7 +934,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       source(
         'import type { Transaction } from "../application/transaction";',
         "return this.db.transaction((tx) =>",
-        "  work(transactionOf(new PostgresWriter(tx, this.actorId))),",
+        "  work(new PostgresWriter(tx, this.actorId).asTransaction()),",
         ");",
       ),
     ],
@@ -943,7 +950,7 @@ describe("永続化の判定（findPersistenceViolations）: must pass", () => {
       "コメントの中の書き込み・transaction(・recordChange(・this.db.insert(",
       POSTGRES,
       source(
-        "// await this.db.insert(xs).values(row); は writerOf で得た Writer で書く",
+        "// await this.db.insert(xs).values(row); は PostgresWriter.of で得た Writer で書く",
         "// this.db.transaction( と recordChange(tx, entries) は直接呼ばない",
         "const rows = await this.db.select().from(xs); // db.transaction(async (tx) => recordChange(tx, e))",
       ),
@@ -1180,7 +1187,7 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
       "changed-props を import type だけで読む（関数を呼べない）",
       POSTGRES,
       source(
-        'import type { changedProps } from "../../../../shared/infra/changed-props";',
+        'import type { ChangedProps } from "../../../../shared/infra/changed-props";',
         "class A {",
         "  async update(x: X) {}",
         "}",
@@ -1191,7 +1198,7 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
       "名前が同じ別のモジュール（./changed-props / shared/infra/changed-props-x）",
       POSTGRES,
       source(
-        'import { changedProps } from "./changed-props";',
+        'import { ChangedProps } from "./changed-props";',
         'import { diff } from "../../../../shared/infra/changed-props-x";',
         "class A {",
         "  async update(x: X) {}",
@@ -1238,10 +1245,10 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
       [{ rule: "no-update-delete-on-append-only-tables", line: 1 }],
     ],
     [
-      "writerOf で得た Writer の update(todoStatusChanges, …)（Writer を通しても insert のみの表の UPDATE）",
+      "PostgresWriter.of で得た Writer の update(todoStatusChanges, …)（Writer を通しても insert のみの表の UPDATE）",
       POSTGRES,
       withWriter(
-        "const w = writerOf(t);",
+        "const w = PostgresWriter.of(t);",
         "await w.update(todoStatusChanges, id, { completed: true });",
       ),
       [{ rule: "no-update-delete-on-append-only-tables", line: 2 }],
@@ -1332,28 +1339,31 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
       source(
         'import type { Writer } from "../../../../shared/infra/writer";',
         `// ${IMPORT_WRITER}`,
-        'import { writerOf } from "./writer";',
+        'import { PostgresWriter } from "./writer";',
         'import { x } from "../../../../shared/infra/writer-x";',
         'import { y } from "../../../../shared/infra/write";',
-        'export { writerOf } from "../../../../shared/infra/writer";',
-        "const w = writerOf(tx);",
+        'export { PostgresWriter } from "../../../../shared/infra/writer";',
+        "const w = PostgresWriter.of(tx);",
         "await w.insert(xs, rows);",
       ),
       [{ rule: "writes-through-writer", line: 8 }],
     ],
     [
-      "writer を import しても、受け手が writerOf で得た Writer でない（drizzle の tx・メンバーの this.writer / this.dbx・別の関数の戻り値・前方一致だけの別の関数・別名への入れ直し）",
+      "writer を import しても、受け手が PostgresWriter.of で得た Writer でない（drizzle の tx・メンバーの this.writer / this.dbx・別の関数の戻り値・前方一致だけの別の関数・別名への入れ直し）",
       POSTGRES,
       source(
         IMPORT_WRITER,
-        "const w = writerOf(tx);",
+        "const w = PostgresWriter.of(tx);",
         "await tx.insert(xs).values(row);",
         "await this.writer.update(xs, id, changes);",
         "await this.dbx.insert(xs, rows);",
         "await getWriter(tx).delete(xs, id);",
-        "await myWriterOf(tx).delete(xs, id);",
+        "await MyPostgresWriter.of(tx).delete(xs, id);",
         "const v = w; await v.delete(xs, id);",
         "await w.insert(xs, rows);",
+        "await PostgresWriter.from(tx).delete(xs, id);",
+        "await x.PostgresWriter.of(tx).delete(xs, id);",
+        "const u = PostgresWriter.ofTx(tx); await u.insert(xs, rows);",
       ),
       [
         { rule: "writes-through-writer", line: 3 },
@@ -1362,18 +1372,21 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
         { rule: "writes-through-writer", line: 6 },
         { rule: "writes-through-writer", line: 7 },
         { rule: "writes-through-writer", line: 8 },
+        { rule: "writes-through-writer", line: 10 },
+        { rule: "writes-through-writer", line: 11 },
+        { rule: "writes-through-writer", line: 12 },
       ],
     ],
     [
       "*.postgres.ts が change-log を import する（値・import type・複数行・拡張子付き・export … from）",
       POSTGRES,
       source(
-        'import { insertEntry } from "../../../../shared/infra/change-log";',
+        'import { ChangeRecords } from "../../../../shared/infra/change-log";',
         "import type { ChangeEntry } from '../../../../shared/infra/change-log.ts';",
         "import {",
-        "  deleteEntry,",
+        "  ChangeRecords,",
         '} from "../../../../shared/infra/change-log";',
-        'export { updateEntries } from "../../../../shared/infra/change-log";',
+        'export { ChangeRecords } from "../../../../shared/infra/change-log";',
       ),
       [
         { rule: "no-change-log-in-repository", line: 1 },
@@ -1428,22 +1441,24 @@ describe("永続化の判定（findPersistenceViolations）: must reject", () =>
       ],
     ],
     [
-      "*.postgres.ts で recordChange を直接使う（import・別名の import・Writer を取り出した後の呼び出し・名前空間の参照）",
+      "*.postgres.ts で recordChange を直接使う（import・別名の import・Writer を取り出した後の呼び出し・名前空間の参照・ChangeRecords の static メソッド）",
       POSTGRES,
       withWriter(
         'import { recordChange } from "./audit";',
         'import { recordChange as rc } from "./audit";',
-        "const w = writerOf(t);",
+        "const w = PostgresWriter.of(t);",
         "  await recordChange(w, entries);",
         "  await w.insert(xs, rows);",
         "",
         "await changeLog . recordChange (tx, entries);",
+        "await ChangeRecords.recordChange(w, entries);",
       ),
       [
         { rule: "no-direct-record-change", line: 1 },
         { rule: "no-direct-record-change", line: 2 },
         { rule: "no-direct-record-change", line: 4 },
         { rule: "no-direct-record-change", line: 7 },
+        { rule: "no-direct-record-change", line: 8 },
       ],
     ],
     [
@@ -1696,10 +1711,10 @@ describe("backend のソースの列挙と検査（fixture）", () => {
       "apps/backend/features/y/internal/infra/y-lock.postgres.ts": source(
         "export class YLock {",
         "  async findByIdForUpdate(id: string) {",
-        '    await writerOf(tx).select().from(ys).for("update");',
+        '    await PostgresWriter.of(tx).select().from(ys).for("update");',
         "  }",
         "  async findByIdLocked(id: string) {",
-        '    await writerOf(tx).select().from(ys).for("update");',
+        '    await PostgresWriter.of(tx).select().from(ys).for("update");',
         "  }",
         "  async findLockedForUpdate(id: string) {}",
         "}",
@@ -1735,22 +1750,22 @@ describe("backend のソースの列挙と検査（fixture）", () => {
         "await this.db.transaction(async (tx) => { await tx.insert(zs).values(r); });",
         "await recordChange(this.db, entries);",
         "const rows = await this.db.select().from(zs).limit(1);",
-        'import { insertEntry } from "../../../../shared/infra/change-log";',
+        'import { ChangeRecords } from "../../../../shared/infra/change-log";',
       ),
-      // 規則を満たす Repository（writer を import し、writerOf(tx) で得た Writer で書き、子表を leftJoin で読む）。
+      // 規則を満たす Repository（writer を import し、PostgresWriter.of(tx) で得た Writer で書き、子表を leftJoin で読む）。
       "apps/backend/features/z/internal/infra/z-writer.postgres.ts": source(
         IMPORT_WRITER,
         'import type { Transaction } from "../../../../shared/application/transaction";',
         'import { zChanges, zs } from "./schema";',
-        "const writer = writerOf(tx);",
+        "const writer = PostgresWriter.of(tx);",
         "await writer.delete(zs, id);",
         "const rows = await this.db.select().from(zs).leftJoin(zChanges, on);",
       ),
       // 書き込みの口（*.postgres.ts でない）は change-log を import し、tx で書き、recordChange を呼んでよい。
       "apps/backend/shared/infra/writer.ts": source(
-        'import { recordChange } from "./change-log";',
+        'import { ChangeRecords } from "./change-log";',
         "await this.tx.insert(table).values(rows);",
-        "await recordChange(this.tx, entries);",
+        "await ChangeRecords.recordChange(this.tx, entries);",
       ),
       // トランザクションの runner（*.postgres.ts だが Repository でない）は db.transaction を呼んでよい。同じ場所の別の *.postgres.ts は
       //   対象のまま。
@@ -1838,7 +1853,7 @@ describe("backend のソースの列挙と検査（fixture）", () => {
 });
 
 describe("永続化（実ファイル）", () => {
-  it("upsert を使わず、*.postgres.ts の update は changed-props を import し、reconstruct を持つ Entity は origin を持ち、insert のみの表を update / delete せず、その表を Changes / Events / Logs で終わる変数で宣言し、書き込みは writerOf で得た Writer を通し（transaction と recordChange を直接呼ばず、change-log を import しない）、集約は子表の全件を JOIN で読み、行ロックをするメソッドの名前は ForUpdate で終わる", () => {
+  it("upsert を使わず、*.postgres.ts の update は changed-props を import し、reconstruct を持つ Entity は origin を持ち、insert のみの表を update / delete せず、その表を Changes / Events / Logs で終わる変数で宣言し、書き込みは PostgresWriter.of で得た Writer を通し（transaction と recordChange を直接呼ばず、change-log を import しない）、集約は子表の全件を JOIN で読み、行ロックをするメソッドの名前は ForUpdate で終わる", () => {
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     const files = listBackendSources(repoRoot);
     expect(files).toContain(

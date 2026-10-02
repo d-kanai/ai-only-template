@@ -1,7 +1,7 @@
 import {
-  describeErrorKey,
   type ErrorKey,
   type ErrorKeyParams,
+  ErrorKeys,
   type ErrorParamsArgs,
 } from "./error-key";
 
@@ -32,7 +32,7 @@ export class DomainError<K extends ErrorKey = ErrorKey> extends Error {
     // WHY as: rest は K が決まるまで [params?: undefined] か [params: ErrorKeyParams[K]] のどちらか分からない（型の分岐が
     //   遅延する）ので、先頭を取り出した値の型を TypeScript が導けない。どちらの場合も先頭は ErrorKeyParams[K] か undefined。
     const params = rest[0] as ErrorKeyParams[K] | undefined;
-    super(describeErrorKey(key, params));
+    super(ErrorKeys.describe(key, params));
     // WHY name を上書きする: ログやスタックトレースで Error ではなく DomainError と表示させ、原因の切り分けを早くするため。
     this.name = "DomainError";
     this.code = code;

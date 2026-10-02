@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
-// 「domain の検証は validate を通す」（.claude/rules/backend.md の「入力検証」の domain の項、apps/backend/shared/domain/validate.ts、
+// 「domain の検証は validate（DomainValidation.validated）を通す」（.claude/rules/backend.md の「入力検証」の domain の項、apps/backend/shared/domain/validate.ts、
 // Issue #177）を、backend のソースで機械的に検査するテスト。
 // WHY 検査する: zod の issue → DomainError の変換（最初の issue の message をキーにする・キーの無い issue は DomainError ではない
 //   Error（500）にする）は validate の 1 か所に置いた。Entity ごとに safeParse して自分で DomainError を作ると、変換が Entity ごとに
@@ -25,8 +25,9 @@ import { afterAll, describe, expect, it } from "vitest";
 //     （node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/classic/schemas.d.ts の ZodType）。
 //     ただし直前の識別子が組み込みの JSON / Date のもの（`JSON.parse(` / `Date.parse(`）は zod ではないので除く
 //     （NON_ZOD_RECEIVERS）。受け手が識別子でないもの（`todoPropsSchema().parse(`）も違反にする。
-//     `Number.parseInt(` / `parseInt(` は名前が `parse` ではないので、もともと一致しない。プロジェクトの `validate(schema, x)` は
-//     `.` の付かない関数呼び出しなので一致しない（`.validate(` だけを見る）。
+//     `Number.parseInt(` / `parseInt(` は名前が `parse` ではないので、もともと一致しない。プロジェクトの
+//     `DomainValidation.validated(schema, x)`（Issue #262 で関数 validate からクラスの static メソッドにした）は名前が `validate` ではないので
+//     一致しない（`.validate(` だけを見る）。WHY メソッド名を validated にした: `.validate(` だとこの規則に一致し、Entity からの呼び出しも違反になる。
 //     WHY domain だけ: presentation はリクエストのスキーマを safeParse して項目ごとの errors にする（json-body.ts）ので、zod を直接呼ぶ。
 //   - validation-error-only-in-validate（backend 全体）: `new DomainError("validation_error"`（validation_error の DomainError を
 //     作れるのは backend 全体で validate.ts だけ）。`new DomainError(` と引数の間に空白・改行を挟んでも拾う。`not_found` など
@@ -155,12 +156,12 @@ const source = (...lines: string[]) => lines.join("\n");
 describe("domain の検証の判定（findDomainValidationViolations）: must pass", () => {
   it.each([
     [
-      "validate を通して検証する（Entity の完全コンストラクタ）",
+      "DomainValidation.validated を通して検証する（Entity の完全コンストラクタ）",
       source(
-        'import { validate } from "../../../../shared/domain/validate";',
-        "const valid = validate(todoPropsSchema(), props);",
-        // プロジェクトの validate は関数呼び出しで、`.validate(` ではない。
-        "return validate(schema, value);",
+        'import { DomainValidation } from "../../../../shared/domain/validate";',
+        "const valid = DomainValidation.validated(todoPropsSchema(), props);",
+        // プロジェクトの検証は `.validated(` で、zod の `.validate(` ではない（Issue #262 で関数 validate からクラスの static メソッドにした）。
+        "return DomainValidation.validated(schema, value);",
       ),
     ],
     [
@@ -204,7 +205,7 @@ describe("domain の検証の判定（findDomainValidationViolations）: must pa
       source(
         "// schema.safeParse(x) を直接呼ばず validate を通す。",
         '// 違反は DomainError("validation_error", key) になる。',
-        "const valid = validate(schema(), x); // schema.parse(x) にしない",
+        "const valid = DomainValidation.validated(schema(), x); // schema.parse(x) にしない",
         '// new DomainError("validation_error", "todo.title.empty")',
       ),
     ],
@@ -402,8 +403,8 @@ describe("domain のファイルの列挙と検査（fixture）", () => {
   it("apps/backend の *.ts（テスト・依存・validate.ts を除く）を対象にし、parse の規則は domain だけに当て、違反を「規則: パス:行: 行の内容」で返す", () => {
     const root = fixture({
       "apps/backend/features/x/internal/domain/x.ts": source(
-        'import { validate } from "../../../../shared/domain/validate";',
-        "const valid = validate(xSchema(), props);",
+        'import { DomainValidation } from "../../../../shared/domain/validate";',
+        "const valid = DomainValidation.validated(xSchema(), props);",
         'throw new DomainError("not_found", "x.notFound", { id });',
       ),
       "apps/backend/features/x/internal/domain/y.ts": source(

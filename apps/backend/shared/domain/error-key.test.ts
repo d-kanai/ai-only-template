@@ -1,28 +1,27 @@
 // @vitest-environment node
 import { describe, expect, expectTypeOf, test } from "vitest";
 import {
-  describeErrorKey,
   ERROR_KEYS,
   type ErrorKey,
-  isErrorKey,
+  ErrorKeys,
   type ParamlessErrorKey,
 } from "./error-key";
 
-// describeErrorKey は Error#message（ログ・スタックトレースに出る開発者向けの文字列）を作る。
+// ErrorKeys.describe は Error#message（ログ・スタックトレースに出る開発者向けの文字列）を作る。
 //   画面に出す文言ではない（画面はキーと params を辞書で翻訳する。Issue #116）。
-describe("describeErrorKey", () => {
+describe("ErrorKeys.describe", () => {
   test("params が無ければ、キーだけを返す", () => {
-    expect(describeErrorKey("todo.title.empty")).toBe("todo.title.empty");
+    expect(ErrorKeys.describe("todo.title.empty")).toBe("todo.title.empty");
   });
 
   test("params があれば、キーの後ろに空白 1 つと params の JSON を付ける", () => {
-    expect(describeErrorKey("todo.title.tooLong", { max: 100 })).toBe(
+    expect(ErrorKeys.describe("todo.title.tooLong", { max: 100 })).toBe(
       'todo.title.tooLong {"max":100}',
     );
   });
 });
 
-// ERROR_KEYS は ErrorKey（ErrorKeyParams のキー）の実行時の一覧。isErrorKey がこれで判定する。
+// ERROR_KEYS は ErrorKey（ErrorKeyParams のキー）の実行時の一覧。ErrorKeys.includes がこれで判定する。
 // WHY 型で比べる（toEqualTypeOf）: 一覧の過不足（キーを ErrorKeyParams に足して ERROR_KEYS に足し忘れる、その逆）を
 //   pnpm typecheck で止める。実行時の値を並べて比べると、キーを足すたびにテストも直す必要があり、足し忘れを見逃す。
 describe("ERROR_KEYS", () => {
@@ -32,7 +31,7 @@ describe("ERROR_KEYS", () => {
 });
 
 // ParamlessErrorKey は params を持たないキー（Record<string, never>）だけ。zod の型の検査（z.string など）の issue は
-//   params を運ばないので、そこに付けられるのはこのキーだけにする（shared/domain/keyed-issue.ts の keyedIssue）。
+//   params を運ばないので、そこに付けられるのはこのキーだけにする（shared/domain/keyed-issue.ts の KeyedIssue.of）。
 describe("ParamlessErrorKey", () => {
   test("params の無いキーだけを含む（型で検査する）", () => {
     expectTypeOf<ParamlessErrorKey>().toEqualTypeOf<
@@ -49,11 +48,11 @@ describe("ParamlessErrorKey", () => {
   });
 });
 
-// isErrorKey は zod の issue の message が ErrorKey かを確かめる（todo.ts の validate。キーを付け忘れた項目では zod の
+// ErrorKeys.includes は zod の issue の message が ErrorKey かを確かめる（validate.ts の DomainValidation.validated。キーを付け忘れた項目では zod の
 //   英語の文言が入る）。
-describe("isErrorKey", () => {
+describe("ErrorKeys.includes", () => {
   test.each(ERROR_KEYS)("%s は ErrorKey", (key) => {
-    expect(isErrorKey(key)).toBe(true);
+    expect(ErrorKeys.includes(key)).toBe(true);
   });
 
   test.each([
@@ -66,6 +65,6 @@ describe("isErrorKey", () => {
     //   キーと取り違えない。
     ["Object.prototype の名前", "constructor"],
   ])("%s は ErrorKey ではない", (_label, value) => {
-    expect(isErrorKey(value)).toBe(false);
+    expect(ErrorKeys.includes(value)).toBe(false);
   });
 });

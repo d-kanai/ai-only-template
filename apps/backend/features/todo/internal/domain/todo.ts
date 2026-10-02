@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { now } from "@repo/shared/now";
 import { z } from "zod";
-import { keyedIssue, keyedRefine } from "../../../../shared/domain/keyed-issue";
-import { validate } from "../../../../shared/domain/validate";
+import { KeyedIssue } from "../../../../shared/domain/keyed-issue";
+import { DomainValidation } from "../../../../shared/domain/validate";
 
 // タイトルの上限の文字数（前後の空白を除いたコードポイント数）。
 // WHY export する（Issue #144）: presentation のリクエストのスキーマ（create-todo.api.ts・rename-todo.api.ts）が同じ上限を
@@ -66,7 +66,7 @@ export class Todo {
     props: TodoProps,
     origin: (valid: TodoProps) => Readonly<TodoProps> | undefined,
   ) {
-    const valid = validate(Todo.todoPropsSchema(), props);
+    const valid = DomainValidation.validated(Todo.todoPropsSchema(), props);
     this.id = valid.id;
     this.title = valid.title;
     this.completed = valid.completed;
@@ -173,11 +173,11 @@ export class Todo {
   // WHY タイトル以外（id・完了状態・作成日時）も規則に含める: どの口から来た値も、すべてが規則を満たすことを 1 つの
   //   スキーマで宣言する。create の id は randomUUID で常に満たすが、reconstruct は DB の行（Postgres の uuid 型は
   //   版の桁が 0 の値も受け付ける）を受け取る。create の作成日時（now()）も Date であることを型でしか保証しないので、同じく検証する。
-  // WHY 項目ごとにキーを付ける: validate（shared/domain/validate.ts）が最初の issue の message（= キー）を DomainError の key にする。
+  // WHY 項目ごとにキーを付ける: DomainValidation.validated（shared/domain/validate.ts）が最初の issue の message（= キー）を DomainError の key にする。
   //   zod の既定の文言（英語で zod の語彙を含む）を domain の外に出さない。キーの無い issue を作らないよう、検査を持つ
-  //   zod のスキーマ・refine にはすべて keyedIssue / keyedRefine を渡す（z.object 自身は、値が型の上でオブジェクトなので
-  //   失敗しない）。渡し忘れは validate が DomainError ではない Error（500）にする。
-  // WHY id は z.uuid()（RFC 9562 の形）: presentation の parseUuidParam と同じ形にそろえる。Todo の id は randomUUID（v4）で
+  //   zod のスキーマ・refine にはすべて KeyedIssue.of / KeyedIssue.refine を渡す（z.object 自身は、値が型の上でオブジェクトなので
+  //   失敗しない）。渡し忘れは DomainValidation.validated が DomainError ではない Error（500）にする。
+  // WHY id は z.uuid()（RFC 9562 の形）: presentation の ResourceId.parseUuid と同じ形にそろえる。Todo の id は randomUUID（v4）で
   //   作るので必ず満たす（ADR docs/adr/architecture/20260929-zod-for-backend-validation.md。z.uuid() は RFC 9562 の形だけで大文字も通す。.claude/rules/backend.md）。
   // WHY メソッドにする（スキーマを最上位の定数・static フィールドにしない）: 最上位の式や static フィールドの初期化は読み込み時にだけ評価される static な変異になり、
   //   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に作れば、比較や message の変異を
@@ -191,7 +191,7 @@ export class Todo {
   //   （Issue #94 で撤回した分け方）ので、規則はいつも全体で当てる。
   private static todoPropsSchema() {
     const fields = z.object({
-      id: z.uuid(keyedIssue("todo.id.invalid")),
+      id: z.uuid(KeyedIssue.of("todo.id.invalid")),
       // タイトルの不変条件: 前後の空白を除いて 1〜TODO_TITLE_MAX_LENGTH 文字。Todo の規則は todoPropsSchema 1 か所に宣言する（Issue #88）。
       //   presentation は同じ規則を同じキーで重ねてよいが、これより厳しくしない（Issue #144。.claude/rules/backend.md）。
       // WHY trim してから数え、trim した値を保持する: 空白だけのタイトルを「空」とみなし、
@@ -204,19 +204,21 @@ export class Todo {
       // WHY 文字列でないときのキーも付ける: todoPropsSchema の「zod の既定の文言を domain の外に出さない」に
       //   そろえる。この経路を通るのは型を as で偽ったときだけ（presentation は z.string で弾き、DB の列は NOT NULL text）。
       title: z
-        .string(keyedIssue("todo.title.invalid"))
+        .string(KeyedIssue.of("todo.title.invalid"))
         .trim()
         .refine(
           (title) => Array.from(title).length >= 1,
-          keyedIssue("todo.title.empty"),
+          KeyedIssue.of("todo.title.empty"),
         )
         .refine(
           (title) => Array.from(title).length <= TODO_TITLE_MAX_LENGTH,
           // 画面の文言に上限の文字数を埋め込めるよう、params で渡す（上限を変えても画面の辞書を直さずに済む）。
-          keyedRefine("todo.title.tooLong", { max: TODO_TITLE_MAX_LENGTH }),
+          KeyedIssue.refine("todo.title.tooLong", {
+            max: TODO_TITLE_MAX_LENGTH,
+          }),
         ),
-      completed: z.boolean(keyedIssue("todo.completed.invalid")),
-      createdAt: z.date(keyedIssue("todo.createdAt.invalid")),
+      completed: z.boolean(KeyedIssue.of("todo.completed.invalid")),
+      createdAt: z.date(KeyedIssue.of("todo.createdAt.invalid")),
       // 完了の履歴（Issue #188）。完了状態が変わるたびに、変わった後の値と日時を末尾に足す（古い順）。
       //   項目どうしの規則（今の completed・作成日時との関係）は、下の refine（isConsistentHistory）が見る。
       // WHY readonly()（zod が parse の結果を Object.freeze する）: 履歴は Todo の値で、Todo は不変。配列や要素を書き換えられると、
@@ -226,17 +228,17 @@ export class Todo {
         .array(
           z
             .object({
-              completed: z.boolean(keyedIssue("todo.statusChanges.invalid")),
-              changedAt: z.date(keyedIssue("todo.statusChanges.invalid")),
+              completed: z.boolean(KeyedIssue.of("todo.statusChanges.invalid")),
+              changedAt: z.date(KeyedIssue.of("todo.statusChanges.invalid")),
             })
             .readonly(),
-          keyedIssue("todo.statusChanges.invalid"),
+          KeyedIssue.of("todo.statusChanges.invalid"),
         )
         .readonly(),
     });
     return fields.refine(
       Todo.isConsistentHistory,
-      keyedIssue("todo.statusChanges.invalid"),
+      KeyedIssue.of("todo.statusChanges.invalid"),
     );
   }
 

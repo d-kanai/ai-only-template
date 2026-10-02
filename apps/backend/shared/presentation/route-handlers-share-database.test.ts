@@ -4,10 +4,10 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import type { Database } from "../infra/database";
 
-// 各 feature の *.api.ts は、モジュールの評価時に `new <Api>(new <Command>(new Postgres<X>Repository(getDatabase().db)))` で
+// 各 feature の *.api.ts は、モジュールの評価時に `new <Api>(new <Command>(new Postgres<X>Repository(AppDatabase.get().db)))` で
 // Route Handler を 1 回だけ組み立てる（組み立ては api ファイルごと。.claude/rules/backend.md の「presentation」）。
 // このテストは「全 feature の api ファイルをすべて読み込んでも、Repository に渡る db は 1 つ（= プールは Next のサーバプロセスで 1 つ）」を固定する。
-// WHY: api ファイルごとに getDatabase() を呼ぶ設計は、getDatabase が同じものを返すことに依存している。呼ぶたびに
+// WHY: api ファイルごとに AppDatabase.get() を呼ぶ設計は、AppDatabase.get が同じものを返すことに依存している。呼ぶたびに
 //   新しいプールを作る実装に変わると、api ファイルの数だけプールができて max_connections を食いつぶす（Issue #132）。
 //   モジュールの読み直し（HMR）で同じプールが返ることは shared/infra/database.test.ts が固定する。
 // WHY shared に置く: 検査するのは特定の feature ではなく、feature をまたぐプール（shared/infra/database.ts）の使われ方。
@@ -57,7 +57,7 @@ const received: Database[] = [];
 //   「このテスト中に実行された」と記録され、static かつテストに覆われた hybrid になる。ignoreStatic（stryker.config.mjs）は
 //   hybrid を Ignored にせず、覆ったテストだけで判定するので、実行時の振る舞いに現れない列定義の変異がこの 1 テストで
 //   判定されて Survived になっていた（schema.ts の 35 件）。beforeAll はテスト id が無い文脈なので、ここでの評価は
-//   static のままになる。getDatabase() の呼び出しは test の中に残し、database.ts の変異はこのテストでも判定させる。
+//   static のままになる。AppDatabase.get() の呼び出しは test の中に残し、database.ts の変異はこのテストでも判定させる。
 beforeAll(async () => {
   // WHY resetModules: このファイルより前に読み込まれた api モジュールが残っていると、組み立てが再実行されず記録できない。
   vi.resetModules();
@@ -87,14 +87,14 @@ beforeAll(async () => {
 // WHY afterAll: 読み込みを beforeAll で行うので、モックの解除とプールの後始末もファイルの最後に 1 回行う。
 afterAll(async () => {
   for (const file of repositoryFiles) vi.doUnmock(file);
-  const { closeDatabase } = await import("../infra/database");
-  await closeDatabase();
+  const { AppDatabase } = await import("../infra/database");
+  await AppDatabase.close();
   vi.resetModules();
 });
 
-test("全 feature の api ファイルをすべて読み込んでも、Repository に渡る db は getDatabase() の 1 つだけ", async () => {
+test("全 feature の api ファイルをすべて読み込んでも、Repository に渡る db は AppDatabase.get() の 1 つだけ", async () => {
   // beforeAll の resetModules 後に読み込まれた database モジュール（api ファイルが使ったもの）を取る。
-  const { getDatabase } = await import("../infra/database");
+  const { AppDatabase } = await import("../infra/database");
 
   // 列挙が空だと Repository も 0 個で、下の検証が意味を持たないまま通る。
   expect(features.length).toBeGreaterThan(0);
@@ -102,7 +102,7 @@ test("全 feature の api ファイルをすべて読み込んでも、Repositor
   expect(repositoryFiles.length).toBeGreaterThan(0);
   // api ファイルごとに 1 回組み立てる（Repository は api ファイルの数だけ作られる）。
   expect(received).toHaveLength(apiFiles.length);
-  // 渡った db はすべて同じ 1 つで、それは getDatabase() が返す db。
+  // 渡った db はすべて同じ 1 つで、それは AppDatabase.get() が返す db。
   expect(new Set(received).size).toBe(1);
-  expect(received[0]).toBe(getDatabase().db);
+  expect(received[0]).toBe(AppDatabase.get().db);
 });

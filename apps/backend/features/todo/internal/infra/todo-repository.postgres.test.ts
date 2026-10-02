@@ -17,7 +17,7 @@ import { DomainError } from "../../../../shared/domain/domain-error";
 import type { ChangeEntry } from "../../../../shared/infra/change-log";
 import { changeLogs } from "../../../../shared/infra/schema";
 import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";
-import { writerOf } from "../../../../shared/infra/writer";
+import { PostgresWriter } from "../../../../shared/infra/writer";
 import {
   createTestDatabase,
   type TestDatabase,
@@ -106,7 +106,7 @@ function deferred<T = void>() {
 
 // トランザクション（tx）の接続の Postgres のプロセスの id。
 async function backendPid(tx: Transaction): Promise<number> {
-  const [row] = await writerOf(tx)
+  const [row] = await PostgresWriter.of(tx)
     .select({ pid: sql<number>`pg_backend_pid()` })
     .from(todos);
   return Number(row?.pid);
@@ -1328,7 +1328,7 @@ describe("PostgresTodoRepository", () => {
     });
   });
 
-  // 失敗は warn（500 の例外は toProblemResponse が error で残す）。
+  // 失敗は warn（500 の例外は ProblemResponse.from が error で残す）。
   test("ロックせずに読んだ後に delete された Todo を変えて update すると、前のログの後に失敗のログ（warn。Error）を出す", async () => {
     const todo = Todo.create("牛乳を買う");
     await insert(todo);
@@ -1392,7 +1392,7 @@ describe("PostgresTodoRepository", () => {
     );
   });
 
-  // WHY uuid の形でない id を「無い」（undefined）にしない: 利用者の入力は presentation の parseUuidParam が先に 404 にする
+  // WHY uuid の形でない id を「無い」（undefined）にしない: 利用者の入力は presentation の ResourceId.parseUuid が先に 404 にする
   //   ので、ここに uuid の形でない id が来るのは呼び出し側の実装ミスだけ。「無い」で通すと誤りが隠れる。Postgres の
   //   uuid 型のエラー（SQLSTATE 22P02 invalid_text_representation）をそのまま投げ、API は 500 でログに残す。
   test.each([
@@ -1510,8 +1510,8 @@ describe("PostgresTodoRepository", () => {
     };
   }
 
-  // WHY message は英語: ログ（toProblemResponse の logger.emit の server_error）に出る開発者向けの文字列で、apps/backend の非テストコードには
-  //   自然言語の日本語を置かない（Issue #116）。cause の DomainError の message はキーと params（describeErrorKey）。
+  // WHY message は英語: ログ（ProblemResponse.from の logger.emit の server_error）に出る開発者向けの文字列で、apps/backend の非テストコードには
+  //   自然言語の日本語を置かない（Issue #116）。cause の DomainError の message はキーと params（ErrorKeys.describe）。
   function corruptedRowError(id: string, cause: DomainError): Error {
     return new Error(
       `stored Todo (id: ${id}) violates the invariants: ${cause.message}`,
