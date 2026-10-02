@@ -10,7 +10,7 @@ ADR `architecture/20261002-class-based-backend.md` と `architecture/20261002-cl
 
 ## 決定
 - 規則 `class-based` の対象に、`apps/frontend_customer/` の `features/`・`shared/`・`test-support/` の下の React 以外のモジュール（`*.tsx`・`*.jsx`・`*.hook.*` を除く。テストも除く）を足す。
-- `biome.json` の `noStaticOnlyClass` の override に同じ範囲を足す（frontend は別の override にし、`!**/*.tsx`・`!**/*.jsx`・`!**/*.hook.*` で除く）。
+- `biome.json` の `noStaticOnlyClass` の override に同じ範囲を足す（frontend は別の override にし、`!**/*.tsx`・`!**/*.jsx`・`!**/*.hook.*`・`!**/*.test.*` で除く。テストは規則 `class-based` の対象外なので、Biome の推奨の警告を残す）。
 - 名前: `TodoApi`（`list`・`get`・`create`・`rename`・`changeCompletion`・`delete`。補助は `private static`）、`ApiErrorMessage`（`toMessage`・`toMessages`）、`Locales`（`is`・`negotiate`・`fromHeader`）、`DateTimeFormatter`（`format`）、`RequestLogBuilder`（`build`）。どれも状態を持たないので static メソッド。定数（`SUPPORTED_LOCALES`・`DEFAULT_LOCALE`・`LOCALE_HEADER`・`LOCALE_COOKIE`）と型（`Locale`・`ErrorMessages` など）は名前を変えずにクラスの外に置く。
 - 画面のテストは `vi.mock("@/features/todo/api/todo-api")` の自動モックのまま、`vi.mocked(TodoApi.list)` で戻り値を決める。
 - 対象外（関数のまま）:

@@ -309,7 +309,7 @@ describe("biome check（pnpm lint と同じ引数）", () => {
 });
 
 // complexity/noStaticOnlyClass の override（Issue #262）: apps/backend/**・apps/shared/**・apps/e2e/** と、apps/frontend_customer の
-//   features/**・shared/**・test-support/** のうち *.tsx・*.jsx・*.hook.* 以外だけ off にする。どれも最上位に関数を置かず（apps/e2e は
+//   features/**・shared/**・test-support/** のうち *.tsx・*.jsx・*.hook.*・*.test.* 以外だけ off にする。どれも最上位に関数を置かず（apps/e2e は
 //   spec 以外の補助。database.ts の E2eDatabase。frontend は React 以外のモジュール。todo-api.ts の TodoApi）、状態の無い補助を
 //   static だけのクラスにする（ADR docs/adr/architecture/20261002-class-based-backend.md・20261002-class-based-shared-and-test-support.md・
 //   20261002-class-based-frontend-modules.md）。範囲は rule-tests/architecture.test.ts の規則 class-based の対象と同じにする。
@@ -391,6 +391,10 @@ describe("biome check の noStaticOnlyClass は apps/backend・apps/shared・app
     [
       "apps/frontend_customer/features/todo/screens/x/static-only.hook.ts",
       "frontend の React の hook",
+    ],
+    [
+      "apps/frontend_customer/features/todo/api/static-only.test.ts",
+      "frontend のテスト（規則 class-based の対象外）",
     ],
     ["apps/frontend_customer/app/static-only.ts", "frontend の app/"],
     ["apps/frontend_customer/static-only.ts", "frontend の直下"],

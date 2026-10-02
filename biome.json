@@ -122,7 +122,8 @@
         "apps/frontend_customer/test-support/**",
         "!**/*.tsx",
         "!**/*.jsx",
-        "!**/*.hook.*"
+        "!**/*.hook.*",
+        "!**/*.test.*"
       ],
       "linter": {
         "rules": {
