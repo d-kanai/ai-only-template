@@ -62,7 +62,7 @@ paths:
 | 書き方 | frontend の中は `@/<path>`（tsconfig の paths `@/*` → `apps/frontend_customer/*`） | - | レビュー |
 | 書き方 | backend へは `@repo/backend/<path>` だけ（workspace パッケージと `apps/backend/package.json` の `exports` で解決）。相対パス（`../backend/...`）と `@/../backend/...` は使わない（規則 `frontend-to-backend-specifier`） | 相対パスは `exports`（公開する入口）を通らずに backend のどのファイルでも指せ、後で別プロセスに分けたときにも壊れる | `rule-tests/architecture.test.ts` の `frontend-to-backend-specifier` |
 | 書き方 | `apps/shared` へは `@repo/shared/<name>` だけ（直下のファイルから。`apps/shared/package.json` の `exports`）。相対パス（`../shared/...`）と `@/../shared/...` は使わない（規則 `frontend-to-shared-specifier`） | 同上 | `rule-tests/architecture.test.ts` の `frontend-to-shared-specifier` |
-| 解決 | exports に無いファイルを import すると `tsc` / `next build` が「Cannot find module」で止まる。足し方は `.claude/rules/code/backend.md` の「exports」 | - | `pnpm typecheck` |
+| 解決 | exports に無いファイルを import すると `tsc` / `next build` が「Cannot find module」で止まる。足し方は `.claude/rules/code/backend.md` の「import と exports」の表の「exports」 | - | `pnpm typecheck` |
 | 解決 | `apps/frontend_customer/tsconfig.json`: Next 用（plugin・jsx・DOM の型、paths は `@/*` だけ）。`@repo/backend/...`・`@repo/shared/...` を paths に書かない | 書くと exports を通らずにパッケージのどのファイルも指せてしまう | レビュー |
 
 ## 画面の骨組み
@@ -174,8 +174,8 @@ export function TodoScreen() {
 | リクエストログ | `GCP_PROJECT_ID` は `proxy.ts` が `@repo/shared/env` から読んで渡す | `shared/request-log/` は `apps/shared` を参照できない（規則 `screen-to-shared`） | `rule-tests/architecture.test.ts` の `screen-to-shared` |
 | リクエストログ | `event.name` が一覧（`apps/shared/log-event.ts`）にあることと種類ごとの必須項目は、`proxy.ts` の `logger.emit(log)` の型チェックが見る | - | `pnpm typecheck` |
 | リクエストログ | クエリは `url.query` にキーと値の組で出し、値は logger が `***` にする（キーは自由文としてメールなどだけを `***`）。`referer`（URL のクエリを含みうる）と `client.address`（接続元の IP。GDPR では個人データ）も `***` になる | - | 説明 |
-| リクエストログ | `RequestLogBuilder.build` と `proxy.ts` は生の値を渡すだけで、伏せる処理を書かない（マスクは logger の中だけ。Issue #216） | `.claude/rules/code/backend.md` の「個人情報のマスク」、ADR `docs/adr/architecture/20260930-log-masking-in-logger.md` | レビュー |
-| リクエストログ | 受信時刻は `@repo/shared/now` の `Clock.now()` で取る（現在時刻の唯一の出口。`new Date()` は書かない。規則 `now-single-source`、`.claude/rules/code/shared.md` の「now」） | - | `rule-tests/architecture.test.ts` の `now-single-source` |
+| リクエストログ | `RequestLogBuilder.build` と `proxy.ts` は生の値を渡すだけで、伏せる処理を書かない（マスクは logger の中だけ。Issue #216） | `.claude/rules/code/backend.md` の「ログ」の表の「マスク」、ADR `docs/adr/architecture/20260930-log-masking-in-logger.md` | レビュー |
+| リクエストログ | 受信時刻は `@repo/shared/now` の `Clock.now()` で取る（現在時刻の唯一の出口。`new Date()` は書かない。規則 `now-single-source`、`.claude/rules/code/shared.md` の「現在時刻」） | - | `rule-tests/architecture.test.ts` の `now-single-source` |
 | リクエストログ | 認可・リダイレクトなどのロジックは置かない | - | レビュー |
 | リクエストログ | 限界: status と所要時間は取れない（Proxy は応答の前に動く）、プリフェッチは matcher で除く、ブラウザの戻る・進むで Next のルーターのキャッシュが使われると画面の行は出ない（出るのは画面が呼ぶ API の行だけ）、`client.address` は `x-forwarded-for` を信じる値でクライアントが偽装できるので、信頼できるリバースプロキシがヘッダを付け直す前提で使う | 限界（ログに出ないもの・信頼できない値） | 説明 |
 

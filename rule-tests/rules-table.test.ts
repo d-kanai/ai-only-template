@@ -1048,7 +1048,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And("仕様の例の表は、実リポジトリの参照で違反なし", () => {
-      // given: Issue #322 の書き換えの仕様の「例」（backend.md の「モジュールの境界」。見出しは Issue #336 で括弧の注記を外した）。参照は実リポジトリの rule-tests/architecture.test.ts。
+      // given: Issue #322 の書き換えの仕様の「例」（backend.md の「依存の向き」の表の「モジュールの境界」）。参照は実リポジトリの rule-tests/architecture.test.ts。
       const example = lines(
         FRONT,
         "",

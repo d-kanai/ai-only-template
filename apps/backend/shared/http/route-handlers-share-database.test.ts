@@ -5,7 +5,7 @@ import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import type { Database } from "../drizzle/database";
 
 // 各 feature の *.api.ts は、モジュールの評価時に `new <Api>(new <Command>(new Postgres<X>Repository(AppDatabase.get().db)))` で
-// Route Handler を 1 回だけ組み立てる（組み立ては api ファイルごと。.claude/rules/code/backend.md の「presentation」）。
+// Route Handler を 1 回だけ組み立てる（組み立ては api ファイルごと。.claude/rules/code/backend.md の「API の書き方」の表の「組み立て」）。
 // このテストは「全 feature の api ファイルをすべて読み込んでも、Repository に渡る db は 1 つ（= プールは Next のサーバプロセスで 1 つ）」を固定する。
 // WHY: api ファイルごとに AppDatabase.get() を呼ぶ設計は、AppDatabase.get が同じものを返すことに依存している。呼ぶたびに
 //   新しいプールを作る実装に変わると、api ファイルの数だけプールができて max_connections を食いつぶす（Issue #132）。

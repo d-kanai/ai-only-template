@@ -1209,7 +1209,7 @@ const RULES: Rule[] = [
           ))),
   },
   {
-    // 「他のモジュールの internal/ は参照しない」（Issue #208。モジュラーモノリス。.claude/rules/code/backend.md の「モジュールの境界」）。
+    // 「他のモジュールの internal/ は参照しない」（Issue #208。モジュラーモノリス。.claude/rules/code/backend.md の「依存の向き」の表の「モジュールの境界」）。
     //   backend の feature を 1 つのモジュールとし、直下を公開の入口 expose/ と中身 internal/ に分ける。
     // WHY: internal はモジュールの中身で、他のモジュールが依存すると、中身を変えるたびに他のモジュールが壊れ、境界が無くなる。
     //   他のモジュールが使えるのは expose/ だけにし、公開するものをディレクトリで決める。
@@ -2510,8 +2510,7 @@ function findStaticInInstanceClassViolations(root: string): string[] {
 
 // --- workspace パッケージの exports（規則 backend-exports。Issue #68 の段階 2。規則 shared-exports。Issue #90） ---
 // exports は、@repo/backend・@repo/shared として外（そのパッケージのディレクトリの外）に公開するファイルの一覧。
-//   ユーザー判断で、全ファイル（"./*"）ではなく、外が使う入口だけを明示する（.claude/rules/code/backend.md の「import の書き方と
-//   公開の範囲（exports）」、.claude/rules/code/shared.md）。
+//   ユーザー判断で、全ファイル（"./*"）ではなく、外が使う入口だけを明示する（.claude/rules/code/backend.md の「import と exports」の表の「exports」、.claude/rules/code/shared.md）。
 // 検査すること（1 つでも破ると「<規則の id>: ...」の行を出す）:
 //   (1) 外から "<パッケージ名>/<path>" で参照するものは、すべて exports のどれかのキーに当たる。
 //       WHY: 当たらないと Next / Vitest / tsc の解決で失敗するが、その前に「どのファイルのどの参照か」を一覧で出す。

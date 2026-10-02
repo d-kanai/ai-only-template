@@ -28,7 +28,7 @@ export function TodoItem({ todo, onToggle, onDelete }: TodoItemProps) {
   // 作成日時はブラウザ（利用者）のタイムゾーンで出す。サーバは UTC で動く（package.json の TZ=UTC）ので、サーバで決めると
   // 利用者の時刻とずれる。
   // WHY 描画の中で読んでよい（hydration の不一致にならない）: 一覧は hook が useEffect の中で取得してから描くので、
-  //   この部品はサーバの prerender・SSR では描かれず、ブラウザでだけ描かれる（.claude/rules/code/frontend.md の「SSR を前提にしない」）。
+  //   この部品はサーバの prerender・SSR では描かれず、ブラウザでだけ描かれる（.claude/rules/code/frontend.md の「データ取得とレンダリング」の表の「prerender」）。
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   return (
     <ListItem>

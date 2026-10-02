@@ -26,7 +26,7 @@ class DrizzleConfigPath {
   }
 }
 
-// drizzle-kit（マイグレーションの生成）の設定。使い方は .claude/rules/code/backend.md の「永続化（Drizzle + Postgres）」。
+// drizzle-kit（マイグレーションの生成）の設定。使い方は .claude/rules/code/backend.md の「DB スキーマ」の表の「マイグレーション」。
 //   pnpm db:generate … drizzle-kit generate: schema のファイルと前回のスナップショット（shared/drizzle/migrations/meta/）の差分から、
 //                      マイグレーションの SQL を out（shared/drizzle/migrations/）に作る。DB には接続しない。
 // 当てるのは drizzle-kit migrate ではなく pnpm db:migrate（shared/drizzle/migrate.ts。drizzle-orm の migrator。Issue #326）。
