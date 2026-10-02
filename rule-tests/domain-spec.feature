@@ -18,7 +18,7 @@ Feature: domain 仕様の置き場所と書き方
     * 見出し・説明・step の行の禁止語は行の番号で違反になり、コメントの行の禁止語は違反なし
   Scenario: step の実装の loadFeature と skip（findStepContentViolations）
     * 対の .feature を第 2 引数なしで読めば違反なし（単一引用符・名前空間・文字列やコメントの中の skip など）
-    * loadFeature の無い・対でない・第 2 引数のある読み方、ほかの読み込み口と設定、skip・only とタグの絞り込みは違反
+    * loadFeature の無い・describeFeature に渡さない・対でない・第 2 引数のある読み方、ほかの読み込み口と設定、skip・only とタグの絞り込みは違反
   Scenario: step の実装の import（findStepContentViolations の domain-spec-pure）
     * 同じ feature の domain のモジュールを相対パスで値として import すれば違反なし（複数行・type の混じった import・拡張子付き・domain の下の入れ子など）
     * InMemory と実 DB の import（型だけ・dynamic import・再公開も）は行の違反、同じ feature の domain の値の import が無ければファイルの違反になる

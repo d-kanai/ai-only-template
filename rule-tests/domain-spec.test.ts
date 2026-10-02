@@ -69,7 +69,7 @@ import { featureLines } from "./feature-lines";
 //       見出しも見る: domain 仕様の見出しは固定の一覧ではなく、業務ルールの名前そのもの。
 //   以下は step の実装（spec/domain/<feature>/ の直下の <name>.domain-spec.test.ts）の中身の規則:
 //   - domain-spec-load-feature: `loadFeature("./<name>.feature")`（対の .feature を第 2 引数なしで読む。引用符は " か '。名前空間の
-//     `x.loadFeature(` も同じ）の呼び出しが 1 つ以上要る（無ければファイルの違反）。それ以外の形の loadFeature の呼び出し（第 2 引数・
+//     `x.loadFeature(` も同じ）の呼び出しが 1 つ以上要り（無ければファイルの違反）、`const <名前> = await loadFeature(…)` で受けた値を `describeFeature(<名前>` に渡す（渡していなければファイルの違反。Codex の指摘）。それ以外の形の loadFeature の呼び出し（第 2 引数・
 //     別のパス・テンプレートリテラル・変数）、`loadFeature as` の別名の import、setVitestCucumberConfiguration・loadFeatureFromText・
 //     defineFeature の名前、`.skip` / `.only` / `.skipIf` / `.runIf`（直前が `.` のスプレッドは除く）と includeTags / excludeTags の
 //     名前は、その行の違反。
@@ -510,8 +510,26 @@ function findLoadFeatureViolations(
     const args = /^loadFeature\s*\(\s*(["'])([^"'\n]*)\1\s*\)/.exec(
       code.slice(match.index),
     );
-    return { index: match.index, paired: args?.[2] === paired };
+    // WHY 受けた変数の名前を読む: 対の .feature を読んでも describeFeature に渡さなければ、仕様の Scenario は 1 つも登録されず、
+    //   ほかのテストだけで緑になる（Codex の指摘、Issue #318）。`const <名前> = await [ns.]loadFeature(` の形だけを受け付ける。
+    const assigned =
+      /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?(?:[\w$]+\s*\.\s*)?$/.exec(
+        blanked.slice(0, match.index),
+      );
+    return {
+      index: match.index,
+      paired: args?.[2] === paired,
+      variable: assigned?.[1],
+    };
   });
+  const registered = calls.some(
+    (call) =>
+      call.paired &&
+      call.variable !== undefined &&
+      new RegExp(
+        `\\bdescribeFeature\\s*\\(\\s*${call.variable.replace(/\$/g, "\\$")}\\b`,
+      ).test(blanked),
+  );
   // WHY 別名の import・ほかの口・設定を止める: 別名で呼ぶと上の形の検査を逃れ、loadFeatureFromText・defineFeature は .feature の
   //   ファイルを読まず、setVitestCucumberConfiguration は言語とタグの絞り込みを全体で変える。
   // WHY skip の直前が . のもの（スプレッドの `...only`）を除く: `{ ...todo }` のようなスプレッドを呼び出しと取り違えない。
@@ -529,13 +547,22 @@ function findLoadFeatureViolations(
       line: lineAt(code, index),
     }),
   );
-  return calls.some((call) => call.paired)
+  if (!calls.some((call) => call.paired)) {
+    return [
+      ...lines,
+      {
+        rule: "domain-spec-load-feature",
+        note: `loadFeature("${paired}") が無い`,
+      },
+    ];
+  }
+  return registered
     ? lines
     : [
         ...lines,
         {
           rule: "domain-spec-load-feature",
-          note: `loadFeature("${paired}") が無い`,
+          note: `loadFeature("${paired}") の結果を describeFeature に渡していない`,
         },
       ];
 }
@@ -681,7 +708,8 @@ const GOOD_FEATURE = source(
 // step の実装の必須の形（対の .feature を読み、同じ feature の domain を値で import する）。例はこれに足すか、どれかを欠く。
 const DOMAIN_IMPORT =
   'import { X } from "../../../features/x/internal/domain/x";';
-const LOAD_FEATURE = 'const feature = await loadFeature("./x.feature");';
+const LOAD_FEATURE =
+  'const feature = await loadFeature("./x.feature"); describeFeature(feature, () => {});';
 const stepsWith = (...extra: string[]) =>
   source(DOMAIN_IMPORT, LOAD_FEATURE, ...extra);
 
@@ -1349,6 +1377,7 @@ describeFeature(feature, ({ Scenario }) => {
               source(
                 DOMAIN_IMPORT,
                 "const feature = await loadFeature( './x.feature' );",
+                "describeFeature( feature, () => {});",
               ),
             ],
             [
@@ -1357,6 +1386,7 @@ describeFeature(feature, ({ Scenario }) => {
                 DOMAIN_IMPORT,
                 'import * as cucumber from "@amiceli/vitest-cucumber";',
                 'const feature = await cucumber.loadFeature("./x.feature");',
+                "cucumber.describeFeature(feature, () => {});",
               ),
             ],
             [
@@ -1381,7 +1411,7 @@ describeFeature(feature, ({ Scenario }) => {
       );
 
       And(
-        "loadFeature の無い・対でない・第 2 引数のある読み方、ほかの読み込み口と設定、skip・only とタグの絞り込みは違反",
+        "loadFeature の無い・describeFeature に渡さない・対でない・第 2 引数のある読み方、ほかの読み込み口と設定、skip・only とタグの絞り込みは違反",
         () => {
           // given
           const missing: DomainSpecViolation = {
@@ -1402,6 +1432,22 @@ describeFeature(feature, ({ Scenario }) => {
                 "const d = await loadFeature(path);",
               ),
               [...at(2, 3, 4, 5), missing],
+            ],
+            [
+              "対の .feature を読んでも describeFeature に渡さない（別の値を渡す・変数に受けない）",
+              source(
+                DOMAIN_IMPORT,
+                'const feature = await loadFeature("./x.feature");',
+                "describeFeature(other, () => {});",
+                'await loadFeature("./x.feature");',
+                "describeFeature(featureX, () => {});",
+              ),
+              [
+                {
+                  rule: "domain-spec-load-feature",
+                  note: 'loadFeature("./x.feature") の結果を describeFeature に渡していない',
+                },
+              ],
             ],
             [
               "第 2 引数で言語を渡す（対の形の呼び出しが別にあっても）",
@@ -1648,6 +1694,7 @@ describeFeature(feature, ({ Scenario }) => {
           [`${specs}/only-steps.domain-spec.test.ts`]: source(
             DOMAIN_IMPORT,
             'const feature = await loadFeature("./only-steps.feature");',
+            "describeFeature(feature, () => {});",
           ),
           // 置き場所の違反: 補助・入れ子・直下・外の step（中身は見ない）。
           [`${specs}/support.ts`]: "export const a = 1;\n",
