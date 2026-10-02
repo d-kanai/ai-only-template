@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // Stop フック（scripts/hooks/require-work-log.sh）の仕様。Issue #64。
 // このターンでツールを使ったのに、その日の作業ログ（docs/work-logs/<今日>.md）が作業ツリーでも今日のコミットでも変わっていなければ、
-// {"decision":"block"} で停止を拒否する。WHY と限界は .claude/rules/work-log.md。
+// {"decision":"block"} で停止を拒否する。WHY と限界は .claude/rules/tooling/work-log-hooks.md。
 
 const scriptPath = resolve(import.meta.dirname, "require-work-log.sh");
 
@@ -191,7 +191,7 @@ describe("require-work-log.sh（Stop フック）", () => {
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual({
       decision: "block",
-      reason: `作業ログ ${todayLog} に、このターンでやったこと（調査・判断・確認した事実）を追記してください（.claude/general/work-log.md）。追記してからコミットしてください。`,
+      reason: `作業ログ ${todayLog} に、このターンでやったこと（調査・判断・確認した事実）を追記してください（.claude/rules/workflow/work-log.md）。追記してからコミットしてください。`,
     });
   }
 
@@ -208,7 +208,7 @@ describe("require-work-log.sh（Stop フック）", () => {
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual({
       decision: "block",
-      reason: `作業ログ ${todayLog} の項目${headings.map((h) => `「${h}」`).join("、")}に \`- 機械化: <縛れる（何で）/ 縛れない（理由）/ 対象外>\` の行を足してください（.claude/general/work-log.md）。`,
+      reason: `作業ログ ${todayLog} の項目${headings.map((h) => `「${h}」`).join("、")}に \`- 機械化: <縛れる（何で）/ 縛れない（理由）/ 対象外>\` の行を足してください（.claude/rules/workflow/work-log.md）。`,
     });
   }
 

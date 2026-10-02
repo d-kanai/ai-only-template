@@ -6,7 +6,7 @@ import { defineBddConfig } from "playwright-bdd";
 // 実行: リポジトリ直下の pnpm test:e2e（= pnpm --filter @repo/e2e test = apps/e2e をカレントディレクトリにした playwright test）。
 //   Next の本番ビルドを webServer で起動し、ブラウザから画面を操作する。
 // WHY apps/e2e を workspace パッケージ @repo/e2e にする（Issue #84）: apps/frontend_customer・apps/backend と同じ形にし、E2E だけが使う
-//   依存（@playwright/test・pg・@types/pg）を apps/e2e/package.json に置いて、リポジトリ直下から外す（.claude/rules/testing.md の「E2E」）。
+//   依存（@playwright/test・pg・@types/pg）を apps/e2e/package.json に置いて、リポジトリ直下から外す（.claude/rules/quality/testing.md の「E2E」）。
 // WHY env.ts を "@repo/shared/..." で import する（Issue #68 の段階 2・Issue #90）: env.ts は frontend と backend で共通の workspace
 //   パッケージ apps/shared にあり、公開の入口（apps/shared/package.json の exports）からだけ使う（rule-tests/architecture.test.ts の
 //   frontend-to-shared-specifier）。apps/e2e/package.json の devDependencies に "@repo/shared": "workspace:*" があるので、Node の解決
@@ -19,8 +19,8 @@ import { defineBddConfig } from "playwright-bdd";
 //   メインの作業ツリーは E2E_PORT が無くても（既存の .env のままでも）この値で動く。
 // WHY .env から変えられるようにする（Issue #64）: worktree では WorktreeCreate フックが worktree の名前から 3101〜3900 の
 //   値を導いて .env に書く（scripts/worktree-env.sh）。並列の worktree が同じポートを使うと、reuseExistingServer で
-//   別の worktree のサーバを検証してしまうため（.claude/rules/worktree.md）。
-// WHY Env（必須）ではなく toolEnv（任意）: E2E 専用の値で、アプリ（next start）は使わないため（.claude/rules/env.md）。
+//   別の worktree のサーバを検証してしまうため（.claude/rules/tooling/worktree.md）。
+// WHY Env（必須）ではなく toolEnv（任意）: E2E 専用の値で、アプリ（next start）は使わないため（.claude/rules/tooling/env.md）。
 const port = toolEnv.E2E_PORT ?? 3100;
 const baseURL = `http://localhost:${port}`;
 
@@ -41,7 +41,7 @@ const chromiumExecutable = toolEnv.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
 //   webServer の中では当てない（Issue #57 の方針。CI・クラウドのフックは E2E の前に db:migrate を実行する）。
 const databaseUrl = env.DATABASE_URL;
 
-// E2E は Gherkin の .feature（業務の流れ）と step のクラス（*.steps.ts）で書く（Issue #279。.claude/rules/testing.md の「E2E」、
+// E2E は Gherkin の .feature（業務の流れ）と step のクラス（*.steps.ts）で書く（Issue #279。.claude/rules/quality/testing.md の「E2E」、
 //   ADR docs/adr/quality/20261002-e2e-in-gherkin-with-playwright-bdd.md）。playwright-bdd の bddgen が .feature から Playwright の
 //   テスト（outputDir の .features-gen/ の *.spec.js）を生成し、playwright test がそれを実行する（package.json の test）。
 // defineBddConfig の返り値は生成先のディレクトリで、testDir にそのまま渡す（Playwright は生成されたテストだけを探す）。

@@ -9,8 +9,8 @@ import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, beforeAll, expect } from "vitest";
 import { casesByName } from "./case-table";
 
-// pnpm-workspace.yaml のサプライチェーン保護と版の書き方の設定（.claude/rules/dependencies.md）を仕様として固定するテスト。
-// ルール検査テスト（.claude/rules/testing.md）なので、読み取り（readTopLevelSettings）と判定（findWorkspaceSettingViolations）を
+// pnpm-workspace.yaml のサプライチェーン保護と版の書き方の設定（.claude/rules/tooling/dependencies.md）を仕様として固定するテスト。
+// ルール検査テスト（.claude/rules/quality/testing.md）なので、読み取り（readTopLevelSettings）と判定（findWorkspaceSettingViolations）を
 // 関数に切り出し、許可される例（must pass）と違反の例（must reject）の両方で固定する。
 // .feature（pnpm-workspace.feature）と step の実装（このファイル）に分けた（Issue #282）。
 
@@ -125,7 +125,7 @@ function readTopLevelSettings(yaml: string): Settings {
 //   - minimumReleaseAgeStrict: true: 非 strict だと条件を満たす版がないときに古い版へ黙ってフォールバックし、
 //     lockfile の内容が意図しない版に変わりうる。失敗させて人間・AI に気づかせる。
 //   - savePrefix: ''（空文字）: `pnpm add <pkg>` で版を書き忘れても範囲指定（既定の '^'）にならないようにする
-//     （依存は完全固定。.claude/rules/dependencies.md）。
+//     （依存は完全固定。.claude/rules/tooling/dependencies.md）。
 //   - allowBuilds: 依存のビルドスクリプト（postinstall 等）は任意コードを実行できるため、許可・不許可をパッケージごとに
 //     レビューして決めている（各パッケージの理由は pnpm-workspace.yaml のコメント）。許可（true）が黙って増えたり、
 //     lefthook（pre-commit の導入に必要）が false になったりしないよう、中身を丸ごと比較する。
@@ -483,7 +483,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And("トップレベルのキーが重複していると例外にする", () => {
-      // WHY toThrow(Error) と message の両方: toThrow("文字列") は throw undefined でも通る（.claude/rules/testing.md）。
+      // WHY toThrow(Error) と message の両方: toThrow("文字列") は throw undefined でも通る（.claude/rules/quality/testing.md）。
       // given
       const yaml = `${VALID_YAML}minimumReleaseAge: 1440\n`;
 
@@ -501,7 +501,7 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("pnpm-workspace.yaml の実ファイル", ({ And }) => {
     // 読み込み → 読み取り → 判定を、本番と同じ readWorkspaceSettings で実ファイルから通す
-    //   （.claude/rules/testing.md の「ルール検査テスト」）。
+    //   （.claude/rules/quality/testing.md の「ルール検査テスト」）。
     And(
       "違反を含む pnpm-workspace.yaml からは、違反の設定と実際の値をすべて検出する",
       () => {

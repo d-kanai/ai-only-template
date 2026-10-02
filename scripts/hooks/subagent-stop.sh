@@ -11,7 +11,7 @@
 # 結果は stdout の {"systemMessage": "..."}（ユーザーに表示される）で返す。何もなければ何も出さない。
 # WHY block しない（decision: "block" を返さない）: block はサブエージェントを動かし続ける指示になるが、共有フックはここで直し、
 #   lockfile の扱いはオーケストレータの判断なので、サブエージェントを止めても直らない。
-# どこで失敗しても exit 0（フックの失敗でサブエージェントの報告を止めない）。WHAT / WHY は .claude/rules/git-guard.md。
+# どこで失敗しても exit 0（フックの失敗でサブエージェントの報告を止めない）。WHAT / WHY は .claude/rules/tooling/git-guard.md。
 set -u
 
 input="$(cat)"

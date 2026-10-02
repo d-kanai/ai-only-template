@@ -2,7 +2,7 @@
 # PreToolUse フック（.claude/settings.json の hooks.PreToolUse。matcher は Bash と GitHub MCP の書き込みツール）。
 # 文章で禁止していた git 操作（サブエージェントの commit / push / PR 作成・マージ、main への直接 commit / push、
 # force push、フックの飛ばし、squash / rebase マージ）を、Claude Code がツールを実行する前に拒否する。
-# WHAT / WHY と誤検知の扱いは .claude/rules/git-guard.md、決定は ADR docs/adr/workflow/20260928-git-operations-enforced-by-hooks.md。
+# WHAT / WHY と誤検知の扱いは .claude/rules/tooling/git-guard.md、決定は ADR docs/adr/workflow/20260928-git-operations-enforced-by-hooks.md。
 #
 # 入力: stdin の JSON（公式 hooks の「PreToolUse input」。tool_name・tool_input・cwd、サブエージェントの中では agent_id・agent_type）。
 # 出力: 拒否するときだけ stdout に
@@ -43,7 +43,7 @@ const BRANCH_WRITING_MCP = new Set([
 ]);
 
 // サブエージェントに許さない git のサブコマンド（コミットや履歴を作る・変える操作。オーケストレータだけが行う。
-// .claude/general/orchestration.md）。pull はマージコミットを作りうるので含める。
+// .claude/rules/workflow/orchestration.md）。pull はマージコミットを作りうるので含める。
 const SUBAGENT_DENIED_GIT = new Set([
   "commit", "push", "merge", "rebase", "tag", "cherry-pick", "revert", "am", "pull",
   // 低レベルのコマンドでコミットを作る・ブランチを動かす書き方（commit-tree + update-ref）。
@@ -51,7 +51,7 @@ const SUBAGENT_DENIED_GIT = new Set([
 ]);
 
 // 危険な長いオプションと、git が一意な接頭辞として受け付ける最短の書き方（git は長いオプションの省略形を受け付ける）。
-// 最短の接頭辞の根拠は git 2.43.0 の builtin/commit.c・push.c・merge.c のオプション定義（.claude/rules/git-guard.md）:
+// 最短の接頭辞の根拠は git 2.43.0 の builtin/commit.c・push.c・merge.c のオプション定義（.claude/rules/tooling/git-guard.md）:
 // - --no-v: --no-verify（commit / push / merge）。--no-v〜--no-ver は --no-verbose とも一致して git では曖昧（エラー）だが、
 //   止めても害はないので止める側に倒す。
 // - --for: push の --force 系（--fo は --follow-tags と曖昧）。--m: push の --mirror（m で始まるのはこれだけ）。
@@ -89,7 +89,7 @@ const GH_FALSE = new Set(["false", "0", "f", "F", "FALSE", "False"]);
 
 // WHY クォートとバックスラッシュを消す: `bash -c "git push"` や `git "push"`、`git \<改行> commit` のように、
 //   クォートやエスケープで区切りを変えた書き方も同じ文字列として見るため。文字列の中の git も拾う（誤検知は受け入れる。
-//   .claude/rules/git-guard.md の「誤検知」）。
+//   .claude/rules/tooling/git-guard.md の「誤検知」）。
 function normalize(command) {
   return command.replace(/\\\n/g, " ").replace(/[\\"\x27]/g, "");
 }
@@ -251,7 +251,7 @@ function pushTargets(args, branchOf) {
 function denyForSubagent(command, cwd) {
   for (const call of gitCalls(command, cwd)) {
     // WHY alias を止める: 別名（git ci など）はサブコマンドの名前から判定できない。この場で作る別名（-c alias.* と
-    //   git config alias.*）だけは止められる。既に設定にある別名は見逃す（限界。.claude/rules/git-guard.md）。
+    //   git config alias.*）だけは止められる。既に設定にある別名は見逃す（限界。.claude/rules/tooling/git-guard.md）。
     if (call.configs.some((c) => /^alias\./i.test(c))) return "git -c alias.*（別名）";
     if (call.sub === "config" && call.args.some((a) => /^alias\./i.test(a))) return "git config alias.*（別名の定義）";
     if (SUBAGENT_DENIED_GIT.has(call.sub)) return `git ${call.sub}`;
@@ -267,7 +267,7 @@ function denyForSubagent(command, cwd) {
 function denyForEveryone(command, cwd) {
   const normalized = normalize(command);
   if (LEFTHOOK_BYPASS.test(normalized)) {
-    return "LEFTHOOK=0 / LEFTHOOK_EXCLUDE / LEFTHOOK_BIN / LEFTHOOK_CONFIG でフックを飛ばす・差し替えることはできません（緊急時の扱いは .claude/rules/git-guard.md）";
+    return "LEFTHOOK=0 / LEFTHOOK_EXCLUDE / LEFTHOOK_BIN / LEFTHOOK_CONFIG でフックを飛ばす・差し替えることはできません（緊急時の扱いは .claude/rules/tooling/git-guard.md）";
   }
   // WHY 文字列のどこにあっても止める: -c core.hooksPath=、--config-env、git config core.hooksPath、GIT_CONFIG_PARAMETERS /
   //   GIT_CONFIG_KEY_<n> など、フックの場所を変える書き方が多いため。読むだけ（git config --get）も止まる（誤検知として受け入れる）。
@@ -292,7 +292,7 @@ function denyForEveryone(command, cwd) {
       return "git commit -n（--no-verify）でフックを飛ばすことはできません";
     }
     if (call.sub === "merge" && hasLongOption(call.args, SQUASH)) {
-      return "git merge --squash は使いません（マージは merge commit だけ。.claude/general/workflow.md）";
+      return "git merge --squash は使いません（マージは merge commit だけ。.claude/rules/workflow/issue-pr.md）";
     }
     if ((call.sub === "commit" || call.sub === "merge") && branchOf() === "main") {
       return `main ブランチでの git ${call.sub} はできません。<type>/<Issue番号>-<内容> のブランチを切って作業してください`;
@@ -308,7 +308,7 @@ function denyForEveryone(command, cwd) {
   }
   for (const call of ghPrCalls(command, cwd)) {
     if (call.sub === "merge" && ghMergeRewritesHistory(call.args)) {
-      return "gh pr merge の squash / rebase は使いません（--merge を使う。.claude/general/workflow.md）";
+      return "gh pr merge の squash / rebase は使いません（--merge を使う。.claude/rules/workflow/issue-pr.md）";
     }
   }
   return null;
@@ -339,7 +339,7 @@ function decide(input) {
       return `サブエージェントは ${tool} を使えません（PR 作成・マージ・ブランチへの書き込みはオーケストレータが行う）`;
     }
     if (tool === "mcp__github__merge_pull_request" && ["squash", "rebase"].includes(toolInput.merge_method)) {
-      return `merge_method: ${toolInput.merge_method} は使いません（merge commit だけ。.claude/general/workflow.md）`;
+      return `merge_method: ${toolInput.merge_method} は使いません（merge commit だけ。.claude/rules/workflow/issue-pr.md）`;
     }
     if (BRANCH_WRITING_MCP.has(tool) && toolInput.branch === "main") {
       return `${tool} で main に直接書き込むことはできません`;

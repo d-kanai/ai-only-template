@@ -2,7 +2,7 @@
 
 - 日付: 2026-10-02
 - 状態: 採用
-- 関連: Issue #300 / ADR `architecture/20261002-class-based-backend.md`（補助を static にしてよいとした元の決定） / ADR `architecture/20261002-class-based-shared-and-test-support.md` / `.claude/rules/architecture-check.md` の `no-static-in-instance-class`
+- 関連: Issue #300 / ADR `architecture/20261002-class-based-backend.md`（補助を static にしてよいとした元の決定） / ADR `architecture/20261002-class-based-shared-and-test-support.md` / `.claude/rules/code/architecture-check.md` の `no-static-in-instance-class`
 
 ## 背景
 ADR `architecture/20261002-class-based-backend.md` で最上位の関数をやめ、補助もクラスのメソッドにすると決めた。そこでは「インスタンスの状態を使わないものは `private static` / `static` など、使い方に合わせて選ぶ」とし、移行（Issue #262）では状態を使わない補助を一律 `private static` にした。

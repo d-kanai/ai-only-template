@@ -88,7 +88,7 @@ export class Todo {
   //   完了の履歴は「作成日時に未完了になった」の 1 件から始める（Issue #188）。
   // WHY 作成日時を引数で受け取らない: 「作ったときの時刻が入る」は Todo の生成ルールで、呼び出し側が時刻を渡せると
   //   そのルールが呼び出し側に漏れ、任意の時刻の Todo を作れてしまう。テストで時刻を決めるときは、現在時刻の唯一の出口
-  //   Clock.now（apps/shared/now.ts）を vi.mock で差し替える（.claude/rules/testing.md）。
+  //   Clock.now（apps/shared/now.ts）を vi.mock で差し替える（.claude/rules/quality/testing.md）。
   // WHY origin は undefined: 新規で、読み込んだ値が無い。Repository の insert は origin が undefined の
   //   Todo だけを、update は origin のある Todo だけを受け付ける（取り違えを Error にする。Issue #215）。
   static create(title: string): Todo {
@@ -182,7 +182,7 @@ export class Todo {
   //   zod のスキーマ・refine にはすべて KeyedIssue.of / KeyedIssue.refine を渡す（z.object 自身は、値が型の上でオブジェクトなので
   //   失敗しない）。渡し忘れは DomainValidation.validated が DomainError ではない Error（500）にする。
   // WHY id は z.uuid()（RFC 9562 の形）: presentation の ResourceId.parseUuid と同じ形にそろえる。Todo の id は randomUUID（v4）で
-  //   作るので必ず満たす（ADR docs/adr/architecture/20260929-zod-for-backend-validation.md。z.uuid() は RFC 9562 の形だけで大文字も通す。.claude/rules/backend.md）。
+  //   作るので必ず満たす（ADR docs/adr/architecture/20260929-zod-for-backend-validation.md。z.uuid() は RFC 9562 の形だけで大文字も通す。.claude/rules/code/backend.md）。
   // WHY メソッドにする（スキーマを最上位の定数・static フィールドにしない）: 最上位の式や static フィールドの初期化は読み込み時にだけ評価される static な変異になり、
   //   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に作れば、比較や message の変異を
   //   テストで検出できる（Issue #55）。上限の値そのもの（TODO_TITLE_MAX_LENGTH）は最上位の定数なので、todo.test.ts が値と
@@ -197,7 +197,7 @@ export class Todo {
     const fields = z.object({
       id: z.uuid(KeyedIssue.of("todo.id.invalid")),
       // タイトルの不変条件: 前後の空白を除いて 1〜TODO_TITLE_MAX_LENGTH 文字。Todo の規則は todoPropsSchema 1 か所に宣言する（Issue #88）。
-      //   presentation は同じ規則を同じキーで重ねてよいが、これより厳しくしない（Issue #144。.claude/rules/backend.md）。
+      //   presentation は同じ規則を同じキーで重ねてよいが、これより厳しくしない（Issue #144。.claude/rules/code/backend.md）。
       // WHY trim してから数え、trim した値を保持する: 空白だけのタイトルを「空」とみなし、
       //   前後の空白の有無だけが違う Todo が混ざらないようにする。z.string().trim() は値を置き換える（後の refine も parse の結果も
       //   trim 後の値）。

@@ -1,12 +1,12 @@
 import { type RunnerTestCase, TestRunner } from "vitest";
 
-// API 網羅率（Issue #281。.claude/rules/testing.md の「API 網羅率」）の記録の側。API ジャーニーの handler を track で包むと、
+// API 網羅率（Issue #281。.claude/rules/quality/testing.md の「API 網羅率」）の記録の側。API ジャーニーの handler を track で包むと、
 //   handler を呼んだテスト（vitest-cucumber の step 1 つ = Vitest の test 1 つ）の meta.apiCalls に Api のクラス名が残る。
 //   集計と判定は Vitest の reporter（api-coverage-reporter.ts）が、実行の終わりに全テストの meta を読んで行う。
 // WHY テストの meta に載せる: Vitest はテストファイルを別の worker で動かすので、モジュールの変数は reporter（Vitest の本体の
 //   プロセス）から読めない。meta は Vitest がテストの結果と一緒に本体へ送り、reporter が TestCase.meta() で読める
 //   （Vitest 5.0.1 で実測、2026-10-02 の work-logs）。ファイルや環境変数を介さないので、後始末も process.env の例外も要らない
-//   （process.env は apps/shared/env.ts だけが読む。.claude/rules/env.md）。
+//   （process.env は apps/shared/env.ts だけが読む。.claude/rules/tooling/env.md）。
 // WHY クラス名で記録する: 全 API の一覧（reporter）は route.ts の re-export から、本番の api ファイルの `export const <METHOD> = new
 //   <クラス名>(` をたどってクラス名に結ぶ。ジャーニーは本番と同じクラスを db だけ変えて組み立てるので、クラス名が両方をつなぐ
 //   唯一の共通の名前になる（handler の変数名や要求のパスは、ジャーニーが自由に書けて本番と結べない）。

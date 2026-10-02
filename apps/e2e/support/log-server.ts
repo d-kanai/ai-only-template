@@ -9,7 +9,7 @@ import { expect } from "@playwright/test";
 //   stdout に流すだけ。types/test.d.ts の説明。テストは別の worker プロセスで動く）。ローカルの reuseExistingServer では、起動済みの
 //   サーバ（別のプロセス）を使うので stdout を取る手段がない。
 // 前提: webServer の command（pnpm build）が先に本番ビルド（apps/frontend_customer/.next）を作っていること。ローカルで起動済みの
-//   サーバを使うときは、そのビルドが今のコードのものか注意する（.claude/rules/testing.md の E2E）。
+//   サーバを使うときは、そのビルドが今のコードのものか注意する（.claude/rules/quality/testing.md の E2E）。
 // WHY ポート 0: OS に空いているポートを選ばせ、webServer（E2E_PORT）・開発サーバ・並列の worktree のサーバと重ならないようにする。
 //   選ばれたポートは next start が出す「Local: http://localhost:<port>」の行から読む。
 // WHY 環境変数を渡さない（親の環境を引き継ぐ。TZ だけ UTC にする）: next start は .env を読み、webServer と同じく apps/e2e/support/database.ts と

@@ -53,7 +53,7 @@ export class PostgresTodoRepository implements TodoRepository {
   //   違反（500）になった（Issue #215 の実測。todo-repository.postgres.test.ts の「同時に動かすと」のテスト）。ロックを取った後の
   //   別の文なら、先の command の COMMIT の後の新しいスナップショットで、根と履歴をそろって読める。
   // WHY ロックの文は列を選ばない（全列）: 見るのは行のロックだけ。select({ id }) と列を選ぶと、Stryker の select({})（列の無い
-  //   SELECT。Postgres は受け付け、ロックも同じ）が結果を変えない変異として残る（.claude/rules/testing.md の「等価な変異を生む書き方を
+  //   SELECT。Postgres は受け付け、ロックも同じ）が結果を変えない変異として残る（.claude/rules/quality/testing.md の「等価な変異を生む書き方を
   //   しない」）。1 行だけなので全列を読んでも負担にならない。
   // WHY 行の有無はロックの文で見ない（2 文目の結果で not_found にする）: 分岐を 1 つにする。無い id でも 2 文目は空を返すだけ。
   // WHY FOR UPDATE（FOR SHARE / FOR KEY SHARE にしない）: 同じ Todo の 2 つの command が互いに待つ（直列化）。共有ロックだと 2 つとも
@@ -213,7 +213,7 @@ export class PostgresTodoRepository implements TodoRepository {
   // WHY 1 文で読む（todos と履歴を別の文にしない）: 既定の READ COMMITTED では、文ごとに別のスナップショットを見る。2 文に
   //   分けると、その間に別の要求がコミットした DELETE（cascade で履歴も消える）や完了の変更が片方の文だけに見え、履歴の
   //   無い Todo や、履歴の最後と todos.completed がずれた Todo として読んで不変条件の違反（500）になる（read skew）。
-  //   1 文なら 1 つのスナップショットなので、分離レベルに頼らずに済む（.claude/rules/backend.md の「永続化」）。
+  //   1 文なら 1 つのスナップショットなので、分離レベルに頼らずに済む（.claude/rules/code/backend.md の「永続化」）。
   //   todo-repository.postgres.test.ts が Pool の query の回数（1 回）で固定する。
   // WHY LEFT JOIN（INNER JOIN にしない）: 履歴の無い行を一覧から黙って外さず、不変条件の違反（500）にして気づけるようにする
   //   （toTodo の「行を読み飛ばさない」と同じ）。

@@ -3,7 +3,7 @@
 コードに残らない行動（設定変更・調査・判断）を `docs/work-logs/YYYY-MM-DD.md`（1 日 1 ファイル）に記録する。
 
 - タイミング: タスクを終えるたび。調査・質問への回答だけで終わった場合も、回答を返す前に書く（実装が無いと区切りが無く漏れやすい）。
-- 強制: Stop フック `scripts/hooks/require-work-log.sh`（ツールを使ったターンで今日のログが変わっていなければ停止を拒否）と、CI の `scripts/hooks/check-work-logs-diff.sh`（PR の差分に `docs/work-logs/*.md` が無ければ失敗）。どちらも、追加した項目に `- 機械化:` の行が無ければ止める（Issue #178。仕様と限界は `.claude/rules/work-log.md`）。
+- 強制: Stop フック `scripts/hooks/require-work-log.sh`（ツールを使ったターンで今日のログが変わっていなければ停止を拒否）と、CI の `scripts/hooks/check-work-logs-diff.sh`（PR の差分に `docs/work-logs/*.md` が無ければ失敗）。どちらも、追加した項目に `- 機械化:` の行が無ければ止める（Issue #178。仕様と限界は `.claude/rules/tooling/work-log-hooks.md`）。
 - 記録対象（後で同じ調査を繰り返したり、背景を知らずにデグレしたりしないため）:
   - 一次情報で裏どりした事実（公式の制約・実測した挙動・版や公開日）。情報源の URL か確認したコマンドを書く。
   - 比較検討の結論（何と何を比べ、何を選び、なぜか。採用しなかった案も 1 行）。

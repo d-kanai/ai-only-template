@@ -13,7 +13,7 @@ import type { ErrorKey, ErrorParamsArgs } from "../domain/error-key";
 // WHY キーと params（notFoundKey・params）を呼び出し側が渡す: 「何が見つからないか」（todo.notFound など）は feature ごとに違い、
 //   query / command が投げる not_found のキーと params とそろえる必要があるため。このメソッドは feature を知らない。
 //   params の形は DomainError と同じくキーごとに型で縛る（error-key.ts の ErrorParamsArgs）。
-// WHY shared/presentation に置く（各 api ファイルに重ねて書かない）: .claude/rules/backend.md が各ファイルに重ねて
+// WHY shared/presentation に置く（各 api ファイルに重ねて書かない）: .claude/rules/code/backend.md が各ファイルに重ねて
 //   書いてよいとしているのは DTO の型だけで、処理は含まない。同じ処理を 3 つの api ファイルに複製すると
 //   片方だけ直してずれる。feature をまたがない汎用の処理なので、RequestBody.parse と同じく shared/presentation に置く。
 // WHY メソッドの中で z.uuid() を作る: 最上位の定数・static フィールドは static な変異になり mutation testing で数えない（json-body.ts のコメント）。

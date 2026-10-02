@@ -147,7 +147,7 @@ export class FreeTextMask {
   // 自由文の上限の文字数と、切ったときに付ける印。
   // WHY 定数をメソッドの中で作る（static フィールドにしない）: クラスの static フィールドの初期化は読み込み時に 1 回だけ評価され、
   //   最上位の値と同じく Stryker の ignoreStatic で検査から外れるおそれがある（未確認。ADR
-  //   docs/adr/architecture/20261002-class-based-backend.md。.claude/rules/testing.md の mutation testing）。
+  //   docs/adr/architecture/20261002-class-based-backend.md。.claude/rules/quality/testing.md の mutation testing）。
   static limit(): { maxLength: number; marker: string } {
     return { maxLength: 2000, marker: "...[truncated]" };
   }
@@ -162,14 +162,19 @@ export class FreeTextMask {
   // WHY 置換の順（Bearer → JWT → メール → 番号）: Bearer の後のトークンが JWT のときに、トークンごと（Bearer を含めて）1 つの ***
   //   にする（先に JWT を置き換えると "Bearer ***" が残り、Bearer の正規表現が * に一致しない）。
   // WHY メソッドの中に正規表現を書く（最上位の定数・static フィールドにしない）: 最上位の値は Stryker の static な変異になり、
-  //   ignoreStatic で検査から外れる（.claude/rules/testing.md の mutation testing）。static フィールドも同じく外れるおそれがある（未確認）。
+  //   ignoreStatic で検査から外れる（.claude/rules/quality/testing.md の mutation testing）。static フィールドも同じく外れるおそれがある（未確認）。
+  // WHY 番号の前に英数字・_・- が無いことを求める（(?<![\w-])。数字だけを見ない）: uuid（/todos/c98fc6d4-3505-4704-9400-118b…）の
+  //   途中の「数字 4 桁の組 3 つと続く数字」が区切りつきの番号の形に一致し、Luhn に偶然合うと id が *** になった（Issue #304。
+  //   E2E の request-log が uuid しだいで落ちた）。uuid の途中の数字の組は必ず「16 進の文字か -」の後に来るので、前だけ見れば外せる。
+  // WHY 後ろは数字だけを見る（(?!\d) のまま）: 後ろにハイフン・英字が続く形（4111…-12/25 のように有効期限が続く・4111…_）を
+  //   見逃さないため（reviewer の指摘）。限界: 前に英字・- が付く形（cc-4111…・x4111…）はマスクしない（uuid の途中と見分けない）。
   static mask(text: string): string {
     return FreeTextMask.truncate(text)
       .replace(/\bBearer\s+[\w.~+/-]+=*/gi, MASK)
       .replace(/eyJ[\w.-]+/g, MASK)
       .replace(/(?<![\w.%+-])[\w.%+-]+@[\w-]+\.[\w.-]+/g, MASK)
       .replace(
-        /(?<!\d)(?:\d{13,19}|\d{4}[ -]\d{4}[ -]\d{4}[ -]\d{1,7})(?!\d)/g,
+        /(?<![\w-])(?:\d{13,19}|\d{4}[ -]\d{4}[ -]\d{4}[ -]\d{1,7})(?!\d)/g,
         (match) =>
           FreeTextMask.isCardNumber(match.replace(/[ -]/g, "")) ? MASK : match,
       );

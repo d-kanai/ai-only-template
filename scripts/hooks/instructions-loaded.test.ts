@@ -78,7 +78,7 @@ describe("instructions-loaded.sh（InstructionsLoaded フック）", () => {
     const second = run({
       hook_event_name: "InstructionsLoaded",
       cwd: repo,
-      file_path: `${repo}/.claude/rules/work-log.md`,
+      file_path: `${repo}/.claude/rules/tooling/work-log-hooks.md`,
       memory_type: "Project",
       load_reason: "path_glob_match",
       globs: ["docs/work-logs/**"],
@@ -102,7 +102,7 @@ describe("instructions-loaded.sh（InstructionsLoaded フック）", () => {
     });
     expect(b).toEqual({
       ts: expect.any(String),
-      file_path: `${repo}/.claude/rules/work-log.md`,
+      file_path: `${repo}/.claude/rules/tooling/work-log-hooks.md`,
       load_reason: "path_glob_match",
       trigger_file_path: `${repo}/docs/work-logs/2026-09-28.md`,
       memory_type: "Project",

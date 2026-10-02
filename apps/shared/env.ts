@@ -1,9 +1,9 @@
 // 環境変数の唯一の入口（Issue #59）。アプリ・テスト・ツールの設定ファイルは、process.env を直接読まずにここの env / toolEnv を使う。
-// 規則と WHY は .claude/rules/env.md の「環境変数」。process.env を直接読むと Biome（style/noProcessEnv）と
+// 規則と WHY は .claude/rules/tooling/env.md の「環境変数」。process.env を直接読むと Biome（style/noProcessEnv）と
 // rule-tests/architecture.test.ts（規則 env-direct-access）で失敗する。process.env に触ってよいのはこのファイルだけ
 // （例外は apps/frontend_customer/instrumentation.ts が Next.js の規約の NEXT_RUNTIME を読む 1 か所だけ）。
 // 置き場所は frontend と backend で共通の workspace パッケージ apps/shared（@repo/shared/env。Issue #90 で apps/backend/shared/infra/
-// から移した。frontend 直下の instrumentation-node.ts・backend・apps/e2e/・vitest.global-setup.ts が使う。.claude/rules/shared.md）。
+// から移した。frontend 直下の instrumentation-node.ts・backend・apps/e2e/・vitest.global-setup.ts が使う。.claude/rules/code/shared.md）。
 //
 // WHY 1 か所にまとめる: 変数ごとに読む場所が散らばると、既定値や検証（数として使えるか）が場所ごとにずれ、
 //   どの変数が必要かを一覧できない。ここで型を付けて検証した値だけを配ると、使う側は string | undefined を扱わずに済む。
@@ -62,7 +62,7 @@ export type ToolEnv = {
   // WHY Env（必須）でなくここ: E2E 専用で、アプリ（next start）は使わない。必須にすると本番や既存の .env にテスト用の
   //   変数を要求し、足すまで全コマンドが止まる（Issue #64 の reviewer 指摘）。
   // WHY 任意でも不正な値はエラーにする: 0 や範囲外を黙って既定値にすると、worktree ごとに分けたつもりのポートが
-  //   3100 に戻り、reuseExistingServer で別の worktree のサーバを検証してしまう（.claude/rules/worktree.md）。
+  //   3100 に戻り、reuseExistingServer で別の worktree のサーバを検証してしまう（.claude/rules/tooling/worktree.md）。
   E2E_PORT: number | undefined;
 };
 
@@ -100,7 +100,7 @@ export class EnvReader {
         [
           "Environment variables are missing or invalid.",
           ...problems.map((problem) => `  - ${problem}`),
-          "Run cp .env.example .env at the repository root to create .env, then check the values (see .claude/rules/env.md).",
+          "Run cp .env.example .env at the repository root to create .env, then check the values (see .claude/rules/tooling/env.md).",
         ].join("\n"),
       );
     }
@@ -169,7 +169,7 @@ export class EnvReader {
 
   // 変数ごとの検証。
   // WHY 表をメソッドの中で作る（最上位の定数・static フィールドにしない）: 最上位の値は Stryker の static な変異になり、
-  //   ignoreStatic で検査から外れる（.claude/rules/testing.md の mutation testing）。クラスの static フィールドの初期化も読み込み時に
+  //   ignoreStatic で検査から外れる（.claude/rules/quality/testing.md の mutation testing）。クラスの static フィールドの初期化も読み込み時に
   //   1 回だけ評価されるので、同じく外れるおそれがある（未確認。ADR docs/adr/architecture/20261002-class-based-backend.md）。
   private static parsers(): {
     [K in keyof Env]: (raw: string) => Check<Env[K]>;

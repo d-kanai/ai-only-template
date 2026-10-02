@@ -6,28 +6,60 @@ paths:
 # frontend（画面側。apps/frontend_customer）
 
 `apps/frontend_customer/` は workspace パッケージ `@repo/frontend-customer`（Next.js の App Router）。Next は `apps/frontend_customer` をカレントディレクトリにして動く（リポジトリ直下の `pnpm dev/build/start` が `pnpm --filter @repo/frontend-customer <script>` を呼ぶ）。
-依存の向きの規則は `rule-tests/architecture.test.ts` が検査する（一覧は `.claude/rules/architecture-check.md`）。API 側は `.claude/rules/backend.md`。決定と採用しなかった案は ADR `docs/adr/architecture/20260928-feature-based-directory-and-ddd-backend.md`。
+依存の向きの規則は `rule-tests/architecture.test.ts` が検査する（一覧は `.claude/rules/code/architecture-check.md`）。API 側は `.claude/rules/code/backend.md`。決定と採用しなかった案は ADR `docs/adr/architecture/20260928-feature-based-directory-and-ddd-backend.md`。
 
 ## 置き場所
 - ソースは `app/`・`features/`・`shared/`・`test-support/` の下か、直下の `next.config.ts`・`instrumentation.ts`・`instrumentation-node.ts`・`proxy.ts`・`next-env.d.ts` だけ（規則 `frontend-placement`）。`src/` は使わない。
   - WHY: 依存の規則はこれらの場所にしかかからず、`apps/frontend_customer/lib/db.ts` のような場所から backend の container を import しても素通りしていた（Issue #68 の reviewer 指摘）。
-- `apps/frontend_customer/test-support/`（Issue #181）: テストだけが使うコード（`i18n.tsx` の `JaLocale`・`tJa`）。本番のコード（`app/`・`features/`・`shared/`・直下のファイル）から参照しない（`@/test-support/...` はテストからだけ）・Docker のイメージに入らない（`.dockerignore` の `**/test-support`）。検査は `rule-tests/test-support.test.ts` と `.github/workflows/deploy.yml`。WHY は `.claude/rules/backend.md` の `apps/backend/test-support/` と同じ。
-- `apps/frontend_customer/shared/<name>/`: feature をまたぐ部品。今あるのは `request-log/`（リクエストログの 1 行を組み立てる純粋な処理。`RequestLogBuilder.build`）と `i18n/`（翻訳の仕組み・共通の辞書・ロケール・日時の表示。下の「i18n」）。`components/` `hooks/` は使うものが出るまで作らない。`shared/` は `features/`・`app/`・backend・`apps/shared` を参照しない（規則 `shared-to-features`・`screen-to-app`・`screen-to-backend`・`screen-to-shared`）。`apps/frontend_customer/shared/`（画面側の部品）と `apps/shared/`（frontend と backend で共通のサーバ側の基盤。`.claude/rules/shared.md`）は別のもの。
+- `apps/frontend_customer/test-support/`（Issue #181）: テストだけが使うコード（`i18n.tsx` の `JaLocale`・`tJa`、`design-system.tsx` の `DesignSystem`）。本番のコード（`app/`・`features/`・`shared/`・直下のファイル）から参照しない（`@/test-support/...` はテストからだけ）・Docker のイメージに入らない（`.dockerignore` の `**/test-support`）。検査は `rule-tests/test-support.test.ts` と `.github/workflows/deploy.yml`。WHY は `.claude/rules/code/backend.md` の `apps/backend/test-support/` と同じ。
+- `apps/frontend_customer/shared/<name>/`: feature をまたぐ部品。今あるのは `request-log/`（リクエストログの 1 行を組み立てる純粋な処理。`RequestLogBuilder.build`）と `i18n/`（翻訳の仕組み・共通の辞書・ロケール・日時の表示。下の「i18n」）と `ui/`（デザインシステム。下の「デザインシステム」）。画面をまたぐ見た目の部品は `ui/atoms/` の atom にし、`shared/components/` は作らない（feature の中で画面をまたぐ部品は `features/<f>/components/`）。`hooks/` は使うものが出るまで作らない。`shared/` は `features/`・`app/`・backend・`apps/shared` を参照しない（規則 `shared-to-features`・`screen-to-app`・`screen-to-backend`・`screen-to-shared`）。`apps/frontend_customer/shared/`（画面側の部品）と `apps/shared/`（frontend と backend で共通のサーバ側の基盤。`.claude/rules/code/shared.md`）は別のもの。
+  - WHY `shared/components/` を作らない: 以前は「`components/` は使うものが出るまで作らない」だったが、Issue #292 で画面をまたぐ部品（Mantine を包むもの）が出て、置き場所を `ui/atoms/` にした。Mantine を import してよいのは `shared/ui/` の中だけ（規則 `design-system-mantine-boundary`）なので、Mantine を包む部品は `shared/components/` には置けない。
 
 ## app/（ルーティングだけ）
 - 置くもの: Next の規約ファイル（`page.tsx` / `layout.tsx` / `loading.tsx` / `error.tsx` など）と `app/api/**/route.ts` だけ。テストは置かない（仕様は screen と api ファイルのテストで固定し、ルーティングにロジックを置かせない）。
 - `page.tsx` は screen を返すだけ（`return <TodoScreen />`。動的セグメントは `await params` で取り出して props で渡す）。
 - `app/api/**/route.ts` は backend の api ファイルが export する HTTP メソッド名の関数を re-export するだけ（`export { GET } from "@repo/backend/features/todo/internal/presentation/list-todos.api";`）。同じ URL の複数メソッドはそれぞれ別の api ファイルから re-export する。入力検証やレスポンスの組み立ては書かない。
-- `instrumentation.ts` は Next の規約で `apps/frontend_customer/` 直下に置く（起動時の環境変数の検証。`.claude/rules/env.md`）。直下のファイルは backend を参照しない（規則 `frontend-root-to-backend`）。起動時の検証の `env` とログの `logger` は、frontend と backend で共通の `apps/shared` から `@repo/shared/env`・`@repo/shared/logger` で使う（Issue #90。以前は backend の中にあり、この規則の例外だった）。
-- `proxy.ts`（Next の Proxy。旧 `middleware.ts` は使わない）も規約で直下に置く。画面アクセスと `/api/**` の呼び出しを 1 リクエスト 1 行の JSON で stdout に出すだけにし、1 行の中身は `shared/request-log/` の `RequestLogBuilder.build`（テストで固定）で組み立て、`logger.emit` で出す。行の形は Cloud Logging の特別フィールドと OTel semconv の HTTP の名前（入れ子）で、`event.name` は `page_request`（画面）/ `api_request`（`/api/**`）、`message` は `<METHOD> <path>`、`traceparent`（W3C）があれば `logging.googleapis.com/trace`（`projects/<GCP_PROJECT_ID>/traces/<trace-id>`）・`spanId`・`trace_sampled` を出す（形が違えば出さない）。`GCP_PROJECT_ID` は `proxy.ts` が `@repo/shared/env` から読んで渡す（`shared/request-log/` は `apps/shared` を参照できない。規則 `screen-to-shared`）。`event.name` が一覧（`apps/shared/log-event.ts`）にあることと種類ごとの必須項目は、`proxy.ts` の `logger.emit(log)` の型チェックが見る。キーの一覧は ADR `docs/adr/architecture/20260930-log-format-cloud-logging-otel.md`（Issue #209）。クエリは `url.query` にキーと値の組で出し、値は logger が `***` にする（キーは自由文としてメールなどだけを `***`）。`referer`（URL のクエリを含みうる）と `client.address`（接続元の IP。GDPR では個人データ）も `***` になる。`RequestLogBuilder.build` と `proxy.ts` は生の値を渡すだけで、伏せる処理を書かない（マスクは logger の中だけ。Issue #216。`.claude/rules/backend.md` の「個人情報のマスク」、ADR `docs/adr/architecture/20260930-log-masking-in-logger.md`）。受信時刻は `@repo/shared/now` の `Clock.now()` で取る（現在時刻の唯一の出口。`new Date()` は書かない。規則 `now-single-source`、`.claude/rules/shared.md` の「now」）。認可・リダイレクトなどのロジックは置かない。決定は ADR `docs/adr/architecture/20260929-request-log-in-proxy.md`、ブラウザのリクエスト一覧の実測は 2026-09-29 の work-logs「docs/ から移した記録」。限界: status と所要時間は取れない（Proxy は応答の前に動く）、プリフェッチは matcher で除く、ブラウザの戻る・進むで Next のルーターのキャッシュが使われると画面の行は出ない（出るのは画面が呼ぶ API の行だけ）、`client.address` は `x-forwarded-for` を信じる値でクライアントが偽装できるので、信頼できるリバースプロキシがヘッダを付け直す前提で使う。
+- `instrumentation.ts` は Next の規約で `apps/frontend_customer/` 直下に置く（起動時の環境変数の検証。`.claude/rules/tooling/env.md`）。直下のファイルは backend を参照しない（規則 `frontend-root-to-backend`）。起動時の検証の `env` とログの `logger` は、frontend と backend で共通の `apps/shared` から `@repo/shared/env`・`@repo/shared/logger` で使う（Issue #90。以前は backend の中にあり、この規則の例外だった）。
+- `proxy.ts`（Next の Proxy。旧 `middleware.ts` は使わない）も規約で直下に置く。画面アクセスと `/api/**` の呼び出しを 1 リクエスト 1 行の JSON で stdout に出すだけにし、1 行の中身は `shared/request-log/` の `RequestLogBuilder.build`（テストで固定）で組み立て、`logger.emit` で出す。行の形は Cloud Logging の特別フィールドと OTel semconv の HTTP の名前（入れ子）で、`event.name` は `page_request`（画面）/ `api_request`（`/api/**`）、`message` は `<METHOD> <path>`、`traceparent`（W3C）があれば `logging.googleapis.com/trace`（`projects/<GCP_PROJECT_ID>/traces/<trace-id>`）・`spanId`・`trace_sampled` を出す（形が違えば出さない）。`GCP_PROJECT_ID` は `proxy.ts` が `@repo/shared/env` から読んで渡す（`shared/request-log/` は `apps/shared` を参照できない。規則 `screen-to-shared`）。`event.name` が一覧（`apps/shared/log-event.ts`）にあることと種類ごとの必須項目は、`proxy.ts` の `logger.emit(log)` の型チェックが見る。キーの一覧は ADR `docs/adr/architecture/20260930-log-format-cloud-logging-otel.md`（Issue #209）。クエリは `url.query` にキーと値の組で出し、値は logger が `***` にする（キーは自由文としてメールなどだけを `***`）。`referer`（URL のクエリを含みうる）と `client.address`（接続元の IP。GDPR では個人データ）も `***` になる。`RequestLogBuilder.build` と `proxy.ts` は生の値を渡すだけで、伏せる処理を書かない（マスクは logger の中だけ。Issue #216。`.claude/rules/code/backend.md` の「個人情報のマスク」、ADR `docs/adr/architecture/20260930-log-masking-in-logger.md`）。受信時刻は `@repo/shared/now` の `Clock.now()` で取る（現在時刻の唯一の出口。`new Date()` は書かない。規則 `now-single-source`、`.claude/rules/code/shared.md` の「now」）。認可・リダイレクトなどのロジックは置かない。決定は ADR `docs/adr/architecture/20260929-request-log-in-proxy.md`、ブラウザのリクエスト一覧の実測は 2026-09-29 の work-logs「docs/ から移した記録」。限界: status と所要時間は取れない（Proxy は応答の前に動く）、プリフェッチは matcher で除く、ブラウザの戻る・進むで Next のルーターのキャッシュが使われると画面の行は出ない（出るのは画面が呼ぶ API の行だけ）、`client.address` は `x-forwarded-for` を信じる値でクライアントが偽装できるので、信頼できるリバースプロキシがヘッダを付け直す前提で使う。
 - WHY ルーティングを分ける: URL を変えてもコードを動かさずに済む（Next は構成について unopinionated で、`app/` の外にコードを置くのは公式の例の 1 つ）。
 
 ## features/<feature>/
-- `screens/<name>-screen/`: 1 画面 = 1 ディレクトリ。`<name>-screen.tsx`（見た目。先頭に `"use client"`。hook の戻り値を描くだけ）と `<name>-screen.hook.ts`（状態・イベント・データ取得。`use<Name>Screen`）と、それぞれのテストを隣に置く。
+- `screens/<name>-screen/`: 1 画面 = 1 ディレクトリ。`<name>-screen.tsx`（見た目。先頭に `"use client"`。hook の戻り値を描くだけで、形は下の「画面の骨組み」）と `<name>-screen.hook.ts`（状態・イベント・データ取得。`use<Name>Screen`）と `<name>-screen.messages.ts`（辞書）と、それぞれのテストを隣に置く。ほかのファイル（部品の別ファイル・入れ子のディレクトリ）は置かない（規則 `screen-outline-placement`）。
   - WHY: ロジックは `renderHook` で、見た目は操作ベースで小さくテストでき、画面を消すときはディレクトリごと消せる。
-- `components/`: feature 内で画面をまたぐ部品。`hooks/`: 画面をまたぐ hook。
+- `components/`: feature 内で画面をまたぐ部品（atom を組み合わせて描く。今あるのは `todo-item.tsx`）。1 つの画面だけで使う部品は画面のファイルの中に export せずに置く（下の「画面の骨組み」）。`hooks/`: 画面をまたぐ hook。
 - `api/`: `/api/...` を fetch する薄いラッパー。feature の中で backend を参照してよいのはここだけ。
 - `index.ts`: 公開 API。feature の外（`app/`・他の feature）から import してよいのはここだけ（内部の構成を変えても外の import を直さずに済む）。feature 同士は原則 import せず、必要なら相手の `index.ts` だけ。
+
+## 画面の骨組み（規則 `screen-outline-*`。Issue #292）
+- 画面のファイルが export する値は画面の関数 `export function <Name>Screen` 1 つだけ（`screen-outline-single-export`。`export default`・`export const` の画面も違反）。
+- 画面の関数は hook を呼び、`return` を 1 つだけ書く（早期 return も違反。`screen-outline-single-return`）。根は atom の `<Layout>`（`@/shared/ui/atoms/layout`。`screen-outline-layout-root`）で、直下には同じファイルの最上位で定義した export しない部品のうち、名前が `...Section`（表示のまとまり）か `...Form`（入力のまとまり）のものの要素だけを並べる（props は渡してよい。`screen-outline-layout-children`）。
+  ```tsx
+  export function TodoScreen() {
+    const { ... } = useTodoScreen();
+    return (
+      <Layout>
+        <TitleSection />
+        <NewTodoForm ... />
+        <TodoListSection ... />
+      </Layout>
+    );
+  }
+  // ↓ ファイルの下の方に、export しない Section / Form を atom で描く
+  ```
+- 読み込み中・エラーの出し分け、`.map`、atom の並べ方は Section / Form の中に書く（`Layout` の直下に式・atom・素の要素・Fragment・文字列を置かない）。
+- WHY: daiki の依頼（2026-10-02「screen の中身が、見て画面レイアウトが想像できるように」）。ファイルを開いて最初の関数を見るだけで画面のレイアウトが分かる。早期 return を止めるのは、状態ごとに別のレイアウトになり、最初の関数で画面の形が 1 つに決まらなくなるため。
+- 限界（レビューで見る）: Section / Form の中身（atom を使っているか）と、部品がファイルの下の方にあるか（並び順）は見ない。`features/<f>/components/` と `app/` の `page.tsx` は対象外。詳細は `rule-tests/screen-outline.test.ts` の冒頭。
+
+## デザインシステム（Mantine。規則 `design-system-*`。Issue #292）
+- 置き場所は `shared/ui/` だけ: `atoms/`（Mantine の部品を包む atom。今は Alert / Button / Checkbox / Form / Group / Layout / Link / List / ListItem / PageTitle / Stack / Surface / Text / TextInput / Time の 15 個）、`themes/<名前>/`（`<名前>.theme.ts` と `<名前>.module.css`。今は `bento` と `pop`）と `themes/theme-definition.ts`（テーマの型）、`active-theme.ts`（使うテーマ。今は `bento`）、`design-system-provider.tsx`（`MantineProvider`。`app/layout.tsx` が包む）、`design-system-document.tsx`（`<html>` / `<head>` に要るもの）。
+- `shared/ui/` の外のテスト以外のソース（`app/`・`features/`・`shared/` のほかの場所・`test-support/`・直下のファイル）は Mantine を値でも型でも参照せず（`design-system-mantine-boundary`）、画面は atom を置くだけにする。style・className・Styles API（`classNames` / `styles` / `vars`）・Mantine の style props（`mt`・`c`・`w` など）・見た目を選ぶ props（`color` / `variant` / `size` など）を書かない（`design-system-no-direct-style`）。`.css` は `shared/ui/` の下にだけ置き、外から import しない（`design-system-css-placement`）。
+  - WHY: テーマを差し替えるだけで全体の見た目が変わるようにする（daiki の要望 2026-10-02）。画面に見た目を書くと、その箇所はテーマを替えても変わらず、見た目の正がテーマと画面の 2 か所に分かれる。atom で包むと、画面が Mantine を知らずに済み、ライブラリを替えても atom の中だけ直せばよい。
+- 余白だけは画面に書く: 段階名 `xs` / `sm` / `md` / `lg` / `xl`（`SpacingStep`）の文字列だけで、atom の `Stack` / `Group` の `gap` に渡す（atom の型が段階名だけを受ける）。atom の外で余白の props（`m*` / `p*` / `gap` など）を書くときも段階名の文字列リテラルだけ（数値・px・式は違反）。幅・高さは余白に入れない（違反）。
+  - WHY: 部品の並べ方（どこを詰め、どこを空けるか）は画面の構造なので画面に書き、各段階の値（rem）の正はテーマの `spacing`（型で全段階が必須）に残す。テーマを替えると余白も替わる。
+- atom を足す・変えるとき: props は画面が要るものだけを自前の型で出し（Mantine の props 型を渡さない。見た目の口が画面に開くため）、イベントは文字列・boolean・引数なしで渡す（`preventDefault` などは atom の中）。包む Mantine の部品を `theme-definition.ts` の `ThemedComponent` に足し、すべてのテーマの `components` に見た目を書く（足し忘れは `design-system-themed-components` と型チェックで止まる）。atom のテストは `shared/ui/atoms/<name>.test.tsx`。
+- テーマを替える: `active-theme.ts` の 1 行を別のテーマに差し替える（画面のコードは変えない）。テーマを足すときは `ThemeDefinition` の型（`spacing` の全段階と `ThemedComponent` の全部品が必須）を満たす。
+- テスト: Mantine で描く画面・部品は Provider で包む必要がある。`test-support/i18n.tsx` の `JaLocale` が `test-support/design-system.tsx` の `DesignSystem`（`DesignSystemProvider` と jsdom に無い `window.matchMedia` の代わり）も含むので、画面のテストは今までどおり `JaLocale` を wrapper にする。
+- 限界（レビューで見る）: スプレッド（`{...props}`）・`createElement` の props・`useMantineTheme` で取り出した値を別の口から当てる書き方は見ない。詳細は `rule-tests/design-system.test.ts` の冒頭。
 
 ## 画面側とサーバ側の境界
 - `features/<f>/api/` から backend への参照は `import type` / `export type` だけで、参照先は自 feature の `apps/backend/features/<f>/internal/presentation/<name>.api.ts` と `apps/backend/shared/presentation/problem.ts`（`Problem`・`ErrorKey`・`ErrorKeyParams`）。api ファイルの関数や application・domain・infra の実装は import しない。
@@ -37,7 +69,7 @@ paths:
 - 型で担保されないこと: URL と HTTP メソッド（画面側に文字列で書く）、実行時の JSON の形（`response.json()` を型に当てはめるだけ）。URL を型で担保したくなったら、api ファイルから path の定数を export する案を検討する（今は入れない）。
 
 ## ログ
-- サーバ側（直下の `proxy.ts`・`instrumentation-node.ts`）のログは `@repo/shared/logger` を通す。`console.*` は書かない（Biome の `noConsole` と規則 `console-direct-access`。`.claude/rules/backend.md` の「ログ」）。
+- サーバ側（直下の `proxy.ts`・`instrumentation-node.ts`）のログは `@repo/shared/logger` を通す。`console.*` は書かない（Biome の `noConsole` と規則 `console-direct-access`。`.claude/rules/code/backend.md` の「ログ」）。
 - `features/`・`app/`・`shared/` のクライアントコード（ブラウザ）は logger も console も使わない（画面にはログを出さない）。logger・env はサーバ専用で、`app/`・`features/`・`shared/` から `apps/shared` は参照しない（規則 `screen-to-shared`。env・logger をブラウザのバンドルに持ち込まない。now も今は画面が現在時刻を読まないので同じく参照しない）。
   - WHY: ブラウザの console に出したものはサーバのログに残らず、利用者の開発者ツールにだけ見える。エラーは画面の表示（エラー状態）で扱う。
 
@@ -53,7 +85,7 @@ paths:
 - backend へは `@repo/backend/<path>` だけ（workspace パッケージと `apps/backend/package.json` の `exports` で解決）。相対パス（`../backend/...`）と `@/../backend/...` は使わない（規則 `frontend-to-backend-specifier`）。
 - `apps/shared` へは `@repo/shared/<name>` だけ（直下のファイルから。`apps/shared/package.json` の `exports`）。相対パス（`../shared/...`）と `@/../shared/...` は使わない（規則 `frontend-to-shared-specifier`）。
   - WHY: 相対パスは `exports`（公開する入口）を通らずに backend のどのファイルでも指せ、後で別プロセスに分けたときにも壊れる。
-- exports に無いファイルを import すると `tsc` / `next build` が「Cannot find module」で止まる。足し方は `.claude/rules/backend.md` の「exports」。
+- exports に無いファイルを import すると `tsc` / `next build` が「Cannot find module」で止まる。足し方は `.claude/rules/code/backend.md` の「exports」。
 - `apps/frontend_customer/tsconfig.json`: Next 用（plugin・jsx・DOM の型、paths は `@/*` だけ）。`@repo/backend/...`・`@repo/shared/...` を paths に書かない（書くと exports を通らずにパッケージのどのファイルも指せてしまう）。
 
 ## i18n（Issue #116・#125。決定と採用しなかった案は ADR `docs/adr/architecture/20260929-i18n-without-library.md` と `docs/adr/architecture/20260929-messages-colocated-per-screen.md`）
@@ -70,7 +102,7 @@ paths:
   - placeholder の名前は英数字と `_` だけ（`{max}`・`{max_1}`）。実行時の置換（`formatMessage` の `/\{(\w+)\}/`）と同じ規則を型でも強制し、`{a-b}`・`{}`・`{ max }` のような `{...}` を含む文言はコンパイルエラーになる（対にならない `{` や `}` は書ける）。
   - `t(key, params)` の params は ja の文言の `{name}` から型で導く（`i18n.tsx` の `MessageParams`）。placeholder が無いキーは params を渡せず、あるキーは必須で、名前の違いもコンパイルエラーになる。
   - 使い方: 画面・部品では `const t = useT(todoScreenMessages);`（その辞書のキーだけを受け付ける `t`。別の画面の辞書のキーはコンパイルエラー）。キーが実行時の値（サーバの Problem Details の `key`）のときだけ `formatMessage(commonMessages, locale, key, params)` を使う（`features/todo/api/api-error.ts` の `ApiErrorMessage.toMessage`）。
-- サーバのエラー: backend は RFC 9457 の Problem Details（`application/problem+json`。`.claude/rules/backend.md`）を返す。`features/<f>/api/` は本文が Problem Details（`type` が文字列・`status` が数値・`key` が共通の辞書のキー・`params` は省略かオブジェクト。`todo-api.ts` の `TodoApi.isProblem`）なら `ApiError`（`status`（HTTP の応答のステータス）・`type`・`key`・`params`）を、そうでなければ `error.unknown`（`params.status`、`type` は無し）の `ApiError` を投げる。`detail` は開発者向けの英語で読まない・出さない。hook は失敗の理由を持って描画のときに翻訳する（ロケールが変わっても、その言語で出る）。backend の `ErrorKey` がすべて共通の辞書にあること・params の名前が placeholder と同じことは、`api-error.ts` の `ApiErrorKey` の型の制約と `api-error.test.ts` の型の検査で止める（`shared/` は backend を参照できないので、`api/` で突き合わせる）。
+- サーバのエラー: backend は RFC 9457 の Problem Details（`application/problem+json`。`.claude/rules/code/backend.md`）を返す。`features/<f>/api/` は本文が Problem Details（`type` が文字列・`status` が数値・`key` が共通の辞書のキー・`params` は省略かオブジェクト。`todo-api.ts` の `TodoApi.isProblem`）なら `ApiError`（`status`（HTTP の応答のステータス）・`type`・`key`・`params`）を、そうでなければ `error.unknown`（`params.status`、`type` は無し）の `ApiError` を投げる。`detail` は開発者向けの英語で読まない・出さない。hook は失敗の理由を持って描画のときに翻訳する（ロケールが変わっても、その言語で出る）。backend の `ErrorKey` がすべて共通の辞書にあること・params の名前が placeholder と同じことは、`api-error.ts` の `ApiErrorKey` の型の制約と `api-error.test.ts` の型の検査で止める（`shared/` は backend を参照できないので、`api/` で突き合わせる）。
   - 項目ごとの誤り（Issue #144）: 400 の本文の `errors`（`{ pointer, key, params?, detail }[]`。`pointer` は RFC 6901 の JSON Pointer の fragment の形で、本文全体は `#`）を `ApiError` の `errors`（`pointer`・`key`・`params`。本文に無ければ `[]`、`detail` は持たない）に載せる。`isProblem` は `errors` が省略か配列で、各要素の `pointer` が文字列・`key` が共通の辞書のキー・`params` が省略か配列でないオブジェクトであることを確かめ、1 件でも崩れていれば本文全体を Problem Details とみなさない（`error.unknown`）。WHY: 崩れた要素だけを捨てると、捨てた誤りが出ないまま残りだけを直せばよいように見える。
   - 表示は `api-error.ts` の `ApiErrorMessage.toMessages(reason, locale, fields)` で、フォーム全体の文言（`form`）と入力の下の文言（`fields`）に分ける。`fields` はその画面が入力を描く項目の名前（本文の最上位のキー）で、`pointer` が `#/<項目名>` と完全一致する誤りをその項目に、それ以外（`#`・描いていない項目・入れ子の位置）を `form` に出す。項目・`form` とも最初の 1 件。`errors` が無い失敗（404・500・JSON でない応答・fetch の失敗）は今までどおり `form` だけ。
   - 項目の誤りも全体の文言も、入力を編集しても消えず、次の送信の成功・失敗で置き換わる（hook の `setFailure`。既存の全体のエラーと同じ扱い）。WHY: 編集で消すと「まだ直っていない」状態で文言が消え、送信するまで結果が分からない。項目の誤りだけのときは `role="alert"` が無いのでスクリーンリーダーは自動では読み上げない（入力にフォーカスしたときに説明として読まれる。変えるなら入力にフォーカスを移す）。方針の ADR は `docs/adr/architecture/20260930-presentation-overlaps-domain-validation.md`。
@@ -83,7 +115,7 @@ paths:
 - テスト: 画面・components は `test-support/i18n.tsx`（`@/test-support/i18n`）の `JaLocale` を wrapper にして描き、期待する文言は `tJa(todoScreenMessages, key, params)`（対応する辞書で翻訳した結果）と比べる（言い回しの変更でテストを直さずに済む）。en で描いて英語になることも画面ごとに 1 件見る（辞書の en の中身はここで見る）。仕組み（`defineMessages`・`useT` など）は `shared/i18n/i18n.test.tsx` がテスト用の辞書で固定する。
 
 ## クラスと関数（規則 `class-based`。ADR `docs/adr/architecture/20261002-class-based-frontend-modules.md`）
-- `features/`・`shared/`・`test-support/` の React 以外のモジュール（`.ts` など。`*.tsx`・`*.jsx`・`*.hook.*` 以外）は、ファイルの最上位に関数を置かず、クラスのメソッド（状態が無ければ static だけのクラス。インスタンスで使うクラスには自分を返すファクトリ以外の static を置かない。規則 `no-static-in-instance-class`、Issue #300）にする。今あるもの: `TodoApi`（`list`・`get`・`create`・`rename`・`changeCompletion`・`delete`）・`ApiErrorMessage`（`toMessage`・`toMessages`）・`Locales`（`is`・`negotiate`・`fromHeader`）・`DateTimeFormatter`（`format`）・`RequestLogBuilder`（`build`）。定数（`SUPPORTED_LOCALES`・`LOCALE_HEADER` など）と型はクラスの外の値のまま。検査は `rule-tests/architecture.test.ts` の `class-based`、static だけのクラスの許可は `biome.json` の override（`.claude/rules/lint.md`）。
+- `features/`・`shared/`・`test-support/` の React 以外のモジュール（`.ts` など。`*.tsx`・`*.jsx`・`*.hook.*` 以外）は、ファイルの最上位に関数を置かず、クラスのメソッド（状態が無ければ static だけのクラス。インスタンスで使うクラスには自分を返すファクトリ以外の static を置かない。規則 `no-static-in-instance-class`、Issue #300）にする。今あるもの: `TodoApi`（`list`・`get`・`create`・`rename`・`changeCompletion`・`delete`）・`ApiErrorMessage`（`toMessage`・`toMessages`）・`Locales`（`is`・`negotiate`・`fromHeader`）・`DateTimeFormatter`（`format`）・`RequestLogBuilder`（`build`）。定数（`SUPPORTED_LOCALES`・`LOCALE_HEADER` など）と型はクラスの外の値のまま。検査は `rule-tests/architecture.test.ts` の `class-based`、static だけのクラスの許可は `biome.json` の override（`.claude/rules/quality/lint.md`）。
   - WHY: daiki の判断（2026-10-02「クラス必須でルールにして」）。backend・apps/shared と同じ形にそろえ、画面のテストの差し替えも `vi.mocked(TodoApi.list)` の形になる（`vi.mocked(Clock.now)` と同じ）。
 - 対象外（関数のまま）: React の component（`*.tsx`・`*.jsx`。JSX を含むファイルの補助 `i18n.tsx` の `defineMessages`・`formatMessage` なども、ファイルごと外す）、hook（`*.hook.*`）、`app/` の下（Next の規約）、直下のファイル（`proxy.ts`・`instrumentation.ts`・`instrumentation-node.ts`・`next.config.ts`）。WHY: React と Next が関数の形を求める（クラスの component は非推奨、hook は Rules of Hooks、`proxy`・`register`・`page` の default export は規約）。`instrumentation-node.ts` は Vitest のカバレッジの対象外で、形を変えても単体テストで確かめられない。
 
@@ -91,4 +123,4 @@ paths:
 - ディレクトリ・ファイルは kebab-case（`todo-screen/`）。コンポーネントと型は PascalCase（`TodoScreen`）。hook は `use` 始まり（`useTodoScreen`）。役割の接尾辞は `.` の後ろ（`.hook.ts`・`.test.tsx`）。
 
 ## テスト
-- hook は `renderHook`、screen は render して操作し表示を検証する（どちらも jsdom。`vitest.config.mts` の既定）。`api/` は `vi.mock` で差し替える（`.claude/rules/testing.md`）。
+- hook は `renderHook`、screen は render して操作し表示を検証する（どちらも jsdom。`vitest.config.mts` の既定）。`api/` は `vi.mock` で差し替える（`.claude/rules/quality/testing.md`）。

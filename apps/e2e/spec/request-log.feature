@@ -1,4 +1,4 @@
-# アクセスの記録（Issue #80 / #209 / #279。.claude/rules/testing.md の「E2E（Playwright + playwright-bdd）」）。
+# アクセスの記録（Issue #80 / #209 / #279。.claude/rules/quality/testing.md の「E2E（Playwright + playwright-bdd）」）。
 # step の実装は request-log.steps.ts（対の名前。rule-tests/e2e-feature.test.ts の e2e-feature-pair）。共有の step は shared.steps.ts。
 # 1 行の中身の決め方は apps/frontend_customer/shared/request-log/request-log.test.ts で固定しているので、ここでは proxy.ts の結線
 #   （規約の場所で呼ばれる・matcher・logger 経由で標準出力への 1 行・応答の追跡の番号）だけを見る。

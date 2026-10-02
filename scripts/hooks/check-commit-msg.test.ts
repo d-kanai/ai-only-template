@@ -1,7 +1,7 @@
 // @vitest-environment node
 // WHY: vitest.config.mts の既定環境は jsdom だが、このテストは bash / git を子プロセスで起動するだけで DOM を使わない。
 //
-// scripts/hooks/check-commit-msg.sh（lefthook の commit-msg）の仕様。コミットメッセージの形式（.claude/general/commit.md）を
+// scripts/hooks/check-commit-msg.sh（lefthook の commit-msg）の仕様。コミットメッセージの形式（.claude/rules/workflow/commit.md）を
 // 機械で止めるルール検査テストなので、通るメッセージ（must pass）と拒否するメッセージ（must reject）を両方持ち、
 // 最後に一時的な git リポジトリで `git commit` から lefthook 経由でスクリプトが呼ばれることまで通す。
 import { spawnSync } from "node:child_process";

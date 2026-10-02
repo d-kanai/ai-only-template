@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Claude Code の WorktreeRemove フック（Issue #64。設計と WHY は .claude/rules/worktree.md）。
+# Claude Code の WorktreeRemove フック（Issue #64。設計と WHY は .claude/rules/tooling/worktree.md）。
 # worktree-create.sh が作った worktree（<メイン>/.claude/worktrees/<name>）の DB を drop し、共有フックを修復する。
 #
 # 入力（stdin の JSON）: worktree_path（WorktreeCreate が返したパス）、cwd。出力: なし（JSON の出力は捨てられる。公式
