@@ -38,6 +38,11 @@ import { casesByName } from "./case-table";
 //       文が同じほかの step と同じものとして扱われ、読み込みで ItemAlreadyExistsError になる（`a.b* c` と `a.b* d`）。波かっこは
 //       `{string}` / `{int}` などの式として読まれ、別の文の step に一致する（`{int}` を含む 2 つの step が重なった）。どちらも
 //       ルール検査テストの step の文には要らないので、書けないようにして読み違いを起こさせない。
+//     WHY 文が正規表現として読めることも見る（Issue #282 の worker の実測）: vitest-cucumber 8.0.0 は step の文を `?` のほかは
+//       逃がさずに正規表現にする（`dist/parser-*.mjs` の ExpressionStep.matchStep）。対になっていない `(` は読み込みで
+//       `SyntaxError: Unterminated group` になり、`.call(` のように書けなかった。同じ作り方で正規表現にし、作れない文を止める。
+//       作れた正規表現が文自身に一致するかは見ない: 対のかっこ `（a）` 以外の `(a)` は文自身に一致しないが、vitest-cucumber 8.0.0 は
+//       それでも step を対応づけて実行した（`a (x) b` と `a (x) c` で実測。式の無い step は文字列のまま照らし合わせているとみられる）。
 // 移していないテスト（PENDING）: 移す PR を分けるので、移していないテストは一覧に載せて検査から外す。一覧にあるのに .feature が
 //   あれば、一覧から消し忘れたものとして違反にする（一覧が古くならない）。すべて移したら一覧は空になる。
 // 限界: import は先頭の import の並び（コメント・空行を挟んでよい）だけを見る。途中の import・`require`・`import()`・
@@ -98,9 +103,22 @@ function leadingImports(source: string): string {
 
 // `*` の step の行（trim 済み）の文に、先頭のほかの `*` か波かっこがあれば違反を返す。
 function stepTextViolations(line: string, number: number): string[] {
-  return /[*{}]/.test(line.slice(1))
-    ? [`${number} 行目: step の文に「*」か波かっこがある`]
-    : [];
+  const text = line.slice(1).trim();
+  if (/[*{}]/.test(text))
+    return [`${number} 行目: step の文に「*」か波かっこがある`];
+  return compilesAsPattern(text)
+    ? []
+    : [`${number} 行目: step の文が正規表現として読めない`];
+}
+
+// vitest-cucumber 8.0.0 が step の文から作る正規表現（`?` だけを逃がし、前後を ^ / $ で囲む。ExpressionStep.matchStep）を作れるか。
+function compilesAsPattern(text: string): boolean {
+  try {
+    new RegExp(`^${text.replace(/[?]/g, "\\$&")}$`);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // .feature の書き方の違反（1 始まりの行の番号つき）。
@@ -504,6 +522,32 @@ describeFeature(feature, ({ Scenario }) => {
           `3 行目: ${brace}`,
           `4 行目: ${brace}`,
           `5 行目: ${brace}`,
+        ]);
+      },
+    );
+
+    And(
+      "step の文が正規表現として読めないと、行の番号で違反になる（対になっていないかっこ）",
+      () => {
+        // given
+        const feature = lines(
+          "Feature: a",
+          "  Scenario: b",
+          "    * .handle.call( を止める",
+          "    * 閉じるだけ ) のかっこ",
+          "    * [a-z のかっこ",
+          "    * 対の (かっこ) と [a] と ? と + と a.b と ^ と $ は書ける",
+        );
+
+        // when
+        const result = featureFormatViolations(feature);
+
+        // then
+        const pattern = "step の文が正規表現として読めない";
+        expect(result).toEqual([
+          `3 行目: ${pattern}`,
+          `4 行目: ${pattern}`,
+          `5 行目: ${pattern}`,
         ]);
       },
     );
