@@ -7,7 +7,8 @@ PR の作成・マージの前にスキル `pr-flow` を読む（手順: コマ�
 - ブランチ: main から `<type>/<Issue番号>-<内容>`（例: `feat/12-branch-rules`）。type は Issue・PR のラベルと同じ。
 - コミットと push: worker が完了するごとにコミットし、未コミットを長く残さない（環境側の Stop フックが止めるたびに wake になる）。push は 1 ラウンド（実装 → 検証 → 指摘の反映）につき 1 回にまとめる（push ごとに CI が再実行され、完了の通知で wake が増える）。
 - PR: 本文は `.github/PULL_REQUEST_TEMPLATE.md`（WHY / WHAT / 実装経緯 / 検証内容）を埋め、`Closes #<Issue番号>` を入れる。タイトルはコミットの 1 行目と同じ書き方。
-- マージ条件（すべて）: reviewer の検証で問題なし（機械的な変更は reviewer を省き、オーケストレータが確認してその旨を PR に書く）/ CI の `ci` ジョブが緑（required status check）/ main との競合なし。
+- rule-review: PR を作ったら auto-merge の前にスキル `rule-review` を回し、指摘を PR のレビュー（行コメントとまとめ）で残してから直す。直したら各スレッドに返信して resolve する（`pr-flow` の手順 8。WHY: レビューの結果と直した経過を PR に残す。ユーザー判断 2026-10-02、Issue #341）。
+- マージ条件（すべて）: reviewer の検証で問題なし（機械的な変更は reviewer を省き、オーケストレータが確認してその旨を PR に書く）/ rule-review の結果が PR にあり 🔴 が残っていない / CI の `ci` ジョブが緑（required status check）/ main との競合なし。
 - マージ: オーケストレータが merge commit（`--merge`）で行う。squash / rebase は使わない。人間の承認は不要で、マージ後に報告する。
 - マージ後: 報告の前に main に戻って pull・prune し、ローカルのブランチを `git branch -d` で消す（`-D` で強制しない）。
 - CI が赤なら原因を PR のブランチで直す。テストの skip や無効化で緑にしない。
