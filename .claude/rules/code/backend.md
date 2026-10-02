@@ -9,7 +9,8 @@ paths:
 | --- | --- | --- | --- |
 | 概要 | `apps/backend/` は workspace パッケージ `@repo/backend`。Next・React に依存しない TypeScript で、サーバの起動口は持たない（Next の Route Handler から呼ばれる） | - | 説明 |
 | 概要 | 依存の向きの規則はすべて `rule-tests/architecture.test.ts` が検査する（規則の一覧は `.claude/rules/code/architecture-check.md`） | 決定と採用しなかった案は ADR（`docs/adr/README.md` の一覧）、実測は 2026-09-28 の work-logs | 説明 |
-| クラス | 本番コードとテストの補助（`test-support/`・`spec/` の `support.ts`。テストは除く）はファイルの最上位に関数を置かず、クラスにする（状態の無い補助は static メソッド。ADR `docs/adr/architecture/20261002-class-based-backend.md`、Issue #262）。検査は apps/shared と apps/e2e の補助も対象（ADR `docs/adr/architecture/20261002-class-based-shared-and-test-support.md`） | - | `rule-tests/architecture.test.ts` の `class-based` |
+| クラス | 本番コードとテストの補助（`test-support/`・`spec/` の `support.ts`。テストは除く）はファイルの最上位に関数を置かず、クラスにする（ADR `docs/adr/architecture/20261002-class-based-backend.md`、Issue #262）。検査は apps/shared と apps/e2e の補助も対象（ADR `docs/adr/architecture/20261002-class-based-shared-and-test-support.md`） | - | `rule-tests/architecture.test.ts` の `class-based` |
+| クラス | インスタンスで使うクラス（Repository・Api・Entity など）の補助は `private` のインスタンスのメソッドにし、static は自分のクラスを返すファクトリ（`Todo.create` など）だけ。インスタンスを作らない補助は static だけのクラスにする（ADR `docs/adr/architecture/20261002-no-static-in-instance-class.md`、Issue #300） | - | `rule-tests/architecture.test.ts` の `no-static-in-instance-class` |
 | クラス | static だけのクラスを許す Biome の override は `.claude/rules/quality/lint.md` | - | 説明 |
 
 ## 置き場所（feature は DDD 4 層、shared は意味の単位）
@@ -24,7 +25,7 @@ paths:
 | feature の直下 | feature の直下は `expose/`（他のモジュールへ公開する入口）と `internal/`（4 層。feature の中だけで使う実装）だけにする（Issue #208。モジュラーモノリス）。`internal/` を挟まない `features/<feature>/<層>/`（Issue #208 より前の置き場所）と `internal/` の直下のファイルは `backend-placement` の違反 | - | `rule-tests/architecture.test.ts` の `backend-placement` |
 | feature の直下 | `expose/` は直下のファイルだけ（`expose/<name>.ts`。下にディレクトリを作らない。深くしたくなったら規則を変える） | - | `rule-tests/architecture.test.ts` の `backend-placement` |
 | feature の直下 | 境界の規則は下の「モジュールの境界（expose / internal）」 | - | 説明 |
-| test-support | `apps/backend/test-support/`（Issue #181）にはテストだけが使うコードを置く: `database.ts` の `TestDatabase`（`TestDatabase.create`・`TestDatabase.cleanupSchemas`）。実 Postgres のテスト用スキーマ。Repository の InMemory の実装 `<feature>/<名前>-repository.in-memory.ts`（Issue #191）。実 Postgres のテストの前提の行を表に直接入れるテストデータビルダー `<feature>/<名前>-builder.ts`（`TodoBuilder.of(db)…build()`。Issue #240。`.claude/rules/quality/testing.md` の「テストダブル」）（直下に分けるのはユーザー判断「test-support が build に入らないルールは頑張って」） | 直下に分ける: 層の下（以前の `shared/drizzle/database.test-support.ts`）だと本番のコードと同じ場所で、ファイル名の目印だけでは import もイメージへの混入も止まらない。1 か所のディレクトリにすれば、`.dockerignore` の 1 行で外せ、検査も場所で書ける | 説明 |
+| test-support | `apps/backend/test-support/`（Issue #181）にはテストだけが使うコードを置く: `database.ts` の `TestDatabase`（`TestDatabase.create`）と `TestSchemas`（`TestSchemas.cleanup`）。実 Postgres のテスト用スキーマ。Repository の InMemory の実装 `<feature>/<名前>-repository.in-memory.ts`（Issue #191）。実 Postgres のテストの前提の行を表に直接入れるテストデータビルダー `<feature>/<名前>-builder.ts`（`TodoBuilder.of(db)…build()`。Issue #240。`.claude/rules/quality/testing.md` の「テストダブル」）（直下に分けるのはユーザー判断「test-support が build に入らないルールは頑張って」） | 直下に分ける: 層の下（以前の `shared/drizzle/database.test-support.ts`）だと本番のコードと同じ場所で、ファイル名の目印だけでは import もイメージへの混入も止まらない。1 か所のディレクトリにすれば、`.dockerignore` の 1 行で外せ、検査も場所で書ける | 説明 |
 | test-support | test-support は層に属さず（feature の domain・infra の schema・shared の単位を値で参照してよい）層の規則はかからない | - | 説明 |
 | test-support | 本番のコードから test-support を参照しない | - | `rule-tests/test-support.test.ts` の `production-imports-test-support` |
 | test-support | test-support を exports にも載せない | - | `rule-tests/test-support.test.ts` の `exports-test-support` |

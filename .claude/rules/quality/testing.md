@@ -51,12 +51,12 @@ paths:
 - 足りなければテストを足して埋める。`/* v8 ignore */` などで逃がさない。対象外を増やすときは上の方針に当てはまるか確かめ、`vitest.config.mts` とここに理由を書く。
 
 ## globalSetup（テスト用スキーマの後始末）
-- `vitest.global-setup.ts` が実行の最初に 1 回、`test_` で始まるスキーマを `DROP SCHEMA ... CASCADE` で消す（`TestDatabase.cleanupSchemas`）。`afterAll` での削除も残す。
+- `vitest.global-setup.ts` が実行の最初に 1 回、`test_` で始まるスキーマを `DROP SCHEMA ... CASCADE` で消す（`TestSchemas.cleanup`）。`afterAll` での削除も残す。
   - WHY: プロセスが `afterAll` の前に止まる（Stryker が worker を止める・Ctrl-C）と残る。テストの前なら消してよいのは前の実行の残りだけ。
 - 探し方は `starts_with(schema_name, 'test_')`（LIKE の `_` は任意の 1 文字に一致するため使わない）。
 - Postgres に接続できなければ「cannot connect to Postgres … start it with pnpm db:up」のエラー（英語。Issue #116 で非テストコードの日本語を無くした）で止める。
 - Stryker の worker の中（`STRYKER_MUTATOR_WORKER` がある）では消さない（並行する worker の使用中のスキーマを消すため）。同じ DB に `pnpm test` を 2 つ同時に動かさない。
-- `TestDatabase.cleanupSchemas` のテストはテストごとの接頭辞（`test_cleanup_<UUID>_`）で行う（`test_` だと並列の他のファイルのスキーマを消す）。
+- `TestSchemas.cleanup` のテストはテストごとの接頭辞（`test_cleanup_<UUID>_`）で行う（`test_` だと並列の他のファイルのスキーマを消す）。
 
 ## テストダブル
 - backend: InMemory リポジトリ（`apps/backend/test-support/<feature>/<名前>-repository.in-memory.ts`。テストだけが使うので test-support に置く。Issue #191。`rule-tests/test-support.test.ts` の `in-memory-placement`）を query / command のコンストラクタに渡して組み立てる（Issue #123。`vi.mock` は使わない）。書き込みの command には InMemory のトランザクションの runner（`apps/backend/test-support/transaction-runner.in-memory.ts` の `InMemoryTransactionRunner`。work を呼ぶだけで rollback は再現しない。Issue #215）も渡す。テストが Repository に直接 Todo を置くときは `repository.insert(todo, inMemoryTransaction)`。モックは最小限。WHY: モックは「こう呼ばれるはず」を書き込むので、実装とずれても緑のまま。（検査は `rule-tests/test-doubles.test.ts`: backend のテストの `vi.mock` は `@repo/shared/now` だけ（`vi.doMock` も違反。ほかは呼び出しの直前の行の `// WHY モック: <理由>` で通す）、`apps/backend/test-support/database` の import は infra のテスト・test-support 自身のテスト（直下のテストと `test-support/<feature>/*-builder.test.ts`）・API ジャーニー・API 仕様・global-setup だけ）

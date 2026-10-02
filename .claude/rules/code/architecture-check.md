@@ -7,7 +7,7 @@ paths:
 
 | カテゴリ | WHAT | WHY | 強制 |
 | --- | --- | --- | --- |
-| 概要 | `rule-tests/architecture.test.ts`（`pnpm test` に含まれ、CI の `ci` ジョブで止まる）が、次のものを 1 規則 = 1 テストで検査する: ディレクトリ構成の規則（`.claude/rules/code/backend.md`・`.claude/rules/code/frontend.md`・`.claude/rules/code/shared.md`）と環境変数の直参照の禁止（`.claude/rules/tooling/env.md`）、`console` の直接の呼び出しの禁止（`.claude/rules/code/backend.md` の「ログ」）、現在時刻を `apps/shared/now.ts` の外で読むことの禁止（`.claude/rules/code/shared.md` の「now」）、画面と、サーバ側（backend・shared）のハードコードの文言の禁止（Issue #116 の i18n）、画面・部品の辞書の置き場所（Issue #125）、api の `handle` を `ProblemResponse.wrap` で包むこと（Issue #141）、backend の本番コードの最上位に関数を置かないこと（Issue #262）、backend のモジュールの境界（`expose/` / `internal/`。Issue #208） | - | 説明 |
+| 概要 | `rule-tests/architecture.test.ts`（`pnpm test` に含まれ、CI の `ci` ジョブで止まる）が、次のものを 1 規則 = 1 テストで検査する: ディレクトリ構成の規則（`.claude/rules/code/backend.md`・`.claude/rules/code/frontend.md`・`.claude/rules/code/shared.md`）と環境変数の直参照の禁止（`.claude/rules/tooling/env.md`）、`console` の直接の呼び出しの禁止（`.claude/rules/code/backend.md` の「ログ」）、現在時刻を `apps/shared/now.ts` の外で読むことの禁止（`.claude/rules/code/shared.md` の「now」）、画面と、サーバ側（backend・shared）のハードコードの文言の禁止（Issue #116 の i18n）、画面・部品の辞書の置き場所（Issue #125）、api の `handle` を `ProblemResponse.wrap` で包むこと（Issue #141）、backend の本番コードの最上位に関数を置かないこと（Issue #262）、インスタンスで使うクラスに static を置かないこと（Issue #300）、backend のモジュールの境界（`expose/` / `internal/`。Issue #208） | - | 説明 |
 | 概要 | ルール検査テストなので、must pass / must reject と fault injection が必須（`.claude/rules/quality/testing.md`、手順はスキル `rule-check-test`） | 違反を見逃すと存在する意味が無い | レビュー |
 
 ## 対象と抽出
@@ -19,10 +19,10 @@ paths:
 | 列挙 | 「ファイルの列挙」のテストは読んだディレクトリを記録して確かめる（`walkFiles` の第 3 引数） | 読まないことは結果の一覧からは見えない（後で除いても同じ一覧） | 説明 |
 | 抽出 | import / re-export / dynamic import を正規表現で抜き出す（依存は足さない）。コメントと文字列の中の import 風の文字列は除く。``import(`x`)``（`${}` 無し）と第 2 引数つきの `import("x", { with: ... })` も拾う | - | 説明 |
 | 正規化 | 参照先の正規化: `@/x` → `apps/frontend_customer/x`（backend のファイルに書いても frontend の paths が当たるため）、`@repo/backend/x` → `apps/backend/x`、`@repo/shared/x` → `apps/shared/x`（`@repo/backend-extra`・`@repo/shared-extra` は別パッケージ）、相対パスはリポジトリ相対、それ以外はパッケージ。`@/`・`@repo/backend/`・`@repo/shared/` の後ろの `..` も解決する | - | 説明 |
-| 構文木 | ハードコードの文言と `handle` の包み方と最上位の関数だけは構文木で見る。TypeScript 7.0.2 は JS のパーサ（`ts.createSourceFile`）を持たないので、同梱の tsgo を `typescript/unstable/sync` の API で起動し、仮想のファイルシステムに置いたソースの構文木を `forEachChild` の再帰でたどる（依存は足さない。`parseSourceFiles`） | JSX のテキスト・属性・文字列リテラルの範囲を正規表現では正しく切り出せないため | 説明 |
+| 構文木 | ハードコードの文言と `handle` の包み方と最上位の関数とクラスの static だけは構文木で見る。TypeScript 7.0.2 は JS のパーサ（`ts.createSourceFile`）を持たないので、同梱の tsgo を `typescript/unstable/sync` の API で起動し、仮想のファイルシステムに置いたソースの構文木を `forEachChild` の再帰でたどる（依存は足さない。`parseSourceFiles`） | JSX のテキスト・属性・文字列リテラルの範囲を正規表現では正しく切り出せないため | 説明 |
 | 出力 | 違反は「ファイル → 参照先」（環境変数・console・ハードコードの文言は「ファイル:行」）の一覧で出す | - | 説明 |
 
-## 規則（全部で 36 = 依存の 24 `RULES` + 置き場所 3 + 環境変数 1 + console 1 + 現在時刻 1 + exports 2 + ハードコードの文言 2 + `handle` の包み方 1 + 最上位の関数 1）
+## 規則（全部で 37 = 依存の 24 `RULES` + 置き場所 3 + 環境変数 1 + console 1 + 現在時刻 1 + exports 2 + ハードコードの文言 2 + `handle` の包み方 1 + 最上位の関数 1 + インスタンスのクラスの static 1）
 
 | カテゴリ | WHAT | WHY | 強制 |
 | --- | --- | --- | --- |
@@ -91,6 +91,9 @@ paths:
 | 最上位の関数 | `class-based` の対象に `apps/backend/shared/drizzle/drizzle.config.ts` も入れる | drizzle-kit が求めるのは default export の設定オブジェクトだけで、補助はクラス `DrizzleConfigPath` の static メソッドで書けている（例外は要らない） | `rule-tests/architecture.test.ts` の `class-based` |
 | 最上位の関数 | static だけのクラスを Biome の `complexity/noStaticOnlyClass` が警告しないよう、`biome.json` の override で `apps/backend/**`・`apps/shared/**`・`apps/e2e/**` と、`apps/frontend_customer/` の `features/**`・`shared/**`・`test-support/**`（`*.tsx`・`*.jsx`・`*.hook.*` を除く。この規則の対象と同じ範囲）だけ off にしている（`.claude/rules/quality/lint.md`。効き方は `rule-tests/lint.test.ts`） | - | `biome.json` の `noStaticOnlyClass`、`rule-tests/lint.test.ts` の `noStaticOnlyClass` |
 | 最上位の関数 | `class-based` の限界: 最上位の呼び出しの引数の関数（即時実行の `(() => {})()`、`z.object(...).refine((x) => ...)`）、オブジェクトリテラルのメソッド・関数のプロパティ（`export const x = { f() {} }`）、三項演算子などの式の中の関数、別の値の再代入（`const f = other.f`）。最上位の文のブロックの中の関数（`{ ... }`・`if`・`try`・`switch`・`for` の中） | 限界（見逃す）: ブロックの中は不自然な書き方なので再帰しない（reviewer の実測）。関数かは型を見ないと決まらないので、レビューで見る | レビュー |
+| static | `no-static-in-instance-class`（Issue #300。決定は ADR `docs/adr/architecture/20261002-no-static-in-instance-class.md`）: `class-based` と同じ対象のファイルで、インスタンスのメンバー（コンストラクタ・static でないメソッド・フィールド・アクセサ）を持つクラス（宣言・式、入れ子も）の static メンバー（メソッド・フィールド・アクセサ・static ブロック）を「ファイル:行」で違反にする（`findStaticInInstanceClasses`）。インスタンスのインデックスシグネチャと `;` はどちらにも数えない（static のインデックスシグネチャは違反）。`extends` で継承するクラスは、自分でインスタンスのメンバーを書かなくてもインスタンスのクラスとして扱う（`implements` は数えない）。static だけのクラスに `private constructor() {}` を足すと、コンストラクタをインスタンスのメンバーに数えるので違反になる | 規則にする: Issue #262 の移行で状態を使わない補助を一律 `private static` にし、Repository や API のようにインスタンスで使うクラスに static の補助が混ざった（`PostgresTodoRepository.toTodos` など）。daiki の判断（2026-10-02「基本 static いらないはず」）で、インスタンスで使うクラスの補助はインスタンスのメソッドにそろえる。レビューだけでは移行の書き方が新しいコードに写されるのを止められない | `rule-tests/architecture.test.ts` の `no-static-in-instance-class`・`findStaticInInstanceClasses` |
+| static | `no-static-in-instance-class` が通すもの: static だけのクラス（`Clock`・`TodoApi`・`EnvReader`・`TestSchemas` など）、自分のクラスか `Promise<自分のクラス>` を返すと注釈した static メソッド（ファクトリ。`Todo.create`・`Todo.reconstruct`・`TestDatabase.create`・`TodoBuilder.of`・`PostgresWriter.of`・`E2eLogServer.start`） | static だけのクラスは対象外: `class-based` の受け皿（関数の置き場所）で、static を外すと注入や `vi.mock` の差し替えの作り直しになる（範囲は daiki の確認待ち。Issue #300）。ファクトリは許す: private のコンストラクタの前の検証・準備の入口で、インスタンスがまだ無いので static でしか書けない。名前（`create`・`of`・`start`）が決まっていないので戻り値の型の注釈で見分ける | `rule-tests/architecture.test.ts` の `no-static-in-instance-class` |
+| static | `no-static-in-instance-class` の限界: 戻り値の型が自分のクラスなら、中で new しないメソッドもファクトリとして通る。別名の型（`type Self = Todo`）・推論に任せた戻り値はファクトリと見なさない（違反になる方向） | 限界（見逃す方向と多く検出する方向） | レビュー |
 
 ## テストの持ち方
 

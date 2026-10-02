@@ -131,7 +131,7 @@ export default {
   //     有効にすると約 3.3 分（2026-09-28、ローカル 4 コアで実測。576 変異、3 分 18 秒）。
   //   ロジックの定数は static にしない: 読み込み時に固定される定数（正規表現・変換表・URL・接頭辞など）は、呼び出し時に
   //   評価する関数・メソッドの中に置く（problem.ts の ProblemResponse.problemKindOf、apps/shared/log-event.ts の FreeTextMask.mask、todo-api.ts の todosPath、
-  //   apps/backend/test-support/database.ts の TestDatabase.schemaPrefix）。最上位の定数のままだと、既定の実行では killed になる変異も
+  //   apps/backend/test-support/database.ts の TestSchemas.prefix）。最上位の定数のままだと、既定の実行では killed になる変異も
   //   ignoreStatic で数えなくなるため（reviewer 指摘。Issue #55 で 18 件が該当した）。
   //   残る static（数えないもの）: features/todo/internal/infra/schema.ts の todos の 10 件（下の実測）と、Issue #188 / #189 で加わった
   //   todo_status_changes の宣言（11 件）・shared/change-log/change-log.schema.ts（change_logs。14 件）・shared/change-log/change-operation.ts

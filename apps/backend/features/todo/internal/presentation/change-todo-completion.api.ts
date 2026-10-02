@@ -16,9 +16,7 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 
 // WHY 型をスキーマから導出する: 検査する形と型を 1 か所で宣言し、ずれを無くす（画面側も import type でこの型を使う）。
 export type ChangeTodoCompletionRequest = z.infer<
-  ReturnType<
-    (typeof ChangeTodoCompletionApi)["changeTodoCompletionRequestSchema"]
-  >
+  ReturnType<ChangeTodoCompletionApi["changeTodoCompletionRequestSchema"]>
 >;
 
 // 同じ形の Response を各 *.api.ts に書く。
@@ -37,7 +35,7 @@ type Context = { params: Promise<{ id: string }> };
 
 // PUT /api/todos/:id/completion の Route Handler を持つクラス。コンストラクタで command を受け取り、handle を Route Handler として export する
 //   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・ProblemResponse.wrap で包む・
-//   補助（リクエストのスキーマ・toResponse）を private static メソッドにするは
+//   補助（リクエストのスキーマ・toResponse）を private メソッドにするは
 //   list-todos.api.ts の ListTodosApi のコメント）。
 export class ChangeTodoCompletionApi {
   constructor(
@@ -57,11 +55,10 @@ export class ChangeTodoCompletionApi {
       const id = ResourceId.parseUuid(rawId, "todo.notFound", { id: rawId });
       const { completed } = await RequestBody.parse(
         request,
-        ChangeTodoCompletionApi.changeTodoCompletionRequestSchema(),
+        this.changeTodoCompletionRequestSchema(),
       );
       const todo = await this.changeTodoCompletion.execute({ id, completed });
-      const body: ChangeTodoCompletionResponse =
-        ChangeTodoCompletionApi.toResponse(todo);
+      const body: ChangeTodoCompletionResponse = this.toResponse(todo);
       return Response.json(body);
     },
   );
@@ -69,14 +66,14 @@ export class ChangeTodoCompletionApi {
   // リクエスト本文の「形」（項目の有無と型。未知の項目は拒否）。
   // WHY completed を必須にする: この API は完了を変えるためだけにあり、completed の無い本文は誤り（「何も変えない」200 にしない）。
   // WHY 未知の項目を拒否する: title をこの API に送る誤り（名前の変更は /title）を黙って捨てずに 400 で知らせる（json-body.ts の RequestBody.schema）。
-  private static changeTodoCompletionRequestSchema() {
+  private changeTodoCompletionRequestSchema() {
     return RequestBody.schema({
       // 型が違う・無いときのキー（request.field.notBoolean）は json-body.ts の toProblemError が決める（z.boolean に error は書かない）。
       completed: z.boolean(),
     });
   }
 
-  private static toResponse(todo: Todo): ChangeTodoCompletionResponse {
+  private toResponse(todo: Todo): ChangeTodoCompletionResponse {
     return {
       id: todo.id,
       title: todo.title,
