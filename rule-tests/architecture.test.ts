@@ -1991,6 +1991,7 @@ const PROBLEM_RESPONSE_WRAP = "wrap";
 const HANDLE_MEMBER = "handle";
 // 例外（Issue #156。上の PRESENTATION_WITH_PROBLEM_RESPONSE のコメント）: OFREP の api の handle を包む OfrepResponse.wrap の
 //   クラス名と、それを許す場所（feature-flag の presentation。入れ子も）。メソッド名は ProblemResponse と同じ wrap。
+//   限界: 範囲はディレクトリ単位で、feature-flag の presentation に OFREP でない api を足しても OfrepResponse.wrap で通る。
 const OFREP_RESPONSE_CLASS = "OfrepResponse";
 const OFREP_API_DIR =
   /^apps\/backend\/features\/feature-flag\/internal\/presentation\//;

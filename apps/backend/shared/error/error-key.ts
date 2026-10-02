@@ -23,7 +23,7 @@ export type ErrorKeyParams = {
   // 指定した id の Todo が無い（uuid の形でない id も同じ。resource-id.ts）。
   "todo.notFound": { id: string };
   // 指定した key のフィーチャーフラグが一覧に無い（Issue #156。features/feature-flag/internal/domain/feature-flags.ts）。
-  //   API は Problem Details ではなく OFREP の FLAG_NOT_FOUND（404）で返す（shared/http/ofrep-response.ts）。
+  //   API は Problem Details ではなく OFREP の FLAG_NOT_FOUND（404）で返す（shared/http/ofrep.ts）。
   "featureFlag.notFound": { key: string };
   // リクエストの形の誤り（presentation の json-body.ts）。
   "request.body.notJson": Record<string, never>;

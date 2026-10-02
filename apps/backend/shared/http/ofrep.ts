@@ -47,7 +47,7 @@ export class OfrepRequest {
   //   - 本文がオブジェクトでない（配列・null・文字列）→ PARSE_ERROR（評価の要求として読めない）
   //   - context（とその中）の誤り → INVALID_CONTEXT（openapi.yaml の 400 の例が INVALID_CONTEXT）
   // WHY RequestBody.parse（json-body.ts）を使わない: あちらは Problem Details の InvalidRequestError と ErrorKey に変える。OFREP の
-  //   errorCode は別の語彙で、画面の辞書（ErrorKey）にも載せない（provider が errorCode を OpenFeature のエラーに変える）。
+  //   errorCode は別の語彙で、errorCode は画面の辞書（ErrorKey）に載せない（provider が errorCode を OpenFeature のエラーに変える）。
   // WHY errorDetails は英語の固定の文か zod の説明: openapi.yaml の errorDetails は人が読むための任意の文（ログ・デバッグ用）で、
   //   provider は分岐に使わない。ErrorKey のある誤りは problem-detail.en.ts の同じ文を使い、英語の文を 2 か所に書かない。
   static async parse<Schema extends z.ZodType>(
@@ -116,6 +116,8 @@ export class OfrepResponse {
   // WHY 500 に errorCode: GENERAL を付ける: openapi.yaml の 500 の本文（generalErrorResponse）が定義するのは errorDetails だけだが、
   //   ほかの項目を禁じていない（additionalProperties の指定が無い）。ユーザー指示（Issue #156 のコメント）の形に合わせ、
   //   evaluationFailure の errorCode の enum にある GENERAL を付ける。
+  //   限界: key を付けないので、ofrep-core 2.3.0 が errorCode を読むのは一括の評価の 500 だけ（1 件の評価の 500 は key が無いと
+  //   「形の違う応答」として扱われる）。web provider は一括の評価だけを使うので実害は無い。
   // WHY Content-Type は application/json（Response.json の既定）: provider は 200 の応答が JSON の MIME でなければ失敗にする。
   private static failure(error: unknown): Response {
     if (error instanceof OfrepError) {
