@@ -34,9 +34,8 @@ import {
 
 let database: TestDatabase;
 let handler: ReturnType<typeof changeTodoCompletionApi>;
-// 完了の通知の口に渡されたメッセージ（呼ばれた順）。
-// WHY 本番の notify（notification の expose）ではなく記録する関数を渡す: notify はログに出すだけで、仕様から結果を読めない
-//   （vi は使わない）。notify につながっていることは change-todo-completion.api.test.ts の「本番の PUT」のテストが見る。
+// notification の入口（本物の notify。support.ts の changeTodoCompletionApi が呼ぶ）に渡されたメッセージ（呼ばれた順）。
+// WHY 本物の notify と並べて記録する: notify はログに出すだけで、仕様から結果を読めない（vi は使わない）。WHY の詳細は support.ts。
 const notifications: string[] = [];
 
 beforeAll(async () => {
