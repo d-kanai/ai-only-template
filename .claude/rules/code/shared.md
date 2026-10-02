@@ -50,7 +50,7 @@ paths:
 - 決定は ADR `docs/adr/architecture/20260930-now-single-source.md`、検査の書き方と限界は `.claude/rules/code/architecture-check.md`。
 
 ## クラスにする（Issue #262）
-- 本番のファイル（テスト以外）は最上位に関数を置かず、クラスにする（状態の無い補助は `static` / `private static`）。backend と同じ規則 `class-based`（`rule-tests/architecture.test.ts`。`.claude/rules/code/architecture-check.md`）が検査し、static だけのクラスは `biome.json` の override で `noStaticOnlyClass` を off にしている（`.claude/rules/quality/lint.md`）。決定は ADR `docs/adr/architecture/20261002-class-based-shared-and-test-support.md`。
+- 本番のファイル（テスト以外）は最上位に関数を置かず、クラスにする（static だけのクラスの補助は `static` / `private static`。インスタンスで使うクラス（`Logger`）の補助は `private` のインスタンスのメソッドにする。規則 `no-static-in-instance-class`、Issue #300）。backend と同じ規則 `class-based`（`rule-tests/architecture.test.ts`。`.claude/rules/code/architecture-check.md`）が検査し、static だけのクラスは `biome.json` の override で `noStaticOnlyClass` を off にしている（`.claude/rules/quality/lint.md`）。決定は ADR `docs/adr/architecture/20261002-class-based-shared-and-test-support.md`。
   - クラスの対応: `now.ts` の `Clock.now()`、`logger.ts` の `logger`（`Logger` のインスタンス。呼び出しは `logger.emit` のまま）、`log-event.ts` の `LogFieldMarks`（印 `sensitive` / `freeText` と `bounded` / `boundedFreeText` / `error`）・`FreeTextMask`（自由文の網 `mask`）・`LogSeverity`（`of`）、`env.ts` の `EnvReader`（`read` / `readTool`）・`DotEnvFile`（`load` / `findRepoRoot` / `loadFromRepoRoot`）。値の `env` / `toolEnv` / `LOG_EVENT_SCHEMAS` などはそのまま。
   - 表・スキーマ・定数はメソッドの中で作る（クラスの static フィールドにしない）。WHY: 最上位の値は Stryker の static な変異になり ignoreStatic で検査から外れる（`.claude/rules/quality/testing.md`）。static フィールドの初期化も読み込み時に 1 回だけ評価されるので、同じく外れるおそれがある（未確認。ADR `docs/adr/architecture/20261002-class-based-backend.md`）。
   - `LOG_EVENT_SCHEMAS` が読み込み時に呼ぶクラス（`LogFieldMarks` など）は、それより前に書く（クラスの宣言は巻き上げられない）。
