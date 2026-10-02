@@ -77,6 +77,7 @@
 
 ### スキル（手順。`/<name>` でも呼べる）
 - `pr-flow`: Issue → ブランチ → PR → CI → マージ → 後始末（PR の作成・マージの前に読む）。
+- `rule-review`: 差分を `.claude/rules/code` の表の `レビュー` の行（機械で止めていない規範）でレビューする。基準は `REVIEW.md`。
 - `rule-check-test`: ルール検査テストとゲートの must pass / must reject と fault injection。
 - `mutation-testing`: Stryker の実行と生き残りの扱い。
 - `db-migration`: スキーマの変更とマイグレーション。

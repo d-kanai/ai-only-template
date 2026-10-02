@@ -1,0 +1,41 @@
+diff --git a/apps/frontend_customer/shared/ui/atoms/button.tsx b/apps/frontend_customer/shared/ui/atoms/button.tsx
+index fad5f41..f8053f2 100644
+--- a/apps/frontend_customer/shared/ui/atoms/button.tsx
++++ b/apps/frontend_customer/shared/ui/atoms/button.tsx
+@@ -1,5 +1,8 @@
+-import { Button as MantineButton } from "@mantine/core";
+-import type { ReactNode } from "react";
++import {
++  Button as MantineButton,
++  type ButtonProps as MantineButtonProps,
++} from "@mantine/core";
++import type { MouseEvent, ReactNode } from "react";
+ 
+ // atom（Issue #292）: 画面は Mantine を直接使わず、shared/ui/atoms/ の部品を置く（rule-tests/design-system.test.ts の
+ //   design-system-mantine-boundary）。WHY: 画面が Mantine を知らずに済み、ライブラリを替えても atom の中だけ直せばよい。
+@@ -8,7 +11,8 @@ import type { ReactNode } from "react";
+ type ButtonProps = {
+   children: ReactNode;
+   // WHY 引数なし: 画面はボタンを押したことだけを知ればよく、マウスのイベントの中身を使う場面が無い。
+-  onClick?: () => void;
++  onClick?: (event: MouseEvent<HTMLButtonElement>) => void;
++  variant?: MantineButtonProps["variant"];
+   // WHY 既定を button にする: 送信ボタンは明示したときだけにし、フォームの中に置いた普通のボタンが送信にならないようにする。
+   type?: "button" | "submit";
+   // 見える文字（children）と別に、読み上げ・テストで使う名前（一覧の行ごとの「削除」を区別する）。
+@@ -20,12 +24,14 @@ export function Button({
+   onClick,
+   type = "button",
+   "aria-label": ariaLabel,
++  variant,
+ }: ButtonProps) {
+   return (
+     <MantineButton
+       type={type}
+       aria-label={ariaLabel}
+-      onClick={() => onClick?.()}
++      variant={variant}
++      onClick={(event) => onClick?.(event)}
+     >
+       {children}
+     </MantineButton>

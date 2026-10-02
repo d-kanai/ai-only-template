@@ -1,0 +1,19 @@
+diff --git a/apps/frontend_customer/shared/ui/atoms/button.tsx b/apps/frontend_customer/shared/ui/atoms/button.tsx
+index fad5f41..e71083d 100644
+--- a/apps/frontend_customer/shared/ui/atoms/button.tsx
++++ b/apps/frontend_customer/shared/ui/atoms/button.tsx
+@@ -19,12 +19,12 @@ export function Button({
+   children,
+   onClick,
+   type = "button",
+-  "aria-label": ariaLabel,
++  "aria-label": accessibleName,
+ }: ButtonProps) {
+   return (
+     <MantineButton
+       type={type}
+-      aria-label={ariaLabel}
++      aria-label={accessibleName}
+       onClick={() => onClick?.()}
+     >
+       {children}
