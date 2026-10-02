@@ -76,25 +76,15 @@ export function renameTodoApi(db: Database) {
   ).handle;
 }
 
-// 完了の通知は本番と同じ notification モジュールの入口（expose/notify.ts）に渡し、同じメッセージを onNotify にも渡す（Issue #256）。
-// WHY 本物の notify を呼ぶ（記録する関数だけにしない）: 仕様の実行で notification モジュール（command・ログの sender）まで通す
-//   （daiki の判断 2026-10-02）。記録する関数だけだと、notification モジュールは仕様で一度も動かない。
-// WHY onNotify にも渡す: notify はログに出すだけで戻り値が無く、仕様から結果を読めない（vi は使わない。api-spec-no-vi）。
-//   notify と同じ引数を受け取る関数を並べて呼べば「完了の通知が 1 件」を確かめられる。
-// 限界: onNotify が見るのは notification の入口に渡したメッセージまでで、notification の中（ログの 1 行）は見ない。それは
-//   features/notification/expose/notify.test.ts が見る。本番の PUT の組み立てが notify を渡すことは change-todo-completion.api.test.ts が見る。
-export function changeTodoCompletionApi(
-  db: Database,
-  onNotify: (message: string) => void,
-) {
+// 完了の通知は本番と同じ notification モジュールの入口（expose/notify.ts）を渡す（Issue #256）。
+// WHY 本物の notify を渡す（記録する関数にしない）: 仕様の実行で notification モジュール（command・ログの sender）まで通す（daiki の判断
+//   2026-10-02）。送った通知は、step がログの行（console.log の差し替え。Issue #258）で確かめる。
+export function changeTodoCompletionApi(db: Database) {
   return new ChangeTodoCompletionApi(
     new ChangeTodoCompletionCommand(
       new PostgresTodoRepository(db),
       new PostgresTransactionRunner(db),
-      (message) => {
-        notify(message);
-        onNotify(message);
-      },
+      notify,
     ),
   ).handle;
 }
