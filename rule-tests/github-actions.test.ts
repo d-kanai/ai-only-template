@@ -67,10 +67,10 @@ function isPinnedUses(value: string): boolean {
 type Uses = { line: number; value: string };
 
 // 行頭（リストの `- ` の後を含む）の `uses:` キー（引用符で囲んだ `"uses":` / `'uses':` も）の値を、1 始まりの行の番号つきで返す。行末のコメント（空白の後の `#`）と
-//   前後の引用符を外す。コメントの行（`#` で始まる）は読まない。
+//   前後の引用符を外す。キーと `:` の間の空白（`uses :`）も YAML では同じキーなので読む（Codex の指摘）。コメントの行（`#` で始まる）は読まない。
 function readUses(yaml: string): Uses[] {
   return yaml.split(/\r?\n/).flatMap((text, index) => {
-    const match = /^\s*(?:-\s+)?(["']?)uses\1:\s*(.*)$/.exec(text);
+    const match = /^\s*(?:-\s+)?(["']?)uses\1\s*:\s*(.*)$/.exec(text);
     if (match === null) return [];
     const value = (match[2] ?? "")
       .replace(/\s+#.*$/, "")
@@ -92,7 +92,7 @@ function jobsBlock(yaml: string): string[] {
   for (const text of yaml.split(/\r?\n/)) {
     if (isBlankOrComment(text)) continue;
     if (indentOf(text) === 0) {
-      inJobs = /^jobs:\s*(?:#.*)?$/.test(text);
+      inJobs = /^jobs\s*:\s*(?:#.*)?$/.test(text);
     } else if (inJobs) {
       block.push(text);
     }
@@ -106,7 +106,9 @@ function jobTimeout(body: string[]): string | undefined {
   const propertyIndent = body[0] === undefined ? 0 : indentOf(body[0]);
   return body
     .filter((text) => indentOf(text) === propertyIndent)
-    .map((text) => /^\s*timeout-minutes:\s*(.*?)\s*(?:#.*)?$/.exec(text)?.[1])
+    .map(
+      (text) => /^\s*timeout-minutes\s*:\s*(.*?)\s*(?:#.*)?$/.exec(text)?.[1],
+    )
     .find((value) => value !== undefined);
 }
 
@@ -132,7 +134,7 @@ function readJobs(yaml: string): Job[] {
 function jobName(heading: string): string {
   return heading
     .trim()
-    .replace(/:.*$/, "")
+    .replace(/\s*:.*$/, "")
     .replace(/^(["'])(.*)\1$/, "$2");
 }
 
@@ -271,6 +273,7 @@ describeFeature(feature, ({ Scenario }) => {
           "      - uses: 'pnpm/action-setup@v4' # v4",
           '      - "uses": actions/cache@v4',
           "      - 'uses': actions/cache@v3",
+          "      - uses : actions/cache@v2",
         ].join("\n");
 
         // when
@@ -287,6 +290,7 @@ describeFeature(feature, ({ Scenario }) => {
           { line: 9, value: "pnpm/action-setup@v4" },
           { line: 10, value: "actions/cache@v4" },
           { line: 11, value: "actions/cache@v3" },
+          { line: 12, value: "actions/cache@v2" },
         ]);
       },
     );
@@ -328,8 +332,8 @@ describeFeature(feature, ({ Scenario }) => {
         "    steps:",
         "      - run: echo",
         "",
-        "  deploy:",
-        "    timeout-minutes: 5",
+        "  deploy :",
+        "    timeout-minutes : 5",
         "    runs-on: ubuntu-latest",
       ].join("\n");
 
