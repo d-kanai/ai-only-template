@@ -18,7 +18,7 @@ import { afterAll, expect } from "vitest";
 import { casesByName } from "./case-table";
 
 // テストだけが使うコード（アプリごとの test-support/。apps/backend/test-support/・apps/frontend_customer/test-support/）を
-// 本番に持ち込まないことを、機械的に検査するテスト（Issue #181。.claude/rules/code/backend.md・frontend.md の「置き場所」）。
+// 本番に持ち込まないことを、機械的に検査するテスト（Issue #181。.claude/rules/code/backend.md・frontend.md の「ディレクトリ構成」の表の「test-support」）。
 // WHY 検査する: テストの補助（実 Postgres のテスト用スキーマを作る TestDatabase.create、翻訳の期待値を作る tJa など）は、本番から
 //   import されるとテスト専用の処理がアプリの振る舞いに入り、Docker のイメージ（Cloud Run に出るもの）に入ると本番の攻撃面が増える。
 //   ファイル名の目印（以前の *.test-support.*）だけでは、import もイメージへの混入も止まらない（ユーザー判断「test-support が
@@ -1532,7 +1532,7 @@ describeFeature(feature, ({ Scenario }) => {
           "apps/backend/features/todo/internal/infra/todo-repository.postgres.test.ts",
         );
         expect(files).toContain(
-          "apps/frontend_customer/features/todo/components/todo-item.test.tsx",
+          "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.test.tsx",
         );
         // Issue #219 / #251: API 仕様（.feature・step・support.ts）と API ジャーニーの .feature も .dockerignore の **/spec で外す。
         expect(files).toContain("apps/backend/spec/api/todo/support.ts");

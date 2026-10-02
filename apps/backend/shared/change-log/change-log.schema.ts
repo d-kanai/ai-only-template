@@ -38,13 +38,13 @@ export const changeLogs = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     // 変わった行の表の名前（DB の表名。例: todos）。
     tableName: text("table_name").notNull(),
-    // 変わった行の id。WHY uuid: 表の id 列はすべて uuid（.claude/rules/code/backend.md の「列の型」）。
+    // 変わった行の id。WHY uuid: 表の id 列はすべて uuid（.claude/rules/code/backend.md の「DB スキーマ」の表の「列の型」）。
     rowId: uuid("row_id").notNull(),
     // 操作（insert / update / delete）。WHY text の enum（Postgres の enum 型にしない）: 値の一覧は
     //   shared/change-log/change-operation.ts が持ち、Drizzle の型だけを絞る。enum 型は値を足すたびに ALTER TYPE が要る。
     operation: text("operation", { enum: CHANGE_OPERATIONS }).notNull(),
     // 変わった列の変わる前と後（上の Changes）。WHY jsonb: 表ごとに列が違うので、1 つの表で持つには列名をキーにした
-    //   JSON にする。jsonb は分解して保持し、中の値で検索・インデックスもできる（「列の型」）。
+    //   JSON にする。jsonb は分解して保持し、中の値で検索・インデックスもできる（backend.md の「DB スキーマ」の表の「列の型」）。
     changes: jsonb("changes").$type<Changes>().notNull(),
     // 変更した利用者の id。ログインが無い今は常に null（PostgresTodoRepository の actorId）。
     actorId: uuid("actor_id"),

@@ -91,6 +91,11 @@ import { containsForbiddenWord } from "./feature-business-language";
 //     WHY: 実 DB で本番の組み立てを通すのが API 仕様の目的（Issue #219。InMemory は presentation の単体テストの道具）。
 //   - api-spec-uses-real-database: apps/backend/test-support/database（TestDatabase.create）を値として import する。
 //     WHY: 実 Postgres の上で確かめる。型だけの import（TestDatabase）では DB を用意しない。
+//     例外（Issue #156）: DB を持たない feature（FEATURES_WITHOUT_DATABASE。今は feature-flag だけ）の仕様は import しなくてよい。
+//       WHY: feature-flag はフラグの一覧をコードにハードコードし、Repository も表も持たない（ADR
+//       docs/adr/architecture/20261002-feature-flag-ofrep-hardcoded.md）。DB を用意しても何も確かめず、形だけの import になる。
+//       本番の組み立てを通すことは、support.ts の api-spec-support-assembles-apis が引き続き担保する。
+//       一覧の feature が本当に Repository を持たないことは「API 仕様（実ファイル）」が確かめる（Repository を足したら一覧から外す）。
 //   - api-spec-uses-own-api: 対の api（apps/backend/features/<feature>/internal/presentation/<api>.api。ファイルの置き場所の <feature> と
 //     名前の <api>）を静的な import で参照する（`import type`・inline の type だけでもよい。dynamic `import()`・`export … from` は数えない）。
 //     ほかの api を型だけで足して import するのは可（値の import は api-spec-own-api-only が止める）。
@@ -150,7 +155,7 @@ import { containsForbiddenWord } from "./feature-business-language";
 //     その行の違反。
 //     WHY: すべての handler をまとめて返す入口（以前の todoApis）があると、step は ApiAssembly で終わらない名前で import して、どの API も
 //       呼べる（api-spec-own-api-only を素通りする）。組み立てを Api ごとのクラスに分け、名前を Api のクラスから決めると、step の
-//       import の名前と組み立てる Api が 1 対 1 になる（api ファイルの名前とクラス名は .claude/rules/code/backend.md の「命名」で対になる）。
+//       import の名前と組み立てる Api が 1 対 1 になる（api ファイルの名前とクラス名は .claude/rules/code/backend.md の「クラスと命名」の表の「命名」で対になる）。
 //     WHY 行頭の宣言だけを組み立てのクラスと認める: クラス式（`export const Rows = class CreateTodoApiAssembly {`）は別の名前で export でき、
 //       宣言の名前が step の import の名前にならない。
 //   - api-spec-support-assembles-apis: 自 feature の api（apps/backend/features/<feature>/internal/presentation/<名前>.api）を少なくとも
@@ -606,6 +611,11 @@ function usesViOnlyForConsoleSpy(code: string): boolean {
 // 実 Postgres のテスト用の DB を用意するモジュール（リポジトリ相対、拡張子なし）。
 const TEST_DATABASE_MODULE = "apps/backend/test-support/database";
 
+// DB を持たない feature（api-spec-uses-real-database の例外。Issue #156。WHY は冒頭の説明）。名前の完全一致で見る。
+const FEATURES_WITHOUT_DATABASE: ReadonlySet<string> = new Set([
+  "feature-flag",
+]);
+
 // 文字列の中身を空白にする（改行と長さは残し、位置と行番号を変えない）。stripComments の後に使う（api-journey.test.ts と同じ）。
 // WHY: 文字列の中の `.skip(`・`loadFeature(`・`setVitestCucumberConfiguration` を呼び出しと数えない。
 function blankStrings(code: string): string {
@@ -685,7 +695,7 @@ function isApiModule(module: string | undefined): boolean {
 // api ファイルの名前（kebab-case）から、support.ts の組み立てのクラスの名前を作る
 //   （"change-todo-completion" → "ChangeTodoCompletionApiAssembly"）。
 // WHY Api のクラス名に Assembly を足したものと同じになる: api ファイルとクラスは `<verb>-<noun>.api.ts` と `<Verb><Noun>Api` で対になる
-//   （.claude/rules/code/backend.md の「命名」）。support.ts の側は api-spec-support-assembler-per-api が new する Api のクラス名から同じ名前を求める。
+//   （.claude/rules/code/backend.md の「クラスと命名」の表の「命名」）。support.ts の側は api-spec-support-assembler-per-api が new する Api のクラス名から同じ名前を求める。
 function assemblerNameOf(api: string): string {
   return `${api.replace(/(?:^|-)([a-z0-9])/g, (_, char: string) => char.toUpperCase())}ApiAssembly`;
 }
@@ -783,7 +793,8 @@ function findStepContentViolations(
     .map((ref) => resolveSpecifier(path, ref.specifier));
   return [
     ...lineLevel,
-    ...(valueModules.includes(TEST_DATABASE_MODULE)
+    ...(valueModules.includes(TEST_DATABASE_MODULE) ||
+    FEATURES_WITHOUT_DATABASE.has(feature ?? "")
       ? []
       : [{ rule: "api-spec-uses-real-database" as const }]),
     ...(staticModules.includes(ownApi)
@@ -1882,6 +1893,25 @@ describeFeature(feature, ({ Scenario }) => {
         // then
         expect(violations).toEqual([]);
       });
+
+      And(
+        "DB を持たない feature（feature-flag）の step は、実 DB を import しなくても違反なし（Issue #156）",
+        () => {
+          // given
+          const steps =
+            "apps/backend/spec/api/feature-flag/evaluate-x.api-spec.test.ts";
+          const text = source(
+            'import type { EvaluateXResponse } from "../../../features/feature-flag/internal/presentation/evaluate-x.api";',
+            'const feature = await loadFeature("./evaluate-x.feature");',
+          );
+
+          // when
+          const violations = findApiSpecViolations(steps, text);
+
+          // then
+          expect(violations).toEqual([]);
+        },
+      );
     },
   );
 
@@ -2053,6 +2083,37 @@ describeFeature(feature, ({ Scenario }) => {
         // then
         expect(violations).toEqual([{ rule: "api-spec-placement" }]);
       });
+
+      And(
+        "DB を持つ feature と、名前の一部だけが feature-flag の feature の step は、実 DB の import が無ければ違反（Issue #156 の例外の境界）",
+        () => {
+          // given
+          const text = (feature: string) =>
+            source(
+              `import type { EvaluateXResponse } from "../../../features/${feature}/internal/presentation/evaluate-x.api";`,
+              'const feature = await loadFeature("./evaluate-x.feature");',
+            );
+          const cases: [string, string][] = [
+            ["todo", "todo"],
+            ["feature-flag-x", "feature-flag-x"],
+            ["x-feature-flag", "x-feature-flag"],
+            ["feature", "feature"],
+          ];
+
+          // when
+          const violations = casesByName(cases, ([, feature]) =>
+            findApiSpecViolations(
+              `apps/backend/spec/api/${feature}/evaluate-x.api-spec.test.ts`,
+              text(feature),
+            ),
+          );
+
+          // then
+          expect(violations).toEqual(
+            casesByName(cases, () => [{ rule: "api-spec-uses-real-database" }]),
+          );
+        },
+      );
     },
   );
 
@@ -3006,6 +3067,39 @@ describeFeature(feature, ({ Scenario }) => {
           ]),
         );
         expect(violations).toEqual([]);
+      },
+    );
+
+    // WHY 確かめる: 例外の一覧（FEATURES_WITHOUT_DATABASE）は名前で持つので、その feature に Repository（DB）を足しても例外が
+    //   黙って残る。足したら一覧から外し、仕様を実 DB で書かせる。feature が無くなった名前（打ち間違い・消した feature）も止める。
+    And(
+      "実 DB の例外の feature（FEATURES_WITHOUT_DATABASE）はどれも、presentation の api ファイルを持ち、Postgres の Repository を持たない",
+      () => {
+        // given: 前提なし
+        // when
+        const targets = listApiSpecTargets(repoRoot);
+        // WHY hasApi で feature の有無も見る: 無い feature では walk が空を返し、Repository が無いことになって通ってしまう。
+        const shapes = [...FEATURES_WITHOUT_DATABASE].map((feature) => ({
+          feature,
+          hasApi: targets.some((path) =>
+            path.startsWith(
+              `apps/backend/features/${feature}/internal/presentation/`,
+            ),
+          ),
+          repositories: walk(
+            repoRoot,
+            `apps/backend/features/${feature}`,
+          ).filter((path) => path.endsWith("-repository.postgres.ts")),
+        }));
+
+        // then
+        expect(shapes).toEqual(
+          [...FEATURES_WITHOUT_DATABASE].map((feature) => ({
+            feature,
+            hasApi: true,
+            repositories: [],
+          })),
+        );
       },
     );
   });

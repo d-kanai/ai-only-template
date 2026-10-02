@@ -52,7 +52,7 @@ import { casesByName } from "./case-table";
 //   `globalThis.JSON.parse(`（受け手が組み込みの JSON と見分けられない）も違反と数える（安全側）。encode 系（`.encode(` /
 //   `.safeEncode(` など。TextEncoder と同じ名前）は見ない。DomainError のサブクラスを作って validation_error を渡すもの
 //   （`new MyError("validation_error"`）は見えない。
-// zod の書き方の規則（Issue #332。.claude/rules/code/backend.md の「domain の検証」）。features の domain
+// zod の書き方の規則（Issue #332。.claude/rules/code/backend.md の「入力検証」の表の「domain」）。features の domain
 //   （apps/backend/features/*/internal/domain/ の下）だけに当てる（shared/error は KeyedIssue・validate などの土台で、zod のスキーマを
 //   宣言しない）:
 //   - no-zod-length-in-domain: `.min(` / `.max(`（`.` と名前と `(` の間の空白・改行は可）。受け手が組み込みの Math（`Math.min(` /

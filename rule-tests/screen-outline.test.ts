@@ -91,7 +91,7 @@ import { casesByName } from "./case-table";
 //     `'use client';`。前にコメントがあってもよい）。無い・import や別のディレクティブ（"use strict"）の後・バッククォート・
 //     かっこで包んだもの・式の一部（`"use client".trim()`）・エスケープを含むもの（`"use\u0020client"`）は違反。
 //     WHY: 画面は hook（useState・useEffect）を使うので Client Component でなければならない（.claude/rules/code/frontend.md の
-//     「screens」）。"use client" が無いと、app/ の page.tsx（Server Component）から import したときに Server Component として
+//     「画面の骨組み」の表の「画面の関数」）。"use client" が無いと、app/ の page.tsx（Server Component）から import したときに Server Component として
 //     扱われ、hook の呼び出しでビルド・描画が失敗する。レビューでは書き忘れを見落としうる。
 //     WHY 最初の文（コメントの後は可）: Next 16.3.6 の文書（node_modules/next/dist/docs/01-app/03-api-reference/01-directives/
 //     index.md）は「must appear at the top of a file, before any imports」とする。コメントは文ではない（構文木の statements に
@@ -107,7 +107,7 @@ import { casesByName } from "./case-table";
 // 限界（見ないもの）: Section / Form の要素の子（`<XSection><Text /></XSection>`）は見ない（props の 1 つとして扱う）。部品の中身
 //   （atom を使っているか）と、部品がファイルの下の方にあるか（並び順）は見ない（レビューで見る）。Layout は名前と取り込み元の
 //   文字列で見る（atom の Layout が中で何を描くかは見ない）。画面の関数の return より前の文（hook の呼び出し以外の処理）は見ない。
-//   features/<f>/components/ の部品（todo-item など）と app/ の page.tsx は対象外。置き方の規則はテストの名前・置き場所と、
+//   features/<f>/components/ の部品と app/ の page.tsx は対象外。置き方の規則はテストの名前・置き場所と、
 //   コード以外のファイル（README・画像など）を見ない。シンボリックリンクはたどらない（walk と同じ）。
 
 type RuleId =

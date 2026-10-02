@@ -60,7 +60,7 @@ import { expect } from "vitest";
 import { casesByName } from "./case-table";
 
 // ディレクトリ構成ルール（.claude/rules/code/backend.md・frontend.md。規則の一覧は .claude/rules/code/architecture-check.md）の依存の向きを、仕様として機械的に検査するテスト。
-// 対象は「依存の向き（全体）」「画面側とサーバ側の境界」「backend の 4 層の依存してよい先」、apps/frontend_customer と apps/backend の
+// 対象は frontend.md・backend.md の「依存の向き」の表（全体・画面側とサーバ側・backend の 4 層の依存してよい先）、apps/frontend_customer と apps/backend の
 // 境界（Issue #68。backend → frontend の禁止、backend の中は相対パスだけ、frontend などから backend へは "@repo/backend/..." の
 // 書き方だけ、apps/backend/package.json の exports の過不足）、frontend と backend で共通の apps/shared（Issue #90。置き場所、
 // "@repo/shared/..." の書き方、画面側から参照しない、apps/shared/package.json の exports の過不足）と、環境変数の直参照の禁止
@@ -505,8 +505,8 @@ function referencesOf(root: string, files: string[]): Reference[] {
 // WHY apps/e2e/ とリポジトリ直下を足す: backend を @repo/backend として、apps/shared を @repo/shared として使う側
 //   （frontend-to-backend-specifier・BACKEND_EXPORTS・frontend-to-shared-specifier・SHARED_EXPORTS）の検査の対象にするため
 //   （Issue #68 の段階 2・Issue #90）。ほかの規則は参照元を apps/ の下に絞っているので、足しても影響しない。
-// 限界: リポジトリ直下のほかのディレクトリ（scripts/ の .ts のテスト以外など）は見ない。今は該当するソースが無い
-//   （scripts/ はシェルスクリプトとテストだけ）。そこに backend を参照するソースを置くなら、ここと fixture に足す。
+// 限界: リポジトリ直下のほかのディレクトリ（scripts/ のテスト以外のソースなど）は見ない。今そこにあるソースは
+//   scripts/hooks/work-log-sections.mjs だけで、backend / shared を参照しない。参照するソースを置くなら、ここと fixture に足す。
 function listReferencingFiles(root: string): string[] {
   return [
     ...listAllSourceFiles(root),
@@ -976,7 +976,7 @@ const RULES: Rule[] = [
   },
   {
     // 「`features/<feature>/` の `api/` 以外は backend を参照せず、`api/` が re-export した型を使う」
-    // WHY 画面側の shared/ も含める: 画面側で backend を参照してよいのは features/<f>/api/ だけ（「画面側とサーバ側の境界」）で、
+    // WHY 画面側の shared/ も含める: 画面側で backend を参照してよいのは features/<f>/api/ だけ（frontend.md の「依存の向き」）で、
     //   shared/ から参照すると境界が api/ の 1 か所に集まらなくなるため。
     id: "screen-to-backend",
     name: "apps/frontend_customer/features/<f>/ の api/ 以外と apps/frontend_customer/shared/ は apps/backend/ を参照しない",
@@ -1188,7 +1188,7 @@ const RULES: Rule[] = [
     //   "./todo-screen.messages" は同じファイルを指し、書き方の規則は別の関心（今は無い）。子・親のディレクトリも「別の場所」とする。
     // WHY 参照元を apps/frontend_customer に限らない: apps/e2e/ やリポジトリ直下から辞書を import すると、E2E が文言ではなく辞書の値で
     //   探すことになり、画面に出る文言を確かめなくなる。共通の辞書も apps/frontend_customer の外からは不可。
-    //   テストは対象外（列挙がテストを除く）。画面のテストが部品の辞書で期待値を作る（tJa(todoItemMessages, ...)）のは許す。
+    //   テストは対象外（列挙がテストを除く）。画面のテストが部品の辞書で期待値を作る（tJa(todoScreenMessages, ...)）のは許す。
     // WHY re-export（export ... from）は同じディレクトリでも、共通の辞書でも違反にする（Issue #125 の reviewer 指摘）: 同じ
     //   ディレクトリの中継のファイル（zz-barrel.ts の export { x } from "./x.messages"）を別のディレクトリから import すると、
     //   参照先が *.messages ではないので、この規則を素通りして辞書を別のディレクトリから使えてしまう。辞書を使うファイルは
@@ -1209,7 +1209,7 @@ const RULES: Rule[] = [
           ))),
   },
   {
-    // 「他のモジュールの internal/ は参照しない」（Issue #208。モジュラーモノリス。.claude/rules/code/backend.md の「モジュールの境界」）。
+    // 「他のモジュールの internal/ は参照しない」（Issue #208。モジュラーモノリス。.claude/rules/code/backend.md の「依存の向き」の表の「モジュールの境界」）。
     //   backend の feature を 1 つのモジュールとし、直下を公開の入口 expose/ と中身 internal/ に分ける。
     // WHY: internal はモジュールの中身で、他のモジュールが依存すると、中身を変えるたびに他のモジュールが壊れ、境界が無くなる。
     //   他のモジュールが使えるのは expose/ だけにし、公開するものをディレクトリで決める。
@@ -1515,7 +1515,7 @@ function findEnvViolations(root: string): string[] {
 //     検出しない。2026-09-29 実測）。決定は ADR docs/adr/architecture/20260929-logger-single-exit.md。
 
 // 検査の対象にするディレクトリ。環境変数の直参照の対象（ENV_CHECK_DIRS）に scripts/ を足す。
-// WHY scripts/ を含める: scripts/ の TS / JS（今はテストだけで、ソースは無い）はフックなどから動かすツールになり、
+// WHY scripts/ を含める: scripts/ の TS / JS（ソースは今 scripts/hooks/work-log-sections.mjs の 1 本、残りはテスト）はフックなどから動かすツールになり、
 //   console で出力を書きたくなる場所なので、置いた時点で検査にかける。
 const SCRIPTS_ROOT = "scripts";
 const CONSOLE_CHECK_DIRS = [...ENV_CHECK_DIRS, SCRIPTS_ROOT];
@@ -1966,9 +1966,17 @@ function findHardcodedTextViolations(
 // 限界（見逃す方向）: クラスの外の Route Handler（export async function GET、オブジェクトリテラルの handle）、handle 以外の
 //   名前のメンバー、計算されたプロパティ名（["handle"]）、コンストラクタの引数プロパティは見ない。api ファイルは
 //   クラス <Verb><Noun>Api と handle で書く規約（.claude/rules/code/backend.md）で、ほかの形はレビューで見る。
+// 例外（Issue #156）: apps/backend/features/feature-flag/internal/presentation/ の下（入れ子も）の api ファイルだけは、
+//   OfrepResponse.wrap(...)（apps/backend/shared/http/ofrep.ts）で包んでもよい（ProblemResponse.wrap も可）。
+//   WHY: feature-flag の 2 本（OFREP の evaluateFlag・evaluateFlagsBulk）は、失敗を Problem Details ではなく OFREP の
+//     { errorCode, errorDetails } で返す。OFREP のクライアント（@openfeature/ofrep-web-provider）は本文の errorCode を読み、
+//     Problem Details の 404 / 500 を「形の違う応答」として扱う（ADR docs/adr/architecture/20261002-feature-flag-ofrep-hardcoded.md）。
+//     OfrepResponse.wrap も例外を応答に変える包む口なので、包み忘れ（Next の素の 500）を止めるこの規則の狙いは保てる。
+//   WHY 場所を feature-flag の presentation に限る: OFREP の形はこの 2 本だけの例外（ユーザー判断、Issue #156）。ほかの api ファイルが
+//     OfrepResponse.wrap で包むと、Problem Details の契約から黙って外れる。
 const PRESENTATION_WITH_PROBLEM_RESPONSE = {
   id: "presentation-with-problem-response",
-  name: "apps/backend の presentation と shared/http の api ファイル（*.api.ts）のクラスの handle は ProblemResponse.wrap(...) の呼び出しで初期化する（try / catch の手書き・素の async・別の関数で包むのは違反。テストは除く）",
+  name: "apps/backend の presentation と shared/http の api ファイル（*.api.ts）のクラスの handle は ProblemResponse.wrap(...) の呼び出しで初期化する（try / catch の手書き・素の async・別の関数で包むのは違反。features/feature-flag の presentation の OFREP の api だけは OfrepResponse.wrap(...) も可。テストは除く）",
   appliesTo: (file: string) =>
     isSourceNonTest(file) &&
     /^apps\/backend\/(?:(?:.+\/)?presentation|shared\/http)\/(?:.+\/)?[^/]+\.api\.(?:[cm]?[jt]s|[jt]sx)$/.test(
@@ -1981,6 +1989,19 @@ const PRESENTATION_WITH_PROBLEM_RESPONSE = {
 const PROBLEM_RESPONSE_CLASS = "ProblemResponse";
 const PROBLEM_RESPONSE_WRAP = "wrap";
 const HANDLE_MEMBER = "handle";
+// 例外（Issue #156。上の PRESENTATION_WITH_PROBLEM_RESPONSE のコメント）: OFREP の api の handle を包む OfrepResponse.wrap の
+//   クラス名と、それを許す場所（feature-flag の presentation。入れ子も）。メソッド名は ProblemResponse と同じ wrap。
+//   限界: 範囲はディレクトリ単位で、feature-flag の presentation に OFREP でない api を足しても OfrepResponse.wrap で通る。
+const OFREP_RESPONSE_CLASS = "OfrepResponse";
+const OFREP_API_DIR =
+  /^apps\/backend\/features\/feature-flag\/internal\/presentation\//;
+
+// file の api ファイルの handle を包んでよいクラスの名前（wrap を呼ぶ受け手）。
+function wrapperClassesFor(file: string): string[] {
+  return OFREP_API_DIR.test(file)
+    ? [PROBLEM_RESPONSE_CLASS, OFREP_RESPONSE_CLASS]
+    : [PROBLEM_RESPONSE_CLASS];
+}
 
 // クラスのメンバー（プロパティ・メソッド・getter・setter）の名前。識別子と文字列リテラルの名前だけ（計算された名前などは undefined）。
 function classMemberNameOf(member: Node): string | undefined {
@@ -1997,8 +2018,11 @@ function classMemberNameOf(member: Node): string | undefined {
     : literalTextOf(member.name);
 }
 
-// member が「初期化子が ProblemResponse.wrap(...) の呼び出しのプロパティ」か。
-function isWrappedByProblemResponse(member: Node): boolean {
+// member が「初期化子が <wrapperClasses のどれか>.wrap(...) の呼び出しのプロパティ」か（ふつうは ProblemResponse.wrap だけ）。
+function isWrappedByProblemResponse(
+  member: Node,
+  wrapperClasses: string[],
+): boolean {
   if (!isPropertyDeclaration(member) || member.initializer === undefined) {
     return false;
   }
@@ -2010,21 +2034,23 @@ function isWrappedByProblemResponse(member: Node): boolean {
   return (
     isPropertyAccessExpression(callee) &&
     isIdentifier(callee.expression) &&
-    callee.expression.text === PROBLEM_RESPONSE_CLASS &&
+    wrapperClasses.includes(callee.expression.text) &&
     isIdentifier(callee.name) &&
     callee.name.text === PROBLEM_RESPONSE_WRAP
   );
 }
 
 // 構文木の中のクラス（宣言と式。入れ子も）の handle のうち、ProblemResponse.wrap(...) で初期化していないものを、書かれた順に行番号で返す。
-function findUnwrappedHandles(sourceFile: SourceFile): number[] {
+// file はリポジトリ相対のパス（OFREP の例外の場所かを決める。sourceFile.fileName は判定例では仮のパスになるので別に受け取る）。
+function findUnwrappedHandles(sourceFile: SourceFile, file: string): number[] {
+  const wrapperClasses = wrapperClassesFor(file);
   const found: number[] = [];
   const visit = (node: Node): void => {
     if (isClassLikeDeclaration(node)) {
       for (const member of node.members) {
         if (
           classMemberNameOf(member) === HANDLE_MEMBER &&
-          !isWrappedByProblemResponse(member)
+          !isWrappedByProblemResponse(member, wrapperClasses)
         ) {
           found.push(lineOf(sourceFile, member));
         }
@@ -2051,7 +2077,7 @@ function findProblemResponseViolations(root: string): string[] {
     ),
   );
   return files.flatMap((file) =>
-    findUnwrappedHandles(sourceFiles.get(file) as SourceFile).map(
+    findUnwrappedHandles(sourceFiles.get(file) as SourceFile, file).map(
       (line) => `${file}:${line}`,
     ),
   );
@@ -2510,8 +2536,7 @@ function findStaticInInstanceClassViolations(root: string): string[] {
 
 // --- workspace パッケージの exports（規則 backend-exports。Issue #68 の段階 2。規則 shared-exports。Issue #90） ---
 // exports は、@repo/backend・@repo/shared として外（そのパッケージのディレクトリの外）に公開するファイルの一覧。
-//   ユーザー判断で、全ファイル（"./*"）ではなく、外が使う入口だけを明示する（.claude/rules/code/backend.md の「import の書き方と
-//   公開の範囲（exports）」、.claude/rules/code/shared.md）。
+//   ユーザー判断で、全ファイル（"./*"）ではなく、外が使う入口だけを明示する（.claude/rules/code/backend.md の「import と exports」の表の「exports」、.claude/rules/code/shared.md）。
 // 検査すること（1 つでも破ると「<規則の id>: ...」の行を出す）:
 //   (1) 外から "<パッケージ名>/<path>" で参照するものは、すべて exports のどれかのキーに当たる。
 //       WHY: 当たらないと Next / Vitest / tsc の解決で失敗するが、その前に「どのファイルのどの参照か」を一覧で出す。
@@ -5646,21 +5671,34 @@ function hardcodedTextLinesOf(
 }
 
 // ProblemResponse.wrap で包む規則（PRESENTATION_WITH_PROBLEM_RESPONSE。Issue #141）の判定例。[ファイル, ソース] で決まる。
-// WHY 架空のソースで固定する: 実リポジトリの検査は「今の 5 本が包んでいる」ことしか確かめず、判定が緩すぎても（常に違反なし）
-//   通ってしまう。包み忘れの書き方と、対象外のファイル・メンバーの境界を例で持つ。許可例には本物の 5 本も入れる（must pass）。
+// WHY 架空のソースで固定する: 実リポジトリの検査は「今の 8 本が包んでいる」ことしか確かめず、判定が緩すぎても（常に違反なし）
+//   通ってしまう。包み忘れの書き方と、対象外のファイル・メンバーの境界を例で持つ。許可例には本物の 8 本（REAL_API_FILES）も入れる（must pass）。
 // 複数行のソースを 1 つの文字列にする（この下の判定例と、fixture のファイルの中身で使う）。
 const lines = (...source: string[]) => source.join("\n");
 
 const REAL_API_FILES = [
-  "create-todo",
-  "delete-todo",
-  "get-todo",
-  "list-todos",
-  "rename-todo",
-  "change-todo-completion",
-].map(
-  (name) => `apps/backend/features/todo/internal/presentation/${name}.api.ts`,
-);
+  ...[
+    "create-todo",
+    "delete-todo",
+    "get-todo",
+    "list-todos",
+    "rename-todo",
+    "change-todo-completion",
+  ].map(
+    (name) => `apps/backend/features/todo/internal/presentation/${name}.api.ts`,
+  ),
+  // OFREP の 2 本（Issue #156。OfrepResponse.wrap で包む例外）。
+  ...["evaluate-feature-flag", "evaluate-feature-flags"].map(
+    (name) =>
+      `apps/backend/features/feature-flag/internal/presentation/${name}.api.ts`,
+  ),
+];
+
+// OFREP の例外（Issue #156）を許す場所の api ファイルと、OfrepResponse.wrap で包んだ handle。
+const OFREP_API_FILE =
+  "apps/backend/features/feature-flag/internal/presentation/x.api.ts";
+const OFREP_WRAPPED_HANDLE =
+  "export class XApi { readonly handle = OfrepResponse.wrap(async (request: Request) => new Response(null)); }";
 
 const API_FILE = "apps/backend/features/todo/internal/presentation/x.api.ts";
 const IMPORT_WITH_PROBLEM_RESPONSE =
@@ -5806,9 +5844,29 @@ const PROBLEM_RESPONSE_EXAMPLES: {
       "apps/backend/features/todo/internal/presentation/x.api.js",
       "export class XApi { handle = async (request) => new Response(null); }",
     ],
+    // OFREP の例外（Issue #156）の境界: feature-flag の presentation の外の OfrepResponse.wrap（ほかの feature・前方一致だけが同じ
+    //   feature-flag-x・shared/http）は違反。feature-flag の中でも、包まない handle・別のクラスの wrap は違反。
+    [API_FILE, OFREP_WRAPPED_HANDLE],
+    [
+      "apps/backend/features/feature-flag-x/internal/presentation/x.api.ts",
+      OFREP_WRAPPED_HANDLE,
+    ],
+    ["apps/backend/shared/http/x.api.ts", OFREP_WRAPPED_HANDLE],
+    [
+      OFREP_API_FILE,
+      "export class XApi { readonly handle = async (request: Request) => new Response(null); }",
+    ],
+    [
+      OFREP_API_FILE,
+      "export class XApi { readonly handle = OtherResponse.wrap(async (request: Request) => new Response(null)); }",
+    ],
+    [
+      OFREP_API_FILE,
+      "export class XApi { readonly handle = OfrepResponse.from(async (request: Request) => new Response(null)); }",
+    ],
   ],
   allowed: [
-    // 本物の 5 本（動的セグメントの ctx を持つもの・持たないもの）。
+    // 本物の 8 本（動的セグメントの ctx を持つもの・持たないもの。OFREP の 2 本を含む）。
     ...REAL_API_FILES.map((file): [string, string] => [
       file,
       readFileSync(join(repoRoot, file), "utf8"),
@@ -5826,6 +5884,21 @@ const PROBLEM_RESPONSE_EXAMPLES: {
         "  );",
         "}",
       ),
+    ],
+    // OFREP の例外（Issue #156）: feature-flag の presentation（入れ子も）の OfrepResponse.wrap（ctx あり・型引数つきも）。
+    //   ProblemResponse.wrap もそのまま通る（例外は許す包み方を足すだけ）。
+    [OFREP_API_FILE, OFREP_WRAPPED_HANDLE],
+    [
+      "apps/backend/features/feature-flag/internal/presentation/nested/x.api.ts",
+      OFREP_WRAPPED_HANDLE,
+    ],
+    [
+      OFREP_API_FILE,
+      "export class XApi { readonly handle = OfrepResponse.wrap<[Request, { params: Promise<{ key: string }> }]>(async (request, ctx) => { await ctx.params; return new Response(null); }); }",
+    ],
+    [
+      OFREP_API_FILE,
+      "export class XApi { readonly handle = ProblemResponse.wrap(async (request: Request) => new Response(null)); }",
     ],
     // 型引数を明示した呼び出しも、呼び出す関数は ProblemResponse.wrap。
     [
@@ -5896,15 +5969,16 @@ function judgeProblemResponses(examples: [string, string][]): boolean[] {
   return examples.map(([file], i) => {
     const sourceFile = sourceFiles.get(virtualPath(i, file));
     return (
-      sourceFile !== undefined && findUnwrappedHandles(sourceFile).length > 0
+      sourceFile !== undefined &&
+      findUnwrappedHandles(sourceFile, file).length > 0
     );
   });
 }
 
 // handle の中に try / catch を書かない規則（HANDLE_WITHOUT_TRY_CATCH。Issue #332）の判定例。[ファイル, ソース] で決まる。
-// WHY 架空のソースで固定する: 実リポジトリの検査は「今の 6 本に try / catch が無い」ことしか確かめず、判定が緩すぎても通る。
+// WHY 架空のソースで固定する: 実リポジトリの検査は「今の 8 本に try / catch が無い」ことしか確かめず、判定が緩すぎても通る。
 //   違反例は 1 例 1 つの書き方にし、包み方の規則（presentation-with-problem-response）の巻き添えでないことを示すため、
-//   ProblemResponse.wrap で包んだ handle の中の try / catch を中心に置く。許可例には本物の 6 本も入れる（must pass）。
+//   ProblemResponse.wrap で包んだ handle の中の try / catch を中心に置く。許可例には本物の 8 本も入れる（must pass）。
 const WRAPPED_HANDLE_OPEN =
   "  readonly handle = ProblemResponse.wrap(async (request: Request) => {";
 
@@ -6009,7 +6083,7 @@ const HANDLE_TRY_CATCH_EXAMPLES: {
     ],
   ],
   allowed: [
-    // 本物の 6 本。
+    // 本物の 8 本。
     ...REAL_API_FILES.map((file): [string, string] => [
       file,
       readFileSync(join(repoRoot, file), "utf8"),
@@ -6129,7 +6203,7 @@ const PROBLEM_RESPONSE_FROM_EXAMPLES: {
     ],
   ],
   allowed: [
-    // 本物の problem.ts（wrap の中で from を呼ぶ）と本物の 6 本。
+    // 本物の problem.ts（wrap の中で from を呼ぶ）と本物の 8 本。
     [
       "apps/backend/shared/http/problem.ts",
       readFileSync(
@@ -6993,6 +7067,16 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/backend/shared/http/bad-handle.api.ts": lines(
     "export class RawApi { handle = async (request: Request) => new Response(null); }",
   ),
+  // presentation-with-problem-response の例外（Issue #156）: OfrepResponse.wrap は feature-flag の presentation の外では違反。
+  //   WHY fixture にも置く: 判定例（PROBLEM_RESPONSE_EXAMPLES）は findUnwrappedHandles を直接呼ぶので、列挙 → 判定へ渡すパスの
+  //   誤り（例外がどの場所でも効く）を止められない。fixture は列挙から通す。
+  "apps/backend/features/todo/internal/presentation/bad-ofrep-handle.api.ts":
+    lines(
+      'import { OfrepResponse } from "../../../../shared/http/ofrep";',
+      "export class OfrepApi {",
+      "  readonly handle = OfrepResponse.wrap(async (request: Request) => new Response(null));",
+      "}",
+    ),
   // handle-without-try-catch（Issue #332）: ProblemResponse.wrap で包んだ handle の中の try / catch（本体と、中で定義した関数）。
   //   try / finally（14 行目）と handle 以外のメンバー（17 行目）は拾わない。bad-handle.api.ts の TryCatchApi（4 行目）も違反。
   "apps/backend/features/todo/internal/presentation/bad-try-catch.api.ts":
@@ -7754,6 +7838,7 @@ const MUST_REJECT_VIOLATIONS = [
   ),
   "presentation-with-problem-response: apps/backend/features/todo/internal/presentation/nested/bad-handle.api.mts:1",
   "presentation-with-problem-response: apps/backend/shared/http/bad-handle.api.ts:1",
+  "presentation-with-problem-response: apps/backend/features/todo/internal/presentation/bad-ofrep-handle.api.ts:3",
   ...[4, 13].map(
     (line) =>
       `handle-without-try-catch: apps/backend/features/todo/internal/presentation/bad-try-catch.api.ts:${line}`,
@@ -8264,6 +8349,15 @@ const MUST_PASS_FILES: Record<string, string> = {
     "}",
     "export class Only { static run(): number { return Only.helper(); } private static helper(): number { return 1; } }",
   ),
+  // presentation-with-problem-response の例外（Issue #156）: feature-flag の presentation では OfrepResponse.wrap で包んでよい
+  //   （列挙から通す。MUST_REJECT_FILES の bad-ofrep-handle.api.ts の WHY）。
+  "apps/backend/features/feature-flag/internal/presentation/good-ofrep-handle.api.ts":
+    lines(
+      'import { OfrepResponse } from "../../../../shared/http/ofrep";',
+      "export class OfrepApi {",
+      "  readonly handle = OfrepResponse.wrap(async (request: Request) => new Response(null));",
+      "}",
+    ),
   // presentation-with-problem-response（Issue #141）: ProblemResponse.wrap で包んだ handle（ctx あり・なし）。
   //   対象外: api ファイルでない presentation のファイル、テスト、ほかの層の handle。
   "apps/backend/features/todo/internal/presentation/good-handle.api.ts": lines(
@@ -9115,7 +9209,7 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
             "apps/frontend_customer/proxy.ts",
             "apps/frontend_customer/shared/i18n/format.ts",
-            "apps/frontend_customer/features/todo/components/todo-item.tsx",
+            "apps/frontend_customer/features/todo/screens/todo-detail-screen/todo-detail-screen.tsx",
             "apps/frontend_customer/app/page.tsx",
           ]),
         );
@@ -9161,9 +9255,9 @@ describeFeature(feature, ({ Scenario }) => {
       expect(violations).toEqual([]);
     });
 
-    // WHY 本物の 5 本が列挙に入っていることを見る: 列挙（パスの正規表現）が壊れて 0 件になると、違反も 0 件で常に緑になる。
+    // WHY 本物の 8 本が列挙に入っていることを見る: 列挙（パスの正規表現）が壊れて 0 件になると、違反も 0 件で常に緑になる。
     And(
-      "handle を ProblemResponse.wrap で包む規則は、本物の api ファイル 6 本を対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）",
+      "handle を ProblemResponse.wrap で包む規則は、本物の api ファイル 8 本を対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）",
       () => {
         // given: 前提なし
         // when
@@ -9209,10 +9303,10 @@ describeFeature(feature, ({ Scenario }) => {
       expect(violations).toEqual([]);
     });
 
-    // WHY 本物の 6 本が列挙に入っていて problem.ts が入っていないことを見る: 列挙が壊れて 0 件になると常に緑になり、
+    // WHY 本物の 8 本が列挙に入っていて problem.ts が入っていないことを見る: 列挙が壊れて 0 件になると常に緑になり、
     //   problem.ts が入ると wrap の中の from で常に落ちる。
     And(
-      "ProblemResponse.from の規則は、本物の api ファイル 6 本を対象にし、problem.ts とテストは対象にしない（列挙が壊れて素通りするのを防ぐ）",
+      "ProblemResponse.from の規則は、本物の api ファイル 8 本を対象にし、problem.ts とテストは対象にしない（列挙が壊れて素通りするのを防ぐ）",
       () => {
         // given: 前提なし
         // when
@@ -9282,7 +9376,7 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/frontend_customer/features/todo/api/todo-api.ts",
             "apps/frontend_customer/features/todo/api/api-error.ts",
             "apps/frontend_customer/features/todo/index.ts",
-            "apps/frontend_customer/features/todo/components/todo-item.messages.ts",
+            "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.messages.ts",
             "apps/frontend_customer/shared/i18n/locale.ts",
             "apps/frontend_customer/shared/i18n/format.ts",
             "apps/frontend_customer/shared/request-log/request-log.ts",
@@ -9322,7 +9416,7 @@ describeFeature(feature, ({ Scenario }) => {
         // 前提: 対象外の実ファイルがリポジトリにあること（無ければ上の検査は何も確かめていない）。
         expect(listSourceFiles(repoRoot, FRONTEND_ROOT)).toEqual(
           expect.arrayContaining([
-            "apps/frontend_customer/features/todo/components/todo-item.tsx",
+            "apps/frontend_customer/features/todo/screens/todo-detail-screen/todo-detail-screen.tsx",
             "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.hook.ts",
             "apps/frontend_customer/app/page.tsx",
             "apps/frontend_customer/app/api/todos/route.ts",
@@ -9517,7 +9611,7 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/frontend_customer/app/layout.tsx",
             "apps/frontend_customer/app/page.tsx",
             "apps/frontend_customer/features/todo/api/todo-api.ts",
-            "apps/frontend_customer/features/todo/components/todo-item.tsx",
+            "apps/frontend_customer/features/todo/screens/todo-detail-screen/todo-detail-screen.tsx",
             "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.tsx",
             "apps/frontend_customer/proxy.ts",
           ]),
@@ -9533,7 +9627,6 @@ describeFeature(feature, ({ Scenario }) => {
         expect(result).toEqual(
           expect.arrayContaining([
             "apps/frontend_customer/shared/i18n/common.messages.ts",
-            "apps/frontend_customer/features/todo/components/todo-item.messages.ts",
             "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.messages.ts",
             "apps/frontend_customer/features/todo/screens/todo-detail-screen/todo-detail-screen.messages.ts",
           ]),
@@ -10437,6 +10530,7 @@ describeFeature(feature, ({ Scenario }) => {
             parseSourceFiles({ [API_FILE]: source }).get(
               API_FILE,
             ) as SourceFile,
+            API_FILE,
           );
 
           // then

@@ -19,6 +19,7 @@ export const commonMessages = defineMessages({
     "todo.createdAt.invalid": "作成日時が不正です",
     "todo.statusChanges.invalid": "完了の履歴が不正です",
     "todo.notFound": "Todo（id: {id}）が見つかりません",
+    "featureFlag.notFound": "フィーチャーフラグ（{key}）が見つかりません",
     "request.body.notJson": "リクエスト本文が JSON ではありません",
     "request.body.notObject":
       "リクエスト本文は JSON のオブジェクトで指定してください",
@@ -42,6 +43,7 @@ export const commonMessages = defineMessages({
     "todo.createdAt.invalid": "The creation date is invalid",
     "todo.statusChanges.invalid": "The completion history is invalid",
     "todo.notFound": "Todo (id: {id}) was not found",
+    "featureFlag.notFound": "Feature flag ({key}) was not found",
     "request.body.notJson": "The request body is not JSON",
     "request.body.notObject": "The request body must be a JSON object",
     "request.body.unknownKeys": "The request has unknown fields: {keys}",

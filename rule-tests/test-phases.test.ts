@@ -34,6 +34,8 @@ import { casesByName } from "./case-table";
 //     `.skipIf(...)` / `.runIf(...)` / `.concurrent` / `.sequential` / `.fails` を挟んだ変種も）。
 //   - API 仕様（`*.api-spec.test.ts`）の step（`Given(` / `When(` / `Then(` / `And(` / `But(`）。`*` の step 1 つが Vitest の
 //     テスト 1 つになり、前提から検証までを 1 つの step で書くため（.claude/rules/quality/testing.md の「API 仕様テスト（spec/api）」）。
+//   - domain 仕様（`*.domain-spec.test.ts`）の step。API 仕様と同じく `*` の step 1 つが前提から検証までの 1 テスト（Issue #318。
+//     rule-tests/domain-spec.test.ts）。
 //   - ルール検査テスト（rule-tests/ の直下の `*.test.ts`）の step。API 仕様と同じく `*` の step 1 つが前提から検証までの 1 テスト
 //     （Issue #282。rule-tests/rule-test-feature.test.ts）。
 //   WHY API ジャーニー（`*.api-journey.test.ts`）の step は対象外: step の Given / When / Then のキーワード自体がフェーズを表し、
@@ -446,11 +448,12 @@ function listTestFiles(root: string): string[] {
   return TARGET_DIRS.flatMap(walk).sort();
 }
 
-// step（`*`）1 つが前提から検証までの 1 テストになるファイル: API 仕様と、rule-tests/ の直下のルール検査テスト（Issue #282 で
-//   .feature と step の実装に分けた。rule-tests/rule-test-feature.test.ts）。
+// step（`*`）1 つが前提から検証までの 1 テストになるファイル: API 仕様・domain 仕様（Issue #318）と、rule-tests/ の直下の
+//   ルール検査テスト（Issue #282 で .feature と step の実装に分けた。rule-tests/rule-test-feature.test.ts）。
 function isStepFile(path: string): boolean {
   return (
     path.endsWith(".api-spec.test.ts") ||
+    path.endsWith(".domain-spec.test.ts") ||
     /^rule-tests\/[^/]+\.test\.ts$/.test(path)
   );
 }
@@ -873,6 +876,7 @@ describeFeature(feature, ({ Scenario }) => {
         "apps/e2e/z.spec.ts": bare,
         "apps/e2e/z.steps.ts": step,
         "apps/backend/spec/api/todo/a.api-spec.test.ts": step,
+        "apps/backend/spec/domain/todo/e.domain-spec.test.ts": step,
         "apps/backend/spec/journey/b.api-journey.test.ts": step,
         "rule-tests/c.test.ts": step,
         "rule-tests/nested/d.test.ts": step,
@@ -895,6 +899,7 @@ describeFeature(feature, ({ Scenario }) => {
       expect(result).toEqual({
         files: [
           "apps/backend/spec/api/todo/a.api-spec.test.ts",
+          "apps/backend/spec/domain/todo/e.domain-spec.test.ts",
           "apps/backend/spec/journey/b.api-journey.test.ts",
           "apps/backend/x.test.ts",
           "apps/frontend/y.test.tsx",
@@ -903,6 +908,7 @@ describeFeature(feature, ({ Scenario }) => {
         ],
         violations: [
           missing("apps/backend/spec/api/todo/a.api-spec.test.ts", 1),
+          missing("apps/backend/spec/domain/todo/e.domain-spec.test.ts", 1),
           missing("apps/backend/x.test.ts", 1),
           missing("apps/frontend/y.test.tsx", 2),
           missing("rule-tests/c.test.ts", 1),
@@ -944,6 +950,7 @@ describeFeature(feature, ({ Scenario }) => {
           expect.arrayContaining([
             "apps/backend/features/todo/internal/domain/todo.test.ts",
             "apps/backend/spec/api/todo/create-todo.api-spec.test.ts",
+            "apps/backend/spec/domain/todo/todo.domain-spec.test.ts",
             "rule-tests/architecture.test.ts",
           ]),
         );

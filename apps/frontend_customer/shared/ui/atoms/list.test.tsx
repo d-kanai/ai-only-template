@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
+import { activeTheme } from "@/shared/ui/active-theme";
 import { DesignSystem } from "@/test-support/design-system";
-import { activeTheme } from "../active-theme";
 import { List } from "./list";
 import { ListItem } from "./list-item";
 

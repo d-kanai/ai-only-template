@@ -6,10 +6,10 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { useFeatureFlag } from "@/features/feature-flag";
 import { TodoScreen } from "@/features/todo";
 import { ApiError } from "@/features/todo/api/api-error";
 import { TodoApi } from "@/features/todo/api/todo-api";
-import { todoItemMessages } from "@/features/todo/components/todo-item.messages";
 import { commonMessages } from "@/shared/i18n/common.messages";
 import { LocaleProvider } from "@/shared/i18n/i18n";
 import { DesignSystem } from "@/test-support/design-system";
@@ -19,12 +19,16 @@ import { todoScreenMessages } from "./todo-screen.messages";
 // 画面は「hook の状態を描き、操作を hook に渡す」ことを検証する。API は差し替え、操作の結果として呼ばれたかで見る。
 // 再取得などの細かいロジックは todo-screen.hook.test.ts で固定している。
 vi.mock("@/features/todo/api/todo-api");
+// フィーチャーフラグ（Issue #156）は feature-flag feature の公開 API（index）で差し替える（WHY は todo-screen.hook.test.ts の同じ箇所）。
+vi.mock("@/features/feature-flag");
 
 // globals 無効のため Testing Library の自動 cleanup が働かない。テストごとに DOM を片付ける。
 afterEach(cleanup);
 
 beforeEach(() => {
   vi.resetAllMocks();
+  // 本番の一覧と同じく詳細画面のフラグは on を前提にする（off は「詳細画面のフラグが off なら」のテスト）。
+  vi.mocked(useFeatureFlag).mockReturnValue(true);
 });
 
 const milk = {
@@ -134,6 +138,110 @@ test("LocaleProvider のロケールが en なら、英語の文言で表示す�
   expect(screen.getByRole("button", { name: "Add" })).toBeDefined();
 });
 
+// 一覧の 1 行（TodoListSection の中の TodoItem）。部品は export しないので、画面を描いて見る。
+test("一覧の行の title は、詳細画面 /todo/<id> へのリンクとして表示される", async () => {
+  // given
+  vi.mocked(TodoApi.list).mockResolvedValue({ todos: [milk] });
+
+  // when
+  render(<TodoScreen />, { wrapper: JaLocale });
+
+  // then
+  expect(
+    (await screen.findByRole("link", { name: "牛乳を買う" })).getAttribute(
+      "href",
+    ),
+  ).toBe("/todo/todo-1");
+});
+
+test("詳細画面のフラグが off なら、一覧の行の title はリンクにせず文字だけで表示する", async () => {
+  // given
+  vi.mocked(TodoApi.list).mockResolvedValue({ todos: [milk] });
+  vi.mocked(useFeatureFlag).mockReturnValue(false);
+
+  // when
+  render(<TodoScreen />, { wrapper: JaLocale });
+
+  // then
+  expect(await screen.findByText("牛乳を買う")).toBeDefined();
+  expect(screen.queryByRole("link")).toBeNull();
+});
+
+test("一覧の行の完了チェックボックスは、Todo の completed を反映する", async () => {
+  // given
+  vi.mocked(TodoApi.list).mockResolvedValue({
+    todos: [{ ...milk, completed: true }],
+  });
+
+  // when
+  render(<TodoScreen />, { wrapper: JaLocale });
+
+  // then
+  expect(
+    (
+      (await screen.findByRole("checkbox", {
+        name: tJa(todoScreenMessages, "toggle", { title: "牛乳を買う" }),
+      })) as HTMLInputElement
+    ).checked,
+  ).toBe(true);
+});
+
+// aria-label は title を含む（行の数だけ並ぶ削除ボタンを区別する）が、見えるのは「削除」だけ。
+test("一覧の行の削除ボタンには、辞書の削除の文言が見える文字として出る", async () => {
+  // given
+  vi.mocked(TodoApi.list).mockResolvedValue({ todos: [milk] });
+
+  // when
+  render(<TodoScreen />, { wrapper: JaLocale });
+
+  // then
+  expect(
+    (
+      await screen.findByRole("button", {
+        name: tJa(todoScreenMessages, "deleteAria", { title: "牛乳を買う" }),
+      })
+    ).textContent,
+  ).toBe(tJa(todoScreenMessages, "delete"));
+});
+
+// テストの実行環境のタイムゾーンは UTC（vitest.config.mts の test.env.TZ）。画面はブラウザのタイムゾーンで出す。
+test("一覧の行の作成日時を、ロケールの書式とブラウザのタイムゾーンで <time> に出す", async () => {
+  // given
+  vi.mocked(TodoApi.list).mockResolvedValue({ todos: [milk] });
+
+  // when
+  render(<TodoScreen />, { wrapper: JaLocale });
+
+  // then
+  const time = await screen.findByText("2026/09/28 0:00");
+  expect(time.tagName).toBe("TIME");
+  expect(time.getAttribute("datetime")).toBe("2026-09-28T00:00:00.000Z");
+});
+
+test("LocaleProvider のロケールが en なら、一覧の行も英語の文言と書式で表示する", async () => {
+  // given
+  vi.mocked(TodoApi.list).mockResolvedValue({ todos: [milk] });
+
+  // when
+  render(
+    <LocaleProvider locale="en">
+      <TodoScreen />
+    </LocaleProvider>,
+    { wrapper: DesignSystem },
+  );
+
+  // then
+  expect(
+    await screen.findByRole("checkbox", {
+      name: "Mark “牛乳を買う” as completed",
+    }),
+  ).toBeDefined();
+  expect(
+    screen.getByRole("button", { name: "Delete “牛乳を買う”" }).textContent,
+  ).toBe("Delete");
+  expect(screen.getByText("Sep 28, 2026, 12:00 AM")).toBeDefined();
+});
+
 test("title を入力して追加ボタンを押すと、その title で作成され一覧に表示される", async () => {
   // given
   vi.mocked(TodoApi.list)
@@ -178,7 +286,7 @@ test("完了チェックボックスを押すと、その Todo が完了に更�
   });
   render(<TodoScreen />, { wrapper: JaLocale });
   const checkbox = await screen.findByRole("checkbox", {
-    name: tJa(todoItemMessages, "toggle", { title: "牛乳を買う" }),
+    name: tJa(todoScreenMessages, "toggle", { title: "牛乳を買う" }),
   });
 
   // when
@@ -187,7 +295,7 @@ test("完了チェックボックスを押すと、その Todo が完了に更�
   // then
   expect(
     await screen.findByRole("checkbox", {
-      name: tJa(todoItemMessages, "toggle", { title: "牛乳を買う" }),
+      name: tJa(todoScreenMessages, "toggle", { title: "牛乳を買う" }),
       checked: true,
     }),
   ).toBeDefined();
@@ -202,7 +310,7 @@ test("削除ボタンを押すと、その Todo が削除され一覧から消�
   vi.mocked(TodoApi.delete).mockResolvedValue(undefined);
   render(<TodoScreen />, { wrapper: JaLocale });
   const deleteButton = await screen.findByRole("button", {
-    name: tJa(todoItemMessages, "deleteAria", { title: "牛乳を買う" }),
+    name: tJa(todoScreenMessages, "deleteAria", { title: "牛乳を買う" }),
   });
 
   // when

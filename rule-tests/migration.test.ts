@@ -15,7 +15,7 @@ import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, expect } from "vitest";
 import { casesByName } from "./case-table";
 
-// drizzle のマイグレーションの SQL の決まり（.claude/rules/code/backend.md の「永続化」。Issue #192）を機械的に検査するテスト。
+// drizzle のマイグレーションの SQL の決まり（.claude/rules/code/backend.md の「DB スキーマ」の表の「マイグレーション」。Issue #192）を機械的に検査するテスト。
 // Issue #247 で、データの移行（backfill）の仕組みを消したのに合わせて、backfill の規則（idempotent-insert-select・
 //   backfill-after-traffic・backfill-file-name）を消した（本番環境が無く、規則の WHY の「毎回流す backfill」が無くなったため）。
 // 違反にするもの（規則）:

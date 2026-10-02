@@ -11,7 +11,7 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 
 // PUT /api/todos/:id/title: Todo の名前（title）を変える。無ければ 404。
 // WHY 完了（PUT /api/todos/:id/completion。change-todo-completion.api.ts）と別の API にする: 1 ユースケース = 1 API = 1 command
-//   （.claude/rules/code/backend.md の presentation。ADR docs/adr/architecture/20260930-one-api-per-use-case.md）。
+//   （.claude/rules/code/backend.md の「API の書き方」の表の「1 API = 1 command」。ADR docs/adr/architecture/20260930-one-api-per-use-case.md）。
 //   名前の変更と完了は業務プロセスが別で、1 つの API に任意の項目として混ぜると command の中で分岐が増える。
 // WHY PUT: URL（/title）が指す 1 つの値を本文の値で置き換える。同じ要求を何度送っても結果が同じ（冪等）。
 

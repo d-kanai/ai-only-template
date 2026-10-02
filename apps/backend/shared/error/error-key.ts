@@ -3,7 +3,7 @@
 //   機械可読に返す。画面側（apps/frontend_customer）はキーを辞書で翻訳する。言語を足しても backend は変わらない。
 // WHY domain に置く: DomainError（domain）が使うため。presentation の Problem（problem.ts）も同じ型を使い、problem.ts から
 //   export type で再公開する（画面は @repo/backend/shared/http/problem だけを import できる。exports は増やさない）。
-// キーの形: "<領域>.<対象>.<理由>" の dot 区切り（領域 = todo / request / server）。一度公開したキーは画面の辞書が
+// キーの形: "<領域>.<対象>.<理由>" の dot 区切り（領域 = todo / featureFlag / request / server）。一度公開したキーは画面の辞書が
 //   参照するので、名前を変えない（変えるときは画面の辞書と同じ変更で）。
 // params: 各キーで形を固定する。文言に埋め込む値（上限の文字数・id・項目名）だけを持つ。値は JSON に載せて画面に渡すので
 //   string か number だけにする（Problem の params の型）。params の無いキーは Record<string, never>（空）にする。
@@ -22,6 +22,9 @@ export type ErrorKeyParams = {
   "todo.statusChanges.invalid": Record<string, never>;
   // 指定した id の Todo が無い（uuid の形でない id も同じ。resource-id.ts）。
   "todo.notFound": { id: string };
+  // 指定した key のフィーチャーフラグが一覧に無い（Issue #156。features/feature-flag/internal/domain/feature-flags.ts）。
+  //   API は Problem Details ではなく OFREP の FLAG_NOT_FOUND（404）で返す（shared/http/ofrep.ts）。
+  "featureFlag.notFound": { key: string };
   // リクエストの形の誤り（presentation の json-body.ts）。
   "request.body.notJson": Record<string, never>;
   "request.body.notObject": Record<string, never>;
@@ -59,6 +62,7 @@ export const ERROR_KEYS = [
   "todo.createdAt.invalid",
   "todo.statusChanges.invalid",
   "todo.notFound",
+  "featureFlag.notFound",
   "request.body.notJson",
   "request.body.notObject",
   "request.body.unknownKeys",

@@ -14,9 +14,11 @@ Feature: API 仕様の置き場所と書き方
   Scenario: step の実装の中身（findApiSpecViolations）: must pass
     * step の実装が実 DB と対の api を値で import すれば違反なし（複数行・type の混じった import・@repo/backend/ の書き方・拡張子付きなど）
     * api ファイルは中身を見ない
+    * DB を持たない feature（feature-flag）の step は、実 DB を import しなくても違反なし（Issue #156）
   Scenario: step の実装の中身（findApiSpecViolations）: must reject
     * step の実装の vi・InMemory・api の参照の違反を行で返す（vitest から vi・vi の別名・名前空間・既定の import・dynamic import() など）
     * 置き場所が違えば置き場所の違反だけを返す（中身は見ない）
+    * DB を持つ feature と、名前の一部だけが feature-flag の feature の step は、実 DB の import が無ければ違反（Issue #156 の例外の境界）
   Scenario: step の実装が呼べる API（findApiSpecViolations の api-spec-own-api-only）
     * step の実装が support.ts から対の組み立てのクラスと補助のクラスを import すれば違反なし（別名・拡張子付き・複数行も）
     * step の実装がほかの API の組み立てのクラスを import すれば違反（対のクラスと一緒・別名・複数行・名前の取り違えなど）
@@ -39,3 +41,4 @@ Feature: API 仕様の置き場所と書き方
     * apps/ が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）
   Scenario: API 仕様（実ファイル）
     * presentation の api ファイルごとに apps/backend/spec/api/<feature>/ に <api>.feature と <api>.api-spec.test.ts があり、.feature は固定の見出しの Scenario と箇条書きの step を業務の言葉だけで書き、step の実装は vi と InMemory を使わず、実 DB を使って対の api を参照し、対象でない API の handler を手に入れず、support.ts が api を値で API ごとに組み立て、handler を呼ばない
+    * 実 DB の例外の feature（FEATURES_WITHOUT_DATABASE）はどれも、presentation の api ファイルを持ち、Postgres の Repository を持たない

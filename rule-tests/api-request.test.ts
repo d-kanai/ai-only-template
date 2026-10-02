@@ -15,7 +15,7 @@ import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, expect } from "vitest";
 import { casesByName } from "./case-table";
 
-// 「1 ユースケース = 1 API」（.claude/rules/code/backend.md、Issue #175）を、api ファイル（apps/backend/features/*/internal/presentation/*.api.ts）の
+// 「1 ユースケース = 1 API」（.claude/rules/code/backend.md の「API の書き方」の表の「1 API = 1 command」、Issue #175）を、api ファイル（apps/backend/features/*/internal/presentation/*.api.ts）の
 // リクエストの項目の `.optional()` で機械的に検査するテスト。
 // WHY 検査する: 複数の項目を任意で受けて command の中で「来た項目だけ変える」分岐をする部分更新の API（`{ title?, completed? }`）は、
 //   1 つの API に複数のユースケース（改名・完了の切り替え）が混ざり、項目の組み合わせごとの振る舞い・検証・権限が増える。

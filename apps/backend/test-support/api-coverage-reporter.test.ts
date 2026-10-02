@@ -162,7 +162,7 @@ describe("ApiEndpoints.list（全 API の一覧。route.ts の re-export から�
     expect(endpoints).toStrictEqual(VALID_ENDPOINTS);
   });
 
-  test("must pass: リポジトリの全 API（6 つ）を返す", () => {
+  test("must pass: リポジトリの全 API（8 つ）を返す", () => {
     // given: リポジトリの apps/frontend_customer/app/api/ の route.ts
 
     // when
@@ -170,6 +170,16 @@ describe("ApiEndpoints.list（全 API の一覧。route.ts の re-export から�
 
     // then
     expect(endpoints).toStrictEqual([
+      {
+        method: "POST",
+        path: "/api/ofrep/v1/evaluate/flags",
+        api: "EvaluateFeatureFlagsApi",
+      },
+      {
+        method: "POST",
+        path: "/api/ofrep/v1/evaluate/flags/:key",
+        api: "EvaluateFeatureFlagApi",
+      },
       { method: "GET", path: "/api/todos", api: "ListTodosApi" },
       { method: "POST", path: "/api/todos", api: "CreateTodoApi" },
       { method: "DELETE", path: "/api/todos/:id", api: "DeleteTodoApi" },

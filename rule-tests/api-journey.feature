@@ -2,8 +2,8 @@
 # 規則の WHY と限界は api-journey.test.ts の冒頭。
 Feature: API ジャーニーテスト
   Scenario: API ジャーニーの置き場所（isMisplacedApiJourneyFile）
-    * spec/journey/ の直下の API ジャーニーと .feature、層の下のテストとソース、名前の一部だけが同じファイル、spec/api/ の下の .feature は違反なし
-    * spec/journey/ の名前の違うテスト・テスト以外・サブディレクトリの中、spec/journey/ の外のジャーニーと .feature、spec/api/ の下の API ジャーニーは違反
+    * spec/journey/ の直下の API ジャーニーと .feature、層の下のテストとソース、名前の一部だけが同じファイル、spec/api/ と spec/domain/ の下の .feature は違反なし
+    * spec/journey/ の名前の違うテスト・テスト以外・サブディレクトリの中、spec/journey/ の外のジャーニーと .feature、spec/api/ と spec/domain/ の下の API ジャーニーは違反
   Scenario: API ジャーニーの中身（findApiJourneyViolations）: must pass
     * 実 DB と 2 つ以上の api を値で import し、InMemory と vi を使わない API ジャーニーは違反なし（複数行・type の混じった import・別の feature の api・Postgres の Repository・コメントの中・vi 以外の vitest の import など）
     * API ジャーニーでないファイル（層の下のテスト）は中身を見ない

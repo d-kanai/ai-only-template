@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useFeatureFlag } from "@/features/feature-flag";
 import {
   ApiErrorMessage,
   type ErrorMessages,
@@ -26,6 +27,10 @@ export function useTodoScreen() {
   //   先に送った初回の GET（追加前の一覧）が後から返ると、追加後の一覧を古い一覧で上書きしてしまう。
   //   後に送った GET ほど新しいサーバの状態を反映しているので、最後に送ったものだけを正とする。
   const latestListRequestRef = useRef(0);
+  // 一覧から詳細画面へのリンクを出すか（フィーチャーフラグ todo-detail-screen。Issue #156）。
+  // WHY フラグで出し分ける: 詳細画面を出す・隠すを、コードを戻さずに backend の一覧（FEATURE_FLAGS）の切り替えだけで行えるようにする。
+  //   フラグの読み方（準備ができるまでは off で描く）は features/feature-flag/hooks/use-feature-flag.hook.ts。
+  const showsDetailLink = useFeatureFlag("todo-detail-screen");
 
   // 一覧を取り直して反映する。失敗したら error に入れて false を返す。
   // 後から別の GET を送っていた（この応答が古い）場合は、成功も失敗も反映せず true を返す。
@@ -130,6 +135,7 @@ export function useTodoScreen() {
   return {
     todos,
     isLoading,
+    showsDetailLink,
     error: errorMessages.form,
     fieldErrors: errorMessages.fields,
     newTitle,

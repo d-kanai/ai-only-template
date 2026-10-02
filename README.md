@@ -20,7 +20,7 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 | Git フック | [Lefthook](https://github.com/evilmartians/lefthook) | pre-commit でステージ済みファイルを Biome で検査する |
 | コンテナ | [Docker Compose](https://docs.docker.com/compose/) | `compose.yaml` を手元・GitHub Actions・クラウドセッションの 3 環境で共通に使う。Podman（`podman compose`）でも同じファイルを使う想定 |
 | データベース | [PostgreSQL](https://www.postgresql.org/) | 18（`mirror.gcr.io/library/postgres:18-alpine`。Docker Hub の匿名 pull のレート制限を避けるためミラーから取る）。Todo の保存先（アプリは常に Postgres。InMemory のリポジトリはテスト用） |
-| ORM / マイグレーション | [Drizzle ORM](https://orm.drizzle.team/) + [drizzle-kit](https://orm.drizzle.team/docs/kit-overview) | スキーマを TypeScript で宣言し、`pnpm db:generate` で SQL を生成、`pnpm db:migrate` で当てる（`push` は使わない。`.claude/rules/code/backend.md` の「永続化（Drizzle + Postgres）」・スキル `db-migration`） |
+| ORM / マイグレーション | [Drizzle ORM](https://orm.drizzle.team/) + [drizzle-kit](https://orm.drizzle.team/docs/kit-overview) | スキーマを TypeScript で宣言し、`pnpm db:generate` で SQL を生成、`pnpm db:migrate` で当てる（`push` は使わない。`.claude/rules/code/backend.md` の「DB スキーマ」の表の「マイグレーション」・スキル `db-migration`） |
 | DB ドライバ | [node-postgres（pg）](https://node-postgres.com/) | 接続先とプールの設定は `.env` から読む（`apps/shared/env.ts`。値は `.env.example`。本番用の値は Issue #58 で決める） |
 
 ツールのバージョンは `.tool-versions` が正（決め方と更新手順は `.claude/rules/tooling/env.md`）。npm パッケージのバージョンは各 `package.json`（リポジトリ直下・`apps/frontend_customer`・`apps/backend`・`apps/e2e`・`apps/shared`）と `pnpm-lock.yaml` が正（`.claude/rules/tooling/dependencies.md`）。pnpm のサプライチェーン保護設定は `pnpm-workspace.yaml` を参照。
@@ -39,7 +39,7 @@ apps/
     features/todo/      # 画面側
       screens/todo-screen/  # 一覧画面。todo-screen.tsx（見た目）+ todo-screen.hook.ts（状態・データ取得）+ テスト
       screens/todo-detail-screen/  # 詳細画面（/todo/[id]）。構成は todo-screen/ と同じ
-      components/         # feature 内で画面をまたぐ部品（todo-item.tsx）
+      components/         # feature 内で画面をまたぐ部品（今は無い。1 画面だけで使う部品は画面のファイルの中）
       api/                # /api/... を fetch する薄いラッパー（型は backend の api ファイルから import type）
       index.ts            # 公開 API（外から import してよいのはここだけ）
     shared/             # 画面側で feature をまたぐ共通部品（必要になったら作る）
@@ -75,7 +75,7 @@ apps/
 ```
 
 - 画面は SSR を前提にせず、データは hook から `/api/...` を呼んで取る。サーバの処理はすべて `apps/backend/` に置く。
-- frontend（と `apps/e2e/`・リポジトリ直下の設定ファイル）から backend へは `@repo/backend/<path>` でだけ参照する（相対パスは使わない。例外はテスト基盤の `vitest.global-setup.ts` → `apps/backend/test-support/database` だけ）。使えるのは `apps/backend/package.json` の `exports` に書いたファイルだけ。frontend で参照してよいのは `app/api/**`（api ファイルの値）と `features/*/api/`（型だけ）だけ。`apps/shared`（env・logger）は frontend 直下のサーバ側のファイル・backend・`apps/e2e/`・リポジトリ直下から `@repo/shared/<name>` で参照し、画面側（`app/`・`features/`・`shared/`）からは参照しない。backend は frontend を参照せず、backend の中の import は相対パスだけにする（`rule-tests/architecture.test.ts` で検査。`.claude/rules/code/backend.md` の「import の書き方と公開の範囲（exports）」）。
+- frontend（と `apps/e2e/`・リポジトリ直下の設定ファイル）から backend へは `@repo/backend/<path>` でだけ参照する（相対パスは使わない。例外はテスト基盤の `vitest.global-setup.ts` → `apps/backend/test-support/database` だけ）。使えるのは `apps/backend/package.json` の `exports` に書いたファイルだけ。frontend で参照してよいのは `app/api/**`（api ファイルの値）と `features/*/api/`（型だけ）だけ。`apps/shared`（env・logger）は frontend 直下のサーバ側のファイル・backend・`apps/e2e/`・リポジトリ直下から `@repo/shared/<name>` で参照し、画面側（`app/`・`features/`・`shared/`）からは参照しない。backend は frontend を参照せず、backend の中の import は相対パスだけにする（`rule-tests/architecture.test.ts` で検査。`.claude/rules/code/backend.md` の「import と exports」）。
 - 画面側からサーバ側へは、各 api ファイル（`apps/backend/features/<feature>/internal/presentation/<name>.api.ts`）の型を `import type` で参照するだけ。型で担保されるのはリクエスト / レスポンスの形で、URL・メソッド・実行時の JSON の形は担保されない。
 - テストは対象の隣に置く（`app/` には置かない）。
 
@@ -113,7 +113,7 @@ pnpm db:generate # apps/backend/features/*/internal/infra/schema.ts を変えた
 ```
 
 - 接続先は `.env` の `DATABASE_URL`（`.env.example` の値は `postgresql://app:app@localhost:5432/app`。開発用の固定値で秘密ではない）。アプリは常に Postgres を使うので、`pnpm dev` の前にも `pnpm db:up` と `pnpm db:migrate` が要る。
-- 接続・プールの環境変数（`DATABASE_POOL_MAX` など）は `.claude/rules/code/backend.md` の「永続化（Drizzle + Postgres）」、スキーマの変え方はスキル `db-migration` を参照。
+- 接続・プールの環境変数（`DATABASE_POOL_MAX` など）は `.claude/rules/code/backend.md` の「Repository」の表の「接続とプール」、スキーマの変え方はスキル `db-migration` を参照。
 - Docker Desktop は、従業員 250 人以上または年間売上 1,000 万ドル以上の企業での業務利用などに有料サブスクリプションが必要になる（[Docker Desktop license agreement](https://docs.docker.com/subscription-billing/desktop-license/)）。該当する場合は [Podman](https://podman.io/) の `podman compose up -d --wait` でも同じ `compose.yaml` を使える想定（Podman での実動作は未確認）。
 
 Claude Code のクラウドセッション（asdf が無い環境）では、`scripts/cloud-session-start.sh` で `.tool-versions` どおりの Node.js / pnpm を用意する（環境設定の setup script に `bash scripts/cloud-session-start.sh --install-only` を書くと初回だけで済む）。`.tool-versions` の版を上げたら setup script も更新してキャッシュを作り直す。あわせて SessionStart フックが毎セッション `dockerd` を起動し、`docker compose pull`（最大 3 回再試行）と `docker compose up -d --wait --wait-timeout 120` で Postgres を立ち上げ、`.env` が無ければ `.env.example` からコピーして、`pnpm db:migrate` でマイグレーションを当てる。詳細は `.claude/rules/tooling/cloud-session.md`（規則）・スキル `cloud-session`（確認と復旧）・ADR `docs/adr/workflow/20260928-cloud-session-setup-script-and-hook.md`（決定）を参照。

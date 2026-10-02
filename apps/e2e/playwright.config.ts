@@ -89,7 +89,7 @@ export default defineConfig({
     //   英語の表示は、step で Accept-Language のヘッダを en-US にして確かめる（apps/e2e/spec/i18n.steps.ts）。
     locale: "ja-JP",
     // timezoneId: ブラウザのタイムゾーン。
-    //   WHY サーバ（UTC）と違う Asia/Tokyo にする: 日時はブラウザのタイムゾーンで表示する（todo-item.tsx）。サーバと同じ UTC だと、
+    //   WHY サーバ（UTC）と違う Asia/Tokyo にする: 日時はブラウザのタイムゾーンで表示する（todo-screen.tsx の TodoItem）。サーバと同じ UTC だと、
     //   サーバのタイムゾーンで表示してしまう誤りを見逃す。
     timezoneId: "Asia/Tokyo",
   },
