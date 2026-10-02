@@ -11,7 +11,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
+import { afterAll, expect } from "vitest";
+import { casesByName } from "./case-table";
 
 // 「1 ユースケース = 1 API = 1 command」（.claude/rules/backend.md、Issue #175・#177）を、application の command / query
 // （apps/backend/features/*/internal/application/*.command.ts・*.query.ts）の入力で機械的に検査するテスト。
@@ -233,466 +235,524 @@ const repoRoot = join(import.meta.dirname, "..");
 
 // テストの入力を行の配列で書き、1 行目を 1 として違反の行番号を読みやすくする。
 const source = (...lines: string[]) => lines.join("\n");
-
-describe("command の入力の判定（findUseCaseViolations）: must pass", () => {
-  it.each([
-    [
-      "Input の項目がすべて必須で、input の項目を比較しない",
-      source(
-        "export type RenameTodoInput = {",
-        "  id: string;",
-        "  title: string;",
-        "};",
-        "async execute(input: RenameTodoInput): Promise<Todo> {",
-        "  const current = await this.repository.findByIdForUpdate(input.id);",
-        "  return current.rename(input.title);",
-        "}",
-      ),
-    ],
-    [
-      "Input 以外の型（Result / Props）の ?: は対象外",
-      source(
-        "export type RenameTodoInput = { id: string };",
-        "export type RenameTodoResult = {",
-        "  warning?: string;",
-        "};",
-        "type Props = { note?: string };",
-        // 名前の途中に Input があるだけの型（Input で終わらない）。
-        "type InputResult = { next?: string };",
-      ),
-    ],
-    [
-      "値の三項演算子（a ? b : c）は ?: と数えない（Input の型の中の条件型も）",
-      source(
-        "export type ListInput = {",
-        "  order: Order extends Asc ? 'asc' : 'desc';",
-        "};",
-        "const label = input.completed ? done : todo;",
-        "const x = a ?b : c;",
-      ),
-    ],
-    [
-      "input 以外の値と undefined / null の比較（todo !== undefined / userInput.x / this.input.x）",
-      source(
-        "if (todo !== undefined) return todo;",
-        "if (userInput.title === undefined) return;",
-        "if (this.input.title != null) return;",
-      ),
-    ],
-    [
-      "input の項目を undefined 以外と比べる（input.completed === true）",
-      source("if (input.completed === true) notify();"),
-    ],
-    [
-      "コメントの中の ?: と input.x !== undefined は数えない",
-      source(
-        "export type RenameTodoInput = {",
-        "  id: string; // title?: にしない（部分更新にしない）",
-        "  title: string;",
-        "};",
-        "// input.title !== undefined で分岐しない。",
-      ),
-    ],
-  ])("%s は違反なし", (_name, text) => {
-    // given: it.each の入力
-    // when
-    const violations = findUseCaseViolations(text);
-
-    // then
-    expect(violations).toEqual([]);
-  });
+// WHY OS の一時ディレクトリに置く: リポジトリ内に置くと本番の検査や Biome・git の差分に混ざる。afterAll で消す。
+const roots: string[] = [];
+afterAll(() => {
+  for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
 
-describe("command の入力の判定（findUseCaseViolations）: must reject", () => {
-  it.each<[string, string, UseCaseViolation[]]>([
-    [
-      "Input の任意の項目（title?: / completed?:）",
-      source(
-        "export type UpdateTodoInput = {",
-        "  id: string;",
-        "  title?: string;",
-        "  completed?: boolean;",
-        "};",
-      ),
-      [
-        { rule: "no-optional-input-field", line: 3 },
-        { rule: "no-optional-input-field", line: 4 },
-      ],
-    ],
-    [
-      "1 行で書いた Input・export の無い Input・名前が Input だけ・? と : の間の空白",
-      source(
-        "export type UpdateTodoInput = { id: string; title?: string };",
-        "type LocalInput = { note?: string };",
-        "type Input = {",
-        "  due ? : Date;",
-        "};",
-      ),
-      [
-        { rule: "no-optional-input-field", line: 1 },
-        { rule: "no-optional-input-field", line: 2 },
-        { rule: "no-optional-input-field", line: 4 },
-      ],
-    ],
-    [
-      "Readonly<{ ... }> とジェネリクスの Input",
-      source(
-        "export type RenameXInput = Readonly<{",
-        "  title?: string;",
-        "}>;",
-        "export type PageInput<T> = {",
-        "  cursor?: T;",
-        "};",
-      ),
-      [
-        { rule: "no-optional-input-field", line: 2 },
-        { rule: "no-optional-input-field", line: 5 },
-      ],
-    ],
-    [
-      '引用符で囲んだ項目名（"title"?:）と入れ子のオブジェクトの型の中の ?:',
-      source(
-        "export type UpdateTodoInput = {",
-        '  "title"?: string;',
-        "  filter: {",
-        "    tag?: string;",
-        "  };",
-        "};",
-      ),
-      [
-        { rule: "no-optional-input-field", line: 2 },
-        { rule: "no-optional-input-field", line: 4 },
-      ],
-    ],
-    [
-      "input.title !== undefined / === undefined / != null / == null",
-      source(
-        "if (input.title !== undefined) current = current.rename(input.title);",
-        "if (input.title === undefined) return current;",
-        "if (input.completed != null) done();",
-        "if (input.completed == null) return;",
-      ),
-      [
-        { rule: "no-undefined-branch-on-input", line: 1 },
-        { rule: "no-undefined-branch-on-input", line: 2 },
-        { rule: "no-undefined-branch-on-input", line: 3 },
-        { rule: "no-undefined-branch-on-input", line: 4 },
-      ],
-    ],
-    [
-      "逆向き（undefined !== input.title）・input?.title・演算子の前後の空白と改行",
-      source(
-        "if (undefined !== input.title) rename();",
-        "if (input?.title !== undefined) rename();",
-        "if (",
-        "  input . completed",
-        "    !==",
-        "  undefined",
-        ") done();",
-      ),
-      [
-        { rule: "no-undefined-branch-on-input", line: 1 },
-        { rule: "no-undefined-branch-on-input", line: 2 },
-        { rule: "no-undefined-branch-on-input", line: 4 },
-      ],
-    ],
-  ])("%s は違反", (_name, text, expected) => {
-    // given: it.each の入力
-    // when
-    const violations = findUseCaseViolations(text);
-
-    // then
-    expect(violations).toEqual(expected);
-  });
-});
-
-describe("command のトランザクションの判定（findCommandTransactionViolations）: must pass", () => {
-  it.each([
-    [
-      "execute の本体を this.transactions.run( で包む（複数行・return する）",
-      source(
-        "export class RenameXCommand {",
-        "  constructor(",
-        "    private readonly repository: XRepository,",
-        "    private readonly transactions: TransactionRunner,",
-        "  ) {}",
-        "",
-        "  async execute(input: RenameXInput): Promise<X> {",
-        "    return this.transactions.run(async (tx) => {",
-        "      const current = await this.repository.findByIdForUpdate(input.id, tx);",
-        "      await this.repository.update(current.rename(input.title), tx);",
-        "      return current;",
-        "    });",
-        "  }",
-        "}",
-      ),
-    ],
-    [
-      "修飾子・型引数・戻り値の型のオブジェクト型・run の前後の空白と改行・run の後に通知を書く",
-      source(
-        "  public async execute<T>(input: T): Promise<{ id: string }> {",
-        "    const { current } = await this.transactions",
-        "      . run (async (tx) => ({ current: await this.repository.findByIdForUpdate(input.id, tx) }));",
-        "    this.notify(current.id);",
-        "    return current;",
-        "  }",
-      ),
-    ],
-    [
-      "直前に続くコメント行のどれかに // WHY トランザクション無し: <理由> がある（DB に触らない command）",
-      source(
-        "// WHY トランザクション無し: 通知をログに出すだけで DB に書かない。",
-        "// 送信の失敗の扱いは expose が決める。",
-        "  async execute(input: I): Promise<void> {",
-        "    await this.sender.send(input.message);",
-        "  }",
-      ),
-    ],
-    [
-      "戻り値の型に関数の型（=>）を含む",
-      source(
-        "execute(input: I): Promise<() => void> {",
-        "  return this.transactions.run(async () => () => undefined);",
-        "}",
-      ),
-    ],
-  ])("%s は違反なし", (_name, text) => {
-    // given: it.each の入力
-    // when
-    const violations = findCommandTransactionViolations(text);
-
-    // then
-    expect(violations).toEqual([]);
-  });
-});
-
-describe("command のトランザクションの判定（findCommandTransactionViolations）: must reject", () => {
-  it.each<[string, string, UseCaseViolation[]]>([
-    [
-      "execute が Repository を直接呼び、run で包まない",
-      source(
-        "export class DeleteXCommand {",
-        "  async execute(id: string): Promise<void> {",
-        "    await this.repository.findByIdForUpdate(id, tx);",
-        "    await this.repository.delete(id, tx);",
-        "  }",
-        "}",
-      ),
-      [{ rule: "command-runs-in-transaction", line: 2 }],
-    ],
-    [
-      "run が execute の外（別のメソッド）にだけある",
-      source(
-        "class A {",
-        "  execute(input: I) {",
-        "    return this.save(input);",
-        "  }",
-        "  private save(input: I) {",
-        "    return this.transactions.run(async (tx) => this.repository.insert(input, tx));",
-        "  }",
-        "}",
-      ),
-      [{ rule: "command-runs-in-transaction", line: 2 }],
-    ],
-    [
-      "this の無い transactions.run( / 名前が run で始まるだけの runLater( / 依存を挟まない this.run( / コメントの中の run",
-      source(
-        "async execute(input: I) {",
-        "  await transactions.run(async (tx) => {});",
-        "  await this.transactions.runLater(async (tx) => {});",
-        "  await this.run(async (tx) => {});",
-        "  // return this.transactions.run(async (tx) => {});",
-        "}",
-      ),
-      [{ rule: "command-runs-in-transaction", line: 1 }],
-    ],
-    [
-      "例外の WHY が空行を挟む・理由が空・別の見出し（WHY 任意:）・execute の中にある",
-      source(
-        "// WHY トランザクション無し: DB に書かない。",
-        "",
-        "async execute(a: I) {}",
-        "// WHY トランザクション無し: ",
-        "async execute(b: I) {}",
-        "// WHY 任意: DB に書かない。",
-        "async execute(c: I) {",
-        "  // WHY トランザクション無し: DB に書かない。",
-        "}",
-      ),
-      [
-        { rule: "command-runs-in-transaction", line: 3 },
-        { rule: "command-runs-in-transaction", line: 5 },
-        { rule: "command-runs-in-transaction", line: 7 },
-      ],
-    ],
-    [
-      "execute の定義が無い command（1 行目）",
-      source("export class XCommand {", "  run() {}", "}"),
-      [{ rule: "command-runs-in-transaction", line: 1 }],
-    ],
-    [
-      "execute の後ろの別のクラスに run がある（本体の範囲は execute の { } だけ）",
-      source(
-        "class A {",
-        "  async execute(input: I) {",
-        "    await this.repository.insert(input, tx);",
-        "  }",
-        "}",
-        "class B {",
-        "  async execute(input: I) {",
-        "    await this.transactions.run(async (tx) => {});",
-        "  }",
-        "}",
-      ),
-      [{ rule: "command-runs-in-transaction", line: 2 }],
-    ],
-  ])("%s は違反", (_name, text, expected) => {
-    // given: it.each の入力
-    // when
-    const violations = findCommandTransactionViolations(text);
-
-    // then
-    expect(violations).toEqual(expected);
-  });
-});
-
-// --- 列挙 → 読み取り → 判定を通した fixture テスト ---
-// WHY: 判定が正しくても、対象の列挙（application/*.command.ts・*.query.ts の見つけ方）が漏れれば見逃す。一時ディレクトリに
-//   架空のツリーを置き、本番と同じ collectUseCaseViolations に通して、違反の集合を丸ごと比較する（見逃しも余分な検出も失敗にする）。
-describe("command / query の列挙と検査（fixture）", () => {
-  // WHY OS の一時ディレクトリに置く: リポジトリ内に置くと本番の検査や Biome・git の差分に混ざる。afterAll で消す。
-  const roots: string[] = [];
-  afterAll(() => {
-    for (const root of roots) rmSync(root, { recursive: true, force: true });
-  });
-
-  function fixture(files: Record<string, string>): string {
-    const root = mkdtempSync(join(tmpdir(), "use-case-"));
-    roots.push(root);
-    for (const [path, content] of Object.entries(files)) {
-      mkdirSync(dirname(join(root, path)), { recursive: true });
-      writeFileSync(join(root, path), content);
-    }
-    return root;
+function fixture(files: Record<string, string>): string {
+  const root = mkdtempSync(join(tmpdir(), "use-case-"));
+  roots.push(root);
+  for (const [path, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), content);
   }
+  return root;
+}
 
-  const partialUpdate = source(
-    "export type UpdateXInput = {",
-    "  title?: string;",
-    "};",
-    "if (input.title !== undefined) rename();",
+const partialUpdate = source(
+  "export type UpdateXInput = {",
+  "  title?: string;",
+  "};",
+  "if (input.title !== undefined) rename();",
+);
+
+const feature = await loadFeature("./use-case.feature");
+
+describeFeature(feature, ({ Scenario }) => {
+  Scenario(
+    "command の入力の判定（findUseCaseViolations）: must pass",
+    ({ And }) => {
+      And(
+        "Input の項目がすべて必須で、input の項目を比較しなければ違反なし（Input 以外の型の ?:・値の三項演算子など）",
+        () => {
+          // given
+          const cases: [string, string][] = [
+            [
+              "Input の項目がすべて必須で、input の項目を比較しない",
+              source(
+                "export type RenameTodoInput = {",
+                "  id: string;",
+                "  title: string;",
+                "};",
+                "async execute(input: RenameTodoInput): Promise<Todo> {",
+                "  const current = await this.repository.findByIdForUpdate(input.id);",
+                "  return current.rename(input.title);",
+                "}",
+              ),
+            ],
+            [
+              "Input 以外の型（Result / Props）の ?: は対象外",
+              source(
+                "export type RenameTodoInput = { id: string };",
+                "export type RenameTodoResult = {",
+                "  warning?: string;",
+                "};",
+                "type Props = { note?: string };",
+                // 名前の途中に Input があるだけの型（Input で終わらない）。
+                "type InputResult = { next?: string };",
+              ),
+            ],
+            [
+              "値の三項演算子（a ? b : c）は ?: と数えない（Input の型の中の条件型も）",
+              source(
+                "export type ListInput = {",
+                "  order: Order extends Asc ? 'asc' : 'desc';",
+                "};",
+                "const label = input.completed ? done : todo;",
+                "const x = a ?b : c;",
+              ),
+            ],
+            [
+              "input 以外の値と undefined / null の比較（todo !== undefined / userInput.x / this.input.x）",
+              source(
+                "if (todo !== undefined) return todo;",
+                "if (userInput.title === undefined) return;",
+                "if (this.input.title != null) return;",
+              ),
+            ],
+            [
+              "input の項目を undefined 以外と比べる（input.completed === true）",
+              source("if (input.completed === true) notify();"),
+            ],
+            [
+              "コメントの中の ?: と input.x !== undefined は数えない",
+              source(
+                "export type RenameTodoInput = {",
+                "  id: string; // title?: にしない（部分更新にしない）",
+                "  title: string;",
+                "};",
+                "// input.title !== undefined で分岐しない。",
+              ),
+            ],
+          ];
+
+          // when
+          const violations = casesByName(cases, ([, text]) =>
+            findUseCaseViolations(text),
+          );
+
+          // then
+          expect(violations).toEqual(casesByName(cases, () => []));
+        },
+      );
+    },
   );
 
-  it("features/<f>/internal/application/*.command.ts・*.query.ts だけを対象にし、違反を「規則: パス:行: 行の内容」で返す", () => {
-    // given
-    const root = fixture({
-      "apps/backend/features/x/internal/application/rename-x.command.ts":
-        source(
-          "export type RenameXInput = {",
-          "  id: string;",
-          "  title: string;",
-          "};",
-          "async execute(input: RenameXInput) {",
-          "  return this.transactions.run(async (tx) => {",
-          "    const current = await this.repository.findByIdForUpdate(input.id, tx);",
-          "  });",
-          "}",
-        ),
-      "apps/backend/features/x/internal/application/update-x.command.ts":
-        source(
-          "export type UpdateXInput = {",
-          "  id: string;",
-          "  title?: string;",
-          "};",
-          "if (input.title !== undefined) current = current.rename(input.title);",
-          "async execute(input: UpdateXInput) {",
-          "  await this.transactions.run(async (tx) => {});",
-          "}",
-        ),
-      // Issue #215: トランザクションを張らない command（execute の本体に run が無い）。
-      "apps/backend/features/x/internal/application/delete-x.command.ts":
-        source(
-          "export class DeleteXCommand {",
-          "  async execute(id: string): Promise<void> {",
-          "    await this.repository.delete(id, tx);",
-          "  }",
-          "}",
-        ),
-      // query は execute に run が無くても対象外。
-      "apps/backend/features/x/internal/application/list-x.query.ts": source(
-        "export type ListXResult = { next?: string };",
-        "execute() {",
-        "  return this.repository.findAll();",
-        "}",
-      ),
-      // 対象外: command のテスト、application の command / query 以外、入れ子、domain・presentation、shared、frontend。
-      "apps/backend/features/x/internal/application/update-x.command.test.ts":
-        partialUpdate,
-      "apps/backend/features/x/internal/application/helper.ts": partialUpdate,
-      "apps/backend/features/x/internal/application/nested/y.command.ts":
-        partialUpdate,
-      "apps/backend/features/x/internal/domain/x.ts": partialUpdate,
-      "apps/backend/features/x/internal/presentation/update-x.api.ts":
-        partialUpdate,
-      "apps/backend/shared/application/y.command.ts": partialUpdate,
-      // Issue #208: internal/ を挟まない旧の置き場所（置き場所の規則 backend-placement が違反にする）。
-      "apps/backend/features/x/application/old.command.ts": partialUpdate,
-      "apps/frontend_customer/features/x/application/y.command.ts":
-        partialUpdate,
-    });
+  Scenario(
+    "command の入力の判定（findUseCaseViolations）: must reject",
+    ({ And }) => {
+      And(
+        "Input の任意の項目と input の項目の有無の分岐は、規則と行で違反になる（title?:・1 行の Input・export の無い Input・? と : の間の空白など）",
+        () => {
+          // given
+          const cases: [string, string, UseCaseViolation[]][] = [
+            [
+              "Input の任意の項目（title?: / completed?:）",
+              source(
+                "export type UpdateTodoInput = {",
+                "  id: string;",
+                "  title?: string;",
+                "  completed?: boolean;",
+                "};",
+              ),
+              [
+                { rule: "no-optional-input-field", line: 3 },
+                { rule: "no-optional-input-field", line: 4 },
+              ],
+            ],
+            [
+              "1 行で書いた Input・export の無い Input・名前が Input だけ・? と : の間の空白",
+              source(
+                "export type UpdateTodoInput = { id: string; title?: string };",
+                "type LocalInput = { note?: string };",
+                "type Input = {",
+                "  due ? : Date;",
+                "};",
+              ),
+              [
+                { rule: "no-optional-input-field", line: 1 },
+                { rule: "no-optional-input-field", line: 2 },
+                { rule: "no-optional-input-field", line: 4 },
+              ],
+            ],
+            [
+              "Readonly<{ ... }> とジェネリクスの Input",
+              source(
+                "export type RenameXInput = Readonly<{",
+                "  title?: string;",
+                "}>;",
+                "export type PageInput<T> = {",
+                "  cursor?: T;",
+                "};",
+              ),
+              [
+                { rule: "no-optional-input-field", line: 2 },
+                { rule: "no-optional-input-field", line: 5 },
+              ],
+            ],
+            [
+              '引用符で囲んだ項目名（"title"?:）と入れ子のオブジェクトの型の中の ?:',
+              source(
+                "export type UpdateTodoInput = {",
+                '  "title"?: string;',
+                "  filter: {",
+                "    tag?: string;",
+                "  };",
+                "};",
+              ),
+              [
+                { rule: "no-optional-input-field", line: 2 },
+                { rule: "no-optional-input-field", line: 4 },
+              ],
+            ],
+            [
+              "input.title !== undefined / === undefined / != null / == null",
+              source(
+                "if (input.title !== undefined) current = current.rename(input.title);",
+                "if (input.title === undefined) return current;",
+                "if (input.completed != null) done();",
+                "if (input.completed == null) return;",
+              ),
+              [
+                { rule: "no-undefined-branch-on-input", line: 1 },
+                { rule: "no-undefined-branch-on-input", line: 2 },
+                { rule: "no-undefined-branch-on-input", line: 3 },
+                { rule: "no-undefined-branch-on-input", line: 4 },
+              ],
+            ],
+            [
+              "逆向き（undefined !== input.title）・input?.title・演算子の前後の空白と改行",
+              source(
+                "if (undefined !== input.title) rename();",
+                "if (input?.title !== undefined) rename();",
+                "if (",
+                "  input . completed",
+                "    !==",
+                "  undefined",
+                ") done();",
+              ),
+              [
+                { rule: "no-undefined-branch-on-input", line: 1 },
+                { rule: "no-undefined-branch-on-input", line: 2 },
+                { rule: "no-undefined-branch-on-input", line: 4 },
+              ],
+            ],
+          ];
 
-    // when
-    const result = {
-      files: listUseCaseFiles(root),
-      violations: collectUseCaseViolations(root),
-    };
+          // when
+          const violations = casesByName(cases, ([, text]) =>
+            findUseCaseViolations(text),
+          );
 
-    // then
-    expect(result).toEqual({
-      files: [
-        "apps/backend/features/x/internal/application/delete-x.command.ts",
-        "apps/backend/features/x/internal/application/list-x.query.ts",
-        "apps/backend/features/x/internal/application/rename-x.command.ts",
-        "apps/backend/features/x/internal/application/update-x.command.ts",
-      ],
-      violations: [
-        "command-runs-in-transaction: apps/backend/features/x/internal/application/delete-x.command.ts:2: async execute(id: string): Promise<void> {",
-        "no-optional-input-field: apps/backend/features/x/internal/application/update-x.command.ts:3: title?: string;",
-        "no-undefined-branch-on-input: apps/backend/features/x/internal/application/update-x.command.ts:5: if (input.title !== undefined) current = current.rename(input.title);",
-      ],
-    });
+          // then
+          expect(violations).toEqual(
+            casesByName(cases, ([, , expected]) => expected),
+          );
+        },
+      );
+    },
+  );
+
+  Scenario(
+    "command のトランザクションの判定（findCommandTransactionViolations）: must pass",
+    ({ And }) => {
+      And(
+        "execute の本体を this.transactions.run で包めば違反なし（複数行・return・修飾子・型引数・空白と改行・run の後の通知など）",
+        () => {
+          // given
+          const cases: [string, string][] = [
+            [
+              "execute の本体を this.transactions.run( で包む（複数行・return する）",
+              source(
+                "export class RenameXCommand {",
+                "  constructor(",
+                "    private readonly repository: XRepository,",
+                "    private readonly transactions: TransactionRunner,",
+                "  ) {}",
+                "",
+                "  async execute(input: RenameXInput): Promise<X> {",
+                "    return this.transactions.run(async (tx) => {",
+                "      const current = await this.repository.findByIdForUpdate(input.id, tx);",
+                "      await this.repository.update(current.rename(input.title), tx);",
+                "      return current;",
+                "    });",
+                "  }",
+                "}",
+              ),
+            ],
+            [
+              "修飾子・型引数・戻り値の型のオブジェクト型・run の前後の空白と改行・run の後に通知を書く",
+              source(
+                "  public async execute<T>(input: T): Promise<{ id: string }> {",
+                "    const { current } = await this.transactions",
+                "      . run (async (tx) => ({ current: await this.repository.findByIdForUpdate(input.id, tx) }));",
+                "    this.notify(current.id);",
+                "    return current;",
+                "  }",
+              ),
+            ],
+            [
+              "直前に続くコメント行のどれかに // WHY トランザクション無し: <理由> がある（DB に触らない command）",
+              source(
+                "// WHY トランザクション無し: 通知をログに出すだけで DB に書かない。",
+                "// 送信の失敗の扱いは expose が決める。",
+                "  async execute(input: I): Promise<void> {",
+                "    await this.sender.send(input.message);",
+                "  }",
+              ),
+            ],
+            [
+              "戻り値の型に関数の型（=>）を含む",
+              source(
+                "execute(input: I): Promise<() => void> {",
+                "  return this.transactions.run(async () => () => undefined);",
+                "}",
+              ),
+            ],
+          ];
+
+          // when
+          const violations = casesByName(cases, ([, text]) =>
+            findCommandTransactionViolations(text),
+          );
+
+          // then
+          expect(violations).toEqual(casesByName(cases, () => []));
+        },
+      );
+    },
+  );
+
+  Scenario(
+    "command のトランザクションの判定（findCommandTransactionViolations）: must reject",
+    ({ And }) => {
+      And(
+        "execute を run で包まなければ違反（Repository を直接呼ぶ・run が execute の外にだけあるなど）",
+        () => {
+          // given
+          const cases: [string, string, UseCaseViolation[]][] = [
+            [
+              "execute が Repository を直接呼び、run で包まない",
+              source(
+                "export class DeleteXCommand {",
+                "  async execute(id: string): Promise<void> {",
+                "    await this.repository.findByIdForUpdate(id, tx);",
+                "    await this.repository.delete(id, tx);",
+                "  }",
+                "}",
+              ),
+              [{ rule: "command-runs-in-transaction", line: 2 }],
+            ],
+            [
+              "run が execute の外（別のメソッド）にだけある",
+              source(
+                "class A {",
+                "  execute(input: I) {",
+                "    return this.save(input);",
+                "  }",
+                "  private save(input: I) {",
+                "    return this.transactions.run(async (tx) => this.repository.insert(input, tx));",
+                "  }",
+                "}",
+              ),
+              [{ rule: "command-runs-in-transaction", line: 2 }],
+            ],
+            [
+              "this の無い transactions.run( / 名前が run で始まるだけの runLater( / 依存を挟まない this.run( / コメントの中の run",
+              source(
+                "async execute(input: I) {",
+                "  await transactions.run(async (tx) => {});",
+                "  await this.transactions.runLater(async (tx) => {});",
+                "  await this.run(async (tx) => {});",
+                "  // return this.transactions.run(async (tx) => {});",
+                "}",
+              ),
+              [{ rule: "command-runs-in-transaction", line: 1 }],
+            ],
+            [
+              "例外の WHY が空行を挟む・理由が空・別の見出し（WHY 任意:）・execute の中にある",
+              source(
+                "// WHY トランザクション無し: DB に書かない。",
+                "",
+                "async execute(a: I) {}",
+                "// WHY トランザクション無し: ",
+                "async execute(b: I) {}",
+                "// WHY 任意: DB に書かない。",
+                "async execute(c: I) {",
+                "  // WHY トランザクション無し: DB に書かない。",
+                "}",
+              ),
+              [
+                { rule: "command-runs-in-transaction", line: 3 },
+                { rule: "command-runs-in-transaction", line: 5 },
+                { rule: "command-runs-in-transaction", line: 7 },
+              ],
+            ],
+            [
+              "execute の定義が無い command（1 行目）",
+              source("export class XCommand {", "  run() {}", "}"),
+              [{ rule: "command-runs-in-transaction", line: 1 }],
+            ],
+            [
+              "execute の後ろの別のクラスに run がある（本体の範囲は execute の { } だけ）",
+              source(
+                "class A {",
+                "  async execute(input: I) {",
+                "    await this.repository.insert(input, tx);",
+                "  }",
+                "}",
+                "class B {",
+                "  async execute(input: I) {",
+                "    await this.transactions.run(async (tx) => {});",
+                "  }",
+                "}",
+              ),
+              [{ rule: "command-runs-in-transaction", line: 2 }],
+            ],
+          ];
+
+          // when
+          const violations = casesByName(cases, ([, text]) =>
+            findCommandTransactionViolations(text),
+          );
+
+          // then
+          expect(violations).toEqual(
+            casesByName(cases, ([, , expected]) => expected),
+          );
+        },
+      );
+    },
+  );
+
+  // --- 列挙 → 読み取り → 判定を通した fixture テスト ---
+  // WHY: 判定が正しくても、対象の列挙（application/*.command.ts・*.query.ts の見つけ方）が漏れれば見逃す。一時ディレクトリに
+  //   架空のツリーを置き、本番と同じ collectUseCaseViolations に通して、違反の集合を丸ごと比較する（見逃しも余分な検出も失敗にする）。
+  Scenario("command / query の列挙と検査（fixture）", ({ And }) => {
+    And(
+      "features/<f>/internal/application/ の .command.ts・.query.ts だけを対象にし、違反を「規則: パス:行: 行の内容」で返す",
+      () => {
+        // given
+        const root = fixture({
+          "apps/backend/features/x/internal/application/rename-x.command.ts":
+            source(
+              "export type RenameXInput = {",
+              "  id: string;",
+              "  title: string;",
+              "};",
+              "async execute(input: RenameXInput) {",
+              "  return this.transactions.run(async (tx) => {",
+              "    const current = await this.repository.findByIdForUpdate(input.id, tx);",
+              "  });",
+              "}",
+            ),
+          "apps/backend/features/x/internal/application/update-x.command.ts":
+            source(
+              "export type UpdateXInput = {",
+              "  id: string;",
+              "  title?: string;",
+              "};",
+              "if (input.title !== undefined) current = current.rename(input.title);",
+              "async execute(input: UpdateXInput) {",
+              "  await this.transactions.run(async (tx) => {});",
+              "}",
+            ),
+          // Issue #215: トランザクションを張らない command（execute の本体に run が無い）。
+          "apps/backend/features/x/internal/application/delete-x.command.ts":
+            source(
+              "export class DeleteXCommand {",
+              "  async execute(id: string): Promise<void> {",
+              "    await this.repository.delete(id, tx);",
+              "  }",
+              "}",
+            ),
+          // query は execute に run が無くても対象外。
+          "apps/backend/features/x/internal/application/list-x.query.ts":
+            source(
+              "export type ListXResult = { next?: string };",
+              "execute() {",
+              "  return this.repository.findAll();",
+              "}",
+            ),
+          // 対象外: command のテスト、application の command / query 以外、入れ子、domain・presentation、shared、frontend。
+          "apps/backend/features/x/internal/application/update-x.command.test.ts":
+            partialUpdate,
+          "apps/backend/features/x/internal/application/helper.ts":
+            partialUpdate,
+          "apps/backend/features/x/internal/application/nested/y.command.ts":
+            partialUpdate,
+          "apps/backend/features/x/internal/domain/x.ts": partialUpdate,
+          "apps/backend/features/x/internal/presentation/update-x.api.ts":
+            partialUpdate,
+          "apps/backend/shared/application/y.command.ts": partialUpdate,
+          // Issue #208: internal/ を挟まない旧の置き場所（置き場所の規則 backend-placement が違反にする）。
+          "apps/backend/features/x/application/old.command.ts": partialUpdate,
+          "apps/frontend_customer/features/x/application/y.command.ts":
+            partialUpdate,
+        });
+
+        // when
+        const result = {
+          files: listUseCaseFiles(root),
+          violations: collectUseCaseViolations(root),
+        };
+
+        // then
+        expect(result).toEqual({
+          files: [
+            "apps/backend/features/x/internal/application/delete-x.command.ts",
+            "apps/backend/features/x/internal/application/list-x.query.ts",
+            "apps/backend/features/x/internal/application/rename-x.command.ts",
+            "apps/backend/features/x/internal/application/update-x.command.ts",
+          ],
+          violations: [
+            "command-runs-in-transaction: apps/backend/features/x/internal/application/delete-x.command.ts:2: async execute(id: string): Promise<void> {",
+            "no-optional-input-field: apps/backend/features/x/internal/application/update-x.command.ts:3: title?: string;",
+            "no-undefined-branch-on-input: apps/backend/features/x/internal/application/update-x.command.ts:5: if (input.title !== undefined) current = current.rename(input.title);",
+          ],
+        });
+      },
+    );
+
+    And(
+      "apps/backend/features が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）",
+      () => {
+        // given
+        const root = fixture({ "README.md": "# x\n" });
+
+        // when
+        const result = {
+          files: listUseCaseFiles(root),
+          violations: collectUseCaseViolations(root),
+        };
+
+        // then
+        expect(result).toEqual({ files: [], violations: [] });
+      },
+    );
   });
 
-  it("apps/backend/features が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）", () => {
-    // given
-    const root = fixture({ "README.md": "# x\n" });
+  Scenario("1 ユースケース = 1 command（実ファイル）", ({ And }) => {
+    And(
+      "command / query の Input に任意の項目が無く、input の項目の有無で分岐せず、command の execute はトランザクション（runner の run）で包む",
+      () => {
+        // given: 実ファイル（repoRoot）
+        // when
+        const files = listUseCaseFiles(repoRoot);
+        const violations = collectUseCaseViolations(repoRoot);
 
-    // when
-    const result = {
-      files: listUseCaseFiles(root),
-      violations: collectUseCaseViolations(root),
-    };
-
-    // then
-    expect(result).toEqual({ files: [], violations: [] });
-  });
-});
-
-describe("1 ユースケース = 1 command（実ファイル）", () => {
-  it("command / query の Input に任意の項目が無く、input の項目の有無で分岐せず、command の execute はトランザクション（runner の run）で包む", () => {
-    // given: 実ファイル（repoRoot）
-    // when
-    const files = listUseCaseFiles(repoRoot);
-    const violations = collectUseCaseViolations(repoRoot);
-
-    // then
-    // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
-    expect(files).toContain(
-      "apps/backend/features/todo/internal/application/rename-todo.command.ts",
+        // then
+        // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
+        expect(files).toContain(
+          "apps/backend/features/todo/internal/application/rename-todo.command.ts",
+        );
+        expect(files).toContain(
+          "apps/backend/features/todo/internal/application/list-todos.query.ts",
+        );
+        expect(violations).toEqual([]);
+      },
     );
-    expect(files).toContain(
-      "apps/backend/features/todo/internal/application/list-todos.query.ts",
-    );
-    expect(violations).toEqual([]);
   });
 });
