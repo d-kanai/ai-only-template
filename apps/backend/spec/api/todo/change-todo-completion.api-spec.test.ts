@@ -42,7 +42,7 @@ import {
 
 let database: TestDatabase;
 let handler: ReturnType<typeof changeTodoCompletionApi>;
-// 完了の通知は本物の notification モジュール（expose の notify。support.ts の組み立て）が送り、今の送り先はログ（console.log の
+// 完了の通知は本物の notification モジュール（expose の Notifier。support.ts の組み立て）が送り、今の送り先はログ（console.log の
 //   JSON 1 行）だけ。通知の確かめは、そのログの行を読んで行う。
 // WHY console.log を差し替える（テストダブル無しの例外。Issue #258）: ログは本番の部品の外（実行環境の出力先）で、差し替えずには
 //   仕様から読めない。ログに限って差し替えてよい（daiki の判断 2026-10-02。rule-tests/api-spec.test.ts の api-spec-no-vi が
@@ -70,7 +70,7 @@ afterEach(() => {
 });
 
 // ログに出た通知の本文（出た順）。ログの行のうち event.name が notification のもの（notification-sender.log.ts）だけを読む。
-// 限界: 通知の行は notify の中で同期に出る（send の本体が await の前に logger.emit を呼ぶ）ので、handler の応答の後に読めば揃っている。
+// 限界: 通知の行は Notifier の notify の中で同期に出る（send の本体が await の前に logger.emit を呼ぶ）ので、handler の応答の後に読めば揃っている。
 //   送信が本当に非同期になった（await の後にログを出す）ら、ここで待つ必要がある。
 function notifications(): string[] {
   return log.mock.calls

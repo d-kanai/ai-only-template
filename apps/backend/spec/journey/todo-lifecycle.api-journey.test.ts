@@ -86,9 +86,9 @@ import {
 let database: TestDatabase;
 let handlers: ReturnType<typeof api>;
 // 完了の通知の口に渡されたメッセージ（呼ばれた順）。
-// WHY 本番の notify（notification の expose）ではなく記録する関数を渡す: notify はログに出すだけで、ジャーニーから結果を
+// WHY 本番の Notifier（notification の expose）ではなく記録するオブジェクトを渡す: Notifier はログに出すだけで、ジャーニーから結果を
 //   読めない（vi は使えないので console も見られない）。記録すれば「完了の step で通知が 1 件」を Then で確かめられる。
-//   notify につながっていることは change-todo-completion.api.test.ts の「本番の PUT」のテストが見る。
+//   Notifier につながっていることは change-todo-completion.api.test.ts の「本番の PUT」のテストが見る。
 // WHY 変数を空にし直さない: シナリオ「作成から完了・削除まで」だけが完了にする。ほかのシナリオは完了にせず、通知を見ない。
 const notifications: string[] = [];
 
@@ -118,8 +118,10 @@ function api() {
     putTitle: new RenameTodoApi(new RenameTodoCommand(repository, transactions))
       .handle,
     putCompletion: new ChangeTodoCompletionApi(
-      new ChangeTodoCompletionCommand(repository, transactions, (message) => {
-        notifications.push(message);
+      new ChangeTodoCompletionCommand(repository, transactions, {
+        notify(message) {
+          notifications.push(message);
+        },
       }),
     ).handle,
     deleteTodo: new DeleteTodoApi(
