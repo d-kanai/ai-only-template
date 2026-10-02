@@ -40,6 +40,7 @@ import type { ChangeEntry } from "../../shared/infra/change-log";
 import { changeLogs } from "../../shared/infra/schema";
 import { PostgresTransactionRunner } from "../../shared/infra/transaction.postgres";
 import type { Problem } from "../../shared/presentation/problem";
+import { ApiCoverage } from "../../test-support/api-coverage";
 import { TestDatabase } from "../../test-support/database";
 
 // API ジャーニーテスト（Issue #187 / #200。.claude/rules/testing.md の「API ジャーニーテスト」、ADR
@@ -104,26 +105,35 @@ afterAll(async () => {
 //   が呼び出しの名前で変更系（post / put / patch / delete）を見分け、その後に DB の読み取りがあるかを検査する（.claude/rules/testing.md
 //   の「API ジャーニーテスト」）。
 // 書き込みの command には、本番と同じくトランザクションを張る PostgresTransactionRunner を同じ db で渡す（Issue #215）。
+// 各 Api を ApiCoverage.track で包む（API 網羅率。Issue #281）。呼ばれた Api のクラス名が step の meta に残り、全 API が
+//   どこかのジャーニーで呼ばれたかを reporter（test-support/api-coverage-reporter.ts）が判定する。
+// WHY 包み忘れても通らない: 包まずに呼んだ API は記録されず、網羅率が下がって落ちる（見逃す方向には働かない）。
 function api() {
   const repository = new PostgresTodoRepository(database.db);
   const transactions = new PostgresTransactionRunner(database.db);
   return {
-    postTodo: new CreateTodoApi(new CreateTodoCommand(repository, transactions))
-      .handle,
-    listTodos: new ListTodosApi(new ListTodosQuery(repository)).handle,
-    getTodo: new GetTodoApi(new GetTodoQuery(repository)).handle,
-    putTitle: new RenameTodoApi(new RenameTodoCommand(repository, transactions))
-      .handle,
-    putCompletion: new ChangeTodoCompletionApi(
-      new ChangeTodoCompletionCommand(repository, transactions, {
-        notify(message) {
-          notifications.push(message);
-        },
-      }),
-    ).handle,
-    deleteTodo: new DeleteTodoApi(
-      new DeleteTodoCommand(repository, transactions),
-    ).handle,
+    postTodo: ApiCoverage.track(
+      new CreateTodoApi(new CreateTodoCommand(repository, transactions)),
+    ),
+    listTodos: ApiCoverage.track(
+      new ListTodosApi(new ListTodosQuery(repository)),
+    ),
+    getTodo: ApiCoverage.track(new GetTodoApi(new GetTodoQuery(repository))),
+    putTitle: ApiCoverage.track(
+      new RenameTodoApi(new RenameTodoCommand(repository, transactions)),
+    ),
+    putCompletion: ApiCoverage.track(
+      new ChangeTodoCompletionApi(
+        new ChangeTodoCompletionCommand(repository, transactions, {
+          notify(message) {
+            notifications.push(message);
+          },
+        }),
+      ),
+    ),
+    deleteTodo: ApiCoverage.track(
+      new DeleteTodoApi(new DeleteTodoCommand(repository, transactions)),
+    ),
   };
 }
 
