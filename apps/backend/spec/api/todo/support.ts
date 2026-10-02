@@ -1,5 +1,6 @@
 import { asc, eq, sql } from "drizzle-orm";
 import { expect } from "vitest";
+import { notify } from "../../../features/notification/expose/notify";
 import { ChangeTodoCompletionCommand } from "../../../features/todo/internal/application/change-todo-completion.command";
 import { CreateTodoCommand } from "../../../features/todo/internal/application/create-todo.command";
 import { DeleteTodoCommand } from "../../../features/todo/internal/application/delete-todo.command";
@@ -75,17 +76,25 @@ export function renameTodoApi(db: Database) {
   ).handle;
 }
 
-// WHY 通知は関数を受け取る: 本番の notify（notification の expose）はログに出すだけで、仕様から結果を読めない（vi は使わない）。
-//   記録する関数を渡せば「完了の通知が 1 件」を確かめられる。
+// 完了の通知は本番と同じ notification モジュールの入口（expose/notify.ts）に渡し、同じメッセージを onNotify にも渡す（Issue #256）。
+// WHY 本物の notify を呼ぶ（記録する関数だけにしない）: 仕様の実行で notification モジュール（command・ログの sender）まで通す
+//   （daiki の判断 2026-10-02）。記録する関数だけだと、notification モジュールは仕様で一度も動かない。
+// WHY onNotify にも渡す: notify はログに出すだけで戻り値が無く、仕様から結果を読めない（vi は使わない。api-spec-no-vi）。
+//   notify と同じ引数を受け取る関数を並べて呼べば「完了の通知が 1 件」を確かめられる。
+// 限界: onNotify が見るのは notification の入口に渡したメッセージまでで、notification の中（ログの 1 行）は見ない。それは
+//   features/notification/expose/notify.test.ts が見る。本番の PUT の組み立てが notify を渡すことは change-todo-completion.api.test.ts が見る。
 export function changeTodoCompletionApi(
   db: Database,
-  notify: (message: string) => void,
+  onNotify: (message: string) => void,
 ) {
   return new ChangeTodoCompletionApi(
     new ChangeTodoCompletionCommand(
       new PostgresTodoRepository(db),
       new PostgresTransactionRunner(db),
-      notify,
+      (message) => {
+        notify(message);
+        onNotify(message);
+      },
     ),
   ).handle;
 }
