@@ -138,9 +138,8 @@ describeFeature(feature, ({ Scenario }) => {
     });
 
     // 完了の履歴の日時が作成日時より前の Todo は不変条件の違反で、クライアントには直せないサーバ側の誤り（500。
-    //   todo-repository.postgres.ts の toTodo）。履歴の無い Todo・最後の履歴が todos.completed と食い違う Todo（デプロイの途中で
-    //   古い版が作った・completed だけを変えたもの）は Repository が補って読むので壊れていない（Issue #194・#237。repairHistory）。
-    //   補っても直らない並びの壊れた履歴だけが 500 になる。
+    //   todo-repository.postgres.ts の toTodo）。履歴の無い Todo・最後の履歴が todos.completed と食い違う Todo も同じく 500
+    //   （Repository は補わない。Issue #260）。
     // 例外は toProblemResponse が logger.emit（server_error。ERROR なので console.error）で標準エラーに 1 行出す（vi を使わないので抑えない）。
     And(
       "壊れた Todo（完了の履歴の日時が、作られた日時より前のもの）は、サーバの誤りとして伝えられる",

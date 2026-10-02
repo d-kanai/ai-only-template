@@ -1,7 +1,7 @@
 # スキーマの変更はデプロイの切替の前、データの移行（backfill）は切替の後に冪等な SQL で流す
 
 - 日付: 2026-10-01
-- 状態: 採用
+- 状態: 置き換え（→ workflow/20261002-drop-repair-on-read-without-production.md）
 - 関連: Issue #194 / `.claude/rules/backend.md` / `.github/workflows/deploy.yml` / `rule-tests/migration.test.ts` / スキル `deploy` / スキル `db-migration`
 
 ## 背景
