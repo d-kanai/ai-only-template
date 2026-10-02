@@ -55,3 +55,5 @@ infra
 # Cloudflare（OpenNext）のビルドの出力・ローカルの状態。このイメージには使わない。
 .open-next
 .wrangler
+# pnpm db:migrate:bundle の手元の出力（Issue #326）。イメージでは build ステージが作り直すので、手元の古いものを持ち込まない。
+dist

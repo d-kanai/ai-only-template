@@ -557,7 +557,7 @@ ensure_dotenv() {
   fi
 }
 
-# 起動した Postgres に apps/backend/shared/drizzle/ のマイグレーションを当てる（pnpm db:migrate = drizzle-kit migrate。Issue #57）。
+# 起動した Postgres に apps/backend/shared/drizzle/ のマイグレーションを当てる（pnpm db:migrate。Issue #57）。
 # WHY フックで当てるか: VM はセッションごとに新しく、Postgres もデータの無い状態で起動する。表が無いままだと、
 #   pnpm dev / pnpm test:e2e が「relation "todos" does not exist」で失敗する。
 #   当て済みのものは飛ばす（drizzle.__drizzle_migrations に記録がある）ので、何度実行しても同じ結果になる。

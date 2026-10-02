@@ -106,7 +106,7 @@ cp .env.example .env
 
 ```sh
 pnpm db:up       # Postgres を起動し、healthcheck が通るまで待つ（docker compose up -d --wait）
-pnpm db:migrate  # apps/backend/shared/drizzle/ のマイグレーションを当てる（drizzle-kit migrate。当て済みのものは飛ばす）
+pnpm db:migrate  # apps/backend/shared/drizzle/ のマイグレーションを当てる（入口 migrate.ts を esbuild で束ねて実行。Cloud Run の migrate ジョブと同じファイル。当て済みのものは飛ばす）
 pnpm db:psql     # psql で接続する（docker compose exec db psql -U app -d app）
 pnpm db:down     # 止める（データは名前付きボリューム pgdata に残る。消すときは docker compose down -v）
 pnpm db:generate # apps/backend/features/*/internal/infra/schema.ts を変えたら、差分の SQL を apps/backend/shared/drizzle/ に生成する（drizzle-kit generate。DB には接続しない）

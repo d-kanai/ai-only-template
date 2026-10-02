@@ -98,6 +98,8 @@ export default {
     "apps/backend/**/*.{ts,tsx}",
     "apps/shared/**/*.ts",
     "!apps/backend/shared/drizzle/*.config.ts",
+    // マイグレーションの入口（Issue #326）。vitest.config.mts の coverage.exclude と同じ理由で、単体テストが読み込めない。
+    "!apps/backend/shared/drizzle/migrate.ts",
     "!**/*.test.{ts,tsx}",
     "!**/*.d.ts",
   ],
