@@ -2,7 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { DesignSystem } from "@/test-support/design-system";
 import { activeTheme } from "../active-theme";
-import { Page } from "./page";
+import { Layout } from "./layout";
 
 // Vitest は globals を無効にしているため、Testing Library の自動 cleanup が働かない。前のテストの DOM を明示的に消す。
 afterEach(cleanup);
@@ -11,9 +11,9 @@ test("子を画面の本文（main）として描き、テーマが Container �
   // given: 前提なし（テーマは DesignSystem の既定 activeTheme）
   // when
   render(
-    <Page>
+    <Layout>
       <span>中身</span>
-    </Page>,
+    </Layout>,
     { wrapper: DesignSystem },
   );
 
