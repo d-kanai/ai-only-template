@@ -30,7 +30,7 @@ paths:
 | test-support | 本番のコードから test-support を参照しない | - | `rule-tests/test-support.test.ts` の `production-imports-test-support` |
 | test-support | test-support を exports にも載せない | - | `rule-tests/test-support.test.ts` の `exports-test-support` |
 | test-support | test-support は Docker のイメージに入らない（`.dockerignore` の `**/test-support`。検査は `.dockerignore` の行とパターン。test-support を import するテストも `**/*.test.ts`・`**/*.test.tsx` で外す） | テストを残すと next build の型チェックが解決できずに失敗する | `rule-tests/test-support.test.ts` の `dockerignore-entry`・`dockerignore-excludes` |
-| test-support | イメージに入っていないことを、push した runtime と migrate のイメージの `find` でも確かめる（コンテキスト全体が入るのは migrate） | - | `.github/workflows/deploy.yml` の `find` |
+| test-support | イメージに入っていないことを、push した runtime のイメージ（service と migrate ジョブが使う。Issue #326）の `find` でも確かめる | - | `.github/workflows/deploy.yml` の `find` |
 | test-support | `*.in-memory.*` は `apps/backend/test-support/` の下だけ | - | `rule-tests/test-support.test.ts` の `in-memory-placement` |
 | journey | `apps/backend/spec/journey/`（Issue #187 / #200）には API ジャーニーテスト（実 Postgres で複数の API を業務の流れの順に呼ぶ）の `<ユースケース>.feature`（Gherkin）+ `<ユースケース>.api-journey.test.ts`（step の実装。vitest-cucumber）の対だけを置く。ソース・補助・サブディレクトリは置かない | `features/<f>/` の下にしない: 業務の流れは feature をまたぐことがあり、feature の下では置けない | `rule-tests/api-journey.test.ts` の `api-journey-placement`・`api-journey-feature-pair` |
 | journey | `.feature` もここ以外に置かない（`spec/api/` の下の API 仕様の `.feature` は除く。Issue #219） | - | `rule-tests/api-journey.test.ts` の `api-journey-placement` |

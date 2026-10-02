@@ -9410,7 +9410,6 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/backend/features/todo/internal/domain/todo.ts",
             "apps/backend/features/notification/expose/notifier.ts",
             "apps/backend/features/notification/internal/infra/notification-sender.log.ts",
-            "apps/backend/shared/drizzle/drizzle.config.ts",
             "apps/backend/shared/drizzle/database.ts",
             "apps/backend/shared/http/problem.ts",
             "apps/e2e/support/database.ts",

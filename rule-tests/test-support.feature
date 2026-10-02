@@ -27,12 +27,12 @@ Feature: test-support の置き場所と除外
     * in-memory-placement: apps/backend の下の .in-memory のソースを列挙し、test-support/ の外にあるものだけが違反
     * apps/ も .dockerignore も無ければ、列挙は 0 件で行が無い違反だけ（本番の検査は 0 件を失敗にする）
   Scenario: deploy.yml のイメージの検査のステップ（findDeployVerifyViolations）
-    * runtime と migrate のイメージを検査するステップがあれば違反なし（間に別のステップ・コメント・run が 1 行）
-    * イメージの検査のステップが欠けていれば違反（ステップが無い・migrate のステップが無い・コメントアウト・run に find のパターンが無いなど）
+    * runtime のイメージを検査するステップがあれば違反なし（前後に別のステップ・コメント・run が 1 行）
+    * イメージの検査のステップが欠けていれば違反（ステップが無い・コメントアウト・run に find のパターンが無いなど）
   Scenario: test-support（実ファイル）
     * dockerignore-entry: .dockerignore に test-support をすべての階層で除外する行がある
     * dockerignore-excludes: apps/<app>/test-support/ のすべてのファイルと test-support を import するテストが .dockerignore で除外される
     * production-imports-test-support: 本番のコードは test-support を import しない
-    * deploy-verifies-images: deploy.yml が runtime と migrate のイメージに test-support が無いことを確かめる
+    * deploy-verifies-images: deploy.yml が runtime のイメージ（service と migrate ジョブが使う）に test-support が無いことを確かめる
     * exports-test-support: apps/<app>/package.json の exports に test-support が無い
     * in-memory-placement: apps/backend の .in-memory のソースは apps/backend/test-support/ の下だけにある

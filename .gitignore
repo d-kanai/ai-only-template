@@ -82,3 +82,6 @@ next-env.d.ts
 *.tfstate.*
 *.tfplan
 *.tfvars
+
+# pnpm db:migrate:bundle が esbuild で束ねたマイグレーションの入口と SQL（Issue #326）。
+/dist/

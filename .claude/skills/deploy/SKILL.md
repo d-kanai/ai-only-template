@@ -17,7 +17,7 @@ Terraform は環境のディレクトリ（`infra/envs/stg` か `infra/envs/prod
 - Environment の Variables（`GCP_WIF_PROVIDER` など）が無いあいだ、deploy.yml は最初のステップで notice を出し、以降のステップをスキップする（ジョブは緑）。
 
 ## 通常のデプロイ（main へのマージ → stg）
-`.github/workflows/deploy.yml` が Environment `stg` で自動で動く: 2 イメージ（runtime / migrate）を build・push → migrate ジョブの実行（`--wait`）→ service のデプロイ → `update-traffic --to-latest`（トラフィックを最新のリビジョンへ）。
+`.github/workflows/deploy.yml` が Environment `stg` で自動で動く: runtime イメージを 1 つ build・push → migrate ジョブのイメージを同じものにし、コマンドを `node migrate/migrate.mjs` にして実行（`--wait`。Issue #326。それより前に push した Artifact Registry の `frontend-customer-migrate` のイメージは使わない。残っていれば `gcloud artifacts docker images delete <リージョン>-docker.pkg.dev/<プロジェクト>/app/frontend-customer-migrate --delete-tags` で消す）→ service のデプロイ → `update-traffic --to-latest`（トラフィックを最新のリビジョンへ）。
 - migrate が失敗したら service はデプロイされない（古いコードのまま動き続ける）。下の「migrate が失敗したとき」。
 - 実行は環境ごとの concurrency（`deploy-stg` / `deploy-prod`）で 1 本ずつ（途中で止めない）。
 - マイグレーションは、1 つ前のコードでも動く形（列の追加は先、削除は次のリリース）で書く。WHY: migrate の後、service が切り替わるまでのあいだは古いコードが新しいスキーマで動く。ロールバックでも同じ（スキーマは戻さない）。prod は手動なので、stg より何リリースも前のコードが動いていることがある。prod へのデプロイでは、その間のマイグレーションがまとめて当たり、prod で今動いているコードが新しいスキーマで動く（「1 つ前のコード」は prod で今動いているコードのこと）。

@@ -43,7 +43,7 @@ import { casesByName } from "./case-table";
 //   - exports-test-support: apps/*/package.json の exports のキーか値（条件付きの入れ子も）に `test-support` を含む。
 //     WHY: exports に載せると、別のパッケージから `@repo/<pkg>/...` で本番のコードに読み込める入口になる。
 //   - deploy-verifies-images: .github/workflows/deploy.yml に、push したイメージに test-support が無いことを確かめるステップ
-//     （`Verify runtime image has no test-support`・`Verify migrate image has no test-support`）が無い、そのステップに
+//     （`Verify runtime image has no test-support`）が無い、そのステップに
 //     `if: steps.config.outputs.ready == 'true'` が無い、`run:` に find のパターン `-path "*test-support*"` が無いもの。
 //     WHY パターンまで見る: `test-support` の文字だけだと、find を消してもエラーの文言（`::error::test-support が…`）で通る。
 //     WHY: この検査（(a)〜(d)）はリポジトリのファイルを見るだけで、ビルドした結果（イメージ）は deploy のステップだけが見る。
@@ -51,6 +51,7 @@ import { casesByName } from "./case-table";
 //     Variables の無いリポジトリで失敗するか、条件を変えたときに黙ってスキップされる。
 //     限界: ステップは「行頭が `- key:` の行」で区切り、コメントの行（`#` で始まる）は除いて読む。パターンのほか（find の結果を
 //     判定に使っているか・対象のイメージ）は見ない（手元のイメージで exit 0 / 混入で exit 1 を実測した。Issue #181 の work-logs）。
+//     イメージは runtime の 1 つだけ（Issue #326 で migrate 専用のイメージをやめ、migrate ジョブも runtime を使う）。
 //   - in-memory-placement: apps/backend の下の InMemory の実装（名前が `.in-memory.<ソースの拡張子>` で終わるファイル）が
 //     apps/backend/test-support/ の下に無い（Issue #191。features/<f>/internal/infra/・shared の下（shared/drizzle/ など）・features/<f>/test-support/ は違反）。
 //     WHY: InMemory の Repository はテストだけが使うコードで、infra に置くと本番のコードと見分けが付かず、本番の api ファイルが
@@ -73,8 +74,8 @@ import { casesByName } from "./case-table";
 // import の抽出の限界: コメントは除いてから探す。文字列の中の `from "x"` のような文字列は import と数える（多く検出する側）。
 //   `require("x")`・テンプレートリテラルの `import(`x`)`・tsconfig の paths や package.json の imports（`#x`）で test-support を
 //   別名にした参照は見ない（今のリポジトリの paths は `@/*` だけ）。symlink は列挙でたどらない。
-// ほかの保証: deploy.yml が、push した runtime と migrate のイメージに test-support のパスが無いことを find で確かめる（.dockerignore の
-//   変更で漏れたときに main へのデプロイで止める。コンテキスト全体が入るのは migrate）。architecture.test.ts の backend-placement / frontend-placement が、apps/backend と
+// ほかの保証: deploy.yml が、push した runtime のイメージ（service と migrate ジョブが使う）に test-support のパスが無いことを
+//   find で確かめる（本番のコードの import や app/ のルートで漏れたときに main へのデプロイで止める）。architecture.test.ts の backend-placement / frontend-placement が、apps/backend と
 //   apps/frontend_customer の直下に test-support/ を置くことを許す。
 
 type RuleId =
@@ -361,10 +362,7 @@ function collectViolations(root: string): Record<RuleId, string[]> {
 // --- (e) deploy.yml のイメージの検査のステップ ---
 
 const DEPLOY_WORKFLOW = ".github/workflows/deploy.yml";
-const VERIFY_STEP_NAMES = [
-  "Verify runtime image has no test-support",
-  "Verify migrate image has no test-support",
-];
+const VERIFY_STEP_NAMES = ["Verify runtime image has no test-support"];
 const DEPLOY_READY_CONDITION = "if: steps.config.outputs.ready == 'true'";
 const FIND_PATTERN = '-path "*test-support*"';
 
@@ -516,10 +514,6 @@ const verify = (image: string) => [
 const runtime = step(
   "Verify runtime image has no test-support",
   verify("IMAGE"),
-);
-const migrate = step(
-  "Verify migrate image has no test-support",
-  verify("MIGRATE_IMAGE"),
 );
 const workflow = (...steps: string[]) =>
   lines("jobs:", "  deploy:", "    steps:", ...steps);
@@ -1356,28 +1350,27 @@ describeFeature(feature, ({ Scenario }) => {
     "deploy.yml のイメージの検査のステップ（findDeployVerifyViolations）",
     ({ And }) => {
       And(
-        "runtime と migrate のイメージを検査するステップがあれば違反なし（間に別のステップ・コメント・run が 1 行）",
+        "runtime のイメージを検査するステップがあれば違反なし（前後に別のステップ・コメント・run が 1 行）",
         () => {
           // given
           const cases: [string, string][] = [
-            ["2 つのステップがある", workflow(runtime, migrate)],
+            ["ステップがある", workflow(runtime)],
             [
-              "間に別のステップ・コメントがある",
+              "前後に別のステップ・コメントがある",
               workflow(
-                runtime,
-                "      # マイグレーションのイメージ",
+                "      # アプリのイメージ",
                 "      - if: steps.config.outputs.ready == 'true'",
-                "        name: Build and push migrate image",
+                "        name: Build and push runtime image",
                 "        uses: docker/build-push-action@v7",
-                migrate,
+                runtime,
+                lines("      - name: Other", "        run: echo ok"),
               ),
             ],
             [
               "run が 1 行（| を使わない）",
               workflow(
-                runtime,
                 lines(
-                  "      - name: Verify migrate image has no test-support",
+                  "      - name: Verify runtime image has no test-support",
                   "        if: steps.config.outputs.ready == 'true'",
                   '        run: find / -path "*test-support*" -print',
                 ),
@@ -1396,111 +1389,104 @@ describeFeature(feature, ({ Scenario }) => {
       );
 
       And(
-        "イメージの検査のステップが欠けていれば違反（ステップが無い・migrate のステップが無い・コメントアウト・run に find のパターンが無いなど）",
+        "イメージの検査のステップが欠けていれば違反（ステップが無い・コメントアウト・run に find のパターンが無いなど）",
         () => {
           // given
           const cases: [string, string, string[]][] = [
             [
               "ステップが無い",
               workflow(),
-              [
-                "Verify runtime image has no test-support: ステップが無い",
-                "Verify migrate image has no test-support: ステップが無い",
-              ],
-            ],
-            [
-              "migrate のステップが無い",
-              workflow(runtime),
-              ["Verify migrate image has no test-support: ステップが無い"],
+              ["Verify runtime image has no test-support: ステップが無い"],
             ],
             [
               "コメントアウトしたステップ",
               workflow(
-                runtime,
-                migrate
+                runtime
                   .split("\n")
                   .map((line) => `      # ${line.trim()}`)
                   .join("\n"),
               ),
-              ["Verify migrate image has no test-support: ステップが無い"],
+              ["Verify runtime image has no test-support: ステップが無い"],
             ],
             [
               "名前だけ残して run に find のパターンが無い（エラーの文言にだけ test-support）",
               workflow(
-                runtime,
-                step("Verify migrate image has no test-support", [
+                step("Verify runtime image has no test-support", [
                   'echo "::error::test-support"',
                 ]),
               ),
               [
-                'Verify migrate image has no test-support: run に -path "*test-support*" が無い',
+                'Verify runtime image has no test-support: run に -path "*test-support*" が無い',
               ],
             ],
             [
               "run が無い（名前だけ）",
               workflow(
-                runtime,
                 lines(
                   "      - if: steps.config.outputs.ready == 'true'",
-                  "        name: Verify migrate image has no test-support",
+                  "        name: Verify runtime image has no test-support",
                 ),
               ),
               [
-                'Verify migrate image has no test-support: run に -path "*test-support*" が無い',
+                'Verify runtime image has no test-support: run に -path "*test-support*" が無い',
               ],
             ],
             [
               "test-support が run の外（次のステップ）にだけある",
               workflow(
-                runtime,
-                step("Verify migrate image has no test-support", ["true"]),
+                step("Verify runtime image has no test-support", ["true"]),
                 lines("      - name: Other", "        run: echo test-support"),
               ),
               [
-                'Verify migrate image has no test-support: run に -path "*test-support*" が無い',
+                'Verify runtime image has no test-support: run に -path "*test-support*" が無い',
               ],
             ],
             [
               "test-support が run のコメントにだけある",
               workflow(
-                runtime,
-                step("Verify migrate image has no test-support", [
+                step("Verify runtime image has no test-support", [
                   "# test-support",
                   "true",
                 ]),
               ),
               [
-                'Verify migrate image has no test-support: run に -path "*test-support*" が無い',
+                'Verify runtime image has no test-support: run に -path "*test-support*" が無い',
               ],
             ],
             [
-              "if が無い・別の条件",
+              "if が無い",
+              workflow(
+                lines(
+                  "      - name: Verify runtime image has no test-support",
+                  '        run: find / -path "*test-support*" -print',
+                ),
+              ),
+              [
+                "Verify runtime image has no test-support: if: steps.config.outputs.ready == 'true' が無い",
+              ],
+            ],
+            [
+              "別の条件",
               workflow(
                 step(
                   "Verify runtime image has no test-support",
                   verify("IMAGE"),
                   "if: always()",
                 ),
-                lines(
-                  "      - name: Verify migrate image has no test-support",
-                  '        run: find / -path "*test-support*" -print',
-                ),
               ),
               [
                 "Verify runtime image has no test-support: if: steps.config.outputs.ready == 'true' が無い",
-                "Verify migrate image has no test-support: if: steps.config.outputs.ready == 'true' が無い",
               ],
             ],
             [
               "名前の前方一致だけ（別の名前）",
               workflow(
-                runtime,
                 step(
-                  "Verify migrate image has no test-support files",
-                  verify("MIGRATE_IMAGE"),
+                  "Verify runtime image has no test-support files",
+                  verify("IMAGE"),
                 ),
               ),
-              ["Verify migrate image has no test-support: ステップが無い"],
+              ["Verify runtime image has no test-support: ステップが無い"],
             ],
           ];
 
@@ -1575,7 +1561,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And(
-      "deploy-verifies-images: deploy.yml が runtime と migrate のイメージに test-support が無いことを確かめる",
+      "deploy-verifies-images: deploy.yml が runtime のイメージ（service と migrate ジョブが使う）に test-support が無いことを確かめる",
       () => {
         // given
         const yaml = readFileSync(join(repoRoot, DEPLOY_WORKFLOW), "utf8");
