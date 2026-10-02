@@ -142,6 +142,26 @@ describe("ApiEndpoints.list（全 API の一覧。route.ts の re-export から�
     ]);
   });
 
+  // WHY: api ファイルのコメント（list-todos.api.ts の WHY）にも `export const GET = new ListTodosApi(` の形が書かれる。コメントの
+  //   古いクラス名を拾うと、呼ばれていない本物のクラスを ✓ にしうる（Codex の指摘、PR #287）。
+  test("must pass: api ファイルのコメントの中の export const は読まず、行頭の宣言のクラスを返す", () => {
+    // given
+    const root = fixture({
+      ...validFiles(),
+      [`${PRESENTATION}/rename-todo.api.ts`]: [
+        "// 組み立ては `export const PUT = new OldRenameTodoApi(...).handle` のようにする。",
+        "  // export const PUT = new IndentedOldApi(",
+        apiFile("PUT", "RenameTodoApi"),
+      ].join("\n"),
+    });
+
+    // when
+    const endpoints = ApiEndpoints.list(root);
+
+    // then
+    expect(endpoints).toStrictEqual(VALID_ENDPOINTS);
+  });
+
   test("must pass: リポジトリの全 API（6 つ）を返す", () => {
     // given: リポジトリの apps/frontend_customer/app/api/ の route.ts
 

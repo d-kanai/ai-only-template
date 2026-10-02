@@ -151,8 +151,11 @@ export class ApiEndpoints {
     // WHY 文字コードを渡さず String で文字列にする: RegExp#exec は Buffer も文字列にして読むので、"utf8" を渡すと
     //   その引数を消す変異（Stryker）が等価になり、殺せない。
     const source = String(readFileSync(join(root, apiFile)));
+    // WHY 行頭（^ と m）に限る: api ファイルのコメント（list-todos.api.ts の WHY）にも同じ形が書かれる。コメントの古いクラス名を
+    //   拾うと、呼ばれていない本物のクラスを ✓ にしうる（Codex の指摘、PR #287）。本番の組み立ては最上位の宣言なので行頭から始まる。
     const match = new RegExp(
-      `export\\s+const\\s+${method}\\s*=\\s*new\\s+(\\w+)\\s*\\(`,
+      `^export\\s+const\\s+${method}\\s*=\\s*new\\s+(\\w+)\\s*\\(`,
+      "m",
     ).exec(source);
     if (match === null) {
       throw new Error(
