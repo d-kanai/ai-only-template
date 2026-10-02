@@ -495,19 +495,6 @@ describe("Todo#origin", () => {
     expect(todo.origin).toStrictEqual(VALUES);
   });
 
-  // WHY: Repository が DB に足りない完了の履歴を補って読んだとき（Issue #194・#237。todo-repository.postgres.ts の repairHistory）、
-  //   origin の履歴を DB の状態（補う前）にしておくと、次の update が補った履歴を「増えた分」として書く（repair on write）。
-  test("reconstruct に DB に今ある履歴（stored）を渡すと、今の値は values のまま、origin の履歴だけが stored の履歴になる", () => {
-    const todo = Todo.reconstruct(
-      { ...VALUES, title: "  牛乳を買う \n" },
-      { statusChanges: [] },
-    );
-
-    expect(todo.statusChanges).toStrictEqual(VALUES.statusChanges);
-    expect(todo.origin).toStrictEqual({ ...VALUES, statusChanges: [] });
-    expect(todo.rename("卵を買う").origin).toBe(todo.origin);
-  });
-
   test("rename・changeCompletion した Todo は元の origin を引き継ぐ（今の値は変わっても origin は読み込んだときのまま）", () => {
     const loaded = Todo.reconstruct(VALUES);
 

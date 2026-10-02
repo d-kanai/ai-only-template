@@ -172,7 +172,7 @@ describe("aTodo（Todo のテストデータビルダー）", () => {
     ]);
   });
 
-  // 履歴の無い Todo（デプロイの途中で古い版が作ったもの。Repository が補って読む。Issue #194）も作れる。
+  // 履歴の無い Todo（壊れた Todo。Repository の読み出しで 500 になることを確かめる前提に使う）も作れる。
   it("空の履歴を指定すると、Todo だけが入り、完了の履歴は入らない", async () => {
     const todo = await aTodo(database.db).statusChanges([]).build();
 

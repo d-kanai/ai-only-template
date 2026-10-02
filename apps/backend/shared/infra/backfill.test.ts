@@ -207,7 +207,7 @@ describe("backfill の SQL（shared/drizzle/backfill/）: Todo の完了の履�
   // WHY 冪等にする: 適用の記録表を持たず、デプロイのたびに全ファイルを流す（.claude/rules/backend.md の「永続化」）。
   // WHY 2 文目だけを流す: READ COMMITTED では文ごとにスナップショットを取るので、1 文目と 2 文目の間に旧アプリが作って完了にした
   //   Todo（履歴 0 件・完了済み）は 2 文目にだけ見える。そのとき (id, 1, true) だけを入れると、履歴が [完了] の 1 件になり、
-  //   不変条件は満たすので repair on read でも backfill の流し直しでも直らず、未完了に戻す update が 23505 で 500 になり続ける。
+  //   不変条件は満たすので backfill の流し直しでも直らず、未完了に戻す update が 23505 で 500 になり続ける。
   //   文の区切りは SQL のファイルの「--> statement-breakpoint」の行（drizzle のマイグレーションと同じ書き方）。
   test("履歴 0 件の完了済み Todo に、2 文目（完了の 2 件目を足す文）だけを流しても足さない", async () => {
     await insertTodo(DONE, true);
@@ -224,7 +224,7 @@ describe("backfill の SQL（shared/drizzle/backfill/）: Todo の完了の履�
 
   // 最後の履歴が todos.completed と食い違う Todo（Issue #237）: 履歴を知らない旧リビジョンが、backfill で履歴が付いた後に
   //   todos.completed だけを変えた Todo。3 文目が末尾に「最後の履歴の日時に、今の completed」を 1 件足す。
-  // WHY 日時を最後の履歴の日時にする: 変えた日時の記録が無いので、不変条件（日時は昇順）の下限にする（Repository の repairHistory と同じ）。
+  // WHY 日時を最後の履歴の日時にする: 変えた日時の記録が無いので、不変条件（日時は昇順）の下限にする。
   // WHY 2 件以上の履歴の例にする: 2 文目（1 件目だけの完了済み）では足されず、3 文目だけが足すことを確かめる。
   test("最後の履歴が今の完了かどうかと食い違う Todo に、最後の履歴の日時で今の completed の 1 件を足し、2 回流しても増えない", async () => {
     await insertTodo(OPEN, false);
@@ -282,7 +282,8 @@ describe("backfill の SQL（shared/drizzle/backfill/）: Todo の完了の履�
   });
 
   // 新しいアプリ（repair on write）との同時実行（Issue #194）。アプリは findByIdForUpdate で todos の行をロックし、履歴の無い
-  //   Todo の履歴を補って INSERT する。backfill の SQL は FOR UPDATE OF で todos の行をロックしてアプリと直列化し、ロック待ちの
+  //   Todo の履歴を補って INSERT していた（Issue #260 でアプリは補わなくなった。SQL の備えは残すので、ここではアプリの INSERT を
+  //   直接書いて再現する）。backfill の SQL は FOR UPDATE OF で todos の行をロックしてアプリと直列化し、ロック待ちの
   //   間にアプリが COMMIT した履歴（文の開始時のスナップショットの NOT EXISTS では見えない）は ON CONFLICT DO NOTHING で捨てる。
   // WHY 2 つの接続を同時に開く: ロックを待つことを、backfill がアプリの接続を待っている（pg_blocking_pids）状態になってから
   //   アプリを COMMIT することで確かめる。FOR UPDATE が無ければ backfill は待たず、この状態にならない。ON CONFLICT が無ければ、
@@ -319,7 +320,7 @@ describe("backfill の SQL（shared/drizzle/backfill/）: Todo の完了の履�
     ]);
   });
 
-  // 3 文目（食い違いの補い。Issue #237）も 1 文目と同じく、アプリ（repair on write）との同時実行で履歴を 2 重にしない。
+  // 3 文目（食い違いの補い。Issue #237）も 1 文目と同じく、アプリ（repair on write。Issue #260 でやめたが SQL の備えは残す）との同時実行で履歴を 2 重にしない。
   // WHY アプリは todos を変えずに履歴だけを書く: todos の行が変わらないので、backfill はロックが取れた後に行を読み直さず
   //   （READ COMMITTED の再評価が起きない）、文の開始時のスナップショットのまま (todo_id, 最後の position + 1) を INSERT する。
   //   ON CONFLICT DO NOTHING が無ければ、アプリが COMMIT した同じ position と一意制約の違反（23505）になる。
