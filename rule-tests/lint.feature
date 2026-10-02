@@ -17,6 +17,10 @@ Feature: Biome と Lefthook
     * apps/backend・apps/shared・apps/e2e・frontend の React 以外のモジュールの外では static だけのクラスが非 0 で終わり、noStaticOnlyClass が出力される（前方一致だけが同じ別ディレクトリ・frontend の component と hook とテスト・frontend の app/ と直下・リポジトリ直下）
     * apps/frontend_customer の app/ でもインスタンスのメンバーを持つクラスは 0 で終わる
     * リポジトリの apps/backend/shared/drizzle/drizzle.config.ts（static だけのクラス DrizzleConfigPath）は 0 で終わる
+  Scenario: biome check の noRestrictedImports は apps/frontend_customer の ../ の import を拒否する（Issue #340）
+    * apps/frontend_customer で ../ を指す import・export は非 0 で終わり、noRestrictedImports が出力される（../ と ../../・.. と ../ だけ・import type・export from と export *・dynamic import()・副作用だけの import・拡張子付き・.tsx と app/ とテスト）
+    * apps/frontend_customer の ./・@/・パッケージ（react・next/link・@repo/shared/logger）の import と、コメントと文字列の中の ../ は 0 で終わる
+    * apps/frontend_customer の外の ../ の import は 0 で終わる（backend と e2e は相対パスを使う・前方一致だけが同じ別ディレクトリ・リポジトリ直下）
   Scenario: --error-on-warnings 付きの biome check かの判定（runsBiomeCheckWithErrorOnWarnings）
     * --error-on-warnings 付きの biome check は許可する（フラグの位置・--write・pnpm exec と lefthook の引数・&& でつなぐ）
     * --error-on-warnings が無い・check でない・別のコマンドの引数・npx・失敗を打ち消すつなぎ・warn を効かなくするフラグ・空文字は拒否する（||・;・改行・|・&・--diagnostic-level・--only・--skip）

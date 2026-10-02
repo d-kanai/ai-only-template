@@ -572,6 +572,197 @@ describeFeature(feature, ({ Scenario }) => {
     },
   );
 
+  // style/noRestrictedImports の override（Issue #340）: frontend の中でディレクトリをまたぐ import は `@/` で書き、`../` は使わない
+  //   （.claude/rules/code/frontend.md の「import と exports」）。`../` はファイルの場所で指す先が変わり、階層を数えないと読めない。
+  //   対象を apps/frontend_customer/** に限るのは、backend（apps/backend）は相対パスだけの規則（規則 backend-relative-only）で、
+  //   e2e も `../` を使うため。
+  // WHY パターンを `..`・`../*`・`../**` の 3 つにする: Biome 2.5.13 で `../*` だけでは `../ui/atoms/stack`（2 階層以上）が、
+  //   `../**` が無いと深いパスが、`..` が無いと `from ".."` が通った（2026-10-02 に一時ディレクトリで実測）。
+  // 一時ディレクトリの置き方（リポジトリの biome.json を写す）は noStaticOnlyClass と同じ（モジュールの最上位の staticOnlyClassDir の前の
+  //   コメント）。1 ファイルに import を 1 つだけ書くのは、organizeImports（並び順）の違反と混ざらないようにするため。
+  Scenario(
+    "biome check の noRestrictedImports は apps/frontend_customer の ../ の import を拒否する（Issue #340）",
+    ({ And }) => {
+      And(
+        "apps/frontend_customer で ../ を指す import・export は非 0 で終わり、noRestrictedImports が出力される（../ と ../../・.. と ../ だけ・import type・export from と export *・dynamic import()・副作用だけの import・拡張子付き・.tsx と app/ とテスト）",
+        () => {
+          // given
+          const dir = "apps/frontend_customer/features/todo/screens/x";
+          const cases: [string, string[]][] = [
+            [
+              `${dir}/parent.ts`,
+              [
+                'import { stack } from "../stack";',
+                "export const value = stack;",
+              ],
+            ],
+            [
+              `${dir}/parent-deep.ts`,
+              [
+                'import { stack } from "../ui/atoms/stack";',
+                "export const value = stack;",
+              ],
+            ],
+            [
+              `${dir}/grandparent.ts`,
+              [
+                'import { stack } from "../../shared/ui/atoms/stack";',
+                "export const value = stack;",
+              ],
+            ],
+            [
+              `${dir}/bare-dots.ts`,
+              ['import { stack } from "..";', "export const value = stack;"],
+            ],
+            [
+              `${dir}/bare-dots-slash.ts`,
+              ['import { stack } from "../";', "export const value = stack;"],
+            ],
+            [
+              `${dir}/import-type.ts`,
+              [
+                'import type { Stack } from "../stack";',
+                "export type Value = Stack;",
+              ],
+            ],
+            [`${dir}/export-from.ts`, ['export { stack } from "../stack";']],
+            [`${dir}/export-star.ts`, ['export * from "../stack";']],
+            [
+              `${dir}/dynamic-import.ts`,
+              ['export const load = () => import("../stack");'],
+            ],
+            [`${dir}/side-effect.ts`, ['import "../polyfill";']],
+            [
+              `${dir}/extension.ts`,
+              [
+                'import { stack } from "../stack.ts";',
+                "export const value = stack;",
+              ],
+            ],
+            [
+              "apps/frontend_customer/shared/ui/x/component.tsx",
+              [
+                'import { stack } from "../stack";',
+                "export const value = stack;",
+              ],
+            ],
+            [
+              "apps/frontend_customer/app/todos/page.tsx",
+              [
+                'import { stack } from "../stack";',
+                "export const value = stack;",
+              ],
+            ],
+            [
+              `${dir}/screen.test.ts`,
+              [
+                'import { stack } from "../stack";',
+                "export const value = stack;",
+              ],
+            ],
+          ];
+
+          for (const [path, lines] of cases) {
+            // when
+            const { status, output } = checkAt(path, lines);
+
+            // then
+            expect(status, `${path}\n${output}`).not.toBe(0);
+            expect(output, path).toContain("noRestrictedImports");
+          }
+        },
+      );
+
+      And(
+        "apps/frontend_customer の ./・@/・パッケージ（react・next/link・@repo/shared/logger）の import と、コメントと文字列の中の ../ は 0 で終わる",
+        () => {
+          // given
+          const dir = "apps/frontend_customer/features/todo/screens/y";
+          const cases: [string, string[]][] = [
+            [
+              `${dir}/sibling.ts`,
+              [
+                'import { stack } from "./stack";',
+                "export const value = stack;",
+              ],
+            ],
+            [
+              `${dir}/alias.ts`,
+              [
+                'import { stack } from "@/shared/ui/atoms/stack";',
+                "export const value = stack;",
+              ],
+            ],
+            [
+              `${dir}/package.ts`,
+              [
+                'import { useState } from "react";',
+                "export const value = useState;",
+              ],
+            ],
+            [
+              `${dir}/package-subpath.ts`,
+              ['import Link from "next/link";', "export const value = Link;"],
+            ],
+            [
+              `${dir}/workspace-package.ts`,
+              [
+                'import { logger } from "@repo/shared/logger";',
+                "export const value = logger;",
+              ],
+            ],
+            [
+              `${dir}/comment-and-string.ts`,
+              [
+                '// import { stack } from "../stack";',
+                'export const value = "../stack";',
+              ],
+            ],
+          ];
+
+          for (const [path, lines] of cases) {
+            // when
+            const { status, output } = checkAt(path, lines);
+
+            // then
+            expect(status, `${path}\n${output}`).toBe(0);
+          }
+        },
+      );
+
+      And(
+        "apps/frontend_customer の外の ../ の import は 0 で終わる（backend と e2e は相対パスを使う・前方一致だけが同じ別ディレクトリ・リポジトリ直下）",
+        () => {
+          // given
+          const lines = [
+            'import { stack } from "../stack";',
+            "export const value = stack;",
+          ];
+          const cases: [string, string][] = [
+            [
+              "apps/backend/features/todo/internal/presentation/relative.ts",
+              "backend は相対パスだけ（backend-relative-only）",
+            ],
+            ["apps/e2e/spec/relative.ts", "e2e も相対パスを使う"],
+            [
+              "apps/frontend_customer-x/features/relative.ts",
+              "名前の前方一致だけが同じ別ディレクトリ",
+            ],
+            ["relative.ts", "リポジトリ直下"],
+          ];
+
+          for (const [path, reason] of cases) {
+            // when
+            const { status, output } = checkAt(path, lines);
+
+            // then
+            expect(status, `${path}（${reason}）\n${output}`).toBe(0);
+          }
+        },
+      );
+    },
+  );
+
   Scenario(
     "--error-on-warnings 付きの biome check かの判定（runsBiomeCheckWithErrorOnWarnings）",
     ({ And }) => {
