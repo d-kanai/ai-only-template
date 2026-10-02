@@ -1,0 +1,24 @@
+---
+paths:
+  - ".github/workflows/**"
+  - "rule-tests/github-actions.test.ts"
+---
+
+# GitHub Actions のワークフロー（Issue #351）
+
+`.github/workflows/*.yml`（`ci.yml` / `deploy.yml` / `mutation.yml`）の書き方の決まり。強制は `rule-tests/github-actions.test.ts`（`pnpm test`。仕様は対の `rule-tests/github-actions.feature`、判定の細部と限界はテストの冒頭）。
+
+## 規則
+- `actions-pinned-sha`: `uses:` は action のリポジトリの full-length（40 桁）の commit SHA で固定し、行末のコメントにそのコミットのタグを書く（`uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0`）。
+  - WHY: タグ（`v4`）やブランチは action のリポジトリ側で別のコミットに差し替えられ、CI とデプロイ（GCP の資格情報を持つ）で別のコードが動きうる。GitHub 公式の Actions の secure use が「Pin actions to a full-length commit SHA」を挙げる（https://raw.githubusercontent.com/github/docs/main/content/actions/reference/security/secure-use.md ）。短い SHA も拒否する。
+  - WHY 行末のコメントにタグ: SHA だけではどの版か読めない（Dependabot / Renovate がこのコメントを読んで更新するかは未確認）。コメントの有無はテストで見ない（更新の手順で書く）。
+  - 例外: `./` で始まる同じリポジトリの action・再利用ワークフロー（ワークフローと同じコミットのファイルが使われる）。`docker://` は `@sha256:<64 桁>` の digest で固定したものだけ許す（イメージのタグもタグと同じく差し替えられる。今は使っていない）。
+- `job-timeout`: すべての job に、job の直下の `timeout-minutes: <正の整数>` を書き、直前のコメントに WHY（実測の所要時間か、未確認ならその旨）を書く（コメントの有無はテストで見ない）。フロー形式の job（`b: { ... }`）は中身を読まず違反にする。再利用ワークフローを呼ぶ job が `timeout-minutes` を受け付けるかは未確認で、使い始めて書けなければ例外を足す。
+  - WHY: 書かないと GitHub の既定の 360 分まで止まらず、テストの無限ループや待ちの固まりで Actions の分数を食う（Claude Code の GitHub Actions のドキュメント https://code.claude.com/docs/en/github-actions もコスト管理として workflow の timeout を挙げる）。step の `timeout-minutes` は job 全体の上限にならないので数えない。
+  - 今の値: `ci` 30 分（直近 100 回の成功の最長は約 3.5 分）、`deploy` 30 分（実際のデプロイの所要時間は未確認）、`mutation` 30 分（ローカルの実測で約 3.5 分）。根拠は各ワークフローのコメント。
+
+## 更新するとき（版を上げる・action を足す）
+1. タグの一覧を引く: `git ls-remote --tags https://github.com/<owner>/<repo>`。
+2. 使うタグの行のうち、`refs/tags/<タグ>^{}` の行があればそのコミットを使う（annotated tag は `^{}` の無い行がタグのオブジェクトの SHA で、コミットではない）。`^{}` の行が無ければ（lightweight tag）`refs/tags/<タグ>` の行のコミットを使う。2026-10-02 の実測: `pnpm/action-setup` の `v4` は annotated（`v4` の行は `f40ffcd…`、`v4^{}` の行がコミット `b906aff…`）、`actions/checkout` の `v4` は lightweight（`^{}` の行が無い）。
+3. `uses: <owner>/<repo>@<40 桁> # <タグ>` と書く。メジャーのタグ（`v4`）が指すコミットに合わせるときは、同じコミットを指す完全なタグ（`v4.4.0`）をコメントに書く。
+4. 版を上げるなら、リリースノートで破壊的な変更を確かめ、PR の CI（`ci` ジョブ）で動くことを確かめる。`deploy.yml` の action は CI では動かないので、マージ後のデプロイの実行を確かめる。

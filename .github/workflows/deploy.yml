@@ -66,6 +66,15 @@ jobs:
     #   （承認してから動く）を付けられる。WIF の条件も Environment の名前を見る（infra/modules/app/github_wif.tf）。
     environment: ${{ inputs.environment || 'stg' }}
     runs-on: ubuntu-latest
+    # timeout-minutes: job 全体の上限（分）。超えると GitHub が job を止めて失敗にする。書かないと既定の 360 分まで止まらない。
+    # WHY 30 分: 直近 100 回の実行（2026-09-30〜10-02、`gh run list --workflow deploy.yml --limit 100`）は最短 7 秒・中央値 10 秒・
+    #   最長 44 秒。最新の実行は GCP の Variables が無く、config 以外のステップをすべてスキップしていた（`gh run view` で確認。
+    #   ほかの 99 回のステップは未確認）。
+    #   実際のデプロイ（イメージのビルドと push・migrate ジョブ・Cloud Run の更新）の所要時間は未確認（まだ GCP に出していない）。
+    #   ci（最長約 3.5 分）と同じく、docker build と Cloud Run の待ちに余裕のある上限にし、待ちの固まりで Actions の分数を
+    #   食い続けないようにする。実測が出て足りなければ、根拠を書いて上げる（Issue #351。.claude/rules/tooling/github-actions.md）。
+    #   rule-tests/github-actions.test.ts の job-timeout がすべての job にあることを検査する。
+    timeout-minutes: 30
     steps:
       # Environment の Variables を読み、以降のステップの環境変数にする。Variables が無ければ ready=false にして、以降のステップを
       #   すべてスキップする（ジョブは緑のまま、ログに notice を出す）。
@@ -94,11 +103,11 @@ jobs:
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - if: steps.config.outputs.ready == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # WIF で deployer のサービスアカウントになりすます（infra/modules/app/github_wif.tf）。以降の gcloud / docker はこの資格情報を使う。
       - if: steps.config.outputs.ready == 'true'
-        uses: google-github-actions/auth@v3
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
@@ -110,7 +119,7 @@ jobs:
       # gcloud を入れる（version を省くと action の既定の "latest"。WHY 固定しない: 使うのは run / auth の基本のコマンドだけで、
       #   引数が版で変わりにくい）。
       - if: steps.config.outputs.ready == 'true'
-        uses: google-github-actions/setup-gcloud@v3
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
       # docker が Artifact Registry に push するときに gcloud の資格情報を使うようにする（~/.docker/config.json の credHelpers）。
       - if: steps.config.outputs.ready == 'true'
@@ -120,7 +129,7 @@ jobs:
       # BuildKit のビルダーを作る。WHY: Dockerfile の RUN --mount=type=cache と、下の GitHub Actions のキャッシュ（type=gha）は
       #   docker-container ドライバの BuildKit が要る。
       - if: steps.config.outputs.ready == 'true'
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # アプリのイメージ（Dockerfile の runtime ステージ。service は next の standalone を node で起動し、migrate ジョブは
       #   同じイメージで node migrate/migrate.mjs を実行する）。
@@ -129,7 +138,7 @@ jobs:
       #   mode=max: 最終ステージ以外（deps / build）のレイヤーもキャッシュする。
       - if: steps.config.outputs.ready == 'true'
         name: Build and push runtime image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           target: runtime

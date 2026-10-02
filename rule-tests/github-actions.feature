@@ -1,0 +1,19 @@
+# GitHub Actions のワークフローの決まり（.claude/rules/tooling/github-actions.md）を検査するルール検査テストの仕様（Issue #351）。step の実装は対の github-actions.test.ts。
+# 規則の WHY と限界は github-actions.test.ts の冒頭。
+Feature: GitHub Actions のワークフロー
+  Scenario: action の参照の判定（isPinnedUses）
+    * 40 桁の commit SHA で固定した参照は許可する（owner/repo・サブディレクトリ・再利用ワークフロー・同じリポジトリの ./ ・digest で固定した docker://）
+    * commit SHA で固定していない参照は拒否する（メジャーのタグ・完全なタグ・ブランチ・短い SHA・41 桁・大文字・16 進でない文字・式・@ の無い参照・空文字・タグの docker://・digest の無い docker://・owner が .. の参照）
+  Scenario: action の参照の抽出（readUses）
+    * steps と job の uses を行の番号つきで取り出し、行末のコメントと引用符を外す
+    * コメントアウトした uses の行と、uses を値に含むだけの行は取り出さない
+  Scenario: job の timeout-minutes の判定（readJobs）
+    * job の直下に正の整数の timeout-minutes がある job は違反なし
+    * timeout-minutes の無い job・コメントアウトした timeout-minutes・step にだけある timeout-minutes・0 と式の値は、job の違反になる
+    * jobs の外の同じ名前のキーは job として数えない
+  Scenario: job の見出しの読み方（readJobs）
+    * job と同じインデントの行は、引用符の名前・アンカー付き・フロー形式も job の見出しとして読み、中身の無いフロー形式は違反になる
+  Scenario: ワークフローの実ファイル
+    * 一時ディレクトリの .github/workflows の yml と yaml から、規則ごとの違反をすべて検出する
+    * リポジトリの .github/workflows のワークフローを ci・deploy・mutation を含めて列挙し、uses と job を 1 件以上取り出せる
+    * リポジトリのワークフローの uses はすべて commit SHA で固定し、すべての job に timeout-minutes がある
