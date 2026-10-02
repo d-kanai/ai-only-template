@@ -120,7 +120,8 @@ jobs:
       # PLAYWRIGHT_CHROMIUM_EXECUTABLE は設定しない（クラウド VM 用。apps/e2e/playwright.config.ts のコメント）。
       - run: pnpm --filter @repo/e2e exec playwright install --with-deps chromium
 
-      # E2E テストを実行する（pnpm --filter @repo/e2e test = apps/e2e の playwright test）。
+      # E2E テストを実行する（pnpm --filter @repo/e2e test = apps/e2e の bddgen && playwright test。bddgen が .feature から
+      #   Playwright のテストを生成する。Issue #279）。
       # webServer（apps/e2e/playwright.config.ts）が pnpm -w build && pnpm -w start -p 3100 でサーバを起動する。
       #   apps/e2e/playwright.config.ts が .env の DATABASE_URL（env.ts）を webServer に渡し、Postgres で動かす。
       #   上の pnpm build の成果物を使い回さず build し直すが、ローカルと同じコマンドで動かすことを優先する（単純さのため）。

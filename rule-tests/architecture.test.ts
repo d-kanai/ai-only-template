@@ -400,10 +400,12 @@ function isSourceNonTest(path: string): boolean {
 //   node_modules: 依存（workspace パッケージ化した段階 2 では apps/*/node_modules/ ができる）。pnpm の相対パスの symlink を含む。
 //   .next: next build / next dev の生成物（apps/frontend_customer/.next/。数千件の JS）。next build の .next/standalone/ には
 //     pnpm の node_modules の形（相対パスの symlink）が複製され、循環する symlink を含みうる（Issue #130 / #142）。
+//   .features-gen: playwright-bdd の bddgen が apps/e2e の .feature から生成する Playwright のテスト（apps/e2e/.features-gen/*.spec.js。
+//     Issue #279。.gitignore 済み）。自分たちが書くコードではなく、.feature と step（apps/e2e/*.steps.ts）が検査の対象。
 // WHY 名前を列挙する（"." で始まるディレクトリをまとめて除かない）: まとめて除くと apps/backend/.lib/x.ts のような自前のコードが
 //   検査を素通りする（Issue #68 の reviewer 指摘）。既知の生成物・依存だけを除き、それ以外の "." のディレクトリは通常どおり
 //   検査して、置き場所の規則で違反にする。生成物のディレクトリが増えたらここに足す。
-const EXCLUDED_DIRS = new Set(["node_modules", ".next"]);
+const EXCLUDED_DIRS = new Set(["node_modules", ".next", ".features-gen"]);
 
 type ReadDirectory = (absolutePath: string) => Dirent[];
 
@@ -2544,7 +2546,7 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
       "apps/backend/features/todo/internal/domain/todo.test.ts",
       "apps/backend/test-support/database.ts",
       "apps/frontend_customer/test-support/i18n.tsx",
-      "apps/e2e/todo.spec.ts",
+      "apps/e2e/todo.steps.ts",
       "vitest.config.mts",
     ]) {
       expect(files).not.toContain(excluded);
@@ -2608,6 +2610,8 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "apps/backend/spec/api/todo/support.ts",
         "apps/e2e/database.ts",
         "apps/e2e/playwright.config.ts",
+        "apps/e2e/fixtures.ts",
+        "apps/e2e/todo.steps.ts",
         "apps/frontend_customer/features/todo/api/todo-api.ts",
         "apps/frontend_customer/features/todo/api/api-error.ts",
         "apps/frontend_customer/features/todo/index.ts",
@@ -2752,7 +2756,8 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "apps/frontend_customer/app/page.tsx",
         "apps/e2e/database.ts",
         "apps/e2e/playwright.config.ts",
-        "apps/e2e/request-log.spec.ts",
+        "apps/e2e/log-server.ts",
+        "apps/e2e/request-log.steps.ts",
         "vitest.config.mts",
         "vitest.global-setup.ts",
         "stryker.config.mjs",
