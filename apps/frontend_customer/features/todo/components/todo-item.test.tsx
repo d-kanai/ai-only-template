@@ -1,9 +1,9 @@
-import { List } from "@mantine/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { TodoItem } from "@/features/todo/components/todo-item";
 import { LocaleProvider } from "@/shared/i18n/i18n";
 import type { Locale } from "@/shared/i18n/locale";
+import { List } from "@/shared/ui/atoms/list";
 import { DesignSystem } from "@/test-support/design-system";
 import { JaLocale, tJa } from "@/test-support/i18n";
 import { todoItemMessages } from "./todo-item.messages";
