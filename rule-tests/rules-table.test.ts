@@ -32,6 +32,9 @@ import { casesByName } from "./case-table";
 //     2 行目が `| --- | --- | --- | --- |`（各セル `---`）、3 行目からのデータ行のセルがちょうど 4 つ。セルは行の先頭と末尾の
 //     `|` を除き、`\|` でない `|` で分ける（TS のユニオン型は `\|` と書く）。2 行目が区切り行でなければ、2 行目からをデータ行として見る。
 //   - rules-table-cell: データ行（セルが 4 つのもの）のカテゴリ・WHAT・WHY・強制のセルが空でない。WHY が無い行は `-` と書く。
+//   - rules-table-rows: ファイルの表のデータ行（3 行目から）が合わせて 1 行以上ある。WHY: 表が 1 つも無い（見出しとコードだけの）
+//     ファイルや、表を消してヘッダだけ残したファイルは、ほかの規則に何もかからずに通り、規範を表で書く決まりが素通りする
+//     （PR #327 の Codex のレビューの指摘）。
 //   - rules-table-enforce: 強制のセル（空でないもの）が `レビュー`（機械で止めていない規範）・`説明`（規範でない説明・一覧・経緯）・
 //     機械の検査への参照を `、` で区切った並びのどれか。参照の 1 項目は `` `<パス>` `` か `` `<パス>` の `<名前>` ``（名前が複数なら
 //     `` `a`・`b` ``）か `` `pnpm typecheck` `` / `` `pnpm lint` ``。パスはリポジトリ相対（`/` 始まり・`..` を含むものは違反）で、
@@ -257,6 +260,23 @@ function readFileIfExists(path: string): string | undefined {
   }
 }
 
+// 表のデータ行（各表の 3 行目から）が 1 つも無ければ、ファイルの 1 行目で違反。
+function findMissingRowViolations(content: string): RuleViolation[] {
+  const dataRows = tables(content).reduce(
+    (count, rows) => count + Math.max(0, rows.length - 2),
+    0,
+  );
+  return dataRows > 0
+    ? []
+    : [
+        {
+          rule: "rules-table-rows",
+          line: 1,
+          message: "表のデータ行が 1 つも無い",
+        },
+      ];
+}
+
 // 1 ファイルのすべての違反（`<規則名>: <パス>:<行> <内容>`）。行の順、同じ行は規則の判定の順。
 function checkRulesFile(
   path: string,
@@ -269,6 +289,7 @@ function checkRulesFile(
       ...v,
     })),
     ...findTableViolations(content, referenceRoot),
+    ...findMissingRowViolations(content),
   ];
   return all
     .map((v, order) => ({ ...v, order }))
@@ -533,6 +554,61 @@ describeFeature(feature, ({ Scenario }) => {
         expect(result).toEqual(
           casesByName(cases, ([, , expected]) => expected),
         );
+      },
+    );
+  });
+
+  Scenario("データ行のある表（rules-table-rows）", ({ And }) => {
+    And("表のデータ行が合わせて 1 行以上あれば違反なし", () => {
+      // given
+      const cases: [string, string][] = [
+        ["データ行 1 つ", lines(TABLE_HEAD, "| a | b | c | 説明 |")],
+        [
+          "データ行の無い表と、データ行のある表",
+          lines(TABLE_HEAD, "## x", TABLE_HEAD, "| a | b | c | 説明 |"),
+        ],
+      ];
+
+      // when
+      const result = casesByName(cases, ([, content]) =>
+        findMissingRowViolations(content),
+      );
+
+      // then
+      expect(result).toEqual(casesByName(cases, () => []));
+    });
+
+    And(
+      "表が無い・ヘッダと区切り行だけの表しか無いファイルは、1 行目で違反になる",
+      () => {
+        // given
+        const missing: RuleViolation[] = [
+          {
+            rule: "rules-table-rows",
+            line: 1,
+            message: "表のデータ行が 1 つも無い",
+          },
+        ];
+        const cases: [string, string][] = [
+          ["空のファイル", ""],
+          ["フロントマターと見出しだけ", lines(FRONT, "# x", "## y")],
+          [
+            "コードブロックの中の表",
+            lines("# x", "```", TABLE_HEAD, "| a | b | c | 説明 |", "```"),
+          ],
+          [
+            "ヘッダと区切り行だけの表が 2 つ",
+            lines(TABLE_HEAD, "## x", TABLE_HEAD),
+          ],
+        ];
+
+        // when
+        const result = casesByName(cases, ([, content]) =>
+          findMissingRowViolations(content),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => missing));
       },
     );
   });
