@@ -141,12 +141,21 @@ form .inputRoot {
   background: transparent;
   color: var(--mantine-color-dimmed);
   font-weight: 600;
-  opacity: 0;
 }
 
-.listItem:hover .button,
-.listItem .button:focus-visible {
-  opacity: 1;
+/*
+ * 隠すのはカーソルを乗せられる端末だけにする。
+ * WHY: タッチの端末には hover が無く、隠したままだと削除の場所が分からず押せない（Codex のレビューの指摘、2026-10-02）。
+ */
+@media (hover: hover) {
+  .listItem .button {
+    opacity: 0;
+  }
+
+  .listItem:hover .button,
+  .listItem .button:focus-visible {
+    opacity: 1;
+  }
 }
 
 .listItem .button:hover {
