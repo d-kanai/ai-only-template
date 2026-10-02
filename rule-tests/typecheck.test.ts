@@ -3,8 +3,10 @@
 //   node 環境で動かす。
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
+import { expect } from "vitest";
 import pkg from "../package.json";
+import { casesByName } from "./case-table";
 
 // 型チェックのゲート（pnpm typecheck と CI の ci ジョブ）が効いていることを、仕様として固定するテスト（Issue #68 の reviewer 指摘）。
 // WHY このゲートが要る: monorepo 化（Issue #68）の前は、next build がリポジトリ直下の tsconfig（include が **/*.ts）で、
@@ -16,6 +18,7 @@ import pkg from "../package.json";
 //   （frontend のテストのため）。apps/backend の tsconfig は DOM の型を入れないので、backend が document などのブラウザの API を
 //   使うと型エラーになる（backend を Next・ブラウザに依存させない方針。.claude/rules/backend.md）。
 // 検査するのは package.json の scripts.typecheck と、.github/workflows/ci.yml に pnpm typecheck のステップがあること。
+// .feature（typecheck.feature）と step の実装（このファイル）に分けた（Issue #282）。
 
 const repoRoot = join(import.meta.dirname, "..");
 
@@ -103,187 +106,233 @@ function runsTypecheckBeforeBuild(yaml: string): boolean {
   return typecheck !== -1 && (build === -1 || typecheck < build);
 }
 
-describe("typecheck の判定（typechecksAllProjects）", () => {
-  // 3 つの tsconfig（リポジトリ直下・apps/backend・apps/shared）をどの順で書いてもよい。
-  const SHARED = "tsc -p apps/shared --noEmit";
-  it.each([
-    [`tsc -p . --noEmit && tsc -p apps/backend --noEmit && ${SHARED}`],
-    [`tsc --noEmit -p apps/backend && ${SHARED} && tsc --noEmit --project .`],
-    [
-      "pnpm exec tsc -p . --noEmit && pnpm exec tsc -p apps/backend --noEmit && pnpm exec tsc -p apps/shared --noEmit",
-    ],
-    [
-      `tsc -p . --noEmit --strict && tsc -p apps/backend --noEmit --pretty && ${SHARED}`,
-    ],
-  ])("%s は許可する", (script) => {
-    // given: it.each の入力
-    // when
-    const allowed = typechecksAllProjects(script);
+const SHARED = "tsc -p apps/shared --noEmit";
+const workflow = (...steps: string[]) =>
+  ["jobs:", "  ci:", "    steps:", ...steps].join("\n");
 
-    // then
-    expect(allowed).toBe(true);
-  });
+const feature = await loadFeature("./typecheck.feature");
 
-  it.each([
-    [`tsc -p . --noEmit && ${SHARED}`, "apps/backend を検査しない"],
-    [`tsc -p apps/backend --noEmit && ${SHARED}`, "リポジトリ直下を検査しない"],
-    [
-      "tsc -p . --noEmit && tsc -p apps/backend --noEmit",
-      "apps/shared を検査しない（Issue #90）",
-    ],
-    [
-      `tsc -p . && tsc -p apps/backend --noEmit && ${SHARED}`,
-      "--noEmit が無い",
-    ],
-    [
-      `tsc -p . --noEmit || true && tsc -p apps/backend --noEmit && ${SHARED}`,
-      "|| true で失敗を打ち消す",
-    ],
-    [
-      `tsc -p . --noEmit; tsc -p apps/backend --noEmit && ${SHARED}`,
-      "; で前の失敗を無視する",
-    ],
-    [
-      `tsc -p . --noEmit && tsc -p apps/backend --noEmit && ${SHARED} | cat`,
-      "| で終了コードを変える",
-    ],
-    [
-      `tsc -p . --noEmit --noCheck && tsc -p apps/backend --noEmit && ${SHARED}`,
-      "--noCheck で型チェックを止める",
-    ],
-    [
-      `tsc -p . --noEmit --strict false && tsc -p apps/backend --noEmit && ${SHARED}`,
-      "--strict を false にする",
-    ],
-    [
-      `tsc -p . --noEmit && tsc -p apps/backend --noEmit --noImplicitAny=false && ${SHARED}`,
-      "= で false を渡す",
-    ],
-    [
-      `echo tsc -p . --noEmit && tsc -p apps/backend --noEmit && ${SHARED}`,
-      "tsc を実行していない",
-    ],
-    [
-      `tsc -p . -p apps/backend --noEmit && ${SHARED}`,
-      "-p が 2 つ（tsc は 1 つしか取らない）",
-    ],
-    [
-      `tsc -p apps/frontend_customer --noEmit && tsc -p apps/backend --noEmit && ${SHARED}`,
-      "別の tsconfig",
-    ],
-    ["", "空文字"],
-  ])("%s（%s）は拒否する", (script) => {
-    // given: it.each の入力
-    // when
-    const allowed = typechecksAllProjects(script);
+describeFeature(feature, ({ Scenario }) => {
+  Scenario("typecheck の判定（typechecksAllProjects）", ({ And }) => {
+    // 3 つの tsconfig（リポジトリ直下・apps/backend・apps/shared）をどの順で書いてもよい。
+    And(
+      "3 つの tsconfig を tsc --noEmit で検査するスクリプトは許可する（順不同・--project・pnpm exec・ほかのフラグ）",
+      () => {
+        // given
+        const cases: [string][] = [
+          [`tsc -p . --noEmit && tsc -p apps/backend --noEmit && ${SHARED}`],
+          [
+            `tsc --noEmit -p apps/backend && ${SHARED} && tsc --noEmit --project .`,
+          ],
+          [
+            "pnpm exec tsc -p . --noEmit && pnpm exec tsc -p apps/backend --noEmit && pnpm exec tsc -p apps/shared --noEmit",
+          ],
+          [
+            `tsc -p . --noEmit --strict && tsc -p apps/backend --noEmit --pretty && ${SHARED}`,
+          ],
+        ];
 
-    // then
-    expect(allowed).toBe(false);
-  });
-});
+        // when
+        const result = casesByName(cases, ([script]) =>
+          typechecksAllProjects(script),
+        );
 
-describe("ワークフローの判定（runsTypecheckBeforeBuild）", () => {
-  const workflow = (...steps: string[]) =>
-    ["jobs:", "  ci:", "    steps:", ...steps].join("\n");
-
-  it.each([
-    [
-      "lint → typecheck → build",
-      workflow(
-        "      - run: pnpm lint",
-        "      - run: pnpm typecheck",
-        "      - run: pnpm build",
-      ),
-    ],
-    [
-      "名前付きのステップ",
-      workflow(
-        "      - name: Type check",
-        "        run: pnpm typecheck",
-        "      - run: pnpm build",
-      ),
-    ],
-  ])("%s は許可する", (_name, yaml) => {
-    // given: it.each の入力
-    // when
-    const allowed = runsTypecheckBeforeBuild(yaml);
-
-    // then
-    expect(allowed).toBe(true);
-  });
-
-  it.each([
-    [
-      "typecheck のステップが無い",
-      workflow("      - run: pnpm lint", "      - run: pnpm build"),
-    ],
-    [
-      "コメントアウトされている",
-      workflow("      # - run: pnpm typecheck", "      - run: pnpm build"),
-    ],
-    [
-      "continue-on-error で失敗を無視する",
-      workflow(
-        "      - run: pnpm typecheck",
-        "        continue-on-error: true",
-        "      - run: pnpm build",
-      ),
-    ],
-    [
-      "if で実行しないことがある",
-      workflow(
-        "      - if: false",
-        "        run: pnpm typecheck",
-        "      - run: pnpm build",
-      ),
-    ],
-    [
-      "|| true で失敗を打ち消す",
-      workflow(
-        "      - run: pnpm typecheck || true",
-        "      - run: pnpm build",
-      ),
-    ],
-    [
-      "build の後",
-      workflow("      - run: pnpm build", "      - run: pnpm typecheck"),
-    ],
-  ])("%s は拒否する", (_name, yaml) => {
-    // given: it.each の入力
-    // when
-    const allowed = runsTypecheckBeforeBuild(yaml);
-
-    // then
-    expect(allowed).toBe(false);
-  });
-});
-
-describe("型チェックのゲート（実ファイル）", () => {
-  it("package.json の typecheck は、リポジトリ直下と apps/backend・apps/shared の tsconfig を tsc --noEmit で検査する", () => {
-    // given
-    const scripts: Record<string, string | undefined> = pkg.scripts;
-
-    // when
-    const allowed = typechecksAllProjects(scripts.typecheck ?? "");
-
-    // then
-    expect(allowed).toBe(true);
-  });
-
-  it(".github/workflows/ci.yml は pnpm typecheck を pnpm build より前に、失敗で止まる形で実行する", () => {
-    // given
-    const yaml = readFileSync(
-      join(repoRoot, ".github/workflows/ci.yml"),
-      "utf8",
+        // then
+        expect(result).toEqual(casesByName(cases, () => true));
+      },
     );
 
-    // when
-    const steps = readWorkflowSteps(yaml);
-    const allowed = runsTypecheckBeforeBuild(yaml);
+    And(
+      "検査しない tsconfig がある・失敗を打ち消す・型チェックを弱めるスクリプトは拒否する（apps/backend・直下・apps/shared が無い・--noEmit が無い・|| true・;・|・--noCheck・false を渡す・tsc でない・-p が 2 つ・別の tsconfig・空文字）",
+      () => {
+        // given
+        const cases: [string, string][] = [
+          [`tsc -p . --noEmit && ${SHARED}`, "apps/backend を検査しない"],
+          [
+            `tsc -p apps/backend --noEmit && ${SHARED}`,
+            "リポジトリ直下を検査しない",
+          ],
+          [
+            "tsc -p . --noEmit && tsc -p apps/backend --noEmit",
+            "apps/shared を検査しない（Issue #90）",
+          ],
+          [
+            `tsc -p . && tsc -p apps/backend --noEmit && ${SHARED}`,
+            "--noEmit が無い",
+          ],
+          [
+            `tsc -p . --noEmit || true && tsc -p apps/backend --noEmit && ${SHARED}`,
+            "|| true で失敗を打ち消す",
+          ],
+          [
+            `tsc -p . --noEmit; tsc -p apps/backend --noEmit && ${SHARED}`,
+            "; で前の失敗を無視する",
+          ],
+          [
+            `tsc -p . --noEmit && tsc -p apps/backend --noEmit && ${SHARED} | cat`,
+            "| で終了コードを変える",
+          ],
+          [
+            `tsc -p . --noEmit --noCheck && tsc -p apps/backend --noEmit && ${SHARED}`,
+            "--noCheck で型チェックを止める",
+          ],
+          [
+            `tsc -p . --noEmit --strict false && tsc -p apps/backend --noEmit && ${SHARED}`,
+            "--strict を false にする",
+          ],
+          [
+            `tsc -p . --noEmit && tsc -p apps/backend --noEmit --noImplicitAny=false && ${SHARED}`,
+            "= で false を渡す",
+          ],
+          [
+            `echo tsc -p . --noEmit && tsc -p apps/backend --noEmit && ${SHARED}`,
+            "tsc を実行していない",
+          ],
+          [
+            `tsc -p . -p apps/backend --noEmit && ${SHARED}`,
+            "-p が 2 つ（tsc は 1 つしか取らない）",
+          ],
+          [
+            `tsc -p apps/frontend_customer --noEmit && tsc -p apps/backend --noEmit && ${SHARED}`,
+            "別の tsconfig",
+          ],
+          ["", "空文字"],
+        ];
 
-    // then
-    // 前提: ステップを読み取れていること（読み取りが壊れて 0 件になり、判定が素通りするのを防ぐ）。
-    expect(steps.length).toBeGreaterThan(5);
-    expect(allowed).toBe(true);
+        // when
+        const result = casesByName(cases, ([script]) =>
+          typechecksAllProjects(script),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => false));
+      },
+    );
+  });
+
+  Scenario("ワークフローの判定（runsTypecheckBeforeBuild）", ({ And }) => {
+    And(
+      "pnpm typecheck を build より前に失敗で止まる形で実行するワークフローは許可する（lint → typecheck → build・名前付きのステップ）",
+      () => {
+        // given
+        const cases: [string, string][] = [
+          [
+            "lint → typecheck → build",
+            workflow(
+              "      - run: pnpm lint",
+              "      - run: pnpm typecheck",
+              "      - run: pnpm build",
+            ),
+          ],
+          [
+            "名前付きのステップ",
+            workflow(
+              "      - name: Type check",
+              "        run: pnpm typecheck",
+              "      - run: pnpm build",
+            ),
+          ],
+        ];
+
+        // when
+        const result = casesByName(cases, ([, yaml]) =>
+          runsTypecheckBeforeBuild(yaml),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => true));
+      },
+    );
+
+    And(
+      "typecheck が無い・効かない・build の後のワークフローは拒否する（ステップが無い・コメントアウト・continue-on-error・if・|| true・build の後）",
+      () => {
+        // given
+        const cases: [string, string][] = [
+          [
+            "typecheck のステップが無い",
+            workflow("      - run: pnpm lint", "      - run: pnpm build"),
+          ],
+          [
+            "コメントアウトされている",
+            workflow(
+              "      # - run: pnpm typecheck",
+              "      - run: pnpm build",
+            ),
+          ],
+          [
+            "continue-on-error で失敗を無視する",
+            workflow(
+              "      - run: pnpm typecheck",
+              "        continue-on-error: true",
+              "      - run: pnpm build",
+            ),
+          ],
+          [
+            "if で実行しないことがある",
+            workflow(
+              "      - if: false",
+              "        run: pnpm typecheck",
+              "      - run: pnpm build",
+            ),
+          ],
+          [
+            "|| true で失敗を打ち消す",
+            workflow(
+              "      - run: pnpm typecheck || true",
+              "      - run: pnpm build",
+            ),
+          ],
+          [
+            "build の後",
+            workflow("      - run: pnpm build", "      - run: pnpm typecheck"),
+          ],
+        ];
+
+        // when
+        const result = casesByName(cases, ([, yaml]) =>
+          runsTypecheckBeforeBuild(yaml),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => false));
+      },
+    );
+  });
+
+  Scenario("型チェックのゲート（実ファイル）", ({ And }) => {
+    And(
+      "package.json の typecheck は、リポジトリ直下と apps/backend・apps/shared の tsconfig を tsc --noEmit で検査する",
+      () => {
+        // given
+        const scripts: Record<string, string | undefined> = pkg.scripts;
+
+        // when
+        const allowed = typechecksAllProjects(scripts.typecheck ?? "");
+
+        // then
+        expect(allowed).toBe(true);
+      },
+    );
+
+    And(
+      ".github/workflows/ci.yml は pnpm typecheck を pnpm build より前に、失敗で止まる形で実行する",
+      () => {
+        // given
+        const yaml = readFileSync(
+          join(repoRoot, ".github/workflows/ci.yml"),
+          "utf8",
+        );
+
+        // when
+        const steps = readWorkflowSteps(yaml);
+        const allowed = runsTypecheckBeforeBuild(yaml);
+
+        // then
+        // 前提: ステップを読み取れていること（読み取りが壊れて 0 件になり、判定が素通りするのを防ぐ）。
+        expect(steps.length).toBeGreaterThan(5);
+        expect(allowed).toBe(true);
+      },
+    );
   });
 });

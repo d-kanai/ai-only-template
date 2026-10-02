@@ -3,7 +3,9 @@
 //   DOM を使わないため、node 環境で動かす。
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
+import { expect } from "vitest";
+import { casesByName } from "./case-table";
 
 // 作業ログの CI の検査（Issue #64）が ci.yml に効く形で入っていることを、仕様として固定するルール検査テスト。
 // WHY: 作業ログ（docs/work-logs/YYYY-MM-DD.md）の追記漏れを PR 単位で止める（ユーザー判断。文書だけの PR も例外なし）。
@@ -18,6 +20,7 @@ import { describe, expect, it } from "vitest";
 //   - pnpm lint のステップより前にある（lint より先に、原因の分かるメッセージで止める）。
 //   - actions/checkout のステップに fetch-depth: 0 がある（三点 diff の分岐点を求めるのに base ブランチと履歴が要る）。
 // スクリプトそのものの判定は scripts/hooks/check-work-logs-diff.test.ts。
+// .feature（work-logs-check.feature）と step の実装（このファイル）に分けた（Issue #282）。
 
 const repoRoot = join(import.meta.dirname, "..");
 
@@ -87,176 +90,204 @@ const checkStep = [
 ];
 const lint = ["      - run: pnpm lint"];
 
-describe("ワークフローの判定（checksLogsInPullRequests）", () => {
-  it.each([
-    ["checkout → 検査 → lint", workflow(...checkout, ...checkStep, ...lint)],
-    [
-      "if を式の括弧で囲む",
-      workflow(
-        ...checkout,
-        `      - if: \${{ github.event_name == 'pull_request' }}`,
-        `        run: ${CHECK_COMMAND}`,
-        ...lint,
-      ),
-    ],
-    [
-      "continue-on-error: false を明示する",
-      workflow(
-        ...checkout,
-        ...checkStep,
-        "        continue-on-error: false",
-        ...lint,
-      ),
-    ],
-    [
-      "間に別のステップがある",
-      workflow(
-        ...checkout,
-        "      - run: pnpm install --frozen-lockfile",
-        ...checkStep,
-        "      - run: pnpm db:migrate",
-        ...lint,
-      ),
-    ],
-  ])("%s は許可する", (_name, yaml) => {
-    // given: it.each の yaml
-    // when
-    const allowed = checksLogsInPullRequests(yaml);
+const feature = await loadFeature("./work-logs-check.feature");
 
-    // then
-    expect(allowed).toBe(true);
-  });
+describeFeature(feature, ({ Scenario }) => {
+  Scenario("ワークフローの判定（checksLogsInPullRequests）", ({ And }) => {
+    And(
+      "PR のときだけ失敗で止まる形で lint より前に検査し、checkout が履歴を全部取るワークフローは許可する（checkout → 検査 → lint・if を式の括弧で囲む・continue-on-error: false・間に別のステップ）",
+      () => {
+        // given
+        const cases: [string, string][] = [
+          [
+            "checkout → 検査 → lint",
+            workflow(...checkout, ...checkStep, ...lint),
+          ],
+          [
+            "if を式の括弧で囲む",
+            workflow(
+              ...checkout,
+              `      - if: \${{ github.event_name == 'pull_request' }}`,
+              `        run: ${CHECK_COMMAND}`,
+              ...lint,
+            ),
+          ],
+          [
+            "continue-on-error: false を明示する",
+            workflow(
+              ...checkout,
+              ...checkStep,
+              "        continue-on-error: false",
+              ...lint,
+            ),
+          ],
+          [
+            "間に別のステップがある",
+            workflow(
+              ...checkout,
+              "      - run: pnpm install --frozen-lockfile",
+              ...checkStep,
+              "      - run: pnpm db:migrate",
+              ...lint,
+            ),
+          ],
+        ];
 
-  it.each([
-    ["検査のステップが無い", workflow(...checkout, ...lint)],
-    [
-      "コメントアウトされている",
-      workflow(
-        ...checkout,
-        "      # - if: github.event_name == 'pull_request'",
-        `      #   run: ${CHECK_COMMAND}`,
-        ...lint,
-      ),
-    ],
-    [
-      "|| true で失敗を打ち消す",
-      workflow(
-        ...checkout,
-        "      - if: github.event_name == 'pull_request'",
-        `        run: ${CHECK_COMMAND} || true`,
-        ...lint,
-      ),
-    ],
-    [
-      "; exit 0 で失敗を打ち消す",
-      workflow(
-        ...checkout,
-        "      - if: github.event_name == 'pull_request'",
-        `        run: ${CHECK_COMMAND}; exit 0`,
-        ...lint,
-      ),
-    ],
-    [
-      "continue-on-error: true で失敗を無視する",
-      workflow(
-        ...checkout,
-        ...checkStep,
-        "        continue-on-error: true",
-        ...lint,
-      ),
-    ],
-    [
-      "if が無い（push でも動き、base_ref が空で失敗する）",
-      workflow(...checkout, `      - run: ${CHECK_COMMAND}`, ...lint),
-    ],
-    [
-      "if が push",
-      workflow(
-        ...checkout,
-        "      - if: github.event_name == 'push'",
-        `        run: ${CHECK_COMMAND}`,
-        ...lint,
-      ),
-    ],
-    [
-      "if が false（実行しない）",
-      workflow(
-        ...checkout,
-        "      - if: false",
-        `        run: ${CHECK_COMMAND}`,
-        ...lint,
-      ),
-    ],
-    [
-      "if に条件を足して実行しないことがある",
-      workflow(
-        ...checkout,
-        "      - if: github.event_name == 'pull_request' && false",
-        `        run: ${CHECK_COMMAND}`,
-        ...lint,
-      ),
-    ],
-    [
-      "base を固定の origin/main にする",
-      workflow(
-        ...checkout,
-        "      - if: github.event_name == 'pull_request'",
-        "        run: bash scripts/hooks/check-work-logs-diff.sh origin/main",
-        ...lint,
-      ),
-    ],
-    ["pnpm lint の後", workflow(...checkout, ...lint, ...checkStep)],
-    [
-      "checkout に fetch-depth が無い（既定の 1 では分岐点を求められない）",
-      workflow("      - uses: actions/checkout@v4", ...checkStep, ...lint),
-    ],
-    [
-      "fetch-depth が 1",
-      workflow(
-        "      - uses: actions/checkout@v4",
-        "        with:",
-        "          fetch-depth: 1",
-        ...checkStep,
-        ...lint,
-      ),
-    ],
-    [
-      "fetch-depth: 0 がコメントアウトされている",
-      workflow(
-        "      - uses: actions/checkout@v4",
-        "        with:",
-        "          # fetch-depth: 0",
-        ...checkStep,
-        ...lint,
-      ),
-    ],
-    ["checkout が無い", workflow(...checkStep, ...lint)],
-    ["空文字", ""],
-  ])("%s は拒否する", (_name, yaml) => {
-    // given: it.each の yaml
-    // when
-    const allowed = checksLogsInPullRequests(yaml);
+        // when
+        const result = casesByName(cases, ([, yaml]) =>
+          checksLogsInPullRequests(yaml),
+        );
 
-    // then
-    expect(allowed).toBe(false);
-  });
-});
-
-describe("作業ログの CI の検査（実ファイル）", () => {
-  it(".github/workflows/ci.yml は PR のときだけ check-work-logs-diff.sh を失敗で止まる形で pnpm lint より前に実行し、checkout は fetch-depth: 0", () => {
-    // given
-    const yaml = readFileSync(
-      join(repoRoot, ".github/workflows/ci.yml"),
-      "utf8",
+        // then
+        expect(result).toEqual(casesByName(cases, () => true));
+      },
     );
 
-    // when
-    const steps = readWorkflowSteps(yaml);
-    const allowed = checksLogsInPullRequests(yaml);
+    And(
+      "検査が無い・効かない・push でも動く・lint の後・履歴が浅いワークフローは拒否する（コメントアウト・|| true・; exit 0・continue-on-error: true・if が無い / push / false・base の固定・fetch-depth が無い / 1・checkout が無い・空文字など）",
+      () => {
+        // given
+        const cases: [string, string][] = [
+          ["検査のステップが無い", workflow(...checkout, ...lint)],
+          [
+            "コメントアウトされている",
+            workflow(
+              ...checkout,
+              "      # - if: github.event_name == 'pull_request'",
+              `      #   run: ${CHECK_COMMAND}`,
+              ...lint,
+            ),
+          ],
+          [
+            "|| true で失敗を打ち消す",
+            workflow(
+              ...checkout,
+              "      - if: github.event_name == 'pull_request'",
+              `        run: ${CHECK_COMMAND} || true`,
+              ...lint,
+            ),
+          ],
+          [
+            "; exit 0 で失敗を打ち消す",
+            workflow(
+              ...checkout,
+              "      - if: github.event_name == 'pull_request'",
+              `        run: ${CHECK_COMMAND}; exit 0`,
+              ...lint,
+            ),
+          ],
+          [
+            "continue-on-error: true で失敗を無視する",
+            workflow(
+              ...checkout,
+              ...checkStep,
+              "        continue-on-error: true",
+              ...lint,
+            ),
+          ],
+          [
+            "if が無い（push でも動き、base_ref が空で失敗する）",
+            workflow(...checkout, `      - run: ${CHECK_COMMAND}`, ...lint),
+          ],
+          [
+            "if が push",
+            workflow(
+              ...checkout,
+              "      - if: github.event_name == 'push'",
+              `        run: ${CHECK_COMMAND}`,
+              ...lint,
+            ),
+          ],
+          [
+            "if が false（実行しない）",
+            workflow(
+              ...checkout,
+              "      - if: false",
+              `        run: ${CHECK_COMMAND}`,
+              ...lint,
+            ),
+          ],
+          [
+            "if に条件を足して実行しないことがある",
+            workflow(
+              ...checkout,
+              "      - if: github.event_name == 'pull_request' && false",
+              `        run: ${CHECK_COMMAND}`,
+              ...lint,
+            ),
+          ],
+          [
+            "base を固定の origin/main にする",
+            workflow(
+              ...checkout,
+              "      - if: github.event_name == 'pull_request'",
+              "        run: bash scripts/hooks/check-work-logs-diff.sh origin/main",
+              ...lint,
+            ),
+          ],
+          ["pnpm lint の後", workflow(...checkout, ...lint, ...checkStep)],
+          [
+            "checkout に fetch-depth が無い（既定の 1 では分岐点を求められない）",
+            workflow(
+              "      - uses: actions/checkout@v4",
+              ...checkStep,
+              ...lint,
+            ),
+          ],
+          [
+            "fetch-depth が 1",
+            workflow(
+              "      - uses: actions/checkout@v4",
+              "        with:",
+              "          fetch-depth: 1",
+              ...checkStep,
+              ...lint,
+            ),
+          ],
+          [
+            "fetch-depth: 0 がコメントアウトされている",
+            workflow(
+              "      - uses: actions/checkout@v4",
+              "        with:",
+              "          # fetch-depth: 0",
+              ...checkStep,
+              ...lint,
+            ),
+          ],
+          ["checkout が無い", workflow(...checkStep, ...lint)],
+          ["空文字", ""],
+        ];
 
-    // then
-    // 前提: ステップを読み取れていること（読み取りが壊れて 0 件になり、判定が素通りするのを防ぐ）。
-    expect(steps.length).toBeGreaterThan(5);
-    expect(allowed).toBe(true);
+        // when
+        const result = casesByName(cases, ([, yaml]) =>
+          checksLogsInPullRequests(yaml),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => false));
+      },
+    );
+  });
+
+  Scenario("作業ログの CI の検査（実ファイル）", ({ And }) => {
+    And(
+      ".github/workflows/ci.yml は PR のときだけ check-work-logs-diff.sh を失敗で止まる形で pnpm lint より前に実行し、checkout は fetch-depth: 0",
+      () => {
+        // given
+        const yaml = readFileSync(
+          join(repoRoot, ".github/workflows/ci.yml"),
+          "utf8",
+        );
+
+        // when
+        const steps = readWorkflowSteps(yaml);
+        const allowed = checksLogsInPullRequests(yaml);
+
+        // then
+        // 前提: ステップを読み取れていること（読み取りが壊れて 0 件になり、判定が素通りするのを防ぐ）。
+        expect(steps.length).toBeGreaterThan(5);
+        expect(allowed).toBe(true);
+      },
+    );
   });
 });

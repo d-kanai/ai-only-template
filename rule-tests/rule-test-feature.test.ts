@@ -43,8 +43,6 @@ import { casesByName } from "./case-table";
 //       `SyntaxError: Unterminated group` になり、`.call(` のように書けなかった。同じ作り方で正規表現にし、作れない文を止める。
 //       作れた正規表現が文自身に一致するかは見ない: 対のかっこ `（a）` 以外の `(a)` は文自身に一致しないが、vitest-cucumber 8.0.0 は
 //       それでも step を対応づけて実行した（`a (x) b` と `a (x) c` で実測。式の無い step は文字列のまま照らし合わせているとみられる）。
-// 移していないテスト（PENDING）: 移す PR を分けるので、移していないテストは一覧に載せて検査から外す。一覧にあるのに .feature が
-//   あれば、一覧から消し忘れたものとして違反にする（一覧が古くならない）。すべて移したら一覧は空になる。
 // 限界: import は先頭の import の並び（コメント・空行を挟んでよい）だけを見る。途中の import・`require`・`import()`・
 //   `vitest` の名前空間の import（`import * as v`）の `v.it` は見ない。`Scenario.skip(` / `.only(` は見ない（Biome の
 //   noSkippedTests も止めない。今の step の実装には無い）。step が describe / it を使わずに中で検査を回しているか
@@ -52,19 +50,6 @@ import { casesByName } from "./case-table";
 
 const RULE_TESTS_DIR = "rule-tests";
 const FORBIDDEN_VITEST_IMPORTS = new Set(["it", "test", "describe", "suite"]);
-
-// まだ .feature に移していないルール検査テストの名前（`rule-tests/<名前>.test.ts`）。移したら消す。
-const PENDING = new Set([
-  "api-journey",
-  "instructions",
-  "lint",
-  "package",
-  "pnpm-workspace",
-  "settings",
-  "test-phases",
-  "typecheck",
-  "work-logs-check",
-]);
 
 // ---- 判定 ----
 
@@ -179,25 +164,13 @@ function listRuleTestFiles(root: string): string[] {
   return walk(RULE_TESTS_DIR).sort();
 }
 
-function collectRuleTestFeatureViolations(
-  root: string,
-  pending: ReadonlySet<string>,
-): string[] {
+function collectRuleTestFeatureViolations(root: string): string[] {
   const files = new Set(listRuleTestFiles(root));
   return [...files].flatMap((path) => {
     const base = path.replace(/\.(?:test\.ts|feature)$/, "");
     const name = posix.basename(base);
-    const isPending =
-      posix.dirname(path) === RULE_TESTS_DIR && pending.has(name);
     const isTest = path.endsWith(".test.ts");
     const pair = isTest ? `${base}.feature` : `${base}.test.ts`;
-    if (isPending) {
-      return isTest && files.has(pair)
-        ? [
-            `rule-test-feature-pair: ${path} は .feature に移したので、PENDING から ${name} を消す`,
-          ]
-        : [];
-    }
     if (!files.has(pair))
       return [`rule-test-feature-pair: ${path} に対の ${pair} が無い`];
     const source = readFileSync(join(root, path), "utf8");
@@ -243,7 +216,6 @@ const STEPS = (name: string) =>
     `const feature = await loadFeature("./${name}.feature");`,
   );
 const FEATURE = lines("Feature: a", "  Scenario: b", "    * c");
-const NOTHING_PENDING = new Set<string>();
 
 const feature = await loadFeature("./rule-test-feature.feature");
 
@@ -262,10 +234,7 @@ describeFeature(feature, ({ Scenario }) => {
         });
 
         // when
-        const violations = collectRuleTestFeatureViolations(
-          root,
-          NOTHING_PENDING,
-        );
+        const violations = collectRuleTestFeatureViolations(root);
 
         // then
         expect(violations).toEqual([]);
@@ -284,10 +253,7 @@ describeFeature(feature, ({ Scenario }) => {
         });
 
         // when
-        const violations = collectRuleTestFeatureViolations(
-          root,
-          NOTHING_PENDING,
-        );
+        const violations = collectRuleTestFeatureViolations(root);
 
         // then
         expect(violations).toEqual([
@@ -312,10 +278,7 @@ describeFeature(feature, ({ Scenario }) => {
         });
 
         // when
-        const violations = collectRuleTestFeatureViolations(
-          root,
-          NOTHING_PENDING,
-        );
+        const violations = collectRuleTestFeatureViolations(root);
 
         // then
         expect(violations).toEqual([
@@ -553,49 +516,6 @@ describeFeature(feature, ({ Scenario }) => {
     );
   });
 
-  Scenario("まだ移していないルール検査テスト", ({ And }) => {
-    And(
-      "移していない一覧にあるテストは、.feature が無くても違反にしない",
-      () => {
-        // given
-        const root = fixture({
-          "rule-tests/a.test.ts": 'import { it } from "vitest";',
-        });
-
-        // when
-        const violations = collectRuleTestFeatureViolations(
-          root,
-          new Set(["a"]),
-        );
-
-        // then
-        expect(violations).toEqual([]);
-      },
-    );
-
-    And(
-      "移していない一覧にあるのに .feature があれば、一覧から消すよう違反になる",
-      () => {
-        // given
-        const root = fixture({
-          "rule-tests/a.test.ts": STEPS("a"),
-          "rule-tests/a.feature": FEATURE,
-        });
-
-        // when
-        const violations = collectRuleTestFeatureViolations(
-          root,
-          new Set(["a"]),
-        );
-
-        // then
-        expect(violations).toEqual([
-          "rule-test-feature-pair: rule-tests/a.test.ts は .feature に移したので、PENDING から a を消す",
-        ]);
-      },
-    );
-  });
-
   Scenario("ケースの表", ({ And }) => {
     And("ケース名ごとに値をまとめ、同じケース名があれば例外になる", () => {
       // given
@@ -622,10 +542,10 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "ルール検査テストはすべて .feature と step の実装に分かれている",
       () => {
-        // given: 実ファイル（repoRoot）と移していない一覧（PENDING）
+        // given: 実ファイル（repoRoot）
         // when
         const files = listRuleTestFiles(repoRoot);
-        const violations = collectRuleTestFeatureViolations(repoRoot, PENDING);
+        const violations = collectRuleTestFeatureViolations(repoRoot);
 
         // then
         // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
