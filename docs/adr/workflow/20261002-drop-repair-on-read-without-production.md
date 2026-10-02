@@ -1,7 +1,7 @@
 # データの移行（backfill）は切替の後に冪等な SQL で流す方針を保ち、切替から backfill までの間の repair on read / write はやめる
 
 - 日付: 2026-10-02
-- 状態: 採用
+- 状態: 置き換え（→ workflow/20261002-drop-backfill-without-production.md）
 - 関連: Issue #260 / Issue #194 / Issue #237 / `.claude/rules/backend.md` / `apps/backend/features/todo/internal/infra/todo-repository.postgres.ts`
 
 ## 背景

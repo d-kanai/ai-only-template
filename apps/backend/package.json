@@ -7,8 +7,7 @@
   },
   "scripts": {
     "db:generate": "drizzle-kit generate --config shared/drizzle/drizzle.config.ts",
-    "db:migrate": "drizzle-kit migrate --config shared/drizzle/drizzle.config.ts",
-    "db:backfill": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --input-type=module --eval \"(await import('./shared/infra/ts-resolve.ts')).registerTsResolve(); process.exitCode = await (await import('./shared/infra/backfill.ts')).main();\""
+    "db:migrate": "drizzle-kit migrate --config shared/drizzle/drizzle.config.ts"
   },
   "dependencies": {
     "@repo/shared": "workspace:*",

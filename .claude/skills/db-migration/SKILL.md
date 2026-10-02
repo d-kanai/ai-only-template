@@ -1,6 +1,6 @@
 ---
 name: db-migration
-description: Drizzle のスキーマ変更とマイグレーション（schema.ts → pnpm db:generate → SQL の確認 → コミット → pnpm db:migrate）。テーブル・列を足す・変えるとき、外部キーを張る・既存の行を直す（backfill）とき、apps/backend/features/*/internal/infra/schema.ts・apps/backend/shared/infra/schema.ts・apps/backend/shared/drizzle/ を触るとき、DB の表が無いエラーが出たときに使う。
+description: Drizzle のスキーマ変更とマイグレーション（schema.ts → pnpm db:generate → SQL の確認 → コミット → pnpm db:migrate）。テーブル・列を足す・変えるとき、外部キーを張るとき、apps/backend/features/*/internal/infra/schema.ts・apps/backend/shared/infra/schema.ts・apps/backend/shared/drizzle/ を触るとき、DB の表が無いエラーが出たときに使う。
 ---
 
 # db-migration（Drizzle + Postgres）
@@ -26,7 +26,7 @@ description: Drizzle のスキーマ変更とマイグレーション（schema.t
 5. **当てる**: `pnpm db:migrate`（`drizzle-kit migrate`）。まだ当てていない SQL だけを当てる。当てた記録は DB の `drizzle.__drizzle_migrations` 表に残り、何度実行しても同じ結果になる。
 6. **テストを通す**: `pnpm test`。実 Postgres のテストは `createTestDatabase()` がテストファイルごとの別スキーマにマイグレーションを当てるので、テスト用に migrate する必要はない。E2E（`pnpm test:e2e`）は `public` の表を使うので手順 5 が要る。
 7. **コミット**: `schema.ts`・テスト・`apps/backend/shared/drizzle/`（SQL と `meta/` をまとめて）を同じコミットに入れる。
-- データの移行（backfill。既存の行を足す・直す）はマイグレーションに入れず、`apps/backend/shared/drizzle/backfill/NNNN_<内容>.sql` に冪等な SQL（`INSERT … SELECT … WHERE NOT EXISTS` / `ON CONFLICT … DO NOTHING`）で置き、デプロイの切替の後に `pnpm db:backfill` で流す（deploy.yml の Run backfill。ローカルは `pnpm db:migrate` の後に `pnpm db:backfill`）。WHY: 切替の前に流すと、切替までの間に旧アプリが書いた行が漏れる（Issue #194）。決まりと検査は `.claude/rules/backend.md` の「永続化」の「データの移行（backfill）」。
+- データの移行（既存の行を足す・直す）の仕組みは今は無い（Issue #247 で backfill を外した。本番環境が無く移すデータが無い）。要るようになったら方法を決め直す（`.claude/rules/backend.md` の「永続化」）。
 
 ## 外部キー（`--custom` の SQL で張る。Issue #188）
 - `schema.ts` に `.references()` を書かない。WHY: drizzle-kit 0.31.11 の generate は `REFERENCES "public"."todos"` とスキーマ付きで書く（`bin.cjs` の `schemaTo || "public"`。2026-09-30 に生成して確認）。`createTestDatabase()` はテストファイルごとの別スキーマ（search_path）にマイグレーションを当てるので、public を指す外部キーはテストのスキーマの表を指さず壊れる。
