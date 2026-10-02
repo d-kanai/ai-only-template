@@ -561,7 +561,7 @@ ensure_dotenv() {
 # WHY フックで当てるか: VM はセッションごとに新しく、Postgres もデータの無い状態で起動する。表が無いままだと、
 #   pnpm dev / pnpm test:e2e が「relation "todos" does not exist」で失敗する。
 #   当て済みのものは飛ばす（drizzle.__drizzle_migrations に記録がある）ので、何度実行しても同じ結果になる。
-# 接続先（DATABASE_URL）は apps/backend/shared/drizzle/drizzle.config.ts が env.ts 経由で .env から読む（.env は main で Docker の段より前に
+# 接続先（DATABASE_URL）はマイグレーションの入口 apps/backend/shared/drizzle/migrate.ts のアプリのプールが env.ts 経由で .env から読む（.env は main で Docker の段より前に
 #   ensure_dotenv が用意済み）。スクリプトは接続先を持たず、DATABASE_URL を差し込まない（既定値を 1 か所 = .env.example に
 #   するため。Issue #59）。フックの環境に DATABASE_URL があれば、そのまま引き継がれて .env より優先される。
 # WHY timeout 15: 実測は約 1 秒（2026-09-28、表 1 つ）。15 秒かかるなら止まっているとみなす。フック全体の最悪ケースを

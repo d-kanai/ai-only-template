@@ -46,4 +46,4 @@ description: Drizzle のスキーマ変更とマイグレーション（schema.t
 
 ## 困ったとき
 - `relation "todos" does not exist`: migrate していない。手順 5。
-- 必須の環境変数が欠けていると `drizzle.config.ts` の読み込み（`env.ts`）で名前を挙げて止まる。`.env` を `.env.example` から作る（`.claude/rules/tooling/env.md`）。
+- 必須の環境変数が欠けていると `pnpm db:migrate`（入口 `migrate.ts` のアプリのプールが読む `env.ts`）が名前を挙げて止まる。`pnpm db:generate`（drizzle-kit）は DB に接続せず、`.env` も読まない（Issue #326）。`.env` を `.env.example` から作る（`.claude/rules/tooling/env.md`）。
