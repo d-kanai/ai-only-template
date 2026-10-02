@@ -10,8 +10,8 @@ import { Todo } from "../domain/todo";
 import { ChangeTodoCompletionCommand } from "./change-todo-completion.command";
 
 // notifications: command が完了の通知に渡したメッセージ（呼ばれた順）。
-// WHY 記録する関数を渡す（vi.fn にしない）: 通知の口はコンストラクタで受け取る関数で、型で縛られた偽物をここで書ける
-//   （InMemory の Repository と同じく、差し替えはコンストラクタで行う）。
+// WHY 記録するオブジェクトを渡す（vi.fn にしない）: 通知の口はコンストラクタで受け取る interface（TodoCompletedNotifier）で、
+//   型で縛られた偽物をここで書ける（InMemory の Repository と同じく、差し替えはコンストラクタで行う）。
 async function setup(
   transactions: TransactionRunner = new InMemoryTransactionRunner(),
 ) {
@@ -23,13 +23,11 @@ async function setup(
     repository,
     todo,
     notifications,
-    command: new ChangeTodoCompletionCommand(
-      repository,
-      transactions,
-      (message) => {
+    command: new ChangeTodoCompletionCommand(repository, transactions, {
+      notify(message) {
         notifications.push(message);
       },
-    ),
+    }),
   };
 }
 
@@ -99,7 +97,7 @@ describe("ChangeTodoCompletionCommand", () => {
     });
   });
 
-  // 完了の通知（Issue #208）: 未完了 → 完了に変わったときだけ、notification モジュールの expose（notify）を呼ぶ。
+  // 完了の通知（Issue #208）: 未完了 → 完了に変わったときだけ、notification モジュールの expose（Notifier の notify）を呼ぶ。
   // WHY メッセージは id だけの英語: title などの利用者の値をログに出さない（ログは運用者向けの英語。backend.md の「ログ」）。
   test("未完了の Todo を完了にすると、Todo completed: <id> で 1 回だけ通知する", async () => {
     const { todo, notifications, command } = await setup();
@@ -186,8 +184,10 @@ describe("ChangeTodoCompletionCommand", () => {
     const notifying = new ChangeTodoCompletionCommand(
       repository,
       committingRunner(events),
-      () => {
-        events.push("notify");
+      {
+        notify() {
+          events.push("notify");
+        },
       },
     );
 
