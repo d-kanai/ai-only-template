@@ -1,7 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import { Fixture, Given, When } from "playwright-bdd/decorators";
-import { E2eDatabase } from "./database";
-import type { test } from "./fixtures";
+import { E2eDatabase } from "../support/database";
+import type { test } from "../support/fixtures";
 
 // 複数の .feature が使う step（Issue #279）。.feature と対にならない唯一の step のファイル（rule-tests/e2e-feature.test.ts の
 //   e2e-feature-pair の例外）。
@@ -13,7 +13,7 @@ export class SharedSteps {
 
   // WHY Todo を空にする: データは Postgres に残り、サーバを起動し直しても、前のシナリオ・前回の実行（途中で失敗して削除まで
   //   届かなかったもの）の Todo が一覧に出る。シナリオごとに空の状態から始め、結果が実行順や過去の実行に左右されないようにする。
-  //   接続先は webServer と同じ（apps/e2e/database.ts）。
+  //   接続先は webServer と同じ（apps/e2e/support/database.ts）。
   @Given("Todo が 1 件も無い")
   async noTodos(): Promise<void> {
     await E2eDatabase.resetTodos();

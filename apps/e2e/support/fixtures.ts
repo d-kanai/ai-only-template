@@ -1,10 +1,10 @@
 import { test as base } from "playwright-bdd";
-import { ApiErrorSteps } from "./api-error.steps";
-import { I18nSteps } from "./i18n.steps";
+import { ApiErrorSteps } from "../spec/api-error.steps";
+import { I18nSteps } from "../spec/i18n.steps";
+import { RequestLogSteps } from "../spec/request-log.steps";
+import { SharedSteps } from "../spec/shared.steps";
+import { TodoSteps } from "../spec/todo.steps";
 import { E2eLogServer } from "./log-server";
-import { RequestLogSteps } from "./request-log.steps";
-import { SharedSteps } from "./shared.steps";
-import { TodoSteps } from "./todo.steps";
 
 // E2E の step（*.steps.ts）のクラスを Playwright の fixture として登録する（Issue #279。.claude/rules/testing.md の「E2E」）。
 // WHY step をクラスのメソッドに書く（playwright-bdd のデコレータ @Given / @When / @Then と @Fixture）: テストの補助も最上位に関数を
