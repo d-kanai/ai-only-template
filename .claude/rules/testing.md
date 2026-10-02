@@ -66,7 +66,7 @@ paths:
 - 時計（現在時刻）: `Clock.now`（`apps/shared/now.ts`。現在時刻の唯一の出口）を `vi.mock` で差し替え、`vi.mocked(Clock.now).mockReturnValue(date)` / `mockReturnValueOnce(date)` で時刻を決める（backend の「`vi.mock` は使わない」の例外）。backend のテストは `vi.mock("@repo/shared/now")`、`apps/shared` の中は `vi.mock("./now")`。`afterEach` で `vi.mocked(Clock.now).mockReset()` する。自動モックはクラスの static メソッドも mock に差し替える（Issue #262 で確認）。
   - 自動モックの `Clock.now` は既定で `undefined` を返す（`Todo.create` は作成日時の不変条件で validation_error になり、返させ忘れに気づける）。ファイルのほかのテストが実時刻のままでよいときは `vi.mock("@repo/shared/now", { spy: true })` で本物を残し、時刻を決めるテストだけ `mockReturnValueOnce` する（`todo-repository.postgres.test.ts`）。
   - WHY 時計だけ vi.mock: 時計はコンストラクタで渡す依存ではなく横断的な seam で、作成日時を引数で受け取ると Entity の生成ルールが呼び出し側に漏れる（`.claude/rules/shared.md` の「now」）。`vi.useFakeTimers` で `Date` を差し替えるのは `now.ts` 自身のテストだけ（本物が実時計を読むことを確かめる）。
-- 画面側の hook / screen: `vi.mock("@/features/todo/api/todo-api")` と `vi.mocked(listTodos).mockResolvedValue(...)`。WHY: 境界の `api/` で切ると HTTP やサーバの状態に依存しない。
+- 画面側の hook / screen: `vi.mock("@/features/todo/api/todo-api")` と `vi.mocked(TodoApi.list).mockResolvedValue(...)`（`TodoApi` はクラスの static メソッド。自動モックが static メソッドも mock に差し替える。規則 `class-based`、ADR `docs/adr/architecture/20261002-class-based-frontend-modules.md`）。WHY: 境界の `api/` で切ると HTTP やサーバの状態に依存しない。
 - `api/`: `vi.stubGlobal("fetch", vi.fn<typeof fetch>())` で、送った URL・メソッド・本文と応答の扱いを検証する。
 - 非同期の順序（古い応答が後から届く、画面を離れた後に失敗が届く）は、任意のタイミングで resolve できる `deferred()` で作る（各テストファイルの中に定義）。WHY: `mockResolvedValue` は即時に resolve し、タイマーは実行環境の速さに左右される。
 
