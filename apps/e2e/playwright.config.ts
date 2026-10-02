@@ -1,7 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 import { env, toolEnv } from "@repo/shared/env";
+import { defineBddConfig } from "playwright-bdd";
 
-// Playwright（E2E テスト）の設定。最小構成で、Chromium だけで apps/e2e/ のテスト（*.spec.ts）を実行する。
+// Playwright（E2E テスト）の設定。最小構成で、Chromium だけで apps/e2e/ の .feature（playwright-bdd が生成したテスト）を実行する。
 // 実行: リポジトリ直下の pnpm test:e2e（= pnpm --filter @repo/e2e test = apps/e2e をカレントディレクトリにした playwright test）。
 //   Next の本番ビルドを webServer で起動し、ブラウザから画面を操作する。
 // WHY apps/e2e を workspace パッケージ @repo/e2e にする（Issue #84）: apps/frontend_customer・apps/backend と同じ形にし、E2E だけが使う
@@ -40,17 +41,33 @@ const chromiumExecutable = toolEnv.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
 //   webServer の中では当てない（Issue #57 の方針。CI・クラウドのフックは E2E の前に db:migrate を実行する）。
 const databaseUrl = env.DATABASE_URL;
 
+// E2E は Gherkin の .feature（業務の流れ）と step のクラス（*.steps.ts）で書く（Issue #279。.claude/rules/testing.md の「E2E」、
+//   ADR docs/adr/quality/20261002-e2e-in-gherkin-with-playwright-bdd.md）。playwright-bdd の bddgen が .feature から Playwright の
+//   テスト（outputDir の .features-gen/ の *.spec.js）を生成し、playwright test がそれを実行する（package.json の test）。
+// defineBddConfig の返り値は生成先のディレクトリで、testDir にそのまま渡す（Playwright は生成されたテストだけを探す）。
+// features: apps/e2e の直下の .feature。steps: step のクラスを fixture にまとめる fixtures.ts と、step のクラスの *.steps.ts
+//   （fixtures.ts が import するので、ここに無くても読まれるが、playwright-bdd が step を探す範囲として明示する）。
+// outputDir: 既定（設定ファイルのディレクトリの .features-gen）と同じ値を明示する。.gitignore・rule-tests/architecture.test.ts の
+//   EXCLUDED_DIRS・rule-tests/e2e-feature.test.ts の SKIPPED_DIRS が同じ名前を除くので、名前を変えるならそちらも変える。
+//   生成物は *.spec.js で、tsconfig.json の include（*.ts / *.tsx / *.mts）に入らないので型チェックの対象にもならない。
+// missingSteps: 既定の fail-on-gen（.feature の step に対応する実装が無ければ、生成の時点で失敗にする）。WHY 既定のまま: 書いた
+//   流れが実装されないまま残らない（API ジャーニーの vitest-cucumber の「Missing steps」と同じ役割）。
+const testDir = defineBddConfig({
+  features: "*.feature",
+  steps: ["fixtures.ts", "*.steps.ts"],
+  outputDir: ".features-gen",
+});
+
 export default defineConfig({
-  // testDir: E2E テストの置き場所。このファイルのディレクトリ（apps/e2e）からの相対パスで、"." は apps/e2e そのもの。
-  //   WHY 別のパッケージに置く: Vitest の単体テスト（対象の隣の *.test.ts(x)）と分けるため（Vitest は vitest.config.mts の
-  //   exclude で apps/e2e/** を読まない）。apps/e2e/node_modules の中は Playwright がテストを探すときに読み飛ばす
-  //   （playwright 1.63.0 の lib/runner/index.js。node_modules という名前のディレクトリに入らない）。
-  //   testMatch は既定（**/*.@(spec|test).?(c|m)[jt]s?(x)）で、*.spec.ts だけがテストになる（database.ts は補助）。
-  //   outputDir（失敗時のトレースなど）も既定のまま、この package.json のディレクトリの test-results（apps/e2e/test-results。
-  //   .gitignore 済み）になる（同 lib/common/index.js の packageJsonDir）。
-  testDir: ".",
+  // testDir: playwright-bdd が .feature から生成したテストの置き場所（上の defineBddConfig の outputDir。apps/e2e/.features-gen）。
+  //   WHY E2E を別のパッケージ（apps/e2e）に置く: Vitest の単体テスト（対象の隣の *.test.ts(x)）と分けるため（Vitest は
+  //   vitest.config.mts の exclude で apps/e2e/** を読まない）。
+  //   testMatch は既定（**/*.@(spec|test).?(c|m)[jt]s?(x)）で、生成された *.spec.js がテストになる。
+  //   outputDir（失敗時のトレースなど。playwright-bdd の outputDir とは別のもの）は既定のまま、この package.json のディレクトリの
+  //   test-results（apps/e2e/test-results。.gitignore 済み）になる（playwright 1.63.0 の lib/common/index.js の packageJsonDir）。
+  testDir,
   // fullyParallel / workers: テストを 1 つずつ順番に実行する。
-  //   WHY: webServer の 1 プロセスと 1 つの Postgres を全テストが共有し、各テストの前に todos を空にする（apps/e2e/todo.spec.ts）。
+  //   WHY: webServer の 1 プロセスと 1 つの Postgres を全テストが共有し、各シナリオの前に todos を空にする（apps/e2e/shared.steps.ts の Background の step）。
   //   並列に動かすと、別のテストのリセットや作った Todo が混ざり、結果が実行のタイミングで変わるため。
   fullyParallel: false,
   workers: 1,
@@ -65,7 +82,7 @@ export default defineConfig({
     // locale: ブラウザの言語（navigator.language と、リクエストの Accept-Language）。
     //   WHY ja-JP に固定する: 画面の言語は Accept-Language で決まる（apps/frontend_customer/proxy.ts・shared/i18n/locale.ts。Issue #116）。
     //   固定しないと、実行する環境（CI の Chromium の既定は en-US）で画面の言語が変わり、日本語の文言を探すテストが落ちる。
-    //   英語の表示は、テストの中で test.use({ locale: "en-US" }) にして確かめる（apps/e2e/i18n.spec.ts）。
+    //   英語の表示は、step で Accept-Language のヘッダを en-US にして確かめる（apps/e2e/i18n.steps.ts）。
     locale: "ja-JP",
     // timezoneId: ブラウザのタイムゾーン。
     //   WHY サーバ（UTC）と違う Asia/Tokyo にする: 日時はブラウザのタイムゾーンで表示する（todo-item.tsx）。サーバと同じ UTC だと、

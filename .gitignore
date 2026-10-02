@@ -53,6 +53,9 @@ next-env.d.ts
 /apps/e2e/playwright-report/
 /apps/e2e/blob-report/
 /apps/e2e/playwright/.cache/
+# playwright-bdd の bddgen が .feature から生成するテスト（apps/e2e/playwright.config.ts の defineBddConfig の outputDir）。
+#   WHY コミットしない: pnpm test:e2e（bddgen && playwright test）が毎回作り直す生成物で、.feature と step から決まる。
+/apps/e2e/.features-gen/
 
 # stryker（mutation testing の実行結果。reports/mutation/ にレポート、.stryker-tmp/ に実行中のサンドボックスが作られる）
 /reports/
