@@ -2288,8 +2288,34 @@ function isFactoryOf(member: Node, className: string | undefined): boolean {
   );
 }
 
+// クラスが extends で別のクラスを継承するか（implements は型だけなので数えない）。
+function extendsAnotherClass(node: Node): boolean {
+  const clauses = (
+    node as { heritageClauses?: readonly { token: SyntaxKind }[] }
+  ).heritageClauses;
+  return (
+    clauses?.some((clause) => clause.token === SyntaxKind.ExtendsKeyword) ??
+    false
+  );
+}
+
 // 構文木の中のクラス（宣言と式。入れ子も）のうち、インスタンスのメンバーを持つものの static メンバー（ファクトリを除く）を、
 //   書かれた順に行番号で返す。
+// クラスがインスタンスとして使われるか（インスタンスのメンバーを持つか、別のクラスを継承するか）。
+// WHY インスタンスのインデックスシグネチャは数えない: 型の宣言だけで、インスタンスを作るクラスかどうかを決めない。
+//   static のインデックスシグネチャ（static [k: string]: unknown）は static のメンバーとして違反にする。
+// WHY 継承（extends）するクラスもインスタンスのクラスとして扱う: 自分でインスタンスのメンバーを書かなくても、親から受け継いだ
+//   メソッドでインスタンスとして使われる（class X extends Base { static helper() {} } を素通りさせない。Codex の指摘）。
+function isInstanceClass(node: Node, members: readonly Node[]): boolean {
+  return (
+    extendsAnotherClass(node) ||
+    members.some(
+      (member) =>
+        !isStaticMember(member) && !isIndexSignatureDeclaration(member),
+    )
+  );
+}
+
 function findStaticInInstanceClasses(sourceFile: SourceFile): number[] {
   const found: number[] = [];
   const visit = (node: Node): void => {
@@ -2297,13 +2323,7 @@ function findStaticInInstanceClasses(sourceFile: SourceFile): number[] {
       const members = node.members.filter(
         (member) => !isSemicolonClassElement(member),
       );
-      // WHY インスタンスのインデックスシグネチャは数えない: 型の宣言だけで、インスタンスを作るクラスかどうかを決めない。
-      //   static のインデックスシグネチャ（static [k: string]: unknown）は static のメンバーとして違反にする。
-      const hasInstanceMember = members.some(
-        (member) =>
-          !isStaticMember(member) && !isIndexSignatureDeclaration(member),
-      );
-      if (hasInstanceMember) {
+      if (isInstanceClass(node, members)) {
         for (const member of members) {
           if (isStaticMember(member) && !isFactoryOf(member, node.name?.text)) {
             found.push(lineOf(sourceFile, member));
@@ -6089,7 +6109,7 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
         "}",
       ),
     ],
-    // 14: static のインデックスシグネチャ。
+    // 13: static のインデックスシグネチャ。
     [
       DOMAIN_FILE,
       lines(
@@ -6099,7 +6119,17 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
         "}",
       ),
     ],
-    // 13: frontend の React 以外のモジュール。
+    // 14: 自分ではインスタンスのメンバーを書かず、継承で受け継ぐクラス（Codex の指摘）。
+    [
+      DOMAIN_FILE,
+      lines(
+        "class Base { run(): void {} }",
+        "export class A extends Base {",
+        "  static helper(): void {}",
+        "}",
+      ),
+    ],
+    // 15: frontend の React 以外のモジュール。
     [
       "apps/frontend_customer/features/todo/api/x.ts",
       lines(
@@ -6161,6 +6191,16 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
         "export class A {",
         "  [key: string]: unknown;",
         "  static run(): void {};",
+        "}",
+      ),
+    ],
+    // 8: implements だけのクラスは static だけのクラスのまま（implements は型の宣言で、インスタンスを作るかを決めない）。
+    [
+      DOMAIN_FILE,
+      lines(
+        "interface I { }",
+        "export class A implements I {",
+        "  static run(): void {}",
         "}",
       ),
     ],
