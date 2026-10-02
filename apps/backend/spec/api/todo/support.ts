@@ -1,6 +1,6 @@
 import { asc, eq, sql } from "drizzle-orm";
 import { expect } from "vitest";
-import { notify } from "../../../features/notification/expose/notify";
+import { Notifier } from "../../../features/notification/expose/notifier";
 import { ChangeTodoCompletionCommand } from "../../../features/todo/internal/application/change-todo-completion.command";
 import { CreateTodoCommand } from "../../../features/todo/internal/application/create-todo.command";
 import { DeleteTodoCommand } from "../../../features/todo/internal/application/delete-todo.command";
@@ -76,15 +76,15 @@ export function renameTodoApi(db: Database) {
   ).handle;
 }
 
-// 完了の通知は本番と同じ notification モジュールの入口（expose/notify.ts）を渡す（Issue #256）。
-// WHY 本物の notify を渡す（記録する関数にしない）: 仕様の実行で notification モジュール（command・ログの sender）まで通す（daiki の判断
+// 完了の通知は本番と同じ notification モジュールの入口（expose/notifier.ts の Notifier）を渡す（Issue #256）。
+// WHY 本物の Notifier を渡す（記録するオブジェクトにしない）: 仕様の実行で notification モジュール（command・ログの sender）まで通す（daiki の判断
 //   2026-10-02）。送った通知は、step がログの行（console.log の差し替え。Issue #258）で確かめる。
 export function changeTodoCompletionApi(db: Database) {
   return new ChangeTodoCompletionApi(
     new ChangeTodoCompletionCommand(
       new PostgresTodoRepository(db),
       new PostgresTransactionRunner(db),
-      notify,
+      new Notifier(),
     ),
   ).handle;
 }

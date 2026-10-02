@@ -31,7 +31,7 @@ describe("SendNotificationCommand", () => {
     expect(sender.sent).toEqual(["Todo completed: 1"]);
   });
 
-  // WHY 失敗を握りつぶさずに reject する: 失敗をどう扱うか（ログに出して呼び出し元へは伝えない）は expose（notify）が決める。
+  // WHY 失敗を握りつぶさずに reject する: 失敗をどう扱うか（ログに出して呼び出し元へは伝えない）は expose（Notifier）が決める。
   //   command で握りつぶすと、expose が失敗を知れずログに残らない。
   test("送信口が失敗したら、その例外で reject する", async () => {
     const command = new SendNotificationCommand(new FailingSender());
