@@ -66,12 +66,14 @@ describeFeature(feature, ({ Scenario }) => {
     // 変更の記録も、Todo と完了の履歴の作成（insert）の 2 件だけが残る（冒頭の WHY のとおり .feature には書かない。作る操作の
     //   結果を確かめるこの step に置く）。
     And("タイトルを渡すと、未完了の Todo が作られる", async () => {
+      // given
       const before = Date.now();
 
+      // when
       const milk = await createTodo("牛乳を買う");
-
       const after = Date.now();
       const rows = await TodoSpecRows.todos(database.db);
+      // then
       expect(rows).toStrictEqual([
         {
           id: expect.stringMatching(
@@ -94,8 +96,11 @@ describeFeature(feature, ({ Scenario }) => {
     });
 
     And("タイトルの前後の空白は除かれる", async () => {
+      // given: beforeEach で Todo を空にしてある
+      // when
       await createTodo(" \t牛乳を買う　");
 
+      // then
       await expect(TodoSpecRows.todos(database.db)).resolves.toMatchObject([
         { title: "牛乳を買う" },
       ]);
@@ -103,10 +108,13 @@ describeFeature(feature, ({ Scenario }) => {
 
     // 上限は domain の TODO_TITLE_MAX_LENGTH（100）。文字数はコードポイント数（絵文字 1 つは String#length では 2）。
     And("100 文字のタイトルまで作れる（絵文字は 1 文字と数える）", async () => {
+      // given
       const title = "🍎".repeat(100);
 
+      // when
       await createTodo(title);
 
+      // then
       await expect(TodoSpecRows.todos(database.db)).resolves.toMatchObject([
         { title },
       ]);
@@ -118,8 +126,11 @@ describeFeature(feature, ({ Scenario }) => {
     //   （schema.ts の mode "date"）。
     // WHY 前後に空白のあるタイトルで作る: 要求のタイトルを（空白を除く前のまま）返す誤りを、保存された行との違いで見分ける。
     And("作った Todo が、保存された内容のとおりに返る", async () => {
+      // given: beforeEach で Todo を空にしてある
+      // when
       const response = await postTodo({ title: " 牛乳を買う\t" });
 
+      // then
       expect(response.status).toBe(201);
       const [row] = await TodoSpecRows.todos(database.db);
       expect(row).toBeDefined();
@@ -135,8 +146,11 @@ describeFeature(feature, ({ Scenario }) => {
   Scenario("記録", ({ And }) => {
     // 作成日時に未完了（Todo.create）。
     And("完了の履歴に、作成時の「未完了」が 1 件残る", async () => {
+      // given: beforeEach で Todo を空にしてある
+      // when
       const milk = await createTodo("牛乳を買う");
 
+      // then
       await expect(TodoSpecRows.statuses(database.db)).resolves.toStrictEqual([
         {
           todoId: milk.id,
@@ -153,9 +167,12 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "タイトルが空（空白だけも含む）だと、空という理由で拒否され、何も保存されない",
       async () => {
+        // given: beforeEach で Todo を空にしてある
         for (const title of ["", "  "]) {
+          // when
           const response = await postTodo({ title });
 
+          // then
           await TodoSpecProblems.expectResponse(
             response,
             TodoSpecProblems.validation("/api/todos", {
@@ -178,8 +195,11 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "101 文字のタイトルは、長すぎるという理由で拒否され、何も保存されない",
       async () => {
+        // given: beforeEach で Todo を空にしてある
+        // when
         const response = await postTodo({ title: "🍎".repeat(101) });
 
+        // then
         await TodoSpecProblems.expectResponse(
           response,
           TodoSpecProblems.validation("/api/todos", {
@@ -203,8 +223,11 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "タイトルが文字列でないと、形が違うという理由で拒否され、何も保存されない",
       async () => {
+        // given: beforeEach で Todo を空にしてある
+        // when
         const response = await postTodo({ title: 1 });
 
+        // then
         await TodoSpecProblems.expectResponse(
           response,
           TodoSpecProblems.validation("/api/todos", {
@@ -229,11 +252,14 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "決められていない項目があると、拒否され、何も保存されない",
       async () => {
+        // given: beforeEach で Todo を空にしてある
+        // when
         const response = await postTodo({
           title: "牛乳を買う",
           completed: true,
         });
 
+        // then
         await TodoSpecProblems.expectResponse(
           response,
           TodoSpecProblems.validation("/api/todos", {
@@ -256,10 +282,13 @@ describeFeature(feature, ({ Scenario }) => {
 
     // JSON として読めない本文。項目が無いので errors は付かない。
     And("内容が読み取れない形式だと、拒否され、何も保存されない", async () => {
+      // given: beforeEach で Todo を空にしてある
+      // when
       const response = await handler(
         TodoSpecRequests.raw("POST", "/api/todos", "{title:"),
       );
 
+      // then
       await TodoSpecProblems.expectResponse(
         response,
         TodoSpecProblems.validation("/api/todos", {

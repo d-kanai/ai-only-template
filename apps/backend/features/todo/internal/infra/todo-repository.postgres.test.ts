@@ -884,6 +884,7 @@ describe("PostgresTodoRepository", () => {
   //   どちらかの Todo の履歴が 1 件だと起きない（.claude/rules/testing.md の「複数件を扱う処理」）。日時を Todo ごと・履歴ごとに
   //   変え、取り違えたら値で分かるようにする。
   test("findAll は、2 つの Todo がそれぞれ複数の履歴を持つときも、履歴を Todo ごとに足した順で組み立てる", async () => {
+    // given
     const first = "00000000-0000-4000-8000-000000000002";
     const second = "00000000-0000-4000-8000-000000000001";
     const at = (hour: number) =>
@@ -905,8 +906,10 @@ describe("PostgresTodoRepository", () => {
       await database.db.insert(todoStatusChanges).values(row);
     }
 
+    // when
     const all = await repository().findAll();
 
+    // then
     expect(
       all.map(({ id, completed, statusChanges }) => ({
         id,

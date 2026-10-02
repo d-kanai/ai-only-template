@@ -52,13 +52,16 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "作った Todo の詳細を見ると、タイトル・完了かどうか・作成日時が返る",
       async () => {
+        // given
         const milk = await TodoBuilder.of(database.db)
           .title("牛乳を買う")
           .build();
         await TodoBuilder.of(database.db).title("パンを買う").build();
 
+        // when
         const response = await getTodo(milk.id);
 
+        // then
         expect(response.status).toBe(200);
         await expect(response.json()).resolves.toStrictEqual(
           TodoSpecExpected.response(milk) satisfies GetTodoResponse,
@@ -67,13 +70,16 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And("完了にした Todo は、完了として返る", async () => {
+      // given
       const milk = await TodoBuilder.of(database.db)
         .title("牛乳を買う")
         .completed(true)
         .build();
 
+      // when
       const response = await getTodo(milk.id);
 
+      // then
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
         ...TodoSpecExpected.response(milk),
@@ -84,12 +90,15 @@ describeFeature(feature, ({ Scenario }) => {
     // 名前を変えた後の Todo = 表のタイトルが新しいものになった Todo（完了の履歴は名前の変更で増えない）。名前の変更の API は通さず、
     //   その後の状態をビルダーで作る（冒頭の WHY）。名前の変更が表に書く内容は rename-todo の仕様が確かめる。
     And("名前を変えた Todo は、新しいタイトルで返る", async () => {
+      // given
       const milk = await TodoBuilder.of(database.db)
         .title("豆乳を買う")
         .build();
 
+      // when
       const response = await getTodo(milk.id);
 
+      // then
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
         ...TodoSpecExpected.response(milk),
@@ -101,10 +110,13 @@ describeFeature(feature, ({ Scenario }) => {
   Scenario("異常系", ({ And }) => {
     // WHY 別の Todo を 1 件置く: 空のときだけ「無い」と返す実装を通さない。
     And("存在しない Todo は、存在しないと伝えられる", async () => {
+      // given
       await TodoBuilder.of(database.db).title("牛乳を買う").build();
 
+      // when
       const response = await getTodo(MISSING_ID);
 
+      // then
       await TodoSpecProblems.expectResponse(
         response,
         TodoSpecProblems.notFound(MISSING_ID, `/api/todos/${MISSING_ID}`),
@@ -115,8 +127,11 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "Todo を指す値の形が正しくないときも、存在しないと伝えられる",
       async () => {
+        // given: beforeEach で Todo を空にしてある
+        // when
         const response = await getTodo("missing");
 
+        // then
         await TodoSpecProblems.expectResponse(
           response,
           TodoSpecProblems.notFound("missing", "/api/todos/missing"),
@@ -126,13 +141,16 @@ describeFeature(feature, ({ Scenario }) => {
 
     // 削除の後の状態（行が無い）を、削除の API を通さずに作る（support.ts の TodoSpecRows.remove）。
     And("削除した Todo は、存在しないと伝えられる", async () => {
+      // given
       const milk = await TodoBuilder.of(database.db)
         .title("牛乳を買う")
         .build();
       await TodoSpecRows.remove(database.db, milk.id);
 
+      // when
       const response = await getTodo(milk.id);
 
+      // then
       await TodoSpecProblems.expectResponse(
         response,
         TodoSpecProblems.notFound(milk.id, `/api/todos/${milk.id}`),
@@ -146,6 +164,7 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "壊れた Todo（完了の履歴の日時が、作られた日時より前のもの）は、サーバの誤りとして伝えられる",
       async () => {
+        // given
         const { id } = await TodoBuilder.of(database.db)
           .title("牛乳を買う")
           .createdAt(new Date("2026-09-01T00:00:00.000Z"))
@@ -157,8 +176,10 @@ describeFeature(feature, ({ Scenario }) => {
           ])
           .build();
 
+        // when
         const response = await getTodo(id);
 
+        // then
         await TodoSpecProblems.expectResponse(
           response,
           TodoSpecProblems.internalError(`/api/todos/${id}`),
