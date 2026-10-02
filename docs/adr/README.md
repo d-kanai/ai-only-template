@@ -139,3 +139,4 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-10-02 | 本番環境ができるまでデータの移行（backfill）の仕組みを持たず、下位互換の処理を残さない | 採用 | [20261002-drop-backfill-without-production.md](workflow/20261002-drop-backfill-without-production.md) |
 | 2026-10-02 | データの移行（backfill）は切替の後に冪等な SQL で流す方針を保ち、切替から backfill までの間の repair on read / write はやめる | 置き換え（→ workflow/20261002-drop-backfill-without-production.md） | [20261002-drop-repair-on-read-without-production.md](workflow/20261002-drop-repair-on-read-without-production.md) |
 | 2026-10-02 | 常時読み込む要点を .claude/general から .claude/rules/workflow に移し、rules を分類のサブディレクトリに分ける | 採用 | [20261002-always-loaded-rules-in-rules-workflow.md](workflow/20261002-always-loaded-rules-in-rules-workflow.md) |
+| 2026-10-02 | .claude/rules/code の規則はカテゴリ・WHAT・WHY・強制の 4 列の表で書き、何が止めるかを行ごとに示す | 採用 | [20261002-code-rules-as-tables.md](workflow/20261002-code-rules-as-tables.md) |
