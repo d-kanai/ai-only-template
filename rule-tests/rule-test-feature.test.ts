@@ -30,10 +30,14 @@ import { casesByName } from "./case-table";
 //     （`it as x` の別名も）。WHY: vitest.config.mts は globals を使わないので、import しなければ describe / it を書けない。
 //     describe / it で書いたテストは .feature に現れず、仕様の一覧から漏れる。expect・afterAll などのフックは使ってよい。
 //   - rule-test-feature-format: .feature の行は `#` のコメント・空行・`Feature:` の見出し（1 つ）・`Scenario:` の見出し・`*` の
-//     step だけ。各 Scenario に step が 1 つ以上要る。
+//     step だけ。各 Scenario に step が 1 つ以上要る。step の文に先頭のほかの `*` と波かっこ（`{` / `}`）を書かない。
 //     WHY `*` だけ（API 仕様の api-spec-step-keyword と同じ）: 1 つの step が前提から検証までの 1 テストで、Given / When / Then の
 //       並びを持たない。タグ（`@`）は vitest-cucumber の既定の excludeTags（`@ignore` など）で Scenario を黙って skip させる。
 //       Scenario Outline・Background・Rule・説明の行を許すと、仕様の形がファイルごとにばらつく。
+//     WHY 文の中の `*` と波かっこを止める（vitest-cucumber 8.0.0 で実測。Issue #282）: 文の中に `*` がある step は、`*` の手前までの
+//       文が同じほかの step と同じものとして扱われ、読み込みで ItemAlreadyExistsError になる（`a.b* c` と `a.b* d`）。波かっこは
+//       `{string}` / `{int}` などの式として読まれ、別の文の step に一致する（`{int}` を含む 2 つの step が重なった）。どちらも
+//       ルール検査テストの step の文には要らないので、書けないようにして読み違いを起こさせない。
 // 移していないテスト（PENDING）: 移す PR を分けるので、移していないテストは一覧に載せて検査から外す。一覧にあるのに .feature が
 //   あれば、一覧から消し忘れたものとして違反にする（一覧が古くならない）。すべて移したら一覧は空になる。
 // 限界: import は先頭の import の並び（コメント・空行を挟んでよい）だけを見る。途中の import・`require`・`import()`・
@@ -101,6 +105,13 @@ function leadingImports(source: string): string {
   }
 }
 
+// `*` の step の行（trim 済み）の文に、先頭のほかの `*` か波かっこがあれば違反を返す。
+function stepTextViolations(line: string, number: number): string[] {
+  return /[*{}]/.test(line.slice(1))
+    ? [`${number} 行目: step の文に「*」か波かっこがある`]
+    : [];
+}
+
 // .feature の書き方の違反（1 始まりの行の番号つき）。
 function featureFormatViolations(feature: string): string[] {
   const violations: string[] = [];
@@ -127,6 +138,7 @@ function featureFormatViolations(feature: string): string[] {
     }
     if (/^\*\s+\S/.test(line) && scenario !== undefined) {
       scenario.steps += 1;
+      violations.push(...stepTextViolations(line, number));
       return;
     }
     violations.push(
@@ -390,7 +402,7 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario(".feature の書き方", ({ And }) => {
     And(
-      "Feature の見出し・Scenario の見出し・`*` の step・コメント・空行だけなら違反なし",
+      "Feature の見出し・Scenario の見出し・箇条書きの step・コメント・空行だけなら違反なし",
       () => {
         // given
         const feature = lines(
@@ -478,6 +490,32 @@ describeFeature(feature, ({ Scenario }) => {
       // then
       expect(result).toEqual(casesByName(cases, ([, , expected]) => expected));
     });
+
+    And(
+      "step の文に、先頭のほかの星印か波かっこがあると、行の番号で違反になる",
+      () => {
+        // given
+        const feature = lines(
+          "Feature: a",
+          "  Scenario: b",
+          "    * *.sql を読む",
+          "    * {int} 件",
+          "    * 閉じかっこ } だけ",
+          "    * 「＊」（全角）と（かっこ）と <名前> は書ける",
+        );
+
+        // when
+        const result = featureFormatViolations(feature);
+
+        // then
+        const brace = "step の文に「*」か波かっこがある";
+        expect(result).toEqual([
+          `3 行目: ${brace}`,
+          `4 行目: ${brace}`,
+          `5 行目: ${brace}`,
+        ]);
+      },
+    );
   });
 
   Scenario("まだ移していないルール検査テスト", ({ And }) => {

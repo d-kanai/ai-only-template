@@ -10,9 +10,10 @@ Feature: ルール検査テストの形
     * vitest から expect や afterAll などを import するのは違反なし
     * コードの途中の文字列にある vitest の import は数えない
   Scenario: .feature の書き方
-    * Feature の見出し・Scenario の見出し・`*` の step・コメント・空行だけなら違反なし
+    * Feature の見出し・Scenario の見出し・箇条書きの step・コメント・空行だけなら違反なし
     * Given などのキーワードの step・タグ・Scenario Outline・説明の行は、行の番号で違反になる
     * step が 1 つも無い Scenario は違反になる
+    * step の文に、先頭のほかの星印か波かっこがあると、行の番号で違反になる
   Scenario: まだ移していないルール検査テスト
     * 移していない一覧にあるテストは、.feature が無くても違反にしない
     * 移していない一覧にあるのに .feature があれば、一覧から消すよう違反になる

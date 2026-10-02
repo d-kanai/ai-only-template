@@ -173,7 +173,7 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("列挙と検査（fixture）", ({ And }) => {
     And(
-      "drizzle の下の *.sql（サブディレクトリを含む）だけを検査し、public で修飾した文をファイルと文の番号で返す",
+      "drizzle の下の SQL のファイル（サブディレクトリを含む）だけを検査し、public で修飾した文をファイルと文の番号で返す",
       () => {
         // given
         const root = fixture({
