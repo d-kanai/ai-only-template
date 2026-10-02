@@ -18,7 +18,7 @@ Feature: test-support の置き場所と除外
     * exports のキーか値の test-support は違反（キー・値・両方・条件付きの入れ子の値・文字列だけの exports・以前の置き方の名前）
   Scenario: InMemory の実装の置き場所（isMisplacedInMemory）
     * apps/backend/test-support/ の下の .in-memory のソースと、.in-memory のソースでないものは違反なし（名前の一部だけが in-memory・テスト・.md・frontend・apps/backend の外）
-    * apps/backend/test-support/ の外の apps/backend の .in-memory のソースは違反（features の infra・shared の infra・application・features の下の test-support・前方一致の test-support-x など）
+    * apps/backend/test-support/ の外の apps/backend の .in-memory のソースは違反（features の infra・shared の drizzle・application・features の下の test-support・前方一致の test-support-x など）
   Scenario: 列挙と検査（fixture）
     * 違反の無いツリーは違反 0 件（列挙は test-support/ のファイル・本番のソース・apps/<app>/package.json）
     * すべての規則の違反を「規則: パス」で返す
@@ -27,12 +27,12 @@ Feature: test-support の置き場所と除外
     * in-memory-placement: apps/backend の下の .in-memory のソースを列挙し、test-support/ の外にあるものだけが違反
     * apps/ も .dockerignore も無ければ、列挙は 0 件で行が無い違反だけ（本番の検査は 0 件を失敗にする）
   Scenario: deploy.yml のイメージの検査のステップ（findDeployVerifyViolations）
-    * runtime と migrate のイメージを検査するステップがあれば違反なし（間に別のステップ・コメント・run が 1 行）
-    * イメージの検査のステップが欠けていれば違反（ステップが無い・migrate のステップが無い・コメントアウト・run に find のパターンが無いなど）
+    * runtime のイメージを検査するステップがあれば違反なし（前後に別のステップ・コメント・run が 1 行）
+    * イメージの検査のステップが欠けていれば違反（ステップが無い・コメントアウト・run に find のパターンが無いなど）
   Scenario: test-support（実ファイル）
     * dockerignore-entry: .dockerignore に test-support をすべての階層で除外する行がある
     * dockerignore-excludes: apps/<app>/test-support/ のすべてのファイルと test-support を import するテストが .dockerignore で除外される
     * production-imports-test-support: 本番のコードは test-support を import しない
-    * deploy-verifies-images: deploy.yml が runtime と migrate のイメージに test-support が無いことを確かめる
+    * deploy-verifies-images: deploy.yml が runtime のイメージ（service と migrate ジョブが使う）に test-support が無いことを確かめる
     * exports-test-support: apps/<app>/package.json の exports に test-support が無い
     * in-memory-placement: apps/backend の .in-memory のソースは apps/backend/test-support/ の下だけにある

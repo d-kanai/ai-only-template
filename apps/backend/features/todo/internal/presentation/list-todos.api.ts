@@ -1,5 +1,5 @@
-import { AppDatabase } from "../../../../shared/infra/database";
-import { ProblemResponse } from "../../../../shared/presentation/problem";
+import { AppDatabase } from "../../../../shared/drizzle/database";
+import { ProblemResponse } from "../../../../shared/http/problem";
 import { ListTodosQuery } from "../application/list-todos.query";
 import type { Todo } from "../domain/todo";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
@@ -44,19 +44,17 @@ export class ListTodosApi {
     async (_request: Request): Promise<Response> => {
       const todos = await this.listTodos.execute();
       const body: ListTodosResponse = {
-        todos: todos.map(ListTodosApi.toResponseItem),
+        todos: todos.map((todo) => this.toResponseItem(todo)),
       };
       return Response.json(body);
     },
   );
 
-  // WHY 補助（toResponseItem、ほかの api ファイルのリクエストのスキーマ・toResponse）を private static メソッドにする
+  // WHY 補助（toResponseItem、ほかの api ファイルのリクエストのスキーマ・toResponse）を private メソッドにする
   //   （モジュールの最上位の関数にしない。Issue #262）: backend の本番コードはクラスを基本にし、補助の関数も使うクラスの
   //   メソッドにする（ADR docs/adr/architecture/20261002-class-based-backend.md）。この Api だけが使うので private。
-  //   インスタンスの状態（コンストラクタで受け取った query / command）を使わないので static。
-  private static toResponseItem(
-    todo: Todo,
-  ): ListTodosResponse["todos"][number] {
+  //   インスタンスの状態（コンストラクタで受け取った query / command）は使わないが static にしない: インスタンスで使うクラスに static を置かない（規則 no-static-in-instance-class。Issue #300）。
+  private toResponseItem(todo: Todo): ListTodosResponse["todos"][number] {
     return {
       id: todo.id,
       title: todo.title,

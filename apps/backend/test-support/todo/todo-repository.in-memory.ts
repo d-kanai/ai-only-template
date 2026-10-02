@@ -3,8 +3,8 @@ import {
   RequiredTodo,
   type TodoRepository,
 } from "../../features/todo/internal/domain/todo-repository";
-import type { Transaction } from "../../shared/application/transaction";
-import { ChangedProps } from "../../shared/infra/changed-props";
+import { ChangedProps } from "../../shared/drizzle/changed-props";
+import type { Transaction } from "../../shared/transaction/transaction";
 
 // TodoRepository の InMemory 実装。プロセスが終わるとデータは消える。
 // テスト専用（本番の永続化は Postgres。features/todo/internal/infra/todo-repository.postgres.ts を api ファイルが組み立てる）。テストでは
@@ -24,7 +24,7 @@ import { ChangedProps } from "../../shared/infra/changed-props";
 // WHY tx を受け取るが使わない: interface（Postgres と同じ形）に合わせる。InMemory の runner（test-support/transaction-runner.in-memory.ts）は
 //   rollback を再現しない。
 // WHY 変更履歴（change_logs）を積まない（Issue #215。以前は Postgres と同じ記録を積んでいた。Issue #189）: 変更履歴とログは永続化の
-//   関心で、Postgres では Writer（shared/infra/writer.ts）が文ごとに書く。Repository の実装ごとに組み立てることをやめたので、
+//   関心で、Postgres では Writer（shared/drizzle/writer.ts）が文ごとに書く。Repository の実装ごとに組み立てることをやめたので、
 //   InMemory には記録が無い。変更履歴の契約は Postgres のテスト（todo-repository.postgres.test.ts・writer.test.ts）が固定する。
 // WHY 失敗は書き換える前に投げる: 失敗した insert / update（新規の 2 回目・履歴の競合・行が無い）で保持中の値を変えない
 //   （Postgres はトランザクションで戻る）。
@@ -35,7 +35,7 @@ export class InMemoryTodoRepository implements TodoRepository {
     // 新しい配列を返す: 呼び出し側が配列を並べ替え・削除しても保持中のデータに影響させないため。
     // 並び順は Repository の契約（todo-repository.ts）: 作成日時の昇順、同じなら id の昇順。Postgres の
     //   ORDER BY created_at, id と同じ規則で並べる（Map の挿入順には頼らない）。
-    return Array.from(this.todos.values(), InMemoryTodoRepository.load).sort(
+    return Array.from(this.todos.values(), (stored) => this.load(stored)).sort(
       (a, b) =>
         a.createdAt.getTime() - b.createdAt.getTime() ||
         // id は Map のキーなので同じ値は無く、等しい場合は起きない。
@@ -46,9 +46,7 @@ export class InMemoryTodoRepository implements TodoRepository {
 
   async findById(id: string): Promise<Todo | undefined> {
     const stored = this.todos.get(id);
-    return stored === undefined
-      ? undefined
-      : InMemoryTodoRepository.load(stored);
+    return stored === undefined ? undefined : this.load(stored);
   }
 
   // WHY findById を通す（Map を直接読まない）: テストが findById を spy したときにも findByIdForUpdate 経由の問い合わせが記録される
@@ -113,7 +111,7 @@ export class InMemoryTodoRepository implements TodoRepository {
     this.todos.set(
       todo.id,
       Todo.reconstruct({
-        ...InMemoryTodoRepository.values(stored),
+        ...this.values(stored),
         ...changed,
         statusChanges: [...stored.statusChanges, ...appended],
       }),
@@ -125,14 +123,14 @@ export class InMemoryTodoRepository implements TodoRepository {
     this.todos.delete(id);
   }
   // 保持中の Todo から「読み込んだ Todo」（今の値を origin に持つ）を作る。
-  // WHY private static（Issue #262。以前はファイルの最上位の関数）: テストの補助も最上位に関数を置かない（ADR
-  //   docs/adr/architecture/20261002-class-based-shared-and-test-support.md）。状態を使わないので static。
-  private static load(stored: Todo): Todo {
-    return Todo.reconstruct(InMemoryTodoRepository.values(stored));
+  // WHY private メソッド（Issue #262。以前はファイルの最上位の関数）: テストの補助も最上位に関数を置かない（ADR
+  //   docs/adr/architecture/20261002-class-based-shared-and-test-support.md）。状態は使わないが static にしない: インスタンスで使うクラスに static を置かない（規則 no-static-in-instance-class。Issue #300）。
+  private load(stored: Todo): Todo {
+    return Todo.reconstruct(this.values(stored));
   }
 
   // Todo.reconstruct に渡す値（Postgres の行と同じ項目）。
-  private static values(todo: Todo) {
+  private values(todo: Todo) {
     return {
       id: todo.id,
       title: todo.title,

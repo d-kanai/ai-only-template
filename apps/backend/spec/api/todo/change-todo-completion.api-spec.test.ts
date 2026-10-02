@@ -10,7 +10,7 @@ import {
   vi,
 } from "vitest";
 import type { ChangeTodoCompletionResponse } from "../../../features/todo/internal/presentation/change-todo-completion.api";
-import type { ChangeEntry } from "../../../shared/infra/change-log";
+import type { ChangeEntry } from "../../../shared/change-log/change-log";
 import { TestDatabase } from "../../../test-support/database";
 import {
   type BuiltTodo,

@@ -1,4 +1,4 @@
-import type { TransactionRunner } from "../../../../shared/application/transaction";
+import type { TransactionRunner } from "../../../../shared/transaction/transaction";
 import type { TodoRepository } from "../domain/todo-repository";
 
 // Todo を削除する（command: 状態を変える）。

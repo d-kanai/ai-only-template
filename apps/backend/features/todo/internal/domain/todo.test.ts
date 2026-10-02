@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { Clock } from "@repo/shared/now";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { DomainError } from "../../../../shared/domain/domain-error";
-import type { ErrorKey } from "../../../../shared/domain/error-key";
+import { DomainError } from "../../../../shared/error/domain-error";
+import type { ErrorKey } from "../../../../shared/error/error-key";
 import { TODO_TITLE_MAX_LENGTH, Todo } from "./todo";
 
 // Todo の技術の仕組み（id の形・現在時刻の読み方・不変（元の Todo を変えない）・値の凍結・型を偽った値・Invalid Date・

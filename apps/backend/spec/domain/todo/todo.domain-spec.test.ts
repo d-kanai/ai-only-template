@@ -3,8 +3,8 @@ import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { Clock } from "@repo/shared/now";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { Todo } from "../../../features/todo/internal/domain/todo";
-import { DomainError } from "../../../shared/domain/domain-error";
-import type { ErrorKey } from "../../../shared/domain/error-key";
+import { DomainError } from "../../../shared/error/domain-error";
+import type { ErrorKey } from "../../../shared/error/error-key";
 
 // domain 仕様（Issue #318）: todo.feature の `*` の step を、Todo（domain の Entity）を直接呼んで確かめる。
 // WHY API を通さず Entity を直接呼ぶ: 履歴の不変条件（1 件以上・最後の状態の一致・古い順）は API からは作れない

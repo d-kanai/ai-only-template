@@ -2,7 +2,7 @@
 import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";
 import type { RenameTodoResponse } from "../../../features/todo/internal/presentation/rename-todo.api";
-import type { ChangeEntry } from "../../../shared/infra/change-log";
+import type { ChangeEntry } from "../../../shared/change-log/change-log";
 import { TestDatabase } from "../../../test-support/database";
 import {
   type BuiltTodo,
@@ -66,7 +66,7 @@ describeFeature(feature, ({ Scenario }) => {
   Scenario("更新", ({ And }) => {
     // WHY ほかの Todo を置く: 条件（where）の欠けた UPDATE ですべての Todo の名前を変える誤りを見分ける。作成日時を古くして、
     //   行の順（作成日時の順）で先頭に来るようにする。
-    // 変更の記録には、変わった列（title）の変更前と変更後だけの記録が 1 件だけ残る（shared/infra/writer.ts の update。前提は
+    // 変更の記録には、変わった列（title）の変更前と変更後だけの記録が 1 件だけ残る（shared/drizzle/writer.ts の update。前提は
     //   ビルダーで入れたので記録を残さない）。
     // WHY 変更の記録をこの step で見る: .feature に書かない（create-todo.api-spec.test.ts の冒頭）。名前を変える操作の結果を確かめる
     //   step に置く。

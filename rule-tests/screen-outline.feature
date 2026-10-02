@@ -1,6 +1,6 @@
-# 画面のファイルを骨組み（Layout の下に Section と Form を並べるだけ）にする 5 規則 screen-outline-placement /
-# screen-outline-single-export / screen-outline-layout-root / screen-outline-layout-children / screen-outline-single-return を
-# 検査するルール検査テストの仕様（Issue #292）。
+# 画面のファイルを骨組み（Layout の下に Section と Form を並べるだけ）にする 6 規則 screen-outline-placement /
+# screen-outline-single-export / screen-outline-layout-root / screen-outline-layout-children / screen-outline-single-return /
+# screen-outline-use-client を検査するルール検査テストの仕様（Issue #292。screen-outline-use-client は Issue #332）。
 # step の実装は対の screen-outline.test.ts。規則の WHY と限界は screen-outline.test.ts の冒頭。
 Feature: 画面の骨組み
   Scenario: 画面のファイル（isScreenFile・screenFunctionName）
@@ -21,6 +21,9 @@ Feature: 画面の骨組み
   Scenario: return の数（findSingleReturnViolations）
     * must pass: 画面の関数の return が 1 つなら違反にせず、中で定義した関数とほかの関数の return は数えない
     * must reject: 早期 return を含む複数の return と、return の無い画面の関数は違反
+  Scenario: 最初の文の "use client"（findUseClientViolations）
+    * must pass: 最初の文が "use client" のディレクティブなら、一重引用符でも、前にコメントがあってもよい
+    * must reject: "use client" が無い・import の後・ほかのディレクティブの後・バッククォート・かっこで包んだもの・式の一部・別の文字列・空のファイルは違反
   Scenario: 列挙と検査（fixture）
     * 列挙は features の画面のファイルだけで、違反の無いツリーは違反 0 件
     * すべての規則の違反を「規則: パス:行 内容」で、置き方の違反は「規則: パス」で返す
@@ -32,3 +35,4 @@ Feature: 画面の骨組み
     * screen-outline-layout-root: 画面の関数の return の根は atom の Layout
     * screen-outline-layout-children: Layout の直下は同じファイルの export しない Section と Form の部品の要素だけ
     * screen-outline-single-return: 画面の関数の return は 1 つだけ
+    * screen-outline-use-client: 画面のファイルの最初の文は "use client" のディレクティブ

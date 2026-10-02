@@ -13,13 +13,10 @@ locals {
   }
   # DATABASE_STATEMENT_TIMEOUT_MS / DATABASE_LOCK_TIMEOUT_MS（DB 側の文の実行時間・ロック待ちの上限）も service / job で違うので
   #   下で個別に書く（service は .env.example と同じ 10 秒 / 3 秒、job は 0 = 送らず DB の既定（上限なし）に従う）。
-  # 限界: DB 側のタイムアウト 3 つを効かせるのはアプリのプール（apps/backend/shared/infra/database.ts の createDatabase）だけで、
-  #   job の既定の pnpm db:migrate（drizzle-kit。接続は shared/drizzle/drizzle.config.ts の DATABASE_URL だけを使う）には効かない。
-  #   job で効くのは backfill（pnpm db:backfill）だけ。WHY migrate に足さない: drizzle-kit は SQL を 1 本の接続で続けて流し、
-  #   トランザクションの途中で外部を待たない（アイドルにならない）。DDL を文の時間で打ち切るとマイグレーションが半端に止まる。
-  #   上限はジョブの timeout（600s）が持つ（Codex の指摘への判断。PR #259）。
+  # DB 側のタイムアウト 3 つは、job のマイグレーション（apps/backend/shared/drizzle/migrate.ts）にも効く: 入口がアプリのプール
+  #   （apps/backend/shared/drizzle/database.ts の AppDatabase）で接続する（Issue #326。以前の drizzle-kit migrate には効かなかった）。
   # DB 以外でアプリが起動時に必須とする設定（apps/shared/env.ts。.env.example に意味と WHY）。service と job で同じ値。
-  # WHY job にも渡す: migrate（drizzle-kit）も設定の読み込みで env.ts を通り、必須の変数が 1 つでも欠けると止まる。
+  # WHY job にも渡す: マイグレーションの入口も env.ts を通り、必須の変数が 1 つでも欠けると止まる。
   app_env = {
     # リクエストログの trace（projects/<ID>/traces/<trace-id>。Cloud Logging の logging.googleapis.com/trace）に入れる
     #   プロジェクト ID（Issue #209）。Cloud Run が自動で付ける環境変数にプロジェクト ID は無い
@@ -162,7 +159,9 @@ resource "google_cloud_run_v2_service_iam_member" "public" {
   member   = "allUsers"
 }
 
-# マイグレーション（Dockerfile の migrate ステージ。`pnpm db:migrate` = drizzle-kit migrate）を 1 回実行するジョブ。
+# マイグレーションを 1 回実行するジョブ。service と同じ runtime イメージを、コマンドだけ変えて（node migrate/migrate.mjs。
+#   apps/backend/shared/drizzle/migrate.ts を束ねたもの）動かす（Issue #326。WHY は Dockerfile の先頭）。
+#   イメージとコマンドは deploy.yml の gcloud run jobs update が組で入れ替える（WHY は deploy.yml の「Update migrate job image」）。
 # deploy.yml がデプロイのたびに、イメージを入れ替えて（jobs update）から実行し（jobs execute --wait）、成功したら
 #   service をデプロイする。WHY アプリの起動時に migrate しない: 複数インスタンスが同時に当てるのを避け、失敗したら
 #   新しいリビジョンを出さずに止めるため（.claude/skills/db-migration/SKILL.md「アプリの起動で migrate しない」）。
@@ -202,16 +201,14 @@ resource "google_cloud_run_v2_job" "migrate" {
             }
           }
         }
-        # drizzle-kit migrate は接続 1 本で順に当てる。env.ts が必須にしているので値を渡す。
+        # マイグレーションは接続 1 本で順に当てる（drizzle-orm の migrator が 1 つのトランザクションで流す）。env.ts が必須にしているので値を渡す。
         env {
           name  = "DATABASE_POOL_MAX"
           value = "1"
         }
-        # WHY job は文の実行時間・ロック待ちを無効（0）にする: このジョブは backfill（pnpm db:backfill。アプリのプールを使う
-        #   apps/backend/shared/infra/backfill.ts）も流し、1 つの SQL ファイルが表全体を 1 文で書き換え、アプリの行ロックを待つ
-        #   ことがある。API 向けの 10 秒 / 3 秒で打ち切るとデプロイが途中で止まる。上限はジョブの timeout（600s）が持つ。
-        # 限界: 逆向き（backfill が行ロックを握っている間に API が同じ行を更新する）は、API の lock_timeout（3 秒）を超えると
-        #   55P03 で 500 になる。今の backfill（0001_todo_status_changes.sql）は小さく、数秒で終わる前提。
+        # WHY job は文の実行時間・ロック待ちを無効（0）にする: マイグレーションの DDL は表の大きさに比例して長くなり、アプリの
+        #   ロックを待つことがある。API 向けの 10 秒 / 3 秒で打ち切るとマイグレーションが半端に止まり、デプロイも止まる。
+        #   上限はジョブの timeout（600s）が持つ（Codex の指摘への判断。PR #259）。
         env {
           name  = "DATABASE_STATEMENT_TIMEOUT_MS"
           value = "0"
@@ -237,8 +234,12 @@ resource "google_cloud_run_v2_job" "migrate" {
   }
 
   lifecycle {
+    # command / args も無視する（Issue #326）: deploy.yml がイメージと組で node migrate/migrate.mjs に入れ替える。
+    #   Terraform が持つと、初回の apply の仮のイメージ（bootstrap_image の hello）に node が無く、apply 直後のジョブが動かない。
     ignore_changes = [
       template[0].template[0].containers[0].image,
+      template[0].template[0].containers[0].command,
+      template[0].template[0].containers[0].args,
       client,
       client_version,
     ]

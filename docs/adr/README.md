@@ -57,7 +57,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-28 | 画面側は feature 単位・screen 単位で同居させ、API 側は feature 単位の DDD 4 層にし、app/ はルーティングだけにする | 採用 | [20260928-feature-based-directory-and-ddd-backend.md](architecture/20260928-feature-based-directory-and-ddd-backend.md) |
 | 2026-09-28 | ディレクトリを pnpm workspace の apps/frontend（Next）と apps/backend（@repo/backend）に分け、プロセスは Next 1 つのままにする | 採用 | [20260928-monorepo-apps-frontend-backend.md](architecture/20260928-monorepo-apps-frontend-backend.md) |
 | 2026-09-29 | frontend と backend で共通の基盤（env と logger）は、workspace パッケージ apps/shared（@repo/shared）に置く | 採用 | [20260929-apps-shared-package.md](architecture/20260929-apps-shared-package.md) |
-| 2026-09-29 | backend も最初の階層を features/ と shared/ にし、Drizzle の設定とマイグレーションは shared/drizzle/ に置く | 採用 | [20260929-backend-features-and-shared-directories.md](architecture/20260929-backend-features-and-shared-directories.md) |
+| 2026-09-29 | backend も最初の階層を features/ と shared/ にし、Drizzle の設定とマイグレーションは shared/drizzle/ に置く | 置き換え（→ architecture/20261002-backend-shared-colocated-by-meaning.md） | [20260929-backend-features-and-shared-directories.md](architecture/20260929-backend-features-and-shared-directories.md) |
 | 2026-09-29 | DI コンテナとトランザクションの runner を廃止し、各クラスはコンストラクタ injection にして api ファイルで組み立てる | 採用 | [20260929-constructor-injection-without-container.md](architecture/20260929-constructor-injection-without-container.md) |
 | 2026-09-29 | E2E は apps/e2e の workspace パッケージ @repo/e2e にする | 採用 | [20260929-e2e-as-workspace-package.md](architecture/20260929-e2e-as-workspace-package.md) |
 | 2026-09-29 | API のエラー応答は RFC 9457（Problem Details）の形にし、key と params を拡張メンバーに、開発者向けの英語を detail に入れる | 採用 | [20260929-error-response-rfc9457.md](architecture/20260929-error-response-rfc9457.md) |
@@ -79,10 +79,13 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-30 | presentation の入力検証は domain の規則を重ねてよい（presentation ⊆ domain）。domain は常に完全で、presentation は domain より厳しくしない | 採用 | [20260930-presentation-overlaps-domain-validation.md](architecture/20260930-presentation-overlaps-domain-validation.md) |
 | 2026-09-30 | Repository の書き込みは唯一の入口 writeInTransaction を通し、その前後に 1 行ずつログを自動で出す | 置き換え（→ architecture/20260930-transaction-from-application.md） | [20260930-repository-write-log.md](architecture/20260930-repository-write-log.md) |
 | 2026-09-30 | Todo の完了の遷移は集約の子表（insert のみ）に積み、最新の状態は集約の現在値の列にも持つ | 採用 | [20260930-status-transitions-as-append-only-child-table.md](architecture/20260930-status-transitions-as-append-only-child-table.md) |
-| 2026-09-30 | command がトランザクションを張って Repository に渡し、Repository は insert / update に分け、変更履歴とログは書き込みの口 Writer が文ごとに記録する | 採用 | [20260930-transaction-from-application.md](architecture/20260930-transaction-from-application.md) |
+| 2026-09-30 | command がトランザクションを張って Repository に渡し、Repository は insert / update に分け、変更履歴とログは書き込みの口 Writer が文ごとに記録する | 置き換え（→ architecture/20261002-update-before-from-origin.md） | [20260930-transaction-from-application.md](architecture/20260930-transaction-from-application.md) |
 | 2026-10-02 | apps/backend の本番コードはクラスを基本にし、関数を export せず、補助の関数もクラスのメソッドにする | 採用 | [20261002-class-based-backend.md](architecture/20261002-class-based-backend.md) |
 | 2026-10-02 | クラスベースの対象を apps/shared とテストの補助（test-support・e2e の補助・spec の support.ts）に広げる | 採用 | [20261002-class-based-shared-and-test-support.md](architecture/20261002-class-based-shared-and-test-support.md) |
 | 2026-10-02 | クラスベースの対象を frontend の React 以外のモジュールに広げる | 採用 | [20261002-class-based-frontend-modules.md](architecture/20261002-class-based-frontend-modules.md) |
+| 2026-10-02 | backend/shared は層ではなく意味の単位（error / transaction / http / drizzle / change-log）で置き、feature からの参照を縛らない | 採用 | [20261002-backend-shared-colocated-by-meaning.md](architecture/20261002-backend-shared-colocated-by-meaning.md) |
+| 2026-10-02 | Writer の update は変更履歴の before に呼び出し側の origin を使い、before のために行を読み直さない | 採用 | [20261002-update-before-from-origin.md](architecture/20261002-update-before-from-origin.md) |
+| 2026-10-02 | インスタンスで使うクラスに static を置かない（自分を返すファクトリは除く） | 採用 | [20261002-no-static-in-instance-class.md](architecture/20261002-no-static-in-instance-class.md) |
 
 ### tech-stack/
 言語・ツール・ライブラリの選定
@@ -93,6 +96,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-28 | Stryker の vitest-runner は pnpm patch で直して使う | 採用 | [20260928-patch-stryker-vitest-runner.md](tech-stack/20260928-patch-stryker-vitest-runner.md) |
 | 2026-09-28 | TypeScript は 7 系（7.0.2）を使う | 採用 | [20260928-typescript-7.md](tech-stack/20260928-typescript-7.md) |
 | 2026-09-30 | 本番は GCP の Cloud Run + Cloud SQL にし、Terraform は器だけを、イメージの入れ替えは GitHub Actions の gcloud を受け持つ | 採用 | [20260930-gcp-cloud-run-and-cloud-sql.md](tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md) |
+| 2026-10-02 | migrate ジョブはアプリの runtime イメージをコマンド違いで動かし、マイグレーションは drizzle-orm の migrator を束ねた入口で当てる | 採用 | [20261002-migrate-job-same-runtime-image.md](tech-stack/20261002-migrate-job-same-runtime-image.md) |
 
 ### quality/
 品質ゲートとテストの方針
@@ -114,6 +118,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-10-02 | E2E を API ジャーニーと同じ Gherkin の .feature と step のクラスで書き、playwright-bdd で Playwright のランナーのまま実行する | 採用 | [20261002-e2e-in-gherkin-with-playwright-bdd.md](quality/20261002-e2e-in-gherkin-with-playwright-bdd.md) |
 | 2026-10-02 | API ジャーニーの実行で全 API が 1 回は呼ばれることを API 網羅率として測り、100% を CI のゲートにする | 採用 | [20261002-api-journey-coverage-gate.md](quality/20261002-api-journey-coverage-gate.md) |
 | 2026-10-02 | ルール検査テストを .feature（`*` の箇条書き）と step の実装に分ける | 採用 | [20261002-rule-tests-in-feature.md](quality/20261002-rule-tests-in-feature.md) |
+| 2026-10-02 | コード・設計ルールのレビューは rules の表の「レビュー」の行を観点にし、検出 → 1 件ずつ検証 → 重大度で報告するスキルで行う | 採用 | [20261002-rule-review-from-rules-tables.md](quality/20261002-rule-review-from-rules-tables.md) |
 
 ### workflow/
 開発プロセス・環境・AI エージェントの運用
@@ -136,3 +141,4 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-10-02 | 本番環境ができるまでデータの移行（backfill）の仕組みを持たず、下位互換の処理を残さない | 採用 | [20261002-drop-backfill-without-production.md](workflow/20261002-drop-backfill-without-production.md) |
 | 2026-10-02 | データの移行（backfill）は切替の後に冪等な SQL で流す方針を保ち、切替から backfill までの間の repair on read / write はやめる | 置き換え（→ workflow/20261002-drop-backfill-without-production.md） | [20261002-drop-repair-on-read-without-production.md](workflow/20261002-drop-repair-on-read-without-production.md) |
 | 2026-10-02 | 常時読み込む要点を .claude/general から .claude/rules/workflow に移し、rules を分類のサブディレクトリに分ける | 採用 | [20261002-always-loaded-rules-in-rules-workflow.md](workflow/20261002-always-loaded-rules-in-rules-workflow.md) |
+| 2026-10-02 | .claude/rules/code の規則はカテゴリ・WHAT・WHY・強制の 4 列の表で書き、何が止めるかを行ごとに示す | 採用 | [20261002-code-rules-as-tables.md](workflow/20261002-code-rules-as-tables.md) |

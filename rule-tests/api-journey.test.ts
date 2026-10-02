@@ -1203,9 +1203,9 @@ describeFeature(feature, ({ Scenario }) => {
               [{ rule: "api-journey-uses-real-database" }],
             ],
             [
-              "名前・場所の一部だけが同じ別のモジュール（shared/infra/database・database-x・別の場所の test-support/database）",
+              "名前・場所の一部だけが同じ別のモジュール（shared/drizzle/database・database-x・別の場所の test-support/database）",
               source(
-                'import { AppDatabase } from "../../shared/infra/database";',
+                'import { AppDatabase } from "../../shared/drizzle/database";',
                 'import { a } from "../../test-support/database-x";',
                 'import { b } from "./test-support/database";',
                 CREATE_API_IMPORT,

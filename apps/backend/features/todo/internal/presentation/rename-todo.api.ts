@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { KeyedIssue } from "../../../../shared/domain/keyed-issue";
-import { AppDatabase } from "../../../../shared/infra/database";
-import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";
-import { RequestBody } from "../../../../shared/presentation/json-body";
-import { ProblemResponse } from "../../../../shared/presentation/problem";
-import { ResourceId } from "../../../../shared/presentation/resource-id";
+import { AppDatabase } from "../../../../shared/drizzle/database";
+import { PostgresTransactionRunner } from "../../../../shared/drizzle/transaction.postgres";
+import { KeyedIssue } from "../../../../shared/error/keyed-issue";
+import { RequestBody } from "../../../../shared/http/json-body";
+import { ProblemResponse } from "../../../../shared/http/problem";
+import { ResourceId } from "../../../../shared/http/resource-id";
 import { RenameTodoCommand } from "../application/rename-todo.command";
 import { TODO_TITLE_MAX_LENGTH, type Todo } from "../domain/todo";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
@@ -17,7 +17,7 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 
 // WHY 型をスキーマから導出する: 検査する形と型を 1 か所で宣言し、ずれを無くす（画面側も import type でこの型を使う）。
 export type RenameTodoRequest = z.infer<
-  ReturnType<(typeof RenameTodoApi)["renameTodoRequestSchema"]>
+  ReturnType<RenameTodoApi["renameTodoRequestSchema"]>
 >;
 
 // 同じ形の Response を各 *.api.ts に書く。
@@ -36,7 +36,7 @@ type Context = { params: Promise<{ id: string }> };
 
 // PUT /api/todos/:id/title の Route Handler を持つクラス。コンストラクタで command を受け取り、handle を Route Handler として export する
 //   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・ProblemResponse.wrap で包む・
-//   補助（リクエストのスキーマ・toResponse）を private static メソッドにするは
+//   補助（リクエストのスキーマ・toResponse）を private メソッドにするは
 //   list-todos.api.ts の ListTodosApi のコメント）。
 export class RenameTodoApi {
   constructor(
@@ -53,10 +53,10 @@ export class RenameTodoApi {
       const id = ResourceId.parseUuid(rawId, "todo.notFound", { id: rawId });
       const { title } = await RequestBody.parse(
         request,
-        RenameTodoApi.renameTodoRequestSchema(),
+        this.renameTodoRequestSchema(),
       );
       const todo = await this.renameTodo.execute({ id, title });
-      const body: RenameTodoResponse = RenameTodoApi.toResponse(todo);
+      const body: RenameTodoResponse = this.toResponse(todo);
       return Response.json(body);
     },
   );
@@ -66,7 +66,7 @@ export class RenameTodoApi {
   // WHY 空・長さも見る・domain と同じキーと定数にする: create-todo.api.ts の createTodoRequestSchema のコメント。
   //   不変条件の正は domain（Todo#rename が常に完全に検証する）。
   // WHY 未知の項目を拒否する: completed をこの API に送る誤り（完了は /completion）を黙って捨てずに 400 で知らせる（json-body.ts の RequestBody.schema）。
-  private static renameTodoRequestSchema() {
+  private renameTodoRequestSchema() {
     return RequestBody.schema({
       // 型が違う・無いときのキー（request.field.notString）は json-body.ts の toProblemError が決める（z.string に error は書かない）。
       // trim してからコードポイント数（Array.from）で数える: todo.ts の todoPropsSchema の title と同じ（WHY はそちら）。
@@ -86,7 +86,7 @@ export class RenameTodoApi {
     });
   }
 
-  private static toResponse(todo: Todo): RenameTodoResponse {
+  private toResponse(todo: Todo): RenameTodoResponse {
     return {
       id: todo.id,
       title: todo.title,

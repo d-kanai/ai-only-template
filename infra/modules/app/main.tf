@@ -43,15 +43,15 @@ resource "google_project_service" "apis" {
   disable_on_destroy = false
 }
 
-# アプリのイメージ（runtime / migrate）の置き場所。
+# アプリのイメージ（runtime。service と migrate ジョブが同じものを使う。Issue #326）の置き場所。
 resource "google_artifact_registry_repository" "app" {
   repository_id = local.artifact_repository
   location      = var.region
   format        = "DOCKER"
-  description   = "${var.name_prefix} の runtime / migrate イメージ（GitHub Actions が push する）"
+  description   = "${var.name_prefix} の runtime イメージ（service と migrate ジョブが使う。GitHub Actions が push する）"
 
-  # 古いイメージを消す。WHY: main への push ごとにイメージが増え（migrate イメージは約 385MB。2026-09-30 の
-  #   work-logs）、保存量に課金される。Cloud Run はデプロイ時にイメージを取り込むので、デプロイ済みのリビジョンは
+  # 古いイメージを消す。WHY: main への push ごとにイメージが増え（runtime イメージは圧縮で約 94MB。2026-10-02 の
+  #   work-logs。Issue #326 までは約 385MB の migrate イメージも push していた）、保存量に課金される。Cloud Run はデプロイ時にイメージを取り込むので、デプロイ済みのリビジョンは
   #   Artifact Registry からイメージを消しても動く（https://cloud.google.com/run/docs/deploying 「The container image is
   #   imported by Cloud Run when deployed, so after the deployment, you can delete the image from Artifact Registry」）。
   # false: 下のポリシーを実際に適用する（true だと消す対象をログに出すだけ）。

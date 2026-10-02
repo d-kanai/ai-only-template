@@ -36,10 +36,10 @@ import {
   RenameTodoApi,
   type RenameTodoResponse,
 } from "../../features/todo/internal/presentation/rename-todo.api";
-import type { ChangeEntry } from "../../shared/infra/change-log";
-import { changeLogs } from "../../shared/infra/schema";
-import { PostgresTransactionRunner } from "../../shared/infra/transaction.postgres";
-import type { Problem } from "../../shared/presentation/problem";
+import type { ChangeEntry } from "../../shared/change-log/change-log";
+import { changeLogs } from "../../shared/change-log/change-log.schema";
+import { PostgresTransactionRunner } from "../../shared/drizzle/transaction.postgres";
+import type { Problem } from "../../shared/http/problem";
 import { ApiCoverage } from "../../test-support/api-coverage";
 import { TestDatabase } from "../../test-support/database";
 
@@ -171,7 +171,7 @@ function createdStatusRow(todo: CreateTodoResponse) {
 }
 
 // 変更履歴（change_logs）の行を、id と occurred_at を除いた記録にして並べる。
-// WHY id と occurred_at を除く: id は DB が乱数で作り、occurred_at は要求を処理した時刻（shared/infra/change-log.test.ts が固定する）。
+// WHY id と occurred_at を除く: id は DB が乱数で作り、occurred_at は要求を処理した時刻（shared/change-log/change-log.test.ts が固定する）。
 // WHY 表・行・操作・変わった列の名前で並べる: 同じ要求の記録は同じ occurred_at で、DB が返す順は決まらない。期待値も同じ規則で並べる
 //   （changes のキーの順は jsonb が並べ替えるので、並べる鍵には値ではなく列の名前の集合を使う）。
 function logEntries(rows: readonly ChangeEntry[]): ChangeEntry[] {

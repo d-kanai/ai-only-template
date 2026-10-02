@@ -12,7 +12,7 @@ import type {
   RenameTodoRequest,
   RenameTodoResponse,
 } from "@repo/backend/features/todo/internal/presentation/rename-todo.api";
-import type { Problem } from "@repo/backend/shared/presentation/problem";
+import type { Problem } from "@repo/backend/shared/http/problem";
 import { commonMessages } from "@/shared/i18n/common.messages";
 import { isMessageKey } from "@/shared/i18n/i18n";
 import { ApiError } from "./api-error";
@@ -72,7 +72,7 @@ export class TodoApi {
     return typeof value === "object" && value !== null;
   }
 
-  // 本文が backend の Problem Details（RFC 9457。apps/backend/shared/presentation/problem.ts）かを確かめる。
+  // 本文が backend の Problem Details（RFC 9457。apps/backend/shared/http/problem.ts）かを確かめる。
   // 見るもの: 標準のメンバーの type（文字列）と status（数値）、拡張メンバーの key（共通の辞書のキー）と params（省略かオブジェクト）と
   //   errors（省略か、項目ごとの誤りの配列。isProblemError）。
   // WHY detail・title・instance を見ない: 画面はこれらを使わない（detail は開発者向けの英語で契約外、title は type と 1 対 1）。

@@ -19,7 +19,7 @@ import { casesByName } from "./case-table";
 // Issue #247 で、データの移行（backfill）の仕組みを消したのに合わせて、backfill の規則（idempotent-insert-select・
 //   backfill-after-traffic・backfill-file-name）を消した（本番環境が無く、規則の WHY の「毎回流す backfill」が無くなったため）。
 // 違反にするもの（規則）:
-//   - no-public-schema-qualifier: apps/backend/shared/drizzle/ の下の *.sql の文に、表のスキーマ修飾 `"public".`
+//   - no-public-schema-qualifier: apps/backend/shared/drizzle/migrations/ の下の *.sql の文に、表のスキーマ修飾 `"public".`
 //     （引用符なしの `public.` も。大文字小文字と `.` の前後の空白は問わない）がある（Issue #192）。
 //     WHY: drizzle-kit 0.31.11 の generate は schema.ts の `.references()` を `REFERENCES "public"."todos"` と書く。
 //     TestDatabase.create() はテストファイルごとの別スキーマ（search_path）にマイグレーションを当てるので、public を指す SQL は
@@ -29,9 +29,15 @@ import { casesByName } from "./case-table";
 //     `--> statement-breakpoint`（コメントとして消える）で文に分ける。違反は 1 始まりの文の番号で返す。
 //     限界: 文字列リテラルの中の `public.` も違反にする（誤検出。今の SQL には無い）。文字列リテラルの中の `--`・`;` を
 //     区別しない。`"public"` 以外のスキーマの修飾は見ない。
-// 検査の対象の列挙（drizzle の *.sql）が 0 件なら、実ファイルのテストで失敗させる（0 件だと違反も 0 件で常に緑になる）。
+// 検査の対象の列挙（drizzle/migrations の *.sql）が 0 件なら、実ファイルのテストで失敗させる（0 件だと違反も 0 件で常に緑になる）。
 
-const DRIZZLE_DIR = "apps/backend/shared/drizzle";
+// drizzle-kit の out（生成したマイグレーションの SQL と meta/ の置き場所）。apps/backend/shared/drizzle/drizzle.config.ts の out と同じ。
+// WHY drizzle/ ではなく migrations/ を見る: Issue #310 で drizzle/ に接続・書き込みのソース（database.ts・writer.ts など）も置くように
+//   なり、生成物を drizzle/migrations/ に分けた。pnpm db:migrate（migrate.ts）が当てるのは migrations/ の SQL だけなので、検査もそこに合わせる
+//   （drizzle/ の直下に .sql を置いても当てられないので、検査の対象にしない）。
+// WHY 設定から読まずに定数で持つ: 設定ファイルを import すると drizzle-kit（defineConfig）とその読み込みにテストが依存する。
+//   置き場所は migrate.ts（import.meta.dirname の隣の migrations/）と package.json の db:migrate:bundle にもある。out を変えたら、実ファイルのテスト（最初のマイグレーションが列挙に入ること）が失敗して、ここの直し忘れに気づく。
+const MIGRATIONS_DIR = "apps/backend/shared/drizzle/migrations";
 
 // コメント（`--` から行末と `/* … */`）を消して `;` で文に分け、空の文を除く。
 function sqlStatements(sql: string): string[] {
@@ -53,11 +59,11 @@ function findPublicSchemaQualifiers(sql: string): number[] {
 
 // ---- 列挙と検査（本番と fixture で同じ処理を通す） ----
 
-// apps/backend/shared/drizzle/ の下の *.sql（再帰。meta/ などの下も）。リポジトリ相対の / 区切りで、名前順。無ければ空。
+// apps/backend/shared/drizzle/migrations/ の下の *.sql（再帰。meta/ などの下も）。リポジトリ相対の / 区切りで、名前順。無ければ空。
 function listDrizzleSqlFiles(root: string): string[] {
   let entries: string[];
   try {
-    entries = readdirSync(join(root, DRIZZLE_DIR), {
+    entries = readdirSync(join(root, MIGRATIONS_DIR), {
       recursive: true,
       encoding: "utf8",
     });
@@ -65,7 +71,7 @@ function listDrizzleSqlFiles(root: string): string[] {
     return [];
   }
   return entries
-    .map((path) => `${DRIZZLE_DIR}/${path.split(sep).join("/")}`)
+    .map((path) => `${MIGRATIONS_DIR}/${path.split(sep).join("/")}`)
     .filter((path) => path.endsWith(".sql"))
     .sort();
 }
@@ -173,19 +179,22 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("列挙と検査（fixture）", ({ And }) => {
     And(
-      "drizzle の下の SQL のファイル（サブディレクトリを含む）だけを検査し、public で修飾した文をファイルと文の番号で返す",
+      "マイグレーションのディレクトリ（drizzle/migrations）の下の SQL のファイル（サブディレクトリを含む）だけを検査し、public で修飾した文をファイルと文の番号で返す",
       () => {
         // given
         const root = fixture({
-          [`${DRIZZLE_DIR}/0000_create.sql`]: "CREATE TABLE x (a int);",
-          [`${DRIZZLE_DIR}/0001_fk.sql`]: lines(
+          [`${MIGRATIONS_DIR}/0000_create.sql`]: "CREATE TABLE x (a int);",
+          [`${MIGRATIONS_DIR}/0001_fk.sql`]: lines(
             '-- REFERENCES "public"."t" はコメントなので数えない',
             "CREATE TABLE y (a int);--> statement-breakpoint",
             'ALTER TABLE y ADD CONSTRAINT c FOREIGN KEY (a) REFERENCES "public"."t"("id");',
           ),
-          [`${DRIZZLE_DIR}/nested/0002_x.sql`]: "SELECT 1 FROM public.t;",
-          [`${DRIZZLE_DIR}/meta/_journal.json`]: '{"x": "public.t"}',
-          [`${DRIZZLE_DIR}/drizzle.config.ts`]: "// public.t\n",
+          [`${MIGRATIONS_DIR}/nested/0002_x.sql`]: "SELECT 1 FROM public.t;",
+          [`${MIGRATIONS_DIR}/meta/_journal.json`]: '{"x": "public.t"}',
+          // 対象外: migrations/ の外（drizzle/ の直下の設定・ソースと .sql、別のディレクトリ）。
+          "apps/backend/shared/drizzle/drizzle.config.ts": "// public.t\n",
+          "apps/backend/shared/drizzle/database.ts": "// public.t\n",
+          "apps/backend/shared/drizzle/0009_x.sql": "SELECT 1 FROM public.t;",
           "other/0000_x.sql": "SELECT 1 FROM public.t;",
         });
 
@@ -198,20 +207,20 @@ describeFeature(feature, ({ Scenario }) => {
         // then
         expect(result).toEqual({
           sql: [
-            `${DRIZZLE_DIR}/0000_create.sql`,
-            `${DRIZZLE_DIR}/0001_fk.sql`,
-            `${DRIZZLE_DIR}/nested/0002_x.sql`,
+            `${MIGRATIONS_DIR}/0000_create.sql`,
+            `${MIGRATIONS_DIR}/0001_fk.sql`,
+            `${MIGRATIONS_DIR}/nested/0002_x.sql`,
           ],
           violations: [
-            `no-public-schema-qualifier: ${DRIZZLE_DIR}/0001_fk.sql の 2 文目が表を "public". で修飾している`,
-            `no-public-schema-qualifier: ${DRIZZLE_DIR}/nested/0002_x.sql の 1 文目が表を "public". で修飾している`,
+            `no-public-schema-qualifier: ${MIGRATIONS_DIR}/0001_fk.sql の 2 文目が表を "public". で修飾している`,
+            `no-public-schema-qualifier: ${MIGRATIONS_DIR}/nested/0002_x.sql の 1 文目が表を "public". で修飾している`,
           ],
         });
       },
     );
 
     And(
-      "drizzle のディレクトリが無ければ対象は 0 件で違反も 0 件になる（本番の検査は 0 件を失敗にする）",
+      "マイグレーションのディレクトリが無ければ対象は 0 件で違反も 0 件になる（本番の検査は 0 件を失敗にする）",
       () => {
         // given
         const root = fixture({ "README.md": "# x\n" });
@@ -238,7 +247,7 @@ describeFeature(feature, ({ Scenario }) => {
       // then
       // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
       //   最初のマイグレーションは消えない（消すと migrate の記録とずれる）ので、それが列挙に入ることを見る。
-      expect(files).toContain(`${DRIZZLE_DIR}/0000_create_todos.sql`);
+      expect(files).toContain(`${MIGRATIONS_DIR}/0000_create_todos.sql`);
       expect(violations).toEqual([]);
     });
   });

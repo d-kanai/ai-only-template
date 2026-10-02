@@ -31,7 +31,7 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 
 ```
 pnpm-workspace.yaml     # packages: apps/*（workspace の範囲）と pnpm の設定
-package.json            # ツールと共通の devDependencies。pnpm dev/build/start・db:generate/db:migrate は pnpm --filter で apps の script を呼ぶ
+package.json            # ツールと共通の devDependencies。pnpm dev/build/start・db:generate は pnpm --filter で apps の script を呼ぶ。db:migrate は直下の script（入口を束ねて実行）
 apps/
   frontend_customer/    # @repo/frontend-customer。Next.js（apps/frontend_customer で next dev/build/start）
     package.json        # next / react / "@repo/backend"・"@repo/shared": "workspace:*"
@@ -45,7 +45,7 @@ apps/
     shared/             # 画面側で feature をまたぐ共通部品（必要になったら作る）
     instrumentation.ts  # 起動時の環境変数の検証（Next の規約ファイル）
   backend/
-    package.json        # @repo/backend。drizzle-orm / pg / @repo/shared、exports（外に公開するファイルの一覧）、db:generate / db:migrate
+    package.json        # @repo/backend。drizzle-orm / pg / @repo/shared、exports（外に公開するファイルの一覧）、db:generate
     features/           # 機能ごとのまとまり（frontend の features/ と同じ。Issue #98）
       todo/               # API 側の 1 機能 = 1 モジュール（直下は internal/ と、必要なら expose/ だけ。Issue #208）
         internal/           # feature の中だけで使う実装（DDD 4 層。Issue #208）
@@ -56,8 +56,13 @@ apps/
       notification/       # 通知のモジュール（今はログに出すだけ。Todo の完了で todo から呼ばれる）
         expose/             # 他のモジュールへ公開する入口（notifier.ts。直下のファイルだけ）。他のモジュールは expose/ だけを使い、internal/ は参照しない
         internal/           # 中身（domain/ の送信口の interface、application/ の command、infra/ のログに出す実装）
-    shared/             # API 側で feature をまたぐ共通部品（domain/ に DomainError とエラーのキー、presentation/ にエラー応答（RFC 9457 の Problem Details）と本文の読み取り、infra/ に Postgres のプールと Drizzle の db）
-      drizzle/            # drizzle.config.ts（drizzle-kit の設定）と、生成したマイグレーション（*.sql と meta/。pnpm db:generate が作る。コミットする）
+    shared/             # API 側で feature をまたぐ共通部品。層ではなく意味の単位で置く（Issue #310）
+      error/              # エラーのキー（ErrorKey）・DomainError・zod の検証をそれに変える道具
+      transaction/        # トランザクションの印と port（TransactionRunner）
+      http/               # エラー応答（RFC 9457 の Problem Details）とリクエストの読み取り
+      drizzle/            # drizzle.config.ts（drizzle-kit の設定）、Postgres のプール、トランザクションの実装、書き込みの口 Writer
+        migrations/         # 生成したマイグレーション（*.sql と meta/。pnpm db:generate が作る。コミットする）
+      change-log/         # 変更履歴（change_logs の表と記録）
   shared/               # @repo/shared。frontend と backend で共通の基盤だけ（Issue #90。.claude/rules/code/shared.md）
     package.json        # 依存なし。exports は ./env・./logger だけ
     env.ts              # 環境変数の唯一の入口（リポジトリ直下の .env を読み、必須の変数を検証する）
@@ -101,7 +106,7 @@ cp .env.example .env
 
 ```sh
 pnpm db:up       # Postgres を起動し、healthcheck が通るまで待つ（docker compose up -d --wait）
-pnpm db:migrate  # apps/backend/shared/drizzle/ のマイグレーションを当てる（drizzle-kit migrate。当て済みのものは飛ばす）
+pnpm db:migrate  # apps/backend/shared/drizzle/ のマイグレーションを当てる（入口 migrate.ts を esbuild で束ねて実行。Cloud Run の migrate ジョブと同じファイル。当て済みのものは飛ばす）
 pnpm db:psql     # psql で接続する（docker compose exec db psql -U app -d app）
 pnpm db:down     # 止める（データは名前付きボリューム pgdata に残る。消すときは docker compose down -v）
 pnpm db:generate # apps/backend/features/*/internal/infra/schema.ts を変えたら、差分の SQL を apps/backend/shared/drizzle/ に生成する（drizzle-kit generate。DB には接続しない）
@@ -131,7 +136,7 @@ pnpm build     # 本番ビルド（pnpm --filter @repo/frontend-customer build�
 pnpm start     # 本番ビルドを起動（pnpm --filter @repo/frontend-customer start）
 ```
 
-- コマンドはリポジトリ直下で実行する。`dev` / `build` / `start` は `apps/frontend_customer`、`db:generate` / `db:migrate` は `apps/backend` の script を `pnpm --filter` で呼ぶ（そのパッケージのディレクトリで動くが、`.env` はリポジトリ直下の 1 つを読む）。依存の追加は `pnpm --filter @repo/backend add <pkg>@<x.y.z>` のように置き場所のパッケージを指定する（`.claude/rules/tooling/dependencies.md`）。
+- コマンドはリポジトリ直下で実行する。`dev` / `build` / `start` は `apps/frontend_customer`、`db:generate` は `apps/backend` の script を `pnpm --filter` で呼ぶ。`db:migrate` はリポジトリ直下の script で、`apps/backend/shared/drizzle/migrate.ts` を esbuild で `dist/migrate/` に束ねて実行する（Issue #326）（そのパッケージのディレクトリで動くが、`.env` はリポジトリ直下の 1 つを読む）。依存の追加は `pnpm --filter @repo/backend add <pkg>@<x.y.z>` のように置き場所のパッケージを指定する（`.claude/rules/tooling/dependencies.md`）。
 
 - どのコマンドも `.env` がある前提（上の「セットアップ」）。
 - `pnpm dev` は Postgres の起動とマイグレーションが前提（先に `pnpm db:up && pnpm db:migrate`）。

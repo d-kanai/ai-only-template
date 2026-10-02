@@ -4,7 +4,7 @@ import { env } from "@repo/shared/env";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Client, Pool } from "pg";
-import type { Database } from "../shared/infra/database";
+import type { Database } from "../shared/drizzle/database";
 
 // 実 Postgres を使う単体テスト（*.postgres.test.ts など）のための、テスト専用の DB を用意する部品。
 // 本番のコードからは使わない。test-support/ に置くのが目印で、本番のコードからの import は rule-tests/test-support.test.ts が止め、
@@ -18,13 +18,14 @@ import type { Database } from "../shared/infra/database";
 //   書いている（"todos"）。接続ごとに search_path をテスト用のスキーマにすれば、コードを変えずにその中の表を使う。
 // WHY スキーマ名に UUID を入れる: 同じテストファイルが同時に複数動いても（Stryker）名前が重ならないようにする。
 //   後始末（close）で消す。プロセスが afterAll の前に止まったとき（Stryker が worker を止める、Ctrl-C など）は残るので、
-//   Vitest の実行の最初に globalSetup（vitest.global-setup.ts）が TestDatabase.cleanupSchemas で消す。
+//   Vitest の実行の最初に globalSetup（vitest.global-setup.ts）が TestSchemas.cleanup で消す。
 // WHY クラスにする（Issue #262。以前は関数 createTestDatabase・cleanupTestSchemas・testSchemaPrefix）: テストの補助も最上位に関数を
 //   置かない（ADR docs/adr/architecture/20261002-class-based-shared-and-test-support.md。rule-tests/architecture.test.ts の
-//   class-based）。作ったものは TestDatabase のインスタンス（db・pool・url と migrate・close）で、作り方と後始末は static メソッド。
+//   class-based）。作ったものは TestDatabase のインスタンス（db・pool・url と migrate・close）で、作り方は static のファクトリ create、
+//   接頭辞と前の実行の残りの後始末は TestSchemas の static メソッド。
 //   以前の戻り値の型の名前 TestDatabase をクラスの名前にし、テストの `let database: TestDatabase` をそのまま使えるようにした。
 
-// cleanupSchemas の設定。vitest.global-setup.ts が env / toolEnv（env.ts）から渡す。
+// TestSchemas.cleanup の設定。vitest.global-setup.ts が env / toolEnv（env.ts）から渡す。
 // WHY 引数で受け取る（ここで env / toolEnv を読まない）: 接続できないときと Stryker の worker の中のときの分岐を、
 //   テストで値を変えて確かめるため。
 export type CleanupOptions = {
@@ -48,18 +49,10 @@ export class TestDatabase {
     private readonly schema: string,
   ) {}
 
-  // create が作るスキーマの名前の接頭辞。cleanupSchemas はこれで始まるスキーマを消す。
-  // WHY メソッドの中に置く（モジュールの最上位の定数やクラスの static フィールドにしない）: 最上位の式は読み込み時にだけ評価される
-  //   static な変異になり、mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に評価すれば、変異をテストで
-  //   検出できる（Issue #55）。static フィールドの初期化も読み込み時の評価なので同じ（ADR 20261002-class-based-shared-and-test-support.md）。
-  static schemaPrefix(): string {
-    return "test_";
-  }
-
   // 接続先は env の DATABASE_URL（アプリと同じ。.env / 環境変数から env.ts が読んで検証した値で、既定値は無い）。
   static async create(): Promise<TestDatabase> {
     const url = env.DATABASE_URL;
-    const schema = `${TestDatabase.schemaPrefix()}${randomUUID().replaceAll("-", "")}`;
+    const schema = `${TestSchemas.prefix()}${randomUUID().replaceAll("-", "")}`;
     // max 4: 以前はトランザクションの runner のテストが「トランザクションの中」と「外」の 2 本を同時に使うため 2 以上にしていた
     //   （Issue #123 で runner を廃止）。値はそのまま残す（下げる理由が無く、同時に複数の接続を使うテストを足しても
     //   接続待ちで止まらない）。
@@ -73,9 +66,10 @@ export class TestDatabase {
     return new TestDatabase(drizzle({ client: pool }), pool, url, schema);
   }
 
-  // drizzle/ のマイグレーションをテスト用のスキーマに当てる。
-  // migrationsFolder: apps/backend/shared/drizzle/（このファイルから ../shared/drizzle。Issue #98 で apps/backend 直下の drizzle/ から移し、
-  //   Issue #181 でこのファイルを apps/backend/shared/infra/ から apps/backend/test-support/ に移した）。
+  // drizzle/migrations/ のマイグレーションをテスト用のスキーマに当てる。
+  // migrationsFolder: apps/backend/shared/drizzle/migrations/（このファイルから ../shared/drizzle/migrations。Issue #98 で apps/backend 直下の
+  //   drizzle/ から移し、Issue #181 でこのファイルを apps/backend/shared/infra/ から apps/backend/test-support/ に移し、Issue #310 で
+  //   生成物を shared/drizzle/ の下の migrations/ に分けた）。
   //   WHY このファイルの場所から決める: カレントディレクトリからのパス（"drizzle"）だと、ディレクトリを apps/backend に
   //   移したとき（Issue #68）や、テストをリポジトリ直下以外から動かしたときに見つからない。このファイルは Vitest だけが
   //   読み込み（Next のバンドルには入らない）、import.meta.dirname は元のファイルの場所を指す。
@@ -83,7 +77,13 @@ export class TestDatabase {
   //   pnpm db:migrate の記録と混ざり、「当て済み」と判断されてテスト用のスキーマに表が作られない。
   async migrate(): Promise<void> {
     await migrate(this.db, {
-      migrationsFolder: join(import.meta.dirname, "..", "shared", "drizzle"),
+      migrationsFolder: join(
+        import.meta.dirname,
+        "..",
+        "shared",
+        "drizzle",
+        "migrations",
+      ),
       migrationsSchema: this.schema,
     });
   }
@@ -93,9 +93,23 @@ export class TestDatabase {
     await this.pool.query(`drop schema ${this.schema} cascade`);
     await this.pool.end();
   }
+}
+
+// テスト用のスキーマの名前の規則（接頭辞）と、前の実行の残りの後始末。
+// WHY TestDatabase から分ける（Issue #300。以前は TestDatabase.schemaPrefix・TestDatabase.cleanupSchemas）: インスタンスで使うクラスに
+//   static を置かない（規則 no-static-in-instance-class。ファクトリの TestDatabase.create は除く）。接頭辞と後始末はインスタンス
+//   （1 つのスキーマ）を作らずに使う（vitest.global-setup.ts）ので、static だけのクラスにする。
+export class TestSchemas {
+  // create が作るスキーマの名前の接頭辞。TestSchemas.cleanup はこれで始まるスキーマを消す。
+  // WHY メソッドの中に置く（モジュールの最上位の定数やクラスの static フィールドにしない）: 最上位の式は読み込み時にだけ評価される
+  //   static な変異になり、mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に評価すれば、変異をテストで
+  //   検出できる（Issue #55）。static フィールドの初期化も読み込み時の評価なので同じ（ADR 20261002-class-based-shared-and-test-support.md）。
+  static prefix(): string {
+    return "test_";
+  }
 
   // prefix で始まるスキーマを中の表ごとすべて消し、消した名前を返す。Postgres に接続できなければ、起動を促すエラーにする。
-  // vitest.global-setup.ts が Vitest の実行の最初（テストファイルを動かす前）に TestDatabase.schemaPrefix() で呼ぶ。
+  // vitest.global-setup.ts が Vitest の実行の最初（テストファイルを動かす前）に TestSchemas.prefix() で呼ぶ。
   // WHY LIKE ではなく starts_with で探す: LIKE の "_" は任意の 1 文字に一致するので、'test_%' は "testX..." のような
   //   テスト用でないスキーマにも一致してしまう。
   // WHY Stryker の worker の中（STRYKER_MUTATOR_WORKER。Stryker が子プロセスに渡す環境変数。@stryker-mutator/core 10.0.0 の
@@ -105,7 +119,7 @@ export class TestDatabase {
   //   （GitHub Actions の日次実行はランナーごと捨てるので残っても害がない）。
   // WHY 接続できないときに専用のエラーにする: pnpm test は Postgres が起動している前提（.claude/rules/quality/testing.md）。
   //   各テストファイルの ECONNREFUSED が並ぶより、最初に「起動していない」と分かる方が早く直せる。
-  static async cleanupSchemas(
+  static async cleanup(
     { databaseUrl: url, insideStrykerWorker }: CleanupOptions,
     prefix: string,
   ): Promise<string[]> {

@@ -4,7 +4,7 @@ import {
   todoStatusChanges,
   todos,
 } from "../../features/todo/internal/infra/schema";
-import type { Database } from "../../shared/infra/database";
+import type { Database } from "../../shared/drizzle/database";
 
 // Todo のテストデータビルダー（Issue #240）。テストの前提の Todo を、todos と todo_status_changes に直接 INSERT して用意する。
 //   使い方: `await TodoBuilder.of(db).title("牛乳を買う").completed(true).createdAt(date).build()`。指定しなかった値は既定値になり、
@@ -15,7 +15,7 @@ import type { Database } from "../../shared/infra/database";
 //   - API では作れない前提を作れる: 作成日時は API が Clock.now() で決めるので「同じ日時に作られた」「作成日時の古い順」を作れず（時計は
 //     差し替えない。API 仕様は vi を使わない）、不変条件を満たさない行（完了の履歴の日時が作成日時より前・逆順の「壊れた Todo」）や
 //     履歴の無い行（デプロイの途中で古い版が作ったもの）は API では作れない。
-//   - 前提の変更の記録（change_logs）が混ざらない: Writer（shared/infra/writer.ts）を通らないので記録を書かず、仕様が確かめる記録は
+//   - 前提の変更の記録（change_logs）が混ざらない: Writer（shared/drizzle/writer.ts）を通らないので記録を書かず、仕様が確かめる記録は
 //     対象の操作が残したものだけになる。
 // WHY test-support/<feature>/ に置く（Issue #181 / #191）: テストだけが使うコード。本番のコードからの import は
 //   rule-tests/test-support.test.ts が止め、Docker のイメージにも入らない（.dockerignore の **/test-support）。
@@ -111,14 +111,14 @@ export class TodoBuilder {
       createdAt,
       statusChanges:
         this.specified.statusChanges ??
-        TodoBuilder.defaultStatusChanges(completed, createdAt),
+        this.defaultStatusChanges(completed, createdAt),
     };
   }
 
   // 履歴を指定しないときの完了の履歴。作成時の未完了の 1 件、完了なら作成日時の完了をもう 1 件。
   // WHY この規則: 不変条件
   //   （履歴は 1 件以上・作成日時より前にならない・最後の completed が今の値）を満たす最小の履歴で、前提の Todo を正しい Todo にする。
-  private static defaultStatusChanges(
+  private defaultStatusChanges(
     completed: boolean,
     createdAt: Date,
   ): BuiltTodoStatusChange[] {
