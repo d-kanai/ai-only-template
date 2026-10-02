@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import { FeatureFlagProvider } from "@/features/feature-flag";
 import { LocaleProvider } from "@/shared/i18n/i18n";
 import { LOCALE_HEADER, Locales } from "@/shared/i18n/locale";
 import {
@@ -37,7 +38,11 @@ export default async function RootLayout({
       </head>
       <body>
         <DesignSystemProvider>
-          <LocaleProvider locale={locale}>{children}</LocaleProvider>
+          <LocaleProvider locale={locale}>
+            {/* フィーチャーフラグ（Issue #156）: 全画面が useFeatureFlag でフラグを読めるように包む。provider の準備を待たずに
+                既定値（off）で描き、準備ができたら描き直す（中身と WHY は features/feature-flag/components/feature-flag-provider.tsx）。 */}
+            <FeatureFlagProvider>{children}</FeatureFlagProvider>
+          </LocaleProvider>
         </DesignSystemProvider>
       </body>
     </html>

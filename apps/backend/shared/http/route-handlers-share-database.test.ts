@@ -6,7 +6,7 @@ import type { Database } from "../drizzle/database";
 
 // 各 feature の *.api.ts は、モジュールの評価時に `new <Api>(new <Command>(new Postgres<X>Repository(AppDatabase.get().db)))` で
 // Route Handler を 1 回だけ組み立てる（組み立ては api ファイルごと。.claude/rules/code/backend.md の「API の書き方」の表の「組み立て」）。
-// このテストは「全 feature の api ファイルをすべて読み込んでも、Repository に渡る db は 1 つ（= プールは Next のサーバプロセスで 1 つ）」を固定する。
+// このテストは「Repository を持つ全 feature の api ファイルをすべて読み込んでも、Repository に渡る db は 1 つ（= プールは Next のサーバプロセスで 1 つ）」を固定する。
 // WHY: api ファイルごとに AppDatabase.get() を呼ぶ設計は、AppDatabase.get が同じものを返すことに依存している。呼ぶたびに
 //   新しいプールを作る実装に変わると、api ファイルの数だけプールができて max_connections を食いつぶす（Issue #132）。
 //   モジュールの読み直し（HMR）で同じプールが返ることは shared/drizzle/database.test.ts が固定する。
@@ -37,8 +37,18 @@ function filesIn(features: string[], layer: string, suffix: string): string[] {
 }
 
 const features = featureNames();
-const apiFiles = filesIn(features, "presentation", ".api.ts");
 const repositoryFiles = filesIn(features, "infra", "-repository.postgres.ts");
+// Postgres の Repository を持つ feature（infra に *-repository.postgres.ts がある feature）。
+// WHY Repository を持たない feature の api ファイルを数えない（Issue #156）: 下の検証は「api ファイル 1 つ = Repository 1 つの組み立て」を
+//   前提に、受け取った db の数を api ファイルの数と比べる。feature-flag のように一覧をハードコードして DB を使わない feature の
+//   api ファイルは Repository を作らないので、数えると数が合わない。DB を使わない api ファイルはプールに触れず、この検査の
+//   対象（プールが 1 つか）の外にある。
+// 限界: Repository を持つ feature の中で、DB を使わない api ファイルを足すと数が合わずに落ちる（そのときは数え方を api ファイルごとに直す）。
+const featuresWithRepository = features.filter(
+  (feature) =>
+    filesIn([feature], "infra", "-repository.postgres.ts").length > 0,
+);
+const apiFiles = filesIn(featuresWithRepository, "presentation", ".api.ts");
 
 // Repository のクラス（コンストラクタで db を受け取る）か。export の中から関数ではなくクラスだけを包むために見る。
 // WHY prototype で判定: アロー関数は prototype を持たないので包まない。Repository のファイルの export は今はクラスだけ。
@@ -92,8 +102,8 @@ afterAll(async () => {
   vi.resetModules();
 });
 
-test("全 feature の api ファイルをすべて読み込んでも、Repository に渡る db は AppDatabase.get() の 1 つだけ", async () => {
-  // given: beforeAll で全 feature の api ファイルを読み込み、Repository が受け取った db を記録してある
+test("Repository を持つ全 feature の api ファイルをすべて読み込んでも、Repository に渡る db は AppDatabase.get() の 1 つだけ", async () => {
+  // given: beforeAll で Repository を持つ全 feature の api ファイルを読み込み、Repository が受け取った db を記録してある
   // when
   // beforeAll の resetModules 後に読み込まれた database モジュール（api ファイルが使ったもの）を取る。
   const { AppDatabase } = await import("../drizzle/database");
@@ -101,6 +111,7 @@ test("全 feature の api ファイルをすべて読み込んでも、Repositor
   // then
   // 列挙が空だと Repository も 0 個で、下の検証が意味を持たないまま通る。
   expect(features.length).toBeGreaterThan(0);
+  expect(featuresWithRepository.length).toBeGreaterThan(0);
   expect(apiFiles.length).toBeGreaterThan(0);
   expect(repositoryFiles.length).toBeGreaterThan(0);
   // api ファイルごとに 1 回組み立てる（Repository は api ファイルの数だけ作られる）。

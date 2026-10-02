@@ -86,6 +86,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-10-02 | backend/shared は層ではなく意味の単位（error / transaction / http / drizzle / change-log）で置き、feature からの参照を縛らない | 採用 | [20261002-backend-shared-colocated-by-meaning.md](architecture/20261002-backend-shared-colocated-by-meaning.md) |
 | 2026-10-02 | Writer の update は変更履歴の before に呼び出し側の origin を使い、before のために行を読み直さない | 採用 | [20261002-update-before-from-origin.md](architecture/20261002-update-before-from-origin.md) |
 | 2026-10-02 | インスタンスで使うクラスに static を置かない（自分を返すファクトリは除く） | 採用 | [20261002-no-static-in-instance-class.md](architecture/20261002-no-static-in-instance-class.md) |
+| 2026-10-02 | フィーチャーフラグは backend の 1 feature とし、一覧をコードにハードコードして boolean だけを OFREP の形で返す | 採用 | [20261002-feature-flag-ofrep-hardcoded.md](architecture/20261002-feature-flag-ofrep-hardcoded.md) |
 
 ### tech-stack/
 言語・ツール・ライブラリの選定

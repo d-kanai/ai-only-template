@@ -29,6 +29,11 @@ describe("EnglishProblemDetail.of", () => {
       { id: "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e" },
       "Todo 8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e was not found.",
     ],
+    [
+      "featureFlag.notFound",
+      { key: "todo-detail-screen" },
+      "Feature flag todo-detail-screen was not found.",
+    ],
     ["request.body.notJson", undefined, "Request body must be valid JSON."],
     [
       "request.body.notObject",
