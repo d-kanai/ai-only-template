@@ -64,8 +64,9 @@ apps/
     logger.ts           # サーバ側のログの唯一の出口（JSON 1 行）
   e2e/
     package.json        # @repo/e2e。@playwright/test / playwright-bdd / pg / @repo/shared、test（bddgen && playwright test）
-    *.feature           # E2E の業務の流れ（Gherkin。日本語の step。API ジャーニーと同じ書き方）
-    *.steps.ts          # step の実装（クラスのメソッド。fixtures.ts が fixture にする。shared.steps.ts は共有の step。database.ts は Todo のリセット、playwright.config.ts は設定）
+    playwright.config.ts # 設定（spec/ の .feature を playwright-bdd で実行する）
+    spec/               # 読むもの: E2E の業務の流れ（*.feature。Gherkin。日本語の step。API ジャーニーと同じ書き方）と step の実装（*.steps.ts。クラスのメソッド。shared.steps.ts は共有の step）
+    support/            # テストの土台: fixtures.ts（step のクラスを fixture にする）・database.ts（Todo のリセット）・log-server.ts（stdout を読めるサーバ）
 ```
 
 - 画面は SSR を前提にせず、データは hook から `/api/...` を呼んで取る。サーバの処理はすべて `apps/backend/` に置く。

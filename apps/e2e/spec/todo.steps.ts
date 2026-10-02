@@ -1,7 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import { Fixture, Then, When } from "playwright-bdd/decorators";
-import { E2eDatabase } from "./database";
-import type { test } from "./fixtures";
+import { E2eDatabase } from "../support/database";
+import type { test } from "../support/fixtures";
 
 // todo.feature（画面での Todo の管理）の step（Issue #279。以前の todo.spec.ts）。API は Postgres（playwright.config.ts の webServer に
 //   DATABASE_URL を渡す）で動く。

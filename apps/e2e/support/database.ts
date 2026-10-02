@@ -2,7 +2,7 @@ import { env } from "@repo/shared/env";
 import { Client } from "pg";
 
 // E2E テストが使う Postgres（compose.yaml）への接続と、データのリセット。
-// apps/e2e/*.steps.ts（シナリオの前のリセット・DB の確認）が使う。
+// apps/e2e/spec/*.steps.ts（シナリオの前のリセット・DB の確認）が使う。
 // 接続先は env.DATABASE_URL（.env / 環境変数から env.ts が読んで検証した値）で、webServer（next start）と同じ DB を指す
 // （playwright.config.ts が同じ env.DATABASE_URL を webServer に渡す）。既定値は持たない（WHY は env.ts）。
 // WHY "@repo/shared/..." で import する（Issue #68 の段階 2・Issue #90）: Playwright はテストと設定を自前の変換で読み込むので、

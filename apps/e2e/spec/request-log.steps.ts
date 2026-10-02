@@ -6,8 +6,8 @@ import {
 } from "@playwright/test";
 import { env } from "@repo/shared/env";
 import { Fixture, Given, Then, When } from "playwright-bdd/decorators";
-import type { test } from "./fixtures";
-import type { E2eLogServer } from "./log-server";
+import type { test } from "../support/fixtures";
+import type { E2eLogServer } from "../support/log-server";
 
 // request-log.feature（アクセスの記録）の step（Issue #80 / #209 / #279。以前の request-log.spec.ts）。
 // リクエストログ（apps/frontend_customer/proxy.ts）が、本番ビルドの next start の stdout に 1 リクエスト = JSON 1 行で出ることを

@@ -30,13 +30,17 @@ import {
 //   日本語で書き、step の実装をクラス（*.steps.ts）に書く（daiki の依頼 2026-10-02「ジャーニーテストを参考に cucumber に。
 //   シナリオの書き方は真似して」）。
 // 違反にするもの:
-//   - e2e-feature-placement: apps/e2e/ の下の、サブディレクトリの中の *.feature / *.steps.ts と、手書きの Playwright のテスト
-//     （*.spec.* / *.test.*。どの階層でも）。
+//   - e2e-feature-placement: apps/e2e/spec/ の直下以外にある *.feature / *.steps.ts（apps/e2e の直下・support/・spec/ の
+//     サブディレクトリなど）と、手書きの Playwright のテスト（*.spec.* / *.test.*。どの階層でも）。
 //     WHY 手書きのテストを止める: E2E を .feature と step の対だけにし、業務の流れを読める形にそろえる（API ジャーニーが TS だけの
 //       ジャーニーを廃止したのと同じ。ADR quality/20260930-gherkin-journeys-with-vitest-cucumber.md）。
-//     WHY .feature と step を直下に限る: playwright.config.ts の defineBddConfig が直下（"*.feature" / "*.steps.ts"）だけを読むので、
-//       サブディレクトリに置くと実行されないまま残る。
-//   - e2e-feature-pair: apps/e2e/<name>.feature には apps/e2e/<name>.steps.ts が要り、<name>.steps.ts には <name>.feature が要る。
+//     WHY .feature と step を spec/ に集める（Issue #297）: 直下に .feature・step・土台（fixtures・DB・ログのサーバ）・設定が平置きで
+//       見づらかった（daiki の依頼 2026-10-02）。読むもの（業務の仕様と step の対）は spec/、テストの土台は support/ に分ける。
+//       名前は backend の spec/ にそろえる。土台を test-support/ にしないのは、backend の test-support/ が「本番のディレクトリの中で
+//       本番のビルドに含めないもの」の意味で、全体がテストの apps/e2e では区別にならないため（daiki の指摘）。
+//     WHY spec/ の直下に限る: playwright.config.ts の defineBddConfig が spec/ の直下（"spec/*.feature" / "spec/*.steps.ts"）だけを
+//       読むので、ほかの場所に置くと実行されないまま残る。
+//   - e2e-feature-pair: apps/e2e/spec/<name>.feature には apps/e2e/spec/<name>.steps.ts が要り、<name>.steps.ts には <name>.feature が要る。
 //     例外は複数の .feature が使う step を置く shared.steps.ts だけ。
 //     WHY: playwright-bdd の step はすべての .feature から見えるので、どの .feature の step がどこにあるかをファイル名で分かるようにする。
 //       .feature だけでも bddgen が step の不足で失敗するが、step のファイルだけが残るのは止まらない。
@@ -49,7 +53,7 @@ import {
 //   - e2e-feature-tag: タグ（`@` で始まる行の、空白で区切った各語）が ALLOWED_TAGS に無ければ違反（1 行 1 件）。
 //     WHY 許すタグを絞る: playwright-bdd の特別なタグ（@skip・@only・@fixme・@fail・@timeout など）はシナリオを黙って止める・
 //       ほかのシナリオを止める・結果を変える。API ジャーニーはタグをすべて止める（api-journey-tag）が、E2E はブラウザの言語を
-//       シナリオごとに変える手段がタグしか無い（apps/e2e/fixtures.ts の locale）ので、そのタグだけを許す。
+//       シナリオごとに変える手段がタグしか無い（apps/e2e/support/fixtures.ts の locale）ので、そのタグだけを許す。
 //   行の読み方（行の区切り・コメント・仕切りの形・区画）は rule-tests/feature-lines.ts（API ジャーニーと共有）。
 //   限界: API ジャーニーの .feature の規則と同じ（docstring の中も行として見る・全角の数字と英字・一覧に無い技術の言葉は見ない・
 //     キーワードは英語だけ・仕切りを要るのは When の直前だけで、操作を `*` / And で書くと要求されない）。step の名前は *.steps.ts
@@ -69,12 +73,14 @@ type E2eFeatureRuleId =
 type E2eFeatureViolation = { rule: E2eFeatureRuleId; line?: number };
 
 const E2E_DIR = "apps/e2e";
+// .feature と step の置き場所（Issue #297）。
+const SPEC_DIR = `${E2E_DIR}/spec`;
 
-// 使ってよいタグ。apps/e2e/fixtures.ts の ENGLISH_BROWSER_TAG と同じ文字列。
+// 使ってよいタグ。apps/e2e/support/fixtures.ts の ENGLISH_BROWSER_TAG と同じ文字列。
 const ALLOWED_TAGS = new Set(["@ブラウザの言語が英語"]);
 
 // .feature と対にならない step のファイル（複数の .feature が使う step）。
-const SHARED_STEPS = `${E2E_DIR}/shared.steps.ts`;
+const SHARED_STEPS = `${SPEC_DIR}/shared.steps.ts`;
 
 // 列挙で入らないディレクトリ。
 // WHY 名前を列挙する: node_modules は依存、.features-gen は bddgen の生成物（apps/e2e/playwright.config.ts の outputDir）、
@@ -93,8 +99,8 @@ const STEPS_FILE = /\.steps\.ts$/;
 // 手書きの Playwright / Vitest のテストの名前（拡張子は広く取る）。
 const TEST_FILE = /\.(?:spec|test)\.[cm]?[jt]sx?$/;
 
-function isDirectChild(path: string): boolean {
-  return posix.dirname(path) === E2E_DIR;
+function isInSpecDir(path: string): boolean {
+  return posix.dirname(path) === SPEC_DIR;
 }
 
 // 列挙の対象か（置き場所・対・中身のどれかの規則にかかる名前）。
@@ -108,7 +114,7 @@ function isMisplaced(path: string): boolean {
   if (TEST_FILE.test(path)) {
     return true;
   }
-  return !isDirectChild(path);
+  return !isInSpecDir(path);
 }
 
 // .feature の中身の違反（行の順。同じ行なら tag・business-language・section-divider の順）。
@@ -378,20 +384,24 @@ describeFeature(feature, ({ Scenario }) => {
   });
 
   Scenario("置き場所と対の判定", ({ And }) => {
-    And("直下の .feature と step の対・共有の step は違反なし", () => {
+    And("spec/ の直下の .feature と step の対・共有の step は違反なし", () => {
       // given
       const cases: [string, string, string | undefined][] = [
         [
-          "直下の .feature（対の step あり）",
-          "apps/e2e/a.feature",
+          "spec/ の .feature（対の step あり）",
+          "apps/e2e/spec/a.feature",
           "a.steps.ts",
         ],
         [
-          "直下の step（対の .feature あり）",
-          "apps/e2e/a.steps.ts",
+          "spec/ の step（対の .feature あり）",
+          "apps/e2e/spec/a.steps.ts",
           "a.feature",
         ],
-        ["共有の step（対は要らない）", "apps/e2e/shared.steps.ts", undefined],
+        [
+          "共有の step（対は要らない）",
+          "apps/e2e/spec/shared.steps.ts",
+          undefined,
+        ],
       ];
 
       // when
@@ -399,7 +409,9 @@ describeFeature(feature, ({ Scenario }) => {
         findE2eFeatureViolations(
           path,
           "",
-          new Set(pair === undefined ? [path] : [path, `apps/e2e/${pair}`]),
+          new Set(
+            pair === undefined ? [path] : [path, `apps/e2e/spec/${pair}`],
+          ),
         ),
       );
 
@@ -408,7 +420,7 @@ describeFeature(feature, ({ Scenario }) => {
     });
 
     And(
-      "手書きのテスト・サブディレクトリの .feature と step は置き場所の違反だけになる（中身と対は見ない）",
+      "手書きのテスト・spec/ の外とサブディレクトリの .feature と step は置き場所の違反だけになる（中身と対は見ない）",
       () => {
         // given
         const cases: [string, string][] = [
@@ -417,9 +429,11 @@ describeFeature(feature, ({ Scenario }) => {
             "サブディレクトリの手書きのテスト（.js）",
             "apps/e2e/x/todo.spec.js",
           ],
-          ["Vitest の名前のテスト", "apps/e2e/x.test.ts"],
-          ["サブディレクトリの .feature", "apps/e2e/x/a.feature"],
-          ["サブディレクトリの step", "apps/e2e/x/a.steps.ts"],
+          ["Vitest の名前のテスト", "apps/e2e/spec/x.test.ts"],
+          ["apps/e2e の直下の .feature", "apps/e2e/a.feature"],
+          ["support/ の step", "apps/e2e/support/a.steps.ts"],
+          ["spec/ のサブディレクトリの .feature", "apps/e2e/spec/x/a.feature"],
+          ["spec/ のサブディレクトリの step", "apps/e2e/spec/x/a.steps.ts"],
         ];
 
         // when
@@ -443,9 +457,9 @@ describeFeature(feature, ({ Scenario }) => {
       () => {
         // given
         const cases: [string, string][] = [
-          ["step の無い .feature", "apps/e2e/a.feature"],
-          ["名前の違う step しか無い .feature", "apps/e2e/b.feature"],
-          [".feature の無い step", "apps/e2e/c.steps.ts"],
+          ["step の無い .feature", "apps/e2e/spec/a.feature"],
+          ["名前の違う step しか無い .feature", "apps/e2e/spec/b.feature"],
+          [".feature の無い step", "apps/e2e/spec/c.steps.ts"],
         ];
 
         // when
@@ -453,7 +467,7 @@ describeFeature(feature, ({ Scenario }) => {
           findE2eFeatureViolations(
             path,
             "",
-            new Set([path, "apps/e2e/x.steps.ts"]),
+            new Set([path, "apps/e2e/spec/x.steps.ts"]),
           ),
         );
 
@@ -471,19 +485,20 @@ describeFeature(feature, ({ Scenario }) => {
       () => {
         // given
         const root = fixture({
-          "apps/e2e/good.feature": source(...GOOD_FEATURE),
-          "apps/e2e/good.steps.ts": "",
-          "apps/e2e/shared.steps.ts": "",
-          "apps/e2e/wording.feature": source(
+          "apps/e2e/spec/good.feature": source(...GOOD_FEATURE),
+          "apps/e2e/spec/good.steps.ts": "",
+          "apps/e2e/spec/shared.steps.ts": "",
+          "apps/e2e/spec/wording.feature": source(
             ...GOOD_FEATURE,
             "    And DB に残る",
           ),
-          "apps/e2e/wording.steps.ts": "",
-          "apps/e2e/lonely.feature": "Feature: x\n",
+          "apps/e2e/spec/wording.steps.ts": "",
+          "apps/e2e/spec/lonely.feature": "Feature: x\n",
           "apps/e2e/todo.spec.ts": "",
-          "apps/e2e/nested/a.feature": "Feature: a\n",
+          "apps/e2e/spec/nested/a.feature": "Feature: a\n",
+          "apps/e2e/root.feature": "Feature: r\n",
           // 対象外: 補助・設定、依存・生成物・Playwright の出力の中、apps/e2e の外。
-          "apps/e2e/database.ts": "",
+          "apps/e2e/support/database.ts": "",
           "apps/e2e/playwright.config.ts": "",
           "apps/e2e/node_modules/x/x.spec.ts": "",
           "apps/e2e/.features-gen/good.feature.spec.js": "",
@@ -500,20 +515,22 @@ describeFeature(feature, ({ Scenario }) => {
         // then
         expect(result).toEqual({
           files: [
-            "apps/e2e/good.feature",
-            "apps/e2e/good.steps.ts",
-            "apps/e2e/lonely.feature",
-            "apps/e2e/nested/a.feature",
-            "apps/e2e/shared.steps.ts",
+            "apps/e2e/root.feature",
+            "apps/e2e/spec/good.feature",
+            "apps/e2e/spec/good.steps.ts",
+            "apps/e2e/spec/lonely.feature",
+            "apps/e2e/spec/nested/a.feature",
+            "apps/e2e/spec/shared.steps.ts",
+            "apps/e2e/spec/wording.feature",
+            "apps/e2e/spec/wording.steps.ts",
             "apps/e2e/todo.spec.ts",
-            "apps/e2e/wording.feature",
-            "apps/e2e/wording.steps.ts",
           ],
           violations: [
-            "e2e-feature-pair: apps/e2e/lonely.feature",
-            "e2e-feature-placement: apps/e2e/nested/a.feature",
+            "e2e-feature-placement: apps/e2e/root.feature",
+            "e2e-feature-pair: apps/e2e/spec/lonely.feature",
+            "e2e-feature-placement: apps/e2e/spec/nested/a.feature",
+            "e2e-feature-business-language: apps/e2e/spec/wording.feature:11",
             "e2e-feature-placement: apps/e2e/todo.spec.ts",
-            "e2e-feature-business-language: apps/e2e/wording.feature:11",
           ],
         });
       },
@@ -539,22 +556,27 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("E2E の実ファイル", ({ And }) => {
     // WHY fixtures.ts のタグと突き合わせる: 片方だけを改名すると、この検査は古いタグを通し続ける（reviewer の指摘、Issue #279）。
-    And("許すタグは apps/e2e/fixtures.ts の ENGLISH_BROWSER_TAG と同じ", () => {
-      // given
-      const fixtures = readFileSync(
-        join(repoRoot, E2E_DIR, "fixtures.ts"),
-        "utf8",
-      );
+    And(
+      "許すタグは apps/e2e/support/fixtures.ts の ENGLISH_BROWSER_TAG と同じ",
+      () => {
+        // given
+        const fixtures = readFileSync(
+          join(repoRoot, E2E_DIR, "support", "fixtures.ts"),
+          "utf8",
+        );
 
-      // when
-      const tag = /const ENGLISH_BROWSER_TAG = "([^"]+)";/.exec(fixtures)?.[1];
+        // when
+        const tag = /const ENGLISH_BROWSER_TAG = "([^"]+)";/.exec(
+          fixtures,
+        )?.[1];
 
-      // then
-      expect([...ALLOWED_TAGS]).toEqual([tag]);
-    });
+        // then
+        expect([...ALLOWED_TAGS]).toEqual([tag]);
+      },
+    );
 
     And(
-      "apps/e2e には対になった .feature と step のファイル（と共有の shared.steps.ts）だけがあり、.feature は業務の言葉だけで When の前に仕切りがあり、許すタグだけを使う",
+      "apps/e2e/spec には対になった .feature と step のファイル（と共有の shared.steps.ts）だけがあり、.feature は業務の言葉だけで When の前に仕切りがあり、許すタグだけを使う",
       () => {
         // given
         // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
@@ -566,9 +588,9 @@ describeFeature(feature, ({ Scenario }) => {
         // then
         expect(files).toEqual(
           expect.arrayContaining([
-            "apps/e2e/shared.steps.ts",
-            "apps/e2e/todo.feature",
-            "apps/e2e/todo.steps.ts",
+            "apps/e2e/spec/shared.steps.ts",
+            "apps/e2e/spec/todo.feature",
+            "apps/e2e/spec/todo.steps.ts",
           ]),
         );
         expect(violations).toEqual([]);

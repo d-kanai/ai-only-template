@@ -216,7 +216,7 @@ describe("RequestLogBuilder.build: event.name の判定（/api/** は api_reques
 //   api_request のスキーマ）が行い、url.query の値は *** に、キーは自由文の網（メールアドレスなど）を通して出す（Issue #216）。
 //   ここで値を落とすと、logger のスキーマでマスクされていることを確かめる意味が無くなり、マスクの判断が 2 か所に分かれる。
 //   画面側の shared/ は apps/shared を参照できない（規則 screen-to-shared）ので、マスクの済んだ行の形は logger.test.ts と
-//   E2E（apps/e2e/request-log.feature。stdout にクエリの値が出ないこと）で確かめる。
+//   E2E（apps/e2e/spec/request-log.feature。stdout にクエリの値が出ないこと）で確かめる。
 describe("RequestLogBuilder.build: url.path と url.query（キーと値の組。マスクは logger が行う）", () => {
   test("クエリをキーと値の組（デコードした値）にして、出現順に出す", () => {
     // given

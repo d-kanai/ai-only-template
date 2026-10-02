@@ -1,6 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import { Fixture, Given, Then, When } from "playwright-bdd/decorators";
-import type { test } from "./fixtures";
+import type { test } from "../support/fixtures";
 
 // i18n.feature（画面の言語）の step（Issue #116 / #279。以前の i18n.spec.ts）。決め方（Cookie → Accept-Language → 既定の ja）は
 //   apps/frontend_customer/shared/i18n/locale.test.ts で固定しているので、ここでは結線（proxy.ts が x-locale を載せる →

@@ -40,7 +40,7 @@ export default defineConfig({
       "rule-tests/**/*.test.ts",
       "scripts/**/*.test.ts",
     ],
-    // apps/e2e/**: Playwright の E2E テスト（apps/e2e/*.feature と step の *.steps.ts。bddgen が apps/e2e/.features-gen/ に *.spec.js を
+    // apps/e2e/**: Playwright の E2E テスト（apps/e2e/spec/*.feature と step の *.steps.ts。bddgen が apps/e2e/.features-gen/ に *.spec.js を
     //   生成する。workspace パッケージ @repo/e2e。Issue #84 で e2e/ から移した。Issue #279 で .feature にした）を
     //   Vitest の対象から外す。上の include（apps/**/*.test.{ts,tsx}）は *.spec.ts を拾わないが、E2E の置き場所に *.test.ts を
     //   置いたときや include を既定に戻したときにも拾わないよう、明示して外す。
@@ -97,7 +97,7 @@ export default defineConfig({
       //     同じく直下の Next の規約ファイル proxy.ts（リクエストログ。Issue #80）も含めない: next start / next dev の中で
       //     リクエストごとに Next から呼ばれるだけで、NextRequest の値を渡して 1 行を出力する結線しか持たない。1 行の中身は
       //     apps/frontend_customer/shared/request-log/request-log.ts（計測の対象）のテストで固定し、結線（matcher・stdout・応答ヘッダ）は
-      //     E2E（apps/e2e/request-log.feature）で確かめる。include に apps/frontend_customer 直下を入れていないので、exclude は要らない。
+      //     E2E（apps/e2e/spec/request-log.feature）で確かめる。include に apps/frontend_customer 直下を入れていないので、exclude は要らない。
       //   - apps/e2e/: Playwright の E2E テストとその設定（apps/e2e/playwright.config.ts）。Vitest では実行しない（上の test.exclude）。
       //   - scripts/ のシェルスクリプト（.sh）: include に入れても、@vitest/coverage-v8 が JS として解析しようとして
       //     失敗し、「Failed to parse ... cloud-session-start.sh. Excluding it from coverage.」とエラーを出して結局外す

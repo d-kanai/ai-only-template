@@ -4,7 +4,7 @@ import {
   expect,
 } from "@playwright/test";
 import { Fixture, Then, When } from "playwright-bdd/decorators";
-import type { test } from "./fixtures";
+import type { test } from "../support/fixtures";
 
 // api-error.feature（入力の誤りの伝え方）の step（Issue #126 / #144 / #279。以前の api-error.spec.ts）。
 // API のエラー応答が、本番ビルド（next start）を通っても RFC 9457 の Problem Details（application/problem+json）で返ることを確かめる。
