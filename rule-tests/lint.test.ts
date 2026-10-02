@@ -584,7 +584,7 @@ describeFeature(feature, ({ Scenario }) => {
     "biome check の noRestrictedImports は apps/frontend_customer の ../ の import を拒否する（Issue #340）",
     ({ And }) => {
       And(
-        "apps/frontend_customer で ../ を指す import・export は非 0 で終わり、noRestrictedImports が出力される（../ と ../../・.. と ../ だけ・import type・export from と export *・dynamic import()・副作用だけの import・拡張子付き・.tsx と app/ とテスト）",
+        "apps/frontend_customer で ../ を指す import・export は非 0 で終わり、noRestrictedImports が出力される（../ と ../../・.. と ../ だけ・import type・export from と全部の re-export・dynamic import()・副作用だけの import・拡張子付き・.tsx と app/ とテスト）",
         () => {
           // given
           const dir = "apps/frontend_customer/features/todo/screens/x";
