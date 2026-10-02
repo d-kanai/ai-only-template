@@ -542,7 +542,7 @@ function backendModuleOf(path: string): string | undefined {
 }
 
 // 参照先が、あるモジュールの part（"internal" か "expose"）の下（part のディレクトリそのもの = index も含む）なら、そのモジュール名。
-// "apps/backend/features/notification/expose/notify" と "expose" → "notification"
+// "apps/backend/features/notification/expose/notifier" と "expose" → "notification"
 // WHY 前方一致の境界を付ける（part の直後は "/" か末尾）: internal-x・exposed のような別ディレクトリを取り違えない。
 function backendModulePartOf(
   path: string,
@@ -1200,7 +1200,7 @@ const RULES: Rule[] = [
   {
     // 「他のモジュールの expose/ を参照してよいのは、自モジュールの internal/presentation/ だけ」（Issue #208）。
     // WHY: presentation は api ファイルが本番の handler を組み立てる場所で、他のモジュールの機能もそこで取り出して、application の
-    //   command / query にコンストラクタで関数として渡す（Issue #123 のコンストラクタ注入）。application・domain・infra が他の
+    //   command / query にコンストラクタでインスタンスとして渡す（Issue #123 のコンストラクタ注入。Issue #262 で関数からクラスに）。application・domain・infra が他の
     //   モジュールを直接 import すると、ユースケースのテストで差し替えられず、モジュール間の依存がコードのあちこちに散らばる。
     // WHY expose から他のモジュールの expose も違反（expose-imports と重ねて検出する）: モジュール間の呼び出しの鎖が expose の中に
     //   隠れ、組み立ての場所（presentation）で見えなくなる。
@@ -2293,13 +2293,13 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
   // WHY 本物の expose の参照が取り出せていることを見る（Issue #208）: モジュールの境界の規則（module-internal・
   //   module-expose-only-from-presentation・expose-imports）は、expose/ の下のファイルと、expose を使う presentation の参照を
   //   取り出せていなければ、違反も 0 件で常に緑になる。
-  it("モジュールの境界の規則は、本物の expose（notification の notify.ts）の参照と、それを使う todo の presentation の参照を取り出せている（列挙が壊れて素通りするのを防ぐ）", () => {
+  it("モジュールの境界の規則は、本物の expose（notification の notifier.ts）の参照と、それを使う todo の presentation の参照を取り出せている（列挙が壊れて素通りするのを防ぐ）", () => {
     expect(references.map((ref) => `${ref.from} → ${ref.to}`)).toEqual(
       expect.arrayContaining([
-        "apps/backend/features/todo/internal/presentation/change-todo-completion.api.ts → apps/backend/features/notification/expose/notify",
-        "apps/backend/features/notification/expose/notify.ts → apps/backend/features/notification/internal/application/send-notification.command",
-        "apps/backend/features/notification/expose/notify.ts → apps/backend/features/notification/internal/infra/notification-sender.log",
-        "apps/backend/features/notification/expose/notify.ts → apps/shared/logger",
+        "apps/backend/features/todo/internal/presentation/change-todo-completion.api.ts → apps/backend/features/notification/expose/notifier",
+        "apps/backend/features/notification/expose/notifier.ts → apps/backend/features/notification/internal/application/send-notification.command",
+        "apps/backend/features/notification/expose/notifier.ts → apps/backend/features/notification/internal/infra/notification-sender.log",
+        "apps/backend/features/notification/expose/notifier.ts → apps/shared/logger",
       ]),
     );
   });
@@ -2413,7 +2413,7 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "apps/frontend_customer/instrumentation-node.ts",
         "apps/frontend_customer/proxy.ts",
         "apps/backend/features/todo/internal/domain/todo.ts",
-        "apps/backend/features/notification/expose/notify.ts",
+        "apps/backend/features/notification/expose/notifier.ts",
         "apps/backend/features/notification/internal/infra/notification-sender.log.ts",
         "apps/backend/shared/drizzle/drizzle.config.ts",
         "apps/backend/shared/infra/database.ts",
@@ -2516,7 +2516,7 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "apps/backend/shared/domain/domain-error.ts",
         "apps/backend/shared/presentation/problem.ts",
         "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
-        "apps/backend/features/notification/expose/notify.ts",
+        "apps/backend/features/notification/expose/notifier.ts",
         "apps/backend/shared/drizzle/drizzle.config.ts",
         "apps/shared/env.ts",
         "apps/shared/logger.ts",
@@ -3323,11 +3323,11 @@ const RULE_EXAMPLES: Record<
   },
   application: {
     violating: [
-      // Issue #208: 他のモジュールの expose（層に属さない）。application には関数をコンストラクタで渡す
+      // Issue #208: 他のモジュールの expose（層に属さない）。application にはインスタンスをコンストラクタで渡す
       //   （module-expose-only-from-presentation と重ねて検出する）。
       [
         "apps/backend/features/todo/internal/application/x.ts",
-        "../../../notification/expose/notify",
+        "../../../notification/expose/notifier",
         "value",
       ],
       // Issue #98: "../../../shared/..." は features/shared/（別の feature）を指す（domain の例と同じ。backend/shared は
@@ -3441,12 +3441,12 @@ const RULE_EXAMPLES: Record<
       ],
       [
         "apps/backend/shared/presentation/x.ts",
-        "../../features/notification/expose/notify",
+        "../../features/notification/expose/notifier",
         "value",
       ],
       [
         "apps/backend/features/todo/internal/presentation/x.api.ts",
-        "../../../notification/expose-x/notify",
+        "../../../notification/expose-x/notifier",
         "value",
       ],
       // reviewer の指摘（Issue #98）: feature の名前が shared でも、自 feature の domain は型だけ（backend/shared の
@@ -3742,12 +3742,12 @@ const RULE_EXAMPLES: Record<
       // Issue #208: 組み立ての場所として、他のモジュールの公開の入口（expose）を値でも型でも使える。
       [
         "apps/backend/features/todo/internal/presentation/change-todo-completion.api.ts",
-        "../../../notification/expose/notify",
+        "../../../notification/expose/notifier",
         "value",
       ],
       [
         "apps/backend/features/todo/internal/presentation/nested/x.api.ts",
-        "../../../../notification/expose/notify",
+        "../../../../notification/expose/notifier",
         "type",
       ],
     ],
@@ -4145,13 +4145,13 @@ const RULE_EXAMPLES: Record<
         "re-export",
       ],
       [
-        "apps/backend/features/notification/expose/notify.ts",
+        "apps/backend/features/notification/expose/notifier.ts",
         "../../todo/internal/domain/todo",
         "type",
       ],
       // internal/ そのもの（ディレクトリの index）も中身。
       [
-        "apps/backend/features/notification/expose/notify.ts",
+        "apps/backend/features/notification/expose/notifier.ts",
         "../../todo/internal",
         "value",
       ],
@@ -4170,7 +4170,7 @@ const RULE_EXAMPLES: Record<
     allowed: [
       // 自モジュールの internal（expose からも）。
       [
-        "apps/backend/features/notification/expose/notify.ts",
+        "apps/backend/features/notification/expose/notifier.ts",
         "../internal/application/send-notification.command",
         "value",
       ],
@@ -4182,7 +4182,7 @@ const RULE_EXAMPLES: Record<
       // 他のモジュールの expose は、この規則ではなく module-expose-only-from-presentation が見る。
       [
         "apps/backend/features/todo/internal/presentation/x.api.ts",
-        "../../../notification/expose/notify",
+        "../../../notification/expose/notifier",
         "value",
       ],
       // 前方一致だけが同じ別ディレクトリ（internal-x）は internal ではない（置き場所・層の規則が見る）。
@@ -4220,17 +4220,17 @@ const RULE_EXAMPLES: Record<
       // presentation 以外の層から他のモジュールの expose（値・型・re-export）。
       [
         "apps/backend/features/todo/internal/application/x.command.ts",
-        "../../../notification/expose/notify",
+        "../../../notification/expose/notifier",
         "value",
       ],
       [
         "apps/backend/features/todo/internal/domain/x.ts",
-        "../../../notification/expose/notify",
+        "../../../notification/expose/notifier",
         "type",
       ],
       [
         "apps/backend/features/todo/internal/infra/x.ts",
-        "../../../notification/expose/notify",
+        "../../../notification/expose/notifier",
         "re-export",
       ],
       // expose から他のモジュールの expose（expose-imports と重ねて検出する）。
@@ -4248,24 +4248,24 @@ const RULE_EXAMPLES: Record<
       // presentation の前方一致だけが同じ別ディレクトリ（presentationx）は presentation ではない。
       [
         "apps/backend/features/todo/internal/presentationx/x.ts",
-        "../../../notification/expose/notify",
+        "../../../notification/expose/notifier",
         "value",
       ],
     ],
     allowed: [
       [
         "apps/backend/features/todo/internal/presentation/change-todo-completion.api.ts",
-        "../../../notification/expose/notify",
+        "../../../notification/expose/notifier",
         "value",
       ],
       [
         "apps/backend/features/todo/internal/presentation/nested/x.api.ts",
-        "../../../../notification/expose/notify",
+        "../../../../notification/expose/notifier",
         "type",
       ],
       // 自モジュールの expose の中の参照。
       [
-        "apps/backend/features/notification/expose/notify.ts",
+        "apps/backend/features/notification/expose/notifier.ts",
         "./message",
         "type",
       ],
@@ -4284,7 +4284,7 @@ const RULE_EXAMPLES: Record<
       // 参照元が apps/backend/features/ の外なら対象外（backend/shared は backend-shared が止める）。
       [
         "apps/backend/shared/presentation/x.ts",
-        "../../features/notification/expose/notify",
+        "../../features/notification/expose/notifier",
         "value",
       ],
     ],
@@ -4339,54 +4339,54 @@ const RULE_EXAMPLES: Record<
     ],
     allowed: [
       [
-        "apps/backend/features/notification/expose/notify.ts",
+        "apps/backend/features/notification/expose/notifier.ts",
         "../internal/application/send-notification.command",
         "value",
       ],
       [
-        "apps/backend/features/notification/expose/notify.ts",
+        "apps/backend/features/notification/expose/notifier.ts",
         "../internal/infra/notification-sender.log",
         "value",
       ],
       [
-        "apps/backend/features/notification/expose/notify.ts",
+        "apps/backend/features/notification/expose/notifier.ts",
         "../internal/domain/notification-sender",
         "type",
       ],
       [
-        "apps/backend/features/notification/expose/notify.ts",
+        "apps/backend/features/notification/expose/notifier.ts",
         "@repo/shared/logger",
         "value",
       ],
       [
-        "apps/backend/features/notification/expose/notify.ts",
+        "apps/backend/features/notification/expose/notifier.ts",
         "@repo/shared/now",
         "value",
       ],
       // 組み立ての場所として、backend/shared（database など。どの層も）と apps/shared の env も使える。
       [
-        "apps/backend/features/notification/expose/notify.ts",
+        "apps/backend/features/notification/expose/notifier.ts",
         "../../../shared/infra/database",
         "value",
       ],
       [
-        "apps/backend/features/notification/expose/notify.ts",
+        "apps/backend/features/notification/expose/notifier.ts",
         "../../../shared/domain/domain-error",
         "type",
       ],
       [
-        "apps/backend/features/notification/expose/notify.ts",
+        "apps/backend/features/notification/expose/notifier.ts",
         "@repo/shared/env",
         "value",
       ],
       [
-        "apps/backend/features/notification/expose/notify.ts",
+        "apps/backend/features/notification/expose/notifier.ts",
         "./message",
         "re-export",
       ],
       // フレームワーク以外のパッケージ（層の規則と同じ）。
       [
-        "apps/backend/features/notification/expose/notify.ts",
+        "apps/backend/features/notification/expose/notifier.ts",
         "node:crypto",
         "value",
       ],
@@ -4526,7 +4526,7 @@ const PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
     "apps/backend/features/todo/internal/presentation/nested/x.api.ts",
     // Issue #208: 他のモジュールへ公開する入口（features/<f>/expose/ の直下のファイル。8 つの拡張子のどれでも）。
-    "apps/backend/features/notification/expose/notify.ts",
+    "apps/backend/features/notification/expose/notifier.ts",
     "apps/backend/features/todo/expose/x.mts",
     // feature の名前が shared でも、features/ の下なら feature（backend/shared ではない）。
     "apps/backend/features/shared/internal/domain/x.ts",
@@ -6388,12 +6388,12 @@ const MUST_REJECT_FILES: Record<string, string> = {
   // Issue #208 モジュールの境界。application・domain・infra から他のモジュールの expose（値・型の re-export・dynamic import）。
   //   参照先が層に属さないので層の規則にもかかる（重ねて検出する）。
   "apps/backend/features/todo/internal/application/bad-module-expose.command.ts":
-    lines('import { notify } from "../../../notification/expose/notify";'),
+    lines('import { Notifier } from "../../../notification/expose/notifier";'),
   "apps/backend/features/todo/internal/domain/bad-module-expose.ts": lines(
-    'export type { Notify } from "../../../notification/expose/notify";',
+    'export type { Notifier } from "../../../notification/expose/notifier";',
   ),
   "apps/backend/features/todo/internal/infra/bad-module-expose.ts": lines(
-    'const n = import("../../../notification/expose/notify");',
+    'const n = import("../../../notification/expose/notifier");',
   ),
   // presentation から自モジュールの expose（層の規則 presentation だけにかかる。module-expose-only-from-presentation は他のモジュールだけ）。
   "apps/backend/features/todo/internal/presentation/bad-own-expose.api.ts":
@@ -6405,7 +6405,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
       'import { SendNotificationCommand } from "../../../notification/internal/application/send-notification.command";',
     ),
   // expose-imports: 他のモジュールの internal / expose、フレームワーク、自モジュールの internal/・expose/ の外。backend/shared と
-  //   apps/shared の env、自モジュールの internal は通る（3・4 行目と最後の行。apps/shared の logger・now は must-pass の notify.ts で
+  //   apps/shared の env、自モジュールの internal は通る（3・4 行目と最後の行。apps/shared の logger・now は must-pass の notifier.ts で
   //   見る。この fixture の apps/shared の exports には logger が無く、shared-exports にかかるため）。
   "apps/backend/features/notification/expose/bad-expose.ts": lines(
     'import type { Todo } from "../../todo/internal/domain/todo";',
@@ -7237,7 +7237,7 @@ const MUST_REJECT_VIOLATIONS = [
     "infra: apps/backend/features/todo/internal/infra/bad-module-expose.ts",
   ].flatMap((line) => {
     const [rule, from] = line.split(": ");
-    const to = "apps/backend/features/notification/expose/notify";
+    const to = "apps/backend/features/notification/expose/notifier";
     return [
       `${rule}: ${from} → ${to}`,
       `module-expose-only-from-presentation: ${from} → ${to}`,
@@ -7721,7 +7721,7 @@ const MUST_PASS_FILES: Record<string, string> = {
   ),
   // Issue #208 モジュールの境界: 公開の入口（expose）から自モジュールの internal（値・型）・expose の中・backend/shared・
   //   apps/shared の env / logger / now・Node の組み込み、組み立ての場所（presentation）から他のモジュールの expose（値・型）。
-  "apps/backend/features/notification/expose/notify.ts": lines(
+  "apps/backend/features/notification/expose/notifier.ts": lines(
     'import { logger } from "@repo/shared/logger";',
     'import { now } from "@repo/shared/now";',
     'import { randomUUID } from "node:crypto";',
@@ -7742,7 +7742,7 @@ const MUST_PASS_FILES: Record<string, string> = {
     ),
   "apps/backend/features/todo/internal/presentation/change-todo-completion.api.ts":
     lines(
-      'import { notify } from "../../../notification/expose/notify";',
+      'import { Notifier } from "../../../notification/expose/notifier";',
       'import type { Message } from "../../../notification/expose/message";',
       'import { ChangeTodoCompletionCommand } from "../application/change-todo-completion.command";',
     ),

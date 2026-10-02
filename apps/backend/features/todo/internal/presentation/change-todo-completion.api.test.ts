@@ -36,9 +36,9 @@ async function setup() {
   };
 }
 
-// 完了の通知の口の偽物（何もしない）。通知の条件と本文は command のテスト（change-todo-completion.command.test.ts）が固定し、
+// 完了の通知の口（TodoCompletedNotifier）の偽物（何もしない）。通知の条件と本文は command のテスト（change-todo-completion.command.test.ts）が固定し、
 //   ここでは HTTP の契約だけを見る。本番の組み立てが notification の expose を渡すことは下の「本番の PUT」のテストで見る。
-const ignoreNotification = (): void => undefined;
+const ignoreNotification = { notify: (): void => undefined };
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -183,8 +183,8 @@ describe("PUT /api/todos/:id/completion", () => {
     ]);
   });
 
-  // WHY 本番の PUT の通知をログの行で確かめる: 組み立てで渡す関数（notification の expose の notify）は api ファイルの中の
-  //   値で、外から差し替えも参照もできない。notify は通知をログ（console.log の JSON 1 行）に出すので、本番の PUT で完了にした
+  // WHY 本番の PUT の通知をログの行で確かめる: 組み立てで渡すオブジェクト（notification の expose の Notifier）は api ファイルの中の
+  //   値で、外から差し替えも参照もできない。Notifier は通知をログ（console.log の JSON 1 行）に出すので、本番の PUT で完了にした
   //   後にその行が出れば、notification の expose につながっていることが分かる。runner の run と findByIdForUpdate と update を
   //   差し替えるので DB には接続しない。
   test("本番の PUT は、未完了の Todo を完了にすると notification の expose で Todo completed: <id> を通知する（ログの 1 行）", async () => {
