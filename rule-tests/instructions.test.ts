@@ -32,7 +32,8 @@ import { casesByName } from "./case-table";
 //                     コードスパンで持ち、.claude/rules/testing.md の「今あるもの」が各 `rule-tests/<名前>.test.ts` を持つ（Issue #302）。
 //                     WHY: 一覧は手で足すもので、PR #294 で design-system / screen-outline を足したときに両方の一覧に漏れ、testing.md は
 //                     settings / work-logs-check も漏れていた。一覧に無いルール検査テストは、規則を探す人とエージェントから見えない。
-//                     限界: 名前が書いてあるかだけを見る（説明の中身・消したテストの名前が残っていること・書く場所は見ない）。
+//                     名前を探すのは CLAUDE.md の「ルール検査テスト N 本（」から最初の「。」までと、testing.md の「今あるもの:」で始まる行だけ。
+//                     限界: 名前が書いてあるかだけを見る（説明の中身・消したテストの名前が残っていることは見ない）。
 //   rules-paths       .claude/rules/*.md はフロントマターに paths（1 件以上の glob）を持ち、各 glob がリポジトリのファイルに
 //                     1 件以上一致する（一致しない glob は typo として扱う。そのルールは読み込まれないまま残るため）。
 //   legacy-rules      旧 rules/ ディレクトリが無く、ファイルに rules/code/・rules/general/ への参照が残っていない
@@ -520,16 +521,24 @@ function ruleTestNames(files: string[]): string[] {
     .sort();
 }
 
-// CLAUDE.md の「ルール検査テスト N 本（`<名前>` / …）」と .claude/rules/testing.md の「今あるもの」の `rule-tests/<名前>.test.ts` が、
+// CLAUDE.md の「ルール検査テスト N 本（`<名前>` / …。」と .claude/rules/testing.md の「今あるもの:」の行の `rule-tests/<名前>.test.ts` が、
 //   rule-tests/ の実際のルール検査テストとそろっているか。
 function findRuleTestIndexViolations(
   names: string[],
   read: FileReader,
 ): string[] {
   if (names.length === 0) return [];
-  const claudeMd = read(CLAUDE_MD) ?? "";
-  const testingMd = read(TESTING_MD) ?? "";
-  const written = /ルール検査テスト (\d+) 本/.exec(claudeMd)?.[1];
+  // WHY 一覧の範囲だけを見る: CLAUDE.md の同じ行の Issue の注記や testing.md のほかの節にも名前が出るので、ファイル全体で
+  //   探すと一覧から消した名前を見逃す（reviewer の指摘）。範囲が見つからなければ空とし、すべての名前を違反にする。
+  const claudeMdMatch = /ルール検査テスト (\d+) 本（([^。\n]*)/.exec(
+    read(CLAUDE_MD) ?? "",
+  );
+  const written = claudeMdMatch?.[1];
+  const claudeMd = claudeMdMatch?.[2] ?? "";
+  const testingMd =
+    (read(TESTING_MD) ?? "")
+      .split("\n")
+      .find((line) => line.startsWith("今あるもの:")) ?? "";
   const countViolations =
     written === undefined
       ? [
@@ -1828,7 +1837,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And(
-      "CLAUDE.md の本数が違う・本数の記載が無い・名前が無い、testing.md に rule-tests/<名前>.test.ts が無ければ違反にする（must reject）",
+      "CLAUDE.md の本数が違う・本数の記載が無い・名前が無い、testing.md に rule-tests/<名前>.test.ts が無ければ違反にする（must reject。名前は CLAUDE.md の本数の後ろの（…。と testing.md の「今あるもの:」の行の中だけを見る）",
       () => {
         // given
         const cases = [
@@ -1850,7 +1859,18 @@ describeFeature(feature, ({ Scenario }) => {
             },
             [
               "rule-tests-index: CLAUDE.md に「ルール検査テスト 2 本」の記載が無い",
+              "rule-tests-index: CLAUDE.md に `api-spec` が無い",
+              "rule-tests-index: CLAUDE.md に `lint` が無い",
             ],
+          ],
+          [
+            "名前が本数の後ろの（…。の一覧の外にだけある",
+            {
+              [CLAUDE_MD]:
+                "ルール検査テスト 2 本（`api-spec`。`lint` は Issue #1）\n`api-spec` / `lint`\n",
+              [TESTING_MD]: testingMd,
+            },
+            ["rule-tests-index: CLAUDE.md に `lint` が無い"],
           ],
           [
             "CLAUDE.md が無い",
@@ -1877,10 +1897,21 @@ describeFeature(feature, ({ Scenario }) => {
             {
               [CLAUDE_MD]: claudeMd,
               [TESTING_MD]:
-                "`rule-tests/api-spec.test.tsx`・`rule-tests/lint.feature`\n",
+                "今あるもの: `rule-tests/api-spec.test.tsx`・`rule-tests/lint.feature`\n",
             },
             [
               "rule-tests-index: .claude/rules/testing.md に `rule-tests/api-spec.test.ts` が無い",
+              "rule-tests-index: .claude/rules/testing.md に `rule-tests/lint.test.ts` が無い",
+            ],
+          ],
+          [
+            "testing.md の「今あるもの:」の行の外にだけある",
+            {
+              [CLAUDE_MD]: claudeMd,
+              [TESTING_MD]:
+                "検査は `rule-tests/lint.test.ts`\n今あるもの: `rule-tests/api-spec.test.ts`\n",
+            },
+            [
               "rule-tests-index: .claude/rules/testing.md に `rule-tests/lint.test.ts` が無い",
             ],
           ],

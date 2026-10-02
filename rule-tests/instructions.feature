@@ -54,7 +54,7 @@ Feature: 指示ファイルの構成と形式
   Scenario: ルール検査テストの一覧（rule-tests-index）
     * rule-tests の直下の .feature の名前をルール検査テストとして読み、入れ子とほかの拡張子は読まない
     * CLAUDE.md の本数と名前、.claude/rules/testing.md の rule-tests/<名前>.test.ts がそろっていれば違反にしない（must pass）
-    * CLAUDE.md の本数が違う・本数の記載が無い・名前が無い、testing.md に rule-tests/<名前>.test.ts が無ければ違反にする（must reject）
+    * CLAUDE.md の本数が違う・本数の記載が無い・名前が無い、testing.md に rule-tests/<名前>.test.ts が無ければ違反にする（must reject。名前は CLAUDE.md の本数の後ろの（…。と testing.md の「今あるもの:」の行の中だけを見る）
     * ルール検査テストが 0 件なら、この検査は違反を出さない
   Scenario: fixture のリポジトリを検査したときに検出される違反
     * 許可される構成では違反 0 件（must pass。.gitignore の中と docs/work-logs/ の旧参照は数えない）
