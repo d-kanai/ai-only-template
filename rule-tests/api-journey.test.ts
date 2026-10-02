@@ -49,6 +49,8 @@ import {
 //       rule-tests/api-spec.test.ts の api-spec-placement / api-spec-pair が見る（ここで止めると API 仕様を置けない）。
 //     例外: apps/e2e/ の下の .feature（E2E。Issue #279）もこの規則の対象外。E2E は playwright-bdd で .feature を実行し、置き場所と
 //       対（<name>.feature ⇔ <name>.steps.ts）・中身は rule-tests/e2e-feature.test.ts が見る。
+//     例外: apps/backend/spec/domain/ の下の .feature（domain 仕様。Issue #318）もこの規則の対象外。置き場所と対・中身は
+//       rule-tests/domain-spec.test.ts の domain-spec-placement / domain-spec-pair などが見る。
 //   - api-journey-feature-pair（Issue #200）: apps/backend/spec/journey/ の直下の <name>.feature には、同じ場所に
 //     <name>.api-journey.test.ts（step の実装）が要り、<name>.api-journey.test.ts には <name>.feature が要る。片方だけ・
 //     名前の違う組（a.feature と b.api-journey.test.ts）は、対の無いほうのファイルを違反にする。
@@ -194,11 +196,16 @@ function isFeatureFile(path: string): boolean {
 const OUTSIDE_API_JOURNEY_FILE =
   /\.(?:api-)?journey\.test\.[cm]?[jt]sx?$|\.feature$/;
 
-// API 仕様の置き場所（Issue #219）と E2E の置き場所（Issue #279）。この下の .feature はそれぞれのもので、api-journey-placement の
-//   対象外（置き場所と対は rule-tests/api-spec.test.ts と rule-tests/e2e-feature.test.ts が見る）。
-const OTHER_FEATURE_DIRS = ["apps/backend/spec/api/", "apps/e2e/"];
+// API 仕様の置き場所（Issue #219）・domain 仕様の置き場所（Issue #318）・E2E の置き場所（Issue #279）。この下の .feature は
+//   それぞれのもので、api-journey-placement の対象外（置き場所と対は rule-tests/api-spec.test.ts・rule-tests/domain-spec.test.ts・
+//   rule-tests/e2e-feature.test.ts が見る）。
+const OTHER_FEATURE_DIRS = [
+  "apps/backend/spec/api/",
+  "apps/backend/spec/domain/",
+  "apps/e2e/",
+];
 
-// spec/journey/ の外で、置き場所の違反として見るファイルか（API 仕様と E2E の .feature を除く）。
+// spec/journey/ の外で、置き場所の違反として見るファイルか（API 仕様・domain 仕様・E2E の .feature を除く）。
 function isOutsideApiJourneyTarget(path: string): boolean {
   return (
     OUTSIDE_API_JOURNEY_FILE.test(path) &&
@@ -551,7 +558,7 @@ function walk(root: string, dir: string): string[] {
 }
 
 // 検査の対象: apps/ の下のファイルのうち、apps/backend/spec/journey/ の下にあるものと、外に置くと違反になる名前
-//   （OUTSIDE_API_JOURNEY_FILE。apps/backend/spec/api/ の下の .feature を除く）のもの。名前順。
+//   （OUTSIDE_API_JOURNEY_FILE。OTHER_FEATURE_DIRS の下の .feature を除く）のもの。名前順。
 // WHY root を引数で受け取る: 本番（リポジトリ直下）と fixture（一時ディレクトリ）で同じ列挙を通すため。
 function listApiJourneyTargets(root: string): string[] {
   return walk(root, "apps")
@@ -623,7 +630,7 @@ describeFeature(feature, ({ Scenario }) => {
     "API ジャーニーの置き場所（isMisplacedApiJourneyFile）",
     ({ And }) => {
       And(
-        "spec/journey/ の直下の API ジャーニーと .feature、層の下のテストとソース、名前の一部だけが同じファイル、spec/api/ の下の .feature は違反なし",
+        "spec/journey/ の直下の API ジャーニーと .feature、層の下のテストとソース、名前の一部だけが同じファイル、spec/api/ と spec/domain/ の下の .feature は違反なし",
         () => {
           // given
           const cases: [string, string][] = [
@@ -656,6 +663,11 @@ describeFeature(feature, ({ Scenario }) => {
               "apps/backend/spec/api/ の下の .feature（API 仕様）",
               "apps/backend/spec/api/todo/create-todo.feature",
             ],
+            // domain 仕様の .feature は domain-spec.test.ts が見る（Issue #318）。
+            [
+              "apps/backend/spec/domain/ の下の .feature（domain 仕様）",
+              "apps/backend/spec/domain/todo/todo.feature",
+            ],
           ];
 
           // when
@@ -669,7 +681,7 @@ describeFeature(feature, ({ Scenario }) => {
       );
 
       And(
-        "spec/journey/ の名前の違うテスト・テスト以外・サブディレクトリの中、spec/journey/ の外のジャーニーと .feature、spec/api/ の下の API ジャーニーは違反",
+        "spec/journey/ の名前の違うテスト・テスト以外・サブディレクトリの中、spec/journey/ の外のジャーニーと .feature、spec/api/ と spec/domain/ の下の API ジャーニーは違反",
         () => {
           // given
           const cases: [string, string][] = [
@@ -758,6 +770,15 @@ describeFeature(feature, ({ Scenario }) => {
             [
               "spec/api の前方一致だけの別ディレクトリの .feature",
               "apps/backend/spec/api-x/todo/x.feature",
+            ],
+            // domain 仕様の例外も .feature だけ（Issue #318）。
+            [
+              "apps/backend/spec/domain/ の下の API ジャーニー",
+              "apps/backend/spec/domain/todo/x.api-journey.test.ts",
+            ],
+            [
+              "spec/domain の前方一致だけの別ディレクトリの .feature",
+              "apps/backend/spec/domain-x/todo/x.feature",
             ],
           ];
 
@@ -1941,6 +1962,9 @@ describeFeature(feature, ({ Scenario }) => {
           "apps/backend/spec/api/todo/create-todo.feature": "Feature: DB\n",
           // E2E の .feature も対象外（中身に DB があっても見ない。e2e-feature.test.ts が見る。Issue #279）。
           "apps/e2e/out.feature": "Feature: e2e の DB\n",
+          // domain 仕様の .feature も対象外（中身に DB があっても見ない。domain-spec.test.ts が見る。Issue #318）。
+          "apps/backend/spec/domain/todo/todo.feature":
+            "Feature: domain の DB\n",
           "apps/backend/spec/api/todo/x.api-journey.test.ts": source(
             ...REQUIRED_IMPORTS,
           ),
