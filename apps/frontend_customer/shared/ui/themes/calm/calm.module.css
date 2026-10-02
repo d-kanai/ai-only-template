@@ -18,18 +18,28 @@
 /* 見出し（Title の root）。大きすぎず、字間を詰めて締まった印象にする。 */
 .title {
   color: #111827;
+}
+
+/* 画面の見出し（h1）だけ大きさを決める。h2 以下は Mantine のテーマの大きさのまま。 */
+h1.title {
   font-size: 28px;
   letter-spacing: -0.025em;
   line-height: 1.2;
   margin-block-end: var(--mantine-spacing-lg);
 }
 
-/* 面（Paper の root）。影ではなく細い線で区切る。 */
+/*
+ * 面（Paper の root。Mantine の Card も内部で Paper として描かれ、この見た目が付く）。影ではなく細い線で区切る。
+ * 余白は持たせない（Card は padding の prop で、フォームと一覧は下の規則で決める）。
+ */
 .paper {
   background: var(--mantine-color-white);
   border: 1px solid #e5e7eb;
   box-shadow: 0 1px 2px rgb(17 24 39 / 4%);
-  padding: var(--mantine-spacing-md);
+}
+
+/* 画面の外枠の直下に縦に並ぶ面（フォームと一覧）は、間を空ける。 */
+.container > .paper {
   margin-block-end: var(--mantine-spacing-md);
 }
 
@@ -38,13 +48,14 @@
  * WHY 要素の種類で分ける: 画面は Paper を置くだけで、フォームか一覧かの見た目の違いはテーマで決める。
  */
 form.paper {
+  padding: var(--mantine-spacing-md);
   display: flex;
   align-items: flex-end;
   gap: var(--mantine-spacing-sm);
 }
 
 /* 入力の外枠（TextInput の root）。フォームの中では残りの幅をすべて使う。 */
-.inputRoot {
+form .inputRoot {
   flex: 1;
 }
 
@@ -64,6 +75,13 @@ form.paper {
   transition:
     border-color 120ms,
     box-shadow 120ms;
+}
+
+/* 枠の無い入力（variant="unstyled"）は、枠と背景を付けない。 */
+.input[data-variant="unstyled"] {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .input:focus {
@@ -89,7 +107,7 @@ form.paper {
 .list {
   list-style: none;
   padding: 0;
-  margin: calc(var(--mantine-spacing-md) * -1);
+  margin: 0;
 }
 
 .listItem {
