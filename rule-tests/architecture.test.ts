@@ -403,10 +403,12 @@ function isSourceNonTest(path: string): boolean {
 //   node_modules: 依存（workspace パッケージ化した段階 2 では apps/*/node_modules/ ができる）。pnpm の相対パスの symlink を含む。
 //   .next: next build / next dev の生成物（apps/frontend_customer/.next/。数千件の JS）。next build の .next/standalone/ には
 //     pnpm の node_modules の形（相対パスの symlink）が複製され、循環する symlink を含みうる（Issue #130 / #142）。
+//   .features-gen: playwright-bdd の bddgen が apps/e2e の .feature から生成する Playwright のテスト（apps/e2e/.features-gen/*.spec.js。
+//     Issue #279。.gitignore 済み）。自分たちが書くコードではなく、.feature と step（apps/e2e/*.steps.ts）が検査の対象。
 // WHY 名前を列挙する（"." で始まるディレクトリをまとめて除かない）: まとめて除くと apps/backend/.lib/x.ts のような自前のコードが
 //   検査を素通りする（Issue #68 の reviewer 指摘）。既知の生成物・依存だけを除き、それ以外の "." のディレクトリは通常どおり
 //   検査して、置き場所の規則で違反にする。生成物のディレクトリが増えたらここに足す。
-const EXCLUDED_DIRS = new Set(["node_modules", ".next"]);
+const EXCLUDED_DIRS = new Set(["node_modules", ".next", ".features-gen"]);
 
 type ReadDirectory = (absolutePath: string) => Dirent[];
 
@@ -2043,7 +2045,7 @@ function findProblemResponseViolations(root: string): string[] {
   );
 }
 
-// --- backend と apps/shared の本番コードとテストの補助はクラスを基本にする（規則 class-based。Issue #262） ---
+// --- backend と apps/shared の本番コードとテストの補助、frontend の React 以外のモジュールはクラスを基本にする（規則 class-based。Issue #262） ---
 // apps/backend と apps/shared の本番コード、テストの補助（apps/backend/test-support/・apps/backend/spec/ の support.ts・apps/e2e/ の
 //   spec 以外）は、ファイルの最上位（モジュールの直下と namespace の中）に関数を置かない。補助の関数もクラスのメソッド（状態を
 //   使わないものは static）にする。
@@ -2059,8 +2061,23 @@ function findProblemResponseViolations(root: string): string[] {
 //   - export default のアロー関数・function 式（export default async () => {}）。
 // 許すもの: クラス（宣言・式）のメンバー（メソッド・アロー関数のクラスフィールド readonly handle = ProblemResponse.wrap(async ...)）、
 //   メソッドや関数の中の関数、型・interface、関数でない値の変数（定数・オブジェクト・new X().handle のようなプロパティの参照）。
-// 対象: apps/backend・apps/shared・apps/e2e の下のテスト以外のソース（8 つの拡張子）。テスト（*.test.*）と E2E のテスト
-//   （apps/e2e の *.spec.*。E2E_SPEC_FILE）は除く。
+// 対象: apps/backend・apps/shared・apps/e2e の下と、apps/frontend_customer の features/・shared/・test-support/ の下（*.tsx・*.jsx・
+//   *.hook.* を除く）のテスト以外のソース（8 つの拡張子）。テスト（*.test.*）と E2E のテスト（apps/e2e の *.spec.*。E2E_SPEC_FILE）は除く。
+// WHY frontend の React 以外のモジュールも対象にする（daiki の判断 2026-10-02「クラス必須でルールにして」。ADR
+//   docs/adr/architecture/20261002-class-based-frontend-modules.md）: API の呼び出し（features/<f>/api/）・ロケールの判定・日時の
+//   表示・リクエストログの組み立て（shared/）は React も Next も関数の形を求めないので、backend と同じくクラスのメソッドにそろえる。
+//   画面のテストの差し替えも vi.mocked(TodoApi.list) の形になり、apps/shared の vi.mocked(Clock.now) とそろう。
+// WHY frontend の次は対象外にする（関数の形を外の仕様が求めるか、クラスにすると React の規則とぶつかるもの）:
+//   - *.tsx・*.jsx（React の component。クラスの component は React の公式で非推奨の書き方）。JSX を含む補助（test-support/i18n.tsx の
+//     JaLocale と同じファイルの tJa、shared/i18n/i18n.tsx の LocaleProvider と同じファイルの defineMessages など）もファイルごと外す。
+//     WHY ファイルごと: 同じファイルの中で component と補助を見分けるには「JSX を返すか」を型で見る必要があり、今の判定（構文だけ）
+//     では決まらない。
+//   - *.hook.*（React の hook。hook は関数で呼ぶ規則（Rules of Hooks）で、use で始まる関数であることを React の lint も前提にする）。
+//   - app/ の下（Next の規約のファイル。page.tsx・layout.tsx の default export の関数、app/api の route.ts の GET など。route.ts は
+//     backend の handle を re-export するだけで関数を書かないが、規約のファイルとしてまとめて外す）。
+//   - apps/frontend_customer 直下のファイル（proxy.ts の proxy、instrumentation.ts の register は Next が関数の export を求める。
+//     instrumentation-node.ts は register が Node.js runtime でだけ dynamic import する本体で、Vitest のカバレッジの対象外
+//     （vitest.config.mts）。形を変えても単体テストで確かめられないので、規約のファイルとまとめて外す。next.config.ts も規約のファイル）。
 // WHY テストの補助（apps/backend/test-support/・apps/backend/spec/ の support.ts・apps/e2e/database.ts）も対象にする（Issue #262 の
 //   2 つ目の PR。以前は除いていた）: daiki が対象の範囲を「すべて」と決め、テストの補助も移した（ADR
 //   20261002-class-based-shared-and-test-support.md）。テストの組み立てを読むときも依存の形（クラスのメソッド）が本番とそろう。
@@ -2081,13 +2098,30 @@ function findProblemResponseViolations(root: string): string[] {
 //   レビューで見る。
 const CLASS_BASED = {
   id: "class-based",
-  name: "apps/backend と apps/shared の本番コードとテストの補助（apps/backend の test-support/・spec/ の support.ts、apps/e2e の *.spec.* 以外）はファイルの最上位に関数を置かない（テストと E2E の *.spec.* は除く。function 宣言・関数を入れた変数・export default の関数は違反。クラスのメソッド・クラスフィールドのアロー関数・メソッドの中の関数は可）",
+  name: "apps/backend と apps/shared の本番コードとテストの補助（apps/backend の test-support/・spec/ の support.ts、apps/e2e の *.spec.* 以外）と apps/frontend_customer の features/・shared/・test-support/ の React 以外のモジュール（*.tsx・*.jsx・*.hook.* 以外）はファイルの最上位に関数を置かない（テストと E2E の *.spec.*、frontend の app/ と直下のファイルは除く。function 宣言・関数を入れた変数・export default の関数は違反。クラスのメソッド・クラスフィールドのアロー関数・メソッドの中の関数は可）",
   appliesTo: (file: string) =>
     isSourceNonTest(file) &&
     (isUnder(file, BACKEND_ROOT) ||
       isUnder(file, SHARED_ROOT) ||
-      (isUnder(file, E2E_ROOT) && !E2E_SPEC_FILE.test(file))),
+      (isUnder(file, E2E_ROOT) && !E2E_SPEC_FILE.test(file)) ||
+      isFrontendNonReactModule(file)),
 };
+
+// frontend のうち規則 class-based の対象にするディレクトリ（WHY は CLASS_BASED の「frontend の次は対象外にする」）。
+const CLASS_BASED_FRONTEND_DIRS = ["features", "shared", "test-support"].map(
+  (dir) => `${FRONTEND_ROOT}/${dir}`,
+);
+// React の component（*.tsx・*.jsx）と hook（*.hook.<拡張子>）。
+const REACT_COMPONENT_FILE = /\.[jt]sx$/;
+const REACT_HOOK_FILE = /\.hook\.(?:[cm]?[jt]s|[jt]sx)$/;
+
+function isFrontendNonReactModule(file: string): boolean {
+  return (
+    CLASS_BASED_FRONTEND_DIRS.some((dir) => isUnder(file, dir)) &&
+    !REACT_COMPONENT_FILE.test(file) &&
+    !REACT_HOOK_FILE.test(file)
+  );
+}
 
 // 括弧・型アサーション（as / <T>）・satisfies・非 null アサーション（!）を外した式。
 // WHY 外す: (() => 1)・(async () => 1) as F・function () {} satisfies F は、包んでも最上位の関数であることは変わらない。
@@ -2165,6 +2199,7 @@ function listClassBasedCheckedFiles(root: string): string[] {
     ...listSourceFiles(root, BACKEND_ROOT),
     ...listSourceFiles(root, SHARED_ROOT),
     ...listSourceFiles(root, E2E_ROOT),
+    ...listSourceFiles(root, FRONTEND_ROOT),
   ].filter(CLASS_BASED.appliesTo);
 }
 
@@ -5571,6 +5606,36 @@ const CLASS_BASED_EXAMPLES: {
         "export default { port: port() };",
       ),
     ],
+    // 28〜34: frontend の React 以外のモジュール（ADR 20261002-class-based-frontend-modules.md で対象に広げた）。features/<f>/api/・
+    //   feature の直下・shared/ の入れ子・.mts と .js・辞書（*.messages.ts）・test-support/ の .ts・hook に似た名前（.hooks.ts）。
+    [
+      "apps/frontend_customer/features/todo/api/todo-api.ts",
+      lines("export function listTodos(): void {}"),
+    ],
+    [
+      "apps/frontend_customer/features/todo/x.ts",
+      lines("export function f(): void {}"),
+    ],
+    [
+      "apps/frontend_customer/shared/i18n/nested/x.mts",
+      lines("export const f = (): number => 1;"),
+    ],
+    [
+      "apps/frontend_customer/shared/request-log/x.js",
+      lines("export default function () {}"),
+    ],
+    [
+      "apps/frontend_customer/features/todo/components/todo-item.messages.ts",
+      lines("const pick = (x: string): string => x;"),
+    ],
+    [
+      "apps/frontend_customer/test-support/fetch.ts",
+      lines("export async function stubFetch(): Promise<void> {}"),
+    ],
+    [
+      "apps/frontend_customer/features/todo/hooks/todo.hooks.ts",
+      lines("export function f(): void {}"),
+    ],
   ],
   allowed: [
     // 0: static だけのクラス（状態の無い補助。biome の noStaticOnlyClass は apps/backend で off）。
@@ -5653,8 +5718,8 @@ const CLASS_BASED_EXAMPLES: {
         "/* const g = () => 1; */",
       ),
     ],
-    // 7〜16: 対象外（テスト（test-support/・spec/ の中のテストも）・E2E のテスト *.spec.ts・リポジトリ直下の
-    //   vitest.global-setup.ts・apps/shared のテスト・前方一致だけが同じ apps/shared-x と apps/e2e-x・frontend）。
+    // 7〜14: 対象外（テスト（test-support/・spec/ の中のテストも）・E2E のテスト *.spec.ts・リポジトリ直下の
+    //   vitest.global-setup.ts・apps/shared のテスト・前方一致だけが同じ apps/shared-x と apps/e2e-x）。
     [
       "apps/backend/shared/domain/x.test.ts",
       lines("function helper(): number {", "  return 1;", "}"),
@@ -5681,8 +5746,66 @@ const CLASS_BASED_EXAMPLES: {
       lines("function helper(): number {", "  return 1;", "}"),
     ],
     ["apps/shared-x/x.ts", lines("export function f(): void {}")],
+    // 15〜27: frontend の対象外（CLASS_BASED の「frontend の次は対象外にする」）。React の component（.tsx・.jsx）と hook
+    //   （.hook.ts・.hook.tsx）、app/ の下（page.tsx・route.ts・.ts の補助）、直下のファイル（proxy.ts・instrumentation.ts・
+    //   instrumentation-node.ts・next.config.ts）、frontend のテスト、前方一致だけが同じ別ディレクトリ（features-x/・apps/frontend_customer-x/）。
     [
-      "apps/frontend_customer/features/todo/x.ts",
+      "apps/frontend_customer/features/todo/components/todo-item.tsx",
+      lines("export function TodoItem() {", "  return null;", "}"),
+    ],
+    [
+      "apps/frontend_customer/shared/ui/button.jsx",
+      lines("export const Button = () => null;"),
+    ],
+    [
+      "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.hook.ts",
+      lines("export function useTodoScreen(): void {}"),
+    ],
+    [
+      "apps/frontend_customer/shared/i18n/locale.hook.tsx",
+      lines("export function useLocale(): void {}"),
+    ],
+    [
+      "apps/frontend_customer/app/page.tsx",
+      lines("export default function Page() {", "  return null;", "}"),
+    ],
+    [
+      "apps/frontend_customer/app/api/todos/route.ts",
+      lines(
+        "export async function GET(): Promise<Response> {",
+        "  return new Response(null);",
+        "}",
+      ),
+    ],
+    [
+      "apps/frontend_customer/proxy.ts",
+      lines(
+        "export function proxy(): void {}",
+        "function withLocale(): void {}",
+      ),
+    ],
+    [
+      "apps/frontend_customer/instrumentation.ts",
+      lines("export async function register(): Promise<void> {}"),
+    ],
+    [
+      "apps/frontend_customer/instrumentation-node.ts",
+      lines("export async function verifyEnvAtStartup(): Promise<void> {}"),
+    ],
+    [
+      "apps/frontend_customer/next.config.ts",
+      lines("const f = (): number => 1;", "export default { x: f() };"),
+    ],
+    [
+      "apps/frontend_customer/features/todo/api/todo-api.test.ts",
+      lines("function jsonResponse(): void {}"),
+    ],
+    [
+      "apps/frontend_customer/features-x/x.ts",
+      lines("export function f(): void {}"),
+    ],
+    [
+      "apps/frontend_customer-x/shared/x.ts",
       lines("export function f(): void {}"),
     ],
   ],
@@ -6254,11 +6377,12 @@ const MUST_REJECT_FILES: Record<string, string> = {
     `export const count = (n) => \`\${n}件\`;`,
   ),
   //   拡張子（.jsx）、JSX の無い .ts の日本語、辞書の例外の外（messages/ の下の階層、messages/ の外）。
+  //   .ts の日本語は、最上位の関数にしない（class-based の巻き添えにしない。frontend の api/ も対象）ため、クラスの static フィールドにする。
   "apps/frontend_customer/features/todo/components/bad-text.jsx": lines(
     "export const C = () => <p>Hello</p>;",
   ),
   "apps/frontend_customer/features/todo/api/bad-text.ts": lines(
-    'export const e = () => { throw new Error("取得に失敗しました"); };',
+    'export class E { static e = () => { throw new Error("取得に失敗しました"); }; }',
   ),
   "apps/frontend_customer/shared/i18n/messages/nested/ja.ts": lines(
     'export const ja = { "todo.item.delete": "削除" };',
@@ -6527,6 +6651,21 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/e2e/bad-helper.ts": lines(
     "export const reset = async (): Promise<void> => {};",
   ),
+  // class-based（ADR 20261002-class-based-frontend-modules.md）: frontend の React 以外のモジュール（features/<f>/api/・shared/）の
+  //   最上位の関数。同じディレクトリの component（.tsx）と hook（.hook.ts）の関数は対象外（拾わない）。
+  "apps/frontend_customer/features/todo/api/bad-class-api.ts": lines(
+    "export class TodoApi { static list(): void {} }",
+    "export function listTodos(): void {}",
+  ),
+  "apps/frontend_customer/shared/i18n/bad-format.ts": lines(
+    "export const formatDateTime = (iso: string): string => iso;",
+  ),
+  "apps/frontend_customer/features/todo/api/bad-api-view.tsx": lines(
+    "export function View() { return null; }",
+  ),
+  "apps/frontend_customer/features/todo/api/bad-api.hook.ts": lines(
+    "export function useApi(): void {}",
+  ),
   // backend-placement / frontend-placement（Issue #181）: 直下の test-support/ と前方一致だけが同じ別ディレクトリ。
   "apps/backend/test-support-x/x.ts": lines("export const x = 1;"),
   "apps/frontend_customer/test-support-x/x.ts": lines("export const x = 1;"),
@@ -6544,6 +6683,8 @@ const MUST_REJECT_VIOLATIONS = [
   "class-based: apps/backend/test-support/todo/bad-builder.ts:1",
   "class-based: apps/backend/spec/api/todo/support.ts:1",
   "class-based: apps/e2e/bad-helper.ts:1",
+  "class-based: apps/frontend_customer/features/todo/api/bad-class-api.ts:2",
+  "class-based: apps/frontend_customer/shared/i18n/bad-format.ts:1",
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(
     (line) =>
       `now-single-source: apps/backend/features/todo/internal/domain/bad-now.ts:${line}`,
@@ -7188,9 +7329,8 @@ const MUST_PASS_FILES: Record<string, string> = {
       'import { useCallback, useEffect, useRef, useState } from "react";',
       'import type { todoScreenMessages } from "@/features/todo/screens/todo-screen/todo-screen.messages";',
       "import {",
-      "  listTodos,",
+      "  TodoApi,",
       "  type Todo,",
-      "  updateTodo,",
       '} from "@/features/todo/api/todo-api";',
     ),
   "apps/frontend_customer/features/todo/screens/todo-detail-screen/todo-detail-screen.tsx":
@@ -7203,9 +7343,8 @@ const MUST_PASS_FILES: Record<string, string> = {
     lines(
       'import { useCallback, useEffect, useRef, useState } from "react";',
       "import {",
-      "  getTodo,",
+      "  TodoApi,",
       "  type Todo,",
-      "  updateTodo,",
       '} from "@/features/todo/api/todo-api";',
     ),
   // 別 feature からは index だけ（alias と相対、index の明示あり・なし）。画面側の shared/ は参照してよい。
@@ -7535,8 +7674,8 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { logger } from "@repo/shared/logger";',
     'import { now } from "@repo/shared/now";',
     'import { type NextRequest, NextResponse } from "next/server";',
-    'import { buildRequestLog } from "@/shared/request-log/request-log";',
-    "logger.emit(buildRequestLog({ receivedAt: now() }));",
+    'import { RequestLogBuilder } from "@/shared/request-log/request-log";',
+    "logger.emit(RequestLogBuilder.build({ receivedAt: now() }));",
   ),
   // now-single-source: 現在時刻は apps/shared/now.ts だけが読み、ほかは Clock.now() を使う（backend の 4 層すべてと frontend 直下）。
   //   class-based（Issue #262）: apps/shared/now.ts もクラスの static メソッドにする。
@@ -7582,8 +7721,9 @@ const MUST_PASS_FILES: Record<string, string> = {
   "apps/e2e/clock.spec.ts": lines("export const runId = Date.now();"),
   "scripts/clock.ts": lines("export const t = Date.now();"),
   "clock.config.mts": lines("export default { at: new Date() };"),
+  // class-based（ADR 20261002-class-based-frontend-modules.md）: frontend の shared/ もクラスの static メソッドにする。
   "apps/frontend_customer/shared/request-log/request-log.ts": lines(
-    "export function buildRequestLog() {}",
+    "export class RequestLogBuilder { static build() {} }",
   ),
   // env.ts は apps/shared（@repo/shared。Issue #90）にあり、apps/backend の設定ファイル（apps/backend/shared/drizzle/drizzle.config.ts）・apps/e2e/・
   //   リポジトリ直下の設定ファイルは "@repo/shared/env" で import する。
@@ -7893,7 +8033,7 @@ describeFeature(feature, ({ Scenario }) => {
           "apps/backend/features/todo/internal/domain/todo.test.ts",
           "apps/backend/test-support/database.ts",
           "apps/frontend_customer/test-support/i18n.tsx",
-          "apps/e2e/todo.spec.ts",
+          "apps/e2e/todo.steps.ts",
           "vitest.config.mts",
         ]) {
           expect(files).not.toContain(excluded);
@@ -7968,7 +8108,7 @@ describeFeature(feature, ({ Scenario }) => {
 
     // WHY 本物のファイルが列挙に入っていることを見る: 列挙（パスの判定）が壊れて 0 件になると、違反も 0 件で常に緑になる。
     And(
-      "最上位に関数を置かない規則は、apps/backend の本番コード（層・expose・drizzle.config.ts）・apps/shared の本番コード・テストの補助（test-support/・spec/ の support.ts・apps/e2e/ の spec 以外）を対象にし、テスト・E2E の .spec.ts・リポジトリ直下は対象にしない（列挙が壊れて素通りするのを防ぐ）",
+      "最上位に関数を置かない規則は、apps/backend の本番コード（層・expose・drizzle.config.ts）・apps/shared の本番コード・テストの補助（test-support/・spec/ の support.ts・apps/e2e/ の spec 以外）・frontend の React 以外のモジュール（features/・shared/ の .ts）を対象にし、テスト・E2E の .spec.ts・リポジトリ直下・frontend の .tsx・.hook.ts・app/・直下のファイルは対象にしない（列挙が壊れて素通りするのを防ぐ）",
       () => {
         // given: 前提なし
         // when
@@ -7995,6 +8135,15 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/backend/spec/api/todo/support.ts",
             "apps/e2e/database.ts",
             "apps/e2e/playwright.config.ts",
+            "apps/e2e/fixtures.ts",
+            "apps/e2e/todo.steps.ts",
+            "apps/frontend_customer/features/todo/api/todo-api.ts",
+            "apps/frontend_customer/features/todo/api/api-error.ts",
+            "apps/frontend_customer/features/todo/index.ts",
+            "apps/frontend_customer/features/todo/components/todo-item.messages.ts",
+            "apps/frontend_customer/shared/i18n/locale.ts",
+            "apps/frontend_customer/shared/i18n/format.ts",
+            "apps/frontend_customer/shared/request-log/request-log.ts",
           ]),
         );
 
@@ -8006,12 +8155,41 @@ describeFeature(feature, ({ Scenario }) => {
             !(
               isUnder(file, BACKEND_ROOT) ||
               isUnder(file, SHARED_ROOT) ||
-              isUnder(file, E2E_ROOT)
+              isUnder(file, E2E_ROOT) ||
+              isUnder(file, FRONTEND_ROOT)
             ),
         );
 
         // then
         expect(result).toEqual([]);
+
+        // when
+        // WHY frontend の対象外を別に見る: 対象外（React の component・hook、Next の規約のファイル）が列挙に入ると、関数の形を
+        //   外の仕様が求めるファイルが違反になる（判定の例でも固定するが、実ファイルの列挙でも確かめる）。
+        const frontendExcluded = files.filter(
+          (file) =>
+            isUnder(file, FRONTEND_ROOT) &&
+            (/\.[jt]sx$/.test(file) ||
+              /\.hook\./.test(file) ||
+              isUnder(file, `${FRONTEND_ROOT}/app`) ||
+              /^apps\/frontend_customer\/[^/]+$/.test(file)),
+        );
+
+        // then
+        expect(frontendExcluded).toEqual([]);
+        // 前提: 対象外の実ファイルがリポジトリにあること（無ければ上の検査は何も確かめていない）。
+        expect(listSourceFiles(repoRoot, FRONTEND_ROOT)).toEqual(
+          expect.arrayContaining([
+            "apps/frontend_customer/features/todo/components/todo-item.tsx",
+            "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.hook.ts",
+            "apps/frontend_customer/app/page.tsx",
+            "apps/frontend_customer/app/api/todos/route.ts",
+            "apps/frontend_customer/proxy.ts",
+            "apps/frontend_customer/instrumentation.ts",
+            "apps/frontend_customer/instrumentation-node.ts",
+            "apps/frontend_customer/next.config.ts",
+          ]),
+        );
       },
     );
 
@@ -8163,7 +8341,8 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/frontend_customer/app/page.tsx",
             "apps/e2e/database.ts",
             "apps/e2e/playwright.config.ts",
-            "apps/e2e/request-log.spec.ts",
+            "apps/e2e/log-server.ts",
+            "apps/e2e/request-log.steps.ts",
             "vitest.config.mts",
             "vitest.global-setup.ts",
             "stryker.config.mjs",
@@ -9009,7 +9188,7 @@ describeFeature(feature, ({ Scenario }) => {
   );
 
   Scenario(
-    `backend と apps/shared の本番コードとテストの補助の最上位に関数を置かない規則の判定（${CLASS_BASED.id}）`,
+    `backend と apps/shared の本番コードとテストの補助、frontend の React 以外のモジュールの最上位に関数を置かない規則の判定（${CLASS_BASED.id}）`,
     ({ And }) => {
       const { violating, allowed } = CLASS_BASED_EXAMPLES;
       // WHY 遅延して 1 回だけ判定する: 例ごとに tsgo を起動すると遅いため（handle の規則の判定と同じ）。

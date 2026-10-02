@@ -3,11 +3,7 @@ import type {
   ErrorKeyParams,
 } from "@repo/backend/shared/presentation/problem";
 import { describe, expect, expectTypeOf, test } from "vitest";
-import {
-  ApiError,
-  toErrorMessage,
-  toErrorMessages,
-} from "@/features/todo/api/api-error";
+import { ApiError, ApiErrorMessage } from "@/features/todo/api/api-error";
 import { commonMessages } from "@/shared/i18n/common.messages";
 import type { MessageKey, MessageParams } from "@/shared/i18n/i18n";
 import { tJa } from "@/test-support/i18n";
@@ -93,7 +89,7 @@ describe("ApiError", () => {
   });
 });
 
-describe("toErrorMessage（失敗の理由を画面の文言にする）", () => {
+describe("ApiErrorMessage.toMessage（失敗の理由を画面の文言にする）", () => {
   test("ApiError はキーと params を、ロケールの辞書で翻訳する", () => {
     // given
     const error = new ApiError({
@@ -104,8 +100,8 @@ describe("toErrorMessage（失敗の理由を画面の文言にする）", () =>
     });
 
     // when
-    const ja = toErrorMessage(error, "ja");
-    const en = toErrorMessage(error, "en");
+    const ja = ApiErrorMessage.toMessage(error, "ja");
+    const en = ApiErrorMessage.toMessage(error, "en");
 
     // then
     expect(ja).toBe("Todo（id: todo-1）が見つかりません");
@@ -121,7 +117,7 @@ describe("toErrorMessage（失敗の理由を画面の文言にする）", () =>
     });
 
     // when
-    const message = toErrorMessage(error, "ja");
+    const message = ApiErrorMessage.toMessage(error, "ja");
 
     // then
     expect(message).toBe("通信に失敗しました（HTTP 502）");
@@ -136,8 +132,8 @@ describe("toErrorMessage（失敗の理由を画面の文言にする）", () =>
   ])("%s は、固定の文言（error.unexpected）にする", (_label, reason) => {
     // given: 前提なし（reason は test.each の引数）
     // when
-    const ja = toErrorMessage(reason, "ja");
-    const en = toErrorMessage(reason, "en");
+    const ja = ApiErrorMessage.toMessage(reason, "ja");
+    const en = ApiErrorMessage.toMessage(reason, "en");
 
     // then
     expect(ja).toBe("予期しないエラーが発生しました");
@@ -147,10 +143,10 @@ describe("toErrorMessage（失敗の理由を画面の文言にする）", () =>
 
 // 400 の errors（項目ごとの誤り）を、入力の下に出す文言（fields）とフォーム全体の文言（form）に分ける。
 // fields に渡すのは、その画面が入力を描く項目の名前（リクエストの本文の最上位のキー）。
-describe("toErrorMessages（失敗の理由を、フォーム全体の文言と項目ごとの文言にする）", () => {
+describe("ApiErrorMessage.toMessages（失敗の理由を、フォーム全体の文言と項目ごとの文言にする）", () => {
   const validation = { status: 400, type: "/problems/validation-error" };
 
-  test("errors が無い ApiError（404 など）は、フォーム全体の文言だけ（toErrorMessage と同じ）", () => {
+  test("errors が無い ApiError（404 など）は、フォーム全体の文言だけ（ApiErrorMessage.toMessage と同じ）", () => {
     // given
     const error = new ApiError({
       status: 404,
@@ -160,7 +156,7 @@ describe("toErrorMessages（失敗の理由を、フォーム全体の文言と�
     });
 
     // when
-    const messages = toErrorMessages(error, "ja", ["title"]);
+    const messages = ApiErrorMessage.toMessages(error, "ja", ["title"]);
 
     // then
     expect(messages).toStrictEqual({
@@ -174,7 +170,7 @@ describe("toErrorMessages（失敗の理由を、フォーム全体の文言と�
     const error = new TypeError("Failed to fetch");
 
     // when
-    const messages = toErrorMessages(error, "ja", ["title"]);
+    const messages = ApiErrorMessage.toMessages(error, "ja", ["title"]);
 
     // then
     expect(messages).toStrictEqual({
@@ -194,7 +190,7 @@ describe("toErrorMessages（失敗の理由を、フォーム全体の文言と�
     });
 
     // when
-    const messages = toErrorMessages(error, "ja", ["title"]);
+    const messages = ApiErrorMessage.toMessages(error, "ja", ["title"]);
 
     // then
     expect(messages).toStrictEqual({
@@ -215,8 +211,8 @@ describe("toErrorMessages（失敗の理由を、フォーム全体の文言と�
     });
 
     // when
-    const ja = toErrorMessages(error, "ja", ["title"]);
-    const en = toErrorMessages(error, "en", ["title"]);
+    const ja = ApiErrorMessage.toMessages(error, "ja", ["title"]);
+    const en = ApiErrorMessage.toMessages(error, "en", ["title"]);
 
     // then
     expect(ja.fields).toStrictEqual({
@@ -249,7 +245,7 @@ describe("toErrorMessages（失敗の理由を、フォーム全体の文言と�
     });
 
     // when
-    const messages = toErrorMessages(error, "ja", ["title"]);
+    const messages = ApiErrorMessage.toMessages(error, "ja", ["title"]);
 
     // then
     expect(messages).toStrictEqual({
@@ -284,7 +280,7 @@ describe("toErrorMessages（失敗の理由を、フォーム全体の文言と�
     });
 
     // when
-    const messages = toErrorMessages(error, "ja", ["title"]);
+    const messages = ApiErrorMessage.toMessages(error, "ja", ["title"]);
 
     // then
     expect(messages).toStrictEqual({
@@ -316,7 +312,10 @@ describe("toErrorMessages（失敗の理由を、フォーム全体の文言と�
     });
 
     // when
-    const messages = toErrorMessages(error, "ja", ["title", "completed"]);
+    const messages = ApiErrorMessage.toMessages(error, "ja", [
+      "title",
+      "completed",
+    ]);
 
     // then
     expect(messages).toStrictEqual({
@@ -353,7 +352,7 @@ describe("toErrorMessages（失敗の理由を、フォーム全体の文言と�
     });
 
     // when
-    const messages = toErrorMessages(error, "ja", ["title"]);
+    const messages = ApiErrorMessage.toMessages(error, "ja", ["title"]);
 
     // then
     expect(messages).toStrictEqual({

@@ -84,104 +84,124 @@ export type RequestLogInput = {
   projectId: string;
 };
 
-export function buildRequestLog(input: RequestLogInput): RequestLog {
-  // WHY Headers に揃える: Headers は名前の大文字・小文字を区別せずに引け、record（テスト）でも同じ読み方になる。
-  const headers = new Headers(input.headers);
-  const url = new URL(input.url);
-  const fields = {
-    message: `${input.method} ${url.pathname}`,
-    time: input.receivedAt.toISOString(),
-    http: {
-      request: {
-        id: nonEmpty(headers.get("x-request-id")) ?? input.generateRequestId(),
-        method: input.method,
-        header: {
-          referer: headers.get("referer"),
-          accept: headers.get("accept"),
-          "content-type": headers.get("content-type"),
+// 1 行の組み立て（RequestLogBuilder.build）。
+// WHY クラスの static メソッドにする（最上位の関数にしない）: frontend の React 以外のモジュールもクラスを基本にする（規則 class-based。
+//   ADR docs/adr/architecture/20261002-class-based-frontend-modules.md）。状態を持たないのでインスタンスは作らない。
+export class RequestLogBuilder {
+  static build(input: RequestLogInput): RequestLog {
+    // WHY Headers に揃える: Headers は名前の大文字・小文字を区別せずに引け、record（テスト）でも同じ読み方になる。
+    const headers = new Headers(input.headers);
+    const url = new URL(input.url);
+    const fields = {
+      message: `${input.method} ${url.pathname}`,
+      time: input.receivedAt.toISOString(),
+      http: {
+        request: {
+          id:
+            RequestLogBuilder.nonEmpty(headers.get("x-request-id")) ??
+            input.generateRequestId(),
+          method: input.method,
+          header: {
+            referer: headers.get("referer"),
+            accept: headers.get("accept"),
+            "content-type": headers.get("content-type"),
+          },
+          body: {
+            size: RequestLogBuilder.contentLength(
+              headers.get("content-length"),
+            ),
+          },
         },
-        body: { size: contentLength(headers.get("content-length")) },
       },
-    },
-    url: {
-      path: url.pathname,
-      // WHY Object.fromEntries（同じキーは後の値で上書き）: 値は logger が *** にするので、同じキーの繰り返し（?a=1&a=2）は
-      //   キーの種類が分かれば足りる。配列にすると行の形がキーごとに変わる。
-      query: Object.fromEntries(url.searchParams),
-    },
-    client: { address: clientIp(headers) },
-    user_agent: { original: headers.get("user-agent") },
-    server: { address: headers.get("host") },
-    user: { id: null },
-    ...traceFields(headers.get("traceparent"), input.projectId),
-  };
-  // WHY 種類ごとに組み立てる（event: { name: isApiPath(...) ? "api_request" : "page_request" } と 1 つに書かない）: 上の RequestLog の WHY。union の値の
-  //   event.name では、どちらの種類の形かを型で決められない。
-  return isApiPath(url.pathname)
-    ? { ...fields, event: { name: "api_request" } }
-    : { ...fields, event: { name: "page_request" } };
-}
-
-// traceparent から trace の 3 つのキーを作る。形が違えば何も出さない（空のオブジェクト）。
-// WHY traceparent を読む: Cloud Run はリクエストに W3C の traceparent を自動で付ける（https://docs.cloud.google.com/run/docs/trace ）。
-//   アプリの行を Cloud Run のリクエストログ（基盤が出す行）とトレースに結び付けるには、アプリの行に logging.googleapis.com/trace を
-//   書く（https://docs.cloud.google.com/run/docs/logging の「Write structured logs」の例。例は X-Cloud-Trace-Context を読むが、
-//   W3C の標準の traceparent にそろえる）。実機（Cloud Run）での結び付きは未確認。
-// WHY 形が違えば出さない（null も入れない）: W3C の仕様は、形の違う・すべて 0 の trace-id / parent-id の traceparent を無視する
-//   ことを求める（MUST ignore）。null のキーを残すと、Cloud Logging が trace として読もうとする値が行に入る。
-// WHY version は 00 だけ: 今の仕様の版で、ほかの版は項目の並びが違いうる。版が上がったらここを見直す。
-function traceFields(
-  traceparent: string | null,
-  projectId: string,
-): TraceFields {
-  // W3C Trace Context の traceparent（https://www.w3.org/TR/trace-context/#traceparent-header ）の version 00 の形。
-  //   16 進数は小文字だけ（HEXDIGLC）。前後に余分な文字があれば一致させない（^ と $）。
-  // WHY 関数の中に書く（最上位の定数にしない）: 最上位の値は Stryker の static な変異になり、ignoreStatic で検査から外れる。
-  const match = traceparent?.match(
-    /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/,
-  );
-  if (!match) {
-    return {};
+      url: {
+        path: url.pathname,
+        // WHY Object.fromEntries（同じキーは後の値で上書き）: 値は logger が *** にするので、同じキーの繰り返し（?a=1&a=2）は
+        //   キーの種類が分かれば足りる。配列にすると行の形がキーごとに変わる。
+        query: Object.fromEntries(url.searchParams),
+      },
+      client: { address: RequestLogBuilder.clientIp(headers) },
+      user_agent: { original: headers.get("user-agent") },
+      server: { address: headers.get("host") },
+      user: { id: null },
+      ...RequestLogBuilder.traceFields(
+        headers.get("traceparent"),
+        input.projectId,
+      ),
+    };
+    // WHY 種類ごとに組み立てる（event: { name: isApiPath(...) ? "api_request" : "page_request" } と 1 つに書かない）: 上の RequestLog の WHY。union の値の
+    //   event.name では、どちらの種類の形かを型で決められない。
+    return RequestLogBuilder.isApiPath(url.pathname)
+      ? { ...fields, event: { name: "api_request" } }
+      : { ...fields, event: { name: "page_request" } };
   }
-  const [, traceId, spanId, flags] = match;
-  if (isAllZero(traceId) || isAllZero(spanId)) {
-    return {};
+
+  // traceparent から trace の 3 つのキーを作る。形が違えば何も出さない（空のオブジェクト）。
+  // WHY traceparent を読む: Cloud Run はリクエストに W3C の traceparent を自動で付ける（https://docs.cloud.google.com/run/docs/trace ）。
+  //   アプリの行を Cloud Run のリクエストログ（基盤が出す行）とトレースに結び付けるには、アプリの行に logging.googleapis.com/trace を
+  //   書く（https://docs.cloud.google.com/run/docs/logging の「Write structured logs」の例。例は X-Cloud-Trace-Context を読むが、
+  //   W3C の標準の traceparent にそろえる）。実機（Cloud Run）での結び付きは未確認。
+  // WHY 形が違えば出さない（null も入れない）: W3C の仕様は、形の違う・すべて 0 の trace-id / parent-id の traceparent を無視する
+  //   ことを求める（MUST ignore）。null のキーを残すと、Cloud Logging が trace として読もうとする値が行に入る。
+  // WHY version は 00 だけ: 今の仕様の版で、ほかの版は項目の並びが違いうる。版が上がったらここを見直す。
+  private static traceFields(
+    traceparent: string | null,
+    projectId: string,
+  ): TraceFields {
+    // W3C Trace Context の traceparent（https://www.w3.org/TR/trace-context/#traceparent-header ）の version 00 の形。
+    //   16 進数は小文字だけ（HEXDIGLC）。前後に余分な文字があれば一致させない（^ と $）。
+    // WHY 関数の中に書く（最上位の定数にしない）: 最上位の値は Stryker の static な変異になり、ignoreStatic で検査から外れる。
+    const match = traceparent?.match(
+      /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/,
+    );
+    if (!match) {
+      return {};
+    }
+    const [, traceId, spanId, flags] = match;
+    if (
+      RequestLogBuilder.isAllZero(traceId) ||
+      RequestLogBuilder.isAllZero(spanId)
+    ) {
+      return {};
+    }
+    return {
+      "logging.googleapis.com/trace": `projects/${projectId}/traces/${traceId}`,
+      "logging.googleapis.com/spanId": spanId,
+      // WHY 最下位ビットだけを見る: sampled は trace-flags の bit 0（W3C の FLAG_SAMPLED = 1）。ほかのビットは別の意味を持ちうる。
+      "logging.googleapis.com/trace_sampled":
+        (Number.parseInt(flags, 16) & 1) === 1,
+    };
   }
-  return {
-    "logging.googleapis.com/trace": `projects/${projectId}/traces/${traceId}`,
-    "logging.googleapis.com/spanId": spanId,
-    // WHY 最下位ビットだけを見る: sampled は trace-flags の bit 0（W3C の FLAG_SAMPLED = 1）。ほかのビットは別の意味を持ちうる。
-    "logging.googleapis.com/trace_sampled":
-      (Number.parseInt(flags, 16) & 1) === 1,
-  };
-}
 
-function isAllZero(hex: string): boolean {
-  return /^0+$/.test(hex);
-}
+  private static isAllZero(hex: string): boolean {
+    return /^0+$/.test(hex);
+  }
 
-// WHY "/api" 自体と "/api/" で始まるものだけ: Route Handler は app/api/ の下にあり、"/apis" や "/api-docs" のような
-//   前方一致だけが同じパスは画面として扱う（apps/frontend_customer/app/ の構成と同じ区切り）。
-function isApiPath(pathname: string): boolean {
-  return pathname === "/api" || pathname.startsWith("/api/");
-}
+  // WHY "/api" 自体と "/api/" で始まるものだけ: Route Handler は app/api/ の下にあり、"/apis" や "/api-docs" のような
+  //   前方一致だけが同じパスは画面として扱う（apps/frontend_customer/app/ の構成と同じ区切り）。
+  private static isApiPath(pathname: string): boolean {
+    return pathname === "/api" || pathname.startsWith("/api/");
+  }
 
-// WHY x-forwarded-for の先頭: プロキシを経るごとに右に追記されるので、先頭が最初の接続元（クライアント）になる。
-//   Next.js v15 で request.ip は削除され、ヘッダから取るしかない（proxy.md）。ヘッダは偽装できるので、信頼できる
-//   プロキシの後ろで動かす前提の値（.claude/rules/frontend.md の限界: 信頼できるリバースプロキシがヘッダを付け直す前提）。
-function clientIp(headers: Headers): string | null {
-  const forwardedFor = headers.get("x-forwarded-for")?.split(",")[0].trim();
-  return nonEmpty(forwardedFor) ?? nonEmpty(headers.get("x-real-ip"));
-}
+  // WHY x-forwarded-for の先頭: プロキシを経るごとに右に追記されるので、先頭が最初の接続元（クライアント）になる。
+  //   Next.js v15 で request.ip は削除され、ヘッダから取るしかない（proxy.md）。ヘッダは偽装できるので、信頼できる
+  //   プロキシの後ろで動かす前提の値（.claude/rules/frontend.md の限界: 信頼できるリバースプロキシがヘッダを付け直す前提）。
+  private static clientIp(headers: Headers): string | null {
+    const forwardedFor = headers.get("x-forwarded-for")?.split(",")[0].trim();
+    return (
+      RequestLogBuilder.nonEmpty(forwardedFor) ??
+      RequestLogBuilder.nonEmpty(headers.get("x-real-ip"))
+    );
+  }
 
-// WHY 数字だけのときに限る: Content-Length は 0 以上の整数（RFC 9110）。読めない値を Number() や parseInt で推測すると
-//   "12abc" が 12、"" が 0 になり、実際と違うバイト数を記録してしまう。
-// WHY value?.match: null の検査を別の条件に書くと、RegExp.test(null) が "null" として偽になるため、検査を消す変異が
-//   結果を変えない（等価な変異として Stryker に残る）。
-function contentLength(value: string | null): number | null {
-  return value?.match(/^\d+$/) ? Number(value) : null;
-}
+  // WHY 数字だけのときに限る: Content-Length は 0 以上の整数（RFC 9110）。読めない値を Number() や parseInt で推測すると
+  //   "12abc" が 12、"" が 0 になり、実際と違うバイト数を記録してしまう。
+  // WHY value?.match: null の検査を別の条件に書くと、RegExp.test(null) が "null" として偽になるため、検査を消す変異が
+  //   結果を変えない（等価な変異として Stryker に残る）。
+  private static contentLength(value: string | null): number | null {
+    return value?.match(/^\d+$/) ? Number(value) : null;
+  }
 
-function nonEmpty(value: string | null | undefined): string | null {
-  return value ? value : null;
+  private static nonEmpty(value: string | null | undefined): string | null {
+    return value ? value : null;
+  }
 }

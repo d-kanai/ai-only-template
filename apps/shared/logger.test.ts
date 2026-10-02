@@ -339,7 +339,7 @@ describe("logger.emit: 種類ごとのスキーマ（allowlist とマスク）",
     },
   );
 
-  // WHY 先頭の並び: 行を目で追うとき、どの行も先頭が severity・time・message・event の順にそろう（apps/e2e/request-log.spec.ts も見る）。
+  // WHY 先頭の並び: 行を目で追うとき、どの行も先頭が severity・time・message・event の順にそろう（apps/e2e/request-log.steps.ts も見る）。
   //   残りはスキーマに書いた順（呼び出し側のキーの順によらない）。
   test("先頭は severity・time・message・event の順で、残りはスキーマの順（呼び出し側のキーの順によらない）", () => {
     // given

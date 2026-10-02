@@ -1,18 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ApiErrorMessage,
   type ErrorMessages,
-  toErrorMessages,
 } from "@/features/todo/api/api-error";
-import {
-  changeTodoCompletion,
-  getTodo,
-  renameTodo,
-  type Todo,
-} from "@/features/todo/api/todo-api";
+import { type Todo, TodoApi } from "@/features/todo/api/todo-api";
 import { useLocale } from "@/shared/i18n/i18n";
 
 // 失敗の理由（catch で受けた値）を包んで state に持つ。null（失敗なし）と、reject された値そのものが null / undefined の場合を区別するため。
-// WHY 文言ではなく理由を持ち、描画のときに翻訳する（toErrorMessages）: ロケールが変わっても表示中のエラーがそのロケールで出る。
+// WHY 文言ではなく理由を持ち、描画のときに翻訳する（ApiErrorMessage.toMessages）: ロケールが変わっても表示中のエラーがそのロケールで出る。
 //   翻訳に使う locale を useCallback の依存に入れずに済み、コールバックが作り直されない（下の依存配列の Stryker のコメントの前提）。
 type Failure = { reason: unknown };
 
@@ -25,7 +20,7 @@ export function useTodoDetailScreen(todoId: string) {
   const [isLoading, setIsLoading] = useState(true);
   const locale = useLocale();
   // todo-api は失敗時に ApiError を投げるが、fetch 自体の失敗なども含め catch に何が来るかは型で保証されない。
-  // 画面には翻訳した文字列だけを渡す（ApiError 以外は固定の文言。api-error.ts の toErrorMessages）。
+  // 画面には翻訳した文字列だけを渡す（ApiError 以外は固定の文言。api-error.ts の ApiErrorMessage.toMessages）。
   const [failure, setFailure] = useState<Failure | null>(null);
   // 表示中の todoId の「世代」。todoId が変わる（または unmount する）たびに進める。
   // WHY: PUT は todoId が変わった後に返ることがある。useCallback の todoId は呼び出し時点の値で固定されるので、
@@ -41,7 +36,7 @@ export function useTodoDetailScreen(todoId: string) {
     setTodo(null);
     setIsLoading(true);
     setFailure(null);
-    getTodo(todoId)
+    TodoApi.get(todoId)
       .then(
         (fetched) => {
           if (ignore) return;
@@ -94,7 +89,7 @@ export function useTodoDetailScreen(todoId: string) {
     // 空白だけの title はサーバで弾かれる入力なので送らない（一覧画面の追加と同じ扱い）。前後の空白は保存しない。
     const trimmed = title.trim();
     if (trimmed === "") return;
-    const updated = await update((id) => renameTodo(id, trimmed));
+    const updated = await update((id) => TodoApi.rename(id, trimmed));
     // 失敗したときは入力を残し、直して再送できるようにする。
     if (updated !== null) setTitle(updated.title);
   }, [title, update]);
@@ -103,16 +98,16 @@ export function useTodoDetailScreen(todoId: string) {
     if (todo === null) return;
     // 完了の API（本文は completed だけ）を呼ぶので、編集中で未保存の title は保存されない。
     const completed = !todo.completed;
-    await update((id) => changeTodoCompletion(id, completed));
+    await update((id) => TodoApi.changeCompletion(id, completed));
   }, [todo, update]);
 
   // 失敗を、フォーム全体の文言（error。role="alert" で出す）と、入力の下に出す項目ごとの文言（fieldErrors）に分ける（Issue #144）。
   // WHY 項目は "title" だけ: この画面のtitle のフォームが描く入力は title だけ。ほかの項目の誤りは error に出る（api-error.ts の
-  //   toErrorMessages）。
+  //   ApiErrorMessage.toMessages）。
   const errorMessages: ErrorMessages<"title"> =
     failure === null
       ? { form: null, fields: {} }
-      : toErrorMessages(failure.reason, locale, ["title"]);
+      : ApiErrorMessage.toMessages(failure.reason, locale, ["title"]);
 
   return {
     todo,

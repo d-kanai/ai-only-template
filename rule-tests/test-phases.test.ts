@@ -32,14 +32,15 @@ import { casesByName } from "./case-table";
 // 対象のテスト:
 //   - 対象のディレクトリ（TARGET_DIRS）の下の `*.test.ts` / `*.test.tsx` の `it(` / `test(`（`.each(...)` / `.for(...)` /
 //     `.skipIf(...)` / `.runIf(...)` / `.concurrent` / `.sequential` / `.fails` を挟んだ変種も）。
-//   - apps/e2e/ の下の `*.spec.ts`（Playwright）の `test(`。`test.describe(` / `test.use(` / `test.beforeEach(` は修飾が上の一覧に
-//     無いのでテストとして数えない。
 //   - API 仕様（`*.api-spec.test.ts`）の step（`Given(` / `When(` / `Then(` / `And(` / `But(`）。`*` の step 1 つが Vitest の
 //     テスト 1 つになり、前提から検証までを 1 つの step で書くため（.claude/rules/testing.md の「API 仕様テスト（spec/api）」）。
 //   - ルール検査テスト（rule-tests/ の直下の `*.test.ts`）の step。API 仕様と同じく `*` の step 1 つが前提から検証までの 1 テスト
 //     （Issue #282。rule-tests/rule-test-feature.test.ts）。
 //   WHY API ジャーニー（`*.api-journey.test.ts`）の step は対象外: step の Given / When / Then のキーワード自体がフェーズを表し、
 //     step 1 つが 1 つのフェーズしか持たない。
+//   WHY E2E（apps/e2e/）は対象外（Issue #279）: E2E は .feature と step のクラス（*.steps.ts）だけで書き（手書きの *.spec.ts は
+//     rule-tests/e2e-feature.test.ts の e2e-feature-placement が止める）、API ジャーニーと同じく step のキーワードがフェーズを表す。
+//     playwright-bdd が生成する apps/e2e/.features-gen/*.spec.js も、自分たちが書くテストではない。
 //   直前が `.` の呼び出し（`/x/.test(s)`・`page.test(`）はテストではない。
 // 読み方: ソースを字句に分け（文字列・テンプレートリテラル・正規表現・コメントを区別する）、テストの呼び出しの引数のうち、
 //   トップレベルの最後の関数（`=>` の直後の `{`、または `function` の本体）を本体とする。文字列の中の `test(`・`// given` は数えない。
@@ -49,7 +50,7 @@ import { casesByName } from "./case-table";
 // 検査の対象の列挙が 0 件なら、実ファイルのテストで失敗させる（0 件だと違反も 0 件で常に緑になる）。
 // .feature（test-phases.feature）と step の実装（このファイル）に分けた（Issue #282）。
 
-// WHY この 3 つ: リポジトリのテストを置く場所のすべて（vitest.config.mts の include と apps/e2e/）。
+// WHY この 3 つ: リポジトリの Vitest のテストを置く場所のすべて（vitest.config.mts の include）。
 const TARGET_DIRS = ["apps", "rule-tests", "scripts"];
 // WHY 除くディレクトリ: 依存・ビルドの出力・Stryker の一時コピーは自分たちのテストではない。
 const SKIPPED_DIRS = new Set([
@@ -423,8 +424,7 @@ function testBodyViolations(
 // ---- 列挙と検査（本番と fixture で同じ処理を通す） ----
 
 function isTargetTestFile(path: string): boolean {
-  if (/\.test\.tsx?$/.test(path)) return true;
-  return path.startsWith("apps/e2e/") && path.endsWith(".spec.ts");
+  return /\.test\.tsx?$/.test(path);
 }
 
 // 対象のディレクトリの下のテストファイル（リポジトリ相対の / 区切り、名前順）。
@@ -871,6 +871,7 @@ describeFeature(feature, ({ Scenario }) => {
         "apps/backend/x.test.ts": bare,
         "apps/frontend/y.test.tsx": `\n${bare}`,
         "apps/e2e/z.spec.ts": bare,
+        "apps/e2e/z.steps.ts": step,
         "apps/backend/spec/api/todo/a.api-spec.test.ts": step,
         "apps/backend/spec/journey/b.api-journey.test.ts": step,
         "rule-tests/c.test.ts": step,
@@ -896,7 +897,6 @@ describeFeature(feature, ({ Scenario }) => {
           "apps/backend/spec/api/todo/a.api-spec.test.ts",
           "apps/backend/spec/journey/b.api-journey.test.ts",
           "apps/backend/x.test.ts",
-          "apps/e2e/z.spec.ts",
           "apps/frontend/y.test.tsx",
           "rule-tests/c.test.ts",
           "rule-tests/nested/d.test.ts",
@@ -904,7 +904,6 @@ describeFeature(feature, ({ Scenario }) => {
         violations: [
           missing("apps/backend/spec/api/todo/a.api-spec.test.ts", 1),
           missing("apps/backend/x.test.ts", 1),
-          missing("apps/e2e/z.spec.ts", 1),
           missing("apps/frontend/y.test.tsx", 2),
           missing("rule-tests/c.test.ts", 1),
         ],
@@ -945,7 +944,6 @@ describeFeature(feature, ({ Scenario }) => {
           expect.arrayContaining([
             "apps/backend/features/todo/internal/domain/todo.test.ts",
             "apps/backend/spec/api/todo/create-todo.api-spec.test.ts",
-            "apps/e2e/todo.spec.ts",
           ]),
         );
         expect(violations).toEqual([]);
