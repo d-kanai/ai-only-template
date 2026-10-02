@@ -2,9 +2,16 @@
 // WHY: vitest.config.mts の既定環境は jsdom（コンポーネントテスト用）。このテストは子プロセスを起動するだけで DOM を使わないため、
 //   jsdom の初期化を省き、ブラウザ相当の globals が Node の API と混ざる余地をなくすため node 環境で動かす。
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pkg from "../package.json";
 
@@ -298,6 +305,104 @@ describe("biome check（pnpm lint と同じ引数）", () => {
     ]);
 
     expect(status, output).toBe(0);
+  });
+});
+
+// complexity/noStaticOnlyClass の override（Issue #262）: apps/backend/** だけ off にする。backend は最上位に関数を置かず、状態の無い
+//   補助を static だけのクラスにする（ADR docs/adr/architecture/20261002-class-based-backend.md）。apps/shared・apps/frontend_customer は
+//   関数のままなので、static だけのクラスは recommended どおり警告（--error-on-warnings で失敗）のままにする。
+// WHY 一時ディレクトリにリポジトリの biome.json を写して、その下の apps/... に置いたファイルを検査する: overrides の includes は
+//   設定ファイルのディレクトリからの相対パスで照合され、リポジトリの外のファイル（noProcessEnv の検査の一時ファイル）には
+//   apps/backend/** が一致しない。リポジトリの中の apps/backend に一時ファイルを置くと、並行して走る architecture.test.ts の
+//   置き場所の検査に拾われ、途中で落ちれば作業ツリーにも残る。biome.json はテストのたびに読むので、設定を変えればこの検査に効く。
+// WHY コメント 1 行だけの .gitignore を置く: biome.json の vcs.useIgnoreFile が true で、ignore ファイルの無いディレクトリでは
+//   「couldn't find an ignore file」で設定エラーになり、違反の有無と関係なく非 0 で終わる。空の .gitignore も無いものとして
+//   同じエラーになった（Biome 2.5.13、2026-10-02 実測）。
+// WHY node_modules/.bin/biome を直接起動する: cwd を一時ディレクトリにするため、pnpm exec はリポジトリの workspace を見つけられない。
+describe("biome check の noStaticOnlyClass は apps/backend だけで off（Issue #262）", () => {
+  let dir: string;
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "lint-static-only-class-"));
+    copyFileSync(join(repoRoot, "biome.json"), join(dir, "biome.json"));
+    writeFileSync(
+      join(dir, ".gitignore"),
+      "# lint.test.ts の一時ディレクトリ\n",
+    );
+  });
+
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function checkAt(path: string, lines: string[]) {
+    const file = join(dir, path);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, [...lines, ""].join("\n"));
+    const result = spawnSync(
+      join(repoRoot, "node_modules/.bin/biome"),
+      ["check", ERROR_ON_WARNINGS, path],
+      { cwd: dir, encoding: "utf8" },
+    );
+    return { status: result.status, output: result.stdout + result.stderr };
+  }
+
+  const STATIC_ONLY_CLASS = [
+    "export class Paths {",
+    "  static of(name: string): string {",
+    "    return name;",
+    "  }",
+    "}",
+  ];
+
+  it.each([
+    ["apps/backend/shared/domain/static-only.ts"],
+    ["apps/backend/features/todo/internal/infra/static-only.ts"],
+  ])("%s（apps/backend）では static だけのクラスが 0 で終わる", (path) => {
+    const { status, output } = checkAt(path, STATIC_ONLY_CLASS);
+
+    expect(status, output).toBe(0);
+  });
+
+  it.each([
+    ["apps/shared/static-only.ts", "apps/shared"],
+    ["apps/frontend_customer/shared/static-only.ts", "apps/frontend_customer"],
+    ["apps/backend-x/static-only.ts", "名前の前方一致だけが同じ別ディレクトリ"],
+    ["static-only.ts", "リポジトリ直下"],
+  ])(
+    "%s（%s）では static だけのクラスが非 0 で終わり、noStaticOnlyClass が出力される",
+    (path) => {
+      const { status, output } = checkAt(path, STATIC_ONLY_CLASS);
+
+      expect(status, output).not.toBe(0);
+      expect(output).toContain("noStaticOnlyClass");
+    },
+  );
+
+  // WHY: 上の非 0 が、設定の読み込みの失敗など noStaticOnlyClass 以外の理由ではないことを示す（同じ場所でインスタンスのメンバーを
+  //   持つクラスは通る）。
+  it("apps/shared でもインスタンスのメンバーを持つクラスは 0 で終わる", () => {
+    const { status, output } = checkAt("apps/shared/instance-class.ts", [
+      "export class Paths {",
+      "  of(name: string): string {",
+      "    return name;",
+      "  }",
+      "}",
+    ]);
+
+    expect(status, output).toBe(0);
+  });
+
+  it("リポジトリの apps/backend/shared/drizzle/drizzle.config.ts（static だけのクラス DrizzleConfigPath）は 0 で終わる", () => {
+    const configFile = "apps/backend/shared/drizzle/drizzle.config.ts";
+    // 前提: static だけのクラスを実際に持つこと（持たなければ、この検査は何も確かめていない）。
+    const source = readFileSync(join(repoRoot, configFile), "utf8");
+    expect(source).toContain("class DrizzleConfigPath {");
+    expect(source).toContain("  static fromConfigDir(");
+
+    const result = pnpmExec("biome", ["check", ERROR_ON_WARNINGS, configFile]);
+
+    expect(result.status, result.stdout + result.stderr).toBe(0);
   });
 });
 

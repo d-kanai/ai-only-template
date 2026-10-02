@@ -5,7 +5,7 @@ paths:
 
 # 依存の向きの検査（rule-tests/architecture.test.ts）
 
-`rule-tests/architecture.test.ts`（`pnpm test` に含まれ、CI の `ci` ジョブで止まる）が、ディレクトリ構成の規則（`.claude/rules/backend.md`・`.claude/rules/frontend.md`・`.claude/rules/shared.md`）と環境変数の直参照の禁止（`.claude/rules/env.md`）、`console` の直接の呼び出しの禁止（`.claude/rules/backend.md` の「ログ」）、現在時刻を `apps/shared/now.ts` の外で読むことの禁止（`.claude/rules/shared.md` の「now」）、画面と、サーバ側（backend・shared）のハードコードの文言の禁止（Issue #116 の i18n）、画面・部品の辞書の置き場所（Issue #125）、api の `handle` を `ProblemResponse.wrap` で包むこと（Issue #141）、backend のモジュールの境界（`expose/` / `internal/`。Issue #208）を 1 規則 = 1 テストで検査する。
+`rule-tests/architecture.test.ts`（`pnpm test` に含まれ、CI の `ci` ジョブで止まる）が、ディレクトリ構成の規則（`.claude/rules/backend.md`・`.claude/rules/frontend.md`・`.claude/rules/shared.md`）と環境変数の直参照の禁止（`.claude/rules/env.md`）、`console` の直接の呼び出しの禁止（`.claude/rules/backend.md` の「ログ」）、現在時刻を `apps/shared/now.ts` の外で読むことの禁止（`.claude/rules/shared.md` の「now」）、画面と、サーバ側（backend・shared）のハードコードの文言の禁止（Issue #116 の i18n）、画面・部品の辞書の置き場所（Issue #125）、api の `handle` を `ProblemResponse.wrap` で包むこと（Issue #141）、backend の本番コードの最上位に関数を置かないこと（Issue #262）、backend のモジュールの境界（`expose/` / `internal/`。Issue #208）を 1 規則 = 1 テストで検査する。
 ルール検査テストなので、must pass / must reject と fault injection が必須（`.claude/rules/testing.md`、手順はスキル `rule-check-test`）。
 
 ## 対象と抽出
@@ -16,10 +16,10 @@ paths:
   - 読まないことは結果の一覧からは見えない（後で除いても同じ一覧）ので、「ファイルの列挙」のテストは読んだディレクトリを記録して確かめる（`walkFiles` の第 3 引数）。
 - import / re-export / dynamic import を正規表現で抜き出す（依存は足さない）。コメントと文字列の中の import 風の文字列は除く。``import(`x`)``（`${}` 無し）と第 2 引数つきの `import("x", { with: ... })` も拾う。
 - 参照先の正規化: `@/x` → `apps/frontend_customer/x`（backend のファイルに書いても frontend の paths が当たるため）、`@repo/backend/x` → `apps/backend/x`、`@repo/shared/x` → `apps/shared/x`（`@repo/backend-extra`・`@repo/shared-extra` は別パッケージ）、相対パスはリポジトリ相対、それ以外はパッケージ。`@/`・`@repo/backend/`・`@repo/shared/` の後ろの `..` も解決する。
-- ハードコードの文言と `handle` の包み方だけは構文木で見る（JSX のテキスト・属性・文字列リテラルの範囲を正規表現では正しく切り出せないため）。TypeScript 7.0.2 は JS のパーサ（`ts.createSourceFile`）を持たないので、同梱の tsgo を `typescript/unstable/sync` の API で起動し、仮想のファイルシステムに置いたソースの構文木を `forEachChild` の再帰でたどる（依存は足さない。`parseSourceFiles`）。
+- ハードコードの文言と `handle` の包み方と最上位の関数だけは構文木で見る（JSX のテキスト・属性・文字列リテラルの範囲を正規表現では正しく切り出せないため）。TypeScript 7.0.2 は JS のパーサ（`ts.createSourceFile`）を持たないので、同梱の tsgo を `typescript/unstable/sync` の API で起動し、仮想のファイルシステムに置いたソースの構文木を `forEachChild` の再帰でたどる（依存は足さない。`parseSourceFiles`）。
 - 違反は「ファイル → 参照先」（環境変数・console・ハードコードの文言は「ファイル:行」）の一覧で出す。
 
-## 規則（全部で 35 = 依存の 24 `RULES` + 置き場所 3 + 環境変数 1 + console 1 + 現在時刻 1 + exports 2 + ハードコードの文言 2 + `handle` の包み方 1）
+## 規則（全部で 36 = 依存の 24 `RULES` + 置き場所 3 + 環境変数 1 + console 1 + 現在時刻 1 + exports 2 + ハードコードの文言 2 + `handle` の包み方 1 + 最上位の関数 1）
 - `frontend-to-backend-specifier`: `apps/frontend_customer/`・`apps/e2e/`・リポジトリ直下から `apps/backend/` へは `@repo/backend/...` だけ。相対パスと `@/../backend/...` は、参照先が許される場所でも違反。例外は `vitest.global-setup.ts` → `apps/backend/test-support/database` の相対参照だけ（`TEST_INFRA_RELATIVE_EXCEPTION`。ファイルと参照先の組で絞る）。
 - `frontend-to-shared-specifier`（Issue #90）: `apps/frontend_customer/`・`apps/e2e/`・リポジトリ直下から `apps/shared/` へは `@repo/shared/...` だけ。相対パスと `@/../shared/...` は違反（例外なし）。`frontend-to-backend-specifier` を広げずに別の規則にしたのは、失敗したときにどちらの境界かが分かり、fault injection も独立にできるため。backend は対象外（backend の中の書き方は `backend-relative-only` が見る）。
 - `backend-exports`: (1) 外の `@repo/backend/<path>` はすべて exports のキーに当たる（Node と同じく完全一致を優先し、次に `*` の前が最も長いパターン）、(2) 各キーは外から 1 か所以上で参照される、(3) キーは `./` で始まり、値はキーのパス + `.ts`、(4) キーが指すファイルがある（パターンなら 1 つ以上）。本番の検査では、exports を 1 件以上読めることと外の参照を取り出せていることも確かめる（読み込みや列挙が壊れて素通りしないため）。
@@ -51,6 +51,12 @@ paths:
 
 - `presentation-with-problem-response`（Issue #141）: `apps/backend/` の下の `presentation/` の下（入れ子も）の `*.api.<拡張子>`（8 つの拡張子。テストは除く）で、クラス（宣言・式、入れ子の関数の中も）の `handle` という名前のメンバー（識別子か文字列リテラルの名前。`static` も）は、初期化子が `ProblemResponse.wrap(...)` の呼び出し（呼び出す先が識別子 `ProblemResponse` のプロパティ `wrap`。型引数つきも可。Issue #262 で関数 `withProblemResponse` をクラスの static メソッドにした）のプロパティでなければ違反（「ファイル:行」）。違反の例: try / catch を手書きした handler、素の `async`、`ProblemResponse.wrap` を import だけして使わない、別の関数で包む（`wrap(ProblemResponse.wrap(...))` も）、`problem.ProblemResponse.wrap(...)`、`ProblemResponse.from(...)`・`OtherResponse.wrap(...)`・素の `wrap(...)`・`ProblemResponse["wrap"](...)`、呼び出さずに代入、初期化子なし（コンストラクタで代入）、メソッド・getter の `handle`。WHY: Next の Route Handler には共通の catch が無く、包み忘れると Problem Details ではない素の 500 が漏れる（`.claude/rules/backend.md` の presentation）。判定の例は `PROBLEM_RESPONSE_EXAMPLES`（許可例に本物の 5 本を読み込んで入れる）。限界（見逃す）: クラスの外の Route Handler（`export async function GET`・オブジェクトリテラルの `handle`）、`handle` 以外の名前、計算されたプロパティ名、コンストラクタの引数プロパティ、同じ名前の別のクラス（`ProblemResponse`）をファイルの中で定義して呼ぶもの（import 元は見ない）。
 
+- `backend-class-based`（Issue #262。決定は ADR `docs/adr/architecture/20261002-class-based-backend.md`）: `apps/backend/` のテスト以外のソース（8 つの拡張子。`apps/backend/test-support/`・`apps/backend/spec/` は除く。`test-support-x/`・`spec-x/` のような前方一致だけの別ディレクトリと `features/<f>/test-support/` は対象）で、ファイルの最上位（モジュールの直下と namespace の中）の関数を「ファイル:行」で違反にする（`findTopLevelFunctions`）。違反: `function` 宣言（export / 非 export・`export default function`・async・generator・オーバーロードの宣言・`declare function` を 1 つずつ）、初期化子がアロー関数か function 式の変数（`const` / `let` / `var`、1 つの文の 2 つ目以降も。括弧・`as`・`satisfies`・`!`・`<T>` で包んだものも）、`export default` のアロー関数・function 式。通すもの: クラス（宣言・式）のメンバー（static メソッド、`readonly handle = ProblemResponse.wrap(async ...)` のようなアロー関数のフィールド）、メソッドの中の関数、型と interface、関数でない値の変数（定数のオブジェクト・`export const GET = new XApi(...).handle`）、コメントと文字列の中。
+  - WHY 規則にする: PR #264 / #266 / #267 で移行を終え最上位の関数は 0 件になったが、レビューだけでは関数の import（依存がコンストラクタに出ず、差し替えに `vi.mock` が要る形）が戻るのを止められない（ADR の「(4) ルール検査テストで機械的に止める」）。
+  - WHY `apps/backend/shared/drizzle/drizzle.config.ts` も対象: drizzle-kit が求めるのは default export の設定オブジェクトだけで、補助はクラス `DrizzleConfigPath` の static メソッドで書けている（例外は要らない）。
+  - static だけのクラスを Biome の `complexity/noStaticOnlyClass` が警告しないよう、`biome.json` の override で `apps/backend/**` だけ off にしている（`.claude/rules/lint.md`。効き方は `rule-tests/lint.test.ts`）。
+  - 限界（見逃す）: 最上位の呼び出しの引数の関数（即時実行の `(() => {})()`、`z.object(...).refine((x) => ...)`）、オブジェクトリテラルのメソッド・関数のプロパティ（`export const x = { f() {} }`）、三項演算子などの式の中の関数、別の値の再代入（`const f = other.f`）。最上位の文のブロックの中の関数（`{ ... }`・`if`・`try`・`switch`・`for` の中。不自然な書き方なので再帰しない。reviewer の実測）。関数かは型を見ないと決まらないので、レビューで見る。
+
 ## テストの持ち方
 - 規則ごとに判定の例（`RULE_EXAMPLES`。違反になる例・ならない例を架空の参照で 3 件以上ずつ）。今のコードに違反が無いことだけでは、規則が緩すぎても気づけない。`RULES` のすべての規則に例があることもテストで確かめる。exports は `resolveExportKey`・`findExportsViolations` に当たる例・当たらない例・違反の例を持つ。
 - fixture（`collectViolations(root)`）: 一時ディレクトリに架空のツリーを作り、本番と同じ列挙 → 抽出 → 正規化 → 判定に通す。
@@ -61,6 +67,7 @@ paths:
 ## 規則を足す・変えるとき
 - `RULES` と `RULE_EXAMPLES`、置き場所の規則（`BACKEND_PLACEMENT` と `PLACEMENT_EXAMPLES`、`SHARED_PLACEMENT` と `SHARED_PLACEMENT_EXAMPLES`）、fixture の `MUST_REJECT_FILES` / `MUST_REJECT_VIOLATIONS` / `MUST_PASS_FILES` を同じ変更で直す。本番コードに新しい import の形（層の組み合わせや書き方）を足したときも、must-pass に同じ形を足す。
 - `presentation-with-problem-response` を変えるとき（判定 `findUnwrappedHandles`、対象の列挙 `listProblemResponseCheckedFiles`）は、判定例 `PROBLEM_RESPONSE_EXAMPLES`・列挙のテスト・fixture を同じ変更で直す。
+- `backend-class-based` を変えるとき（判定 `findTopLevelFunctions`、対象 `BACKEND_CLASS_BASED.appliesTo` と列挙 `listClassBasedCheckedFiles`）は、判定例 `CLASS_BASED_EXAMPLES`・「最上位の関数の抽出」のテスト・列挙のテスト・fixture を同じ変更で直す。fixture の backend の本番のファイルに別の規則の違反を置くときは、最上位の関数にせずクラスのメンバーにする（この規則の巻き添えにしない）。
 - ハードコードの文言の規則を変えるとき（属性の一覧 `VISIBLE_TEXT_ATTRIBUTES`、辞書の例外 `I18N_MESSAGES`（`*.messages.ts`）と `defineMessages` の引数の判定（`isDefineMessagesCall`）、日本語の判定 `JAPANESE`）は、`HARDCODED_TEXT_EXAMPLES`・「ハードコードの文言の抽出」のテスト・fixture を同じ変更で直す。
 - `.claude/rules/backend.md`・`frontend.md`・`shared.md` の規則の文と、テストの規則を突き合わせる。
 
