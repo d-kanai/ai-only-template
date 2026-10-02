@@ -11,8 +11,9 @@ paths:
 ## 置き場所
 - ソースは `app/`・`features/`・`shared/`・`test-support/` の下か、直下の `next.config.ts`・`instrumentation.ts`・`instrumentation-node.ts`・`proxy.ts`・`next-env.d.ts` だけ（規則 `frontend-placement`）。`src/` は使わない。
   - WHY: 依存の規則はこれらの場所にしかかからず、`apps/frontend_customer/lib/db.ts` のような場所から backend の container を import しても素通りしていた（Issue #68 の reviewer 指摘）。
-- `apps/frontend_customer/test-support/`（Issue #181）: テストだけが使うコード（`i18n.tsx` の `JaLocale`・`tJa`）。本番のコード（`app/`・`features/`・`shared/`・直下のファイル）から参照しない（`@/test-support/...` はテストからだけ）・Docker のイメージに入らない（`.dockerignore` の `**/test-support`）。検査は `rule-tests/test-support.test.ts` と `.github/workflows/deploy.yml`。WHY は `.claude/rules/backend.md` の `apps/backend/test-support/` と同じ。
-- `apps/frontend_customer/shared/<name>/`: feature をまたぐ部品。今あるのは `request-log/`（リクエストログの 1 行を組み立てる純粋な処理。`RequestLogBuilder.build`）と `i18n/`（翻訳の仕組み・共通の辞書・ロケール・日時の表示。下の「i18n」）。`components/` `hooks/` は使うものが出るまで作らない。`shared/` は `features/`・`app/`・backend・`apps/shared` を参照しない（規則 `shared-to-features`・`screen-to-app`・`screen-to-backend`・`screen-to-shared`）。`apps/frontend_customer/shared/`（画面側の部品）と `apps/shared/`（frontend と backend で共通のサーバ側の基盤。`.claude/rules/shared.md`）は別のもの。
+- `apps/frontend_customer/test-support/`（Issue #181）: テストだけが使うコード（`i18n.tsx` の `JaLocale`・`tJa`、`design-system.tsx` の `DesignSystem`）。本番のコード（`app/`・`features/`・`shared/`・直下のファイル）から参照しない（`@/test-support/...` はテストからだけ）・Docker のイメージに入らない（`.dockerignore` の `**/test-support`）。検査は `rule-tests/test-support.test.ts` と `.github/workflows/deploy.yml`。WHY は `.claude/rules/backend.md` の `apps/backend/test-support/` と同じ。
+- `apps/frontend_customer/shared/<name>/`: feature をまたぐ部品。今あるのは `request-log/`（リクエストログの 1 行を組み立てる純粋な処理。`RequestLogBuilder.build`）と `i18n/`（翻訳の仕組み・共通の辞書・ロケール・日時の表示。下の「i18n」）と `ui/`（デザインシステム。下の「デザインシステム」）。画面をまたぐ見た目の部品は `ui/atoms/` の atom にし、`shared/components/` は作らない（feature の中で画面をまたぐ部品は `features/<f>/components/`）。`hooks/` は使うものが出るまで作らない。`shared/` は `features/`・`app/`・backend・`apps/shared` を参照しない（規則 `shared-to-features`・`screen-to-app`・`screen-to-backend`・`screen-to-shared`）。`apps/frontend_customer/shared/`（画面側の部品）と `apps/shared/`（frontend と backend で共通のサーバ側の基盤。`.claude/rules/shared.md`）は別のもの。
+  - WHY `shared/components/` を作らない: 以前は「`components/` は使うものが出るまで作らない」だったが、Issue #292 で画面をまたぐ部品（Mantine を包むもの）が出て、置き場所を `ui/atoms/` にした。Mantine を import してよいのは `shared/ui/` の中だけ（規則 `design-system-mantine-boundary`）なので、Mantine を包む部品は `shared/components/` には置けない。
 
 ## app/（ルーティングだけ）
 - 置くもの: Next の規約ファイル（`page.tsx` / `layout.tsx` / `loading.tsx` / `error.tsx` など）と `app/api/**/route.ts` だけ。テストは置かない（仕様は screen と api ファイルのテストで固定し、ルーティングにロジックを置かせない）。
@@ -23,11 +24,42 @@ paths:
 - WHY ルーティングを分ける: URL を変えてもコードを動かさずに済む（Next は構成について unopinionated で、`app/` の外にコードを置くのは公式の例の 1 つ）。
 
 ## features/<feature>/
-- `screens/<name>-screen/`: 1 画面 = 1 ディレクトリ。`<name>-screen.tsx`（見た目。先頭に `"use client"`。hook の戻り値を描くだけ）と `<name>-screen.hook.ts`（状態・イベント・データ取得。`use<Name>Screen`）と、それぞれのテストを隣に置く。
+- `screens/<name>-screen/`: 1 画面 = 1 ディレクトリ。`<name>-screen.tsx`（見た目。先頭に `"use client"`。hook の戻り値を描くだけで、形は下の「画面の骨組み」）と `<name>-screen.hook.ts`（状態・イベント・データ取得。`use<Name>Screen`）と `<name>-screen.messages.ts`（辞書）と、それぞれのテストを隣に置く。ほかのファイル（部品の別ファイル・入れ子のディレクトリ）は置かない（規則 `screen-outline-placement`）。
   - WHY: ロジックは `renderHook` で、見た目は操作ベースで小さくテストでき、画面を消すときはディレクトリごと消せる。
-- `components/`: feature 内で画面をまたぐ部品。`hooks/`: 画面をまたぐ hook。
+- `components/`: feature 内で画面をまたぐ部品（atom を組み合わせて描く。今あるのは `todo-item.tsx`）。1 つの画面だけで使う部品は画面のファイルの中に export せずに置く（下の「画面の骨組み」）。`hooks/`: 画面をまたぐ hook。
 - `api/`: `/api/...` を fetch する薄いラッパー。feature の中で backend を参照してよいのはここだけ。
 - `index.ts`: 公開 API。feature の外（`app/`・他の feature）から import してよいのはここだけ（内部の構成を変えても外の import を直さずに済む）。feature 同士は原則 import せず、必要なら相手の `index.ts` だけ。
+
+## 画面の骨組み（規則 `screen-outline-*`。Issue #292）
+- 画面のファイルが export する値は画面の関数 `export function <Name>Screen` 1 つだけ（`screen-outline-single-export`。`export default`・`export const` の画面も違反）。
+- 画面の関数は hook を呼び、`return` を 1 つだけ書く（早期 return も違反。`screen-outline-single-return`）。根は atom の `<Layout>`（`@/shared/ui/atoms/layout`。`screen-outline-layout-root`）で、直下には同じファイルの最上位で定義した export しない部品のうち、名前が `...Section`（表示のまとまり）か `...Form`（入力のまとまり）のものの要素だけを並べる（props は渡してよい。`screen-outline-layout-children`）。
+  ```tsx
+  export function TodoScreen() {
+    const { ... } = useTodoScreen();
+    return (
+      <Layout>
+        <TitleSection />
+        <NewTodoForm ... />
+        <TodoListSection ... />
+      </Layout>
+    );
+  }
+  // ↓ ファイルの下の方に、export しない Section / Form を atom で描く
+  ```
+- 読み込み中・エラーの出し分け、`.map`、atom の並べ方は Section / Form の中に書く（`Layout` の直下に式・atom・素の要素・Fragment・文字列を置かない）。
+- WHY: daiki の依頼（2026-10-02「screen の中身が、見て画面レイアウトが想像できるように」）。ファイルを開いて最初の関数を見るだけで画面のレイアウトが分かる。早期 return を止めるのは、状態ごとに別のレイアウトになり、最初の関数で画面の形が 1 つに決まらなくなるため。
+- 限界（レビューで見る）: Section / Form の中身（atom を使っているか）と、部品がファイルの下の方にあるか（並び順）は見ない。`features/<f>/components/` と `app/` の `page.tsx` は対象外。詳細は `rule-tests/screen-outline.test.ts` の冒頭。
+
+## デザインシステム（Mantine。規則 `design-system-*`。Issue #292）
+- 置き場所は `shared/ui/` だけ: `atoms/`（Mantine の部品を包む atom。今は Alert / Button / Checkbox / Form / Group / Layout / Link / List / ListItem / PageTitle / Stack / Surface / Text / TextInput / Time の 15 個）、`themes/<名前>/`（`<名前>.theme.ts` と `<名前>.module.css`。今は `bento` と `pop`）と `themes/theme-definition.ts`（テーマの型）、`active-theme.ts`（使うテーマ。今は `bento`）、`design-system-provider.tsx`（`MantineProvider`。`app/layout.tsx` が包む）、`design-system-document.tsx`（`<html>` / `<head>` に要るもの）。
+- `shared/ui/` の外のテスト以外のソース（`app/`・`features/`・`shared/` のほかの場所・`test-support/`・直下のファイル）は Mantine を値でも型でも参照せず（`design-system-mantine-boundary`）、画面は atom を置くだけにする。style・className・Styles API（`classNames` / `styles` / `vars`）・Mantine の style props（`mt`・`c`・`w` など）・見た目を選ぶ props（`color` / `variant` / `size` など）を書かない（`design-system-no-direct-style`）。`.css` は `shared/ui/` の下にだけ置き、外から import しない（`design-system-css-placement`）。
+  - WHY: テーマを差し替えるだけで全体の見た目が変わるようにする（daiki の要望 2026-10-02）。画面に見た目を書くと、その箇所はテーマを替えても変わらず、見た目の正がテーマと画面の 2 か所に分かれる。atom で包むと、画面が Mantine を知らずに済み、ライブラリを替えても atom の中だけ直せばよい。
+- 余白だけは画面に書く: 段階名 `xs` / `sm` / `md` / `lg` / `xl`（`SpacingStep`）の文字列だけで、atom の `Stack` / `Group` の `gap` に渡す（atom の型が段階名だけを受ける）。atom の外で余白の props（`m*` / `p*` / `gap` など）を書くときも段階名の文字列リテラルだけ（数値・px・式は違反）。幅・高さは余白に入れない（違反）。
+  - WHY: 部品の並べ方（どこを詰め、どこを空けるか）は画面の構造なので画面に書き、各段階の値（rem）の正はテーマの `spacing`（型で全段階が必須）に残す。テーマを替えると余白も替わる。
+- atom を足す・変えるとき: props は画面が要るものだけを自前の型で出し（Mantine の props 型を渡さない。見た目の口が画面に開くため）、イベントは文字列・boolean・引数なしで渡す（`preventDefault` などは atom の中）。包む Mantine の部品を `theme-definition.ts` の `ThemedComponent` に足し、すべてのテーマの `components` に見た目を書く（足し忘れは `design-system-themed-components` と型チェックで止まる）。atom のテストは `shared/ui/atoms/<name>.test.tsx`。
+- テーマを替える: `active-theme.ts` の 1 行を別のテーマに差し替える（画面のコードは変えない）。テーマを足すときは `ThemeDefinition` の型（`spacing` の全段階と `ThemedComponent` の全部品が必須）を満たす。
+- テスト: Mantine で描く画面・部品は Provider で包む必要がある。`test-support/i18n.tsx` の `JaLocale` が `test-support/design-system.tsx` の `DesignSystem`（`DesignSystemProvider` と jsdom に無い `window.matchMedia` の代わり）も含むので、画面のテストは今までどおり `JaLocale` を wrapper にする。
+- 限界（レビューで見る）: スプレッド（`{...props}`）・`createElement` の props・`useMantineTheme` で取り出した値を別の口から当てる書き方は見ない。詳細は `rule-tests/design-system.test.ts` の冒頭。
 
 ## 画面側とサーバ側の境界
 - `features/<f>/api/` から backend への参照は `import type` / `export type` だけで、参照先は自 feature の `apps/backend/features/<f>/internal/presentation/<name>.api.ts` と `apps/backend/shared/presentation/problem.ts`（`Problem`・`ErrorKey`・`ErrorKeyParams`）。api ファイルの関数や application・domain・infra の実装は import しない。
