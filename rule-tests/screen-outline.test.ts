@@ -64,12 +64,19 @@ import { casesByName } from "./case-table";
 //   最初の関数を `<Layout>` と Section / Form の名前の並びだけにすれば、ファイルを開いて最初の関数を見るだけで画面の
 //   レイアウトが分かる。中身（atom の並べ方・出し分け）は名前の付いた部品に閉じる。
 // 違反にするもの（規則）:
+//   - screen-outline-placement: features/<f>/screens/ の下のコード（.ts / .tsx / .js / .jsx / .mts / .cts / .mjs / .cjs。
+//     テストの `*.test.*` は除く）は、screens/<name>-screen/ の直下の `<name>-screen.tsx`（画面）・`<name>-screen.hook.ts`（hook）・
+//     `<name>-screen.messages.ts`（辞書）だけ。screens の直下のファイル・`-screen` で終わらないディレクトリ・名前のそろって
+//     いないファイル・入れ子・拡張子の違うファイル（`.hook.tsx` など）は違反。
+//     WHY: 下の 4 規則は名前のそろった画面のファイルだけを対象に列挙するので、`screens/settings/settings.tsx` のような
+//     名前のそろっていない画面は列挙されず、4 規則をすべてすり抜ける（reviewer の指摘）。置き方を止めて、画面を必ず列挙に載せる。
+//     部品を別ファイルに切り出すのも違反（部品は画面のファイルの中の private か、features/<f>/components/ に置く）。
 //   - screen-outline-single-export: 画面のファイルが export する値は、画面の関数 1 つ（`export function <Name>Screen`。
 //     <Name> はファイル名の PascalCase）だけ。型（type / interface・export type）は数えない。
 //     WHY: 部品を export すると画面の外から使われ、画面の中だけの部品（private）でなくなる。共有したい部品は
 //     features/<f>/components/ に置く。`export default` と `export const` の画面を許さないのは、最初の関数の形を 1 つにそろえるため。
 //   - screen-outline-layout-root: 画面の関数の return の根（かっこは外す）は、atom の Layout（`@/shared/ui/atoms/layout` から
-//     名前 Layout で取り込んだもの）の要素。WHY: 骨組みの外枠を全画面で同じにし、atom を経ずに外枠を作らせない。
+//     名前 Layout で値として取り込んだもの。`import type { Layout }` と `import { type Layout }` は値でないので数えない）の要素。WHY: 骨組みの外枠を全画面で同じにし、atom を経ずに外枠を作らせない。
 //   - screen-outline-layout-children: Layout の直下に置けるのは、同じファイルの最上位で定義した export しない部品
 //     （function か const）のうち、名前が `<何か>Section` か `<何か>Form` のものの要素だけ。props は渡してよい。
 //     空白と、中身がコメントだけの `{/* */}` は数えない。文字列・式（`{cond ? … : …}`・`.map`）・Fragment・atom・素の要素・
@@ -80,13 +87,16 @@ import { casesByName } from "./case-table";
 //     WHY: 早期 return（`if (isLoading) return <Text />`）で骨組みを分けると、状態ごとに別のレイアウトになり、最初の関数を
 //     見ても画面の形が 1 つに決まらない。
 // 対象: apps/frontend_customer/features/<f>/screens/<name>-screen/<name>-screen.tsx（ディレクトリとファイルの名前がそろったもの）。
-//   0 件なら実ファイルのテストで失敗させる（0 件なら違反も 0 件で常に緑になるため）。
+//   0 件なら実ファイルのテストで失敗させる（0 件なら違反も 0 件で常に緑になるため）。置き方の規則は features/<f>/screens/ の
+//   下のテスト以外のコードすべてを見る。
 // 限界（見ないもの）: Section / Form の要素の子（`<XSection><Text /></XSection>`）は見ない（props の 1 つとして扱う）。部品の中身
 //   （atom を使っているか）と、部品がファイルの下の方にあるか（並び順）は見ない（レビューで見る）。Layout は名前と取り込み元の
 //   文字列で見る（atom の Layout が中で何を描くかは見ない）。画面の関数の return より前の文（hook の呼び出し以外の処理）は見ない。
-//   features/<f>/components/ の部品（todo-item など）と app/ の page.tsx は対象外。
+//   features/<f>/components/ の部品（todo-item など）と app/ の page.tsx は対象外。置き方の規則はテストの名前・置き場所と、
+//   コード以外のファイル（README・画像など）を見ない。シンボリックリンクはたどらない（walk と同じ）。
 
 type RuleId =
+  | "screen-outline-placement"
   | "screen-outline-single-export"
   | "screen-outline-layout-root"
   | "screen-outline-layout-children"
@@ -110,6 +120,30 @@ class ScreenOutlineRule {
 
   static isScreenFile(path: string): boolean {
     return ScreenOutlineRule.SCREEN_FILE.test(path);
+  }
+
+  // screens の下の、置き方を検査するファイル（features/<f>/screens/ の下のコード。テストは除く）。
+  // WHY コードの拡張子だけ: README や画像まで止めると、画面と関係の無い置き物で落ちる（.DS_Store のような OS の生成物も）。
+  //   すり抜けを塞ぎたいのは画面・hook・部品として動くコードなので、TS / JS の拡張子をすべて対象にする（.d.ts も含む）。
+  // WHY テストを除く: テストの置き方は testing.md の「置き方」（対象の隣）の規則で、この規則は画面の側の名前をそろえる。
+  static readonly PLACEMENT_TARGET =
+    /^apps\/frontend_customer\/features\/[^/]+\/screens\/.+\.(?:[cm]?[jt]s|[jt]sx)$/;
+  static readonly TEST_FILE = /\.test\.[cm]?[jt]sx?$/;
+  // 置いてよい形: screens/<name>-screen/ の直下の <name>-screen.tsx（画面）・.hook.ts（hook）・.messages.ts（辞書）。
+  // WHY 辞書も許す: 画面の文言は隣の <name>-screen.messages.ts に置く（frontend.md の「i18n」。今の 2 画面とも持つ）。
+  static readonly PLACED_FILE =
+    /^apps\/frontend_customer\/features\/[^/]+\/screens\/([^/]+-screen)\/\1(?:\.tsx|\.hook\.ts|\.messages\.ts)$/;
+
+  // screen-outline-placement: 置き方を検査するファイルのうち、置いてよい形でないもの（渡された順）。
+  // WHY: 画面のファイルの列挙（SCREEN_FILE）は名前のそろったものだけを拾うので、`screens/settings/settings.tsx` のように
+  //   名前のそろっていない画面は列挙されず、骨組みの 4 規則をすべてすり抜ける。置き方で止めて、列挙から漏れる画面を無くす。
+  static findPlacementViolations(paths: readonly string[]): string[] {
+    return paths.filter(
+      (path) =>
+        ScreenOutlineRule.PLACEMENT_TARGET.test(path) &&
+        !ScreenOutlineRule.TEST_FILE.test(path) &&
+        !ScreenOutlineRule.PLACED_FILE.test(path),
+    );
   }
 
   // todo-detail-screen.tsx → TodoDetailScreen。
@@ -292,7 +326,8 @@ class ScreenOutlineRule {
       : node;
   }
 
-  // `import { Layout } from "@/shared/ui/atoms/layout"`（別名の Layout as X は名前が Layout でないので数えない）があるか。
+  // `import { Layout } from "@/shared/ui/atoms/layout"`（別名の Layout as X は名前が Layout でないので数えない。
+  //   文全体・要素の type の import は値でないので数えない）があるか。
   static importsAtomLayout(sourceFile: SourceFile): boolean {
     return sourceFile.statements.some((statement) => {
       if (
@@ -303,11 +338,16 @@ class ScreenOutlineRule {
         return false;
       }
       const bindings = statement.importClause?.namedBindings;
+      // WHY 文全体の type も見る: `import type { Layout }` は値を取り込まず、要素の isTypeOnly は false のまま
+      //   （typescript 7 の AST では文全体の type は ImportClause の phaseModifier に入る）。
+      const typeOnlyStatement =
+        statement.importClause?.phaseModifier === SyntaxKind.TypeKeyword;
       return (
         bindings !== undefined &&
         isNamedImports(bindings) &&
         bindings.elements.some(
           (element) =>
+            !typeOnlyStatement &&
             !element.isTypeOnly &&
             element.name.text === ScreenOutlineRule.LAYOUT &&
             (element.propertyName === undefined ||
@@ -512,7 +552,14 @@ class ScreenOutlineRule {
       .sort();
   }
 
-  // 規則ごとの違反を「<規則>: <パス>:<行> <内容>」（return の数の違反で内容が無ければ「<規則>: <パス>:<行>」）で返す。
+  static listPlacementViolations(root: string): string[] {
+    return ScreenOutlineRule.findPlacementViolations(
+      ScreenOutlineRule.walk(root, ScreenOutlineRule.FRONTEND_ROOT).sort(),
+    );
+  }
+
+  // 規則ごとの違反を「<規則>: <パス>:<行> <内容>」（return の数の違反で内容が無ければ「<規則>: <パス>:<行>」、
+  //   置き方の違反はファイルの単位なので「<規則>: <パス>」）で返す。
   static collectViolations(root: string): Record<RuleId, string[]> {
     const screens = ScreenOutlineRule.listScreenFiles(root);
     const parsed = ScreenOutlineRule.parse(
@@ -531,6 +578,9 @@ class ScreenOutlineRule {
         ).map((found) => `${rule}: ${path}:${found}`),
       );
     return {
+      "screen-outline-placement": ScreenOutlineRule.listPlacementViolations(
+        root,
+      ).map((path) => `screen-outline-placement: ${path}`),
       "screen-outline-single-export": linesIn(
         ScreenOutlineRule.findSingleExportViolations,
         "screen-outline-single-export",
@@ -670,6 +720,82 @@ describeFeature(feature, ({ Scenario }) => {
     );
   });
 
+  Scenario("screens の下の置き方（findPlacementViolations）", ({ And }) => {
+    And(
+      "must pass: screens の下の、ディレクトリと同じ名前の -screen.tsx と hook と辞書とテストと、コード以外のファイルと screens の外は違反にしない",
+      () => {
+        // given
+        const base = "apps/frontend_customer/features/todo";
+        const paths = [
+          `${base}/screens/todo-screen/todo-screen.tsx`,
+          `${base}/screens/todo-screen/todo-screen.hook.ts`,
+          `${base}/screens/todo-screen/todo-screen.messages.ts`,
+          `${base}/screens/todo-screen/todo-screen.test.tsx`,
+          `${base}/screens/todo-screen/todo-screen.hook.test.ts`,
+          `${base}/screens/todo-detail-screen/todo-detail-screen.tsx`,
+          // テストは名前と置き場所を問わない（画面のテストの置き方は testing.md の「置き方」で、この規則の対象外）。
+          `${base}/screens/settings/settings.test.tsx`,
+          // コード以外（画像・文書など）は対象外。
+          `${base}/screens/todo-screen/README.md`,
+          // screens の外は対象外（components の部品・app の page.tsx・shared）。
+          `${base}/components/todo-item.tsx`,
+          `${base}/api/todo-api.ts`,
+          "apps/frontend_customer/app/page.tsx",
+          "apps/frontend_customer/shared/screens/x/x.tsx",
+        ];
+        // when
+        const result = ScreenOutlineRule.findPlacementViolations(paths);
+        // then
+        expect(result).toEqual([]);
+      },
+    );
+    And(
+      "must reject: screens の直下のファイル・名前のそろっていないディレクトリ・-screen で終わらないディレクトリ・入れ子・ほかの名前のファイル・拡張子の違うファイルは違反",
+      () => {
+        // given
+        const base = "apps/frontend_customer/features/todo/screens";
+        const cases = [
+          ["screens の直下の画面", `${base}/settings-screen.tsx`],
+          ["screens の直下の hook", `${base}/settings-screen.hook.ts`],
+          ["-screen で終わらないディレクトリ", `${base}/settings/settings.tsx`],
+          [
+            "-screen で終わらないディレクトリの hook",
+            `${base}/settings/settings.hook.ts`,
+          ],
+          [
+            "ディレクトリと名前の違う画面",
+            `${base}/todo-screen/list-screen.tsx`,
+          ],
+          [
+            "ディレクトリと名前の違う hook",
+            `${base}/todo-screen/list-screen.hook.ts`,
+          ],
+          ["入れ子", `${base}/todo-screen/parts/todo-screen.tsx`],
+          ["ほかの名前の部品", `${base}/todo-screen/title-section.tsx`],
+          ["ほかの名前の補助", `${base}/todo-screen/format.ts`],
+          ["拡張子 .ts の画面", `${base}/todo-screen/todo-screen.ts`],
+          ["拡張子 .jsx の画面", `${base}/todo-screen/todo-screen.jsx`],
+          ["拡張子 .tsx の hook", `${base}/todo-screen/todo-screen.hook.tsx`],
+          [
+            "拡張子 .tsx の辞書",
+            `${base}/todo-screen/todo-screen.messages.tsx`,
+          ],
+          ["拡張子 .mts", `${base}/todo-screen/todo-screen.hook.mts`],
+          ["拡張子 .js", `${base}/todo-screen/todo-screen.hook.js`],
+          ["拡張子 .cjs", `${base}/todo-screen/x.cjs`],
+          ["拡張子 .mjs", `${base}/todo-screen/x.mjs`],
+          ["拡張子 .cts", `${base}/todo-screen/x.cts`],
+          ["型の宣言", `${base}/todo-screen/todo-screen.d.ts`],
+        ] as const;
+        // when
+        const result = casesByName(cases, ([, path]) =>
+          ScreenOutlineRule.findPlacementViolations([path]),
+        );
+        // then
+        expect(result).toEqual(casesByName(cases, ([, path]) => [path]));
+      },
+    );
+  });
   Scenario("export する値（findSingleExportViolations）", ({ And }) => {
     And(
       "must pass: 画面の関数だけを export function で export し、型の export と export しない部品はあってよい",
@@ -851,6 +977,13 @@ describeFeature(feature, ({ Scenario }) => {
             ),
           ],
           [
+            "文全体を型だけで取り込んだ Layout",
+            lines(
+              'import type { Layout } from "@/shared/ui/atoms/layout";',
+              "export function XScreen() { return <Layout />; }",
+            ),
+          ],
+          [
             "既定の import の Layout",
             lines(
               'import Layout from "@/shared/ui/atoms/layout";',
@@ -888,6 +1021,7 @@ describeFeature(feature, ({ Scenario }) => {
               "別の場所から取り込んだ Layout": [`2 ${notImported}`],
               "別名で取り込んだ Layout": [`2 ${notImported}`],
               "型だけ取り込んだ Layout": [`2 ${notImported}`],
+              "文全体を型だけで取り込んだ Layout": [`2 ${notImported}`],
               "既定の import の Layout": [`2 ${notImported}`],
               "同じファイルで定義した Layout": [`2 ${notImported}`],
             };
@@ -1173,6 +1307,7 @@ describeFeature(feature, ({ Scenario }) => {
           // 画面のファイルでないもの（テスト・hook・部品・page.tsx）は対象外。違反の形でも数えない。
           [`${SCREEN_DIR}/x-screen.test.tsx`]: "export const a = 1;\n",
           [`${SCREEN_DIR}/x-screen.hook.ts`]: "export const b = 1;\n",
+          [`${SCREEN_DIR}/x-screen.messages.ts`]: "export const c = 1;\n",
           "apps/frontend_customer/features/x/components/x-item.tsx":
             "export const XItem = () => <div>x</div>;\n",
           "apps/frontend_customer/app/page.tsx":
@@ -1191,6 +1326,7 @@ describeFeature(feature, ({ Scenario }) => {
         // then
         expect(screens).toEqual([`${SCREEN_DIR}/x-screen.tsx`]);
         expect(violations).toEqual({
+          "screen-outline-placement": [],
           "screen-outline-single-export": [],
           "screen-outline-layout-root": [],
           "screen-outline-layout-children": [],
@@ -1199,43 +1335,59 @@ describeFeature(feature, ({ Scenario }) => {
       },
     );
 
-    And("すべての規則の違反を「規則: パス:行 内容」で返す", () => {
-      // given
-      const ySource = lines(
-        LAYOUT_IMPORT,
-        "export function YDetailScreen() {",
-        "  if (x) return <Layout>読み込み中</Layout>;",
-        "  return <main />;",
-        "}",
-        "export function TitleSection() { return null; }",
-      );
-      const yDir = "apps/frontend_customer/features/y/screens/y-detail-screen";
-      const root = fixture({
-        [`${SCREEN_DIR}/x-screen.tsx`]: OUTLINED_SCREEN,
-        [`${yDir}/y-detail-screen.tsx`]: ySource,
-      });
+    And(
+      "すべての規則の違反を「規則: パス:行 内容」で、置き方の違反は「規則: パス」で返す",
+      () => {
+        // given
+        const ySource = lines(
+          LAYOUT_IMPORT,
+          "export function YDetailScreen() {",
+          "  if (x) return <Layout>読み込み中</Layout>;",
+          "  return <main />;",
+          "}",
+          "export function TitleSection() { return null; }",
+        );
+        const yDir =
+          "apps/frontend_customer/features/y/screens/y-detail-screen";
+        const misplaced = [
+          "apps/frontend_customer/features/y/screens/settings/settings.tsx",
+          `${yDir}/title-section.tsx`,
+        ];
+        const root = fixture({
+          [`${SCREEN_DIR}/x-screen.tsx`]: OUTLINED_SCREEN,
+          [`${yDir}/y-detail-screen.tsx`]: ySource,
+          // 名前のそろっていない画面は、画面のファイルとして列挙されず骨組みの規則をすり抜けるので、置き方の規則で止める。
+          ...Object.fromEntries(
+            misplaced.map((path) => [path, "export const z = 1;\n"]),
+          ),
+        });
 
-      // when
-      const violations = ScreenOutlineRule.collectViolations(root);
+        // when
+        const violations = ScreenOutlineRule.collectViolations(root);
 
-      // then
-      const y = `${yDir}/y-detail-screen.tsx`;
-      expect(violations).toEqual({
-        "screen-outline-single-export": [
-          `screen-outline-single-export: ${y}:6 TitleSection`,
-        ],
-        "screen-outline-layout-root": [
-          `screen-outline-layout-root: ${y}:4 <main>`,
-        ],
-        "screen-outline-layout-children": [
-          `screen-outline-layout-children: ${y}:3 文字列`,
-        ],
-        "screen-outline-single-return": [
-          `screen-outline-single-return: ${y}:3`,
-          `screen-outline-single-return: ${y}:4`,
-        ],
-      });
-    });
+        // then
+        const y = `${yDir}/y-detail-screen.tsx`;
+        expect(violations).toEqual({
+          "screen-outline-placement": [
+            `screen-outline-placement: ${misplaced[0]}`,
+            `screen-outline-placement: ${misplaced[1]}`,
+          ],
+          "screen-outline-single-export": [
+            `screen-outline-single-export: ${y}:6 TitleSection`,
+          ],
+          "screen-outline-layout-root": [
+            `screen-outline-layout-root: ${y}:4 <main>`,
+          ],
+          "screen-outline-layout-children": [
+            `screen-outline-layout-children: ${y}:3 文字列`,
+          ],
+          "screen-outline-single-return": [
+            `screen-outline-single-return: ${y}:3`,
+            `screen-outline-single-return: ${y}:4`,
+          ],
+        });
+      },
+    );
 
     And(
       "apps/frontend_customer が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）",
@@ -1250,6 +1402,7 @@ describeFeature(feature, ({ Scenario }) => {
         // then
         expect(screens).toEqual([]);
         expect(violations).toEqual({
+          "screen-outline-placement": [],
           "screen-outline-single-export": [],
           "screen-outline-layout-root": [],
           "screen-outline-layout-children": [],
@@ -1273,6 +1426,16 @@ describeFeature(feature, ({ Scenario }) => {
       expect(count).toBeGreaterThan(0);
     });
 
+    And(
+      "screen-outline-placement: screens の下のテスト以外のコードは、ディレクトリと同じ名前の画面と hook と辞書だけ",
+      () => {
+        // given: Scenario の冒頭で collectViolations(repoRoot) 済み（実ファイル）
+        // when
+        const result = violations["screen-outline-placement"];
+        // then
+        expect(result).toEqual([]);
+      },
+    );
     And(
       "screen-outline-single-export: 画面のファイルが export する値は画面の関数 1 つだけ",
       () => {
