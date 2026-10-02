@@ -38,11 +38,11 @@ Feature: ディレクトリ構成ルール（依存の向き）
     * 現在時刻の読み取りの検査は、apps/frontend_customer・apps/backend・apps/shared のソースを対象にし、テスト・テストの補助・apps/e2e/・ルート直下は対象にしない（列挙が壊れて素通りするのを防ぐ）
     * 画面（apps/frontend_customer）に文言をハードコードしない: JSX のテキスト、利用者に見える属性（aria-label・placeholder・title・alt・label・aria-description）の文字列、日本語の文字列は違反（辞書 apps/frontend_customer/<階層>/<名前>.messages.ts の defineMessages(...) の引数の中とテストは除く）
     * apps/backend と apps/shared の非テストコードは日本語のリテラルを持たない（エラーは ErrorKey と params で表し、運用者向けの文言は英語。テストは除く。例外なし）
-    * apps/backend の presentation と shared/http の api ファイル（<名前>.api.ts）のクラスの handle は ProblemResponse.wrap(...) の呼び出しで初期化する（try / catch の手書き・素の async・別の関数で包むのは違反。テストは除く）
-    * handle を ProblemResponse.wrap で包む規則は、本物の api ファイル 6 本を対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）
+    * apps/backend の presentation と shared/http の api ファイル（<名前>.api.ts）のクラスの handle は ProblemResponse.wrap(...) の呼び出しで初期化する（try / catch の手書き・素の async・別の関数で包むのは違反。features/feature-flag の presentation の OFREP の api だけは OfrepResponse.wrap(...) も可。テストは除く）
+    * handle を ProblemResponse.wrap で包む規則は、本物の api ファイル 8 本を対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）
     * apps/backend の presentation と shared/http の api ファイル（<名前>.api.ts）のクラスの handle の中に try / catch を書かない（エラーの変換は ProblemResponse.wrap に任せる。try / finally は可。テストは除く）
     * ProblemResponse.from を書いてよいのは apps/backend/shared/http/problem.ts だけ（api は ProblemResponse.wrap 経由で使う。apps/backend の本番コードが対象で、テストは除く）
-    * ProblemResponse.from の規則は、本物の api ファイル 6 本を対象にし、problem.ts とテストは対象にしない（列挙が壊れて素通りするのを防ぐ）
+    * ProblemResponse.from の規則は、本物の api ファイル 8 本を対象にし、problem.ts とテストは対象にしない（列挙が壊れて素通りするのを防ぐ）
     * apps/backend と apps/shared の本番コードとテストの補助（apps/backend の test-support/・spec/ の support.ts、apps/e2e の <名前>.spec.<名前> 以外）と apps/frontend_customer の features/・shared/・test-support/ の React 以外のモジュール（<名前>.tsx・<名前>.jsx・<名前>.hook.<名前> 以外）はファイルの最上位に関数を置かない（テストと E2E の <名前>.spec.<名前>、frontend の app/ と直下のファイルは除く。function 宣言・関数を入れた変数・export default の関数は違反。クラスのメソッド・クラスフィールドのアロー関数・メソッドの中の関数は可）
     * 規則 class-based の対象のファイルでは、インスタンスのメンバー（コンストラクタ・static でないメソッド・フィールド・アクセサ）を持つクラスに static のメンバーを置かない（自分のクラスか Promise<自分のクラス> を返す static のファクトリは可。static だけのクラスは対象外）
     * 最上位に関数を置かない規則は、apps/backend の本番コード（層・expose・drizzle.config.ts）・apps/shared の本番コード・テストの補助（test-support/・spec/ の support.ts・apps/e2e/ の spec 以外）・frontend の React 以外のモジュール（features/・shared/ の .ts）を対象にし、テスト・E2E の .spec.ts・リポジトリ直下・frontend の .tsx・.hook.ts・app/・直下のファイルは対象にしない（列挙が壊れて素通りするのを防ぐ）

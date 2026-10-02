@@ -32,6 +32,7 @@ export class EnglishProblemDetail {
       "todo.statusChanges.invalid": () =>
         "Completion history is inconsistent with the Todo.",
       "todo.notFound": ({ id }) => `Todo ${id} was not found.`,
+      "featureFlag.notFound": ({ key }) => `Feature flag ${key} was not found.`,
       "request.body.notJson": () => "Request body must be valid JSON.",
       "request.body.notObject": () => "Request body must be a JSON object.",
       "request.body.unknownKeys": ({ keys }) =>
