@@ -15,38 +15,48 @@ import { dirname, join, posix } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { containsForbiddenWord } from "./feature-business-language";
 
-// API 仕様テスト（Issue #219。.claude/rules/testing.md の「API 仕様テスト（api-specs）」、ADR
+// API 仕様テスト（Issue #219。.claude/rules/testing.md の「API 仕様テスト（spec/api）」、ADR
 //   docs/adr/quality/20260930-api-spec-in-feature.md）の置き場所と形を、ファイルの一覧とソースで機械的に検査するテスト。
 // API 仕様テスト = API 1 つ（apps/backend/features/<feature>/internal/presentation/<api>.api.ts）の振る舞いを、人が読む仕様として
 //   Gherkin の <api>.feature に業務の言葉で書き、step の実装（<api>.api-spec.test.ts）が実 Postgres の上で本番の組み立てを通して
 //   確かめるテスト。`*` の 1 行 = 1 つの振る舞い = 1 つのテスト（vitest-cucumber は step 1 つを Vitest の test 1 つにする）。
 // 違反にするもの:
-//   - api-spec-placement: apps/backend/api-specs/ の下には、<feature>/ の直下の <api>.feature・<api>.api-spec.test.ts・support.ts
-//     （補助。名前は固定）だけを置く。api-specs/ の直下のファイル・<feature>/ の下のサブディレクトリの中のファイル・ほかの名前
-//     （helper.ts・README.md・x.test.ts・.tsx・support.test.ts）は違反。apps/ の下のほかの場所（features/<f>/・api-journeys/・
+//   - api-spec-placement: apps/backend/spec/api/ の下には、<feature>/ の直下の <api>.feature・<api>.api-spec.test.ts・support.ts
+//     （補助。名前は固定）だけを置く。spec/api/ の直下のファイル・<feature>/ の下のサブディレクトリの中のファイル・ほかの名前
+//     （helper.ts・README.md・x.test.ts・.tsx・support.test.ts）は違反。apps/ の下のほかの場所（features/<f>/・spec/journey/・
 //     frontend など）に *.api-spec.test.* を置くのも違反。
 //     WHY 置き場所を 1 か所にする: 人が読む API 仕様を feature ごとに 1 つのディレクトリで一覧でき、test-support/database（実 DB）の
 //       import の例外（rule-tests/test-doubles.test.ts の db-tests-in-infra-only）もこの 1 か所に絞れる。
-//     WHY 補助は support.ts の 1 つに固定する: step の実装が共有する組み立て・DB の読み出しの置き場所を決め、api-specs/ を別の用途の
+//     WHY 補助は support.ts の 1 つに固定する: step の実装が共有する組み立て・DB の読み出しの置き場所を決め、spec/api/ を別の用途の
 //       置き場所にさせない（Issue #219 の判断。test-support/ はテストダブル・DB 基盤・テストデータビルダー（Issue #240）の置き場所で、API 仕様だけの補助は置かない）。
-//     WHY api-specs/ の外の .feature はここで見ない: rule-tests/api-journey.test.ts の api-journey-placement が止める（api-specs/ の下の
+//     WHY spec/api/ の外の .feature はここで見ない: rule-tests/api-journey.test.ts の api-journey-placement が止める（spec/api/ の下の
 //       .feature だけを例外にしている）。
 //   - api-spec-pair: apps/backend/features/<feature>/internal/presentation/<api>.api.ts の 1 つごとに、
-//     apps/backend/api-specs/<feature>/<api>.feature と <api>.api-spec.test.ts の両方が要る（無いほうを api ファイルの違反にする）。
-//     api-specs/ の <api>.feature・<api>.api-spec.test.ts に対の api ファイルが無ければ、そのファイルを違反にする（feature の
+//     apps/backend/spec/api/<feature>/<api>.feature と <api>.api-spec.test.ts の両方が要る（無いほうを api ファイルの違反にする）。
+//     spec/api/ の <api>.feature・<api>.api-spec.test.ts に対の api ファイルが無ければ、そのファイルを違反にする（feature の
 //     ディレクトリ名の違い・api の名前の違いも）。置き場所の違反のファイルは見ない。
 //     WHY: 人が読む仕様を API ごとに漏れなく持つ（Issue #219。API を足したら仕様も足す）。.feature だけでは何も実行されず、step の
 //       ファイルだけでは読む仕様が無い。api の無い仕様は、消した・改名した API の仕様が残ったもの。
 //     step のファイルが対の .feature を読むことは api-spec-load-feature が見る。
 //     限界: presentation の下のサブディレクトリの api ファイルと、
 //       apps/backend/shared/presentation/ の api ファイルは対の対象外（今は無い）。
-//   以下は .feature（api-specs/<feature>/ の直下の *.feature）の中身の規則。行ごとに見る（行は 1 始まり。行の区切りは \r\n・\r・\n。
+//   以下は .feature（spec/api/<feature>/ の直下の *.feature）の中身の規則。行ごとに見る（行は 1 始まり。行の区切りは \r\n・\r・\n。
 //   vitest-cucumber は readline で読み、単独の \r でも行を分けるので同じにする。reviewer の指摘）:
-//   - api-spec-scenario-heading: `Scenario:` の見出し（`:` の後ろの前後の空白を除いた文字）が SCENARIO_HEADINGS（レスポンス /
-//     ソート / 検索 / 記録 / 副作用 / 異常系）のどれでもなければ違反。同じ見出しの 2 つ目以降も違反（1 つの .feature に 1 回）。
+//   - api-spec-scenario-heading: `Scenario:` の見出し（`:` の後ろの前後の空白を除いた文字）が SCENARIO_HEADINGS（作成 / 更新 /
+//     削除 / レスポンス / ソート / 検索 / 記録 / 副作用 / 異常系）のどれでもなければ違反。同じ見出しの 2 つ目以降も違反（1 つの
+//     .feature に 1 回）。
 //     WHY: API ごとに同じ観点の見出しで振る舞いを分けると、読む人がどの API でも同じ場所を拾い読みでき、観点の抜けも見出しで分かる。
-//       見出しは読み取り（レスポンス / ソート / 検索 / 異常系）と書き込み（レスポンス / 記録 / 副作用 / 異常系）の観点（ユーザー判断、
-//       2026-09-30 の work-logs）。該当の無い見出しは書かずに省く（見出しの有無・読み取りと書き込みの別は見ない）。
+//       見出しは読み取り（レスポンス / ソート / 検索 / 異常系）と書き込み（作成・更新・削除のどれか 1 つ / レスポンス / 記録 / 副作用 /
+//       異常系）の観点（ユーザー判断、2026-09-30 の work-logs。作成・更新・削除は Issue #249）。該当の無い見出しは書かずに省く。
+//   - api-spec-scenario-order（Issue #249）: 見出しが SCENARIO_HEADINGS の順に並んでいなければ、前の見出しより一覧で前に来る見出しの
+//     行を違反にする（一覧に無い見出しと同じ見出しの 2 つ目は数えない。api-spec-scenario-heading の違反なので）。
+//     WHY: どの API の仕様も同じ順で読める（書き込みならメインの変更 → レスポンス → 記録 → 副作用 → 異常系）。
+//   - api-spec-write-heading（Issue #249）: メインの変更の見出し（作成 / 更新 / 削除）が 2 つ以上なら 2 つ目以降の行、記録か副作用が
+//     あるのにメインの変更の見出しが無ければ最初の記録・副作用の行を違反にする。
+//     WHY: 書き込みの API の仕様で、対象の Todo 自身に起こること（メインの変更）と返る内容（レスポンス）を別の見出しに分ける
+//       （ユーザー判断 2026-10-01。以前は create の「レスポンス」に「未完了の Todo が作られて返る」「前後の空白は除かれる」が混ざって
+//       いた）。書き込みの API かどうかは記録・副作用の見出しで推定する（記録も副作用も無い書き込みの API はメインの変更が無くても
+//       通る。今の 4 つの書き込みの API はどれも記録を持つ）。メインの変更が 1 つの API に 2 つあるのは、1 つの操作の仕様として誤り。
 //   - api-spec-keyword: `Scenario Outline:` / `Scenario Template:` / `Rule:` / `Background:` / `Example:` / `Examples:` /
 //     `Scenarios:` の行と、`# language:` の行は違反。
 //     WHY: 形を「Feature の下に固定の見出しの Scenario と `*` の step」の 1 通りにし、見出しの一覧の検査を逃れる書き方（Example は
@@ -69,10 +79,12 @@ import { containsForbiddenWord } from "./feature-business-language";
 //     WHY: .feature は業務の仕様として開発者でない人も読む（API ジャーニーと同じ。Issue #217）。
 //     WHY Scenario の見出しを見ない: 見出しは固定の一覧（api-spec-scenario-heading）で、一覧の「レスポンス」が禁止語に当たる。
 //     WHY Feature の見出しを見ない: Issue #219 の指定（対象は Feature / Scenario の見出し以外）。
-//   以下は step の実装（api-specs/<feature>/ の直下の <api>.api-spec.test.ts）の中身の規則:
+//   以下は step の実装（spec/api/<feature>/ の直下の <api>.api-spec.test.ts）の中身の規則:
 //   - api-spec-no-vi: `vitest` から `vi`（と同じものの別名 `vitest`）を import しない。別名・名前空間・既定の import・dynamic
 //     `import("vitest")` も違反。`import type` と inline の `type` は通す（api-journey-no-vi と同じ判定）。
 //     WHY: 仕様は本番と同じ部品のつながりで確かめる。テストダブル（vi.mock・spyOn・fake timers）は差し替えた部分を確かめなくする。
+//     例外（Issue #258。daiki の判断 2026-10-02）: step の実装で、別名なしの `import { vi }` を console の差し替え（`vi.spyOn(console, ...)`）
+//       だけに使うなら通す（ログの行をアサートするため。WHY と限界は usesViOnlyForConsoleSpy）。support.ts は例外にしない。
 //   - api-spec-no-in-memory: *.in-memory（InMemory の Repository）を import しない（`import type`・`import()`・`export … from` も）。
 //     WHY: 実 DB で本番の組み立てを通すのが API 仕様の目的（Issue #219。InMemory は presentation の単体テストの道具）。
 //   - api-spec-uses-real-database: apps/backend/test-support/database（createTestDatabase）を値として import する。
@@ -107,7 +119,7 @@ import { containsForbiddenWord } from "./feature-business-language";
 //     WHY: skip した Scenario は skipped のまま Vitest が成功で終わり（reviewer の実測）、only はほかの Scenario を黙って止める。
 //       タグの絞り込みも Scenario を外しうる（未実測）。Biome の noSkippedTests / noFocusedTests は `Scenario.skip(` / `Scenario.only(`
 //       を止めない（Issue #219 で biome lint を実測。it / describe / test の名前だけを見る）。
-//   以下は補助（api-specs/<feature>/ の直下の support.ts）の中身の規則:
+//   以下は補助（spec/api/<feature>/ の直下の support.ts）の中身の規則:
 //   - api-spec-no-vi は support.ts にも当てる（step が組み立てを任せる先で vi を使わせない。reviewer の任意の指摘）。
 //   - api-spec-support-no-api-call（Issue #240）: support.ts の中で handler を呼ばない。`.handle(`（`?.handle(`・`.handle.call(` /
 //     `.apply(` / `.bind(`・空白を挟むものも）と、名前が `Api` で終わる関数・メソッドの呼び出し（`createTodoApi(db)`・`createTodoApi<T>(db)`・
@@ -154,6 +166,8 @@ type ApiSpecRuleId =
   | "api-spec-placement"
   | "api-spec-pair"
   | "api-spec-scenario-heading"
+  | "api-spec-scenario-order"
+  | "api-spec-write-heading"
   | "api-spec-keyword"
   | "api-spec-tag"
   | "api-spec-step-star"
@@ -172,10 +186,13 @@ type ApiSpecRuleId =
 // line: ソースの中の位置で決まる違反だけ持つ（1 始まり）。note: 対の違反で、無いファイル（対の相手）を示す。
 type ApiSpecViolation = { rule: ApiSpecRuleId; line?: number; note?: string };
 
-const API_SPECS_DIR = "apps/backend/api-specs/";
+const API_SPECS_DIR = "apps/backend/spec/api/";
 
-// Scenario の見出しの固定の一覧（api-spec-scenario-heading）。WHY は冒頭の説明。
+// Scenario の見出しの固定の一覧（api-spec-scenario-heading）。並びは .feature に書く順（api-spec-scenario-order）。WHY は冒頭の説明。
 const SCENARIO_HEADINGS: readonly string[] = [
+  "作成",
+  "更新",
+  "削除",
   "レスポンス",
   "ソート",
   "検索",
@@ -184,24 +201,30 @@ const SCENARIO_HEADINGS: readonly string[] = [
   "異常系",
 ];
 
-// API 仕様の .feature か（api-specs/<feature>/ の直下の *.feature）。
-function isSpecFeatureFile(path: string): boolean {
-  return /^apps\/backend\/api-specs\/[^/]+\/[^/]+\.feature$/.test(path);
+// API 仕様のファイル（spec/api/<feature>/ の下）の <feature>。WHY API_SPECS_DIR から数える: パスの深さ（要素の位置）で取ると、
+//   置き場所を変えたときに別の要素を feature と読み違える（Issue #251 で api-specs/ から spec/api/ に移した）。
+function featureOfSpecPath(path: string): string {
+  return path.slice(API_SPECS_DIR.length).split("/")[0] ?? "";
 }
 
-// API 仕様の step の実装か（api-specs/<feature>/ の直下の *.api-spec.test.ts）。
+// API 仕様の .feature か（spec/api/<feature>/ の直下の *.feature）。
+function isSpecFeatureFile(path: string): boolean {
+  return /^apps\/backend\/spec\/api\/[^/]+\/[^/]+\.feature$/.test(path);
+}
+
+// API 仕様の step の実装か（spec/api/<feature>/ の直下の *.api-spec.test.ts）。
 function isSpecStepFile(path: string): boolean {
-  return /^apps\/backend\/api-specs\/[^/]+\/[^/]+\.api-spec\.test\.ts$/.test(
+  return /^apps\/backend\/spec\/api\/[^/]+\/[^/]+\.api-spec\.test\.ts$/.test(
     path,
   );
 }
 
-// API 仕様の補助か（api-specs/<feature>/ の直下の support.ts）。
+// API 仕様の補助か（spec/api/<feature>/ の直下の support.ts）。
 function isSpecSupportFile(path: string): boolean {
-  return /^apps\/backend\/api-specs\/[^/]+\/support\.ts$/.test(path);
+  return /^apps\/backend\/spec\/api\/[^/]+\/support\.ts$/.test(path);
 }
 
-// api-specs/ の外で、置いてあれば置き場所の違反になる名前。WHY 拡張子を広く取る: .tsx・.js で外に置いても見つける。
+// spec/api/ の外で、置いてあれば置き場所の違反になる名前。WHY 拡張子を広く取る: .tsx・.js で外に置いても見つける。
 const OUTSIDE_API_SPEC_FILE = /\.api-spec\.test\.[cm]?[jt]sx?$/;
 
 // path（リポジトリ相対、/ 区切り）が置き場所の規則に違反するか。
@@ -221,7 +244,7 @@ const API_FILE =
   /^apps\/backend\/features\/([^/]+)\/internal\/presentation\/([^/]+)\.api\.ts$/;
 
 // 対の違反（api-spec-pair）。files は同じ列挙（listApiSpecTargets）の結果。
-// api ファイルには .feature と step の両方が要り、api-specs/ の .feature・step には api ファイルが要る。
+// api ファイルには .feature と step の両方が要り、spec/api/ の .feature・step には api ファイルが要る。
 function findPairViolations(
   path: string,
   files: ReadonlySet<string>,
@@ -234,7 +257,7 @@ function findPairViolations(
       .map((spec) => ({ rule: "api-spec-pair", note: `${spec} が無い` }));
   }
   const spec =
-    /^apps\/backend\/api-specs\/([^/]+)\/([^/]+?)(?:\.feature|\.api-spec\.test\.ts)$/.exec(
+    /^apps\/backend\/spec\/api\/([^/]+)\/([^/]+?)(?:\.feature|\.api-spec\.test\.ts)$/.exec(
       path,
     );
   if (spec === null || !(isSpecFeatureFile(path) || isSpecStepFile(path))) {
@@ -301,21 +324,65 @@ const LINE_KINDS_WITHOUT_WORDING: ReadonlySet<FeatureLineKind> = new Set([
   "scenario",
 ]);
 
+// メインの変更（書き込みの API が対象の Todo 自身に起こすこと）の見出し（api-spec-write-heading）。WHY は冒頭の説明。
+const MUTATION_HEADINGS: ReadonlySet<string> = new Set([
+  "作成",
+  "更新",
+  "削除",
+]);
+
+// 書き込みの API だけが持つ見出し。あればメインの変更の見出しが要る（api-spec-write-heading）。
+const WRITE_ONLY_HEADINGS: ReadonlySet<string> = new Set(["記録", "副作用"]);
+
+// .feature の中の見出しの並び（行と名前）。一覧の順・メインの変更の数を、ファイルの見出しを読み終えてから見るために集める。
+type ScenarioHeading = { line: number; name: string };
+
 // `Scenario:` の見出しの違反（api-spec-scenario-heading）。seen に見出しを足す（同じ見出しの 2 つ目以降を違反にするため）。
 function headingViolations(
-  line: string,
-  lineNumber: number,
+  heading: ScenarioHeading,
   seen: Set<string>,
 ): ApiSpecViolation[] {
-  const name = line.slice(line.indexOf(":") + 1).trim();
-  const violates = !SCENARIO_HEADINGS.includes(name) || seen.has(name);
-  seen.add(name);
+  const violates =
+    !SCENARIO_HEADINGS.includes(heading.name) || seen.has(heading.name);
+  seen.add(heading.name);
   return violates
-    ? [{ rule: "api-spec-scenario-heading", line: lineNumber }]
+    ? [{ rule: "api-spec-scenario-heading", line: heading.line }]
     : [];
 }
 
-// .feature の中身の違反（行の順。同じ行なら見出し・キーワード・step・言葉の順）。
+// 見出しの並びの違反（api-spec-scenario-order・api-spec-write-heading）。
+// WHY 一覧に無い見出しと同じ見出しの 2 つ目を除く: api-spec-scenario-heading で違反になるので、ほかの規則で重ねて数えない。
+function headingSequenceViolations(
+  headings: readonly ScenarioHeading[],
+): ApiSpecViolation[] {
+  const seen = new Set<string>();
+  const firsts = headings.filter((heading) => {
+    const counted =
+      SCENARIO_HEADINGS.includes(heading.name) && !seen.has(heading.name);
+    seen.add(heading.name);
+    return counted;
+  });
+  const violations: ApiSpecViolation[] = [];
+  let furthest = -1;
+  for (const heading of firsts) {
+    const position = SCENARIO_HEADINGS.indexOf(heading.name);
+    if (position < furthest) {
+      violations.push({ rule: "api-spec-scenario-order", line: heading.line });
+    }
+    furthest = Math.max(furthest, position);
+  }
+  const mutations = firsts.filter((h) => MUTATION_HEADINGS.has(h.name));
+  for (const extra of mutations.slice(1)) {
+    violations.push({ rule: "api-spec-write-heading", line: extra.line });
+  }
+  const writeOnly = firsts.find((h) => WRITE_ONLY_HEADINGS.has(h.name));
+  if (mutations.length === 0 && writeOnly !== undefined) {
+    violations.push({ rule: "api-spec-write-heading", line: writeOnly.line });
+  }
+  return violations;
+}
+
+// .feature の中身の違反（行の順。同じ行なら見出し・キーワード・step・言葉・見出しの並び（順・メインの変更）の順）。
 function findFeatureContentViolations(source: string): ApiSpecViolation[] {
   // WHY \r\n・\r・\n のどれでも分ける: vitest-cucumber は readline で読み、単独の \r でも行を分ける（reviewer の指摘、Issue #219）。
   //   \n だけで分けると、\r で区切った行が 1 行に隠れて（Feature の行の後ろに続けると丸ごと見ない）検査を逃れる。CRLF の行末に \r が
@@ -323,6 +390,7 @@ function findFeatureContentViolations(source: string): ApiSpecViolation[] {
   const lines = source.split(/\r\n|\r|\n/);
   const violations: ApiSpecViolation[] = [];
   const seenHeadings = new Set<string>();
+  const headings: ScenarioHeading[] = [];
   // 今いる Scenario（行と `*` の数）。Scenario の外（Feature の直下・Background などの後）は undefined。
   let scenario: { line: number; stars: number } | undefined;
   const closeScenario = () => {
@@ -343,7 +411,12 @@ function findFeatureContentViolations(source: string): ApiSpecViolation[] {
     }
     if (kind === "scenario") {
       scenario = { line: lineNumber, stars: 0 };
-      violations.push(...headingViolations(line, lineNumber, seenHeadings));
+      const heading = {
+        line: lineNumber,
+        name: line.slice(line.indexOf(":") + 1).trim(),
+      };
+      headings.push(heading);
+      violations.push(...headingViolations(heading, seenHeadings));
     }
     if (kind === "star" && scenario !== undefined) {
       scenario.stars += 1;
@@ -354,7 +427,9 @@ function findFeatureContentViolations(source: string): ApiSpecViolation[] {
     }
   });
   closeScenario();
-  // WHY 並べ直す: `*` の無い Scenario の違反は、次の Scenario（かファイル末尾）で分かるので後から積まれる。
+  violations.push(...headingSequenceViolations(headings));
+  // WHY 並べ直す: `*` の無い Scenario の違反は、次の Scenario（かファイル末尾）で分かるので後から積まれる。見出しの並びの違反も、
+  //   見出しを読み終えてから積む。
   return violations.sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
 }
 
@@ -441,7 +516,7 @@ function moduleBaseName(specifier: string): string {
 }
 
 // 参照先をリポジトリ相対のパス（拡張子なし）にする。自前のコードでない参照（パッケージ）は undefined。
-// WHY 解決して比べる: `../../test-support/database` と `@repo/backend/test-support/database` は同じモジュール。
+// WHY 解決して比べる: `../../../test-support/database` と `@repo/backend/test-support/database` は同じモジュール。
 function resolveSpecifier(from: string, specifier: string): string | undefined {
   const alias = "@repo/backend/";
   const resolved = specifier.startsWith(".")
@@ -467,6 +542,41 @@ function reachesVi(ref: ImportRef): boolean {
     outsideBraces.trim() !== "" ||
     names.some((name) => /^(?:vi|vitest)(?:\s+as\s+[\w$]+)?$/.test(name))
   );
+}
+
+// 名前付きの import で vi を別名なしに取り出すだけか（`{ expect, vi }`。vitest・別名・既定の import・名前空間・dynamic は除く）。
+// WHY 別名を許さない: usesViOnlyForConsoleSpy は `vi` の名前で使い方を数えるので、別名で取り出すと数えられない。
+function importsPlainVi(ref: ImportRef): boolean {
+  if (ref.kind !== "value") {
+    return false;
+  }
+  const braces = /^\{([\s\S]*)\}$/.exec(ref.clause.trim());
+  const names = (braces?.[1] ?? "").split(",").map((name) => name.trim());
+  return (
+    names.includes("vi") &&
+    !names.some((name) => /^(?:vi\s+as\s|vitest\b)/.test(name))
+  );
+}
+
+// step の実装が vi を console の差し替え（`vi.spyOn(console, ...)`）だけに使っているか。code はコメントを消したもの。
+// 数えるのは、前が `.`・名前の文字でない `vi` の出現（import の句の 1 つを除く）。すべてが `vi.spyOn(console,`（改行・空白を挟むものも）で、
+//   1 つ以上あれば true。
+// WHY ログに限って console の差し替えを許す（daiki の判断 2026-10-02、Issue #258）: notification の送り先は今はログ（console.log の
+//   JSON 1 行）だけで、差し替えずには仕様から読めない。console は本番の部品の外（実行環境の出力先）で、差し替えても本番の組み立ては
+//   そのまま通る。vi.fn・console 以外の spyOn・vi.mock は本番の部品を差し替えるので、今どおり止める。
+// WHY 文字列を消さずに数える（blankStrings を使わない。reviewer の指摘、Issue #258）: blankStrings はテンプレート文字列の `${...}` の
+//   中まで消すので、補間の中の `vi.fn()` を数えず通していた。文字列の中の `vi` の語も数えるが、違反に倒れるだけ（安全側）。
+// 限界（字句の推定）: `vi` を別の変数に入れる・オブジェクトに置くのは「console の差し替え以外の出現」として違反にする（安全側）。
+//   `const console = repository;` のように console の名前を上書きしたものは見ない（自然には書かない）。後始末の
+//   `vi.restoreAllMocks()` と型の `ReturnType<typeof vi.spyOn>` も違反になるので、後始末は戻り値の `mockRestore()`、型は
+//   vitest の `MockInstance` で書く。
+//   `vi.spyOn(console, ...)` の戻り値に対する呼び出し（mockImplementation・mockRestore）は見ない。
+function usesViOnlyForConsoleSpy(code: string): boolean {
+  const uses = [...code.matchAll(/(?<![\w$.])vi(?![\w$])/g)].length;
+  const consoleSpies = [
+    ...code.matchAll(/(?<![\w$.])vi\s*\.\s*spyOn\s*\(\s*console\s*,/g),
+  ].length;
+  return consoleSpies > 0 && uses === consoleSpies + 1;
 }
 
 // 実 Postgres のテスト用の DB を用意するモジュール（リポジトリ相対、拡張子なし）。
@@ -534,7 +644,7 @@ function findSkipViolations(code: string): ApiSpecViolation[] {
 function isSupportModule(module: string | undefined): boolean {
   return (
     module !== undefined &&
-    /^apps\/backend\/api-specs\/[^/]+\/support$/.test(module)
+    /^apps\/backend\/spec\/api\/[^/]+\/support$/.test(module)
   );
 }
 
@@ -579,7 +689,7 @@ function findOwnApiOnlyViolations(
   api: string,
   imports: readonly ImportRef[],
 ): ApiSpecViolation[] {
-  const ownApi = `apps/backend/features/${path.split("/")[3]}/internal/presentation/${api}.api`;
+  const ownApi = `apps/backend/features/${featureOfSpecPath(path)}/internal/presentation/${api}.api`;
   const ownSupport = posix.join(posix.dirname(path), "support");
   const ownAssembler = assemblerNameOf(api);
   return imports
@@ -613,7 +723,7 @@ function findStepContentViolations(
   const code = stripComments(source);
   const imports = extractImports(code);
   const [, feature, api] =
-    /^apps\/backend\/api-specs\/([^/]+)\/([^/]+)\.api-spec\.test\.ts$/.exec(
+    /^apps\/backend\/spec\/api\/([^/]+)\/([^/]+)\.api-spec\.test\.ts$/.exec(
       path,
     ) ?? [];
   const loadFeature = findLoadFeatureViolations(code, `./${api}.feature`);
@@ -622,7 +732,9 @@ function findStepContentViolations(
       ...(/\.in-memory$/.test(moduleBaseName(ref.specifier))
         ? [{ rule: "api-spec-no-in-memory" as const, line: ref.line }]
         : []),
-      ...(ref.specifier === "vitest" && reachesVi(ref)
+      ...(ref.specifier === "vitest" &&
+      reachesVi(ref) &&
+      !(importsPlainVi(ref) && usesViOnlyForConsoleSpy(code))
         ? [{ rule: "api-spec-no-vi" as const, line: ref.line }]
         : []),
     ]),
@@ -708,7 +820,7 @@ function findSupportContentViolations(
   path: string,
   source: string,
 ): ApiSpecViolation[] {
-  const presentation = `apps/backend/features/${path.split("/")[3]}/internal/presentation/`;
+  const presentation = `apps/backend/features/${featureOfSpecPath(path)}/internal/presentation/`;
   // WHY 前方一致と残りの名前で見る（feature の名前を正規表現に埋め込まない）: 名前の中の文字を正規表現として解釈させない。
   const isOwnApi = (module: string | undefined) =>
     module?.startsWith(presentation) === true &&
@@ -774,7 +886,7 @@ function walk(root: string, dir: string): string[] {
   });
 }
 
-// 検査の対象: apps/ の下のファイルのうち、apps/backend/api-specs/ の下のもの、外に置くと違反になる名前（OUTSIDE_API_SPEC_FILE）の
+// 検査の対象: apps/ の下のファイルのうち、apps/backend/spec/api/ の下のもの、外に置くと違反になる名前（OUTSIDE_API_SPEC_FILE）の
 //   もの、仕様を要る api ファイル（API_FILE）。名前順。
 // WHY root を引数で受け取る: 本番（リポジトリ直下）と fixture（一時ディレクトリ）で同じ列挙を通すため。
 function listApiSpecTargets(root: string): string[] {
@@ -811,24 +923,24 @@ const repoRoot = join(import.meta.dirname, "..");
 // テストの入力を行の配列で書き、1 行目を 1 として違反の行番号を読みやすくする。
 const source = (...lines: string[]) => lines.join("\n");
 
-const FEATURE = "apps/backend/api-specs/x/create-x.feature";
-const STEPS = "apps/backend/api-specs/x/create-x.api-spec.test.ts";
-const SUPPORT = "apps/backend/api-specs/x/support.ts";
+const FEATURE = "apps/backend/spec/api/x/create-x.feature";
+const STEPS = "apps/backend/spec/api/x/create-x.api-spec.test.ts";
+const SUPPORT = "apps/backend/spec/api/x/support.ts";
 const API = "apps/backend/features/x/internal/presentation/create-x.api.ts";
 // step の実装の必須の import（実 DB と対の api）。must reject の例は、これに違反を 1 つ足すか、どれかを欠く。
 const DATABASE_IMPORT =
-  'import { createTestDatabase } from "../../test-support/database";';
+  'import { createTestDatabase } from "../../../test-support/database";';
 const OWN_API_IMPORT =
-  'import { CreateXApi } from "../../features/x/internal/presentation/create-x.api";';
+  'import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";';
 const REQUIRED_IMPORTS = [DATABASE_IMPORT, OWN_API_IMPORT];
 // step の実装の必須の loadFeature（対の .feature を第 2 引数なしで読む）。中身の例は末尾にこれを足して判定する（行番号を変えない）。
 const LOAD_FEATURE = 'const feature = await loadFeature("./create-x.feature");';
 
 describe("API 仕様の置き場所（isMisplacedApiSpecFile）", () => {
   it.each([
-    ["api-specs/<feature>/ の直下の <api>.feature", FEATURE],
-    ["api-specs/<feature>/ の直下の <api>.api-spec.test.ts", STEPS],
-    ["api-specs/<feature>/ の直下の support.ts", SUPPORT],
+    ["spec/api/<feature>/ の直下の <api>.feature", FEATURE],
+    ["spec/api/<feature>/ の直下の <api>.api-spec.test.ts", STEPS],
+    ["spec/api/<feature>/ の直下の support.ts", SUPPORT],
     ["presentation の api ファイル", API],
     [
       "presentation の単体テスト",
@@ -836,10 +948,10 @@ describe("API 仕様の置き場所（isMisplacedApiSpecFile）", () => {
     ],
     [
       "API ジャーニー（api-spec の名前でない）",
-      "apps/backend/api-journeys/x.api-journey.test.ts",
+      "apps/backend/spec/journey/x.api-journey.test.ts",
     ],
     [
-      "名前に api-spec を含むがテストでないファイル（api-specs/ の外）",
+      "名前に api-spec を含むがテストでないファイル（spec/api/ の外）",
       "apps/backend/features/x/internal/domain/x.api-spec.ts",
     ],
   ])("%s は違反なし", (_name, path) => {
@@ -847,47 +959,47 @@ describe("API 仕様の置き場所（isMisplacedApiSpecFile）", () => {
   });
 
   it.each([
-    ["api-specs/ の直下の .feature", "apps/backend/api-specs/x.feature"],
-    ["api-specs/ の直下の step", "apps/backend/api-specs/x.api-spec.test.ts"],
-    ["api-specs/ の直下の support.ts", "apps/backend/api-specs/support.ts"],
+    ["spec/api/ の直下の .feature", "apps/backend/spec/api/x.feature"],
+    ["spec/api/ の直下の step", "apps/backend/spec/api/x.api-spec.test.ts"],
+    ["spec/api/ の直下の support.ts", "apps/backend/spec/api/support.ts"],
     [
       "<feature>/ の下のサブディレクトリの .feature",
-      "apps/backend/api-specs/x/nested/create-x.feature",
+      "apps/backend/spec/api/x/nested/create-x.feature",
     ],
     [
       "<feature>/ の下のサブディレクトリの step",
-      "apps/backend/api-specs/x/nested/create-x.api-spec.test.ts",
+      "apps/backend/spec/api/x/nested/create-x.api-spec.test.ts",
     ],
     [
       "<feature>/ の下のサブディレクトリの support.ts",
-      "apps/backend/api-specs/x/nested/support.ts",
+      "apps/backend/spec/api/x/nested/support.ts",
     ],
-    ["support.ts 以外の補助の .ts", "apps/backend/api-specs/x/helper.ts"],
-    ["名前の違う補助（Support.ts）", "apps/backend/api-specs/x/Support.ts"],
-    ["support の .tsx", "apps/backend/api-specs/x/support.tsx"],
-    ["support のテスト", "apps/backend/api-specs/x/support.test.ts"],
-    ["api-specs/ の .md", "apps/backend/api-specs/x/README.md"],
-    [".api-spec の無いテスト", "apps/backend/api-specs/x/create-x.test.ts"],
-    [".tsx の step", "apps/backend/api-specs/x/create-x.api-spec.test.tsx"],
+    ["support.ts 以外の補助の .ts", "apps/backend/spec/api/x/helper.ts"],
+    ["名前の違う補助（Support.ts）", "apps/backend/spec/api/x/Support.ts"],
+    ["support の .tsx", "apps/backend/spec/api/x/support.tsx"],
+    ["support のテスト", "apps/backend/spec/api/x/support.test.ts"],
+    ["spec/api/ の .md", "apps/backend/spec/api/x/README.md"],
+    [".api-spec の無いテスト", "apps/backend/spec/api/x/create-x.test.ts"],
+    [".tsx の step", "apps/backend/spec/api/x/create-x.api-spec.test.tsx"],
     [
       ".feature の後ろに拡張子を足したもの（.feature.md）",
-      "apps/backend/api-specs/x/create-x.feature.md",
+      "apps/backend/spec/api/x/create-x.feature.md",
     ],
     [
-      "api-specs/ の下の API ジャーニー",
-      "apps/backend/api-specs/x/x.api-journey.test.ts",
+      "spec/api/ の下の API ジャーニー",
+      "apps/backend/spec/api/x/x.api-journey.test.ts",
     ],
     [
       "presentation の隣の step",
       "apps/backend/features/x/internal/presentation/create-x.api-spec.test.ts",
     ],
     [
-      "api-journeys/ の step",
-      "apps/backend/api-journeys/create-x.api-spec.test.ts",
+      "spec/journey/ の step",
+      "apps/backend/spec/journey/create-x.api-spec.test.ts",
     ],
     [
-      "api-specs の前方一致だけの別ディレクトリの step",
-      "apps/backend/api-specs-x/x/create-x.api-spec.test.ts",
+      "spec/api の前方一致だけの別ディレクトリの step",
+      "apps/backend/spec/api-x/x/create-x.api-spec.test.ts",
     ],
     [
       "frontend の step（.tsx）",
@@ -931,7 +1043,7 @@ describe("api ファイルと API 仕様の対（findPairViolations）", () => {
     ],
     [
       "置き場所の違反の .feature は見ない",
-      "apps/backend/api-specs/x/nested/create-x.feature",
+      "apps/backend/spec/api/x/nested/create-x.feature",
       files(),
     ],
   ])("%s は違反なし", (_name, path, set) => {
@@ -974,8 +1086,8 @@ describe("api ファイルと API 仕様の対（findPairViolations）", () => {
     ],
     [
       "別の feature のディレクトリに置いた .feature（api は features/x）",
-      "apps/backend/api-specs/y/create-x.feature",
-      files(API, "apps/backend/api-specs/y/create-x.feature"),
+      "apps/backend/spec/api/y/create-x.feature",
+      files(API, "apps/backend/spec/api/y/create-x.feature"),
       [
         {
           rule: "api-spec-pair",
@@ -985,8 +1097,8 @@ describe("api ファイルと API 仕様の対（findPairViolations）", () => {
     ],
     [
       "api と名前の違う step（create-xs）",
-      "apps/backend/api-specs/x/create-xs.api-spec.test.ts",
-      files(API, "apps/backend/api-specs/x/create-xs.api-spec.test.ts"),
+      "apps/backend/spec/api/x/create-xs.api-spec.test.ts",
+      files(API, "apps/backend/spec/api/x/create-xs.api-spec.test.ts"),
       [
         {
           rule: "api-spec-pair",
@@ -1002,10 +1114,12 @@ describe("api ファイルと API 仕様の対（findPairViolations）", () => {
 describe(".feature の中身（findApiSpecViolations）: must pass", () => {
   it.each([
     [
-      "固定の見出し 6 つの Scenario と `*` の step（見出しの レスポンス は禁止語でも可）",
+      "固定の見出しを一覧の順に並べた Scenario と `*` の step（見出しの レスポンス は禁止語でも可）",
       source(
         "Feature: Todo を作る",
         "",
+        "  Scenario: 作成",
+        "    * タイトルを渡すと、未完了の Todo が作られる",
         "  Scenario: レスポンス",
         '    * タイトル "牛乳を買う" で作ると、未完了の Todo が作られる',
         "",
@@ -1078,6 +1192,32 @@ describe(".feature の中身（findApiSpecViolations）: must pass", () => {
         "    * Todo が作られる",
         "",
       ].join("\r\n"),
+    ],
+    [
+      "書き込みの形（更新 / レスポンス / 記録 / 副作用 / 異常系）",
+      source(
+        "Feature: x",
+        "  Scenario: 更新",
+        "    * a",
+        "  Scenario: レスポンス",
+        "    * b",
+        "  Scenario: 記録",
+        "    * c",
+        "  Scenario: 副作用",
+        "    * d",
+        "  Scenario: 異常系",
+        "    * e",
+      ),
+    ],
+    [
+      "記録・副作用の無い書き込み（削除だけ）と、見出しを省いた順（削除 → 異常系）",
+      source(
+        "Feature: x",
+        "  Scenario: 削除",
+        "    * a",
+        "  Scenario: 異常系",
+        "    * b",
+      ),
     ],
   ])("%s は違反なし", (_name, text) => {
     expect(findApiSpecViolations(FEATURE, text)).toEqual([]);
@@ -1165,7 +1305,7 @@ describe(".feature の中身（findApiSpecViolations）: must reject", () => {
         "  Scenario: レスポンス",
         "    # * コメントの中の *",
         "    説明だけ",
-        "  Scenario: 記録",
+        "  Scenario: ソート",
         "    Given a",
         "  Scenario: 異常系",
       ),
@@ -1210,7 +1350,7 @@ describe(".feature の中身（findApiSpecViolations）: must reject", () => {
       "`*` の step の変更の記録（Writer が自動で残す技術の仕組み。変更の記録・変更履歴・change log の区切りと単数形）",
       source(
         "Feature: x",
-        "  Scenario: 記録",
+        "  Scenario: 異常系",
         "    * 変更の記録に作成が残る",
         "    * 変更履歴は増えない",
         "    * change-log が 1 件足される",
@@ -1228,7 +1368,7 @@ describe(".feature の中身（findApiSpecViolations）: must reject", () => {
       source(
         "Feature: x",
         "  Rule: レスポンス",
-        "  Scenario: 記録",
+        "  Scenario: 異常系",
         "    * a",
         "    Given DB が空",
       ),
@@ -1265,6 +1405,109 @@ describe(".feature の中身（findApiSpecViolations）: must reject", () => {
         { rule: "api-spec-tag", line: 6 },
       ],
     ],
+    [
+      "メインの変更（作成 / 更新 / 削除）の見出しが無いのに、記録・副作用がある（最初の 1 つの行）",
+      source(
+        "Feature: x",
+        "  Scenario: レスポンス",
+        "    * a",
+        "  Scenario: 記録",
+        "    * b",
+        "  Scenario: 副作用",
+        "    * c",
+      ),
+      [{ rule: "api-spec-write-heading", line: 4 }],
+    ],
+    [
+      "副作用だけがあり、メインの変更の見出しが無い",
+      source("Feature: x", "  Scenario: 副作用", "    * a"),
+      [{ rule: "api-spec-write-heading", line: 2 }],
+    ],
+    [
+      "メインの変更の見出しが 2 つ以上（作成と更新と削除。2 つ目と 3 つ目の行）",
+      source(
+        "Feature: x",
+        "  Scenario: 作成",
+        "    * a",
+        "  Scenario: 更新",
+        "    * b",
+        "  Scenario: 削除",
+        "    * c",
+      ),
+      [
+        { rule: "api-spec-write-heading", line: 4 },
+        { rule: "api-spec-write-heading", line: 6 },
+      ],
+    ],
+    [
+      "一覧の順に並んでいない見出し（レスポンスの後の作成・異常系の後の記録）",
+      source(
+        "Feature: x",
+        "  Scenario: レスポンス",
+        "    * a",
+        "  Scenario: 作成",
+        "    * b",
+        "  Scenario: 異常系",
+        "    * c",
+        "  Scenario: 記録",
+        "    * d",
+      ),
+      [
+        { rule: "api-spec-scenario-order", line: 4 },
+        { rule: "api-spec-scenario-order", line: 8 },
+      ],
+    ],
+    [
+      "同じ見出しの 2 つ目は見出しの違反だけ（順・メインの変更の違反にしない）",
+      source(
+        "Feature: x",
+        "  Scenario: 更新",
+        "    * a",
+        "  Scenario: 更新",
+        "    * b",
+      ),
+      [{ rule: "api-spec-scenario-heading", line: 4 }],
+    ],
+    [
+      "同じ見出しの 2 つ目が一覧で前でも、順の違反にしない（更新 → レスポンス → 更新）",
+      source(
+        "Feature: x",
+        "  Scenario: 更新",
+        "    * a",
+        "  Scenario: レスポンス",
+        "    * b",
+        "  Scenario: 更新",
+        "    * c",
+      ),
+      [{ rule: "api-spec-scenario-heading", line: 6 }],
+    ],
+    [
+      "一覧に無い見出しは順に数えない（異常系 → 一覧）",
+      source(
+        "Feature: x",
+        "  Scenario: 異常系",
+        "    * a",
+        "  Scenario: 一覧",
+        "    * b",
+      ),
+      [{ rule: "api-spec-scenario-heading", line: 4 }],
+    ],
+    [
+      "順は直前の見出しだけでなく、それまでで一覧の最も後ろの見出しと比べる（異常系 → 作成 → レスポンス）",
+      source(
+        "Feature: x",
+        "  Scenario: 異常系",
+        "    * a",
+        "  Scenario: 作成",
+        "    * b",
+        "  Scenario: レスポンス",
+        "    * c",
+      ),
+      [
+        { rule: "api-spec-scenario-order", line: 4 },
+        { rule: "api-spec-scenario-order", line: 6 },
+      ],
+    ],
   ])("%s は違反", (_name, text, expected) => {
     expect(findApiSpecViolations(FEATURE, text)).toEqual(expected);
   });
@@ -1290,8 +1533,8 @@ describe("step の実装の中身（findApiSpecViolations）: must pass", () => 
       "ほかの api（型だけ）・Postgres の Repository・support.ts の対の組み立て・vitest-cucumber を足して import",
       source(
         ...REQUIRED_IMPORTS,
-        'import type { ListXResponse } from "../../features/x/internal/presentation/list-x.api";',
-        'import { PostgresXRepository } from "../../features/x/internal/infra/x-repository.postgres";',
+        'import type { ListXResponse } from "../../../features/x/internal/presentation/list-x.api";',
+        'import { PostgresXRepository } from "../../../features/x/internal/infra/x-repository.postgres";',
         'import { createXApi } from "./support";',
         'import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";',
       ),
@@ -1307,18 +1550,28 @@ describe("step の実装の中身（findApiSpecViolations）: must pass", () => 
       ),
     ],
     [
+      "vi を console の差し替え（vi.spyOn(console, ...)）だけに使う（ログに限る。Issue #258。改行・空白を挟むものも）",
+      source(
+        ...REQUIRED_IMPORTS,
+        'import { afterEach, expect, vi } from "vitest";',
+        'const log = vi.spyOn(console, "log").mockImplementation(() => undefined);',
+        "const error = vi",
+        "  .spyOn( console , 'error');",
+      ),
+    ],
+    [
       "コメントの中の vi・InMemory の import",
       source(
         ...REQUIRED_IMPORTS,
         '// import { vi } from "vitest";',
-        '/* import { InMemoryXRepository } from "../../test-support/x/x-repository.in-memory"; */',
+        '/* import { InMemoryXRepository } from "../../../test-support/x/x-repository.in-memory"; */',
       ),
     ],
     [
       "対の api を型だけで import（import type・inline の type だけ。組み立ては support.ts）",
       source(
         DATABASE_IMPORT,
-        'import type { CreateXResponse } from "../../features/x/internal/presentation/create-x.api";',
+        'import type { CreateXResponse } from "../../../features/x/internal/presentation/create-x.api";',
       ),
     ],
     [
@@ -1364,14 +1617,52 @@ describe("step の実装の中身（findApiSpecViolations）: must reject", () =
       ),
       [3, 4, 5, 6, 7, 8].map((line) => ({ rule: "api-spec-no-vi", line })),
     ],
+    ...[
+      ["vi.fn", "const f = vi.fn();"],
+      ["console 以外の spyOn", 'vi.spyOn(repository, "update");'],
+      ["vi.mock", 'vi.mock("../../../x");'],
+      ["別の変数に入れる", "const v = vi;"],
+      ["オブジェクトのプロパティに置く", "const o = { vi };"],
+      [
+        "console の別名（globalThis.console）",
+        'vi.spyOn(globalThis.console, "log");',
+      ],
+      ["プロパティの文字列で呼ぶ", 'vi["fn"]();'],
+      // WHY テンプレートリテラルで書く: 文字列リテラルに `${` を書くと noTemplateCurlyInString に掛かるため、エスケープして書く。
+      [
+        "テンプレート文字列の補間の中（reviewer の指摘）",
+        `const x = \`\${vi.spyOn(repository, "update")}\`;`,
+      ],
+      ["テンプレート文字列の補間の中の vi.fn", `const y = \`a\${vi.fn()}b\`;`],
+    ].map(([name, use]): [string, string, ApiSpecViolation[]] => [
+      `console の差し替えと一緒に、vi を ${name} に使う（import の行）`,
+      source(
+        ...REQUIRED_IMPORTS,
+        'import { vi } from "vitest";',
+        'vi.spyOn(console, "log");',
+        use ?? "",
+      ),
+      [{ rule: "api-spec-no-vi", line: 3 }],
+    ]),
+    [
+      "console の差し替えに使っていても、vi の別名・vitest・名前空間の import は違反（import の行）",
+      source(
+        ...REQUIRED_IMPORTS,
+        'import { vi as v } from "vitest";',
+        'v.spyOn(console, "log");',
+        'import * as V from "vitest";',
+        'V.vi.spyOn(console, "log");',
+      ),
+      [3, 5].map((line) => ({ rule: "api-spec-no-vi", line })),
+    ],
     [
       "*.in-memory の値の import・import type・dynamic import()・export … from・拡張子付き",
       source(
         ...REQUIRED_IMPORTS,
-        'import { InMemoryXRepository } from "../../test-support/x/x-repository.in-memory";',
-        'import type { InMemoryXRepository as T } from "../../test-support/x/x-repository.in-memory";',
-        'const m = await import("../../test-support/x/x-repository.in-memory");',
-        'export { InMemoryXRepository } from "../../test-support/x/x-repository.in-memory.ts";',
+        'import { InMemoryXRepository } from "../../../test-support/x/x-repository.in-memory";',
+        'import type { InMemoryXRepository as T } from "../../../test-support/x/x-repository.in-memory";',
+        'const m = await import("../../../test-support/x/x-repository.in-memory");',
+        'export { InMemoryXRepository } from "../../../test-support/x/x-repository.in-memory.ts";',
       ),
       [3, 4, 5, 6].map((line) => ({ rule: "api-spec-no-in-memory", line })),
     ],
@@ -1384,8 +1675,8 @@ describe("step の実装の中身（findApiSpecViolations）: must reject", () =
       "test-support/database を型だけで import（import type・inline の type だけ）",
       source(
         OWN_API_IMPORT,
-        'import type { TestDatabase } from "../../test-support/database";',
-        'import { type TestDatabase as D } from "../../test-support/database";',
+        'import type { TestDatabase } from "../../../test-support/database";',
+        'import { type TestDatabase as D } from "../../../test-support/database";',
       ),
       [{ rule: "api-spec-uses-real-database" }],
     ],
@@ -1393,7 +1684,7 @@ describe("step の実装の中身（findApiSpecViolations）: must reject", () =
       "名前・場所の一部だけが同じ別のモジュール（database-x・別の場所の test-support/database）",
       source(
         OWN_API_IMPORT,
-        'import { a } from "../../test-support/database-x";',
+        'import { a } from "../../../test-support/database-x";',
         'import { b } from "./test-support/database";',
       ),
       [{ rule: "api-spec-uses-real-database" }],
@@ -1402,7 +1693,7 @@ describe("step の実装の中身（findApiSpecViolations）: must reject", () =
       "対の api の import が無い（ほかの api だけ）",
       source(
         DATABASE_IMPORT,
-        'import type { ListXApi } from "../../features/x/internal/presentation/list-x.api";',
+        'import type { ListXApi } from "../../../features/x/internal/presentation/list-x.api";',
       ),
       [{ rule: "api-spec-uses-own-api" }],
     ],
@@ -1410,11 +1701,11 @@ describe("step の実装の中身（findApiSpecViolations）: must reject", () =
       "別の feature の同じ名前の api・api でない同じ名前のモジュール・dynamic import()・export … from・コメントの中の import",
       source(
         DATABASE_IMPORT,
-        'import type { CreateXApi as Y } from "../../features/y/internal/presentation/create-x.api";',
-        'import { a } from "../../features/x/internal/application/create-x.command";',
-        'const m = await import("../../features/x/internal/presentation/create-x.api");',
-        'export type { CreateXResponse } from "../../features/x/internal/presentation/create-x.api";',
-        '// import { CreateXApi } from "../../features/x/internal/presentation/create-x.api";',
+        'import type { CreateXApi as Y } from "../../../features/y/internal/presentation/create-x.api";',
+        'import { a } from "../../../features/x/internal/application/create-x.command";',
+        'const m = await import("../../../features/x/internal/presentation/create-x.api");',
+        'export type { CreateXResponse } from "../../../features/x/internal/presentation/create-x.api";',
+        '// import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
       ),
       [{ rule: "api-spec-uses-own-api" }],
     ],
@@ -1429,7 +1720,7 @@ describe("step の実装の中身（findApiSpecViolations）: must reject", () =
     [
       "vi と InMemory と必須の欠け（行の順、その後にファイル全体の違反）",
       source(
-        'import { InMemoryXRepository } from "../../test-support/x/x-repository.in-memory";',
+        'import { InMemoryXRepository } from "../../../test-support/x/x-repository.in-memory";',
         'import { vi } from "vitest";',
       ),
       [
@@ -1448,7 +1739,7 @@ describe("step の実装の中身（findApiSpecViolations）: must reject", () =
   it("置き場所が違えば置き場所の違反だけを返す（中身は見ない）", () => {
     expect(
       findApiSpecViolations(
-        "apps/backend/api-specs/x/nested/create-x.feature",
+        "apps/backend/spec/api/x/nested/create-x.feature",
         source("Feature: DB", "  Scenario: 一覧", "    Given 状態 201"),
       ),
     ).toEqual([{ rule: "api-spec-placement" }]);
@@ -1483,8 +1774,8 @@ describe("step の実装が呼べる API（findApiSpecViolations の api-spec-ow
       "ほかの api（別の feature も）を型だけで import（import type・inline の type だけ）・副作用だけの import",
       source(
         ...REQUIRED_IMPORTS,
-        'import type { ListXResponse } from "../../features/x/internal/presentation/list-x.api";',
-        'import { type GetYResponse } from "../../features/y/internal/presentation/get-y.api";',
+        'import type { ListXResponse } from "../../../features/x/internal/presentation/list-x.api";',
+        'import { type GetYResponse } from "../../../features/y/internal/presentation/get-y.api";',
         'import "./support";',
       ),
     ],
@@ -1493,7 +1784,7 @@ describe("step の実装が呼べる API（findApiSpecViolations の api-spec-ow
       source(
         ...REQUIRED_IMPORTS,
         '// import { listXApi } from "./support";',
-        '/* import { ListXApi } from "../../features/x/internal/presentation/list-x.api"; */',
+        '/* import { ListXApi } from "../../../features/x/internal/presentation/list-x.api"; */',
         'const text = "import { listXApi } from ./support";',
       ),
     ],
@@ -1540,10 +1831,10 @@ describe("step の実装が呼べる API（findApiSpecViolations の api-spec-ow
       "ほかの api を値で import（同じ feature・別の feature・@repo/backend/・拡張子付き・dynamic import()）",
       source(
         ...REQUIRED_IMPORTS,
-        'import { ListXApi } from "../../features/x/internal/presentation/list-x.api";',
+        'import { ListXApi } from "../../../features/x/internal/presentation/list-x.api";',
         'import { GetYApi } from "@repo/backend/features/y/internal/presentation/get-y.api.ts";',
-        'import { DeleteXApi, type DeleteXResponse } from "../../features/x/internal/presentation/delete-x.api";',
-        'const m = await import("../../features/x/internal/presentation/list-x.api");',
+        'import { DeleteXApi, type DeleteXResponse } from "../../../features/x/internal/presentation/delete-x.api";',
+        'const m = await import("../../../features/x/internal/presentation/list-x.api");',
       ),
       [3, 4, 5, 6],
     ],
@@ -1554,12 +1845,11 @@ describe("step の実装が呼べる API（findApiSpecViolations の api-spec-ow
   });
 
   it("対の組み立ての名前は api ファイルの名前の camelCase に Api を足したもの（change-x-completion → changeXCompletionApi）", () => {
-    const path =
-      "apps/backend/api-specs/x/change-x-completion.api-spec.test.ts";
+    const path = "apps/backend/spec/api/x/change-x-completion.api-spec.test.ts";
     const text = (name: string) =>
       source(
         DATABASE_IMPORT,
-        'import type { A } from "../../features/x/internal/presentation/change-x-completion.api";',
+        'import type { A } from "../../../features/x/internal/presentation/change-x-completion.api";',
         `import { ${name} } from "./support";`,
         'const feature = await loadFeature("./change-x-completion.feature");',
       );
@@ -1695,7 +1985,7 @@ describe("補助 support.ts の中身（findApiSpecViolations）", () => {
       source(
         'import { expect } from "vitest";',
         'import { sql } from "drizzle-orm";',
-        'import { CreateXApi } from "../../features/x/internal/presentation/create-x.api";',
+        'import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
       ),
     ],
     [
@@ -1705,7 +1995,7 @@ describe("補助 support.ts の中身（findApiSpecViolations）", () => {
         "  CreateXApi,",
         "  type CreateXResponse,",
         '} from "@repo/backend/features/x/internal/presentation/create-x.api.ts";',
-        'import { ListXApi } from "../../features/x/internal/presentation/list-x.api";',
+        'import { ListXApi } from "../../../features/x/internal/presentation/list-x.api";',
       ),
     ],
   ])("%s は違反なし", (_name, text) => {
@@ -1717,27 +2007,27 @@ describe("補助 support.ts の中身（findApiSpecViolations）", () => {
     [
       "api を型だけで import（import type・inline の type だけ）",
       source(
-        'import type { CreateXApi } from "../../features/x/internal/presentation/create-x.api";',
-        'import { type ListXApi } from "../../features/x/internal/presentation/list-x.api";',
+        'import type { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
+        'import { type ListXApi } from "../../../features/x/internal/presentation/list-x.api";',
       ),
     ],
     [
       "別の feature の api・presentation の api でないモジュール・入れ子の api・api のテスト・前方一致だけの別 feature",
       source(
-        'import { CreateYApi } from "../../features/y/internal/presentation/create-y.api";',
-        'import { a } from "../../features/x/internal/presentation/x-schema";',
-        'import { b } from "../../features/x/internal/application/create-x.command";',
-        'import { c } from "../../features/x/internal/presentation/nested/create-x.api";',
-        'import { d } from "../../features/x/internal/presentation/create-x.api.test";',
-        'import { e } from "../../features/x-extra/internal/presentation/create-x.api";',
+        'import { CreateYApi } from "../../../features/y/internal/presentation/create-y.api";',
+        'import { a } from "../../../features/x/internal/presentation/x-schema";',
+        'import { b } from "../../../features/x/internal/application/create-x.command";',
+        'import { c } from "../../../features/x/internal/presentation/nested/create-x.api";',
+        'import { d } from "../../../features/x/internal/presentation/create-x.api.test";',
+        'import { e } from "../../../features/x-extra/internal/presentation/create-x.api";',
       ),
     ],
     [
       "dynamic import()・export … from・コメントの中の import",
       source(
-        'const m = await import("../../features/x/internal/presentation/create-x.api");',
-        'export { CreateXApi } from "../../features/x/internal/presentation/create-x.api";',
-        '// import { CreateXApi } from "../../features/x/internal/presentation/create-x.api";',
+        'const m = await import("../../../features/x/internal/presentation/create-x.api");',
+        'export { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
+        '// import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
       ),
     ],
   ])("%s は違反", (_name, text) => {
@@ -1751,7 +2041,7 @@ describe("補助 support.ts の中身（findApiSpecViolations）", () => {
       findApiSpecViolations(
         SUPPORT,
         source(
-          'import { CreateXApi } from "../../features/x/internal/presentation/create-x.api";',
+          'import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
           'import { expect, vi } from "vitest";',
           'const m = await import("vitest");',
         ),
@@ -1761,13 +2051,27 @@ describe("補助 support.ts の中身（findApiSpecViolations）", () => {
       { rule: "api-spec-no-vi", line: 3 },
     ]);
   });
+
+  // WHY support.ts では console の差し替えも止める（Issue #258）: 差し替えは step ごとに張って外すもので、組み立ての置き場所には要らない。
+  it("console の差し替えだけに使う vi も違反（step だけの例外）", () => {
+    expect(
+      findApiSpecViolations(
+        SUPPORT,
+        source(
+          'import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
+          'import { vi } from "vitest";',
+          'vi.spyOn(console, "log");',
+        ),
+      ),
+    ).toEqual([{ rule: "api-spec-no-vi", line: 2 }]);
+  });
 });
 
 // --- 補助 support.ts の組み立て（api-spec-support-no-api-call・api-spec-support-assembler-per-api） ---
 // support.ts の値の import を満たす冒頭（create-x と list-x の api を値で import）。中身の例はこの後ろに足す（行は 3 から）。
 const SUPPORT_IMPORTS = [
-  'import { CreateXApi } from "../../features/x/internal/presentation/create-x.api";',
-  'import { ListXApi } from "../../features/x/internal/presentation/list-x.api";',
+  'import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
+  'import { ListXApi } from "../../../features/x/internal/presentation/list-x.api";',
 ];
 
 describe("補助 support.ts の組み立て（findApiSpecViolations）: must pass", () => {
@@ -1916,7 +2220,7 @@ describe("補助 support.ts の組み立て（findApiSpecViolations）: must rej
 });
 
 // --- 列挙 → 読み取り → 判定を通した fixture テスト ---
-// WHY: 判定が正しくても、対象の列挙（api-specs/ の下・外の *.api-spec.test.*・api ファイルの見つけ方）が漏れれば見逃す。一時
+// WHY: 判定が正しくても、対象の列挙（spec/api/ の下・外の *.api-spec.test.*・api ファイルの見つけ方）が漏れれば見逃す。一時
 //   ディレクトリに架空のツリーを置き、本番と同じ collectApiSpecViolations に通して、違反の集合を丸ごと比較する。
 describe("API 仕様の列挙と検査（fixture）", () => {
   // WHY OS の一時ディレクトリに置く: リポジトリ内に置くと本番の検査や Biome・git の差分に混ざる。afterAll で消す。
@@ -1936,22 +2240,22 @@ describe("API 仕様の列挙と検査（fixture）", () => {
   }
 
   const presentation = "apps/backend/features/x/internal/presentation";
-  const specs = "apps/backend/api-specs/x";
+  const specs = "apps/backend/spec/api/x";
   const goodFeature = source(
     "Feature: x",
     "  Scenario: レスポンス",
     "    * 作られる",
   );
-  // api-specs/x/<name>.api-spec.test.ts の必須の import（実 DB と対の api）。
+  // spec/api/x/<name>.api-spec.test.ts の必須の import（実 DB と対の api）。
   const stepsFor = (name: string, ...extra: string[]) =>
     source(
       DATABASE_IMPORT,
-      `import type { A } from "../../features/x/internal/presentation/${name}.api";`,
+      `import type { A } from "../../../features/x/internal/presentation/${name}.api";`,
       ...extra,
       `const feature = await loadFeature("./${name}.feature");`,
     );
 
-  it("api-specs/ の下・外の *.api-spec.test.*・api ファイルを対象にし、違反を「規則: パス(:行)（無いファイル）」で返す", () => {
+  it("spec/api/ の下・外の *.api-spec.test.*・api ファイルを対象にし、違反を「規則: パス(:行)（無いファイル）」で返す", () => {
     const root = fixture({
       // 対がそろい、中身も違反なし（support.ts も）。
       [`${presentation}/create-x.api.ts`]: "export class CreateXApi {}\n",
@@ -1959,15 +2263,15 @@ describe("API 仕様の列挙と検査（fixture）", () => {
       [`${specs}/create-x.api-spec.test.ts`]: stepsFor("create-x"),
       [`${specs}/support.ts`]: source(
         'import { expect } from "vitest";',
-        `import { CreateXApi } from "../../features/x/internal/presentation/create-x.api";`,
+        `import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";`,
       ),
       // 補助の違反: 自 feature の api を型だけで import（組み立てていない）。
-      "apps/backend/api-specs/y/support.ts": source(
-        'import type { CreateYApi } from "../../features/y/internal/presentation/create-y.api";',
+      "apps/backend/spec/api/y/support.ts": source(
+        'import type { CreateYApi } from "../../../features/y/internal/presentation/create-y.api";',
       ),
       // 補助の違反: すべての Api を 1 つの関数で組み立て、組み立て関数を呼ぶ（前提を API で作る口）。
-      "apps/backend/api-specs/z/support.ts": source(
-        'import { CreateZApi } from "../../features/z/internal/presentation/create-z.api";',
+      "apps/backend/spec/api/z/support.ts": source(
+        'import { CreateZApi } from "../../../features/z/internal/presentation/create-z.api";',
         "export function zApis(db) {",
         "  return new CreateZApi(db).handle;",
         "}",
@@ -1997,13 +2301,13 @@ describe("API 仕様の列挙と検査（fixture）", () => {
       // 置き場所の違反: 補助の別名・サブディレクトリ・直下・外の step。
       [`${specs}/helper.ts`]: "export const a = 1;\n",
       [`${specs}/nested/create-x.feature`]: "Feature: DB\n",
-      "apps/backend/api-specs/support.ts": "export const a = 1;\n",
+      "apps/backend/spec/api/support.ts": "export const a = 1;\n",
       [`${presentation}/create-x.api-spec.test.ts`]: "",
       "apps/frontend_customer/x.api-spec.test.tsx": "",
-      // 対象外: presentation の単体テスト・api-journeys・node_modules と . で始まるディレクトリの中。
+      // 対象外: presentation の単体テスト・spec/journey・node_modules と . で始まるディレクトリの中。
       [`${presentation}/create-x.api.test.ts`]:
         'import { vi } from "vitest";\n',
-      "apps/backend/api-journeys/x.feature": "Feature: DB\n",
+      "apps/backend/spec/journey/x.feature": "Feature: DB\n",
       "apps/backend/node_modules/x/x.api-spec.test.ts": "",
       "apps/frontend_customer/.next/x.api-spec.test.ts": "",
     });
@@ -2012,45 +2316,45 @@ describe("API 仕様の列挙と検査（fixture）", () => {
       violations: collectApiSpecViolations(root),
     }).toEqual({
       files: [
-        "apps/backend/api-specs/support.ts",
-        "apps/backend/api-specs/x/create-x.api-spec.test.ts",
-        "apps/backend/api-specs/x/create-x.feature",
-        "apps/backend/api-specs/x/get-x.feature",
-        "apps/backend/api-specs/x/helper.ts",
-        "apps/backend/api-specs/x/list-x.api-spec.test.ts",
-        "apps/backend/api-specs/x/list-x.feature",
-        "apps/backend/api-specs/x/nested/create-x.feature",
-        "apps/backend/api-specs/x/rename-x.api-spec.test.ts",
-        "apps/backend/api-specs/x/support.ts",
-        "apps/backend/api-specs/y/support.ts",
-        "apps/backend/api-specs/z/support.ts",
         "apps/backend/features/x/internal/presentation/create-x.api-spec.test.ts",
         "apps/backend/features/x/internal/presentation/create-x.api.ts",
         "apps/backend/features/x/internal/presentation/delete-x.api.ts",
         "apps/backend/features/x/internal/presentation/get-x.api.ts",
         "apps/backend/features/x/internal/presentation/list-x.api.ts",
+        "apps/backend/spec/api/support.ts",
+        "apps/backend/spec/api/x/create-x.api-spec.test.ts",
+        "apps/backend/spec/api/x/create-x.feature",
+        "apps/backend/spec/api/x/get-x.feature",
+        "apps/backend/spec/api/x/helper.ts",
+        "apps/backend/spec/api/x/list-x.api-spec.test.ts",
+        "apps/backend/spec/api/x/list-x.feature",
+        "apps/backend/spec/api/x/nested/create-x.feature",
+        "apps/backend/spec/api/x/rename-x.api-spec.test.ts",
+        "apps/backend/spec/api/x/support.ts",
+        "apps/backend/spec/api/y/support.ts",
+        "apps/backend/spec/api/z/support.ts",
         "apps/frontend_customer/x.api-spec.test.tsx",
       ],
       violations: [
-        "api-spec-placement: apps/backend/api-specs/support.ts",
-        "api-spec-placement: apps/backend/api-specs/x/helper.ts",
-        "api-spec-no-vi: apps/backend/api-specs/x/list-x.api-spec.test.ts:3",
-        "api-spec-no-skip: apps/backend/api-specs/x/list-x.api-spec.test.ts:4",
-        "api-spec-own-api-only: apps/backend/api-specs/x/list-x.api-spec.test.ts:5",
-        "api-spec-scenario-heading: apps/backend/api-specs/x/list-x.feature:2",
-        "api-spec-step-star: apps/backend/api-specs/x/list-x.feature:2",
-        "api-spec-step-star: apps/backend/api-specs/x/list-x.feature:3",
-        "api-spec-business-language: apps/backend/api-specs/x/list-x.feature:3",
-        "api-spec-tag: apps/backend/api-specs/x/list-x.feature:4",
-        "api-spec-placement: apps/backend/api-specs/x/nested/create-x.feature",
-        "api-spec-pair: apps/backend/api-specs/x/rename-x.api-spec.test.ts（対の apps/backend/features/x/internal/presentation/rename-x.api.ts が無い）",
-        "api-spec-support-assembles-apis: apps/backend/api-specs/y/support.ts",
-        "api-spec-support-assembler-per-api: apps/backend/api-specs/z/support.ts:3",
-        "api-spec-support-no-api-call: apps/backend/api-specs/z/support.ts:6",
         "api-spec-placement: apps/backend/features/x/internal/presentation/create-x.api-spec.test.ts",
-        "api-spec-pair: apps/backend/features/x/internal/presentation/delete-x.api.ts（apps/backend/api-specs/x/delete-x.feature が無い）",
-        "api-spec-pair: apps/backend/features/x/internal/presentation/delete-x.api.ts（apps/backend/api-specs/x/delete-x.api-spec.test.ts が無い）",
-        "api-spec-pair: apps/backend/features/x/internal/presentation/get-x.api.ts（apps/backend/api-specs/x/get-x.api-spec.test.ts が無い）",
+        "api-spec-pair: apps/backend/features/x/internal/presentation/delete-x.api.ts（apps/backend/spec/api/x/delete-x.feature が無い）",
+        "api-spec-pair: apps/backend/features/x/internal/presentation/delete-x.api.ts（apps/backend/spec/api/x/delete-x.api-spec.test.ts が無い）",
+        "api-spec-pair: apps/backend/features/x/internal/presentation/get-x.api.ts（apps/backend/spec/api/x/get-x.api-spec.test.ts が無い）",
+        "api-spec-placement: apps/backend/spec/api/support.ts",
+        "api-spec-placement: apps/backend/spec/api/x/helper.ts",
+        "api-spec-no-vi: apps/backend/spec/api/x/list-x.api-spec.test.ts:3",
+        "api-spec-no-skip: apps/backend/spec/api/x/list-x.api-spec.test.ts:4",
+        "api-spec-own-api-only: apps/backend/spec/api/x/list-x.api-spec.test.ts:5",
+        "api-spec-scenario-heading: apps/backend/spec/api/x/list-x.feature:2",
+        "api-spec-step-star: apps/backend/spec/api/x/list-x.feature:2",
+        "api-spec-step-star: apps/backend/spec/api/x/list-x.feature:3",
+        "api-spec-business-language: apps/backend/spec/api/x/list-x.feature:3",
+        "api-spec-tag: apps/backend/spec/api/x/list-x.feature:4",
+        "api-spec-placement: apps/backend/spec/api/x/nested/create-x.feature",
+        "api-spec-pair: apps/backend/spec/api/x/rename-x.api-spec.test.ts（対の apps/backend/features/x/internal/presentation/rename-x.api.ts が無い）",
+        "api-spec-support-assembles-apis: apps/backend/spec/api/y/support.ts",
+        "api-spec-support-assembler-per-api: apps/backend/spec/api/z/support.ts:3",
+        "api-spec-support-no-api-call: apps/backend/spec/api/z/support.ts:6",
         "api-spec-placement: apps/frontend_customer/x.api-spec.test.tsx",
       ],
     });
@@ -2066,13 +2370,13 @@ describe("API 仕様の列挙と検査（fixture）", () => {
 });
 
 describe("API 仕様（実ファイル）", () => {
-  it("presentation の api ファイルごとに apps/backend/api-specs/<feature>/ に <api>.feature と <api>.api-spec.test.ts があり、.feature は固定の見出しの Scenario と `*` の step を業務の言葉だけで書き、step の実装は vi と InMemory を使わず、実 DB を使って対の api を参照し、対象でない API の handler を手に入れず、support.ts が api を値で API ごとに組み立て、handler を呼ばない", () => {
+  it("presentation の api ファイルごとに apps/backend/spec/api/<feature>/ に <api>.feature と <api>.api-spec.test.ts があり、.feature は固定の見出しの Scenario と `*` の step を業務の言葉だけで書き、step の実装は vi と InMemory を使わず、実 DB を使って対の api を参照し、対象でない API の handler を手に入れず、support.ts が api を値で API ごとに組み立て、handler を呼ばない", () => {
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     expect(listApiSpecTargets(repoRoot)).toEqual(
       expect.arrayContaining([
         "apps/backend/features/todo/internal/presentation/list-todos.api.ts",
-        "apps/backend/api-specs/todo/list-todos.feature",
-        "apps/backend/api-specs/todo/list-todos.api-spec.test.ts",
+        "apps/backend/spec/api/todo/list-todos.feature",
+        "apps/backend/spec/api/todo/list-todos.api-spec.test.ts",
       ]),
     );
     expect(collectApiSpecViolations(repoRoot)).toEqual([]);

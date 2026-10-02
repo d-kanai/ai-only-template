@@ -1,13 +1,21 @@
 // @vitest-environment node
 import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
-import { afterAll, beforeAll, beforeEach, expect } from "vitest";
-import type { ChangeTodoCompletionResponse } from "../../features/todo/internal/presentation/change-todo-completion.api";
-import type { ChangeEntry } from "../../shared/infra/change-log";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  type MockInstance,
+  vi,
+} from "vitest";
+import type { ChangeTodoCompletionResponse } from "../../../features/todo/internal/presentation/change-todo-completion.api";
+import type { ChangeEntry } from "../../../shared/infra/change-log";
 import {
   createTestDatabase,
   type TestDatabase,
-} from "../../test-support/database";
-import { aTodo, type BuiltTodo } from "../../test-support/todo/todo-builder";
+} from "../../../test-support/database";
+import { aTodo, type BuiltTodo } from "../../../test-support/todo/todo-builder";
 import {
   changeTodoCompletionApi,
   context,
@@ -34,17 +42,18 @@ import {
 
 let database: TestDatabase;
 let handler: ReturnType<typeof changeTodoCompletionApi>;
-// 完了の通知の口に渡されたメッセージ（呼ばれた順）。
-// WHY 本番の notify（notification の expose）ではなく記録する関数を渡す: notify はログに出すだけで、仕様から結果を読めない
-//   （vi は使わない）。notify につながっていることは change-todo-completion.api.test.ts の「本番の PUT」のテストが見る。
-const notifications: string[] = [];
+// 完了の通知は本物の notification モジュール（expose の notify。support.ts の組み立て）が送り、今の送り先はログ（console.log の
+//   JSON 1 行）だけ。通知の確かめは、そのログの行を読んで行う。
+// WHY console.log を差し替える（テストダブル無しの例外。Issue #258）: ログは本番の部品の外（実行環境の出力先）で、差し替えずには
+//   仕様から読めない。ログに限って差し替えてよい（daiki の判断 2026-10-02。rule-tests/api-spec.test.ts の api-spec-no-vi が
+//   vi.spyOn(console, ...) だけを通す）。mockImplementation で出力も止める（db_write の行などでテストの出力を埋めない）。
+// WHY step ごとに張って外す: 前の step の行を数えない。
+let log: MockInstance<typeof console.log>;
 
 beforeAll(async () => {
   database = await createTestDatabase();
   await database.migrate();
-  handler = changeTodoCompletionApi(database.db, (message) => {
-    notifications.push(message);
-  });
+  handler = changeTodoCompletionApi(database.db);
 });
 
 afterAll(async () => {
@@ -53,8 +62,28 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await emptyTodos(database.db);
-  notifications.length = 0;
+  log = vi.spyOn(console, "log").mockImplementation(() => undefined);
 });
+
+afterEach(() => {
+  log.mockRestore();
+});
+
+// ログに出た通知の本文（出た順）。ログの行のうち event.name が notification のもの（notification-sender.log.ts）だけを読む。
+// 限界: 通知の行は notify の中で同期に出る（send の本体が await の前に logger.emit を呼ぶ）ので、handler の応答の後に読めば揃っている。
+//   送信が本当に非同期になった（await の後にログを出す）ら、ここで待つ必要がある。
+function notifications(): string[] {
+  return log.mock.calls
+    .map(
+      ([line]) =>
+        JSON.parse(String(line)) as {
+          event: { name: string };
+          notification?: string;
+        },
+    )
+    .filter((entry) => entry.event.name === "notification")
+    .map((entry) => entry.notification ?? "");
+}
 
 async function putCompletion(id: string, body: unknown): Promise<Response> {
   return handler(
@@ -102,6 +131,40 @@ const MISSING_ID = "00000000-0000-4000-8000-000000000000";
 const feature = await loadFeature("./change-todo-completion.feature");
 
 describeFeature(feature, ({ Scenario }) => {
+  // WHY 更新の step は保存された Todo の行を見る: 更新 = 完了かどうかを変える Todo 自身の振る舞い（Issue #249）。返る内容は
+  //   レスポンスの step、完了の履歴は記録の step が見る。
+  Scenario("更新", ({ And }) => {
+    // WHY ほかの Todo を置く: 条件（where）の欠けた UPDATE ですべての Todo を完了にする誤りを見分ける。作成日時を古くして、
+    //   行の順（作成日時の順）で先頭に来るようにする。
+    And(
+      "未完了の Todo を完了にすると、完了として保存され、ほかの Todo は変わらない",
+      async () => {
+        const bread = await aTodo(database.db)
+          .title("パンを買う")
+          .createdAt(new Date("2026-09-01T00:00:00.000Z"))
+          .build();
+        const milk = await uncompletedTodo("牛乳を買う");
+
+        await putCompletion(milk.id, { completed: true });
+
+        await expect(todoRows(database.db)).resolves.toStrictEqual([
+          todoRowOf(bread),
+          todoRowOf({ ...milk, completed: true }),
+        ]);
+      },
+    );
+
+    And("完了の Todo を未完了に戻すと、未完了として保存される", async () => {
+      const milk = await completedTodo("牛乳を買う");
+
+      await putCompletion(milk.id, { completed: false });
+
+      await expect(todoRows(database.db)).resolves.toStrictEqual([
+        todoRowOf({ ...milk, completed: false }),
+      ]);
+    });
+  });
+
   Scenario("レスポンス", ({ And }) => {
     And("未完了の Todo を完了にすると、完了になった Todo が返る", async () => {
       const milk = await uncompletedTodo("牛乳を買う");
@@ -144,23 +207,6 @@ describeFeature(feature, ({ Scenario }) => {
   });
 
   Scenario("記録", ({ And }) => {
-    // WHY ほかの Todo を置く: 条件（where）の欠けた UPDATE ですべての Todo を完了にする誤りを見分ける。作成日時を古くして、
-    //   行の順（作成日時の順）で先頭に来るようにする。
-    And("完了にしたことが保存され、ほかの Todo は変わらない", async () => {
-      const bread = await aTodo(database.db)
-        .title("パンを買う")
-        .createdAt(new Date("2026-09-01T00:00:00.000Z"))
-        .build();
-      const milk = await uncompletedTodo("牛乳を買う");
-
-      await putCompletion(milk.id, { completed: true });
-
-      await expect(todoRows(database.db)).resolves.toStrictEqual([
-        todoRowOf(bread),
-        todoRowOf({ ...milk, completed: true }),
-      ]);
-    });
-
     // 変更の記録は、todos の completed の update と、完了の履歴の insert（全列）の 2 件だけ（前提はビルダーで入れたので記録を残さない。
     //   .feature には書かない。create-todo.api-spec.test.ts の冒頭）。
     And("完了にすると、完了の履歴に「完了」が 1 件足される", async () => {
@@ -214,7 +260,7 @@ describeFeature(feature, ({ Scenario }) => {
         await putCompletion(milk.id, { completed: true });
         await putCompletion(milk.id, { completed: true });
 
-        expect(notifications).toStrictEqual([`Todo completed: ${milk.id}`]);
+        expect(notifications()).toStrictEqual([`Todo completed: ${milk.id}`]);
       },
     );
 
@@ -224,7 +270,7 @@ describeFeature(feature, ({ Scenario }) => {
       const response = await putCompletion(milk.id, { completed: false });
 
       expect(response.status).toBe(200);
-      expect(notifications).toStrictEqual([]);
+      expect(notifications()).toStrictEqual([]);
     });
   });
 
@@ -239,7 +285,7 @@ describeFeature(feature, ({ Scenario }) => {
         response,
         notFoundProblem(MISSING_ID, `/api/todos/${MISSING_ID}/completion`),
       );
-      expect(notifications).toStrictEqual([]);
+      expect(notifications()).toStrictEqual([]);
     });
 
     // 文字列の "true" も拒否する（型の違い。json-body.ts の toProblemError の request.field.notBoolean）。
@@ -270,7 +316,7 @@ describeFeature(feature, ({ Scenario }) => {
           todoRowOf(milk),
         ]);
         await expect(logEntries(database.db)).resolves.toStrictEqual([]);
-        expect(notifications).toStrictEqual([]);
+        expect(notifications()).toStrictEqual([]);
       },
     );
   });

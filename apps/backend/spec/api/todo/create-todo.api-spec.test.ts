@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";
-import type { CreateTodoResponse } from "../../features/todo/internal/presentation/create-todo.api";
+import type { CreateTodoResponse } from "../../../features/todo/internal/presentation/create-todo.api";
 import {
   createTestDatabase,
   type TestDatabase,
-} from "../../test-support/database";
+} from "../../../test-support/database";
 import {
   createTodoApi,
   emptyTodos,
@@ -71,63 +71,74 @@ async function expectNothingStored(): Promise<void> {
 const feature = await loadFeature("./create-todo.feature");
 
 describeFeature(feature, ({ Scenario }) => {
-  Scenario("レスポンス", ({ And }) => {
+  // WHY 作成の step は保存された Todo の行を見る: 作成 = 作られる Todo 自身の振る舞い（Issue #249）。返る内容はレスポンスの step が見る。
+  Scenario("作成", ({ And }) => {
     // id と作成日時は API が決める（randomUUID と now()）ので、形と範囲を確かめる。作成日時は要求の前後の時刻の間。
-    And("タイトルを渡すと、未完了の Todo が作られて返る", async () => {
+    // 変更の記録も、Todo と完了の履歴の作成（insert）の 2 件だけが残る（冒頭の WHY のとおり .feature には書かない。作る操作の
+    //   結果を確かめるこの step に置く）。
+    And("タイトルを渡すと、未完了の Todo が作られる", async () => {
       const before = Date.now();
 
-      const response = await postTodo({ title: "牛乳を買う" });
-
-      const after = Date.now();
-      expect(response.status).toBe(201);
-      const body = (await response.json()) as CreateTodoResponse;
-      expect(body).toStrictEqual({
-        id: expect.stringMatching(
-          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-        ),
-        title: "牛乳を買う",
-        completed: false,
-        createdAt: new Date(Date.parse(body.createdAt)).toISOString(),
-      } satisfies CreateTodoResponse);
-      expect(Date.parse(body.createdAt)).toBeGreaterThanOrEqual(before);
-      expect(Date.parse(body.createdAt)).toBeLessThanOrEqual(after);
-    });
-
-    And("タイトルの前後の空白は除かれる", async () => {
-      const response = await postTodo({ title: " \t牛乳を買う　" });
-
-      expect(response.status).toBe(201);
-      await expect(response.json()).resolves.toMatchObject({
-        title: "牛乳を買う",
-      });
-    });
-
-    // 上限は domain の TODO_TITLE_MAX_LENGTH（100）。文字数はコードポイント数（絵文字 1 つは String#length では 2）。
-    And("100 文字のタイトルまで作れる（絵文字は 1 文字と数える）", async () => {
-      const title = "🍎".repeat(100);
-
-      const response = await postTodo({ title });
-
-      expect(response.status).toBe(201);
-      await expect(response.json()).resolves.toMatchObject({ title });
-    });
-  });
-
-  Scenario("記録", ({ And }) => {
-    // 行の全列（id・タイトル・完了かどうか・作成日時）が応答と同じ。作成日時は行では Date（schema.ts の mode "date"）。
-    // 変更の記録も、Todo と完了の履歴の作成（insert）の 2 件だけが残る（冒頭の WHY のとおり .feature には書かない）。
-    And("作った Todo が、返った内容のとおりに保存される", async () => {
       const milk = await createTodo("牛乳を買う");
 
-      await expect(todoRows(database.db)).resolves.toStrictEqual([
-        { ...milk, createdAt: new Date(milk.createdAt) },
+      const after = Date.now();
+      const rows = await todoRows(database.db);
+      expect(rows).toStrictEqual([
+        {
+          id: expect.stringMatching(
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+          ),
+          title: "牛乳を買う",
+          completed: false,
+          createdAt: expect.any(Date),
+        },
       ]);
+      expect(rows[0]?.createdAt.getTime()).toBeGreaterThanOrEqual(before);
+      expect(rows[0]?.createdAt.getTime()).toBeLessThanOrEqual(after);
       const created = await statusRowOf(database.db, milk.id, 0);
       await expect(logEntries(database.db)).resolves.toStrictEqual(
         sortedLogs([todoInsertLog(milk), statusInsertLog(created)]),
       );
     });
 
+    And("タイトルの前後の空白は除かれる", async () => {
+      await createTodo(" \t牛乳を買う　");
+
+      await expect(todoRows(database.db)).resolves.toMatchObject([
+        { title: "牛乳を買う" },
+      ]);
+    });
+
+    // 上限は domain の TODO_TITLE_MAX_LENGTH（100）。文字数はコードポイント数（絵文字 1 つは String#length では 2）。
+    And("100 文字のタイトルまで作れる（絵文字は 1 文字と数える）", async () => {
+      const title = "🍎".repeat(100);
+
+      await createTodo(title);
+
+      await expect(todoRows(database.db)).resolves.toMatchObject([{ title }]);
+    });
+  });
+
+  Scenario("レスポンス", ({ And }) => {
+    // 応答の全項目（id・タイトル・完了かどうか・作成日時）が保存された行と同じ。作成日時は応答では ISO 8601 の文字列、行では Date
+    //   （schema.ts の mode "date"）。
+    // WHY 前後に空白のあるタイトルで作る: 要求のタイトルを（空白を除く前のまま）返す誤りを、保存された行との違いで見分ける。
+    And("作った Todo が、保存された内容のとおりに返る", async () => {
+      const response = await postTodo({ title: " 牛乳を買う\t" });
+
+      expect(response.status).toBe(201);
+      const [row] = await todoRows(database.db);
+      expect(row).toBeDefined();
+      await expect(response.json()).resolves.toStrictEqual({
+        id: row?.id ?? "",
+        title: "牛乳を買う",
+        completed: false,
+        createdAt: row?.createdAt.toISOString() ?? "",
+      } satisfies CreateTodoResponse);
+    });
+  });
+
+  Scenario("記録", ({ And }) => {
     // 作成日時に未完了（Todo.create）。
     And("完了の履歴に、作成時の「未完了」が 1 件残る", async () => {
       const milk = await createTodo("牛乳を買う");

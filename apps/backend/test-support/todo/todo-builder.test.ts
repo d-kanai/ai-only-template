@@ -10,7 +10,7 @@ import { createTestDatabase, type TestDatabase } from "../database";
 import { aTodo } from "./todo-builder";
 
 // テストデータビルダー aTodo（todo-builder.ts）の仕様。実 Postgres（テスト用のスキーマ）に入った行と、build() の返り値を比べる。
-// WHY 実 Postgres で確かめる: ビルダーは API 仕様（api-specs/）の前提を表に直接入れる道具で、入った行（列・履歴の位置・日時）が
+// WHY 実 Postgres で確かめる: ビルダーは API 仕様（spec/api/）の前提を表に直接入れる道具で、入った行（列・履歴の位置・日時）が
 //   ずれると、仕様の期待値が DB と食い違ったまま気づけない。
 
 let database: TestDatabase;
@@ -172,7 +172,7 @@ describe("aTodo（Todo のテストデータビルダー）", () => {
     ]);
   });
 
-  // 履歴の無い Todo（デプロイの途中で古い版が作ったもの。Repository が補って読む。Issue #194）も作れる。
+  // 履歴の無い Todo（壊れた Todo。Repository の読み出しで 500 になることを確かめる前提に使う）も作れる。
   it("空の履歴を指定すると、Todo だけが入り、完了の履歴は入らない", async () => {
     const todo = await aTodo(database.db).statusChanges([]).build();
 
@@ -188,7 +188,7 @@ describe("aTodo（Todo のテストデータビルダー）", () => {
     await expect(statusRows()).resolves.toStrictEqual([]);
   });
 
-  // WHY: 前提の用意は Writer を通らない（記録は対象の操作のものだけにする。api-specs/todo/support.ts の冒頭）。
+  // WHY: 前提の用意は Writer を通らない（記録は対象の操作のものだけにする。spec/api/todo/support.ts の冒頭）。
   it("変更の記録（change_logs）は書かない", async () => {
     await aTodo(database.db).completed(true).build();
 

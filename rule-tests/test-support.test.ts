@@ -25,9 +25,9 @@ import { afterAll, describe, expect, it } from "vitest";
 //   - dockerignore-entry: .dockerignore に `**/test-support` の行が無い（前後の空白を除いた行が完全一致。コメントアウト・
 //     末尾の / 付き・別のパターンは認めない）。
 //   - dockerignore-excludes: apps/*/test-support/ の下のファイル（再帰）と、test-support を import する apps/ の下のテスト（*.test.*）と、
-//     apps/backend/api-specs/ の下のファイル（API 仕様。`.feature`・step・support.ts。Issue #219）のうち、.dockerignore のパターンで
-//     除外されないもの。WHY api-specs も外す: support.ts はテストでない名前のソースで vitest を import する（テストだけが使う
-//     コード）。イメージに入れない（.dockerignore の `**/api-specs`）。
+//     apps/backend/spec/ の下のファイル（API 仕様 spec/api/ と API ジャーニー spec/journey/。`.feature`・step・support.ts。Issue #219 /
+//     #251）のうち、.dockerignore のパターンで除外されないもの。WHY spec も外す: API 仕様の support.ts はテストでない名前のソースで
+//     vitest を import する（テストだけが使うコード）。.feature も人が読む仕様でイメージに要らない（.dockerignore の `**/spec`）。
 //     WHY (a) と別に持つ: 行があっても、後ろの `!` の行（`!apps/backend/test-support/x.ts` など）で戻されると入る。行の有無だけでなく、
 //     実際のファイルが除外されることを確かめる。
 //     WHY test-support を import するテストも: test-support を外してもテストがコンテキストに残ると、next build の型チェック
@@ -85,8 +85,9 @@ type RuleId =
 const repoRoot = join(import.meta.dirname, "..");
 
 const TEST_SUPPORT_DIR = "test-support";
-// API 仕様（apps/backend/api-specs/。Issue #219）。テストだけが使うコードなので、test-support と同じくイメージに入れない。
-const API_SPECS_DIR = "api-specs";
+// 人が読む仕様（apps/backend/spec/。API 仕様 spec/api/ と API ジャーニー spec/journey/。Issue #219 / #251）。テストだけが使う
+//   コードなので、test-support と同じくイメージに入れない。
+const SPEC_DIR = "spec";
 const DOCKERIGNORE_ENTRY = `**/${TEST_SUPPORT_DIR}`;
 
 // --- (a) .dockerignore の行 ---
@@ -293,9 +294,9 @@ function listDockerExcludedTargets(root: string): string[] {
       findTestSupportImports(readFileSync(join(root, path), "utf8")).length > 0,
   );
   const apiSpecFiles = walk(root, "apps").filter((path) =>
-    path.split("/").includes(API_SPECS_DIR),
+    path.split("/").includes(SPEC_DIR),
   );
-  // WHY 重ねを除く: api-specs の step は test-support を import するテストでもあり、2 つの列挙の両方に入る。
+  // WHY 重ねを除く: spec/api の step は test-support を import するテストでもあり、2 つの列挙の両方に入る。
   return [
     ...new Set([
       ...listTestSupportFiles(root),
@@ -816,10 +817,10 @@ describe("列挙と検査（fixture）", () => {
     'import { createTestDatabase } from "../../../../test-support/database";';
   // API 仕様（Issue #219）。.feature・step（test-support を import するテストでもある）・support.ts のすべてを .dockerignore で外す。
   const apiSpecFiles = {
-    "apps/backend/api-specs/x/create-x.feature": "Feature: x\n",
-    "apps/backend/api-specs/x/create-x.api-spec.test.ts":
-      'import { createTestDatabase } from "../../test-support/database";\n',
-    "apps/backend/api-specs/x/support.ts": 'import { expect } from "vitest";\n',
+    "apps/backend/spec/api/x/create-x.feature": "Feature: x\n",
+    "apps/backend/spec/api/x/create-x.api-spec.test.ts":
+      'import { createTestDatabase } from "../../../test-support/database";\n',
+    "apps/backend/spec/api/x/support.ts": 'import { expect } from "vitest";\n',
   };
   const allowedFiles = {
     "apps/backend/test-support/database.ts": lines(
@@ -868,7 +869,7 @@ describe("列挙と検査（fixture）", () => {
         "# x",
         ".git",
         "**/test-support",
-        "**/api-specs",
+        "**/spec",
         "**/*.test.ts",
         "**/*.test.tsx",
         "!.env.example",
@@ -887,19 +888,19 @@ describe("列挙と検査（fixture）", () => {
         "apps/frontend_customer/test-support/i18n.tsx",
       ],
       excludedTargets: [
-        "apps/backend/api-specs/x/create-x.api-spec.test.ts",
-        "apps/backend/api-specs/x/create-x.feature",
-        "apps/backend/api-specs/x/support.ts",
         "apps/backend/features/x/internal/infra/x.postgres.test.ts",
+        "apps/backend/spec/api/x/create-x.api-spec.test.ts",
+        "apps/backend/spec/api/x/create-x.feature",
+        "apps/backend/spec/api/x/support.ts",
         "apps/backend/test-support/database.ts",
         "apps/backend/test-support/nested/x.ts",
         "apps/frontend_customer/features/x/x.test.tsx",
         "apps/frontend_customer/test-support/i18n.tsx",
       ],
-      // api-specs の support.ts もテストでない名前のソースなので、本番のソースとして test-support の import を見る（今の形）。
+      // spec/api の support.ts もテストでない名前のソースなので、本番のソースとして test-support の import を見る（今の形）。
       production: [
-        "apps/backend/api-specs/x/support.ts",
         "apps/backend/features/x/internal/infra/x.postgres.ts",
+        "apps/backend/spec/api/x/support.ts",
       ],
       packages: [
         "apps/backend/package.json",
@@ -918,7 +919,7 @@ describe("列挙と検査（fixture）", () => {
   it("すべての規則の違反を「規則: パス」で返す", () => {
     const root = fixture({
       ...allowedFiles,
-      // **/api-specs の行が無い → api-specs の .feature と support.ts が除外されない（step は **/*.test.ts の行も無いので除外されない）。
+      // **/spec の行が無い → spec/api の .feature と support.ts が除外されない（step は **/*.test.ts の行も無いので除外されない）。
       ...apiSpecFiles,
       // 行が無く、別の書き方（/ 付き）だけ → test-support/ のすべてのファイルが除外されない。
       ".dockerignore": lines(".git", "**/test-support/"),
@@ -946,10 +947,10 @@ describe("列挙と検査（fixture）", () => {
         "dockerignore-entry: .dockerignore に **/test-support が無い",
       ],
       "dockerignore-excludes": [
-        "dockerignore-excludes: apps/backend/api-specs/x/create-x.api-spec.test.ts",
-        "dockerignore-excludes: apps/backend/api-specs/x/create-x.feature",
-        "dockerignore-excludes: apps/backend/api-specs/x/support.ts",
         "dockerignore-excludes: apps/backend/features/x/internal/infra/x.postgres.test.ts",
+        "dockerignore-excludes: apps/backend/spec/api/x/create-x.api-spec.test.ts",
+        "dockerignore-excludes: apps/backend/spec/api/x/create-x.feature",
+        "dockerignore-excludes: apps/backend/spec/api/x/support.ts",
         "dockerignore-excludes: apps/backend/test-support/database.ts",
         "dockerignore-excludes: apps/backend/test-support/nested/x.ts",
         "dockerignore-excludes: apps/frontend_customer/features/x/x.test.tsx",
@@ -1267,9 +1268,10 @@ describe("test-support（実ファイル）", () => {
     expect(files).toContain(
       "apps/frontend_customer/features/todo/components/todo-item.test.tsx",
     );
-    // Issue #219: API 仕様（.feature・step・support.ts）も .dockerignore の **/api-specs で外す。
-    expect(files).toContain("apps/backend/api-specs/todo/support.ts");
-    expect(files).toContain("apps/backend/api-specs/todo/create-todo.feature");
+    // Issue #219 / #251: API 仕様（.feature・step・support.ts）と API ジャーニーの .feature も .dockerignore の **/spec で外す。
+    expect(files).toContain("apps/backend/spec/api/todo/support.ts");
+    expect(files).toContain("apps/backend/spec/api/todo/create-todo.feature");
+    expect(files).toContain("apps/backend/spec/journey/todo-lifecycle.feature");
     expect(violations["dockerignore-excludes"]).toEqual([]);
   });
 

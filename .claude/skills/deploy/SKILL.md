@@ -18,7 +18,7 @@ Terraform は環境のディレクトリ（`infra/envs/stg` か `infra/envs/prod
 
 ## 通常のデプロイ（main へのマージ → stg）
 `.github/workflows/deploy.yml` が Environment `stg` で自動で動く: 2 イメージ（runtime / migrate）を build・push → migrate ジョブの実行（`--wait`）→ service のデプロイ → `update-traffic --to-latest`（トラフィックを最新のリビジョンへ）→ 同じ migrate ジョブで backfill（`--args=pnpm,db:backfill`。データの移行。Issue #194）。
-- backfill は切替の後に流す（WHY: 切替の前だと、切替までの間に旧アプリが書いた行が漏れる）。失敗してもアプリは切替済みのまま動く（履歴の無い Todo は Repository が補って読み書きする）。下の「backfill が失敗したとき・再実行」。
+- backfill は切替の後に流す（WHY: 切替の前だと、切替までの間に旧アプリが書いた行が漏れる）。失敗してもアプリは切替済みのまま動く（ただし backfill の対象の行は、流し終えるまで読むと 500 になる。Repository は補わない。Issue #260）。下の「backfill が失敗したとき・再実行」。
 - migrate が失敗したら service はデプロイされない（古いコードのまま動き続ける）。下の「migrate が失敗したとき」。
 - 実行は環境ごとの concurrency（`deploy-stg` / `deploy-prod`）で 1 本ずつ（途中で止めない）。
 - マイグレーションは、1 つ前のコードでも動く形（列の追加は先、削除は次のリリース）で書く。WHY: migrate の後、service が切り替わるまでのあいだは古いコードが新しいスキーマで動く。ロールバックでも同じ（スキーマは戻さない）。prod は手動なので、stg より何リリースも前のコードが動いていることがある。prod へのデプロイでは、その間のマイグレーションがまとめて当たり、prod で今動いているコードが新しいスキーマで動く（「1 つ前のコード」は prod で今動いているコードのこと）。
