@@ -53,7 +53,6 @@ const PENDING = new Set([
   "api-journey",
   "api-request",
   "api-spec",
-  "architecture",
   "domain-validation",
   "instructions",
   "lint",

@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, posix, relative, sep } from "node:path";
+import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import {
   isArrowFunction,
   isAsExpression,
@@ -48,7 +49,8 @@ import {
 } from "typescript/unstable/ast";
 import { createVirtualFileSystem } from "typescript/unstable/fs";
 import { API } from "typescript/unstable/sync";
-import { describe, expect, it } from "vitest";
+import { expect } from "vitest";
+import { casesByName } from "./case-table";
 
 // ディレクトリ構成ルール（.claude/rules/backend.md・frontend.md。規則の一覧は .claude/rules/architecture-check.md）の依存の向きを、仕様として機械的に検査するテスト。
 // 対象は「依存の向き（全体）」「画面側とサーバ側の境界」「backend の 4 層の依存してよい先」、apps/frontend_customer と apps/backend の
@@ -71,7 +73,8 @@ import { describe, expect, it } from "vitest";
 // WHY 依存を増やさず正規表現で抽出する: 検査に必要なのは import / export の参照先と「型だけか」の 2 つで、
 //   TypeScript の構文木までは要らない。dependency-cruiser は 18.4.0 の supportedTranspilers.typescript が <7.0.0 で、
 //   本リポジトリの TypeScript 7.0.2 に対応していない（ADR docs/adr/quality/20260928-dependency-direction-checked-by-own-test.md の「採用しなかった案」）。
-//   抽出の限界は stripComments / extractImports の WHY に書き、仕様を下の describe と fixture テストで固定する。
+//   抽出の限界は stripComments / extractImports の WHY に書き、仕様を下の step と fixture テストで固定する。
+// 仕様（Scenario と `*` の step）は architecture.feature に、step の実装はこのファイルの describeFeature に分けた（Issue #282）。
 
 const repoRoot = join(import.meta.dirname, "..");
 
@@ -878,7 +881,7 @@ type RuleId =
 
 type Rule = {
   id: RuleId;
-  // テスト名。.claude/rules/architecture-check.md の規則の文に対応する仕様文。
+  // テスト名（step の文。ruleStepText で「*」を言い換える）。.claude/rules/architecture-check.md の規則の文に対応する仕様文。
   name: string;
   appliesTo: (from: string) => boolean;
   isViolation: (ref: Reference) => boolean;
@@ -2421,503 +2424,6 @@ function collectViolations(root: string): string[] {
     ),
   ].sort();
 }
-
-describe("依存の向き（.claude/rules/architecture-check.md）", () => {
-  const references = collectReferences(repoRoot);
-
-  it("検査の対象から参照を取り出せている（抽出が壊れて 0 件になり、すべての規則が素通りするのを防ぐ）", () => {
-    // given: 前提なし
-    // when
-    const referenceCount = references.length;
-
-    // then
-    expect(referenceCount).toBeGreaterThan(0);
-  });
-
-  it(BACKEND_PLACEMENT.name, () => {
-    // given: 前提なし
-    // when
-    const result = listReferencingFiles(repoRoot).filter(
-      BACKEND_PLACEMENT.isMisplaced,
-    );
-
-    // then
-    expect(result).toEqual([]);
-  });
-
-  it(FRONTEND_PLACEMENT.name, () => {
-    // given: 前提なし
-    // when
-    const result = listReferencingFiles(repoRoot).filter(
-      FRONTEND_PLACEMENT.isMisplaced,
-    );
-
-    // then
-    expect(result).toEqual([]);
-  });
-
-  it(SHARED_PLACEMENT.name, () => {
-    // given: 前提なし
-    // when
-    const result = listAllFiles(repoRoot, SHARED_ROOT).filter(
-      SHARED_PLACEMENT.isMisplaced,
-    );
-
-    // then
-    expect(result).toEqual([]);
-  });
-
-  // WHY: 列挙が空（ディレクトリ名の書き間違い・列挙の壊れ）なら置き場所の違反も 0 件で常に緑になる。
-  // WHY arrayContaining（一覧の外のファイルがあっても落とさない）: 一覧の外のファイルは上の shared-placement の 1 件だけで落とし、
-  //   規則を破ったときに、どの規則が破れたかをテスト名で分かるようにする。
-  it("apps/shared の全ファイル（ソース・テスト・package.json・tsconfig.json）を列挙できている（列挙が壊れて素通りするのを防ぐ）", () => {
-    // given: 前提なし
-    // when
-    const allFiles = listAllFiles(repoRoot, SHARED_ROOT);
-
-    // then
-    expect(allFiles).toEqual(expect.arrayContaining([...SHARED_FILES]));
-  });
-
-  for (const rule of RULES) {
-    it(rule.name, () => {
-      // given: 前提なし
-      // when
-      const violations = findViolations(references, rule);
-
-      // then
-      // 失敗時にどのファイルがどこを参照しているかが出力に出るよう、違反を「ファイル → 参照先」の一覧にして空配列と比較する。
-      expect(violations).toEqual([]);
-    });
-  }
-
-  // WHY 本物の expose の参照が取り出せていることを見る（Issue #208）: モジュールの境界の規則（module-internal・
-  //   module-expose-only-from-presentation・expose-imports）は、expose/ の下のファイルと、expose を使う presentation の参照を
-  //   取り出せていなければ、違反も 0 件で常に緑になる。
-  it("モジュールの境界の規則は、本物の expose（notification の notifier.ts）の参照と、それを使う todo の presentation の参照を取り出せている（列挙が壊れて素通りするのを防ぐ）", () => {
-    // given: 前提なし
-    // when
-    const result = references.map((ref) => `${ref.from} → ${ref.to}`);
-
-    // then
-    expect(result).toEqual(
-      expect.arrayContaining([
-        "apps/backend/features/todo/internal/presentation/change-todo-completion.api.ts → apps/backend/features/notification/expose/notifier",
-        "apps/backend/features/notification/expose/notifier.ts → apps/backend/features/notification/internal/application/send-notification.command",
-        "apps/backend/features/notification/expose/notifier.ts → apps/backend/features/notification/internal/infra/notification-sender.log",
-        "apps/backend/features/notification/expose/notifier.ts → apps/shared/logger",
-      ]),
-    );
-  });
-
-  it(ENV_DIRECT_ACCESS.name, () => {
-    // given: 前提なし
-    // when
-    const violations = findEnvViolations(repoRoot);
-
-    // then
-    // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
-    expect(violations).toEqual([]);
-  });
-
-  it(CONSOLE_DIRECT_ACCESS.name, () => {
-    // given: 前提なし
-    // when
-    const violations = findConsoleViolations(repoRoot);
-
-    // then
-    // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
-    expect(violations).toEqual([]);
-  });
-
-  it(NOW_SINGLE_SOURCE.name, () => {
-    // given: 前提なし
-    // when
-    const violations = findNowViolations(repoRoot);
-
-    // then
-    // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
-    expect(violations).toEqual([]);
-  });
-
-  it("現在時刻の読み取りの検査は、apps/frontend_customer・apps/backend・apps/shared のソースを対象にし、テスト・テストの補助・apps/e2e/・ルート直下は対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
-    // given: 前提なし
-    // when
-    const files = listNowCheckedFiles(repoRoot);
-
-    // then
-    expect(files).toEqual(
-      expect.arrayContaining([
-        "apps/shared/now.ts",
-        "apps/shared/logger.ts",
-        "apps/backend/features/todo/internal/domain/todo.ts",
-        "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
-        "apps/frontend_customer/proxy.ts",
-        "apps/frontend_customer/shared/i18n/format.ts",
-        "apps/frontend_customer/features/todo/components/todo-item.tsx",
-        "apps/frontend_customer/app/page.tsx",
-      ]),
-    );
-
-    // when
-    for (const excluded of [
-      "apps/shared/now.test.ts",
-      "apps/backend/features/todo/internal/domain/todo.test.ts",
-      "apps/backend/test-support/database.ts",
-      "apps/frontend_customer/test-support/i18n.tsx",
-      "apps/e2e/todo.spec.ts",
-      "vitest.config.mts",
-    ]) {
-      expect(files).not.toContain(excluded);
-    }
-
-    const result = files.filter((file) => file.includes("/.next/"));
-
-    // then
-    expect(result).toEqual([]);
-  });
-
-  for (const rule of HARDCODED_TEXT_RULES) {
-    it(rule.name, () => {
-      // given: 前提なし
-      // when
-      const violations = findHardcodedTextViolations(repoRoot, rule);
-
-      // then
-      // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
-      expect(violations).toEqual([]);
-    });
-  }
-
-  it(PRESENTATION_WITH_PROBLEM_RESPONSE.name, () => {
-    // given: 前提なし
-    // when
-    const violations = findProblemResponseViolations(repoRoot);
-
-    // then
-    // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
-    expect(violations).toEqual([]);
-  });
-
-  // WHY 本物の 5 本が列挙に入っていることを見る: 列挙（パスの正規表現）が壊れて 0 件になると、違反も 0 件で常に緑になる。
-  it("handle を ProblemResponse.wrap で包む規則は、本物の api ファイル 6 本を対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
-    // given: 前提なし
-    // when
-    const files = listProblemResponseCheckedFiles(repoRoot);
-
-    // then
-    expect(files).toEqual(
-      expect.arrayContaining([
-        "apps/backend/features/todo/internal/presentation/create-todo.api.ts",
-        "apps/backend/features/todo/internal/presentation/delete-todo.api.ts",
-        "apps/backend/features/todo/internal/presentation/get-todo.api.ts",
-        "apps/backend/features/todo/internal/presentation/list-todos.api.ts",
-        "apps/backend/features/todo/internal/presentation/rename-todo.api.ts",
-        "apps/backend/features/todo/internal/presentation/change-todo-completion.api.ts",
-      ]),
-    );
-
-    // when
-    const result = files.filter((file) => TEST_FILE.test(file));
-
-    // then
-    expect(result).toEqual([]);
-  });
-
-  it(CLASS_BASED.name, () => {
-    // given: 前提なし
-    // when
-    const violations = findClassBasedViolations(repoRoot);
-
-    // then
-    // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
-    expect(violations).toEqual([]);
-  });
-
-  // WHY 本物のファイルが列挙に入っていることを見る: 列挙（パスの判定）が壊れて 0 件になると、違反も 0 件で常に緑になる。
-  it("最上位に関数を置かない規則は、apps/backend の本番コード（層・expose・drizzle.config.ts）・apps/shared の本番コード・テストの補助（test-support/・spec/ の support.ts・apps/e2e/ の spec 以外）を対象にし、テスト・E2E の *.spec.ts・リポジトリ直下は対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
-    // given: 前提なし
-    // when
-    const files = listClassBasedCheckedFiles(repoRoot);
-
-    // then
-    expect(files).toEqual(
-      expect.arrayContaining([
-        "apps/backend/shared/domain/validate.ts",
-        "apps/backend/shared/infra/writer.ts",
-        "apps/backend/shared/presentation/problem.ts",
-        "apps/backend/shared/drizzle/drizzle.config.ts",
-        "apps/backend/features/notification/expose/notifier.ts",
-        "apps/backend/features/todo/internal/domain/todo.ts",
-        "apps/backend/features/todo/internal/presentation/create-todo.api.ts",
-        "apps/shared/env.ts",
-        "apps/shared/log-event.ts",
-        "apps/shared/logger.ts",
-        "apps/shared/now.ts",
-        "apps/backend/test-support/database.ts",
-        "apps/backend/test-support/transaction-runner.in-memory.ts",
-        "apps/backend/test-support/todo/todo-builder.ts",
-        "apps/backend/test-support/todo/todo-repository.in-memory.ts",
-        "apps/backend/spec/api/todo/support.ts",
-        "apps/e2e/database.ts",
-        "apps/e2e/playwright.config.ts",
-      ]),
-    );
-
-    // when
-    const result = files.filter(
-      (file) =>
-        TEST_FILE.test(file) ||
-        E2E_SPEC_FILE.test(file) ||
-        !(
-          isUnder(file, BACKEND_ROOT) ||
-          isUnder(file, SHARED_ROOT) ||
-          isUnder(file, E2E_ROOT)
-        ),
-    );
-
-    // then
-    expect(result).toEqual([]);
-  });
-
-  for (const pkg of EXPORTED_PACKAGES) {
-    it(pkg.name, () => {
-      // given: 前提なし
-      // when
-      const violations = findPackageExportsViolations(
-        repoRoot,
-        pkg,
-        references,
-      );
-
-      // then
-      expect(violations).toEqual([]);
-    });
-  }
-
-  it("apps/backend の exports を 1 件以上読め、apps/frontend_customer の @repo/backend の参照を取り出せている（読み込みや列挙が壊れて素通りするのを防ぐ）", () => {
-    // given: 前提なし
-    // when
-    const exportCount = Object.keys(
-      readPackageExports(repoRoot, BACKEND_EXPORTS),
-    ).length;
-
-    // then
-    expect(exportCount).toBeGreaterThan(0);
-
-    // when
-    const consumers = new Set(
-      references
-        .filter((ref) => isBackendPackage(ref.specifier))
-        .map((ref) => ref.from),
-    );
-
-    const result = [...consumers];
-
-    // then
-    expect(result).toEqual(
-      expect.arrayContaining([
-        "apps/frontend_customer/app/api/todos/route.ts",
-        "apps/frontend_customer/features/todo/api/todo-api.ts",
-      ]),
-    );
-  });
-
-  it("apps/shared の exports を読め、apps/frontend_customer 直下・apps/backend・apps/e2e/・リポジトリ直下の @repo/shared の参照を取り出せている（読み込みや列挙が壊れて素通りするのを防ぐ）", () => {
-    // given: 前提なし
-    // when
-    const result = Object.keys(
-      readPackageExports(repoRoot, SHARED_EXPORTS),
-    ).sort();
-
-    // then
-    expect(result).toEqual(["./env", "./logger", "./now"]);
-
-    // when
-    const consumers = new Set(
-      references
-        .filter((ref) => isSharedPackage(ref.specifier))
-        .map((ref) => ref.from),
-    );
-
-    const sharedConsumers = [...consumers];
-
-    // then
-    expect(sharedConsumers).toEqual(
-      expect.arrayContaining([
-        "apps/frontend_customer/instrumentation-node.ts",
-        "apps/frontend_customer/proxy.ts",
-        "apps/backend/features/todo/internal/domain/todo.ts",
-        "apps/backend/features/notification/expose/notifier.ts",
-        "apps/backend/features/notification/internal/infra/notification-sender.log.ts",
-        "apps/backend/shared/drizzle/drizzle.config.ts",
-        "apps/backend/shared/infra/database.ts",
-        "apps/backend/shared/presentation/problem.ts",
-        "apps/e2e/database.ts",
-        "apps/e2e/playwright.config.ts",
-        "vitest.global-setup.ts",
-      ]),
-    );
-  });
-
-  it("環境変数の直参照の検査は、各ディレクトリとルート直下の設定ファイルを対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
-    // given: 前提なし
-    // when
-    const files = listEnvCheckedFiles(repoRoot);
-
-    // then
-    expect(files).toEqual(
-      expect.arrayContaining([
-        "apps/shared/env.ts",
-        "apps/shared/logger.ts",
-        "apps/backend/shared/infra/database.ts",
-        "apps/backend/test-support/database.ts",
-        "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
-        "apps/backend/shared/drizzle/drizzle.config.ts",
-        "apps/frontend_customer/next.config.ts",
-        "apps/frontend_customer/instrumentation.ts",
-        "apps/frontend_customer/instrumentation-node.ts",
-        "apps/frontend_customer/features/todo/api/todo-api.ts",
-        "apps/frontend_customer/app/page.tsx",
-        "apps/e2e/database.ts",
-        "apps/e2e/playwright.config.ts",
-        "vitest.config.mts",
-        "vitest.global-setup.ts",
-        "stryker.config.mjs",
-      ]),
-    );
-    expect(files).not.toContain("rule-tests/architecture.test.ts");
-    expect(files).not.toContain("apps/shared/env.test.ts");
-
-    // when
-    const result = files.filter((file) => file.includes("/.next/"));
-
-    // then
-    // next build の生成物（apps/frontend_customer/.next/）は数えない（あれば数千件の JS を検査することになる）。
-    expect(result).toEqual([]);
-  });
-
-  it("console の直接の呼び出しの検査は、各ディレクトリ・scripts/・ルート直下の設定ファイルを対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
-    // given: 前提なし
-    // when
-    const files = listConsoleCheckedFiles(repoRoot);
-
-    // then
-    expect(files).toEqual(
-      expect.arrayContaining([
-        "apps/shared/logger.ts",
-        "apps/shared/env.ts",
-        "apps/backend/shared/infra/database.ts",
-        "apps/backend/shared/presentation/problem.ts",
-        "apps/backend/features/todo/internal/presentation/list-todos.api.ts",
-        "apps/backend/shared/drizzle/drizzle.config.ts",
-        "apps/frontend_customer/proxy.ts",
-        "apps/frontend_customer/instrumentation-node.ts",
-        "apps/frontend_customer/features/todo/api/todo-api.ts",
-        "apps/frontend_customer/app/page.tsx",
-        "apps/e2e/database.ts",
-        "apps/e2e/playwright.config.ts",
-        "apps/e2e/request-log.spec.ts",
-        "vitest.config.mts",
-        "vitest.global-setup.ts",
-        "stryker.config.mjs",
-      ]),
-    );
-    expect(files).not.toContain("rule-tests/architecture.test.ts");
-    expect(files).not.toContain("apps/shared/logger.test.ts");
-    expect(files).not.toContain("scripts/hooks/guard-git.test.ts");
-
-    // when
-    const result = files.filter((file) => file.includes("/.next/"));
-
-    // then
-    expect(result).toEqual([]);
-  });
-
-  it("ハードコードの文言の検査は、apps/frontend_customer・apps/backend・apps/shared のソース（辞書 *.messages.ts を含む）を対象にし、テスト・生成物は対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
-    // given: 前提なし
-    // when
-    const frontend = listHardcodedTextCheckedFiles(
-      repoRoot,
-      FRONTEND_HARDCODED_TEXT,
-    );
-
-    // then
-    expect(frontend).toEqual(
-      expect.arrayContaining([
-        "apps/frontend_customer/app/layout.tsx",
-        "apps/frontend_customer/app/page.tsx",
-        "apps/frontend_customer/features/todo/api/todo-api.ts",
-        "apps/frontend_customer/features/todo/components/todo-item.tsx",
-        "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.tsx",
-        "apps/frontend_customer/proxy.ts",
-      ]),
-    );
-
-    // when
-    const result = frontend.filter((file) => I18N_MESSAGES.test(file));
-
-    // then
-    // WHY 辞書も対象に入っていることを見る（Issue #125 の reviewer 指摘で、辞書を対象から外すのをやめた）: 辞書も
-    //   defineMessages(...) の引数の外は同じ検査をかける。対象から外れると、辞書に書いた引数の外の文言が素通りする。
-    //   辞書の例外（I18N_MESSAGES）が実在のファイルに当たっていることも、ここで見る（名前の付け方が変わったら落ちる）。
-    expect(result).toEqual(
-      expect.arrayContaining([
-        "apps/frontend_customer/shared/i18n/common.messages.ts",
-        "apps/frontend_customer/features/todo/components/todo-item.messages.ts",
-        "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.messages.ts",
-        "apps/frontend_customer/features/todo/screens/todo-detail-screen/todo-detail-screen.messages.ts",
-      ]),
-    );
-
-    // when
-    const backend = listHardcodedTextCheckedFiles(
-      repoRoot,
-      SERVER_HARDCODED_TEXT,
-    );
-
-    // then
-    expect(backend).toEqual(
-      expect.arrayContaining([
-        "apps/backend/shared/domain/domain-error.ts",
-        "apps/backend/shared/presentation/problem.ts",
-        "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
-        "apps/backend/features/notification/expose/notifier.ts",
-        "apps/backend/shared/drizzle/drizzle.config.ts",
-        "apps/shared/env.ts",
-        "apps/shared/logger.ts",
-      ]),
-    );
-    for (const files of [frontend, backend]) {
-      expect(files.filter((file) => TEST_FILE.test(file))).toEqual([]);
-      expect(
-        files.filter((file) => /\/(?:\.next|node_modules)\//.test(file)),
-      ).toEqual([]);
-    }
-  });
-
-  it("logger.ts の中の console は拾えている（抽出が壊れて 0 件になり、規則が素通りするのを防ぐ）", () => {
-    // given: 前提なし
-    // when
-    const consoleAccessCount = findConsoleAccesses(
-      readFileSync(join(repoRoot, CONSOLE_DIRECT_ACCESS.allowedFile), "utf8"),
-    ).length;
-
-    // then
-    expect(consoleAccessCount).toBeGreaterThan(0);
-  });
-
-  it("env.ts の中の process.env は拾えている（抽出が壊れて 0 件になり、規則が素通りするのを防ぐ）", () => {
-    // given: 前提なし
-    // when
-    const envAccessCount = findProcessEnvAccesses(
-      readFileSync(join(repoRoot, ENV_DIRECT_ACCESS.allowedFile), "utf8"),
-    ).length;
-
-    // then
-    expect(envAccessCount).toBeGreaterThan(0);
-  });
-});
 
 // --- 規則ごとの判定の仕様 ---
 // 上の「依存の向き」のテストは今のコードに違反が無いことしか確かめないため、規則そのものが緩すぎても（常に違反なしと
@@ -5007,75 +4513,6 @@ const SHARED_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
   ],
 };
 
-describe("backend の置き場所の判定", () => {
-  it.each(PLACEMENT_EXAMPLES.misplaced)("%s は置き場所の違反", (file) => {
-    // given: 前提なし
-    // when
-    const result = BACKEND_PLACEMENT.isMisplaced(file);
-
-    // then
-    expect(result).toBe(true);
-  });
-  it.each(PLACEMENT_EXAMPLES.placed)("%s は置き場所の違反ではない", (file) => {
-    // given: 前提なし
-    // when
-    const result = BACKEND_PLACEMENT.isMisplaced(file);
-
-    // then
-    expect(result).toBe(false);
-  });
-});
-
-describe("apps/shared の置き場所の判定", () => {
-  it.each(SHARED_PLACEMENT_EXAMPLES.misplaced)(
-    "%s は置き場所の違反",
-    (file) => {
-      // given: 前提なし
-      // when
-      const result = SHARED_PLACEMENT.isMisplaced(file);
-
-      // then
-      expect(result).toBe(true);
-    },
-  );
-  it.each(SHARED_PLACEMENT_EXAMPLES.placed)(
-    "%s は置き場所の違反ではない",
-    (file) => {
-      // given: 前提なし
-      // when
-      const result = SHARED_PLACEMENT.isMisplaced(file);
-
-      // then
-      expect(result).toBe(false);
-    },
-  );
-});
-
-describe("frontend の置き場所の判定", () => {
-  it.each(FRONTEND_PLACEMENT_EXAMPLES.misplaced)(
-    "%s は置き場所の違反",
-    (file) => {
-      // given: 前提なし
-      // when
-      const result = FRONTEND_PLACEMENT.isMisplaced(file);
-
-      // then
-      expect(result).toBe(true);
-    },
-  );
-  it.each(FRONTEND_PLACEMENT_EXAMPLES.placed)(
-    "%s は置き場所の違反ではない",
-    (file) => {
-      // given: 前提なし
-      // when
-      const result = FRONTEND_PLACEMENT.isMisplaced(file);
-
-      // then
-      expect(result).toBe(false);
-    },
-  );
-});
-
 // 環境変数の直参照の規則（ENV_DIRECT_ACCESS）の判定例。参照ではなく [ファイル, ソース] で決まるので別に持つ。
 const ENV_ACCESS_EXAMPLES: {
   violating: [file: string, source: string][];
@@ -5195,130 +4632,6 @@ function judgeEnvAccess([file, source]: [string, string]): boolean {
   );
 }
 
-describe("環境変数の直参照の判定", () => {
-  it("違反例・許可例はそれぞれ 4 件以上ある", () => {
-    // given: 前提なし
-    // when
-    const violatingExampleCount = ENV_ACCESS_EXAMPLES.violating.length;
-
-    // then
-    expect(violatingExampleCount).toBeGreaterThanOrEqual(4);
-
-    // when
-    const allowedExampleCount = ENV_ACCESS_EXAMPLES.allowed.length;
-
-    // then
-    expect(allowedExampleCount).toBeGreaterThanOrEqual(4);
-  });
-  it.each(ENV_ACCESS_EXAMPLES.violating)("%s の %j は違反", (...example) => {
-    // given: 前提なし
-    // when
-    const result = judgeEnvAccess(example);
-
-    // then
-    expect(result).toBe(true);
-  });
-  it.each(ENV_ACCESS_EXAMPLES.allowed)(
-    "%s の %j は違反ではない",
-    (...example) => {
-      // given: 前提なし
-      // when
-      const result = judgeEnvAccess(example);
-
-      // then
-      expect(result).toBe(false);
-    },
-  );
-});
-
-describe("環境変数の直参照の抽出（findProcessEnvAccesses）", () => {
-  it("参照ごとに、読んだ変数の名前を返す（.NAME / ?.NAME の形だけ。取れない形は undefined）", () => {
-    // given
-    const source = [
-      "const a = process.env.NEXT_RUNTIME;",
-      "const b = process?.env?.DATABASE_URL;",
-      'const c = process["env"].X;',
-      'const d = process.env["Y"];',
-      "const e = process.env;",
-    ].join("\n");
-
-    // when
-    const result = findProcessEnvAccesses(source).map(
-      ({ variable }) => variable,
-    );
-
-    // then
-    expect(result).toEqual([
-      "NEXT_RUNTIME",
-      "DATABASE_URL",
-      "X",
-      undefined,
-      undefined,
-    ]);
-  });
-
-  it("参照ごとに、書かれた行番号を返す（コメントを消しても行はずれない）", () => {
-    // given
-    const source = [
-      "/*",
-      " * process.env は読まない",
-      " */",
-      "const a = process.env.A; const b = process.env.B;",
-      "// process.env",
-      'const c = process["env"].C;',
-    ].join("\n");
-
-    // when
-    const result = findProcessEnvAccesses(source).map(({ line }) => line);
-
-    // then
-    expect(result).toEqual([4, 4, 6]);
-  });
-
-  it("分割代入・別名・Reflect.get・node:process の default import 経由の参照は拾わない（見逃す方向の限界。Biome の noProcessEnv も検出しない）", () => {
-    // given
-    const source = [
-      "const { env } = process;",
-      "const p = process; p.env;",
-      'const e = Reflect.get(process, "env");',
-      'import proc from "node:process"; proc.env.X;',
-    ].join("\n");
-
-    // when
-    const processEnvAccesses = findProcessEnvAccesses(source);
-
-    // then
-    expect(processEnvAccesses).toEqual([]);
-  });
-
-  it('node:process の名前付き import（import { env } from "node:process"）は拾わない（見逃す方向の限界。Biome の noProcessEnv が検出する）', () => {
-    // given
-    const source = [
-      'import { env } from "node:process";',
-      "export const u = env.X;",
-    ].join("\n");
-
-    // when
-    const processEnvAccesses = findProcessEnvAccesses(source);
-
-    // then
-    expect(processEnvAccesses).toEqual([]);
-  });
-
-  it("テンプレートリテラルの埋め込み式の中の参照は拾わない（見逃す方向の限界。Biome の noProcessEnv が検出する）", () => {
-    // given
-    // WHY テンプレートリテラルで書く: 普通の文字列の中に埋め込み式の形を書くと Biome の noTemplateCurlyInString が
-    //   書き間違いとして検出するため、\${ でエスケープして同じ文字列を作る。
-    const source = `const url = \`db: \${process.env.DATABASE_URL}\`;`;
-
-    // when
-    const processEnvAccesses = findProcessEnvAccesses(source);
-
-    // then
-    expect(processEnvAccesses).toEqual([]);
-  });
-});
-
 // console を直接書く規則（CONSOLE_DIRECT_ACCESS）の判定例。ENV_ACCESS_EXAMPLES と同じく [ファイル, ソース] で決まる。
 const CONSOLE_ACCESS_EXAMPLES: {
   violating: [file: string, source: string][];
@@ -5418,92 +4731,6 @@ function judgeConsoleAccess([file, source]: [string, string]): boolean {
     findConsoleAccesses(source).length > 0
   );
 }
-
-describe("console を直接書く規則の判定", () => {
-  it("違反例・許可例はそれぞれ 4 件以上ある", () => {
-    // given: 前提なし
-    // when
-    const violatingExampleCount = CONSOLE_ACCESS_EXAMPLES.violating.length;
-
-    // then
-    expect(violatingExampleCount).toBeGreaterThanOrEqual(4);
-
-    // when
-    const allowedExampleCount = CONSOLE_ACCESS_EXAMPLES.allowed.length;
-
-    // then
-    expect(allowedExampleCount).toBeGreaterThanOrEqual(4);
-  });
-  it.each(CONSOLE_ACCESS_EXAMPLES.violating)(
-    "%s の %j は違反",
-    (...example) => {
-      // given: 前提なし
-      // when
-      const result = judgeConsoleAccess(example);
-
-      // then
-      expect(result).toBe(true);
-    },
-  );
-  it.each(CONSOLE_ACCESS_EXAMPLES.allowed)(
-    "%s の %j は違反ではない",
-    (...example) => {
-      // given: 前提なし
-      // when
-      const result = judgeConsoleAccess(example);
-
-      // then
-      expect(result).toBe(false);
-    },
-  );
-});
-
-describe("console の参照の抽出（findConsoleAccesses）", () => {
-  it("参照ごとに、書かれた行番号を返す（コメントを消しても行はずれない）", () => {
-    // given
-    const source = [
-      "/*",
-      " * console.log は書かない",
-      " */",
-      "console.log(1); console.error(2);",
-      "// console.warn",
-      'globalThis.console["info"](3);',
-    ].join("\n");
-
-    // when
-    const consoleAccesses = findConsoleAccesses(source);
-
-    // then
-    expect(consoleAccesses).toEqual([4, 4, 6]);
-  });
-
-  it('node:console の import（import { log } from "node:console" / import c from "node:console"）は拾わない（見逃す方向の限界。Biome の noConsole も検出しない）', () => {
-    // given
-    const source = [
-      'import { log } from "node:console";',
-      'import c from "node:console";',
-      "log(1); c.log(2);",
-    ].join("\n");
-
-    // when
-    const consoleAccesses = findConsoleAccesses(source);
-
-    // then
-    expect(consoleAccesses).toEqual([]);
-  });
-
-  it("テンプレートリテラルの埋め込み式の中の console は拾わない（見逃す方向の限界。Biome の noConsole が検出する）", () => {
-    // given
-    // WHY テンプレートリテラルで書く: 環境変数の抽出のテストと同じく、noTemplateCurlyInString を避けるため。
-    const source = `const s = \`x: \${console.log(1)}\`;`;
-
-    // when
-    const consoleAccesses = findConsoleAccesses(source);
-
-    // then
-    expect(consoleAccesses).toEqual([]);
-  });
-});
 
 // 現在時刻の読み取りの規則（NOW_SINGLE_SOURCE）の判定例。CONSOLE_ACCESS_EXAMPLES と同じく [ファイル, ソース] で決まる。
 const NOW_ACCESS_EXAMPLES: {
@@ -5632,102 +4859,6 @@ function judgeNowAccess([file, source]: [string, string]): boolean {
     findCurrentTimeAccesses(source).length > 0
   );
 }
-
-describe("現在時刻を読む規則の判定", () => {
-  it("違反例・許可例はそれぞれ 4 件以上ある", () => {
-    // given: 前提なし
-    // when
-    const violatingExampleCount = NOW_ACCESS_EXAMPLES.violating.length;
-
-    // then
-    expect(violatingExampleCount).toBeGreaterThanOrEqual(4);
-
-    // when
-    const allowedExampleCount = NOW_ACCESS_EXAMPLES.allowed.length;
-
-    // then
-    expect(allowedExampleCount).toBeGreaterThanOrEqual(4);
-  });
-  it.each(NOW_ACCESS_EXAMPLES.violating)("%s の %j は違反", (...example) => {
-    // given: 前提なし
-    // when
-    const result = judgeNowAccess(example);
-
-    // then
-    expect(result).toBe(true);
-  });
-  it.each(NOW_ACCESS_EXAMPLES.allowed)(
-    "%s の %j は違反ではない",
-    (...example) => {
-      // given: 前提なし
-      // when
-      const result = judgeNowAccess(example);
-
-      // then
-      expect(result).toBe(false);
-    },
-  );
-});
-
-describe("現在時刻の読み取りの抽出（findCurrentTimeAccesses）", () => {
-  it("読み取りごとに、書かれた行番号を返す（1 行に 2 つあれば 2 件。コメントを消しても行はずれない）", () => {
-    // given
-    const source = [
-      "/*",
-      " * new Date() は書かない",
-      " */",
-      "const a = new Date(); const b = Date.now();",
-      "// Date.now()",
-      "const c = new Date(a);",
-      "const d = new Date(",
-      ");",
-    ].join("\n");
-
-    // when
-    const currentTimeAccesses = findCurrentTimeAccesses(source);
-
-    // then
-    expect(currentTimeAccesses).toEqual([4, 4, 7]);
-  });
-
-  it("別名・分割代入・括弧で囲んだ Date・空のスプレッド・Reflect.construct は拾わない（見逃す方向の限界）", () => {
-    // given
-    const source = [
-      "const D = Date; const a = new D();",
-      "const { now: read } = Date; read();",
-      "const b = new (Date)();",
-      "const c = new Date(...[]);",
-      "const d = Reflect.construct(Date, []);",
-    ].join("\n");
-
-    // when
-    const currentTimeAccesses = findCurrentTimeAccesses(source);
-
-    // then
-    expect(currentTimeAccesses).toEqual([]);
-  });
-
-  it("テンプレートリテラルの埋め込み式の中は拾わない（見逃す方向の限界）", () => {
-    // given
-    // WHY テンプレートリテラルで書く: console の抽出のテストと同じく、noTemplateCurlyInString を避けるため。
-    const source = `const s = \`at: \${Date.now()}\`;`;
-
-    // when
-    const currentTimeAccesses = findCurrentTimeAccesses(source);
-
-    // then
-    expect(currentTimeAccesses).toEqual([]);
-  });
-
-  it("Date という名前のメソッドの呼び出し（calendar.Date()）も new の無い Date() として数える（多く検出する方向の限界）", () => {
-    // given: 前提なし
-    // when
-    const currentTimeAccesses = findCurrentTimeAccesses("calendar.Date();");
-
-    // then
-    expect(currentTimeAccesses).toEqual([1]);
-  });
-});
 
 // ハードコードの文言の規則（FRONTEND_HARDCODED_TEXT・SERVER_HARDCODED_TEXT。Issue #116）の判定例。[ファイル, ソース] で決まる。
 // WHY 架空のソースで固定する: 実リポジトリの検査は「今の画面に文言が無い」ことしか確かめず、判定が緩すぎても（常に違反なし）
@@ -6047,56 +5178,6 @@ function judgeHardcodedTexts(
   });
 }
 
-for (const rule of HARDCODED_TEXT_RULES) {
-  describe(`ハードコードの文言の判定（${rule.id}）`, () => {
-    const examples = HARDCODED_TEXT_EXAMPLES[rule.id];
-    // WHY 遅延して 1 回だけ判定する: it.each の例ごとに tsgo を起動すると遅いため、最初のテストで全例をまとめて判定する。
-    let verdicts: { violating: boolean[]; allowed: boolean[] } | undefined;
-    const verdictsOf = () => {
-      verdicts ??= {
-        violating: judgeHardcodedTexts(rule, examples.violating),
-        allowed: judgeHardcodedTexts(rule, examples.allowed),
-      };
-      return verdicts;
-    };
-    it("違反例・許可例はそれぞれ 4 件以上ある", () => {
-      // given: 前提なし
-      // when
-      const violatingExampleCount = examples.violating.length;
-
-      // then
-      expect(violatingExampleCount).toBeGreaterThanOrEqual(4);
-
-      // when
-      const allowedExampleCount = examples.allowed.length;
-
-      // then
-      expect(allowedExampleCount).toBeGreaterThanOrEqual(4);
-    });
-    it.each(
-      examples.violating.map(([file, source], i) => ({ file, source, i })),
-    )("$file の $source は違反", ({ i }) => {
-      // given: 前提なし
-      // when
-      const result = verdictsOf().violating[i];
-
-      // then
-      expect(result).toBe(true);
-    });
-    it.each(examples.allowed.map(([file, source], i) => ({ file, source, i })))(
-      "$file の $source は違反ではない",
-      ({ i }) => {
-        // given: 前提なし
-        // when
-        const result = verdictsOf().allowed[i];
-
-        // then
-        expect(result).toBe(false);
-      },
-    );
-  });
-}
-
 // 1 ファイルを解析して、文言の行番号を返す（抽出の仕様のテスト用）。
 function hardcodedTextLinesOf(
   file: string,
@@ -6109,101 +5190,6 @@ function hardcodedTextLinesOf(
     rule.checks,
   );
 }
-
-describe("ハードコードの文言の抽出（findHardcodedTexts）", () => {
-  it("文言ごとに、書かれた行番号を返す（JSX のテキストは最初の文字の行。属性と日本語の両方に当たる値は 1 件）", () => {
-    // given
-    const source = [
-      "/*",
-      " * 削除のボタン",
-      " */",
-      "export const C = ({ todo }) => (",
-      '  <button aria-label="Delete" title={`Edit`}>',
-      "",
-      "    削除",
-      "  </button>",
-      ");",
-      `export const D = ({ todo }) => <img alt={\`「\${todo.title}」\`} />;`,
-      'export const m = "保存しました"; // 日本語',
-    ].join("\n");
-
-    // when
-    const result = hardcodedTextLinesOf(
-      "x.tsx",
-      source,
-      FRONTEND_HARDCODED_TEXT,
-    );
-
-    // then
-    expect(result).toEqual([5, 5, 7, 10, 11]);
-  });
-
-  it("ASCII の文字列を変数に入れてから JSX に渡す・JSX の子に式で書く・一覧に無い props・三項演算子の中は拾わない（見逃す方向の限界。日本語なら拾う）", () => {
-    // given
-    const source = [
-      'const s = "Delete";',
-      "export const A = () => <p>{s}</p>;",
-      'export const B = () => <p>{"Delete"}</p>;',
-      'export const C = () => <Dialog heading="Delete" />;',
-      'export const D = (x) => <a title={x ? "Open" : "Close"} />;',
-      'export const E = (x) => <a title={x ? "開く" : "閉じる"} />;',
-    ].join("\n");
-
-    // when
-    const result = hardcodedTextLinesOf(
-      "x.tsx",
-      source,
-      FRONTEND_HARDCODED_TEXT,
-    );
-
-    // then
-    expect(result).toEqual([6, 6]);
-  });
-
-  it("辞書（*.messages.ts）では defineMessages(...) の引数の中だけを通し、引数の外の文言は行番号で返す", () => {
-    // given
-    const source = [
-      'import { defineMessages } from "@/shared/i18n/i18n";',
-      'export const label = "削除";',
-      "export const m = defineMessages({",
-      '  ja: { delete: "削除" },',
-      '  en: { delete: "Delete" },',
-      "});",
-      'export const e = createElement("button", { "aria-label": "閉じる" });',
-    ].join("\n");
-
-    // when
-    const result = hardcodedTextLinesOf(
-      "apps/frontend_customer/features/todo/components/x.messages.ts",
-      source,
-      FRONTEND_HARDCODED_TEXT,
-    );
-
-    // then
-    expect(result).toEqual([2, 7]);
-
-    // when
-    const nonDictionaryLines = hardcodedTextLinesOf(
-      "apps/frontend_customer/features/todo/components/x.ts",
-      source,
-      FRONTEND_HARDCODED_TEXT,
-    );
-
-    // then
-    // 同じ中身でも辞書でないファイルなら、defineMessages の引数の中も違反。
-    expect(nonDictionaryLines).toEqual([2, 4, 7]);
-  });
-
-  it("構文解析の結果に無いファイルを渡すと例外にする（黙って飛ばして素通りさせない）", () => {
-    // given: 前提なし
-    // when
-    const action = () => parseSourceFiles({ "README.md": "# x" });
-
-    // then
-    // .md は tsconfig の files に書いても TypeScript のソースにならない。
-    expect(action).toThrow(new Error("構文解析の結果に README.md が無い"));
-  });
-});
 
 // ProblemResponse.wrap で包む規則（PRESENTATION_WITH_PROBLEM_RESPONSE。Issue #141）の判定例。[ファイル, ソース] で決まる。
 // WHY 架空のソースで固定する: 実リポジトリの検査は「今の 5 本が包んでいる」ことしか確かめず、判定が緩すぎても（常に違反なし）
@@ -6447,71 +5433,6 @@ function judgeProblemResponses(examples: [string, string][]): boolean[] {
     );
   });
 }
-
-describe(`handle を ProblemResponse.wrap で包む規則の判定（${PRESENTATION_WITH_PROBLEM_RESPONSE.id}）`, () => {
-  const { violating, allowed } = PROBLEM_RESPONSE_EXAMPLES;
-  // WHY 遅延して 1 回だけ判定する: 例ごとに tsgo を起動すると遅いため（ハードコードの文言の判定と同じ）。
-  let verdicts: { violating: boolean[]; allowed: boolean[] } | undefined;
-  const verdictsOf = () => {
-    verdicts ??= {
-      violating: judgeProblemResponses(violating),
-      allowed: judgeProblemResponses(allowed),
-    };
-    return verdicts;
-  };
-  // WHY テスト名にソースを入れない: 複数行のソースがあり、名前が崩れる。どの例かは番号と、例の一覧のコメントで追う。
-  it.each(violating.map(([file], i) => ({ file, i })))(
-    "違反例 $i（$file）は違反",
-    ({ i }) => {
-      // given: 前提なし
-      // when
-      const result = verdictsOf().violating[i];
-
-      // then
-      expect(result).toBe(true);
-    },
-  );
-  it.each(allowed.map(([file], i) => ({ file, i })))(
-    "許可例 $i（$file）は違反ではない",
-    ({ i }) => {
-      // given: 前提なし
-      // when
-      const result = verdictsOf().allowed[i];
-
-      // then
-      expect(result).toBe(false);
-    },
-  );
-});
-
-describe("ProblemResponse.wrap で包んでいない handle の抽出（findUnwrappedHandles）", () => {
-  it("包んでいない handle ごとに、メンバーの書き出しの行番号を返す（包んだ handle・ほかの名前のメンバーは返さない）", () => {
-    // given
-    const source = lines(
-      IMPORT_WITH_PROBLEM_RESPONSE,
-      "export class AApi {",
-      "  readonly handle = ProblemResponse.wrap(async (request: Request) => new Response(null));",
-      "}",
-      "export class BApi {",
-      "  private readonly other = 1;",
-      "  readonly handle = async (request: Request) => new Response(null);",
-      "}",
-      "export const C = class {",
-      "  async handle() {",
-      "    return new Response(null);",
-      "  }",
-      "};",
-    );
-
-    // when
-    const unwrappedHandles = findUnwrappedHandles(
-      parseSourceFiles({ [API_FILE]: source }).get(API_FILE) as SourceFile,
-    );
-
-    // then
-    expect(unwrappedHandles).toEqual([7, 10]);
-  });
-});
 
 const DOMAIN_FILE = "apps/backend/shared/domain/x.ts";
 
@@ -6785,129 +5706,6 @@ function judgeClassBased(examples: [string, string][]): boolean[] {
   });
 }
 
-describe(`backend と apps/shared の本番コードとテストの補助の最上位に関数を置かない規則の判定（${CLASS_BASED.id}）`, () => {
-  const { violating, allowed } = CLASS_BASED_EXAMPLES;
-  // WHY 遅延して 1 回だけ判定する: 例ごとに tsgo を起動すると遅いため（handle の規則の判定と同じ）。
-  let verdicts: { violating: boolean[]; allowed: boolean[] } | undefined;
-  const verdictsOf = () => {
-    verdicts ??= {
-      violating: judgeClassBased(violating),
-      allowed: judgeClassBased(allowed),
-    };
-    return verdicts;
-  };
-  it.each(violating.map(([file], i) => ({ file, i })))(
-    "違反例 $i（$file）は違反",
-    ({ i }) => {
-      // given: 前提なし
-      // when
-      const result = verdictsOf().violating[i];
-
-      // then
-      expect(result).toBe(true);
-    },
-  );
-  it.each(allowed.map(([file], i) => ({ file, i })))(
-    "許可例 $i（$file）は違反ではない",
-    ({ i }) => {
-      // given: 前提なし
-      // when
-      const result = verdictsOf().allowed[i];
-
-      // then
-      expect(result).toBe(false);
-    },
-  );
-});
-
-describe("最上位の関数の抽出（findTopLevelFunctions）", () => {
-  it("最上位の関数ごとに宣言の書き出しの行番号を返す（オーバーロードは宣言ごと、1 つの文の変数は関数のものだけ、クラスの中は返さない）", () => {
-    // given
-    const source = lines(
-      "export function f(x: string): string;",
-      "export function f(x: number): number;",
-      "export function f(x: unknown): unknown {",
-      "  return x;",
-      "}",
-      "export class A {",
-      "  static g(): void {}",
-      "  readonly h = () => 1;",
-      "}",
-      "const a = 1,",
-      "  b = () => a;",
-      "export default function () {}",
-    );
-
-    // when
-    const topLevelFunctions = findTopLevelFunctions(
-      parseSourceFiles({ [DOMAIN_FILE]: source }).get(
-        DOMAIN_FILE,
-      ) as SourceFile,
-    );
-
-    // then
-    expect(topLevelFunctions).toEqual([1, 2, 3, 11, 12]);
-  });
-});
-
-describe("規則ごとの判定", () => {
-  // WHY: 規則を足したのに判定の例を足し忘れると、その規則の判定は下の it.each で 1 度も確かめられない（Issue #68 で 3 規則を足した）。
-  it("RULES のすべての規則に判定の例があり、RULES に無い規則の例は無い", () => {
-    // given: 前提なし
-    // when
-    const result = Object.keys(RULE_EXAMPLES).sort();
-
-    // then
-    expect(result).toEqual(RULES.map((rule) => rule.id).sort());
-  });
-
-  // WHY 件数をそろえる: 例が 1 件だけだと、規則の書き方を少し崩した（条件を 1 つ落とした）ときに気づけない。
-  //   違反・許可の両側に複数の例を置き、境界の両側を固定する。
-  it.each(Object.keys(RULE_EXAMPLES))(
-    "%s の違反例・許可例はそれぞれ 3 件以上ある",
-    (id) => {
-      // given
-      const { violating, allowed } = RULE_EXAMPLES[id as RuleId];
-
-      // when
-      const violatingExampleCount = violating.length;
-
-      // then
-      expect(violatingExampleCount).toBeGreaterThanOrEqual(3);
-
-      // when
-      const allowedExampleCount = allowed.length;
-
-      // then
-      expect(allowedExampleCount).toBeGreaterThanOrEqual(3);
-    },
-  );
-
-  for (const [id, { violating, allowed }] of Object.entries(RULE_EXAMPLES) as [
-    RuleId,
-    { violating: Example[]; allowed: Example[] },
-  ][]) {
-    describe(id, () => {
-      it.each(violating)("%s → %s（%s）は違反", (...example) => {
-        // given: 前提なし
-        // when
-        const result = judge(id, example);
-
-        // then
-        expect(result).toBe(true);
-      });
-      it.each(allowed)("%s → %s（%s）は違反ではない", (...example) => {
-        // given: 前提なし
-        // when
-        const result = judge(id, example);
-
-        // then
-        expect(result).toBe(false);
-      });
-    });
-  }
-});
-
 // --- exports の判定（BACKEND_EXPORTS・SHARED_EXPORTS）の仕様 ---
 // 参照 1 件ごとではなく、exports の中身と参照の集まりで決まるので、RULES の外で例を持つ。
 
@@ -6951,225 +5749,6 @@ const EXPORT_KEY_EXAMPLES: {
     "@repo/backend",
   ],
 };
-
-describe("exports のキーの照合（resolveExportKey）", () => {
-  it("当たる例・当たらない例はそれぞれ 3 件以上ある", () => {
-    // given: 前提なし
-    // when
-    const resolvedExampleCount = EXPORT_KEY_EXAMPLES.resolved.length;
-
-    // then
-    expect(resolvedExampleCount).toBeGreaterThanOrEqual(3);
-
-    // when
-    const unresolvedExampleCount = EXPORT_KEY_EXAMPLES.unresolved.length;
-
-    // then
-    expect(unresolvedExampleCount).toBeGreaterThanOrEqual(3);
-  });
-
-  it.each(EXPORT_KEY_EXAMPLES.resolved)(
-    "%s は %s に当たる",
-    (specifier, key) => {
-      // given: 前提なし
-      // when
-      const result = resolveExportKey(
-        exportSubpath(BACKEND_EXPORTS, specifier),
-        EXPORT_KEY_EXAMPLES.keys,
-      );
-
-      // then
-      expect(result).toBe(key);
-    },
-  );
-
-  it.each(EXPORT_KEY_EXAMPLES.unresolved)(
-    "%s はどのキーにも当たらない",
-    (specifier) => {
-      // given: 前提なし
-      // when
-      const result = resolveExportKey(
-        exportSubpath(BACKEND_EXPORTS, specifier),
-        EXPORT_KEY_EXAMPLES.keys,
-      );
-
-      // then
-      expect(result).toBeUndefined();
-    },
-  );
-});
-
-describe("exports の違反の検出（findExportsViolations）", () => {
-  const ref = (from: string, specifier: string): Reference =>
-    toReference(from, { specifier, typeOnly: false });
-  const backendFiles = [
-    "apps/backend/features/todo/internal/presentation/list-todos.api.ts",
-    "apps/backend/shared/infra/env.ts",
-    "apps/backend/unused.ts",
-    "apps/backend/mismatch.ts",
-    "apps/backend/object.ts",
-  ];
-
-  it("すべての参照がキーに当たり、すべてのキーが使われ、値がキーのパスの .ts でファイルがあれば、違反は 0 件", () => {
-    // given: 前提なし
-    // when
-    const violations = findExportsViolations(
-      BACKEND_EXPORTS,
-      {
-        "./features/todo/internal/presentation/*.api":
-          "./features/todo/internal/presentation/*.api.ts",
-        "./shared/infra/env": "./shared/infra/env.ts",
-      },
-      [
-        ref(
-          "apps/frontend_customer/app/api/todos/route.ts",
-          "@repo/backend/features/todo/internal/presentation/list-todos.api",
-        ),
-        ref("apps/e2e/database.ts", "@repo/backend/shared/infra/env"),
-        // backend の中の参照（backend-relative-only が見る）と、前方一致だけが同じ別パッケージは数えない。
-        ref(
-          "apps/backend/features/todo/internal/infra/x.ts",
-          "@repo/backend/features/todo/internal/infra/todo-repository.postgres",
-        ),
-        ref("apps/frontend_customer/app/page.tsx", "@repo/backend-extra/x"),
-      ],
-      backendFiles,
-    );
-
-    // then
-    expect(violations).toEqual([]);
-  });
-
-  it("キーに当たらない参照、使われないキー、キーと違う値、ファイルの無いキーを、それぞれ検出する", () => {
-    // given: 前提なし
-    // when
-    const violations = findExportsViolations(
-      BACKEND_EXPORTS,
-      {
-        "./features/todo/internal/presentation/*.api":
-          "./features/todo/internal/presentation/*.api.ts",
-        "./unused": "./unused.ts",
-        "./mismatch": "./features/todo/internal/presentation/list-todos.api.ts",
-        "./object": { import: "./object.ts" },
-        "./missing": "./missing.ts",
-        "./features/todo/internal/domain/*":
-          "./features/todo/internal/domain/*.ts",
-      },
-      [
-        ref(
-          "apps/frontend_customer/app/api/todos/route.ts",
-          "@repo/backend/features/todo/internal/presentation/list-todos.api",
-        ),
-        ref(
-          "apps/frontend_customer/features/todo/api/x.ts",
-          "@repo/backend/features/todo/internal/infra/todo-repository.postgres",
-        ),
-        ref("apps/e2e/playwright.config.ts", "@repo/backend"),
-        ref("apps/e2e/a.ts", "@repo/backend/mismatch"),
-        ref("apps/e2e/a.ts", "@repo/backend/object"),
-        ref("apps/e2e/a.ts", "@repo/backend/missing"),
-        ref(
-          "apps/e2e/a.ts",
-          "@repo/backend/features/todo/internal/domain/todo",
-        ),
-      ],
-      backendFiles,
-    );
-
-    // then
-    expect(violations).toEqual([
-      "apps/frontend_customer/features/todo/api/x.ts → @repo/backend/features/todo/internal/infra/todo-repository.postgres",
-      "apps/e2e/playwright.config.ts → @repo/backend",
-      'apps/backend/package.json の exports "./unused" はどこからも参照されていない',
-      'apps/backend/package.json の exports "./mismatch" の値 "./features/todo/internal/presentation/list-todos.api.ts" は、キーのパスに .ts を付けたものではない',
-      'apps/backend/package.json の exports "./object" の値 {"import":"./object.ts"} は、キーのパスに .ts を付けたものではない',
-      'apps/backend/package.json の exports "./missing" が指すファイルが無い',
-      'apps/backend/package.json の exports "./features/todo/internal/domain/*" が指すファイルが無い',
-    ]);
-  });
-
-  it('キーが "./" で始まらないものは、値の形の違反にする', () => {
-    // given: 前提なし
-    // when
-    const violations = findExportsViolations(
-      BACKEND_EXPORTS,
-      { "./x": "./x.ts", x: "x.ts" },
-      [ref("apps/e2e/a.ts", "@repo/backend/x")],
-      ["apps/backend/x.ts"],
-    );
-
-    // then
-    expect(violations).toEqual([
-      'apps/backend/package.json の exports "x" はどこからも参照されていない',
-      'apps/backend/package.json の exports "x" の値 "x.ts" は、キーのパスに .ts を付けたものではない',
-      'apps/backend/package.json の exports "x" が指すファイルが無い',
-    ]);
-  });
-});
-
-describe("apps/shared の exports の違反の検出（findExportsViolations と SHARED_EXPORTS。Issue #90）", () => {
-  const ref = (from: string, specifier: string): Reference =>
-    toReference(from, { specifier, typeOnly: false });
-  const sharedFiles = ["apps/shared/env.ts", "apps/shared/logger.ts"];
-  const exports = {
-    "./env": "./env.ts",
-    "./logger": "./logger.ts",
-  };
-
-  it("frontend 直下・backend・apps/e2e/・リポジトリ直下の参照がすべてキーに当たり、すべてのキーが使われていれば、違反は 0 件", () => {
-    // given: 前提なし
-    // when
-    const violations = findExportsViolations(
-      SHARED_EXPORTS,
-      exports,
-      [
-        ref("apps/frontend_customer/proxy.ts", "@repo/shared/logger"),
-        ref("apps/backend/shared/infra/database.ts", "@repo/shared/env"),
-        ref("apps/e2e/database.ts", "@repo/shared/env"),
-        ref("vitest.global-setup.ts", "@repo/shared/env"),
-        // apps/shared の中の参照と、前方一致だけが同じ別パッケージ・@repo/backend の参照は数えない。
-        ref("apps/shared/x.ts", "@repo/shared/missing"),
-        ref("apps/frontend_customer/app/page.tsx", "@repo/shared-extra/x"),
-        ref("apps/e2e/a.ts", "@repo/backend/env"),
-      ],
-      sharedFiles,
-    );
-
-    // then
-    expect(violations).toEqual([]);
-  });
-
-  it("キーに当たらない参照（backend からのものも）、使われないキー、キーと違う値、ファイルの無いキーを検出し、apps/shared/package.json の名前で出す", () => {
-    // given: 前提なし
-    // when
-    const violations = findExportsViolations(
-      SHARED_EXPORTS,
-      {
-        ...exports,
-        "./unused": "./unused.ts",
-        "./mismatch": "./env.ts",
-      },
-      [
-        ref("apps/frontend_customer/proxy.ts", "@repo/shared/logger"),
-        ref("apps/backend/shared/infra/database.ts", "@repo/shared/env"),
-        ref("apps/backend/shared/infra/database.ts", "@repo/shared/database"),
-        ref("apps/e2e/a.ts", "@repo/shared"),
-        ref("apps/e2e/a.ts", "@repo/shared/mismatch"),
-      ],
-      sharedFiles,
-    );
-
-    // then
-    expect(violations).toEqual([
-      "apps/backend/shared/infra/database.ts → @repo/shared/database",
-      "apps/e2e/a.ts → @repo/shared",
-      'apps/shared/package.json の exports "./unused" はどこからも参照されていない',
-      'apps/shared/package.json の exports "./unused" が指すファイルが無い',
-      'apps/shared/package.json の exports "./mismatch" の値 "./env.ts" は、キーのパスに .ts を付けたものではない',
-      'apps/shared/package.json の exports "./mismatch" が指すファイルが無い',
-    ]);
-  });
-});
 
 // --- 抽出 → 正規化 → 判定を通した fixture テスト ---
 // 上の「規則ごとの判定」は、正規化済みの参照 1 件を規則に渡すだけで、ファイルの列挙・import の抽出・相対パスの解決を
@@ -9134,669 +7713,2431 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { GET } from "@repo/backend/features/todo/internal/infra/todo-repository.postgres";',
 };
 
-// Issue #130 / #142: 列挙は除外するディレクトリ（EXCLUDED_DIRS）の中に入らない（列挙した後で除くのではない）。
-// WHY: next build が作る apps/frontend_customer/.next/standalone/ には、pnpm の node_modules の形（.pnpm の中の相対パスの
-//   symlink）が複製される。以前の列挙（readdirSync の recursive: true）は symlink の先のディレクトリにも入り（Node 24.21.0 の
-//   lib/fs.js の handleFilePaths が internalModuleStat で symlink をたどる）、除くのは列挙の後だったため、symlink の組み合わせで
-//   列挙が膨らみ、rule-tests が heap を使い切って落ちた（#130 で 463 秒かけて OOM、#137 で手元の node_modules/node_modules の
-//   自己参照 symlink が standalone に複製されて SIGABRT。2026-09-29 に実測）。
-// WHY 読んだディレクトリを記録して確かめる（結果の一覧だけを見ない）: 列挙した後で除いても結果の一覧は同じで、違いは
-//   中に入るかどうか（かかる時間と memory）だけ。循環する symlink の fixture は、以前の列挙でも ELOOP（symlink 40 段）で
-//   止まって結果が同じになるか、2 本以上あると止まらなくなり（2^40）、どちらも決定的な失敗にならない（2026-09-29 に実測）。
-describe("ファイルの列挙（walkFiles・listSourceFiles・listAllFiles）", () => {
-  // WHY 結果を返す: テストの本体で when（実行）と then（検証）を分けるため、一時ツリーの中で集めた結果を外に返す（後始末は finally のまま）。
-  function withTree<T>(
-    files: Record<string, string>,
-    symlinks: Record<string, string>,
-    collect: (root: string) => T,
-  ): T {
-    const root = mkdtempSync(join(tmpdir(), "architecture-list-test-"));
-    try {
-      for (const [path, content] of Object.entries(files)) {
-        mkdirSync(dirname(join(root, path)), { recursive: true });
-        writeFileSync(join(root, path), content);
-      }
-      for (const [path, target] of Object.entries(symlinks)) {
-        mkdirSync(dirname(join(root, path)), { recursive: true });
-        symlinkSync(target, join(root, path));
-      }
-      return collect(root);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  }
+// [ファイル, ソース] の例に、移す前の it.each の名前（`%s の %j`）と同じ形のケース名を付ける（Issue #282 で casesByName に移した）。
+function sourceExampleCases(
+  examples: [file: string, source: string][],
+): [string, [file: string, source: string]][] {
+  return examples.map((example) => [
+    `${example[0]} の ${JSON.stringify(example[1])}`,
+    example,
+  ]);
+}
 
-  function walkRecordingReads(root: string, dir: string) {
-    const read: string[] = [];
-    const files = walkFiles(root, dir, (path) => {
-      read.push(toPosix(relative(root, path)));
-      return readDirectory(path);
-    });
-    return { read: read.sort(), files: files.sort() };
-  }
+// 規則ごとの判定の例のケース名（移す前の it.each の名前 `%s → %s（%s）` と同じ形）。
+function exampleName([from, specifier, kind]: Example): string {
+  return `${from} → ${specifier}（${kind}）`;
+}
 
-  const GENERATED_TREE = {
-    "apps/frontend_customer/app/page.tsx": "export default 1;",
-    "apps/frontend_customer/.lib/x.ts": "export const x = 1;",
-    "apps/frontend_customer/.next/standalone/server.js": "process.env;",
-    "apps/frontend_customer/.next/server/chunk.js": "process.env;",
-    "apps/frontend_customer/node_modules/pkg/index.js": "process.env;",
-    "apps/frontend_customer/features/todo/node_modules/pkg/index.js":
-      "process.env;",
-  };
+// 規則の名前（Rule の name など。.claude/rules/architecture-check.md の規則の文）を、.feature の step の文にする（Issue #282）。
+// WHY 「*」を言い換える: step の文の中の「*」は vitest-cucumber が読み違える（rule-tests/rule-test-feature.test.ts の
+//   rule-test-feature-format が止める）。名前の中の「*」は glob なので、「**/」を「<階層>/」、残りの「*」を「<名前>」と読み替える。
+//   規則の名前そのものは変えない（違反の一覧や文書と同じ文のまま）。
+function ruleStepText(name: string): string {
+  return name.replaceAll("**/", "<階層>/").replaceAll("*", "<名前>");
+}
 
-  it("除外するディレクトリ（node_modules・.next）は、どの階層でも読まない（中に入ってから除くのではない）", () => {
-    // given: モジュールの定数 GENERATED_TREE（生成物のディレクトリを含むツリー）
-    // when
-    const walked = withTree(GENERATED_TREE, {}, (root) =>
-      walkRecordingReads(root, FRONTEND_ROOT),
-    );
+const feature = await loadFeature("./architecture.feature");
 
-    // then
-    expect(walked).toEqual({
-      read: [
-        "apps/frontend_customer",
-        "apps/frontend_customer/.lib",
-        "apps/frontend_customer/app",
-        "apps/frontend_customer/features",
-        "apps/frontend_customer/features/todo",
-      ],
-      files: [
-        "apps/frontend_customer/.lib/x.ts",
-        "apps/frontend_customer/app/page.tsx",
-      ],
-    });
-  });
+describeFeature(feature, ({ Scenario }) => {
+  Scenario("依存の向き（.claude/rules/architecture-check.md）", ({ And }) => {
+    const references = collectReferences(repoRoot);
 
-  // Issue #142 の再現の形: .next/standalone/ に複製された pnpm の相対 symlink が循環する（2 本あると以前の列挙は 2^40 で
-  //   止まらない）。除外のディレクトリの中なので、読まずに完走する。中に入ってから除くと statSync が ELOOP を投げて失敗する。
-  it("除外するディレクトリの中に循環する symlink（.next/standalone/node_modules/x -> ../..）があっても、中に入らずに完走する", () => {
-    // given
-    const symlinks = {
-      "apps/frontend_customer/.next/standalone/node_modules/x": "../..",
-      "apps/frontend_customer/.next/standalone/node_modules/y": "../..",
-      "apps/frontend_customer/node_modules/node_modules": "..",
-    };
+    And(
+      "検査の対象から参照を取り出せている（抽出が壊れて 0 件になり、すべての規則が素通りするのを防ぐ）",
+      () => {
+        // given: 前提なし
+        // when
+        const referenceCount = references.length;
 
-    // when
-    const walked = withTree(GENERATED_TREE, symlinks, (root) =>
-      walkRecordingReads(root, FRONTEND_ROOT),
-    );
-
-    // then
-    expect(walked).toEqual({
-      read: [
-        "apps/frontend_customer",
-        "apps/frontend_customer/.lib",
-        "apps/frontend_customer/app",
-        "apps/frontend_customer/features",
-        "apps/frontend_customer/features/todo",
-      ],
-      files: [
-        "apps/frontend_customer/.lib/x.ts",
-        "apps/frontend_customer/app/page.tsx",
-      ],
-    });
-  });
-
-  it("listSourceFiles・listAllFiles は、除外するディレクトリの中に自分を指す symlink があっても、その外のファイルだけを返す", () => {
-    // given
-    const files = {
-      ...GENERATED_TREE,
-      "apps/shared/env.ts": "export const env = 1;",
-      "apps/shared/node_modules/pkg/index.js": "process.env;",
-    };
-    const symlinks = {
-      "apps/frontend_customer/.next/standalone/self": ".",
-      "apps/shared/node_modules/self": ".",
-    };
-
-    // when
-    const listed = withTree(files, symlinks, (root) => ({
-      source: listSourceFiles(root, FRONTEND_ROOT).sort(),
-      all: listAllFiles(root, SHARED_ROOT),
-    }));
-
-    // then
-    expect(listed).toEqual({
-      source: [
-        "apps/frontend_customer/.lib/x.ts",
-        "apps/frontend_customer/app/page.tsx",
-      ],
-      all: ["apps/shared/env.ts"],
-    });
-  });
-
-  // WHY symlink の先も列挙する: 以前の列挙（readdirSync の recursive: true）と同じ範囲を検査し、symlink で置いたディレクトリの
-  //   コードが検査を素通りしないようにする。
-  // listAllFiles の挙動の差: 以前は通常ファイル（entry.isFile()）だけを返し、ファイルを指す symlink は数えなかった。今は
-  //   ディレクトリ以外をすべて返すので、ファイルへの symlink（と先の無い symlink）も返す（置き場所の規則で違反にできる）。
-  it("除外しないディレクトリの symlink は、先のディレクトリの中も列挙し、ファイルへの symlink もファイルとして返す", () => {
-    // given
-    const files = {
-      "apps/frontend_customer/app/page.tsx": "export default 1;",
-      "outside/lib/db.ts": "export const db = 1;",
-      "outside/shared-extra/extra.ts": "export const x = 1;",
-      "outside/note.md": "x",
-    };
-    const symlinks = {
-      "apps/frontend_customer/lib": "../../outside/lib",
-      "apps/shared/extra": "../../outside/shared-extra",
-      "apps/shared/note.md": "../../outside/note.md",
-      "apps/shared/dangling.ts": "../../outside/missing.ts",
-    };
-
-    // when
-    const listed = withTree(files, symlinks, (root) => ({
-      source: listSourceFiles(root, FRONTEND_ROOT).sort(),
-      all: listAllFiles(root, SHARED_ROOT).sort(),
-    }));
-
-    // then
-    expect(listed).toEqual({
-      source: [
-        "apps/frontend_customer/app/page.tsx",
-        "apps/frontend_customer/lib/db.ts",
-      ],
-      all: [
-        "apps/shared/dangling.ts",
-        "apps/shared/extra/extra.ts",
-        "apps/shared/note.md",
-      ],
-    });
-  });
-
-  // WHY 例外で止まることを固定する: 除外の外で循環すると、statSync が ELOOP（symlink 40 段）を投げて列挙が失敗する（無限には
-  //   再帰しない）。以前の列挙（readdirSync の recursive: true）は ELOOP を黙って握りつぶし、途中までの一覧を返していた
-  //   （検査が一部だけで緑になりうる）。今は音を立てて失敗する。
-  it("除外の外に置いた循環する symlink（apps/backend/loop -> ..）は、ELOOP の例外で止まる（無限に回らない）", () => {
-    // given
-    const files = {
-      "apps/backend/features/todo/internal/domain/todo.ts":
-        "export const x = 1;",
-    };
-    const symlinks = { "apps/backend/loop": ".." };
-
-    // when
-    const thrown = withTree(files, symlinks, (root) => {
-      try {
-        walkFiles(root, BACKEND_ROOT);
-        return undefined;
-      } catch (error) {
-        return error;
-      }
-    });
-
-    // then
-    expect(thrown).toMatchObject({ code: "ELOOP", syscall: "stat" });
-  });
-
-  it("ディレクトリが無ければ空を返す", () => {
-    // given: 前提なし（空のツリー）
-    // when
-    const listed = withTree({}, {}, (root) => ({
-      walked: walkFiles(root, FRONTEND_ROOT),
-      source: listSourceFiles(root, FRONTEND_ROOT),
-      all: listAllFiles(root, SHARED_ROOT),
-    }));
-
-    // then
-    expect(listed).toEqual({ walked: [], source: [], all: [] });
-  });
-});
-
-describe("fixture のツリーを検査したときに検出される違反", () => {
-  it("must-reject: 置いた違反がすべて、置いたとおりの規則で検出され、それ以外は検出されない", () => {
-    // given: 前提なし
-    // when
-    const result = violationsOfFixture(MUST_REJECT_FILES);
-
-    // then
-    expect(result).toEqual([...MUST_REJECT_VIOLATIONS].sort());
-  });
-
-  it("must-pass: 許可される参照だけのツリーでは違反が 0 件", () => {
-    // given: 前提なし
-    // when
-    const result = violationsOfFixture(MUST_PASS_FILES);
-
-    // then
-    expect(result).toEqual([]);
-  });
-});
-
-describe("参照の抽出（extractImports）", () => {
-  it("複数行にまたがる import を 1 つの参照として取り出す", () => {
-    // given
-    const source = [
-      "import {",
-      "  CreateTodoCommand,",
-      "  DeleteTodoCommand,",
-      '} from "@/backend/features/todo/internal/application/x";',
-    ].join("\n");
-
-    // when
-    const imports = extractImports(source);
-
-    // then
-    expect(imports).toEqual([
-      {
-        specifier: "@/backend/features/todo/internal/application/x",
-        typeOnly: false,
+        // then
+        expect(referenceCount).toBeGreaterThan(0);
       },
-    ]);
-  });
-
-  it("import type / export type は型だけの参照、export { X } from は値の参照になる。export ... from は re-export の印を持つ", () => {
-    // given
-    const source = [
-      'import type { A } from "a";',
-      'export type { B } from "b";',
-      'export { GET } from "c";',
-      'export * from "d";',
-      'import { Entity } from "e";',
-    ].join("\n");
-
-    // when
-    const imports = extractImports(source);
-
-    // then
-    // WHY import に reExport が無いことも toEqual で見る: toEqual は undefined のプロパティを無いものと同じに扱うが、
-    //   reExport: true が付けば一致しない（import を re-export と取り違えると、同じディレクトリの辞書の import まで違反になる）。
-    expect(imports).toEqual([
-      { specifier: "a", typeOnly: true },
-      { specifier: "b", typeOnly: true, reExport: true },
-      { specifier: "c", typeOnly: false, reExport: true },
-      { specifier: "d", typeOnly: false, reExport: true },
-      { specifier: "e", typeOnly: false },
-    ]);
-  });
-
-  it("inline の type は、すべての名前に付いているときだけ型だけの参照になる", () => {
-    // given
-    const source = [
-      'import { type A, type B } from "all-type";',
-      'import { type A, Value } from "mixed";',
-      'import Default, { type A } from "with-default";',
-      'import {} from "empty";',
-      // Issue #224（Codex のレビュー）: `type` という名前の値の export を別名で受ける形は、inline の type 修飾子ではなく値の import。
-      'import { type as portValue } from "named-type";',
-      'import { type A, type as portValue } from "named-type-mixed";',
-      // 空白が複数でも（ブロックコメントを落とした跡）`type as` は値の import。
-      'import { type    as portValue } from "named-type-spaces";',
-      'import { type /* keep */ as portValue } from "named-type-comment";',
-    ].join("\n");
-
-    // when
-    const imports = extractImports(source);
-
-    // then
-    expect(imports).toEqual([
-      { specifier: "all-type", typeOnly: true },
-      { specifier: "mixed", typeOnly: false },
-      { specifier: "with-default", typeOnly: false },
-      { specifier: "empty", typeOnly: false },
-      { specifier: "named-type", typeOnly: false },
-      { specifier: "named-type-mixed", typeOnly: false },
-      { specifier: "named-type-spaces", typeOnly: false },
-      { specifier: "named-type-comment", typeOnly: false },
-    ]);
-  });
-
-  // Issue #144: presentation が自 feature の domain から値で import してよいのは定数だけ（規則 presentation）。import の名前が
-  //   すべて UPPER_SNAKE_CASE（/^[A-Z][A-Z0-9_]*$/。inline の type の名前は数えない）のときだけ定数だけの印を持つ。
-  // WHY as の前の名前（元の export 名）で見る: 参照先で何を export しているかが規則の対象で、手元の別名は関係ない。
-  // WHY re-export・default・* as・{} は印を持たない: re-export は presentation から domain の値を外へ出す。default と * as は
-  //   名前で中身が分からない（モジュール全体・任意の値）。{} は名前が無い。
-  it("名前がすべて UPPER_SNAKE_CASE の定数の import だけが、定数だけの印を持つ", () => {
-    // given
-    const source = [
-      'import { TODO_TITLE_MAX_LENGTH } from "constant";',
-      'import { MAX_2, A } from "constants";',
-      'import { type Todo, TODO_TITLE_MAX_LENGTH } from "constant-and-type";',
-      'import { TODO_TITLE_MAX_LENGTH as max } from "constant-alias";',
-      "import {",
-      "  TODO_A,",
-      "  TODO_B,",
-      '} from "multi-line";',
-      'import { Todo } from "pascal";',
-      'import { KeyedIssue } from "camel";',
-      'import { TODO_MAX, Todo } from "mixed";',
-      'import { max as TODO_MAX } from "alias-to-constant";',
-      'import { Todo_MAX } from "not-upper";',
-      'import { _TODO } from "underscore-first";',
-      'import { TODO$ } from "dollar";',
-      'import TODO_DEFAULT from "default";',
-      'import * as TODO from "namespace";',
-      'import TODO_D, { TODO_E } from "default-and-named";',
-      'import {} from "empty";',
-      'import { type TODO_T } from "type-only-inline";',
-      'import type { TODO_T } from "type-only";',
-      'export { TODO_MAX } from "re-export";',
-      'import "side-effect";',
-      'const m = import("dynamic");',
-    ].join("\n");
-
-    // when
-    const imports = extractImports(source);
-
-    // then
-    expect(imports).toEqual([
-      { specifier: "constant", typeOnly: false, constantsOnly: true },
-      { specifier: "constants", typeOnly: false, constantsOnly: true },
-      { specifier: "constant-and-type", typeOnly: false, constantsOnly: true },
-      { specifier: "constant-alias", typeOnly: false, constantsOnly: true },
-      { specifier: "multi-line", typeOnly: false, constantsOnly: true },
-      { specifier: "pascal", typeOnly: false },
-      { specifier: "camel", typeOnly: false },
-      { specifier: "mixed", typeOnly: false },
-      { specifier: "alias-to-constant", typeOnly: false },
-      { specifier: "not-upper", typeOnly: false },
-      { specifier: "underscore-first", typeOnly: false },
-      { specifier: "dollar", typeOnly: false },
-      { specifier: "default", typeOnly: false },
-      { specifier: "namespace", typeOnly: false },
-      { specifier: "default-and-named", typeOnly: false },
-      { specifier: "empty", typeOnly: false },
-      { specifier: "type-only-inline", typeOnly: true },
-      { specifier: "type-only", typeOnly: true },
-      { specifier: "re-export", typeOnly: false, reExport: true },
-      { specifier: "side-effect", typeOnly: false },
-      { specifier: "dynamic", typeOnly: false },
-    ]);
-  });
-
-  it("副作用だけの import と dynamic import を値の参照として取り出す", () => {
-    // given
-    const source = [
-      'import "./globals.css";',
-      'const mod = await import("@/features/todo");',
-    ].join("\n");
-
-    // when
-    const imports = extractImports(source);
-
-    // then
-    expect(imports).toEqual([
-      { specifier: "./globals.css", typeOnly: false },
-      { specifier: "@/features/todo", typeOnly: false },
-    ]);
-  });
-
-  it("コメントの中の import は拾わず、文字列の中の // でその後ろを消さない", () => {
-    // given
-    const source = [
-      '// 例: import { GET } from "@/backend/line-comment";',
-      "/*",
-      ' * import { GET } from "@/backend/block-comment";',
-      " */",
-      'const url = "https://example.com"; import { a } from "after-string";',
-      "const s = '/* not a comment */'; import { b } from \"after-quote\";",
-    ].join("\n");
-
-    // when
-    const imports = extractImports(source);
-
-    // then
-    expect(imports).toEqual([
-      { specifier: "after-string", typeOnly: false },
-      { specifier: "after-quote", typeOnly: false },
-    ]);
-  });
-
-  it("セミコロンの無い文の直後の import type を、前の文とつなげずに型だけの参照として取り出す", () => {
-    // given
-    const source = [
-      "export enum E { A }",
-      'import type { X } from "after-enum";',
-    ].join("\n");
-
-    // when
-    const imports = extractImports(source);
-
-    // then
-    expect(imports).toEqual([{ specifier: "after-enum", typeOnly: true }]);
-  });
-
-  it("文字列リテラル（テンプレートリテラルを含む）の中の import 風の文字列は拾わない", () => {
-    // given
-    const source = [
-      "const a = 'import(\"@/backend/x\")';",
-      "const b = 'import \"@/backend/y\"';",
-      "const t = `",
-      'import { c } from "@/backend/z";',
-      "`;",
-      'import { real } from "real";',
-    ].join("\n");
-
-    // when
-    const imports = extractImports(source);
-
-    // then
-    expect(imports).toEqual([{ specifier: "real", typeOnly: false }]);
-  });
-
-  it("埋め込み式（ドル記号と波かっこ）を含むテンプレートリテラルの import() は、参照先を静的に決められないので拾わない（見逃す方向の限界）", () => {
-    // given
-    // WHY テンプレートリテラルで書く: 普通の文字列の中に埋め込み式の形を書くと Biome の noTemplateCurlyInString が
-    //   書き間違いとして検出するため、\${ でエスケープして同じ文字列を作る。
-    const source = [
-      `const m = import(\`@/backend/\${name}/presentation/x.api\`);`,
-      'import { real } from "real";',
-    ].join("\n");
-
-    // when
-    const imports = extractImports(source);
-
-    // then
-    expect(imports).toEqual([{ specifier: "real", typeOnly: false }]);
-  });
-
-  it("from を持たない export 文から、後ろの文の from まで一致を伸ばさない", () => {
-    // given
-    const source = [
-      "export const GET = new ListTodosApi(new ListTodosQuery(repository)).handle;",
-      "export default function Page() {",
-      "  return null",
-      "}",
-      'import { x } from "real";',
-    ].join("\n");
-
-    // when
-    const imports = extractImports(source);
-
-    // then
-    expect(imports).toEqual([{ specifier: "real", typeOnly: false }]);
-  });
-});
-
-describe("参照先の正規化（toReference）", () => {
-  const from =
-    "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.tsx";
-
-  it('"@/" は apps/frontend_customer からのパスにする（tsconfig の paths の "@/*" は apps/frontend_customer/*）', () => {
-    // given: 前提なし
-    // when
-    const result = toReference(from, {
-      specifier: "@/features/todo/api/todo-api",
-      typeOnly: true,
-    });
-
-    // then
-    expect(result).toEqual({
-      from,
-      specifier: "@/features/todo/api/todo-api",
-      to: "apps/frontend_customer/features/todo/api/todo-api",
-      own: true,
-      typeOnly: true,
-    });
-  });
-
-  it('"@repo/backend/" と "@repo/backend" は apps/backend からのパスにする', () => {
-    // given: 前提なし
-    // when
-    const result = toReference(from, {
-      specifier:
-        "@repo/backend/features/todo/internal/presentation/list-todos.api.ts",
-      typeOnly: true,
-    });
-
-    // then
-    expect(result).toEqual({
-      from,
-      specifier:
-        "@repo/backend/features/todo/internal/presentation/list-todos.api.ts",
-      to: "apps/backend/features/todo/internal/presentation/list-todos.api",
-      own: true,
-      typeOnly: true,
-    });
-
-    // when
-    const to2 = toReference(from, {
-      specifier: "@repo/backend",
-      typeOnly: false,
-    }).to;
-
-    // then
-    expect(to2).toBe("apps/backend");
-  });
-
-  it('"@repo/shared/" と "@repo/shared" は apps/shared からのパスにし、"@repo/shared-extra/x" は自前のコードにしない（Issue #90）', () => {
-    // given: 前提なし
-    // when
-    const result = toReference(from, {
-      specifier: "@repo/shared/env.ts",
-      typeOnly: false,
-    });
-
-    // then
-    expect(result).toEqual({
-      from,
-      specifier: "@repo/shared/env.ts",
-      to: "apps/shared/env",
-      own: true,
-      typeOnly: false,
-    });
-
-    // when
-    const to2 = toReference(from, {
-      specifier: "@repo/shared",
-      typeOnly: false,
-    }).to;
-
-    // then
-    expect(to2).toBe("apps/shared");
-
-    // when
-    const to3 = toReference(from, {
-      specifier: "@repo/shared/../backend/x",
-      typeOnly: false,
-    }).to;
-
-    // then
-    expect(to3).toBe("apps/backend/x");
-
-    // when
-    const sharedExtraReference = toReference(from, {
-      specifier: "@repo/shared-extra/x",
-      typeOnly: false,
-    });
-
-    // then
-    expect(sharedExtraReference).toEqual({
-      from,
-      specifier: "@repo/shared-extra/x",
-      to: "@repo/shared-extra/x",
-      own: false,
-      typeOnly: false,
-    });
-  });
-
-  it('"@/" と "@repo/backend/" の後ろの ".." は解決する（"@/../backend/x" は apps/backend/x）', () => {
-    // given: 前提なし
-    // when
-    const to2 = toReference(from, {
-      specifier:
-        "@/../backend/features/todo/internal/presentation/list-todos.api",
-      typeOnly: true,
-    }).to;
-
-    // then
-    expect(to2).toBe(
-      "apps/backend/features/todo/internal/presentation/list-todos.api",
     );
 
-    // when
-    const to3 = toReference(from, {
-      specifier: "@repo/backend/../frontend_customer/features/todo",
-      typeOnly: false,
-    }).to;
+    And(ruleStepText(BACKEND_PLACEMENT.name), () => {
+      // given: 前提なし
+      // when
+      const result = listReferencingFiles(repoRoot).filter(
+        BACKEND_PLACEMENT.isMisplaced,
+      );
 
-    // then
-    expect(to3).toBe("apps/frontend_customer/features/todo");
+      // then
+      expect(result).toEqual([]);
+    });
+
+    And(ruleStepText(FRONTEND_PLACEMENT.name), () => {
+      // given: 前提なし
+      // when
+      const result = listReferencingFiles(repoRoot).filter(
+        FRONTEND_PLACEMENT.isMisplaced,
+      );
+
+      // then
+      expect(result).toEqual([]);
+    });
+
+    And(ruleStepText(SHARED_PLACEMENT.name), () => {
+      // given: 前提なし
+      // when
+      const result = listAllFiles(repoRoot, SHARED_ROOT).filter(
+        SHARED_PLACEMENT.isMisplaced,
+      );
+
+      // then
+      expect(result).toEqual([]);
+    });
+
+    // WHY: 列挙が空（ディレクトリ名の書き間違い・列挙の壊れ）なら置き場所の違反も 0 件で常に緑になる。
+    // WHY arrayContaining（一覧の外のファイルがあっても落とさない）: 一覧の外のファイルは上の shared-placement の 1 件だけで落とし、
+    //   規則を破ったときに、どの規則が破れたかをテスト名で分かるようにする。
+    And(
+      "apps/shared の全ファイル（ソース・テスト・package.json・tsconfig.json）を列挙できている（列挙が壊れて素通りするのを防ぐ）",
+      () => {
+        // given: 前提なし
+        // when
+        const allFiles = listAllFiles(repoRoot, SHARED_ROOT);
+
+        // then
+        expect(allFiles).toEqual(expect.arrayContaining([...SHARED_FILES]));
+      },
+    );
+
+    for (const rule of RULES) {
+      And(ruleStepText(rule.name), () => {
+        // given: 前提なし
+        // when
+        const violations = findViolations(references, rule);
+
+        // then
+        // 失敗時にどのファイルがどこを参照しているかが出力に出るよう、違反を「ファイル → 参照先」の一覧にして空配列と比較する。
+        expect(violations).toEqual([]);
+      });
+    }
+
+    // WHY 本物の expose の参照が取り出せていることを見る（Issue #208）: モジュールの境界の規則（module-internal・
+    //   module-expose-only-from-presentation・expose-imports）は、expose/ の下のファイルと、expose を使う presentation の参照を
+    //   取り出せていなければ、違反も 0 件で常に緑になる。
+    And(
+      "モジュールの境界の規則は、本物の expose（notification の notifier.ts）の参照と、それを使う todo の presentation の参照を取り出せている（列挙が壊れて素通りするのを防ぐ）",
+      () => {
+        // given: 前提なし
+        // when
+        const result = references.map((ref) => `${ref.from} → ${ref.to}`);
+
+        // then
+        expect(result).toEqual(
+          expect.arrayContaining([
+            "apps/backend/features/todo/internal/presentation/change-todo-completion.api.ts → apps/backend/features/notification/expose/notifier",
+            "apps/backend/features/notification/expose/notifier.ts → apps/backend/features/notification/internal/application/send-notification.command",
+            "apps/backend/features/notification/expose/notifier.ts → apps/backend/features/notification/internal/infra/notification-sender.log",
+            "apps/backend/features/notification/expose/notifier.ts → apps/shared/logger",
+          ]),
+        );
+      },
+    );
+
+    And(ruleStepText(ENV_DIRECT_ACCESS.name), () => {
+      // given: 前提なし
+      // when
+      const violations = findEnvViolations(repoRoot);
+
+      // then
+      // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
+      expect(violations).toEqual([]);
+    });
+
+    And(ruleStepText(CONSOLE_DIRECT_ACCESS.name), () => {
+      // given: 前提なし
+      // when
+      const violations = findConsoleViolations(repoRoot);
+
+      // then
+      // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
+      expect(violations).toEqual([]);
+    });
+
+    And(ruleStepText(NOW_SINGLE_SOURCE.name), () => {
+      // given: 前提なし
+      // when
+      const violations = findNowViolations(repoRoot);
+
+      // then
+      // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
+      expect(violations).toEqual([]);
+    });
+
+    And(
+      "現在時刻の読み取りの検査は、apps/frontend_customer・apps/backend・apps/shared のソースを対象にし、テスト・テストの補助・apps/e2e/・ルート直下は対象にしない（列挙が壊れて素通りするのを防ぐ）",
+      () => {
+        // given: 前提なし
+        // when
+        const files = listNowCheckedFiles(repoRoot);
+
+        // then
+        expect(files).toEqual(
+          expect.arrayContaining([
+            "apps/shared/now.ts",
+            "apps/shared/logger.ts",
+            "apps/backend/features/todo/internal/domain/todo.ts",
+            "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
+            "apps/frontend_customer/proxy.ts",
+            "apps/frontend_customer/shared/i18n/format.ts",
+            "apps/frontend_customer/features/todo/components/todo-item.tsx",
+            "apps/frontend_customer/app/page.tsx",
+          ]),
+        );
+
+        // when
+        for (const excluded of [
+          "apps/shared/now.test.ts",
+          "apps/backend/features/todo/internal/domain/todo.test.ts",
+          "apps/backend/test-support/database.ts",
+          "apps/frontend_customer/test-support/i18n.tsx",
+          "apps/e2e/todo.spec.ts",
+          "vitest.config.mts",
+        ]) {
+          expect(files).not.toContain(excluded);
+        }
+
+        const result = files.filter((file) => file.includes("/.next/"));
+
+        // then
+        expect(result).toEqual([]);
+      },
+    );
+
+    for (const rule of HARDCODED_TEXT_RULES) {
+      And(ruleStepText(rule.name), () => {
+        // given: 前提なし
+        // when
+        const violations = findHardcodedTextViolations(repoRoot, rule);
+
+        // then
+        // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
+        expect(violations).toEqual([]);
+      });
+    }
+
+    And(ruleStepText(PRESENTATION_WITH_PROBLEM_RESPONSE.name), () => {
+      // given: 前提なし
+      // when
+      const violations = findProblemResponseViolations(repoRoot);
+
+      // then
+      // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
+      expect(violations).toEqual([]);
+    });
+
+    // WHY 本物の 5 本が列挙に入っていることを見る: 列挙（パスの正規表現）が壊れて 0 件になると、違反も 0 件で常に緑になる。
+    And(
+      "handle を ProblemResponse.wrap で包む規則は、本物の api ファイル 6 本を対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）",
+      () => {
+        // given: 前提なし
+        // when
+        const files = listProblemResponseCheckedFiles(repoRoot);
+
+        // then
+        expect(files).toEqual(
+          expect.arrayContaining([
+            "apps/backend/features/todo/internal/presentation/create-todo.api.ts",
+            "apps/backend/features/todo/internal/presentation/delete-todo.api.ts",
+            "apps/backend/features/todo/internal/presentation/get-todo.api.ts",
+            "apps/backend/features/todo/internal/presentation/list-todos.api.ts",
+            "apps/backend/features/todo/internal/presentation/rename-todo.api.ts",
+            "apps/backend/features/todo/internal/presentation/change-todo-completion.api.ts",
+          ]),
+        );
+
+        // when
+        const result = files.filter((file) => TEST_FILE.test(file));
+
+        // then
+        expect(result).toEqual([]);
+      },
+    );
+
+    And(ruleStepText(CLASS_BASED.name), () => {
+      // given: 前提なし
+      // when
+      const violations = findClassBasedViolations(repoRoot);
+
+      // then
+      // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
+      expect(violations).toEqual([]);
+    });
+
+    // WHY 本物のファイルが列挙に入っていることを見る: 列挙（パスの判定）が壊れて 0 件になると、違反も 0 件で常に緑になる。
+    And(
+      "最上位に関数を置かない規則は、apps/backend の本番コード（層・expose・drizzle.config.ts）・apps/shared の本番コード・テストの補助（test-support/・spec/ の support.ts・apps/e2e/ の spec 以外）を対象にし、テスト・E2E の .spec.ts・リポジトリ直下は対象にしない（列挙が壊れて素通りするのを防ぐ）",
+      () => {
+        // given: 前提なし
+        // when
+        const files = listClassBasedCheckedFiles(repoRoot);
+
+        // then
+        expect(files).toEqual(
+          expect.arrayContaining([
+            "apps/backend/shared/domain/validate.ts",
+            "apps/backend/shared/infra/writer.ts",
+            "apps/backend/shared/presentation/problem.ts",
+            "apps/backend/shared/drizzle/drizzle.config.ts",
+            "apps/backend/features/notification/expose/notifier.ts",
+            "apps/backend/features/todo/internal/domain/todo.ts",
+            "apps/backend/features/todo/internal/presentation/create-todo.api.ts",
+            "apps/shared/env.ts",
+            "apps/shared/log-event.ts",
+            "apps/shared/logger.ts",
+            "apps/shared/now.ts",
+            "apps/backend/test-support/database.ts",
+            "apps/backend/test-support/transaction-runner.in-memory.ts",
+            "apps/backend/test-support/todo/todo-builder.ts",
+            "apps/backend/test-support/todo/todo-repository.in-memory.ts",
+            "apps/backend/spec/api/todo/support.ts",
+            "apps/e2e/database.ts",
+            "apps/e2e/playwright.config.ts",
+          ]),
+        );
+
+        // when
+        const result = files.filter(
+          (file) =>
+            TEST_FILE.test(file) ||
+            E2E_SPEC_FILE.test(file) ||
+            !(
+              isUnder(file, BACKEND_ROOT) ||
+              isUnder(file, SHARED_ROOT) ||
+              isUnder(file, E2E_ROOT)
+            ),
+        );
+
+        // then
+        expect(result).toEqual([]);
+      },
+    );
+
+    for (const pkg of EXPORTED_PACKAGES) {
+      And(ruleStepText(pkg.name), () => {
+        // given: 前提なし
+        // when
+        const violations = findPackageExportsViolations(
+          repoRoot,
+          pkg,
+          references,
+        );
+
+        // then
+        expect(violations).toEqual([]);
+      });
+    }
+
+    And(
+      "apps/backend の exports を 1 件以上読め、apps/frontend_customer の @repo/backend の参照を取り出せている（読み込みや列挙が壊れて素通りするのを防ぐ）",
+      () => {
+        // given: 前提なし
+        // when
+        const exportCount = Object.keys(
+          readPackageExports(repoRoot, BACKEND_EXPORTS),
+        ).length;
+
+        // then
+        expect(exportCount).toBeGreaterThan(0);
+
+        // when
+        const consumers = new Set(
+          references
+            .filter((ref) => isBackendPackage(ref.specifier))
+            .map((ref) => ref.from),
+        );
+
+        const result = [...consumers];
+
+        // then
+        expect(result).toEqual(
+          expect.arrayContaining([
+            "apps/frontend_customer/app/api/todos/route.ts",
+            "apps/frontend_customer/features/todo/api/todo-api.ts",
+          ]),
+        );
+      },
+    );
+
+    And(
+      "apps/shared の exports を読め、apps/frontend_customer 直下・apps/backend・apps/e2e/・リポジトリ直下の @repo/shared の参照を取り出せている（読み込みや列挙が壊れて素通りするのを防ぐ）",
+      () => {
+        // given: 前提なし
+        // when
+        const result = Object.keys(
+          readPackageExports(repoRoot, SHARED_EXPORTS),
+        ).sort();
+
+        // then
+        expect(result).toEqual(["./env", "./logger", "./now"]);
+
+        // when
+        const consumers = new Set(
+          references
+            .filter((ref) => isSharedPackage(ref.specifier))
+            .map((ref) => ref.from),
+        );
+
+        const sharedConsumers = [...consumers];
+
+        // then
+        expect(sharedConsumers).toEqual(
+          expect.arrayContaining([
+            "apps/frontend_customer/instrumentation-node.ts",
+            "apps/frontend_customer/proxy.ts",
+            "apps/backend/features/todo/internal/domain/todo.ts",
+            "apps/backend/features/notification/expose/notifier.ts",
+            "apps/backend/features/notification/internal/infra/notification-sender.log.ts",
+            "apps/backend/shared/drizzle/drizzle.config.ts",
+            "apps/backend/shared/infra/database.ts",
+            "apps/backend/shared/presentation/problem.ts",
+            "apps/e2e/database.ts",
+            "apps/e2e/playwright.config.ts",
+            "vitest.global-setup.ts",
+          ]),
+        );
+      },
+    );
+
+    And(
+      "環境変数の直参照の検査は、各ディレクトリとルート直下の設定ファイルを対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）",
+      () => {
+        // given: 前提なし
+        // when
+        const files = listEnvCheckedFiles(repoRoot);
+
+        // then
+        expect(files).toEqual(
+          expect.arrayContaining([
+            "apps/shared/env.ts",
+            "apps/shared/logger.ts",
+            "apps/backend/shared/infra/database.ts",
+            "apps/backend/test-support/database.ts",
+            "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
+            "apps/backend/shared/drizzle/drizzle.config.ts",
+            "apps/frontend_customer/next.config.ts",
+            "apps/frontend_customer/instrumentation.ts",
+            "apps/frontend_customer/instrumentation-node.ts",
+            "apps/frontend_customer/features/todo/api/todo-api.ts",
+            "apps/frontend_customer/app/page.tsx",
+            "apps/e2e/database.ts",
+            "apps/e2e/playwright.config.ts",
+            "vitest.config.mts",
+            "vitest.global-setup.ts",
+            "stryker.config.mjs",
+          ]),
+        );
+        expect(files).not.toContain("rule-tests/architecture.test.ts");
+        expect(files).not.toContain("apps/shared/env.test.ts");
+
+        // when
+        const result = files.filter((file) => file.includes("/.next/"));
+
+        // then
+        // next build の生成物（apps/frontend_customer/.next/）は数えない（あれば数千件の JS を検査することになる）。
+        expect(result).toEqual([]);
+      },
+    );
+
+    And(
+      "console の直接の呼び出しの検査は、各ディレクトリ・scripts/・ルート直下の設定ファイルを対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）",
+      () => {
+        // given: 前提なし
+        // when
+        const files = listConsoleCheckedFiles(repoRoot);
+
+        // then
+        expect(files).toEqual(
+          expect.arrayContaining([
+            "apps/shared/logger.ts",
+            "apps/shared/env.ts",
+            "apps/backend/shared/infra/database.ts",
+            "apps/backend/shared/presentation/problem.ts",
+            "apps/backend/features/todo/internal/presentation/list-todos.api.ts",
+            "apps/backend/shared/drizzle/drizzle.config.ts",
+            "apps/frontend_customer/proxy.ts",
+            "apps/frontend_customer/instrumentation-node.ts",
+            "apps/frontend_customer/features/todo/api/todo-api.ts",
+            "apps/frontend_customer/app/page.tsx",
+            "apps/e2e/database.ts",
+            "apps/e2e/playwright.config.ts",
+            "apps/e2e/request-log.spec.ts",
+            "vitest.config.mts",
+            "vitest.global-setup.ts",
+            "stryker.config.mjs",
+          ]),
+        );
+        expect(files).not.toContain("rule-tests/architecture.test.ts");
+        expect(files).not.toContain("apps/shared/logger.test.ts");
+        expect(files).not.toContain("scripts/hooks/guard-git.test.ts");
+
+        // when
+        const result = files.filter((file) => file.includes("/.next/"));
+
+        // then
+        expect(result).toEqual([]);
+      },
+    );
+
+    And(
+      "ハードコードの文言の検査は、apps/frontend_customer・apps/backend・apps/shared のソース（辞書 .messages.ts を含む）を対象にし、テスト・生成物は対象にしない（列挙が壊れて素通りするのを防ぐ）",
+      () => {
+        // given: 前提なし
+        // when
+        const frontend = listHardcodedTextCheckedFiles(
+          repoRoot,
+          FRONTEND_HARDCODED_TEXT,
+        );
+
+        // then
+        expect(frontend).toEqual(
+          expect.arrayContaining([
+            "apps/frontend_customer/app/layout.tsx",
+            "apps/frontend_customer/app/page.tsx",
+            "apps/frontend_customer/features/todo/api/todo-api.ts",
+            "apps/frontend_customer/features/todo/components/todo-item.tsx",
+            "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.tsx",
+            "apps/frontend_customer/proxy.ts",
+          ]),
+        );
+
+        // when
+        const result = frontend.filter((file) => I18N_MESSAGES.test(file));
+
+        // then
+        // WHY 辞書も対象に入っていることを見る（Issue #125 の reviewer 指摘で、辞書を対象から外すのをやめた）: 辞書も
+        //   defineMessages(...) の引数の外は同じ検査をかける。対象から外れると、辞書に書いた引数の外の文言が素通りする。
+        //   辞書の例外（I18N_MESSAGES）が実在のファイルに当たっていることも、ここで見る（名前の付け方が変わったら落ちる）。
+        expect(result).toEqual(
+          expect.arrayContaining([
+            "apps/frontend_customer/shared/i18n/common.messages.ts",
+            "apps/frontend_customer/features/todo/components/todo-item.messages.ts",
+            "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.messages.ts",
+            "apps/frontend_customer/features/todo/screens/todo-detail-screen/todo-detail-screen.messages.ts",
+          ]),
+        );
+
+        // when
+        const backend = listHardcodedTextCheckedFiles(
+          repoRoot,
+          SERVER_HARDCODED_TEXT,
+        );
+
+        // then
+        expect(backend).toEqual(
+          expect.arrayContaining([
+            "apps/backend/shared/domain/domain-error.ts",
+            "apps/backend/shared/presentation/problem.ts",
+            "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
+            "apps/backend/features/notification/expose/notifier.ts",
+            "apps/backend/shared/drizzle/drizzle.config.ts",
+            "apps/shared/env.ts",
+            "apps/shared/logger.ts",
+          ]),
+        );
+        for (const files of [frontend, backend]) {
+          expect(files.filter((file) => TEST_FILE.test(file))).toEqual([]);
+          expect(
+            files.filter((file) => /\/(?:\.next|node_modules)\//.test(file)),
+          ).toEqual([]);
+        }
+      },
+    );
+
+    And(
+      "logger.ts の中の console は拾えている（抽出が壊れて 0 件になり、規則が素通りするのを防ぐ）",
+      () => {
+        // given: 前提なし
+        // when
+        const consoleAccessCount = findConsoleAccesses(
+          readFileSync(
+            join(repoRoot, CONSOLE_DIRECT_ACCESS.allowedFile),
+            "utf8",
+          ),
+        ).length;
+
+        // then
+        expect(consoleAccessCount).toBeGreaterThan(0);
+      },
+    );
+
+    And(
+      "env.ts の中の process.env は拾えている（抽出が壊れて 0 件になり、規則が素通りするのを防ぐ）",
+      () => {
+        // given: 前提なし
+        // when
+        const envAccessCount = findProcessEnvAccesses(
+          readFileSync(join(repoRoot, ENV_DIRECT_ACCESS.allowedFile), "utf8"),
+        ).length;
+
+        // then
+        expect(envAccessCount).toBeGreaterThan(0);
+      },
+    );
   });
 
-  it('名前の前方一致だけが同じ別パッケージ（"@repo/backend-extra/x"）は自前のコードにしない', () => {
-    // given: 前提なし
-    // when
-    const result = toReference(from, {
-      specifier: "@repo/backend-extra/x",
-      typeOnly: false,
-    });
+  Scenario("backend の置き場所の判定", ({ And }) => {
+    And(
+      "違反例（PLACEMENT_EXAMPLES.misplaced）はすべて置き場所の違反になる",
+      () => {
+        // given
+        const cases = PLACEMENT_EXAMPLES.misplaced.map((file): [string] => [
+          file,
+        ]);
 
-    // then
-    expect(result).toEqual({
-      from,
-      specifier: "@repo/backend-extra/x",
-      to: "@repo/backend-extra/x",
-      own: false,
-      typeOnly: false,
+        // when
+        const result = casesByName(cases, ([file]) =>
+          BACKEND_PLACEMENT.isMisplaced(file),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => true));
+      },
+    );
+    And(
+      "許可例（PLACEMENT_EXAMPLES.placed）はどれも置き場所の違反にならない",
+      () => {
+        // given
+        const cases = PLACEMENT_EXAMPLES.placed.map((file): [string] => [file]);
+
+        // when
+        const result = casesByName(cases, ([file]) =>
+          BACKEND_PLACEMENT.isMisplaced(file),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => false));
+      },
+    );
+  });
+
+  Scenario("apps/shared の置き場所の判定", ({ And }) => {
+    And(
+      "違反例（SHARED_PLACEMENT_EXAMPLES.misplaced）はすべて置き場所の違反になる",
+      () => {
+        // given
+        const cases = SHARED_PLACEMENT_EXAMPLES.misplaced.map(
+          (file): [string] => [file],
+        );
+
+        // when
+        const result = casesByName(cases, ([file]) =>
+          SHARED_PLACEMENT.isMisplaced(file),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => true));
+      },
+    );
+    And(
+      "許可例（SHARED_PLACEMENT_EXAMPLES.placed）はどれも置き場所の違反にならない",
+      () => {
+        // given
+        const cases = SHARED_PLACEMENT_EXAMPLES.placed.map((file): [string] => [
+          file,
+        ]);
+
+        // when
+        const result = casesByName(cases, ([file]) =>
+          SHARED_PLACEMENT.isMisplaced(file),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => false));
+      },
+    );
+  });
+
+  Scenario("frontend の置き場所の判定", ({ And }) => {
+    And(
+      "違反例（FRONTEND_PLACEMENT_EXAMPLES.misplaced）はすべて置き場所の違反になる",
+      () => {
+        // given
+        const cases = FRONTEND_PLACEMENT_EXAMPLES.misplaced.map(
+          (file): [string] => [file],
+        );
+
+        // when
+        const result = casesByName(cases, ([file]) =>
+          FRONTEND_PLACEMENT.isMisplaced(file),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => true));
+      },
+    );
+    And(
+      "許可例（FRONTEND_PLACEMENT_EXAMPLES.placed）はどれも置き場所の違反にならない",
+      () => {
+        // given
+        const cases = FRONTEND_PLACEMENT_EXAMPLES.placed.map(
+          (file): [string] => [file],
+        );
+
+        // when
+        const result = casesByName(cases, ([file]) =>
+          FRONTEND_PLACEMENT.isMisplaced(file),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => false));
+      },
+    );
+  });
+
+  Scenario("環境変数の直参照の判定", ({ And }) => {
+    And("違反例・許可例はそれぞれ 4 件以上ある", () => {
+      // given: 前提なし
+      // when
+      const violatingExampleCount = ENV_ACCESS_EXAMPLES.violating.length;
+
+      // then
+      expect(violatingExampleCount).toBeGreaterThanOrEqual(4);
+
+      // when
+      const allowedExampleCount = ENV_ACCESS_EXAMPLES.allowed.length;
+
+      // then
+      expect(allowedExampleCount).toBeGreaterThanOrEqual(4);
+    });
+    And("違反例（ENV_ACCESS_EXAMPLES.violating）はすべて違反になる", () => {
+      // given
+      const cases = sourceExampleCases(ENV_ACCESS_EXAMPLES.violating);
+
+      // when
+      const result = casesByName(cases, ([, example]) =>
+        judgeEnvAccess(example),
+      );
+
+      // then
+      expect(result).toEqual(casesByName(cases, () => true));
+    });
+    And("許可例（ENV_ACCESS_EXAMPLES.allowed）はどれも違反にならない", () => {
+      // given
+      const cases = sourceExampleCases(ENV_ACCESS_EXAMPLES.allowed);
+
+      // when
+      const result = casesByName(cases, ([, example]) =>
+        judgeEnvAccess(example),
+      );
+
+      // then
+      expect(result).toEqual(casesByName(cases, () => false));
     });
   });
 
-  it("相対パスは参照元の位置から解決し、拡張子を外す", () => {
-    // given: 前提なし
-    // when
-    const result = toReference(from, {
-      specifier: "../../components/todo-item.tsx",
-      typeOnly: false,
-    });
+  Scenario("環境変数の直参照の抽出（findProcessEnvAccesses）", ({ And }) => {
+    And(
+      "参照ごとに、読んだ変数の名前を返す（.NAME / ?.NAME の形だけ。取れない形は undefined）",
+      () => {
+        // given
+        const source = [
+          "const a = process.env.NEXT_RUNTIME;",
+          "const b = process?.env?.DATABASE_URL;",
+          'const c = process["env"].X;',
+          'const d = process.env["Y"];',
+          "const e = process.env;",
+        ].join("\n");
 
-    // then
-    expect(result).toEqual({
-      from,
-      specifier: "../../components/todo-item.tsx",
-      to: "apps/frontend_customer/features/todo/components/todo-item",
-      own: true,
-      typeOnly: false,
-    });
+        // when
+        const result = findProcessEnvAccesses(source).map(
+          ({ variable }) => variable,
+        );
 
-    // when
-    const to2 = toReference(from, {
-      specifier: "../../../../../backend/features/todo/internal/domain/todo",
-      typeOnly: false,
-    }).to;
+        // then
+        expect(result).toEqual([
+          "NEXT_RUNTIME",
+          "DATABASE_URL",
+          "X",
+          undefined,
+          undefined,
+        ]);
+      },
+    );
 
-    // then
-    // apps をまたぐ相対パスも、リポジトリ相対のパスに解決する。
-    expect(to2).toBe("apps/backend/features/todo/internal/domain/todo");
+    And(
+      "参照ごとに、書かれた行番号を返す（コメントを消しても行はずれない）",
+      () => {
+        // given
+        const source = [
+          "/*",
+          " * process.env は読まない",
+          " */",
+          "const a = process.env.A; const b = process.env.B;",
+          "// process.env",
+          'const c = process["env"].C;',
+        ].join("\n");
+
+        // when
+        const result = findProcessEnvAccesses(source).map(({ line }) => line);
+
+        // then
+        expect(result).toEqual([4, 4, 6]);
+      },
+    );
+
+    And(
+      "分割代入・別名・Reflect.get・node:process の default import 経由の参照は拾わない（見逃す方向の限界。Biome の noProcessEnv も検出しない）",
+      () => {
+        // given
+        const source = [
+          "const { env } = process;",
+          "const p = process; p.env;",
+          'const e = Reflect.get(process, "env");',
+          'import proc from "node:process"; proc.env.X;',
+        ].join("\n");
+
+        // when
+        const processEnvAccesses = findProcessEnvAccesses(source);
+
+        // then
+        expect(processEnvAccesses).toEqual([]);
+      },
+    );
+
+    And(
+      "node:process の名前付き import（env を取り出す形）は拾わない（見逃す方向の限界。Biome の noProcessEnv が検出する）",
+      () => {
+        // given
+        const source = [
+          'import { env } from "node:process";',
+          "export const u = env.X;",
+        ].join("\n");
+
+        // when
+        const processEnvAccesses = findProcessEnvAccesses(source);
+
+        // then
+        expect(processEnvAccesses).toEqual([]);
+      },
+    );
+
+    And(
+      "テンプレートリテラルの埋め込み式の中の参照は拾わない（見逃す方向の限界。Biome の noProcessEnv が検出する）",
+      () => {
+        // given
+        // WHY テンプレートリテラルで書く: 普通の文字列の中に埋め込み式の形を書くと Biome の noTemplateCurlyInString が
+        //   書き間違いとして検出するため、\${ でエスケープして同じ文字列を作る。
+        const source = `const url = \`db: \${process.env.DATABASE_URL}\`;`;
+
+        // when
+        const processEnvAccesses = findProcessEnvAccesses(source);
+
+        // then
+        expect(processEnvAccesses).toEqual([]);
+      },
+    );
   });
 
-  it("それ以外はパッケージとして specifier のまま扱う", () => {
-    // given: 前提なし
-    // when
-    const result = toReference(from, {
-      specifier: "next/link",
-      typeOnly: false,
+  Scenario("console を直接書く規則の判定", ({ And }) => {
+    And("違反例・許可例はそれぞれ 4 件以上ある", () => {
+      // given: 前提なし
+      // when
+      const violatingExampleCount = CONSOLE_ACCESS_EXAMPLES.violating.length;
+
+      // then
+      expect(violatingExampleCount).toBeGreaterThanOrEqual(4);
+
+      // when
+      const allowedExampleCount = CONSOLE_ACCESS_EXAMPLES.allowed.length;
+
+      // then
+      expect(allowedExampleCount).toBeGreaterThanOrEqual(4);
+    });
+    And("違反例（CONSOLE_ACCESS_EXAMPLES.violating）はすべて違反になる", () => {
+      // given
+      const cases = sourceExampleCases(CONSOLE_ACCESS_EXAMPLES.violating);
+
+      // when
+      const result = casesByName(cases, ([, example]) =>
+        judgeConsoleAccess(example),
+      );
+
+      // then
+      expect(result).toEqual(casesByName(cases, () => true));
+    });
+    And(
+      "許可例（CONSOLE_ACCESS_EXAMPLES.allowed）はどれも違反にならない",
+      () => {
+        // given
+        const cases = sourceExampleCases(CONSOLE_ACCESS_EXAMPLES.allowed);
+
+        // when
+        const result = casesByName(cases, ([, example]) =>
+          judgeConsoleAccess(example),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => false));
+      },
+    );
+  });
+
+  Scenario("console の参照の抽出（findConsoleAccesses）", ({ And }) => {
+    And(
+      "参照ごとに、書かれた行番号を返す（コメントを消しても行はずれない）",
+      () => {
+        // given
+        const source = [
+          "/*",
+          " * console.log は書かない",
+          " */",
+          "console.log(1); console.error(2);",
+          "// console.warn",
+          'globalThis.console["info"](3);',
+        ].join("\n");
+
+        // when
+        const consoleAccesses = findConsoleAccesses(source);
+
+        // then
+        expect(consoleAccesses).toEqual([4, 4, 6]);
+      },
+    );
+
+    And(
+      "node:console の import（名前付きの import と default import）は拾わない（見逃す方向の限界。Biome の noConsole も検出しない）",
+      () => {
+        // given
+        const source = [
+          'import { log } from "node:console";',
+          'import c from "node:console";',
+          "log(1); c.log(2);",
+        ].join("\n");
+
+        // when
+        const consoleAccesses = findConsoleAccesses(source);
+
+        // then
+        expect(consoleAccesses).toEqual([]);
+      },
+    );
+
+    And(
+      "テンプレートリテラルの埋め込み式の中の console は拾わない（見逃す方向の限界。Biome の noConsole が検出する）",
+      () => {
+        // given
+        // WHY テンプレートリテラルで書く: 環境変数の抽出のテストと同じく、noTemplateCurlyInString を避けるため。
+        const source = `const s = \`x: \${console.log(1)}\`;`;
+
+        // when
+        const consoleAccesses = findConsoleAccesses(source);
+
+        // then
+        expect(consoleAccesses).toEqual([]);
+      },
+    );
+  });
+
+  Scenario("現在時刻を読む規則の判定", ({ And }) => {
+    And("違反例・許可例はそれぞれ 4 件以上ある", () => {
+      // given: 前提なし
+      // when
+      const violatingExampleCount = NOW_ACCESS_EXAMPLES.violating.length;
+
+      // then
+      expect(violatingExampleCount).toBeGreaterThanOrEqual(4);
+
+      // when
+      const allowedExampleCount = NOW_ACCESS_EXAMPLES.allowed.length;
+
+      // then
+      expect(allowedExampleCount).toBeGreaterThanOrEqual(4);
+    });
+    And("違反例（NOW_ACCESS_EXAMPLES.violating）はすべて違反になる", () => {
+      // given
+      const cases = sourceExampleCases(NOW_ACCESS_EXAMPLES.violating);
+
+      // when
+      const result = casesByName(cases, ([, example]) =>
+        judgeNowAccess(example),
+      );
+
+      // then
+      expect(result).toEqual(casesByName(cases, () => true));
+    });
+    And("許可例（NOW_ACCESS_EXAMPLES.allowed）はどれも違反にならない", () => {
+      // given
+      const cases = sourceExampleCases(NOW_ACCESS_EXAMPLES.allowed);
+
+      // when
+      const result = casesByName(cases, ([, example]) =>
+        judgeNowAccess(example),
+      );
+
+      // then
+      expect(result).toEqual(casesByName(cases, () => false));
+    });
+  });
+
+  Scenario("現在時刻の読み取りの抽出（findCurrentTimeAccesses）", ({ And }) => {
+    And(
+      "読み取りごとに、書かれた行番号を返す（1 行に 2 つあれば 2 件。コメントを消しても行はずれない）",
+      () => {
+        // given
+        const source = [
+          "/*",
+          " * new Date() は書かない",
+          " */",
+          "const a = new Date(); const b = Date.now();",
+          "// Date.now()",
+          "const c = new Date(a);",
+          "const d = new Date(",
+          ");",
+        ].join("\n");
+
+        // when
+        const currentTimeAccesses = findCurrentTimeAccesses(source);
+
+        // then
+        expect(currentTimeAccesses).toEqual([4, 4, 7]);
+      },
+    );
+
+    And(
+      "別名・分割代入・括弧で囲んだ Date・空のスプレッド・Reflect.construct は拾わない（見逃す方向の限界）",
+      () => {
+        // given
+        const source = [
+          "const D = Date; const a = new D();",
+          "const { now: read } = Date; read();",
+          "const b = new (Date)();",
+          "const c = new Date(...[]);",
+          "const d = Reflect.construct(Date, []);",
+        ].join("\n");
+
+        // when
+        const currentTimeAccesses = findCurrentTimeAccesses(source);
+
+        // then
+        expect(currentTimeAccesses).toEqual([]);
+      },
+    );
+
+    And(
+      "テンプレートリテラルの埋め込み式の中は拾わない（見逃す方向の限界）",
+      () => {
+        // given
+        // WHY テンプレートリテラルで書く: console の抽出のテストと同じく、noTemplateCurlyInString を避けるため。
+        const source = `const s = \`at: \${Date.now()}\`;`;
+
+        // when
+        const currentTimeAccesses = findCurrentTimeAccesses(source);
+
+        // then
+        expect(currentTimeAccesses).toEqual([]);
+      },
+    );
+
+    And(
+      "Date という名前のメソッドの呼び出し（calendar.Date()）も new の無い Date() として数える（多く検出する方向の限界）",
+      () => {
+        // given: 前提なし
+        // when
+        const currentTimeAccesses = findCurrentTimeAccesses("calendar.Date();");
+
+        // then
+        expect(currentTimeAccesses).toEqual([1]);
+      },
+    );
+  });
+
+  for (const rule of HARDCODED_TEXT_RULES) {
+    Scenario(`ハードコードの文言の判定（${rule.id}）`, ({ And }) => {
+      const examples = HARDCODED_TEXT_EXAMPLES[rule.id];
+      // WHY 遅延して 1 回だけ判定する: 例ごとに tsgo を起動すると遅いため、最初に判定する step で全例をまとめて判定する。
+      let verdicts: { violating: boolean[]; allowed: boolean[] } | undefined;
+      const verdictsOf = () => {
+        verdicts ??= {
+          violating: judgeHardcodedTexts(rule, examples.violating),
+          allowed: judgeHardcodedTexts(rule, examples.allowed),
+        };
+        return verdicts;
+      };
+      And("違反例・許可例はそれぞれ 4 件以上ある", () => {
+        // given: 前提なし
+        // when
+        const violatingExampleCount = examples.violating.length;
+
+        // then
+        expect(violatingExampleCount).toBeGreaterThanOrEqual(4);
+
+        // when
+        const allowedExampleCount = examples.allowed.length;
+
+        // then
+        expect(allowedExampleCount).toBeGreaterThanOrEqual(4);
+      });
+      And(
+        "違反例（HARDCODED_TEXT_EXAMPLES の violating）はすべて違反になる",
+        () => {
+          // given
+          const cases = examples.violating.map(
+            ([file, source], i): [string, number] => [
+              `${file} の ${JSON.stringify(source)}`,
+              i,
+            ],
+          );
+
+          // when
+          const result = casesByName(
+            cases,
+            ([, i]) => verdictsOf().violating[i],
+          );
+
+          // then
+          expect(result).toEqual(casesByName(cases, () => true));
+        },
+      );
+      And(
+        "許可例（HARDCODED_TEXT_EXAMPLES の allowed）はどれも違反にならない",
+        () => {
+          // given
+          const cases = examples.allowed.map(
+            ([file, source], i): [string, number] => [
+              `${file} の ${JSON.stringify(source)}`,
+              i,
+            ],
+          );
+
+          // when
+          const result = casesByName(cases, ([, i]) => verdictsOf().allowed[i]);
+
+          // then
+          expect(result).toEqual(casesByName(cases, () => false));
+        },
+      );
+    });
+  }
+
+  Scenario("ハードコードの文言の抽出（findHardcodedTexts）", ({ And }) => {
+    And(
+      "文言ごとに、書かれた行番号を返す（JSX のテキストは最初の文字の行。属性と日本語の両方に当たる値は 1 件）",
+      () => {
+        // given
+        const source = [
+          "/*",
+          " * 削除のボタン",
+          " */",
+          "export const C = ({ todo }) => (",
+          '  <button aria-label="Delete" title={`Edit`}>',
+          "",
+          "    削除",
+          "  </button>",
+          ");",
+          `export const D = ({ todo }) => <img alt={\`「\${todo.title}」\`} />;`,
+          'export const m = "保存しました"; // 日本語',
+        ].join("\n");
+
+        // when
+        const result = hardcodedTextLinesOf(
+          "x.tsx",
+          source,
+          FRONTEND_HARDCODED_TEXT,
+        );
+
+        // then
+        expect(result).toEqual([5, 5, 7, 10, 11]);
+      },
+    );
+
+    And(
+      "ASCII の文字列を変数に入れてから JSX に渡す・JSX の子に式で書く・一覧に無い props・三項演算子の中は拾わない（見逃す方向の限界。日本語なら拾う）",
+      () => {
+        // given
+        const source = [
+          'const s = "Delete";',
+          "export const A = () => <p>{s}</p>;",
+          'export const B = () => <p>{"Delete"}</p>;',
+          'export const C = () => <Dialog heading="Delete" />;',
+          'export const D = (x) => <a title={x ? "Open" : "Close"} />;',
+          'export const E = (x) => <a title={x ? "開く" : "閉じる"} />;',
+        ].join("\n");
+
+        // when
+        const result = hardcodedTextLinesOf(
+          "x.tsx",
+          source,
+          FRONTEND_HARDCODED_TEXT,
+        );
+
+        // then
+        expect(result).toEqual([6, 6]);
+      },
+    );
+
+    And(
+      "辞書（.messages.ts）では defineMessages(...) の引数の中だけを通し、引数の外の文言は行番号で返す",
+      () => {
+        // given
+        const source = [
+          'import { defineMessages } from "@/shared/i18n/i18n";',
+          'export const label = "削除";',
+          "export const m = defineMessages({",
+          '  ja: { delete: "削除" },',
+          '  en: { delete: "Delete" },',
+          "});",
+          'export const e = createElement("button", { "aria-label": "閉じる" });',
+        ].join("\n");
+
+        // when
+        const result = hardcodedTextLinesOf(
+          "apps/frontend_customer/features/todo/components/x.messages.ts",
+          source,
+          FRONTEND_HARDCODED_TEXT,
+        );
+
+        // then
+        expect(result).toEqual([2, 7]);
+
+        // when
+        const nonDictionaryLines = hardcodedTextLinesOf(
+          "apps/frontend_customer/features/todo/components/x.ts",
+          source,
+          FRONTEND_HARDCODED_TEXT,
+        );
+
+        // then
+        // 同じ中身でも辞書でないファイルなら、defineMessages の引数の中も違反。
+        expect(nonDictionaryLines).toEqual([2, 4, 7]);
+      },
+    );
+
+    And(
+      "構文解析の結果に無いファイルを渡すと例外にする（黙って飛ばして素通りさせない）",
+      () => {
+        // given: 前提なし
+        // when
+        const action = () => parseSourceFiles({ "README.md": "# x" });
+
+        // then
+        // .md は tsconfig の files に書いても TypeScript のソースにならない。
+        expect(action).toThrow(new Error("構文解析の結果に README.md が無い"));
+      },
+    );
+  });
+
+  Scenario(
+    `handle を ProblemResponse.wrap で包む規則の判定（${PRESENTATION_WITH_PROBLEM_RESPONSE.id}）`,
+    ({ And }) => {
+      const { violating, allowed } = PROBLEM_RESPONSE_EXAMPLES;
+      // WHY 遅延して 1 回だけ判定する: 例ごとに tsgo を起動すると遅いため（ハードコードの文言の判定と同じ）。
+      let verdicts: { violating: boolean[]; allowed: boolean[] } | undefined;
+      const verdictsOf = () => {
+        verdicts ??= {
+          violating: judgeProblemResponses(violating),
+          allowed: judgeProblemResponses(allowed),
+        };
+        return verdicts;
+      };
+      // WHY ケース名にソースを入れない: 複数行のソースがあり、名前が崩れる。どの例かは番号と、例の一覧のコメントで追う。
+      And(
+        "違反例（PROBLEM_RESPONSE_EXAMPLES.violating）はすべて違反になる",
+        () => {
+          // given
+          const cases = violating.map(([file], i): [string, number] => [
+            `違反例 ${i}（${file}）`,
+            i,
+          ]);
+
+          // when
+          const result = casesByName(
+            cases,
+            ([, i]) => verdictsOf().violating[i],
+          );
+
+          // then
+          expect(result).toEqual(casesByName(cases, () => true));
+        },
+      );
+      And(
+        "許可例（PROBLEM_RESPONSE_EXAMPLES.allowed）はどれも違反にならない",
+        () => {
+          // given
+          const cases = allowed.map(([file], i): [string, number] => [
+            `許可例 ${i}（${file}）`,
+            i,
+          ]);
+
+          // when
+          const result = casesByName(cases, ([, i]) => verdictsOf().allowed[i]);
+
+          // then
+          expect(result).toEqual(casesByName(cases, () => false));
+        },
+      );
+    },
+  );
+
+  Scenario(
+    "ProblemResponse.wrap で包んでいない handle の抽出（findUnwrappedHandles）",
+    ({ And }) => {
+      And(
+        "包んでいない handle ごとに、メンバーの書き出しの行番号を返す（包んだ handle・ほかの名前のメンバーは返さない）",
+        () => {
+          // given
+          const source = lines(
+            IMPORT_WITH_PROBLEM_RESPONSE,
+            "export class AApi {",
+            "  readonly handle = ProblemResponse.wrap(async (request: Request) => new Response(null));",
+            "}",
+            "export class BApi {",
+            "  private readonly other = 1;",
+            "  readonly handle = async (request: Request) => new Response(null);",
+            "}",
+            "export const C = class {",
+            "  async handle() {",
+            "    return new Response(null);",
+            "  }",
+            "};",
+          );
+
+          // when
+          const unwrappedHandles = findUnwrappedHandles(
+            parseSourceFiles({ [API_FILE]: source }).get(
+              API_FILE,
+            ) as SourceFile,
+          );
+
+          // then
+          expect(unwrappedHandles).toEqual([7, 10]);
+        },
+      );
+    },
+  );
+
+  Scenario(
+    `backend と apps/shared の本番コードとテストの補助の最上位に関数を置かない規則の判定（${CLASS_BASED.id}）`,
+    ({ And }) => {
+      const { violating, allowed } = CLASS_BASED_EXAMPLES;
+      // WHY 遅延して 1 回だけ判定する: 例ごとに tsgo を起動すると遅いため（handle の規則の判定と同じ）。
+      let verdicts: { violating: boolean[]; allowed: boolean[] } | undefined;
+      const verdictsOf = () => {
+        verdicts ??= {
+          violating: judgeClassBased(violating),
+          allowed: judgeClassBased(allowed),
+        };
+        return verdicts;
+      };
+      And("違反例（CLASS_BASED_EXAMPLES.violating）はすべて違反になる", () => {
+        // given
+        const cases = violating.map(([file], i): [string, number] => [
+          `違反例 ${i}（${file}）`,
+          i,
+        ]);
+
+        // when
+        const result = casesByName(cases, ([, i]) => verdictsOf().violating[i]);
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => true));
+      });
+      And(
+        "許可例（CLASS_BASED_EXAMPLES.allowed）はどれも違反にならない",
+        () => {
+          // given
+          const cases = allowed.map(([file], i): [string, number] => [
+            `許可例 ${i}（${file}）`,
+            i,
+          ]);
+
+          // when
+          const result = casesByName(cases, ([, i]) => verdictsOf().allowed[i]);
+
+          // then
+          expect(result).toEqual(casesByName(cases, () => false));
+        },
+      );
+    },
+  );
+
+  Scenario("最上位の関数の抽出（findTopLevelFunctions）", ({ And }) => {
+    And(
+      "最上位の関数ごとに宣言の書き出しの行番号を返す（オーバーロードは宣言ごと、1 つの文の変数は関数のものだけ、クラスの中は返さない）",
+      () => {
+        // given
+        const source = lines(
+          "export function f(x: string): string;",
+          "export function f(x: number): number;",
+          "export function f(x: unknown): unknown {",
+          "  return x;",
+          "}",
+          "export class A {",
+          "  static g(): void {}",
+          "  readonly h = () => 1;",
+          "}",
+          "const a = 1,",
+          "  b = () => a;",
+          "export default function () {}",
+        );
+
+        // when
+        const topLevelFunctions = findTopLevelFunctions(
+          parseSourceFiles({ [DOMAIN_FILE]: source }).get(
+            DOMAIN_FILE,
+          ) as SourceFile,
+        );
+
+        // then
+        expect(topLevelFunctions).toEqual([1, 2, 3, 11, 12]);
+      },
+    );
+  });
+
+  Scenario("規則ごとの判定", ({ And }) => {
+    // WHY: 規則を足したのに判定の例を足し忘れると、その規則の判定は下の規則ごとの Scenario で 1 度も確かめられない（Issue #68 で 3 規則を足した）。
+    And(
+      "RULES のすべての規則に判定の例があり、RULES に無い規則の例は無い",
+      () => {
+        // given: 前提なし
+        // when
+        const result = Object.keys(RULE_EXAMPLES).sort();
+
+        // then
+        expect(result).toEqual(RULES.map((rule) => rule.id).sort());
+      },
+    );
+
+    // WHY 件数をそろえる: 例が 1 件だけだと、規則の書き方を少し崩した（条件を 1 つ落とした）ときに気づけない。
+    //   違反・許可の両側に複数の例を置き、境界の両側を固定する。
+    And("どの規則も違反例・許可例がそれぞれ 3 件以上ある", () => {
+      // given
+      const cases = Object.keys(RULE_EXAMPLES).map((id): [string] => [id]);
+
+      // when
+      const result = casesByName(cases, ([id]) => {
+        const { violating, allowed } = RULE_EXAMPLES[id as RuleId];
+        return {
+          violating: violating.length >= 3,
+          allowed: allowed.length >= 3,
+        };
+      });
+
+      // then
+      expect(result).toEqual(
+        casesByName(cases, () => ({ violating: true, allowed: true })),
+      );
+    });
+  });
+
+  for (const [id, { violating, allowed }] of Object.entries(RULE_EXAMPLES) as [
+    RuleId,
+    { violating: Example[]; allowed: Example[] },
+  ][]) {
+    Scenario(`規則ごとの判定（${id}）`, ({ And }) => {
+      And("違反例（RULE_EXAMPLES の violating）はすべて違反になる", () => {
+        // given
+        const cases = violating.map((example): [string, Example] => [
+          exampleName(example),
+          example,
+        ]);
+
+        // when
+        const result = casesByName(cases, ([, example]) => judge(id, example));
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => true));
+      });
+      And("許可例（RULE_EXAMPLES の allowed）はどれも違反にならない", () => {
+        // given
+        const cases = allowed.map((example): [string, Example] => [
+          exampleName(example),
+          example,
+        ]);
+
+        // when
+        const result = casesByName(cases, ([, example]) => judge(id, example));
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => false));
+      });
+    });
+  }
+
+  Scenario("exports のキーの照合（resolveExportKey）", ({ And }) => {
+    And("当たる例・当たらない例はそれぞれ 3 件以上ある", () => {
+      // given: 前提なし
+      // when
+      const resolvedExampleCount = EXPORT_KEY_EXAMPLES.resolved.length;
+
+      // then
+      expect(resolvedExampleCount).toBeGreaterThanOrEqual(3);
+
+      // when
+      const unresolvedExampleCount = EXPORT_KEY_EXAMPLES.unresolved.length;
+
+      // then
+      expect(unresolvedExampleCount).toBeGreaterThanOrEqual(3);
     });
 
-    // then
-    expect(result).toEqual({
-      from,
-      specifier: "next/link",
-      to: "next/link",
-      own: false,
-      typeOnly: false,
+    And(
+      "当たる例（EXPORT_KEY_EXAMPLES.resolved）は、それぞれ例に書いたキーに当たる",
+      () => {
+        // given
+        const cases = EXPORT_KEY_EXAMPLES.resolved;
+
+        // when
+        const result = casesByName(cases, ([specifier]) =>
+          resolveExportKey(
+            exportSubpath(BACKEND_EXPORTS, specifier),
+            EXPORT_KEY_EXAMPLES.keys,
+          ),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, ([, key]) => key));
+      },
+    );
+
+    And(
+      "当たらない例（EXPORT_KEY_EXAMPLES.unresolved）はどのキーにも当たらない",
+      () => {
+        // given
+        const cases = EXPORT_KEY_EXAMPLES.unresolved.map(
+          (specifier): [string] => [specifier],
+        );
+
+        // when
+        const result = casesByName(cases, ([specifier]) =>
+          resolveExportKey(
+            exportSubpath(BACKEND_EXPORTS, specifier),
+            EXPORT_KEY_EXAMPLES.keys,
+          ),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => undefined));
+      },
+    );
+  });
+
+  Scenario("exports の違反の検出（findExportsViolations）", ({ And }) => {
+    const ref = (from: string, specifier: string): Reference =>
+      toReference(from, { specifier, typeOnly: false });
+    const backendFiles = [
+      "apps/backend/features/todo/internal/presentation/list-todos.api.ts",
+      "apps/backend/shared/infra/env.ts",
+      "apps/backend/unused.ts",
+      "apps/backend/mismatch.ts",
+      "apps/backend/object.ts",
+    ];
+
+    And(
+      "すべての参照がキーに当たり、すべてのキーが使われ、値がキーのパスの .ts でファイルがあれば、違反は 0 件",
+      () => {
+        // given: 前提なし
+        // when
+        const violations = findExportsViolations(
+          BACKEND_EXPORTS,
+          {
+            "./features/todo/internal/presentation/*.api":
+              "./features/todo/internal/presentation/*.api.ts",
+            "./shared/infra/env": "./shared/infra/env.ts",
+          },
+          [
+            ref(
+              "apps/frontend_customer/app/api/todos/route.ts",
+              "@repo/backend/features/todo/internal/presentation/list-todos.api",
+            ),
+            ref("apps/e2e/database.ts", "@repo/backend/shared/infra/env"),
+            // backend の中の参照（backend-relative-only が見る）と、前方一致だけが同じ別パッケージは数えない。
+            ref(
+              "apps/backend/features/todo/internal/infra/x.ts",
+              "@repo/backend/features/todo/internal/infra/todo-repository.postgres",
+            ),
+            ref("apps/frontend_customer/app/page.tsx", "@repo/backend-extra/x"),
+          ],
+          backendFiles,
+        );
+
+        // then
+        expect(violations).toEqual([]);
+      },
+    );
+
+    And(
+      "キーに当たらない参照、使われないキー、キーと違う値、ファイルの無いキーを、それぞれ検出する",
+      () => {
+        // given: 前提なし
+        // when
+        const violations = findExportsViolations(
+          BACKEND_EXPORTS,
+          {
+            "./features/todo/internal/presentation/*.api":
+              "./features/todo/internal/presentation/*.api.ts",
+            "./unused": "./unused.ts",
+            "./mismatch":
+              "./features/todo/internal/presentation/list-todos.api.ts",
+            "./object": { import: "./object.ts" },
+            "./missing": "./missing.ts",
+            "./features/todo/internal/domain/*":
+              "./features/todo/internal/domain/*.ts",
+          },
+          [
+            ref(
+              "apps/frontend_customer/app/api/todos/route.ts",
+              "@repo/backend/features/todo/internal/presentation/list-todos.api",
+            ),
+            ref(
+              "apps/frontend_customer/features/todo/api/x.ts",
+              "@repo/backend/features/todo/internal/infra/todo-repository.postgres",
+            ),
+            ref("apps/e2e/playwright.config.ts", "@repo/backend"),
+            ref("apps/e2e/a.ts", "@repo/backend/mismatch"),
+            ref("apps/e2e/a.ts", "@repo/backend/object"),
+            ref("apps/e2e/a.ts", "@repo/backend/missing"),
+            ref(
+              "apps/e2e/a.ts",
+              "@repo/backend/features/todo/internal/domain/todo",
+            ),
+          ],
+          backendFiles,
+        );
+
+        // then
+        expect(violations).toEqual([
+          "apps/frontend_customer/features/todo/api/x.ts → @repo/backend/features/todo/internal/infra/todo-repository.postgres",
+          "apps/e2e/playwright.config.ts → @repo/backend",
+          'apps/backend/package.json の exports "./unused" はどこからも参照されていない',
+          'apps/backend/package.json の exports "./mismatch" の値 "./features/todo/internal/presentation/list-todos.api.ts" は、キーのパスに .ts を付けたものではない',
+          'apps/backend/package.json の exports "./object" の値 {"import":"./object.ts"} は、キーのパスに .ts を付けたものではない',
+          'apps/backend/package.json の exports "./missing" が指すファイルが無い',
+          'apps/backend/package.json の exports "./features/todo/internal/domain/*" が指すファイルが無い',
+        ]);
+      },
+    );
+
+    And('キーが "./" で始まらないものは、値の形の違反にする', () => {
+      // given: 前提なし
+      // when
+      const violations = findExportsViolations(
+        BACKEND_EXPORTS,
+        { "./x": "./x.ts", x: "x.ts" },
+        [ref("apps/e2e/a.ts", "@repo/backend/x")],
+        ["apps/backend/x.ts"],
+      );
+
+      // then
+      expect(violations).toEqual([
+        'apps/backend/package.json の exports "x" はどこからも参照されていない',
+        'apps/backend/package.json の exports "x" の値 "x.ts" は、キーのパスに .ts を付けたものではない',
+        'apps/backend/package.json の exports "x" が指すファイルが無い',
+      ]);
+    });
+  });
+
+  Scenario(
+    "apps/shared の exports の違反の検出（findExportsViolations と SHARED_EXPORTS。Issue #90）",
+    ({ And }) => {
+      const ref = (from: string, specifier: string): Reference =>
+        toReference(from, { specifier, typeOnly: false });
+      const sharedFiles = ["apps/shared/env.ts", "apps/shared/logger.ts"];
+      const exports = {
+        "./env": "./env.ts",
+        "./logger": "./logger.ts",
+      };
+
+      And(
+        "frontend 直下・backend・apps/e2e/・リポジトリ直下の参照がすべてキーに当たり、すべてのキーが使われていれば、違反は 0 件",
+        () => {
+          // given: 前提なし
+          // when
+          const violations = findExportsViolations(
+            SHARED_EXPORTS,
+            exports,
+            [
+              ref("apps/frontend_customer/proxy.ts", "@repo/shared/logger"),
+              ref("apps/backend/shared/infra/database.ts", "@repo/shared/env"),
+              ref("apps/e2e/database.ts", "@repo/shared/env"),
+              ref("vitest.global-setup.ts", "@repo/shared/env"),
+              // apps/shared の中の参照と、前方一致だけが同じ別パッケージ・@repo/backend の参照は数えない。
+              ref("apps/shared/x.ts", "@repo/shared/missing"),
+              ref(
+                "apps/frontend_customer/app/page.tsx",
+                "@repo/shared-extra/x",
+              ),
+              ref("apps/e2e/a.ts", "@repo/backend/env"),
+            ],
+            sharedFiles,
+          );
+
+          // then
+          expect(violations).toEqual([]);
+        },
+      );
+
+      And(
+        "キーに当たらない参照（backend からのものも）、使われないキー、キーと違う値、ファイルの無いキーを検出し、apps/shared/package.json の名前で出す",
+        () => {
+          // given: 前提なし
+          // when
+          const violations = findExportsViolations(
+            SHARED_EXPORTS,
+            {
+              ...exports,
+              "./unused": "./unused.ts",
+              "./mismatch": "./env.ts",
+            },
+            [
+              ref("apps/frontend_customer/proxy.ts", "@repo/shared/logger"),
+              ref("apps/backend/shared/infra/database.ts", "@repo/shared/env"),
+              ref(
+                "apps/backend/shared/infra/database.ts",
+                "@repo/shared/database",
+              ),
+              ref("apps/e2e/a.ts", "@repo/shared"),
+              ref("apps/e2e/a.ts", "@repo/shared/mismatch"),
+            ],
+            sharedFiles,
+          );
+
+          // then
+          expect(violations).toEqual([
+            "apps/backend/shared/infra/database.ts → @repo/shared/database",
+            "apps/e2e/a.ts → @repo/shared",
+            'apps/shared/package.json の exports "./unused" はどこからも参照されていない',
+            'apps/shared/package.json の exports "./unused" が指すファイルが無い',
+            'apps/shared/package.json の exports "./mismatch" の値 "./env.ts" は、キーのパスに .ts を付けたものではない',
+            'apps/shared/package.json の exports "./mismatch" が指すファイルが無い',
+          ]);
+        },
+      );
+    },
+  );
+
+  // Issue #130 / #142: 列挙は除外するディレクトリ（EXCLUDED_DIRS）の中に入らない（列挙した後で除くのではない）。
+  // WHY: next build が作る apps/frontend_customer/.next/standalone/ には、pnpm の node_modules の形（.pnpm の中の相対パスの
+  //   symlink）が複製される。以前の列挙（readdirSync の recursive: true）は symlink の先のディレクトリにも入り（Node 24.21.0 の
+  //   lib/fs.js の handleFilePaths が internalModuleStat で symlink をたどる）、除くのは列挙の後だったため、symlink の組み合わせで
+  //   列挙が膨らみ、rule-tests が heap を使い切って落ちた（#130 で 463 秒かけて OOM、#137 で手元の node_modules/node_modules の
+  //   自己参照 symlink が standalone に複製されて SIGABRT。2026-09-29 に実測）。
+  // WHY 読んだディレクトリを記録して確かめる（結果の一覧だけを見ない）: 列挙した後で除いても結果の一覧は同じで、違いは
+  //   中に入るかどうか（かかる時間と memory）だけ。循環する symlink の fixture は、以前の列挙でも ELOOP（symlink 40 段）で
+  //   止まって結果が同じになるか、2 本以上あると止まらなくなり（2^40）、どちらも決定的な失敗にならない（2026-09-29 に実測）。
+  Scenario(
+    "ファイルの列挙（walkFiles・listSourceFiles・listAllFiles）",
+    ({ And }) => {
+      // WHY 結果を返す: テストの本体で when（実行）と then（検証）を分けるため、一時ツリーの中で集めた結果を外に返す（後始末は finally のまま）。
+      function withTree<T>(
+        files: Record<string, string>,
+        symlinks: Record<string, string>,
+        collect: (root: string) => T,
+      ): T {
+        const root = mkdtempSync(join(tmpdir(), "architecture-list-test-"));
+        try {
+          for (const [path, content] of Object.entries(files)) {
+            mkdirSync(dirname(join(root, path)), { recursive: true });
+            writeFileSync(join(root, path), content);
+          }
+          for (const [path, target] of Object.entries(symlinks)) {
+            mkdirSync(dirname(join(root, path)), { recursive: true });
+            symlinkSync(target, join(root, path));
+          }
+          return collect(root);
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
+      }
+
+      function walkRecordingReads(root: string, dir: string) {
+        const read: string[] = [];
+        const files = walkFiles(root, dir, (path) => {
+          read.push(toPosix(relative(root, path)));
+          return readDirectory(path);
+        });
+        return { read: read.sort(), files: files.sort() };
+      }
+
+      const GENERATED_TREE = {
+        "apps/frontend_customer/app/page.tsx": "export default 1;",
+        "apps/frontend_customer/.lib/x.ts": "export const x = 1;",
+        "apps/frontend_customer/.next/standalone/server.js": "process.env;",
+        "apps/frontend_customer/.next/server/chunk.js": "process.env;",
+        "apps/frontend_customer/node_modules/pkg/index.js": "process.env;",
+        "apps/frontend_customer/features/todo/node_modules/pkg/index.js":
+          "process.env;",
+      };
+
+      And(
+        "除外するディレクトリ（node_modules・.next）は、どの階層でも読まない（中に入ってから除くのではない）",
+        () => {
+          // given: モジュールの定数 GENERATED_TREE（生成物のディレクトリを含むツリー）
+          // when
+          const walked = withTree(GENERATED_TREE, {}, (root) =>
+            walkRecordingReads(root, FRONTEND_ROOT),
+          );
+
+          // then
+          expect(walked).toEqual({
+            read: [
+              "apps/frontend_customer",
+              "apps/frontend_customer/.lib",
+              "apps/frontend_customer/app",
+              "apps/frontend_customer/features",
+              "apps/frontend_customer/features/todo",
+            ],
+            files: [
+              "apps/frontend_customer/.lib/x.ts",
+              "apps/frontend_customer/app/page.tsx",
+            ],
+          });
+        },
+      );
+
+      // Issue #142 の再現の形: .next/standalone/ に複製された pnpm の相対 symlink が循環する（2 本あると以前の列挙は 2^40 で
+      //   止まらない）。除外のディレクトリの中なので、読まずに完走する。中に入ってから除くと statSync が ELOOP を投げて失敗する。
+      And(
+        "除外するディレクトリの中に循環する symlink（.next/standalone/node_modules/x -> ../..）があっても、中に入らずに完走する",
+        () => {
+          // given
+          const symlinks = {
+            "apps/frontend_customer/.next/standalone/node_modules/x": "../..",
+            "apps/frontend_customer/.next/standalone/node_modules/y": "../..",
+            "apps/frontend_customer/node_modules/node_modules": "..",
+          };
+
+          // when
+          const walked = withTree(GENERATED_TREE, symlinks, (root) =>
+            walkRecordingReads(root, FRONTEND_ROOT),
+          );
+
+          // then
+          expect(walked).toEqual({
+            read: [
+              "apps/frontend_customer",
+              "apps/frontend_customer/.lib",
+              "apps/frontend_customer/app",
+              "apps/frontend_customer/features",
+              "apps/frontend_customer/features/todo",
+            ],
+            files: [
+              "apps/frontend_customer/.lib/x.ts",
+              "apps/frontend_customer/app/page.tsx",
+            ],
+          });
+        },
+      );
+
+      And(
+        "listSourceFiles・listAllFiles は、除外するディレクトリの中に自分を指す symlink があっても、その外のファイルだけを返す",
+        () => {
+          // given
+          const files = {
+            ...GENERATED_TREE,
+            "apps/shared/env.ts": "export const env = 1;",
+            "apps/shared/node_modules/pkg/index.js": "process.env;",
+          };
+          const symlinks = {
+            "apps/frontend_customer/.next/standalone/self": ".",
+            "apps/shared/node_modules/self": ".",
+          };
+
+          // when
+          const listed = withTree(files, symlinks, (root) => ({
+            source: listSourceFiles(root, FRONTEND_ROOT).sort(),
+            all: listAllFiles(root, SHARED_ROOT),
+          }));
+
+          // then
+          expect(listed).toEqual({
+            source: [
+              "apps/frontend_customer/.lib/x.ts",
+              "apps/frontend_customer/app/page.tsx",
+            ],
+            all: ["apps/shared/env.ts"],
+          });
+        },
+      );
+
+      // WHY symlink の先も列挙する: 以前の列挙（readdirSync の recursive: true）と同じ範囲を検査し、symlink で置いたディレクトリの
+      //   コードが検査を素通りしないようにする。
+      // listAllFiles の挙動の差: 以前は通常ファイル（entry.isFile()）だけを返し、ファイルを指す symlink は数えなかった。今は
+      //   ディレクトリ以外をすべて返すので、ファイルへの symlink（と先の無い symlink）も返す（置き場所の規則で違反にできる）。
+      And(
+        "除外しないディレクトリの symlink は、先のディレクトリの中も列挙し、ファイルへの symlink もファイルとして返す",
+        () => {
+          // given
+          const files = {
+            "apps/frontend_customer/app/page.tsx": "export default 1;",
+            "outside/lib/db.ts": "export const db = 1;",
+            "outside/shared-extra/extra.ts": "export const x = 1;",
+            "outside/note.md": "x",
+          };
+          const symlinks = {
+            "apps/frontend_customer/lib": "../../outside/lib",
+            "apps/shared/extra": "../../outside/shared-extra",
+            "apps/shared/note.md": "../../outside/note.md",
+            "apps/shared/dangling.ts": "../../outside/missing.ts",
+          };
+
+          // when
+          const listed = withTree(files, symlinks, (root) => ({
+            source: listSourceFiles(root, FRONTEND_ROOT).sort(),
+            all: listAllFiles(root, SHARED_ROOT).sort(),
+          }));
+
+          // then
+          expect(listed).toEqual({
+            source: [
+              "apps/frontend_customer/app/page.tsx",
+              "apps/frontend_customer/lib/db.ts",
+            ],
+            all: [
+              "apps/shared/dangling.ts",
+              "apps/shared/extra/extra.ts",
+              "apps/shared/note.md",
+            ],
+          });
+        },
+      );
+
+      // WHY 例外で止まることを固定する: 除外の外で循環すると、statSync が ELOOP（symlink 40 段）を投げて列挙が失敗する（無限には
+      //   再帰しない）。以前の列挙（readdirSync の recursive: true）は ELOOP を黙って握りつぶし、途中までの一覧を返していた
+      //   （検査が一部だけで緑になりうる）。今は音を立てて失敗する。
+      And(
+        "除外の外に置いた循環する symlink（apps/backend/loop -> ..）は、ELOOP の例外で止まる（無限に回らない）",
+        () => {
+          // given
+          const files = {
+            "apps/backend/features/todo/internal/domain/todo.ts":
+              "export const x = 1;",
+          };
+          const symlinks = { "apps/backend/loop": ".." };
+
+          // when
+          const thrown = withTree(files, symlinks, (root) => {
+            try {
+              walkFiles(root, BACKEND_ROOT);
+              return undefined;
+            } catch (error) {
+              return error;
+            }
+          });
+
+          // then
+          expect(thrown).toMatchObject({ code: "ELOOP", syscall: "stat" });
+        },
+      );
+
+      And("ディレクトリが無ければ空を返す", () => {
+        // given: 前提なし（空のツリー）
+        // when
+        const listed = withTree({}, {}, (root) => ({
+          walked: walkFiles(root, FRONTEND_ROOT),
+          source: listSourceFiles(root, FRONTEND_ROOT),
+          all: listAllFiles(root, SHARED_ROOT),
+        }));
+
+        // then
+        expect(listed).toEqual({ walked: [], source: [], all: [] });
+      });
+    },
+  );
+
+  Scenario("fixture のツリーを検査したときに検出される違反", ({ And }) => {
+    And(
+      "must-reject: 置いた違反がすべて、置いたとおりの規則で検出され、それ以外は検出されない",
+      () => {
+        // given: 前提なし
+        // when
+        const result = violationsOfFixture(MUST_REJECT_FILES);
+
+        // then
+        expect(result).toEqual([...MUST_REJECT_VIOLATIONS].sort());
+      },
+    );
+
+    And("must-pass: 許可される参照だけのツリーでは違反が 0 件", () => {
+      // given: 前提なし
+      // when
+      const result = violationsOfFixture(MUST_PASS_FILES);
+
+      // then
+      expect(result).toEqual([]);
+    });
+  });
+
+  Scenario("参照の抽出（extractImports）", ({ And }) => {
+    And("複数行にまたがる import を 1 つの参照として取り出す", () => {
+      // given
+      const source = [
+        "import {",
+        "  CreateTodoCommand,",
+        "  DeleteTodoCommand,",
+        '} from "@/backend/features/todo/internal/application/x";',
+      ].join("\n");
+
+      // when
+      const imports = extractImports(source);
+
+      // then
+      expect(imports).toEqual([
+        {
+          specifier: "@/backend/features/todo/internal/application/x",
+          typeOnly: false,
+        },
+      ]);
+    });
+
+    And(
+      "import type / export type は型だけの参照、名前を並べた export ... from は値の参照になる。export ... from は re-export の印を持つ",
+      () => {
+        // given
+        const source = [
+          'import type { A } from "a";',
+          'export type { B } from "b";',
+          'export { GET } from "c";',
+          'export * from "d";',
+          'import { Entity } from "e";',
+        ].join("\n");
+
+        // when
+        const imports = extractImports(source);
+
+        // then
+        // WHY import に reExport が無いことも toEqual で見る: toEqual は undefined のプロパティを無いものと同じに扱うが、
+        //   reExport: true が付けば一致しない（import を re-export と取り違えると、同じディレクトリの辞書の import まで違反になる）。
+        expect(imports).toEqual([
+          { specifier: "a", typeOnly: true },
+          { specifier: "b", typeOnly: true, reExport: true },
+          { specifier: "c", typeOnly: false, reExport: true },
+          { specifier: "d", typeOnly: false, reExport: true },
+          { specifier: "e", typeOnly: false },
+        ]);
+      },
+    );
+
+    And(
+      "inline の type は、すべての名前に付いているときだけ型だけの参照になる",
+      () => {
+        // given
+        const source = [
+          'import { type A, type B } from "all-type";',
+          'import { type A, Value } from "mixed";',
+          'import Default, { type A } from "with-default";',
+          'import {} from "empty";',
+          // Issue #224（Codex のレビュー）: `type` という名前の値の export を別名で受ける形は、inline の type 修飾子ではなく値の import。
+          'import { type as portValue } from "named-type";',
+          'import { type A, type as portValue } from "named-type-mixed";',
+          // 空白が複数でも（ブロックコメントを落とした跡）`type as` は値の import。
+          'import { type    as portValue } from "named-type-spaces";',
+          'import { type /* keep */ as portValue } from "named-type-comment";',
+        ].join("\n");
+
+        // when
+        const imports = extractImports(source);
+
+        // then
+        expect(imports).toEqual([
+          { specifier: "all-type", typeOnly: true },
+          { specifier: "mixed", typeOnly: false },
+          { specifier: "with-default", typeOnly: false },
+          { specifier: "empty", typeOnly: false },
+          { specifier: "named-type", typeOnly: false },
+          { specifier: "named-type-mixed", typeOnly: false },
+          { specifier: "named-type-spaces", typeOnly: false },
+          { specifier: "named-type-comment", typeOnly: false },
+        ]);
+      },
+    );
+
+    // Issue #144: presentation が自 feature の domain から値で import してよいのは定数だけ（規則 presentation）。import の名前が
+    //   すべて UPPER_SNAKE_CASE（/^[A-Z][A-Z0-9_]*$/。inline の type の名前は数えない）のときだけ定数だけの印を持つ。
+    // WHY as の前の名前（元の export 名）で見る: 参照先で何を export しているかが規則の対象で、手元の別名は関係ない。
+    // WHY re-export・default・* as・{} は印を持たない: re-export は presentation から domain の値を外へ出す。default と * as は
+    //   名前で中身が分からない（モジュール全体・任意の値）。{} は名前が無い。
+    And(
+      "名前がすべて UPPER_SNAKE_CASE の定数の import だけが、定数だけの印を持つ",
+      () => {
+        // given
+        const source = [
+          'import { TODO_TITLE_MAX_LENGTH } from "constant";',
+          'import { MAX_2, A } from "constants";',
+          'import { type Todo, TODO_TITLE_MAX_LENGTH } from "constant-and-type";',
+          'import { TODO_TITLE_MAX_LENGTH as max } from "constant-alias";',
+          "import {",
+          "  TODO_A,",
+          "  TODO_B,",
+          '} from "multi-line";',
+          'import { Todo } from "pascal";',
+          'import { KeyedIssue } from "camel";',
+          'import { TODO_MAX, Todo } from "mixed";',
+          'import { max as TODO_MAX } from "alias-to-constant";',
+          'import { Todo_MAX } from "not-upper";',
+          'import { _TODO } from "underscore-first";',
+          'import { TODO$ } from "dollar";',
+          'import TODO_DEFAULT from "default";',
+          'import * as TODO from "namespace";',
+          'import TODO_D, { TODO_E } from "default-and-named";',
+          'import {} from "empty";',
+          'import { type TODO_T } from "type-only-inline";',
+          'import type { TODO_T } from "type-only";',
+          'export { TODO_MAX } from "re-export";',
+          'import "side-effect";',
+          'const m = import("dynamic");',
+        ].join("\n");
+
+        // when
+        const imports = extractImports(source);
+
+        // then
+        expect(imports).toEqual([
+          { specifier: "constant", typeOnly: false, constantsOnly: true },
+          { specifier: "constants", typeOnly: false, constantsOnly: true },
+          {
+            specifier: "constant-and-type",
+            typeOnly: false,
+            constantsOnly: true,
+          },
+          { specifier: "constant-alias", typeOnly: false, constantsOnly: true },
+          { specifier: "multi-line", typeOnly: false, constantsOnly: true },
+          { specifier: "pascal", typeOnly: false },
+          { specifier: "camel", typeOnly: false },
+          { specifier: "mixed", typeOnly: false },
+          { specifier: "alias-to-constant", typeOnly: false },
+          { specifier: "not-upper", typeOnly: false },
+          { specifier: "underscore-first", typeOnly: false },
+          { specifier: "dollar", typeOnly: false },
+          { specifier: "default", typeOnly: false },
+          { specifier: "namespace", typeOnly: false },
+          { specifier: "default-and-named", typeOnly: false },
+          { specifier: "empty", typeOnly: false },
+          { specifier: "type-only-inline", typeOnly: true },
+          { specifier: "type-only", typeOnly: true },
+          { specifier: "re-export", typeOnly: false, reExport: true },
+          { specifier: "side-effect", typeOnly: false },
+          { specifier: "dynamic", typeOnly: false },
+        ]);
+      },
+    );
+
+    And(
+      "副作用だけの import と dynamic import を値の参照として取り出す",
+      () => {
+        // given
+        const source = [
+          'import "./globals.css";',
+          'const mod = await import("@/features/todo");',
+        ].join("\n");
+
+        // when
+        const imports = extractImports(source);
+
+        // then
+        expect(imports).toEqual([
+          { specifier: "./globals.css", typeOnly: false },
+          { specifier: "@/features/todo", typeOnly: false },
+        ]);
+      },
+    );
+
+    And(
+      "コメントの中の import は拾わず、文字列の中の // でその後ろを消さない",
+      () => {
+        // given
+        const source = [
+          '// 例: import { GET } from "@/backend/line-comment";',
+          "/*",
+          ' * import { GET } from "@/backend/block-comment";',
+          " */",
+          'const url = "https://example.com"; import { a } from "after-string";',
+          "const s = '/* not a comment */'; import { b } from \"after-quote\";",
+        ].join("\n");
+
+        // when
+        const imports = extractImports(source);
+
+        // then
+        expect(imports).toEqual([
+          { specifier: "after-string", typeOnly: false },
+          { specifier: "after-quote", typeOnly: false },
+        ]);
+      },
+    );
+
+    And(
+      "セミコロンの無い文の直後の import type を、前の文とつなげずに型だけの参照として取り出す",
+      () => {
+        // given
+        const source = [
+          "export enum E { A }",
+          'import type { X } from "after-enum";',
+        ].join("\n");
+
+        // when
+        const imports = extractImports(source);
+
+        // then
+        expect(imports).toEqual([{ specifier: "after-enum", typeOnly: true }]);
+      },
+    );
+
+    And(
+      "文字列リテラル（テンプレートリテラルを含む）の中の import 風の文字列は拾わない",
+      () => {
+        // given
+        const source = [
+          "const a = 'import(\"@/backend/x\")';",
+          "const b = 'import \"@/backend/y\"';",
+          "const t = `",
+          'import { c } from "@/backend/z";',
+          "`;",
+          'import { real } from "real";',
+        ].join("\n");
+
+        // when
+        const imports = extractImports(source);
+
+        // then
+        expect(imports).toEqual([{ specifier: "real", typeOnly: false }]);
+      },
+    );
+
+    And(
+      "埋め込み式（ドル記号と波かっこ）を含むテンプレートリテラルの import() は、参照先を静的に決められないので拾わない（見逃す方向の限界）",
+      () => {
+        // given
+        // WHY テンプレートリテラルで書く: 普通の文字列の中に埋め込み式の形を書くと Biome の noTemplateCurlyInString が
+        //   書き間違いとして検出するため、\${ でエスケープして同じ文字列を作る。
+        const source = [
+          `const m = import(\`@/backend/\${name}/presentation/x.api\`);`,
+          'import { real } from "real";',
+        ].join("\n");
+
+        // when
+        const imports = extractImports(source);
+
+        // then
+        expect(imports).toEqual([{ specifier: "real", typeOnly: false }]);
+      },
+    );
+
+    And(
+      "from を持たない export 文から、後ろの文の from まで一致を伸ばさない",
+      () => {
+        // given
+        const source = [
+          "export const GET = new ListTodosApi(new ListTodosQuery(repository)).handle;",
+          "export default function Page() {",
+          "  return null",
+          "}",
+          'import { x } from "real";',
+        ].join("\n");
+
+        // when
+        const imports = extractImports(source);
+
+        // then
+        expect(imports).toEqual([{ specifier: "real", typeOnly: false }]);
+      },
+    );
+  });
+
+  Scenario("参照先の正規化（toReference）", ({ And }) => {
+    const from =
+      "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.tsx";
+
+    And(
+      '"@/" は apps/frontend_customer からのパスにする（tsconfig の paths で "@/" の下は apps/frontend_customer の下）',
+      () => {
+        // given: 前提なし
+        // when
+        const result = toReference(from, {
+          specifier: "@/features/todo/api/todo-api",
+          typeOnly: true,
+        });
+
+        // then
+        expect(result).toEqual({
+          from,
+          specifier: "@/features/todo/api/todo-api",
+          to: "apps/frontend_customer/features/todo/api/todo-api",
+          own: true,
+          typeOnly: true,
+        });
+      },
+    );
+
+    And(
+      '"@repo/backend/" と "@repo/backend" は apps/backend からのパスにする',
+      () => {
+        // given: 前提なし
+        // when
+        const result = toReference(from, {
+          specifier:
+            "@repo/backend/features/todo/internal/presentation/list-todos.api.ts",
+          typeOnly: true,
+        });
+
+        // then
+        expect(result).toEqual({
+          from,
+          specifier:
+            "@repo/backend/features/todo/internal/presentation/list-todos.api.ts",
+          to: "apps/backend/features/todo/internal/presentation/list-todos.api",
+          own: true,
+          typeOnly: true,
+        });
+
+        // when
+        const to2 = toReference(from, {
+          specifier: "@repo/backend",
+          typeOnly: false,
+        }).to;
+
+        // then
+        expect(to2).toBe("apps/backend");
+      },
+    );
+
+    And(
+      '"@repo/shared/" と "@repo/shared" は apps/shared からのパスにし、"@repo/shared-extra/x" は自前のコードにしない（Issue #90）',
+      () => {
+        // given: 前提なし
+        // when
+        const result = toReference(from, {
+          specifier: "@repo/shared/env.ts",
+          typeOnly: false,
+        });
+
+        // then
+        expect(result).toEqual({
+          from,
+          specifier: "@repo/shared/env.ts",
+          to: "apps/shared/env",
+          own: true,
+          typeOnly: false,
+        });
+
+        // when
+        const to2 = toReference(from, {
+          specifier: "@repo/shared",
+          typeOnly: false,
+        }).to;
+
+        // then
+        expect(to2).toBe("apps/shared");
+
+        // when
+        const to3 = toReference(from, {
+          specifier: "@repo/shared/../backend/x",
+          typeOnly: false,
+        }).to;
+
+        // then
+        expect(to3).toBe("apps/backend/x");
+
+        // when
+        const sharedExtraReference = toReference(from, {
+          specifier: "@repo/shared-extra/x",
+          typeOnly: false,
+        });
+
+        // then
+        expect(sharedExtraReference).toEqual({
+          from,
+          specifier: "@repo/shared-extra/x",
+          to: "@repo/shared-extra/x",
+          own: false,
+          typeOnly: false,
+        });
+      },
+    );
+
+    And(
+      '"@/" と "@repo/backend/" の後ろの ".." は解決する（"@/../backend/x" は apps/backend/x）',
+      () => {
+        // given: 前提なし
+        // when
+        const to2 = toReference(from, {
+          specifier:
+            "@/../backend/features/todo/internal/presentation/list-todos.api",
+          typeOnly: true,
+        }).to;
+
+        // then
+        expect(to2).toBe(
+          "apps/backend/features/todo/internal/presentation/list-todos.api",
+        );
+
+        // when
+        const to3 = toReference(from, {
+          specifier: "@repo/backend/../frontend_customer/features/todo",
+          typeOnly: false,
+        }).to;
+
+        // then
+        expect(to3).toBe("apps/frontend_customer/features/todo");
+      },
+    );
+
+    And(
+      '名前の前方一致だけが同じ別パッケージ（"@repo/backend-extra/x"）は自前のコードにしない',
+      () => {
+        // given: 前提なし
+        // when
+        const result = toReference(from, {
+          specifier: "@repo/backend-extra/x",
+          typeOnly: false,
+        });
+
+        // then
+        expect(result).toEqual({
+          from,
+          specifier: "@repo/backend-extra/x",
+          to: "@repo/backend-extra/x",
+          own: false,
+          typeOnly: false,
+        });
+      },
+    );
+
+    And("相対パスは参照元の位置から解決し、拡張子を外す", () => {
+      // given: 前提なし
+      // when
+      const result = toReference(from, {
+        specifier: "../../components/todo-item.tsx",
+        typeOnly: false,
+      });
+
+      // then
+      expect(result).toEqual({
+        from,
+        specifier: "../../components/todo-item.tsx",
+        to: "apps/frontend_customer/features/todo/components/todo-item",
+        own: true,
+        typeOnly: false,
+      });
+
+      // when
+      const to2 = toReference(from, {
+        specifier: "../../../../../backend/features/todo/internal/domain/todo",
+        typeOnly: false,
+      }).to;
+
+      // then
+      // apps をまたぐ相対パスも、リポジトリ相対のパスに解決する。
+      expect(to2).toBe("apps/backend/features/todo/internal/domain/todo");
+    });
+
+    And("それ以外はパッケージとして specifier のまま扱う", () => {
+      // given: 前提なし
+      // when
+      const result = toReference(from, {
+        specifier: "next/link",
+        typeOnly: false,
+      });
+
+      // then
+      expect(result).toEqual({
+        from,
+        specifier: "next/link",
+        to: "next/link",
+        own: false,
+        typeOnly: false,
+      });
     });
   });
 });
