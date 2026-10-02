@@ -50,12 +50,29 @@ export class ApiEndpoints {
         `${join(root, API_ROUTES_DIR)} has no route.ts (API coverage would have no APIs to count).`,
       );
     }
-    return routeFiles
+    const endpoints = routeFiles
       .flatMap((file) => ApiEndpoints.fromRoute(root, file))
       .sort(
         (a, b) =>
           a.path.localeCompare(b.path) || a.method.localeCompare(b.method),
       );
+    ApiEndpoints.assertDistinctApis(endpoints);
+    return endpoints;
+  }
+
+  // WHY 同じ Api のクラスを指す API を例外にする: 判定はクラス名で行うので、2 つの API が同じクラスを指すと、片方を呼ぶだけで
+  //   両方が ✓ になる（reviewer の実測、Issue #281）。別の feature に同じ名前のクラスがある場合も同じ。
+  private static assertDistinctApis(endpoints: readonly ApiEndpoint[]): void {
+    const seen = new Map<string, ApiEndpoint>();
+    for (const endpoint of endpoints) {
+      const first = seen.get(endpoint.api);
+      if (first !== undefined) {
+        throw new Error(
+          `${first.method} ${first.path} and ${endpoint.method} ${endpoint.path} both use ${endpoint.api} (API coverage tells APIs apart by their Api class).`,
+        );
+      }
+      seen.set(endpoint.api, endpoint);
+    }
   }
 
   private static routeFiles(dir: string): string[] {

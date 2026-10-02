@@ -107,7 +107,8 @@ paths:
   - 判定は Vitest の reporter（`apps/backend/test-support/api-coverage-reporter.ts`。`vitest.config.mts` の `reporters`）。すべてのジャーニーを含む実行（`pnpm test`・`pnpm test:api-journey`）の終わりに `API coverage (API journeys): 6/6 (100.0%)` と API ごとの ✓ / ✗ を出す。一部のジャーニーだけ・`-t` で絞った実行では判定しない。単体テスト・API 仕様の呼び出しは数えない。
   - API を足したら、その API を使う業務の流れをジャーニーに足す（✗ の API）。WHY: API は必ずどこかの業務の流れに現れるはずで、現れない API は使われ方が確かめられていないか要らない API。
   - route.ts は re-export（`export { GET } from "@repo/backend/..."`）とコメントだけにする。ほかのコード・HTTP メソッドでない名前（別名の `as` も）・`@repo/backend/` の外の参照・`export const <METHOD> = new <クラス名>(` の無い api ファイルは、網羅率の側で例外になる（全 API を数え漏らさないため）。
-  - 限界: 呼んだかだけを見る（応答や DB を確かめたかは上の検査と reviewer）。ルートグループ・catch-all のパスは表示を Next のパスに直さない（判定はクラス名なので結果は変わらない）。
+  - 2 つの API が同じ Api のクラスを指すのも例外にする（判定はクラス名なので、片方を呼ぶだけで両方が ✓ になる。reviewer の実測）。
+  - 限界: 呼んだかだけを見る（応答や DB を確かめたかは上の検査と reviewer）。分母は `app/api/**` の `route.ts` だけ（`route.js` / `route.tsx`・`app/api` の外の Route Handler は数えない。今は無い）。route.ts のコメントは行コメント（`//`）だけを読み飛ばす（`/* */` は例外になる）。ルートグループ・catch-all のパスは表示を Next のパスに直さない（判定はクラス名なので結果は変わらない）。判定を飛ばす実行（一部のジャーニー・`-t`）では何も出さないので、`vitest.config.mts` の include / exclude が API ジャーニーを外さないことを `api-coverage-reporter.test.ts` が固定する。ジャーニーが 1 本の今は、そのファイルだけの実行も全体として判定する。
 - Stryker では実行しない（`vitest.stryker.config.mts` の `exclude`。Stryker は `vitest.config.mts` を継承したこの設定で動く）。WHY: step 1 つが Vitest の test 1 つになり、Stryker が変異を通る test だけに `testNamePattern` で絞ると、前提の step 抜きで後の step が失敗して killed と数えられうる。vitest-cucumber 8.0.0 に「シナリオを 1 つの test にする」設定は無い。代償として、API ジャーニーの流れは変異を殺すテストに数えない（変異は層ごとの単体テストと `*.postgres.test.ts` が殺す）。
 
 ## API 仕様テスト（spec/api。Issue #219）

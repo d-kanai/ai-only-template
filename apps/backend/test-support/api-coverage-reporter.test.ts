@@ -217,6 +217,25 @@ describe("ApiEndpoints.list（全 API の一覧。route.ts の re-export から�
     );
   });
 
+  // WHY: 判定は Api のクラス名で行うので、同じクラスを 2 つの route が指すと、片方を呼ぶだけで両方が ✓ になる（reviewer の実測）。
+  test("must reject: 2 つの API が同じ Api のクラスを指す", () => {
+    // given
+    const root = fixture({
+      ...validFiles(),
+      [`${API_DIR}/todos/[id]/archive/route.ts`]: `export { PUT } from "${SPECIFIER}/rename-todo.api";\n`,
+    });
+
+    // when
+    const listing = () => ApiEndpoints.list(root);
+
+    // then
+    expect(listing).toThrow(
+      new Error(
+        "PUT /api/todos/:id/archive and PUT /api/todos/:id/title both use RenameTodoApi (API coverage tells APIs apart by their Api class).",
+      ),
+    );
+  });
+
   test("must reject: re-export の参照先が @repo/backend の外", () => {
     // given
     const root = fixture({
@@ -479,5 +498,22 @@ describe("vitest.config.mts の結線", () => {
       "...configDefaults.reporters",
       '"./apps/backend/test-support/api-coverage-reporter.ts"',
     ]);
+  });
+
+  // WHY: reporter は「すべての API ジャーニーを含む実行」でだけ判定するので、設定の include から外れる・exclude に入ると、
+  //   pnpm test は網羅率を出さずに緑になる（reviewer の指摘）。
+  test("include は API ジャーニーを含み、exclude は API ジャーニーにかからない", () => {
+    // given
+    const config = readFileSync(join(REPO_ROOT, "vitest.config.mts"), "utf8");
+
+    // when
+    const include = /\binclude:\s*\[([^\]]*)\]/.exec(config)?.[1];
+    const exclude = /\bexclude:\s*\[([^\]]*)\]/.exec(config)?.[1];
+
+    // then
+    expect(include).toContain('"apps/**/*.test.{ts,tsx}"');
+    expect(exclude).toBe(
+      '...configDefaults.exclude, "apps/e2e/**", ".stryker-tmp/**"',
+    );
   });
 });
