@@ -99,6 +99,10 @@ import { containsForbiddenWord } from "./feature-business-language";
 //   - api-journey-handler-naming: `new XxxApi(`（名前が Api で終わるクラス）は `<名前> = ` か `<名前>: `（オブジェクトのキー）の直後にだけ
 //     書き、名前は HTTP メソッドで始める（大文字小文字を区別しない前方一致。変更系は post / put / patch / delete、読み取りは get /
 //     list）。名前の無い `new XxxApi(`（`await new XxxApi(c).handle(r)`）も違反。行は `new XxxApi(` の行。
+//     名前と `new XxxApi(` の間には、API 網羅率の記録 `ApiCoverage.track(`（apps/backend/test-support/api-coverage.ts。Issue #281）
+//     だけを挟んでよい（`postX: ApiCoverage.track(new CreateXApi(c))`）。WHY: ジャーニーは各 Api を track で包んで網羅率に記録する。
+//     名前の規約はそのまま track の結果を入れる名前に当てる。ほかの関数（`wrap(`）を挟むのは違反のまま（名前と Api の対応を
+//     この形に限る）。
 //     WHY: 次の api-journey-asserts-db-after-mutation は、呼び出しの名前で変更系を見分ける。`renameTodo` のような名前だと変更系と
 //       分からず、DB の検証が無くても通ってしまう。名前を規約に縛って、見分けの漏れを止める。
 //   - api-journey-asserts-db-after-mutation: 変更系の handler の呼び出し（`await <名前>(`・`await <名前>.handle(`・
@@ -337,9 +341,10 @@ function blankStrings(code: string): string {
 function findHandlerNamingViolations(code: string): ApiJourneyViolation[] {
   return [...code.matchAll(/\bnew\s+[A-Z][\w$]*Api\s*\(/g)]
     .filter((match) => {
-      const name = /([A-Za-z_$][\w$]*)\s*[=:]\s*$/.exec(
-        code.slice(0, match.index),
-      )?.[1];
+      const name =
+        /([A-Za-z_$][\w$]*)\s*[=:]\s*(?:ApiCoverage\s*\.\s*track\s*\(\s*)?$/.exec(
+          code.slice(0, match.index),
+        )?.[1];
       return name === undefined || !isHandlerName(name);
     })
     .map((match) => ({
@@ -796,6 +801,12 @@ describe("API ジャーニーの中身（findApiJourneyViolations）: must pass"
         "};",
         "const getY =",
         "  new GetYApi(query).handle;",
+        "const handlersWithCoverage = {",
+        "  postX: ApiCoverage.track(new CreateXApi(command)),",
+        "  putX: ApiCoverage.track(",
+        "    new RenameXApi(command),",
+        "  ),",
+        "};",
         "const repository = new PostgresXRepository(database.db);",
         "const client = new XApiClient();",
       ),
@@ -934,6 +945,8 @@ describe("API ジャーニーの中身（findApiJourneyViolations）: must rejec
         "const fetchX =",
         "  new GetXApi(query).handle;",
         "const completeX = new CompleteXApi (command).handle;",
+        "const renameY = ApiCoverage.track(new RenameYApi(command));",
+        "const postY = wrap(new CreateYApi(command));",
       ),
       [
         { rule: "api-journey-handler-naming", line: 4 },
@@ -942,6 +955,8 @@ describe("API ジャーニーの中身（findApiJourneyViolations）: must rejec
         { rule: "api-journey-handler-naming", line: 7 },
         { rule: "api-journey-handler-naming", line: 9 },
         { rule: "api-journey-handler-naming", line: 10 },
+        { rule: "api-journey-handler-naming", line: 11 },
+        { rule: "api-journey-handler-naming", line: 12 },
       ],
     ],
     [
