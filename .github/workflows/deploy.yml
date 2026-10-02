@@ -3,8 +3,7 @@
 #   - 手動実行（Actions の「Run workflow」で main と環境を選ぶ）: 選んだ環境にデプロイする。prod はこれでしか出さない。
 #   WHY prod を自動にしない: stg で動きを確かめてから、人が出すタイミングを決める（ADR docs/adr/tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md）。
 # 流れ: WIF で GCP に認証 → runtime / migrate の 2 イメージを build して Artifact Registry に push → migrate ジョブのイメージを
-#   入れ替えて実行（成功を待つ）→ service のイメージを入れ替える → トラフィックを最新のリビジョンに向ける → 同じ migrate ジョブで
-#   データの移行（pnpm db:backfill）を流す（Issue #194）。
+#   入れ替えて実行（成功を待つ）→ service のイメージを入れ替える → トラフィックを最新のリビジョンに向ける。
 # 器（service / job / DB / 権限）は Terraform（infra/envs/<環境> → infra/modules/app）が作る。このワークフローはイメージだけを
 #   入れ替える（WHY は infra/modules/app/main.tf）。
 # 名前（service / job）は infra/modules/app/main.tf の locals（name_prefix の既定）と同じ。GitHub の Variables（vars.*）は
@@ -217,21 +216,3 @@ jobs:
       - if: steps.config.outputs.ready == 'true'
         name: Route traffic to latest revision
         run: gcloud run services update-traffic "$SERVICE" --to-latest --region "$REGION" --quiet
-
-      # データの移行（backfill。apps/backend/shared/drizzle/backfill/ の冪等な SQL）を、トラフィックを新しいリビジョンに向けた後に流す
-      #   （Issue #194。決定は ADR docs/adr/workflow/20261001-backfill-after-traffic-switch.md）。
-      # WHY 切替の後: 切替の前（Run migrations の時点など）に流すと、切替までの間に旧アプリが書いた行（新しいコードの前提を満たさない行。
-      #   例: 完了の履歴の無い Todo）が漏れる。切替の後は旧アプリが書かないので、ここで流せば漏れが残らない。切替から流し終えるまでの
-      #   間、対象の行は読むと 500 になる（Repository は補わない。Issue #260、ADR docs/adr/workflow/20261002-drop-repair-on-read-without-production.md）。
-      # WHY migrate のジョブを使う: 同じイメージ（deps ステージ）に backfill の SQL と apps/backend/shared/infra/backfill.ts が入り、
-      #   接続先（DATABASE_* の環境変数・Cloud SQL の接続）もジョブの定義にある。別のジョブを Terraform で足さずに済む。
-      # --args=pnpm,db:backfill: この実行 1 回だけ、コンテナの CMD（Dockerfile の migrate ステージの CMD ["pnpm", "db:migrate"]）を
-      #   置き換える。ENTRYPOINT は置き換えない（migrate ステージは ENTRYPOINT を持たず、node のイメージの docker-entrypoint.sh が
-      #   引数をそのまま実行する）ので、コマンドの先頭（pnpm）から書く。ジョブの定義は変わらない（次の Run migrations は db:migrate）。
-      #   https://cloud.google.com/sdk/gcloud/reference/run/jobs/execute の --args。
-      # --wait: 終わるまで待つ。失敗したらこのステップが赤になる（アプリは切替済みのまま。直して手動で流し直す手順は
-      #   .claude/skills/deploy/SKILL.md）。
-      # rule-tests/migration.test.ts が、このステップがあり Route traffic to latest revision より後にあることを確かめる。
-      - if: steps.config.outputs.ready == 'true'
-        name: Run backfill
-        run: gcloud run jobs execute "$MIGRATE_JOB" --region "$REGION" --wait --args=pnpm,db:backfill

@@ -114,7 +114,7 @@ export class TodoBuilder {
 }
 
 // 履歴を指定しないときの完了の履歴。作成時の未完了の 1 件、完了なら作成日時の完了をもう 1 件。
-// WHY backfill（shared/drizzle/backfill/0001_todo_status_changes.sql）と同じ規則: 不変条件
+// WHY この規則: 不変条件
 //   （履歴は 1 件以上・作成日時より前にならない・最後の completed が今の値）を満たす最小の履歴で、前提の Todo を正しい Todo にする。
 function defaultStatusChanges(
   completed: boolean,

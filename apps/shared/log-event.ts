@@ -18,8 +18,6 @@ import { z } from "zod";
 //   api_request       /api/** の呼び出しのリクエストログ（同上）
 //   db_write          Repository の書き込みの 1 文ごとの前後（apps/backend/shared/infra/writer.ts。event.phase が start / done / failed）
 //   db_pool_error     アイドル中の Postgres の接続のエラー（apps/backend/shared/infra/database.ts）
-//   db_backfill       データの移行（backfill）の SQL ファイルごとの前後（apps/backend/shared/infra/backfill.ts。event.phase が
-//                     start / done / failed。Issue #194）
 //   server_error      API の想定外の例外（500。apps/backend/shared/presentation/problem.ts）
 //   app_start_failed  起動時の検証の失敗（apps/frontend_customer/instrumentation-node.ts）
 //   notification      通知の送信（notification モジュール。失敗は event.phase が failed）
@@ -29,7 +27,6 @@ export const LOG_EVENT_NAMES = [
   "api_request",
   "db_write",
   "db_pool_error",
-  "db_backfill",
   "server_error",
   "app_start_failed",
   "notification",
@@ -289,30 +286,6 @@ export const LOG_EVENT_SCHEMAS = {
     event: z.object({ name: z.literal("db_pool_error") }),
     error: errorField(),
   }),
-  // データの移行（backfill）の SQL ファイル 1 つごとの前後と失敗（apps/backend/shared/infra/backfill.ts。Issue #194）。
-  // WHY db_write と分ける: db_write は Repository の 1 文ごとの記録（表・操作・行の id・変更の前後）で、backfill はファイル単位の
-  //   一括の INSERT ... SELECT（行の id も変更の前後も持たない）。デプロイのジョブの中でだけ出るので、種類で引けるようにする。
-  // file.name: backfill の SQL ファイルの名前（apps/backend/shared/drizzle/backfill/NNNN_<内容>.sql。リポジトリが決める名前で、
-  //   利用者の値を含まない）。名前は OTel semconv の file.name。
-  // affected_rows: ファイルの文が足した・変えた行の数の合計（pg の rowCount の和。done のときだけ）。2 回目以降の実行で 0 に
-  //   なる（冪等）ことをログで確かめられる。
-  // db.response.status_code: 失敗した文の SQLSTATE（23505 など。db_write と同じ名前）。
-  // error: 例外（{ type, message }）。backfill の SQL はパラメータを持たず（DrizzleQueryError の message のような値を含む形にならない）、
-  //   pg の message の値は DB の行に由来しうるが、freeText の網を通す。
-  db_backfill: z.object({
-    message: freeText(),
-    event: z.object({
-      name: z.literal("db_backfill"),
-      phase: z.enum(["start", "done", "failed"]),
-      duration_ms: z.number().optional(),
-    }),
-    file: z.object({ name: z.string() }),
-    affected_rows: z.number().optional(),
-    db: z
-      .object({ response: z.object({ status_code: z.string() }) })
-      .optional(),
-    error: errorField().optional(),
-  }),
   server_error: z.object({
     message: freeText(),
     event: z.object({ name: z.literal("server_error") }),
@@ -367,8 +340,6 @@ export type Severity = "INFO" | "WARNING" | "ERROR";
 //   一部の行を拾わない（Issue #216）。
 // WHY db_write の失敗は WARNING: 500 になる想定外の例外は presentation の toProblemResponse が server_error（ERROR）で別に残す。
 //   書き込みの失敗の多くは制約違反など想定内（409 / 400 にする）もの。
-// WHY db_backfill の失敗は ERROR（db_write と違い WARNING にしない）: デプロイのジョブが止まり、データの移行が終わっていない
-//   （切替の後の Todo に履歴の無い行が残る）。想定内の失敗は無い。
 // WHY notification の失敗は ERROR: 通知の失敗は応答を 500 にしないので server_error の行が出ず、この行が唯一の手がかり。
 // WHY 対応表を関数の中に置く（最上位の定数にしない）: 最上位の値は Stryker の static な変異になり、ignoreStatic で検査から外れる。
 export function severityOf(event: ParsedLogEvent): Severity {
@@ -377,7 +348,6 @@ export function severityOf(event: ParsedLogEvent): Severity {
     api_request: "INFO",
     db_write: "INFO",
     db_pool_error: "ERROR",
-    db_backfill: "INFO",
     server_error: "ERROR",
     app_start_failed: "ERROR",
     notification: "INFO",
