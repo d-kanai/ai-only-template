@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { now } from "@repo/shared/now";
+import { Clock } from "@repo/shared/now";
 import { z } from "zod";
 import { KeyedIssue } from "../../../../shared/domain/keyed-issue";
 import { DomainValidation } from "../../../../shared/domain/validate";
@@ -84,15 +84,15 @@ export class Todo {
     return this.#origin;
   }
 
-  // 新しい Todo を作る。id は randomUUID、作成日時は現在時刻（now()）、完了状態は未完了で始める。
+  // 新しい Todo を作る。id は randomUUID、作成日時は現在時刻（Clock.now()）、完了状態は未完了で始める。
   //   完了の履歴は「作成日時に未完了になった」の 1 件から始める（Issue #188）。
   // WHY 作成日時を引数で受け取らない: 「作ったときの時刻が入る」は Todo の生成ルールで、呼び出し側が時刻を渡せると
   //   そのルールが呼び出し側に漏れ、任意の時刻の Todo を作れてしまう。テストで時刻を決めるときは、現在時刻の唯一の出口
-  //   now（apps/shared/now.ts）を vi.mock で差し替える（.claude/rules/testing.md）。
+  //   Clock.now（apps/shared/now.ts）を vi.mock で差し替える（.claude/rules/testing.md）。
   // WHY origin は undefined: 新規で、読み込んだ値が無い。Repository の insert は origin が undefined の
   //   Todo だけを、update は origin のある Todo だけを受け付ける（取り違えを Error にする。Issue #215）。
   static create(title: string): Todo {
-    const createdAt = now();
+    const createdAt = Clock.now();
     return new Todo(
       {
         id: randomUUID(),
@@ -128,7 +128,7 @@ export class Todo {
   // WHY toggle（反転）ではなく値を受け取る: API は「完了にする / 未完了に戻す」を completed の値で指定する。
   //   反転だと同じリクエストを 2 回送ったときに結果が変わる（冪等でなくなる）。
   // completed の規則（boolean であること）も含めて、コンストラクタが全体を検証する。
-  // 完了状態が変わるときは、変わった後の値と現在時刻（now()）を完了の履歴の末尾に足す（Issue #188）。
+  // 完了状態が変わるときは、変わった後の値と現在時刻（Clock.now()）を完了の履歴の末尾に足す（Issue #188）。
   // WHY 今と同じ値なら遷移しない（this を返す）: 同じ状態への遷移を履歴に積むとノイズになる（「いつ完了したか」の
   //   答えが複数になる）。Todo が変わらないので、Repository の update も差分が無く SQL を発行しない。
   changeCompletion(completed: boolean): Todo {
@@ -137,7 +137,10 @@ export class Todo {
     }
     return this.transition({
       completed,
-      statusChanges: [...this.statusChanges, { completed, changedAt: now() }],
+      statusChanges: [
+        ...this.statusChanges,
+        { completed, changedAt: Clock.now() },
+      ],
     });
   }
 
@@ -172,7 +175,7 @@ export class Todo {
   // Todo が持つ値のすべて（完全コンストラクタが検証する値）の規則 = Todo の不変条件。
   // WHY タイトル以外（id・完了状態・作成日時）も規則に含める: どの口から来た値も、すべてが規則を満たすことを 1 つの
   //   スキーマで宣言する。create の id は randomUUID で常に満たすが、reconstruct は DB の行（Postgres の uuid 型は
-  //   版の桁が 0 の値も受け付ける）を受け取る。create の作成日時（now()）も Date であることを型でしか保証しないので、同じく検証する。
+  //   版の桁が 0 の値も受け付ける）を受け取る。create の作成日時（Clock.now()）も Date であることを型でしか保証しないので、同じく検証する。
   // WHY 項目ごとにキーを付ける: DomainValidation.validated（shared/domain/validate.ts）が最初の issue の message（= キー）を DomainError の key にする。
   //   zod の既定の文言（英語で zod の語彙を含む）を domain の外に出さない。キーの無い issue を作らないよう、検査を持つ
   //   zod のスキーマ・refine にはすべて KeyedIssue.of / KeyedIssue.refine を渡す（z.object 自身は、値が型の上でオブジェクトなので
@@ -247,7 +250,7 @@ export class Todo {
   //   statusChanges の中だけでは書けない。zod は項目の issue が続行可能（title の refine など）なら、この refine も実行する
   //   （zod 4.6.5 で確認）ので、空の配列もここで弾く（at(-1) が undefined）。
   // WHY 1 件以上: create が「作成日時に未完了」の 1 件から始める。0 件の Todo は「いつ未完了になったか」が分からない。
-  // WHY 昇順（同じ値は可）: 足した順が時刻の順。同じ値を許すのは、now() はミリ秒で、作成と完了が同じミリ秒になりうるため。
+  // WHY 昇順（同じ値は可）: 足した順が時刻の順。同じ値を許すのは、Clock.now() はミリ秒で、作成と完了が同じミリ秒になりうるため。
   // WHY 最初の日時は作成日時以上: 作られる前に状態が変わることは無い。
   // WHY 最後の completed が今の completed と等しい: 今の完了状態（todos.completed の列。一覧・詳細はこれだけを読む）と、
   //   履歴から導いた最新の状態がずれると、どちらが正しいか決まらない。

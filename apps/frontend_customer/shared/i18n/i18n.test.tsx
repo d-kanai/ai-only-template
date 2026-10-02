@@ -49,21 +49,32 @@ const stringValue: string = String("x");
 
 describe("defineMessages（ja を正とする辞書を定義する）", () => {
   test("渡した辞書をそのまま返す（実行時の処理は無く、型の検査だけを行う）", () => {
+    // given
     const messages = { ja: { a: "あ" }, en: { a: "A" } } as const;
 
-    expect(defineMessages(messages)).toBe(messages);
+    // when
+    const defined = defineMessages(messages);
+
+    // then
+    expect(defined).toBe(messages);
   });
 
   test("ja の文言は文字列リテラルの型になる（as const を書かなくてよい）", () => {
-    expectTypeOf(testMessages.ja.save).toEqualTypeOf<"保存">();
-    expectTypeOf(
-      testMessages.ja.tooLong,
-    ).toEqualTypeOf<"タイトルは {max} 文字以内で入力してください">();
+    // given: 前提なし（testMessages はモジュールの定数）
+    // when
+    const save = expectTypeOf(testMessages.ja.save);
+    const tooLong = expectTypeOf(testMessages.ja.tooLong);
+
+    // then
+    save.toEqualTypeOf<"保存">();
+    tooLong.toEqualTypeOf<"タイトルは {max} 文字以内で入力してください">();
   });
 
   // 型の検査（pnpm typecheck で確かめる。@ts-expect-error の行がエラーにならなければ tsc が失敗する）。
   // 実行しても意味が無いので関数に包んで呼ばない。
   test("en のキーの過不足・placeholder の不一致・空の文言はコンパイルエラーになる", () => {
+    // given: 前提なし
+    // when
     const typeErrors = [
       () =>
         defineMessages({
@@ -157,93 +168,140 @@ describe("defineMessages（ja を正とする辞書を定義する）", () => {
           en: { a: "{ max } characters or fewer" },
         }),
     ];
+
+    // then
     expect(typeErrors).toHaveLength(14);
   });
 
   // WHY } の後に { を書く: { の後に } があると、その間は placeholder の名前として検査される（上の「名前に空白がある」）。
   test("placeholder の名前は英数字と _ で、対にならない { や } は文言に書ける（型と実行時で同じ名前を置き換える）", () => {
+    // given
     const messages = defineMessages({
       ja: { a: "{max_1} と {Id2}（} だけ、{ だけ）" },
       en: { a: "{Id2} and {max_1} (} only, { only)" },
     });
 
+    // when
+    const formatted = formatMessage(messages, "en", "a", {
+      max_1: 3,
+      Id2: "x",
+    });
+
+    // then
     expectTypeOf<MessageParams<typeof messages, "a">>().toEqualTypeOf<{
       readonly max_1: string | number;
       readonly Id2: string | number;
     }>();
-    expect(formatMessage(messages, "en", "a", { max_1: 3, Id2: "x" })).toBe(
-      "x and 3 (} only, { only)",
-    );
+    expect(formatted).toBe("x and 3 (} only, { only)");
   });
 });
 
 describe("formatMessage（辞書・ロケール・キーと params から文言を組み立てる）", () => {
   test("ロケールの辞書の文言を返す", () => {
-    expect(formatMessage(testMessages, "ja", "save")).toBe("保存");
-    expect(formatMessage(testMessages, "en", "save")).toBe("Save");
+    // given: 前提なし（testMessages はモジュールの定数）
+    // when
+    const ja = formatMessage(testMessages, "ja", "save");
+    const en = formatMessage(testMessages, "en", "save");
+
+    // then
+    expect(ja).toBe("保存");
+    expect(en).toBe("Save");
   });
 
   test("placeholder を params の値で置き換える（数も文字列にする）", () => {
-    expect(formatMessage(testMessages, "ja", "tooLong", { max: 100 })).toBe(
-      "タイトルは 100 文字以内で入力してください",
-    );
-    expect(formatMessage(testMessages, "en", "toggle", { title: "Milk" })).toBe(
-      "Mark “Milk” as completed",
-    );
+    // given: 前提なし（testMessages はモジュールの定数）
+    // when
+    const number = formatMessage(testMessages, "ja", "tooLong", { max: 100 });
+    const text = formatMessage(testMessages, "en", "toggle", { title: "Milk" });
+
+    // then
+    expect(number).toBe("タイトルは 100 文字以内で入力してください");
+    expect(text).toBe("Mark “Milk” as completed");
   });
 
   test("文言の途中の placeholder を置き換え、前後の文言は残す", () => {
-    expect(
-      formatMessage(testMessages, "en", "unknownKeys", { keys: "a, b" }),
-    ).toBe("The request has unknown fields: a, b");
+    // given: 前提なし（testMessages はモジュールの定数）
+    // when
+    const formatted = formatMessage(testMessages, "en", "unknownKeys", {
+      keys: "a, b",
+    });
+
+    // then
+    expect(formatted).toBe("The request has unknown fields: a, b");
   });
 
   test("複数の placeholder をそれぞれの値で置き換える", () => {
-    expect(formatMessage(testMessages, "en", "pair", { a: "A", b: "B" })).toBe(
-      "B and A",
-    );
+    // given: 前提なし（testMessages はモジュールの定数）
+    // when
+    const formatted = formatMessage(testMessages, "en", "pair", {
+      a: "A",
+      b: "B",
+    });
+
+    // then
+    expect(formatted).toBe("B and A");
   });
 
   // WHY 置き換えずに残す: サーバの params が欠けたとき、"undefined" や空文字に化けると気づけない。{name} のまま出せば分かる。
   test("params に無い placeholder は {name} のまま残す", () => {
-    expect(formatMessage(testMessages, "ja", "tooLong", {})).toBe(
-      "タイトルは {max} 文字以内で入力してください",
-    );
-    expect(formatMessage(testMessages, "ja", "tooLong")).toBe(
-      "タイトルは {max} 文字以内で入力してください",
-    );
+    // given: 前提なし（testMessages はモジュールの定数）
+    // when
+    const emptyParams = formatMessage(testMessages, "ja", "tooLong", {});
+    const noParams = formatMessage(testMessages, "ja", "tooLong");
+
+    // then
+    expect(emptyParams).toBe("タイトルは {max} 文字以内で入力してください");
+    expect(noParams).toBe("タイトルは {max} 文字以内で入力してください");
   });
 
   test("文言に無い params は無視する", () => {
-    expect(formatMessage(testMessages, "ja", "save", { extra: "x" })).toBe(
-      "保存",
-    );
+    // given: 前提なし（testMessages はモジュールの定数）
+    // when
+    const formatted = formatMessage(testMessages, "ja", "save", { extra: "x" });
+
+    // then
+    expect(formatted).toBe("保存");
   });
 
   // Object.prototype の名前（toString など）を params の値と取り違えない。
   test("params が持たない名前は、Object.prototype の名前でも置き換えない", () => {
+    // given
     const messages = defineMessages({
       ja: { a: "値は {toString}" },
       en: { a: "value is {toString}" },
     });
 
-    expect(formatMessage(messages, "ja", "a", {})).toBe("値は {toString}");
+    // when
+    const formatted = formatMessage(messages, "ja", "a", {});
+
+    // then
+    expect(formatted).toBe("値は {toString}");
   });
 });
 
 describe("createTranslator（辞書とロケールを固定した型付きの t）", () => {
   test("辞書とロケールを固定した t を返す", () => {
+    // given
     const tJa = createTranslator(testMessages, "ja");
     const tEn = createTranslator(testMessages, "en");
 
-    expect(tJa("toggle", { title: "牛乳" })).toBe("「牛乳」を完了にする");
-    expect(tEn("toggle", { title: "Milk" })).toBe("Mark “Milk” as completed");
-    expect(tEn("save")).toBe("Save");
+    // when
+    const ja = tJa("toggle", { title: "牛乳" });
+    const en = tEn("toggle", { title: "Milk" });
+    const noParams = tEn("save");
+
+    // then
+    expect(ja).toBe("「牛乳」を完了にする");
+    expect(en).toBe("Mark “Milk” as completed");
+    expect(noParams).toBe("Save");
   });
 
   // 型の検査（pnpm typecheck で確かめる）。呼ぶと存在しないキーで実行時エラーになるので、関数に包んで呼ばない。
   test("キーと params の誤りはコンパイルエラーになる", () => {
+    // given
     const t = createTranslator(testMessages, "ja");
+
+    // when
     const typeErrors = [
       // @ts-expect-error 存在しないキー
       () => t("nope"),
@@ -260,42 +318,66 @@ describe("createTranslator（辞書とロケールを固定した型付きの t�
       // @ts-expect-error params の値は文字列か数だけ
       () => t("tooLong", { max: true }),
     ];
-    expect(typeErrors).toHaveLength(7);
     // 別の辞書の t には、その辞書のキーを渡せる（上の「別の辞書のキー」がキーの集合の違いで止まっていることの対照）。
-    expect(createTranslator(otherMessages, "en")("back")).toBe("Back to list");
+    const otherLabel = createTranslator(otherMessages, "en")("back");
+
+    // then
+    expect(typeErrors).toHaveLength(7);
+    expect(otherLabel).toBe("Back to list");
   });
 
   test("キーと params の型は、渡した辞書の ja の文言から導く", () => {
+    // given
     type TestMessages = typeof testMessages;
-    expectTypeOf<MessageKey<TestMessages>>().toEqualTypeOf<
+
+    // when
+    const keys = expectTypeOf<MessageKey<TestMessages>>();
+    const tooLongParams =
+      expectTypeOf<MessageParams<TestMessages, "tooLong">>();
+    const pairParams = expectTypeOf<MessageParams<TestMessages, "pair">>();
+    const saveArgs = expectTypeOf<TranslateArgs<TestMessages, "save">>();
+    const toggleArgs = expectTypeOf<TranslateArgs<TestMessages, "toggle">>();
+    const dictionary = expectTypeOf<TestMessages>();
+
+    // then
+    keys.toEqualTypeOf<
       "save" | "tooLong" | "toggle" | "unknownKeys" | "pair"
     >();
-    expectTypeOf<MessageParams<TestMessages, "tooLong">>().toEqualTypeOf<{
+    tooLongParams.toEqualTypeOf<{
       readonly max: string | number;
     }>();
-    expectTypeOf<MessageParams<TestMessages, "pair">>().toEqualTypeOf<{
+    pairParams.toEqualTypeOf<{
       readonly a: string | number;
       readonly b: string | number;
     }>();
-    expectTypeOf<TranslateArgs<TestMessages, "save">>().toEqualTypeOf<[]>();
-    expectTypeOf<TranslateArgs<TestMessages, "toggle">>().toEqualTypeOf<
-      [params: { readonly title: string | number }]
-    >();
+    saveArgs.toEqualTypeOf<[]>();
+    toggleArgs.toEqualTypeOf<[params: { readonly title: string | number }]>();
     // defineMessages が返す辞書は Messages（ja と en を持つ辞書の一般の形）に当てはまる。
-    expectTypeOf<TestMessages>().toExtend<Messages>();
+    dictionary.toExtend<Messages>();
   });
 });
 
 describe("isMessageKey（サーバから届いた文字列が辞書のキーか）", () => {
   test("辞書にあるキーなら true", () => {
-    expect(isMessageKey(testMessages, "save")).toBe(true);
-    expect(isMessageKey(testMessages, "tooLong")).toBe(true);
+    // given: 前提なし（testMessages はモジュールの定数）
+    // when
+    const save = isMessageKey(testMessages, "save");
+    const tooLong = isMessageKey(testMessages, "tooLong");
+
+    // then
+    expect(save).toBe(true);
+    expect(tooLong).toBe(true);
   });
 
   test.each(["nope", "", "back", "toString", "__proto__", "constructor"])(
     "辞書に無い値（%j。別の辞書のキー、Object.prototype の名前を含む）なら false",
     (value) => {
-      expect(isMessageKey(testMessages, value)).toBe(false);
+      // given: 前提なし（value は test.each の引数）
+      // when
+      const result = isMessageKey(testMessages, value);
+
+      // then
+      expect(result).toBe(false);
     },
   );
 });
@@ -328,62 +410,80 @@ function renderWithLocale<P, T>(
 
 describe("useLocale", () => {
   test("LocaleProvider のロケールを返す", () => {
+    // given: 前提なし
+    // when
     const { result } = renderWithLocale(() => useLocale(), "en", undefined);
 
+    // then
     expect(result.current).toBe("en");
   });
 
   // WHY 既定に落とす（エラーにしない）: app/layout.tsx が必ず LocaleProvider で包む。包まれないのはテストなどで、
   //   Proxy を通らないリクエストと同じく既定の ja で表示すればよい。
   test("LocaleProvider の外では既定の ja を返す", () => {
+    // given: 前提なし
+    // when
     const { result } = renderHook(() => useLocale());
 
+    // then
     expect(result.current).toBe("ja");
   });
 });
 
 describe("useT（画面のロケールで、渡した辞書を翻訳する t）", () => {
   test("LocaleProvider のロケールで、渡した辞書を翻訳する t を返す", () => {
+    // given: 前提なし（testMessages はモジュールの定数）
+    // when
     const { result } = renderWithLocale(
       (messages: typeof testMessages) => useT(messages),
       "en",
       testMessages,
     );
 
+    // then
     expect(result.current("toggle", { title: "Milk" })).toBe(
       "Mark “Milk” as completed",
     );
   });
 
   test("ロケールが変わると、新しいロケールで翻訳する t に変わる", () => {
+    // given
     const { result, rerender } = renderWithLocale(
       (messages: typeof testMessages) => useT(messages),
       "ja",
       testMessages,
     );
-    expect(result.current("save")).toBe("保存");
+    const before = result.current("save");
 
+    // when
     rerender("en", testMessages);
 
+    // then
+    expect(before).toBe("保存");
     expect(result.current("save")).toBe("Save");
   });
 
   // WHY 辞書も依存に入れる: 同じ部品で辞書を切り替えたときに、前の辞書の t が残らないようにする。
   test("辞書が変わると、新しい辞書で翻訳する t に変わる", () => {
+    // given
     const { result, rerender } = renderWithLocale(
       (messages: Messages) => useT(messages) as (key: string) => string,
       "en",
       testMessages as Messages,
     );
-    expect(result.current("save")).toBe("Save");
+    const before = result.current("save");
 
+    // when
     rerender("en", otherMessages as Messages);
 
+    // then
+    expect(before).toBe("Save");
     expect(result.current("back")).toBe("Back to list");
   });
 
   // WHY 同じ関数を返す: t を useEffect / useCallback の依存に入れても、描画のたびに作り直されないようにする。
   test("ロケールと辞書が変わらなければ、再描画しても同じ t を返す", () => {
+    // given
     const { result, rerender } = renderWithLocale(
       (messages: typeof testMessages) => useT(messages),
       "ja",
@@ -391,20 +491,25 @@ describe("useT（画面のロケールで、渡した辞書を翻訳する t）"
     );
     const first = result.current;
 
+    // when
     rerender("ja", testMessages);
 
+    // then
     expect(result.current).toBe(first);
   });
 });
 
 describe("LocaleProvider", () => {
   test("子要素をそのまま描く", () => {
+    // given: 前提なし
+    // when
     render(
       <LocaleProvider locale="ja">
         <p>child</p>
       </LocaleProvider>,
     );
 
+    // then
     expect(screen.getByText("child")).toBeDefined();
   });
 });

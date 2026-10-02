@@ -87,7 +87,7 @@ import { containsForbiddenWord } from "./feature-business-language";
 //       だけに使うなら通す（ログの行をアサートするため。WHY と限界は usesViOnlyForConsoleSpy）。support.ts は例外にしない。
 //   - api-spec-no-in-memory: *.in-memory（InMemory の Repository）を import しない（`import type`・`import()`・`export … from` も）。
 //     WHY: 実 DB で本番の組み立てを通すのが API 仕様の目的（Issue #219。InMemory は presentation の単体テストの道具）。
-//   - api-spec-uses-real-database: apps/backend/test-support/database（createTestDatabase）を値として import する。
+//   - api-spec-uses-real-database: apps/backend/test-support/database（TestDatabase.create）を値として import する。
 //     WHY: 実 Postgres の上で確かめる。型だけの import（TestDatabase）では DB を用意しない。
 //   - api-spec-uses-own-api: 対の api（apps/backend/features/<feature>/internal/presentation/<api>.api。ファイルの置き場所の <feature> と
 //     名前の <api>）を静的な import で参照する（`import type`・inline の type だけでもよい。dynamic `import()`・`export … from` は数えない）。
@@ -96,16 +96,22 @@ import { containsForbiddenWord } from "./feature-business-language";
 //       型（応答の型）だけの参照も認める。本番の組み立てを通すことは、api-spec-uses-real-database・api-spec-no-in-memory と、次の
 //       api-spec-support-assembles-apis で担保する。
 //   - api-spec-own-api-only（Issue #240）: 自分の仕様の対象の API 以外の handler を手に入れる import をしない。その行の違反:
-//     (1) support.ts（どの feature のものも）から、名前が `Api` で終わるもののうち、同じディレクトリの support.ts の対の組み立て
-//     （<api> の camelCase + `Api`。rename-todo → renameTodoApi）以外を値で import する（別名の import は元の名前で見る。`import type`・
-//     inline の type は通す）。support.ts を名前空間（`* as`）・既定の import・dynamic `import()` で読むのも違反（どの組み立てでも
+//     (1) support.ts（どの feature のものも）から、名前が `ApiAssembly` か `Api` で終わるもののうち、同じディレクトリの support.ts の
+//     対の組み立てのクラス（<api> の PascalCase + `ApiAssembly`。rename-todo → RenameTodoApiAssembly）以外を値で import する（別名の
+//     import は元の名前で見る。`import type`・inline の type は通す。`Api` で終わる名前は以前の組み立て関数 createTodoApi や、Api の
+//     クラスを `Api` で終わる名前のまま再公開したものを取らせないため。別の名前での再公開は support.ts の api-spec-support-no-api-call が
+//     止める）。support.ts を名前空間（`* as`）・既定の import・dynamic `import()` で読むのも違反（どの組み立てでも
 //     取り出せる）。(2) 対でない presentation の api ファイル（どの feature のものも）を値で import する（dynamic `import()` も。型だけは
-//     通す）。
+//     通す）。step は組み立てのクラス以外の補助のクラス（TodoSpecRows など）を自由に import してよい（support.ts の規則が、それらの
+//     クラスに handler の入口を置かせない）。
 //     WHY: 前提の Todo はテストデータビルダー（apps/backend/test-support/<feature>/*-builder.ts）で表に直接入れ、step が呼ぶ API は
 //       仕様の対象の 1 つだけにする（ユーザー判断 2026-10-01、Issue #240）。前提を対象でない API で作ると、表が増えたときに前提の
 //       用意が API の組み合わせに依存し、対象と関係の無い API の変更で仕様が落ちる。前提の記録（change_logs）も混ざり、期待値が
 //       「対象の操作が残す記録」だけにならない。handler は support.ts の組み立てか api のクラスからしか手に入らないので、その 2 つの
 //       入口を import の名前で止める。
+//     WHY 組み立てを Api ごとのクラスにし、ほかの補助と分ける（Issue #262。daiki の判断で backend をクラスベースに統一し、テストの補助も
+//       対象）: support.ts を 1 つのクラスにまとめると、step はそのクラスを import するだけでどの API の組み立てにも触れられ、import の
+//       名前で止められない。Api ごとのクラスに分ければ、import するクラスの名前と組み立てる Api が 1 対 1 になる。
 //   - api-spec-load-feature: `loadFeature("./<api>.feature")`（対の .feature を第 2 引数なしで読む。引用符は " か '。名前空間の
 //     `x.loadFeature(` も同じ）の呼び出しが 1 つ以上要る（無ければファイル全体の違反）。それ以外の形の loadFeature の呼び出し
 //     （第 2 引数・別のパス・テンプレートリテラル・変数）、`loadFeature as` の別名の import、setVitestCucumberConfiguration・
@@ -121,18 +127,30 @@ import { containsForbiddenWord } from "./feature-business-language";
 //       を止めない（Issue #219 で biome lint を実測。it / describe / test の名前だけを見る）。
 //   以下は補助（spec/api/<feature>/ の直下の support.ts）の中身の規則:
 //   - api-spec-no-vi は support.ts にも当てる（step が組み立てを任せる先で vi を使わせない。reviewer の任意の指摘）。
-//   - api-spec-support-no-api-call（Issue #240）: support.ts の中で handler を呼ばない。`.handle(`（`?.handle(`・`.handle.call(` /
-//     `.apply(` / `.bind(`・空白を挟むものも）と、名前が `Api` で終わる関数・メソッドの呼び出し（`createTodoApi(db)`・`createTodoApi<T>(db)`・
-//     `createTodoApi?.(db)`・`x.postTodoApi(`。`new <名前>Api(` と
-//     `function <名前>Api(` の宣言は除く）は、その行の違反。
+//   - api-spec-support-no-api-call（Issue #240。Issue #262 でクラスの形に）: support.ts の中で handler を呼ばず、組み立てのクラスを使わない。
+//     次のものがある行の違反（1 行 1 件）: `.handle(` / `.handler(`（`?.`・`.call(` / `.apply(` / `.bind(`・空白を挟むものも。
+//     `this.handler(db)` のような組み立てのメソッドの呼び出しも）、名前が `Api` で終わる関数・メソッドの呼び出し（`createTodoApi(db)`・
+//     `createTodoApi<T>(db)`・`createTodoApi?.(db)`・`x.postTodoApi(`・new しない `CreateTodoApi(db)`。`new <名前>Api(` と
+//     `function <名前>Api(` の宣言は除く）、組み立てのクラスの名前 `<名前>ApiAssembly` の `class <名前>ApiAssembly` の宣言以外の出現
+//     （`ListTodoApiAssembly.handler(db)`・`export { X as Rows }`・`const Rows = X`・`extends X`・`export default X`）。
+//     api ファイル（presentation の *.api）の Api のクラスも、組み立ての `new <名前>Api(` 以外で使わせない（reviewer の指摘、Issue #262）:
+//     api ファイルの名前空間・既定の import・別名（`as`）・`Api` で終わらない名前の値の import（本番の handler の `GET` など）・
+//     `export … from`・副作用だけの import・dynamic `import()` の行と、値で import した `<名前>Api` の import の文の外の出現のうち
+//     `new <名前>Api(` 以外（`export { ListXApi as Rows }`・`const Rows = ListXApi`・`extends ListXApi`・`new (ListXApi)(db)`・
+//     `Reflect.construct(ListXApi, …)`・かっこの無い `new ListXApi`）。型だけの名前（`import type`・inline の type）は見ない。
 //     WHY: 前提を API で作る口（以前の createTodo・changeCompletion）を support.ts に置かせない。step の api-spec-own-api-only は
-//       import の名前しか見ないので、support.ts の関数が中でほかの API を呼ぶと素通りする。
-//   - api-spec-support-assembler-per-api（Issue #240）: `new <名前>Api(` は、その Api だけを組み立てる関数 `function <名前の先頭を小文字>Api(`
-//     （CreateTodoApi → createTodoApi）の中に 1 つだけ置く。囲む関数（その位置より前で最後の `function <名前>(` の宣言）が無い・名前が
-//     違う・同じ関数の 2 つ目以降は、その行の違反。
-//     WHY: すべての handler をまとめて返す関数（以前の todoApis）があると、step は `Api` で終わらない名前で import して、どの API も
-//       呼べる（api-spec-own-api-only を素通りする）。組み立て関数を Api ごとに分け、名前を Api のクラスから決めると、step の
+//       import の名前しか見ないので、support.ts の補助のクラスが中でほかの API の組み立てを使う・組み立てのクラスや Api のクラスを
+//       別の名前で再公開すると素通りする。
+//   - api-spec-support-assembler-per-api（Issue #240。Issue #262 でクラスの形に）: `new <名前>Api(` は、その Api だけを組み立てるクラス
+//     `class <名前>ApiAssembly`（CreateTodoApi → CreateTodoApiAssembly。行頭の `class` / `export class` の宣言）の本体の中に 1 つだけ置く。
+//     囲むクラス（その位置を本体（`{` から対の `}` まで。文字列の中の波かっこは数えない）に含む行頭のクラスの宣言）が無い（最上位の文・
+//     関数・アロー関数・クラス式・関数の中の字下げしたクラス・クラスを閉じた後）・名前が違う・同じクラスの 2 つ目以降（別のメソッドも）は、
+//     その行の違反。
+//     WHY: すべての handler をまとめて返す入口（以前の todoApis）があると、step は ApiAssembly で終わらない名前で import して、どの API も
+//       呼べる（api-spec-own-api-only を素通りする）。組み立てを Api ごとのクラスに分け、名前を Api のクラスから決めると、step の
 //       import の名前と組み立てる Api が 1 対 1 になる（api ファイルの名前とクラス名は .claude/rules/backend.md の「命名」で対になる）。
+//     WHY 行頭の宣言だけを組み立てのクラスと認める: クラス式（`export const Rows = class CreateTodoApiAssembly {`）は別の名前で export でき、
+//       宣言の名前が step の import の名前にならない。
 //   - api-spec-support-assembles-apis: 自 feature の api（apps/backend/features/<feature>/internal/presentation/<名前>.api）を少なくとも
 //     1 つ値として import する（`import type`・inline の type だけ・dynamic `import()`・`export … from` は数えない）。
 //     WHY: step のファイルは組み立てを support.ts に任せ、api を型だけで参照してよい。support.ts が本番の api ファイル（Api のクラス）を
@@ -147,18 +165,22 @@ import { containsForbiddenWord } from "./feature-business-language";
 //     loadFeature・skip は名前で見るので、`x["skip"](`・変数に入れ直した関数（`const s = Scenario.skip`）・vitest-cucumber の
 //     関数を別のモジュールで包んで呼ぶ書き方は見ない（逆に、同じ名前の別の関数・プロパティ `.only` も違反にする）。
 //     `*` の step ごとに前提から確かめまで完結しているか・DB の行を確かめているかは見ない（reviewer が見る）。
-//   - support.ts は api の値の import・vi の import・Api の組み立ての置き場所・handler と組み立て関数の呼び出しだけを見る（InMemory の
+//   - support.ts は api の値の import・vi の import・Api の組み立ての置き場所・handler の呼び出しと組み立てのクラスの使用だけを見る（InMemory の
 //     import は見ない）。値で import した api のクラスを実際に組み立てに使っているかは見ない。step のファイルの api の import は型だけでも
 //     通るので、step が対の api を実際に呼んでいるかは見ない（reviewer が見る）。step のファイルが support.ts 経由で
 //     test-support/database を使っても、step のファイル自身に値の import が無ければ違反になる（直接 import する）。
-//   - 対象の API だけ（api-spec-own-api-only・api-spec-support-no-api-call・api-spec-support-assembler-per-api。Issue #240）: 名前で見るので、
-//     support.ts が組み立て関数を `Api` で終わらない名前で再公開する（`export { createTodoApi as post }`・`export const post = createTodoApi`）、
-//     組み立て関数の中で handler を変数に入れ直して呼ぶ（`const h = new XApi(…).handle; await h(req)`）、文字列のキーで呼ぶ
-//     （`x["handle"](`）、組み立て関数を support.ts の中で別名にして呼ぶ（`const post = createXApi; post(db)(req)`）、型引数の
-//     入れ子（`createXApi<Array<T>>(db)`。`<[^<>()]*>` が入れ子を読めない）、step の `require("./support")`、
-//     command / query を直接 new して呼ぶ（handler を通らずに前提を作る）、step が support.ts を経ずに
-//     Postgres の Repository などで前提を書く書き方は見ない（reviewer が見る）。囲む関数は直前の `function` の宣言で推定するので、
-//     ネストした関数・アロー関数・クラスのメソッドの中の `new <名前>Api(` は外側の関数で数える（名前が合わなければ違反になる側に倒れる）。
+//   - 対象の API だけ（api-spec-own-api-only・api-spec-support-no-api-call・api-spec-support-assembler-per-api。Issue #240・#262）: 名前で
+//     見るので、組み立てのクラスの中で handler を変数に入れ直して呼ぶ（`const h = new XApi(…).handle; await h(req)`）、組み立てのメソッドを
+//     handler 以外の名前にして `this.<名前>(db)(req)` で呼ぶ、文字列のキーで呼ぶ（`x["handle"](`）、型引数の入れ子
+//     （`createXApi<Array<T>>(db)`。`<[^<>()]*>` が入れ子を読めない）、step の `require("./support")`、command / query を直接 new して
+//     呼ぶ（handler を通らずに前提を作る）、step が support.ts を経ずに Postgres の Repository などで前提を書く書き方は見ない（reviewer が
+//     見る）。クラスの本体の範囲は波かっこの数で決めるので、正規表現リテラルの中の波かっこ・`class X extends Y<{ a: 1 }> {` のような
+//     見出しの中の波かっこは読み違える（不自然な書き方なので扱わない）。
+//     組み立てのクラスの中で handler や組み立てのメソッドを呼ばずに参照だけ渡す書き方（`static { XSpecRows.list = this.handler; }`・
+//     `XSpecRows.h = new CreateXApi(db).handle` のように補助のクラスのプロパティに入れる）は見ない（reviewer の指摘。呼び出しの形だけを
+//     止めている）。Api のクラスの使い方は、support.ts が import で取った名前だけを見るので、`require("…/x.api")`・api ファイルを
+//     別のモジュールを経由して読む・`globalThis` などから取り出す書き方は見ない（`new (ListXApi)(db)`・`Reflect.construct`・
+//     変数に入れてからの `new`・かっこの無い `new` は、名前の出現として api-spec-support-no-api-call が止める）。
 // WHY 文字列で判定する（AST にしない）: 見るのはパス・行の先頭のキーワード・import の参照先だけで、正規表現で足りる
 //   （rule-tests/api-journey.test.ts と同じ）。
 
@@ -658,12 +680,18 @@ function isApiModule(module: string | undefined): boolean {
   );
 }
 
-// api ファイルの名前（kebab-case）から、support.ts の組み立て関数の名前を作る（"change-todo-completion" → "changeTodoCompletionApi"）。
-// WHY クラス名の先頭を小文字にしたものと同じになる: api ファイルとクラスは `<verb>-<noun>.api.ts` と `<Verb><Noun>Api` で対になる
-//   （.claude/rules/backend.md の「命名」）。support.ts の側は api-spec-support-assembler-per-api がクラス名から同じ名前を求める。
+// api ファイルの名前（kebab-case）から、support.ts の組み立てのクラスの名前を作る
+//   （"change-todo-completion" → "ChangeTodoCompletionApiAssembly"）。
+// WHY Api のクラス名に Assembly を足したものと同じになる: api ファイルとクラスは `<verb>-<noun>.api.ts` と `<Verb><Noun>Api` で対になる
+//   （.claude/rules/backend.md の「命名」）。support.ts の側は api-spec-support-assembler-per-api が new する Api のクラス名から同じ名前を求める。
 function assemblerNameOf(api: string): string {
-  return `${api.replace(/-([a-z0-9])/g, (_, char: string) => char.toUpperCase())}Api`;
+  return `${api.replace(/(?:^|-)([a-z0-9])/g, (_, char: string) => char.toUpperCase())}ApiAssembly`;
 }
+
+// support.ts から step が値で import してはいけない名前の形（組み立てのクラス `<名前>ApiAssembly` と、Api で終わる名前）。
+// WHY Api で終わる名前も止める: 以前の組み立て関数（createTodoApi）や、Api のクラスを `Api` で終わる名前のまま再公開したものを
+//   取らせない（別の名前での再公開は support.ts の側の api-spec-support-no-api-call が止める）。
+const ASSEMBLER_LIKE_NAME = /Api(?:Assembly)?$/;
 
 // 静的な import の句（`{ a, type B, c as d }`・`X, { a }`・`* as s`）のうち、値として取り出す名前（別名の前の元の名前）。
 //   whole: 既定の import か名前空間（`* as s`）で、モジュールの何でも取り出せる。
@@ -679,8 +707,9 @@ function valueNamesOf(clause: string): { names: string[]; whole: boolean } {
 }
 
 // step の実装が自分の仕様の対象の API 以外の handler を手に入れる import の行（api-spec-own-api-only）。
-//   - support.ts（どの feature のものも）から、Api で終わる名前のうち対の組み立て（同じディレクトリの support.ts の
-//     assemblerNameOf(api)）以外を値で import する。ほかの feature の support.ts からは Api で終わる名前をどれも取らない。
+//   - support.ts（どの feature のものも）から、ASSEMBLER_LIKE_NAME の名前（ApiAssembly・Api で終わる）のうち対の組み立てのクラス
+//     （同じディレクトリの support.ts の assemblerNameOf(api)）以外を値で import する。ほかの feature の support.ts からは
+//     ASSEMBLER_LIKE_NAME の名前をどれも取らない。
 //     名前空間・既定の import・dynamic import() はどの組み立てでも取り出せるので違反。
 //   - 対でない presentation の api ファイル（どの feature のものも）を値で import する（dynamic import() も）。型だけは通す。
 // WHY は冒頭の説明。
@@ -705,7 +734,7 @@ function findOwnApiOnlyViolations(
           whole ||
           names.some(
             (name) =>
-              /Api$/.test(name) &&
+              ASSEMBLER_LIKE_NAME.test(name) &&
               (module !== ownSupport || name !== ownAssembler),
           )
         );
@@ -764,43 +793,144 @@ function findStepContentViolations(
   ];
 }
 
-// support.ts が handler を呼ぶ・組み立て関数（Api で終わる名前）を呼ぶ行（api-spec-support-no-api-call）。code はコメントを消したもの。
-// `.handle(`（`?.handle(`・`.handle.call(` / `.apply(` / `.bind(`・空白を挟むものも）と、`<名前>Api(`（型引数 `<...>` を挟むもの・
-//   optional call の `<名前>Api?.(`・メソッドの `x.<名前>Api(` も）のうち `new <名前>Api(`（組み立て）と `function <名前>Api(`（組み立て関数の
-//   宣言）以外。文字列の中は見ない（blankStrings）。
-function findSupportApiCallViolations(code: string): ApiSpecViolation[] {
+// support.ts が handler を呼ぶ・組み立てのクラスを使う行（api-spec-support-no-api-call）。code はコメントを消したもの。1 行 1 件。
+// 違反にするもの（文字列の中は見ない。blankStrings）:
+//   - `.handle(` / `.handler(`（`?.`・`.call(` / `.apply(` / `.bind(`・空白を挟むものも）。handler の呼び出しと、組み立てのメソッド
+//     （`this.handler(db)`）の呼び出し。
+//   - `<名前>Api(`（型引数 `<...>` を挟むもの・optional call の `<名前>Api?.(`・メソッドの `x.<名前>Api(` も）のうち `new <名前>Api(`（組み立て）
+//     と `function <名前>Api(` の宣言以外。以前の組み立て関数（createTodoApi）と、new せずに呼ぶ Api。
+//   - 組み立てのクラスの名前（`<名前>ApiAssembly`）の、`class <名前>ApiAssembly` の宣言以外の出現（呼び出し・再公開・変数・継承）。
+//   - api ファイルの Api のクラスを組み立て以外の形で読む・使う行（findSupportApiClassLeaks）。
+// WHY 1 行 1 件: `ListXApiAssembly.handler(db)(req)` は名前と `.handler(` の 2 か所に当たるが、違反は 1 つの書き方。
+function findSupportApiCallViolations(
+  path: string,
+  code: string,
+): ApiSpecViolation[] {
   const blanked = blankStrings(code);
-  return [
-    ...blanked.matchAll(/\.\s*handle\s*(?:\.\s*(?:call|apply|bind)\s*)?\(/g),
+  const lines = [
+    ...blanked.matchAll(/\.\s*handler?\s*(?:\.\s*(?:call|apply|bind)\s*)?\(/g),
     ...blanked.matchAll(
       /(?<!\bnew\s+)(?<!\bfunction\s+)(?<![\w$])[A-Za-z_$][\w$]*Api\s*(?:<[^<>()]*>)?\s*(?:\?\.)?\s*\(/g,
     ),
-  ].map((match) => ({
-    rule: "api-spec-support-no-api-call",
-    line: lineAt(code, match.index),
-  }));
+    ...blanked.matchAll(
+      /(?<!\bclass\s+)(?<![\w$])[A-Za-z_$][\w$]*ApiAssembly(?![\w$])/g,
+    ),
+  ]
+    .map((match) => lineAt(code, match.index))
+    .concat(findSupportApiClassLeaks(path, code));
+  return [...new Set(lines)]
+    .sort((a, b) => a - b)
+    .map((line) => ({ rule: "api-spec-support-no-api-call", line }));
 }
 
-// support.ts の `new <名前>Api(` のうち、API ごとの組み立て関数の中に 1 つだけ置かれていないもの（api-spec-support-assembler-per-api）。
-// 囲む関数は、その位置より前で最後の `function <名前>(` の宣言と推定する（字句。ネストやアロー関数は見分けない）。違反は、
-//   囲む関数が無い（最上位・最初の function より前）、名前が「Api のクラス名の先頭を小文字にしたもの」でない、同じ関数の 2 つ目以降。
+// support.ts が api ファイル（presentation の *.api。どの feature のものも）の Api のクラスを、組み立て（`new <名前>Api(`）以外の形で
+//   外に出しうる行（api-spec-support-no-api-call の一部）。code はコメントを消したもの。返すのは行番号。
+//   - import の行: api ファイルの名前空間・既定の import・別名（`as`）・`Api` で終わらない名前の値の import（本番の handler の `GET` など）・
+//     `export … from`・副作用だけの import・dynamic `import()`。`import type` と inline の type の名前は見ない。
+//   - 出現: 値で import した `<名前>Api` の、import の文の外の出現のうち `new <名前>Api(` 以外（`export { ListXApi as Rows }`・
+//     `const Rows = ListXApi`・`extends ListXApi`・`new (ListXApi)(db)`・`Reflect.construct(ListXApi, …)`・かっこの無い `new ListXApi`）。
+//     `new <名前>Api(` の置き場所は api-spec-support-assembler-per-api が見る。プロパティ（`x.ListXApi`）は数えない。
+// WHY（reviewer の指摘、Issue #262）: Api のクラスを別の名前で再公開すると、step はその名前で import して new し、対象でない API の
+//   handler を手に入れられる（api-spec-own-api-only は ApiAssembly / Api で終わる名前しか見ない）。support.ts の中で Api のクラスに
+//   触れてよい形を組み立ての `new <名前>Api(` だけにすると、handler の入口が組み立てのクラスだけになる。別名の import を止めるのは、
+//   `new Lister(` が `Api` で終わらず組み立ての規則の対象から外れるため。
+// WHY 型だけの名前は見ない: 型の位置（`Pick<GetXApi, "handle">`）では handler を手に入れられない。
+function findSupportApiClassLeaks(path: string, code: string): number[] {
+  const apiImports = extractImports(code).filter((ref) =>
+    isApiModule(resolveSpecifier(path, ref.specifier)),
+  );
+  const leakingImports = apiImports
+    .filter((ref) => {
+      if (ref.kind === "type") {
+        return false;
+      }
+      if (ref.kind !== "value") {
+        return true;
+      }
+      const items = (/\{([\s\S]*)\}/.exec(ref.clause)?.[1] ?? "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter((item) => item !== "" && !/^type\s/.test(item));
+      return (
+        valueNamesOf(ref.clause).whole ||
+        items.some((item) => /\sas\s/.test(item) || !/Api$/.test(item))
+      );
+    })
+    .map((ref) => ref.line);
+  const apiNames = apiImports
+    .filter((ref) => ref.kind === "value")
+    .flatMap((ref) => valueNamesOf(ref.clause).names)
+    .filter((name) => /^[A-Za-z_][\w]*Api$/.test(name));
+  // import / export … from の文（複数行も）の範囲。この中の名前は import そのものなので数えない。
+  const importSpans = [
+    ...code.matchAll(
+      /^[ \t]*(?:import|export)\s+(?:type\s+)?(?:(?!^\s*(?:import|export)\b)[\w\s{},*$])*?\bfrom\s*["'][^"'\n]+["']/gm,
+    ),
+  ].map((match) => [match.index, match.index + match[0].length] as const);
+  const blanked = blankStrings(code);
+  const uses = apiNames.flatMap((name) =>
+    [...blanked.matchAll(new RegExp(`(?<![\\w$.])${name}(?![\\w$])`, "g"))]
+      .filter(
+        (match) =>
+          !importSpans.some(
+            ([start, end]) => start <= match.index && match.index < end,
+          ) &&
+          !(
+            /\bnew\s+$/.test(blanked.slice(0, match.index)) &&
+            /^\s*\(/.test(blanked.slice(match.index + name.length))
+          ),
+      )
+      .map((match) => lineAt(code, match.index)),
+  );
+  return [...leakingImports, ...uses];
+}
+
+// 最上位のクラスの宣言（行頭の `class` / `export class` / `export abstract class` など）の名前と、本体の範囲（`{` から対の `}` まで）。
+//   blanked は文字列を空白にしたもの（文字列・テンプレート文字列の中の波かっこを数えない）。
+// WHY 行頭（字下げなし）の宣言だけを見る: クラス式（`const X = class CreateXApiAssembly {`）や関数の中のクラスは、step が別の名前で
+//   受け取れる・support.ts の中で使える形なので、組み立てのクラスと認めない（Biome の整形で最上位の宣言は字下げされない）。
+// WHY 波かっこを数えて範囲を決める（直前の宣言で推定しない）: クラスを閉じた後の最上位の文の `new` を、直前のクラスの中と取り違えない。
+function topLevelClassesOf(
+  blanked: string,
+): { name: string; start: number; end: number }[] {
+  return [
+    ...blanked.matchAll(
+      /^(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z_$][\w$]*)[^{]*\{/gm,
+    ),
+  ].map((match) => {
+    const start = match.index + match[0].length - 1;
+    let depth = 0;
+    let end = blanked.length;
+    for (let index = start; index < blanked.length; index++) {
+      depth += blanked[index] === "{" ? 1 : blanked[index] === "}" ? -1 : 0;
+      if (depth === 0) {
+        end = index;
+        break;
+      }
+    }
+    return { name: match[1] ?? "", start, end };
+  });
+}
+
+// support.ts の `new <名前>Api(` のうち、API ごとの組み立てのクラスの中に 1 つだけ置かれていないもの（api-spec-support-assembler-per-api）。
+// 囲むクラスは、その位置を本体に含む最上位のクラスの宣言（topLevelClassesOf）。違反は、囲むクラスが無い（最上位の文・関数・アロー関数・
+//   クラス式・関数の中のクラス）、名前が「Api のクラス名 + Assembly」でない、同じクラスの 2 つ目以降（別のメソッドも）。
 function findSupportAssemblerViolations(code: string): ApiSpecViolation[] {
   const blanked = blankStrings(code);
-  const declarations = [...blanked.matchAll(/\bfunction\s+([\w$]+)/g)];
-  const assembledIn = new Set<number>();
+  const classes = topLevelClassesOf(blanked);
+  const assembled = new Set<string>();
   return [...blanked.matchAll(/\bnew\s+([A-Za-z_$][\w$]*Api)\s*\(/g)].flatMap(
     (match): ApiSpecViolation[] => {
-      const enclosing = declarations
-        .filter((declaration) => declaration.index < match.index)
-        .at(-1);
-      const className = match[1] ?? "";
-      const expected = `${className.charAt(0).toLowerCase()}${className.slice(1)}`;
+      const enclosing = classes.find(
+        (declaration) =>
+          declaration.start < match.index && match.index < declaration.end,
+      );
       const ok =
         enclosing !== undefined &&
-        enclosing[1] === expected &&
-        !assembledIn.has(enclosing.index);
+        enclosing.name === `${match[1] ?? ""}Assembly` &&
+        !assembled.has(enclosing.name);
       if (enclosing !== undefined) {
-        assembledIn.add(enclosing.index);
+        assembled.add(enclosing.name);
       }
       return ok
         ? []
@@ -841,7 +971,7 @@ function findSupportContentViolations(
   const lineLevel = [
     ...vi,
     ...findSupportAssemblerViolations(code),
-    ...findSupportApiCallViolations(code),
+    ...findSupportApiCallViolations(path, code),
   ].sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
   return assembles
     ? lineLevel
@@ -955,7 +1085,12 @@ describe("API 仕様の置き場所（isMisplacedApiSpecFile）", () => {
       "apps/backend/features/x/internal/domain/x.api-spec.ts",
     ],
   ])("%s は違反なし", (_name, path) => {
-    expect(isMisplacedApiSpecFile(path)).toBe(false);
+    // given: it.each の入力
+    // when
+    const result = isMisplacedApiSpecFile(path);
+
+    // then
+    expect(result).toBe(false);
   });
 
   it.each([
@@ -1007,7 +1142,12 @@ describe("API 仕様の置き場所（isMisplacedApiSpecFile）", () => {
     ],
     ["E2E の step（.js）", "apps/e2e/x.api-spec.test.js"],
   ])("%s は違反", (_name, path) => {
-    expect(isMisplacedApiSpecFile(path)).toBe(true);
+    // given: it.each の入力
+    // when
+    const result = isMisplacedApiSpecFile(path);
+
+    // then
+    expect(result).toBe(true);
   });
 });
 
@@ -1047,7 +1187,12 @@ describe("api ファイルと API 仕様の対（findPairViolations）", () => {
       files(),
     ],
   ])("%s は違反なし", (_name, path, set) => {
-    expect(findPairViolations(path, set)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findPairViolations(path, set);
+
+    // then
+    expect(violations).toEqual([]);
   });
 
   it.each([
@@ -1107,7 +1252,12 @@ describe("api ファイルと API 仕様の対（findPairViolations）", () => {
       ],
     ],
   ])("%s は違反", (_name, path, set, expected) => {
-    expect(findPairViolations(path, set)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const violations = findPairViolations(path, set);
+
+    // then
+    expect(violations).toEqual(expected);
   });
 });
 
@@ -1220,7 +1370,12 @@ describe(".feature の中身（findApiSpecViolations）: must pass", () => {
       ),
     ],
   ])("%s は違反なし", (_name, text) => {
-    expect(findApiSpecViolations(FEATURE, text)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findApiSpecViolations(FEATURE, text);
+
+    // then
+    expect(violations).toEqual([]);
   });
 });
 
@@ -1509,7 +1664,12 @@ describe(".feature の中身（findApiSpecViolations）: must reject", () => {
       ],
     ],
   ])("%s は違反", (_name, text, expected) => {
-    expect(findApiSpecViolations(FEATURE, text)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const violations = findApiSpecViolations(FEATURE, text);
+
+    // then
+    expect(violations).toEqual(expected);
   });
 });
 
@@ -1530,12 +1690,12 @@ describe("step の実装の中身（findApiSpecViolations）: must pass", () => 
       ),
     ],
     [
-      "ほかの api（型だけ）・Postgres の Repository・support.ts の対の組み立て・vitest-cucumber を足して import",
+      "ほかの api（型だけ）・Postgres の Repository・support.ts の対の組み立てのクラス・vitest-cucumber を足して import",
       source(
         ...REQUIRED_IMPORTS,
         'import type { ListXResponse } from "../../../features/x/internal/presentation/list-x.api";',
         'import { PostgresXRepository } from "../../../features/x/internal/infra/x-repository.postgres";',
-        'import { createXApi } from "./support";',
+        'import { CreateXApiAssembly } from "./support";',
         'import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";',
       ),
     ],
@@ -1590,15 +1750,24 @@ describe("step の実装の中身（findApiSpecViolations）: must pass", () => 
       ),
     ],
   ])("%s は違反なし", (_name, text) => {
-    expect(findApiSpecViolations(STEPS, source(text, LOAD_FEATURE))).toEqual(
-      [],
-    );
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(STEPS, source(text, LOAD_FEATURE));
+
+    // then
+    expect(violations).toEqual([]);
   });
 
   it("api ファイルは中身を見ない", () => {
-    expect(
-      findApiSpecViolations(API, source('import { vi } from "vitest";')),
-    ).toEqual([]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(
+      API,
+      source('import { vi } from "vitest";'),
+    );
+
+    // then
+    expect(violations).toEqual([]);
   });
 });
 
@@ -1731,43 +1900,55 @@ describe("step の実装の中身（findApiSpecViolations）: must reject", () =
       ],
     ],
   ])("%s は違反", (_name, text, expected) => {
-    expect(findApiSpecViolations(STEPS, source(text, LOAD_FEATURE))).toEqual(
-      expected,
-    );
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(STEPS, source(text, LOAD_FEATURE));
+
+    // then
+    expect(violations).toEqual(expected);
   });
 
   it("置き場所が違えば置き場所の違反だけを返す（中身は見ない）", () => {
-    expect(
-      findApiSpecViolations(
-        "apps/backend/spec/api/x/nested/create-x.feature",
-        source("Feature: DB", "  Scenario: 一覧", "    Given 状態 201"),
-      ),
-    ).toEqual([{ rule: "api-spec-placement" }]);
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(
+      "apps/backend/spec/api/x/nested/create-x.feature",
+      source("Feature: DB", "  Scenario: 一覧", "    Given 状態 201"),
+    );
+
+    // then
+    expect(violations).toEqual([{ rule: "api-spec-placement" }]);
   });
 });
 
 describe("step の実装が呼べる API（findApiSpecViolations の api-spec-own-api-only）", () => {
   it.each([
     [
-      "support.ts から対の組み立て（create-x → createXApi）と補助を import（別名・拡張子付き・複数行も）",
+      "support.ts から対の組み立てのクラス（create-x → CreateXApiAssembly）と補助のクラスを import（別名・拡張子付き・複数行も）",
       source(
         ...REQUIRED_IMPORTS,
-        'import { createXApi, jsonRequest } from "./support";',
-        'import { createXApi as post } from "./support.ts";',
+        'import { CreateXApiAssembly, XSpecRequests } from "./support";',
+        'import { CreateXApiAssembly as Post } from "./support.ts";',
         "import {",
-        "  bodylessRequest,",
-        "  createXApi,",
-        "  todoRowOf,",
+        "  XSpecRows,",
+        "  CreateXApiAssembly,",
+        "  XSpecProblems,",
         '} from "./support";',
       ),
     ],
     [
-      "support.ts から Api で終わらない名前・型だけの名前（import type・inline の type）を import",
+      "support.ts から型だけの名前（import type・inline の type。ほかの組み立てのクラスも）を import",
       source(
         ...REQUIRED_IMPORTS,
-        'import { todoResponseOf, xApis } from "./support";',
-        'import type { ListXApi } from "./support";',
-        'import { type GetXApi, createXApi } from "./support";',
+        'import type { ListXApiAssembly, ListXApi } from "./support";',
+        'import { type GetXApiAssembly, CreateXApiAssembly } from "./support";',
+      ),
+    ],
+    [
+      "名前の途中に ApiAssembly を含むが末尾でない補助のクラス（ApiAssemblyRows・ListXApiAssemblyNote）",
+      source(
+        ...REQUIRED_IMPORTS,
+        'import { ApiAssemblyRows, ListXApiAssemblyNote } from "./support";',
       ),
     ],
     [
@@ -1783,33 +1964,47 @@ describe("step の実装が呼べる API（findApiSpecViolations の api-spec-ow
       "コメント・文字列の中の import と呼び出し",
       source(
         ...REQUIRED_IMPORTS,
-        '// import { listXApi } from "./support";',
+        '// import { ListXApiAssembly } from "./support";',
         '/* import { ListXApi } from "../../../features/x/internal/presentation/list-x.api"; */',
-        'const text = "import { listXApi } from ./support";',
+        'const text = "import { ListXApiAssembly } from ./support";',
       ),
     ],
   ])("%s は違反なし", (_name, text) => {
-    expect(findApiSpecViolations(STEPS, source(text, LOAD_FEATURE))).toEqual(
-      [],
-    );
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(STEPS, source(text, LOAD_FEATURE));
+
+    // then
+    expect(violations).toEqual([]);
   });
 
   it.each([
     [
-      "support.ts からほかの API の組み立てを import（対の組み立てと一緒・別名・複数行）",
+      "support.ts からほかの API の組み立てのクラスを import（対のクラスと一緒・別名・複数行）",
       source(
         ...REQUIRED_IMPORTS,
-        'import { listXApi } from "./support";',
-        'import { createXApi, getXApi as get } from "./support";',
+        'import { ListXApiAssembly } from "./support";',
+        'import { CreateXApiAssembly, GetXApiAssembly as Own } from "./support";',
         "import {",
-        "  jsonRequest,",
-        "  deleteXApi,",
+        "  XSpecRows,",
+        "  DeleteXApiAssembly,",
         '} from "./support";',
       ),
       [3, 4, 8],
     ],
     [
-      "support.ts を名前空間・既定の import・dynamic import() で読む（どの組み立てでも取り出せる）",
+      "名前の取り違え（大文字小文字・前に文字を足す・Api のクラス名そのもの・以前の組み立て関数の名前）",
+      source(
+        ...REQUIRED_IMPORTS,
+        'import { CreatexApiAssembly } from "./support";',
+        'import { XCreateXApiAssembly } from "./support";',
+        'import { CreateXApi } from "./support";',
+        'import { createXApi } from "./support";',
+      ),
+      [3, 4, 5, 6],
+    ],
+    [
+      "support.ts を名前空間・既定の import・dynamic import() で読む（どの組み立てのクラスでも取り出せる）",
       source(
         ...REQUIRED_IMPORTS,
         'import * as support from "./support";',
@@ -1819,11 +2014,11 @@ describe("step の実装が呼べる API（findApiSpecViolations の api-spec-ow
       [3, 4, 5],
     ],
     [
-      "ほかの feature の support.ts から組み立てを import（拡張子付きも）",
+      "ほかの feature の support.ts から組み立てのクラスを import（対と同じ名前・拡張子付きも）",
       source(
         ...REQUIRED_IMPORTS,
-        'import { getYApi } from "../y/support";',
-        'import { createXApi } from "../y/support.ts";',
+        'import { GetYApiAssembly } from "../y/support";',
+        'import { CreateXApiAssembly } from "../y/support.ts";',
       ),
       [3, 4],
     ],
@@ -1839,12 +2034,18 @@ describe("step の実装が呼べる API（findApiSpecViolations の api-spec-ow
       [3, 4, 5, 6],
     ],
   ])("%s は違反", (_name, text, lines) => {
-    expect(findApiSpecViolations(STEPS, source(text, LOAD_FEATURE))).toEqual(
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(STEPS, source(text, LOAD_FEATURE));
+
+    // then
+    expect(violations).toEqual(
       lines.map((line) => ({ rule: "api-spec-own-api-only", line })),
     );
   });
 
-  it("対の組み立ての名前は api ファイルの名前の camelCase に Api を足したもの（change-x-completion → changeXCompletionApi）", () => {
+  it("対の組み立てのクラスの名前は api ファイルの名前の PascalCase に ApiAssembly を足したもの（change-x-completion → ChangeXCompletionApiAssembly）", () => {
+    // given
     const path = "apps/backend/spec/api/x/change-x-completion.api-spec.test.ts";
     const text = (name: string) =>
       source(
@@ -1853,11 +2054,16 @@ describe("step の実装が呼べる API（findApiSpecViolations の api-spec-ow
         `import { ${name} } from "./support";`,
         'const feature = await loadFeature("./change-x-completion.feature");',
       );
-    expect({
-      own: findApiSpecViolations(path, text("changeXCompletionApi")),
-      kebab: findApiSpecViolations(path, text("changeXcompletionApi")),
-      create: findApiSpecViolations(path, text("createXApi")),
-    }).toEqual({
+
+    // when
+    const result = {
+      own: findApiSpecViolations(path, text("ChangeXCompletionApiAssembly")),
+      kebab: findApiSpecViolations(path, text("ChangeXcompletionApiAssembly")),
+      create: findApiSpecViolations(path, text("CreateXApiAssembly")),
+    };
+
+    // then
+    expect(result).toEqual({
       own: [],
       kebab: [{ rule: "api-spec-own-api-only", line: 3 }],
       create: [{ rule: "api-spec-own-api-only", line: 3 }],
@@ -1898,7 +2104,12 @@ describe("step の実装の loadFeature と skip（findApiSpecViolations）", ()
       ),
     ],
   ])("%s は違反なし", (_name, text) => {
-    expect(findApiSpecViolations(STEPS, text)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findApiSpecViolations(STEPS, text);
+
+    // then
+    expect(violations).toEqual([]);
   });
 
   it.each([
@@ -1974,7 +2185,12 @@ describe("step の実装の loadFeature と skip（findApiSpecViolations）", ()
       })),
     ],
   ])("%s は違反", (_name, text, expected) => {
-    expect(findApiSpecViolations(STEPS, text)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const violations = findApiSpecViolations(STEPS, text);
+
+    // then
+    expect(violations).toEqual(expected);
   });
 });
 
@@ -1999,7 +2215,12 @@ describe("補助 support.ts の中身（findApiSpecViolations）", () => {
       ),
     ],
   ])("%s は違反なし", (_name, text) => {
-    expect(findApiSpecViolations(SUPPORT, text)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findApiSpecViolations(SUPPORT, text);
+
+    // then
+    expect(violations).toEqual([]);
   });
 
   it.each([
@@ -2017,36 +2238,55 @@ describe("補助 support.ts の中身（findApiSpecViolations）", () => {
         'import { CreateYApi } from "../../../features/y/internal/presentation/create-y.api";',
         'import { a } from "../../../features/x/internal/presentation/x-schema";',
         'import { b } from "../../../features/x/internal/application/create-x.command";',
-        'import { c } from "../../../features/x/internal/presentation/nested/create-x.api";',
+        'import { NestedXApi } from "../../../features/x/internal/presentation/nested/create-x.api";',
         'import { d } from "../../../features/x/internal/presentation/create-x.api.test";',
-        'import { e } from "../../../features/x-extra/internal/presentation/create-x.api";',
+        'import { ExtraXApi } from "../../../features/x-extra/internal/presentation/create-x.api";',
       ),
     ],
-    [
-      "dynamic import()・export … from・コメントの中の import",
+  ])("%s は違反", (_name, text) => {
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(SUPPORT, text);
+
+    // then
+    expect(violations).toEqual([{ rule: "api-spec-support-assembles-apis" }]);
+  });
+
+  // WHY 別に書く: dynamic import() と export … from は api ファイルを組み立て以外の形で読むので、api-spec-support-no-api-call にも当たる。
+  it("dynamic import()・export … from・コメントの中の import は数えない（dynamic import() と export … from は no-api-call にも当たる）", () => {
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(
+      SUPPORT,
       source(
         'const m = await import("../../../features/x/internal/presentation/create-x.api");',
         'export { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
         '// import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
       ),
-    ],
-  ])("%s は違反", (_name, text) => {
-    expect(findApiSpecViolations(SUPPORT, text)).toEqual([
+    );
+
+    // then
+    expect(violations).toEqual([
+      { rule: "api-spec-support-no-api-call", line: 1 },
+      { rule: "api-spec-support-no-api-call", line: 2 },
       { rule: "api-spec-support-assembles-apis" },
     ]);
   });
 
   it("vitest から vi を import すれば、その行の違反（step と同じ判定。api を組み立てていても）", () => {
-    expect(
-      findApiSpecViolations(
-        SUPPORT,
-        source(
-          'import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
-          'import { expect, vi } from "vitest";',
-          'const m = await import("vitest");',
-        ),
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(
+      SUPPORT,
+      source(
+        'import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
+        'import { expect, vi } from "vitest";',
+        'const m = await import("vitest");',
       ),
-    ).toEqual([
+    );
+
+    // then
+    expect(violations).toEqual([
       { rule: "api-spec-no-vi", line: 2 },
       { rule: "api-spec-no-vi", line: 3 },
     ]);
@@ -2054,16 +2294,19 @@ describe("補助 support.ts の中身（findApiSpecViolations）", () => {
 
   // WHY support.ts では console の差し替えも止める（Issue #258）: 差し替えは step ごとに張って外すもので、組み立ての置き場所には要らない。
   it("console の差し替えだけに使う vi も違反（step だけの例外）", () => {
-    expect(
-      findApiSpecViolations(
-        SUPPORT,
-        source(
-          'import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
-          'import { vi } from "vitest";',
-          'vi.spyOn(console, "log");',
-        ),
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const violations = findApiSpecViolations(
+      SUPPORT,
+      source(
+        'import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
+        'import { vi } from "vitest";',
+        'vi.spyOn(console, "log");',
       ),
-    ).toEqual([{ rule: "api-spec-no-vi", line: 2 }]);
+    );
+
+    // then
+    expect(violations).toEqual([{ rule: "api-spec-no-vi", line: 2 }]);
   });
 });
 
@@ -2077,42 +2320,84 @@ const SUPPORT_IMPORTS = [
 describe("補助 support.ts の組み立て（findApiSpecViolations）: must pass", () => {
   it.each([
     [
-      "API ごとの組み立て関数（名前は Api のクラス名の先頭を小文字にしたもの）が、その Api を 1 つだけ new して handle を返す",
+      "API ごとの組み立てのクラス（名前は Api のクラス名 + Assembly）が、その Api を 1 つだけ new して handle を返す（export の有無・abstract も）",
       source(
         ...SUPPORT_IMPORTS,
-        "export function createXApi(db: Database) {",
-        "  return new CreateXApi(new CreateXCommand(new PostgresXRepository(db))).handle;",
+        "export class CreateXApiAssembly {",
+        "  static handler(db: Database) {",
+        "    return new CreateXApi(new CreateXCommand(new PostgresXRepository(db))).handle;",
+        "  }",
         "}",
-        "export async function listXApi(db: Database, notify: (m: string) => void) {",
-        "  return new ListXApi(new ListXQuery(db, notify)).handle;",
+        "export abstract class ListXApiAssembly {",
+        "  static handler(db: Database, notify: (m: string) => void) {",
+        "    return new ListXApi(new ListXQuery(db, notify)).handle;",
+        "  }",
         "}",
       ),
     ],
     [
-      "組み立て関数の型の参照（typeof・ReturnType）・Api で終わらない関数の呼び出し・handle の参照（呼ばない）",
+      "組み立てのクラスの中の入れ子の波かっこ（オブジェクト・テンプレート文字列の補間・文字列の中の }）の後の new",
       source(
         ...SUPPORT_IMPORTS,
-        "export function createXApi<T>(db: Database) {",
-        "  return new CreateXApi(new CreateXCommand(db)).handle;",
+        "class CreateXApiAssembly {",
+        "  static handler(db: Database) {",
+        "    const options = { a: { b: 1 } };",
+        // WHY "$" と "{" を分けて書く: 1 つの文字列に書くと Biome の noTemplateCurlyInString が補間の書き忘れとして警告する。
+        `    const text = \`$${"{"}{ c: 1 }.c} }}\`;`,
+        '    const brace = "}";',
+        "    return new CreateXApi(new CreateXCommand(db, options, text, brace)).handle;",
+        "  }",
         "}",
-        "export type Post = ReturnType<typeof createXApi>;",
-        "export function jsonRequest(body: unknown): Request {",
-        '  return new Request("http://localhost", { body: JSON.stringify(body) });',
-        "}",
-        'export const pick = (api: Pick<CreateXApi, "handle">) => api.handle;',
       ),
     ],
     [
-      "コメント・文字列の中の呼び出しと new",
+      "補助のクラス（行・要求・失敗の本文）の中の Api で終わらない呼び出し・handle の参照（呼ばない）・Api の型",
       source(
         ...SUPPORT_IMPORTS,
-        "// const post = createXApi(db); await post.handle(request);",
+        "export class XSpecRequests {",
+        "  static json(body: unknown): Request {",
+        '    return new Request("http://localhost", { body: JSON.stringify(body) });',
+        "  }",
+        "  static pick(api: { handle: () => void }) {",
+        "    return api.handle;",
+        "  }",
+        "}",
+        "export class XSpecRows {",
+        "  static empty(db: Database) {",
+        "    return XSpecRows.rows(db);",
+        "  }",
+        "}",
+      ),
+    ],
+    [
+      "api ファイルから型だけで import した Api（import type・inline の type）を型の位置で使う・Api の値と型を一緒に import",
+      source(
+        ...SUPPORT_IMPORTS,
+        'import type { GetXApi } from "../../../features/x/internal/presentation/get-x.api";',
+        'import { type DeleteXApi, RenameXApi, type RenameXResponse } from "../../../features/x/internal/presentation/rename-x.api";',
+        "export class XSpecRows {",
+        '  static pick(api: Pick<GetXApi, "handle">, other: DeleteXApi): RenameXResponse | undefined {',
+        "    return undefined;",
+        "  }",
+        "}",
+      ),
+    ],
+    [
+      "コメント・文字列の中の呼び出しと new と組み立てのクラスの名前",
+      source(
+        ...SUPPORT_IMPORTS,
+        "// const post = CreateXApiAssembly.handler(db); await post.handle(request);",
         "/* new ListXApi(query) */",
-        'const text = "createXApi(db).handle(request) new ListXApi(";',
+        'const text = "CreateXApiAssembly.handler(db).handle(request) new ListXApi(";',
       ),
     ],
   ])("%s は違反なし", (_name, text) => {
-    expect(findApiSpecViolations(SUPPORT, text)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findApiSpecViolations(SUPPORT, text);
+
+    // then
+    expect(violations).toEqual([]);
   });
 });
 
@@ -2122,79 +2407,191 @@ describe("補助 support.ts の組み立て（findApiSpecViolations）: must rej
       "handler を呼ぶ（.handle(・?.handle(・空白を挟む・.handle.call( / .apply( / .bind(）",
       source(
         ...SUPPORT_IMPORTS,
-        "export function createXApi(db: Database) {",
-        "  return new CreateXApi(new CreateXCommand(db)).handle(request);",
+        "export class CreateXApiAssembly {",
+        "  static handler(db: Database) {",
+        "    return new CreateXApi(new CreateXCommand(db)).handle(request);",
+        "  }",
         "}",
-        "export async function seed(api?: CreateXApi) {",
-        "  await api?.handle(request);",
-        "  await api.handle (request);",
-        "  await api.handle.call(undefined, request);",
-        "  await api.handle.apply(api, [request]);",
-        "  api.handle.bind(api)(request);",
+        "export class XSeed {",
+        "  static async run(api?: { handle: Handler }) {",
+        "    await api?.handle(request);",
+        "    await api.handle (request);",
+        "    await api.handle.call(undefined, request);",
+        "    await api.handle.apply(api, [request]);",
+        "    api.handle.bind(api)(request);",
+        "  }",
         "}",
       ),
-      [4, 7, 8, 9, 10, 11].map((line) => ({
+      [5, 10, 11, 12, 13, 14].map((line) => ({
         rule: "api-spec-support-no-api-call",
         line,
       })),
     ],
     [
-      "組み立て関数・Api で終わる名前を呼ぶ（型引数付き・optional call・メソッド・Api のクラスを new せずに呼ぶ）",
+      "組み立てのメソッドを呼ぶ（this.handler(・.handler.call( / ?.handler(）・Api で終わる名前を呼ぶ（以前の組み立て関数・new しない Api・型引数付き・optional call）",
       source(
         ...SUPPORT_IMPORTS,
-        "export async function createTodo(db: Database) {",
-        "  const post = createXApi(db);",
-        "  const list = listXApi<T>(db);",
-        "  await apis.postXApi(request);",
-        "  return CreateXApi(db);",
-        "  const get = getXApi?.(db);",
+        "export class CreateXApiAssembly {",
+        "  static handler(db: Database) {",
+        "    return new CreateXApi(new CreateXCommand(db)).handle;",
+        "  }",
+        "  static async seed(db: Database) {",
+        "    await this.handler(db)(request);",
+        "    await this.handler.call(this, db);",
+        "    await this?.handler(db);",
+        "  }",
+        "}",
+        "export class XSeed {",
+        "  static async run(db: Database) {",
+        "    const post = createXApi(db);",
+        "    const list = listXApi<T>(db);",
+        "    await apis.postXApi(request);",
+        "    const get = getXApi?.(db);",
+        "    return CreateXApi(db);",
+        "  }",
         "}",
       ),
-      [4, 5, 6, 7, 8].map((line) => ({
+      [8, 9, 10, 15, 16, 17, 18, 19].map((line) => ({
         rule: "api-spec-support-no-api-call",
         line,
       })),
     ],
     [
-      "1 つの関数ですべての Api を組み立てる（todoApis のような形。2 つ目以降も名前の違いも違反）",
+      "組み立てのクラスを support.ts の中で使う（補助のクラスのメソッドからほかの組み立てを呼ぶ・別名で再公開・変数に入れる・継承・既定の export。1 行 1 件）",
       source(
         ...SUPPORT_IMPORTS,
-        "export function xApis(db: Database) {",
-        "  return {",
-        "    postX: new CreateXApi(new CreateXCommand(db)).handle,",
-        "    listX: new ListXApi(new ListXQuery(db)).handle,",
-        "  };",
+        "export class XSpecRows {",
+        "  static async seed(db: Database) {",
+        "    return ListXApiAssembly.handler(db)(request);",
+        "  }",
+        "}",
+        "export { CreateXApiAssembly as XSpecRequests };",
+        "export const XSpecProblems = ListXApiAssembly;",
+        "export class XSpecLogs extends CreateXApiAssembly {}",
+        "export default CreateXApiAssembly;",
+      ),
+      [5, 8, 9, 10, 11].map((line) => ({
+        rule: "api-spec-support-no-api-call",
+        line,
+      })),
+    ],
+    [
+      "api ファイルから値で import した Api のクラスを new <名前>( 以外で使う（別名で再公開・変数・継承・かっこで包んだ new・Reflect.construct・かっこの無い new。1 行 1 件）",
+      source(
+        ...SUPPORT_IMPORTS,
+        "export { ListXApi as Rows };",
+        "export const Rows2 = ListXApi;",
+        "export class XSpecRows extends ListXApi {}",
+        "export const Rows3 = new (ListXApi)(db);",
+        "export const Rows4 = Reflect.construct(ListXApi, [db]);",
+        "export const Rows5 = new ListXApi;",
+      ),
+      [3, 4, 5, 6, 7, 8].map((line) => ({
+        rule: "api-spec-support-no-api-call",
+        line,
+      })),
+    ],
+    [
+      "api ファイルを Api のクラスの名前のまま以外で読む（別名・名前空間・既定の import・Api で終わらない値（本番の handler の GET）・export … from・dynamic import()。その import の行）",
+      source(
+        'import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";',
+        'import { ListXApi as Lister } from "../../../features/x/internal/presentation/list-x.api";',
+        'import * as getX from "@repo/backend/features/x/internal/presentation/get-x.api";',
+        'import DeleteX from "../../../features/x/internal/presentation/delete-x.api.ts";',
+        'import { GET } from "../../../features/x/internal/presentation/rename-x.api";',
+        'export { ListXApi } from "../../../features/x/internal/presentation/list-x.api";',
+        'const m = await import("../../../features/x/internal/presentation/list-x.api");',
+        "export class ListXApiAssembly {",
+        "  static handler(db: Database) {",
+        "    return new Lister(db).handle;",
+        "  }",
         "}",
       ),
-      [5, 6].map((line) => ({
+      [2, 3, 4, 5, 6, 7].map((line) => ({
+        rule: "api-spec-support-no-api-call",
+        line,
+      })),
+    ],
+    [
+      "1 つのクラスですべての Api を組み立てる（todoApis のような形。名前の違いも 2 つ目以降も違反）",
+      source(
+        ...SUPPORT_IMPORTS,
+        "export class XApis {",
+        "  static handlers(db: Database) {",
+        "    return {",
+        "      postX: new CreateXApi(new CreateXCommand(db)).handle,",
+        "      listX: new ListXApi(new ListXQuery(db)).handle,",
+        "    };",
+        "  }",
+        "}",
+      ),
+      [6, 7].map((line) => ({
         rule: "api-spec-support-assembler-per-api",
         line,
       })),
     ],
     [
-      "組み立て関数の名前が Api のクラスと違う・同じ関数で 2 つ new する",
+      "組み立てのクラスの名前が Api のクラスと違う（ほかの Api の組み立て・Assembly の無い名前・補助のクラス）・同じクラスで 2 つ new する（別のメソッドも）",
       source(
         ...SUPPORT_IMPORTS,
-        "export function listXApi(db: Database) {",
-        "  return new CreateXApi(new CreateXCommand(db)).handle;",
+        "export class ListXApiAssembly {",
+        "  static handler(db: Database) {",
+        "    return new CreateXApi(new CreateXCommand(db)).handle;",
+        "  }",
         "}",
-        "export function createXApi(db: Database) {",
-        "  return [new CreateXApi(a).handle, new CreateXApi(b).handle];",
+        "export class CreateXApiAssembly {",
+        "  static handler(db: Database) {",
+        "    return new CreateXApi(a).handle;",
+        "  }",
+        "  static other(db: Database) {",
+        "    return new CreateXApi(b).handle;",
+        "  }",
+        "}",
+        "export class CreateXApi2Assembly {",
+        "  static handler(db: Database) {",
+        "    return new CreateXApi(a).handle;",
+        "  }",
+        "}",
+        "export class XSpecRows {",
+        "  static seed(db: Database) {",
+        "    return new ListXApi(new ListXQuery(db)).handle;",
+        "  }",
         "}",
       ),
-      [4, 7].map((line) => ({
+      [5, 13, 18, 23].map((line) => ({
         rule: "api-spec-support-assembler-per-api",
         line,
       })),
     ],
     [
-      "function の宣言でない場所（最上位・アロー関数）で new する",
+      "クラスの宣言の外（最上位・関数・アロー関数・クラスを閉じた後・クラス式・関数の中の字下げしたクラス）で new する",
       source(
         ...SUPPORT_IMPORTS,
         "const post = new CreateXApi(new CreateXCommand(db)).handle;",
+        "export function createXApi(db: Database) {",
+        "  return new CreateXApi(new CreateXCommand(db)).handle;",
+        "}",
         "export const listXApi = (db: Database) => new ListXApi(new ListXQuery(db)).handle;",
+        "export class CreateXApiAssembly {",
+        "  static handler(db: Database) {",
+        "    return new CreateXApi(new CreateXCommand(db)).handle;",
+        "  }",
+        "}",
+        "const after = new CreateXApi(new CreateXCommand(db)).handle;",
+        "export const XSpecRows = class ListXApiAssembly {",
+        "  static handler(db: Database) {",
+        "    return new ListXApi(new ListXQuery(db)).handle;",
+        "  }",
+        "};",
+        "export function wrap() {",
+        "  class ListXApiAssembly {",
+        "    static handler(db: Database) {",
+        "      return new ListXApi(new ListXQuery(db)).handle;",
+        "    }",
+        "  }",
+        "}",
       ),
-      [3, 4].map((line) => ({
+      [3, 5, 7, 13, 16, 22].map((line) => ({
         rule: "api-spec-support-assembler-per-api",
         line,
       })),
@@ -2204,18 +2601,25 @@ describe("補助 support.ts の組み立て（findApiSpecViolations）: must rej
       source(
         ...SUPPORT_IMPORTS,
         'import { vi } from "vitest";',
-        "export function xApis(db: Database) {",
-        "  return new CreateXApi(db).handle(request);",
+        "export class XApis {",
+        "  static handler(db: Database) {",
+        "    return new CreateXApi(db).handle(request);",
+        "  }",
         "}",
       ),
       [
         { rule: "api-spec-no-vi", line: 3 },
-        { rule: "api-spec-support-assembler-per-api", line: 5 },
-        { rule: "api-spec-support-no-api-call", line: 5 },
+        { rule: "api-spec-support-assembler-per-api", line: 6 },
+        { rule: "api-spec-support-no-api-call", line: 6 },
       ],
     ],
   ])("%s は違反", (_name, text, expected) => {
-    expect(findApiSpecViolations(SUPPORT, text)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const violations = findApiSpecViolations(SUPPORT, text);
+
+    // then
+    expect(violations).toEqual(expected);
   });
 });
 
@@ -2256,6 +2660,7 @@ describe("API 仕様の列挙と検査（fixture）", () => {
     );
 
   it("spec/api/ の下・外の *.api-spec.test.*・api ファイルを対象にし、違反を「規則: パス(:行)（無いファイル）」で返す", () => {
+    // given
     const root = fixture({
       // 対がそろい、中身も違反なし（support.ts も）。
       [`${presentation}/create-x.api.ts`]: "export class CreateXApi {}\n",
@@ -2264,19 +2669,28 @@ describe("API 仕様の列挙と検査（fixture）", () => {
       [`${specs}/support.ts`]: source(
         'import { expect } from "vitest";',
         `import { CreateXApi } from "../../../features/x/internal/presentation/create-x.api";`,
+        "export class CreateXApiAssembly {",
+        "  static handler(db) {",
+        "    return new CreateXApi(db).handle;",
+        "  }",
+        "}",
       ),
       // 補助の違反: 自 feature の api を型だけで import（組み立てていない）。
       "apps/backend/spec/api/y/support.ts": source(
         'import type { CreateYApi } from "../../../features/y/internal/presentation/create-y.api";',
       ),
-      // 補助の違反: すべての Api を 1 つの関数で組み立て、組み立て関数を呼ぶ（前提を API で作る口）。
+      // 補助の違反: Api を名前の合わないクラス（すべてをまとめる形）で組み立て、補助のクラスから組み立てのクラスを呼ぶ（前提を API で作る口）。
       "apps/backend/spec/api/z/support.ts": source(
         'import { CreateZApi } from "../../../features/z/internal/presentation/create-z.api";',
-        "export function zApis(db) {",
-        "  return new CreateZApi(db).handle;",
+        "export class ZApis {",
+        "  static handler(db) {",
+        "    return new CreateZApi(db).handle;",
+        "  }",
         "}",
-        "export async function seed(db) {",
-        '  return createZApi(db)(new Request("http://localhost"));',
+        "export class ZSeed {",
+        "  static async run(db) {",
+        '    return CreateZApiAssembly.handler(db)(new Request("http://localhost"));',
+        "  }",
         "}",
       ),
       // 対がそろうが、.feature と step の中身が違反。
@@ -2291,7 +2705,7 @@ describe("API 仕様の列挙と検査（fixture）", () => {
         "list-x",
         'import { vi } from "vitest";',
         'Scenario.skip("a", () => {});',
-        'import { createXApi } from "./support";',
+        'import { CreateXApiAssembly } from "./support";',
       ),
       // 対の違反: api だけ（.feature と step が無い）、.feature だけ、api の無い step。
       [`${presentation}/delete-x.api.ts`]: "export class DeleteXApi {}\n",
@@ -2311,10 +2725,15 @@ describe("API 仕様の列挙と検査（fixture）", () => {
       "apps/backend/node_modules/x/x.api-spec.test.ts": "",
       "apps/frontend_customer/.next/x.api-spec.test.ts": "",
     });
-    expect({
+
+    // when
+    const result = {
       files: listApiSpecTargets(root),
       violations: collectApiSpecViolations(root),
-    }).toEqual({
+    };
+
+    // then
+    expect(result).toEqual({
       files: [
         "apps/backend/features/x/internal/presentation/create-x.api-spec.test.ts",
         "apps/backend/features/x/internal/presentation/create-x.api.ts",
@@ -2353,32 +2772,44 @@ describe("API 仕様の列挙と検査（fixture）", () => {
         "api-spec-placement: apps/backend/spec/api/x/nested/create-x.feature",
         "api-spec-pair: apps/backend/spec/api/x/rename-x.api-spec.test.ts（対の apps/backend/features/x/internal/presentation/rename-x.api.ts が無い）",
         "api-spec-support-assembles-apis: apps/backend/spec/api/y/support.ts",
-        "api-spec-support-assembler-per-api: apps/backend/spec/api/z/support.ts:3",
-        "api-spec-support-no-api-call: apps/backend/spec/api/z/support.ts:6",
+        "api-spec-support-assembler-per-api: apps/backend/spec/api/z/support.ts:4",
+        "api-spec-support-no-api-call: apps/backend/spec/api/z/support.ts:9",
         "api-spec-placement: apps/frontend_customer/x.api-spec.test.tsx",
       ],
     });
   });
 
   it("apps/ が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）", () => {
+    // given
     const root = fixture({ "README.md": "# x\n" });
-    expect({
+
+    // when
+    const result = {
       files: listApiSpecTargets(root),
       violations: collectApiSpecViolations(root),
-    }).toEqual({ files: [], violations: [] });
+    };
+
+    // then
+    expect(result).toEqual({ files: [], violations: [] });
   });
 });
 
 describe("API 仕様（実ファイル）", () => {
   it("presentation の api ファイルごとに apps/backend/spec/api/<feature>/ に <api>.feature と <api>.api-spec.test.ts があり、.feature は固定の見出しの Scenario と `*` の step を業務の言葉だけで書き、step の実装は vi と InMemory を使わず、実 DB を使って対の api を参照し、対象でない API の handler を手に入れず、support.ts が api を値で API ごとに組み立て、handler を呼ばない", () => {
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const apiSpecTargets = listApiSpecTargets(repoRoot);
+    const violations = collectApiSpecViolations(repoRoot);
+
+    // then
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
-    expect(listApiSpecTargets(repoRoot)).toEqual(
+    expect(apiSpecTargets).toEqual(
       expect.arrayContaining([
         "apps/backend/features/todo/internal/presentation/list-todos.api.ts",
         "apps/backend/spec/api/todo/list-todos.feature",
         "apps/backend/spec/api/todo/list-todos.api-spec.test.ts",
       ]),
     );
-    expect(collectApiSpecViolations(repoRoot)).toEqual([]);
+    expect(violations).toEqual([]);
   });
 });

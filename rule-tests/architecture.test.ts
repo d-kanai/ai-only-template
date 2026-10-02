@@ -102,6 +102,9 @@ const SHARED_ALLOWED_PACKAGES = new Set(["zod"]);
 //   **/*.mts を含み、JS のファイルや ESM / CJS を明示した拡張子のファイルも同じビルドに入り、同じ規則の対象になるため。
 const SOURCE_FILE = /\.(?:[cm]?[jt]s|[jt]sx)$/;
 const TEST_FILE = /\.test\.(?:[cm]?[jt]s|[jt]sx)$/;
+// E2E のテスト（Playwright の *.spec.ts。testMatch の既定 **/*.@(spec|test).?(c|m)[jt]s?(x) のうち spec の側。apps/e2e/playwright.config.ts）。
+//   Vitest のテスト（TEST_FILE）ではないので、多くの規則では検査の対象のまま。規則 class-based だけが除く（WHY は CLASS_BASED）。
+const E2E_SPEC_FILE = /\.spec\.(?:[cm]?[jt]s|[jt]sx)$/;
 
 type ImportStatement = {
   // import / export の from に書かれた文字列そのもの（"@repo/backend/..."、"../x"、"next/link" など）。
@@ -397,10 +400,12 @@ function isSourceNonTest(path: string): boolean {
 //   node_modules: 依存（workspace パッケージ化した段階 2 では apps/*/node_modules/ ができる）。pnpm の相対パスの symlink を含む。
 //   .next: next build / next dev の生成物（apps/frontend_customer/.next/。数千件の JS）。next build の .next/standalone/ には
 //     pnpm の node_modules の形（相対パスの symlink）が複製され、循環する symlink を含みうる（Issue #130 / #142）。
+//   .features-gen: playwright-bdd の bddgen が apps/e2e の .feature から生成する Playwright のテスト（apps/e2e/.features-gen/*.spec.js。
+//     Issue #279。.gitignore 済み）。自分たちが書くコードではなく、.feature と step（apps/e2e/*.steps.ts）が検査の対象。
 // WHY 名前を列挙する（"." で始まるディレクトリをまとめて除かない）: まとめて除くと apps/backend/.lib/x.ts のような自前のコードが
 //   検査を素通りする（Issue #68 の reviewer 指摘）。既知の生成物・依存だけを除き、それ以外の "." のディレクトリは通常どおり
 //   検査して、置き場所の規則で違反にする。生成物のディレクトリが増えたらここに足す。
-const EXCLUDED_DIRS = new Set(["node_modules", ".next"]);
+const EXCLUDED_DIRS = new Set(["node_modules", ".next", ".features-gen"]);
 
 type ReadDirectory = (absolutePath: string) => Dirent[];
 
@@ -1270,7 +1275,7 @@ const RULES: Rule[] = [
 //   backend/shared の中なので backend-shared がかかる（feature のコードを import せず、schema は glob の文字列で指す）。
 // 決定と採用しなかった案は ADR docs/adr/architecture/20260929-backend-features-and-shared-directories.md。
 // WHY 直下の test-support/ も許す（Issue #181。ユーザー判断「test-support が build に入らないルールは頑張って」）: テストだけが使う
-//   コード（createTestDatabase など）の置き場所で、層のコードではない。層の下（shared/infra/）に置くと本番のコードと見分けが付かず、
+//   コード（TestDatabase.create など）の置き場所で、層のコードではない。層の下（shared/infra/）に置くと本番のコードと見分けが付かず、
 //   .dockerignore の 1 行（**/test-support）でイメージから外せない。層の規則は当てない（どの層でもない）が、本番のコードから
 //   参照しないこと・イメージに入らないことは rule-tests/test-support.test.ts が見る（層のファイルから参照すると層の規則にもかかる）。
 //   直下だけに許し、features/<f>/test-support/ や shared/test-support/ は違反のままにする（置き場所を 1 か所にそろえる）。
@@ -2037,20 +2042,50 @@ function findProblemResponseViolations(root: string): string[] {
   );
 }
 
-// --- backend の本番コードはクラスを基本にする（規則 backend-class-based。Issue #262 の 4 本目） ---
-// apps/backend の本番コードは、ファイルの最上位（モジュールの直下と namespace の中）に関数を置かない。補助の関数もクラスの
-//   メソッド（状態を使わないものは static）にする。
+// --- backend と apps/shared の本番コードとテストの補助、frontend の React 以外のモジュールはクラスを基本にする（規則 class-based。Issue #262） ---
+// apps/backend と apps/shared の本番コード、テストの補助（apps/backend/test-support/・apps/backend/spec/ の support.ts・apps/e2e/ の
+//   spec 以外）は、ファイルの最上位（モジュールの直下と namespace の中）に関数を置かない。補助の関数もクラスのメソッド（状態を
+//   使わないものは static）にする。
 // WHY 規則にする: ADR docs/adr/architecture/20261002-class-based-backend.md（daiki の判断 2026-10-02）で、関数を export せず、
-//   ファイルの中だけの補助の関数も置かないと決めた。PR #264 / #266 / #267 で移行を終え、本番コードの最上位の関数は 0 件になった。
-//   レビューだけでは、関数の import が戻る（依存がコンストラクタに出ず、差し替えに vi.mock が要る形に戻る）のを止められない。
+//   ファイルの中だけの補助の関数も置かないと決めた。PR #264 / #266 / #267 で backend の移行を終え、本番コードの最上位の関数は 0 件に
+//   なった。レビューだけでは、関数の import が戻る（依存がコンストラクタに出ず、差し替えに vi.mock が要る形に戻る）のを止められない。
+// WHY apps/shared も対象にする（Issue #262。規則の名前を backend-class-based から class-based に変えた）: daiki が対象の範囲を
+//   「すべて」と決めた（2026-10-02。ADR docs/adr/architecture/20261002-class-based-shared-and-test-support.md）。apps/shared は
+//   backend と frontend 直下が import する基盤で、ここに関数が残ると backend の呼び出し側に関数の import が戻る。
 // 違反にするもの（ファイル:行。行は宣言の書き出し）:
 //   - function 宣言（export・export default・async・generator・オーバーロードの宣言・declare function も、1 つずつ）。
 //   - 初期化子が関数（アロー関数・function 式）の変数（const / let / var、export も）。括弧・as・satisfies・! ・<T> で包んだものも。
 //   - export default のアロー関数・function 式（export default async () => {}）。
 // 許すもの: クラス（宣言・式）のメンバー（メソッド・アロー関数のクラスフィールド readonly handle = ProblemResponse.wrap(async ...)）、
 //   メソッドや関数の中の関数、型・interface、関数でない値の変数（定数・オブジェクト・new X().handle のようなプロパティの参照）。
-// 対象: apps/backend の下のテスト以外のソース（8 つの拡張子）。テスト・apps/backend/test-support/・apps/backend/spec/ は除く
-//   （ADR の対象外。テストの組み立ての補助は関数のほうが読みやすく、本番の依存の形に影響しない）。
+// 対象: apps/backend・apps/shared・apps/e2e の下と、apps/frontend_customer の features/・shared/・test-support/ の下（*.tsx・*.jsx・
+//   *.hook.* を除く）のテスト以外のソース（8 つの拡張子）。テスト（*.test.*）と E2E のテスト（apps/e2e の *.spec.*。E2E_SPEC_FILE）は除く。
+// WHY frontend の React 以外のモジュールも対象にする（daiki の判断 2026-10-02「クラス必須でルールにして」。ADR
+//   docs/adr/architecture/20261002-class-based-frontend-modules.md）: API の呼び出し（features/<f>/api/）・ロケールの判定・日時の
+//   表示・リクエストログの組み立て（shared/）は React も Next も関数の形を求めないので、backend と同じくクラスのメソッドにそろえる。
+//   画面のテストの差し替えも vi.mocked(TodoApi.list) の形になり、apps/shared の vi.mocked(Clock.now) とそろう。
+// WHY frontend の次は対象外にする（関数の形を外の仕様が求めるか、クラスにすると React の規則とぶつかるもの）:
+//   - *.tsx・*.jsx（React の component。クラスの component は React の公式で非推奨の書き方）。JSX を含む補助（test-support/i18n.tsx の
+//     JaLocale と同じファイルの tJa、shared/i18n/i18n.tsx の LocaleProvider と同じファイルの defineMessages など）もファイルごと外す。
+//     WHY ファイルごと: 同じファイルの中で component と補助を見分けるには「JSX を返すか」を型で見る必要があり、今の判定（構文だけ）
+//     では決まらない。
+//   - *.hook.*（React の hook。hook は関数で呼ぶ規則（Rules of Hooks）で、use で始まる関数であることを React の lint も前提にする）。
+//   - app/ の下（Next の規約のファイル。page.tsx・layout.tsx の default export の関数、app/api の route.ts の GET など。route.ts は
+//     backend の handle を re-export するだけで関数を書かないが、規約のファイルとしてまとめて外す）。
+//   - apps/frontend_customer 直下のファイル（proxy.ts の proxy、instrumentation.ts の register は Next が関数の export を求める。
+//     instrumentation-node.ts は register が Node.js runtime でだけ dynamic import する本体で、Vitest のカバレッジの対象外
+//     （vitest.config.mts）。形を変えても単体テストで確かめられないので、規約のファイルとまとめて外す。next.config.ts も規約のファイル）。
+// WHY テストの補助（apps/backend/test-support/・apps/backend/spec/ の support.ts・apps/e2e/database.ts）も対象にする（Issue #262 の
+//   2 つ目の PR。以前は除いていた）: daiki が対象の範囲を「すべて」と決め、テストの補助も移した（ADR
+//   20261002-class-based-shared-and-test-support.md）。テストの組み立てを読むときも依存の形（クラスのメソッド）が本番とそろう。
+// WHY テスト（*.test.*・*.spec.*）は除く: テストの本体は Vitest / Playwright の describe・it・test に関数を渡す形で、ファイルの中だけの
+//   小さな補助の関数（step の中の組み立てなど）まで縛ると、テストの読みやすさを落とすだけで関数の import は増えない（ほかのファイルは
+//   テストを import しない）。
+// WHY リポジトリ直下の vitest.global-setup.ts は対象外のまま（apps/ の下でないので列挙に入らない）: Vitest の globalSetup は
+//   setup を関数の default export で求める（中の処理は test-support の TestDatabase を呼ぶ）。
+// WHY apps/e2e/playwright.config.ts は対象にする（例外にしない）: Playwright が求めるのは default export の設定オブジェクト
+//   （defineConfig の戻り値）だけで、補助の関数の形は求めない。今も最上位は定数と default export だけで関数は無い
+//   （drizzle.config.ts と同じ扱い）。
 // WHY apps/backend/shared/drizzle/drizzle.config.ts も対象にする: drizzle-kit が求めるのは default export の設定オブジェクトだけで、
 //   補助の関数の形は求めない。今もクラス DrizzleConfigPath の static メソッドで書いている（ファイルのコメント）ので、例外は要らない。
 // 限界（見逃す方向）: 最上位の関数呼び出しの引数に書いた関数（即時実行の (() => {})()、z.object(...).refine((x) => ...)）、
@@ -2058,15 +2093,32 @@ function findProblemResponseViolations(root: string): string[] {
 //   （const f = c ? () => 1 : () => 2）、別のファイルの関数の再代入（const f = other.f）は見ない（関数かは型を見ないと決まらない）。
 //   最上位の文のブロックの中の関数（{ ... }・if・try・switch・for の中）も見ない（不自然な書き方なので再帰しない。reviewer の実測）。
 //   レビューで見る。
-const BACKEND_CLASS_BASED = {
-  id: "backend-class-based",
-  name: "apps/backend の本番コード（テスト・test-support/・spec/ を除く）はファイルの最上位に関数を置かない（function 宣言・関数を入れた変数・export default の関数は違反。クラスのメソッド・クラスフィールドのアロー関数・メソッドの中の関数は可）",
+const CLASS_BASED = {
+  id: "class-based",
+  name: "apps/backend と apps/shared の本番コードとテストの補助（apps/backend の test-support/・spec/ の support.ts、apps/e2e の *.spec.* 以外）と apps/frontend_customer の features/・shared/・test-support/ の React 以外のモジュール（*.tsx・*.jsx・*.hook.* 以外）はファイルの最上位に関数を置かない（テストと E2E の *.spec.*、frontend の app/ と直下のファイルは除く。function 宣言・関数を入れた変数・export default の関数は違反。クラスのメソッド・クラスフィールドのアロー関数・メソッドの中の関数は可）",
   appliesTo: (file: string) =>
     isSourceNonTest(file) &&
-    isUnder(file, BACKEND_ROOT) &&
-    !BACKEND_TEST_SUPPORT_DIR.test(file) &&
-    !isUnder(file, `${BACKEND_ROOT}/spec`),
+    (isUnder(file, BACKEND_ROOT) ||
+      isUnder(file, SHARED_ROOT) ||
+      (isUnder(file, E2E_ROOT) && !E2E_SPEC_FILE.test(file)) ||
+      isFrontendNonReactModule(file)),
 };
+
+// frontend のうち規則 class-based の対象にするディレクトリ（WHY は CLASS_BASED の「frontend の次は対象外にする」）。
+const CLASS_BASED_FRONTEND_DIRS = ["features", "shared", "test-support"].map(
+  (dir) => `${FRONTEND_ROOT}/${dir}`,
+);
+// React の component（*.tsx・*.jsx）と hook（*.hook.<拡張子>）。
+const REACT_COMPONENT_FILE = /\.[jt]sx$/;
+const REACT_HOOK_FILE = /\.hook\.(?:[cm]?[jt]s|[jt]sx)$/;
+
+function isFrontendNonReactModule(file: string): boolean {
+  return (
+    CLASS_BASED_FRONTEND_DIRS.some((dir) => isUnder(file, dir)) &&
+    !REACT_COMPONENT_FILE.test(file) &&
+    !REACT_HOOK_FILE.test(file)
+  );
+}
 
 // 括弧・型アサーション（as / <T>）・satisfies・非 null アサーション（!）を外した式。
 // WHY 外す: (() => 1)・(async () => 1) as F・function () {} satisfies F は、包んでも最上位の関数であることは変わらない。
@@ -2140,9 +2192,12 @@ function findTopLevelFunctions(sourceFile: SourceFile): number[] {
 }
 
 function listClassBasedCheckedFiles(root: string): string[] {
-  return listSourceFiles(root, BACKEND_ROOT).filter(
-    BACKEND_CLASS_BASED.appliesTo,
-  );
+  return [
+    ...listSourceFiles(root, BACKEND_ROOT),
+    ...listSourceFiles(root, SHARED_ROOT),
+    ...listSourceFiles(root, E2E_ROOT),
+    ...listSourceFiles(root, FRONTEND_ROOT),
+  ].filter(CLASS_BASED.appliesTo);
 }
 
 // 「ファイル:行」の一覧。
@@ -2352,7 +2407,7 @@ function findViolations(references: Reference[], rule: Rule): string[] {
 //   現在時刻の読み取りも「now-single-source: ファイル:行」で同じく出す。
 //   ハードコードの文言も「frontend-hardcoded-text: ファイル:行」「server-hardcoded-text: ファイル:行」を文言ごとに 1 行で出す。
 //   ProblemResponse.wrap で包んでいない handle も「presentation-with-problem-response: ファイル:行」を handle ごとに 1 行で出す。
-//   backend の本番コードの最上位の関数も「backend-class-based: ファイル:行」を関数ごとに 1 行で出す。
+//   backend と apps/shared の本番コードとテストの補助の最上位の関数も「class-based: ファイル:行」を関数ごとに 1 行で出す。
 //   exports の違反は「backend-exports: ...」「shared-exports: ...」の 1 行で出す（findExportsViolations）。
 //   apps/shared の置き場所の違反は「shared-placement: ファイル」の 1 行で出す（ソース以外も含め、apps/shared の全ファイルを見る）。
 // WHY 置き場所の規則も参照を取り出すファイル（listReferencingFiles。apps/e2e/ とリポジトリ直下を含む）全体にかける:
@@ -2389,7 +2444,7 @@ function collectViolations(root: string): string[] {
       (line) => `${PRESENTATION_WITH_PROBLEM_RESPONSE.id}: ${line}`,
     ),
     ...findClassBasedViolations(root).map(
-      (line) => `${BACKEND_CLASS_BASED.id}: ${line}`,
+      (line) => `${CLASS_BASED.id}: ${line}`,
     ),
     ...listAllFiles(root, SHARED_ROOT)
       .filter(SHARED_PLACEMENT.isMisplaced)
@@ -2406,40 +2461,68 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
   const references = collectReferences(repoRoot);
 
   it("検査の対象から参照を取り出せている（抽出が壊れて 0 件になり、すべての規則が素通りするのを防ぐ）", () => {
-    expect(references.length).toBeGreaterThan(0);
+    // given: 前提なし
+    // when
+    const referenceCount = references.length;
+
+    // then
+    expect(referenceCount).toBeGreaterThan(0);
   });
 
   it(BACKEND_PLACEMENT.name, () => {
-    expect(
-      listReferencingFiles(repoRoot).filter(BACKEND_PLACEMENT.isMisplaced),
-    ).toEqual([]);
+    // given: 前提なし
+    // when
+    const result = listReferencingFiles(repoRoot).filter(
+      BACKEND_PLACEMENT.isMisplaced,
+    );
+
+    // then
+    expect(result).toEqual([]);
   });
 
   it(FRONTEND_PLACEMENT.name, () => {
-    expect(
-      listReferencingFiles(repoRoot).filter(FRONTEND_PLACEMENT.isMisplaced),
-    ).toEqual([]);
+    // given: 前提なし
+    // when
+    const result = listReferencingFiles(repoRoot).filter(
+      FRONTEND_PLACEMENT.isMisplaced,
+    );
+
+    // then
+    expect(result).toEqual([]);
   });
 
   it(SHARED_PLACEMENT.name, () => {
-    expect(
-      listAllFiles(repoRoot, SHARED_ROOT).filter(SHARED_PLACEMENT.isMisplaced),
-    ).toEqual([]);
+    // given: 前提なし
+    // when
+    const result = listAllFiles(repoRoot, SHARED_ROOT).filter(
+      SHARED_PLACEMENT.isMisplaced,
+    );
+
+    // then
+    expect(result).toEqual([]);
   });
 
   // WHY: 列挙が空（ディレクトリ名の書き間違い・列挙の壊れ）なら置き場所の違反も 0 件で常に緑になる。
   // WHY arrayContaining（一覧の外のファイルがあっても落とさない）: 一覧の外のファイルは上の shared-placement の 1 件だけで落とし、
   //   規則を破ったときに、どの規則が破れたかをテスト名で分かるようにする。
   it("apps/shared の全ファイル（ソース・テスト・package.json・tsconfig.json）を列挙できている（列挙が壊れて素通りするのを防ぐ）", () => {
-    expect(listAllFiles(repoRoot, SHARED_ROOT)).toEqual(
-      expect.arrayContaining([...SHARED_FILES]),
-    );
+    // given: 前提なし
+    // when
+    const allFiles = listAllFiles(repoRoot, SHARED_ROOT);
+
+    // then
+    expect(allFiles).toEqual(expect.arrayContaining([...SHARED_FILES]));
   });
 
   for (const rule of RULES) {
     it(rule.name, () => {
+      // given: 前提なし
+      // when
+      const violations = findViolations(references, rule);
+
+      // then
       // 失敗時にどのファイルがどこを参照しているかが出力に出るよう、違反を「ファイル → 参照先」の一覧にして空配列と比較する。
-      expect(findViolations(references, rule)).toEqual([]);
+      expect(violations).toEqual([]);
     });
   }
 
@@ -2447,7 +2530,12 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
   //   module-expose-only-from-presentation・expose-imports）は、expose/ の下のファイルと、expose を使う presentation の参照を
   //   取り出せていなければ、違反も 0 件で常に緑になる。
   it("モジュールの境界の規則は、本物の expose（notification の notifier.ts）の参照と、それを使う todo の presentation の参照を取り出せている（列挙が壊れて素通りするのを防ぐ）", () => {
-    expect(references.map((ref) => `${ref.from} → ${ref.to}`)).toEqual(
+    // given: 前提なし
+    // when
+    const result = references.map((ref) => `${ref.from} → ${ref.to}`);
+
+    // then
+    expect(result).toEqual(
       expect.arrayContaining([
         "apps/backend/features/todo/internal/presentation/change-todo-completion.api.ts → apps/backend/features/notification/expose/notifier",
         "apps/backend/features/notification/expose/notifier.ts → apps/backend/features/notification/internal/application/send-notification.command",
@@ -2458,22 +2546,41 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
   });
 
   it(ENV_DIRECT_ACCESS.name, () => {
+    // given: 前提なし
+    // when
+    const violations = findEnvViolations(repoRoot);
+
+    // then
     // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
-    expect(findEnvViolations(repoRoot)).toEqual([]);
+    expect(violations).toEqual([]);
   });
 
   it(CONSOLE_DIRECT_ACCESS.name, () => {
+    // given: 前提なし
+    // when
+    const violations = findConsoleViolations(repoRoot);
+
+    // then
     // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
-    expect(findConsoleViolations(repoRoot)).toEqual([]);
+    expect(violations).toEqual([]);
   });
 
   it(NOW_SINGLE_SOURCE.name, () => {
+    // given: 前提なし
+    // when
+    const violations = findNowViolations(repoRoot);
+
+    // then
     // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
-    expect(findNowViolations(repoRoot)).toEqual([]);
+    expect(violations).toEqual([]);
   });
 
   it("現在時刻の読み取りの検査は、apps/frontend_customer・apps/backend・apps/shared のソースを対象にし、テスト・テストの補助・apps/e2e/・ルート直下は対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
+    // given: 前提なし
+    // when
     const files = listNowCheckedFiles(repoRoot);
+
+    // then
     expect(files).toEqual(
       expect.arrayContaining([
         "apps/shared/now.ts",
@@ -2486,34 +2593,54 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "apps/frontend_customer/app/page.tsx",
       ]),
     );
+
+    // when
     for (const excluded of [
       "apps/shared/now.test.ts",
       "apps/backend/features/todo/internal/domain/todo.test.ts",
       "apps/backend/test-support/database.ts",
       "apps/frontend_customer/test-support/i18n.tsx",
-      "apps/e2e/todo.spec.ts",
+      "apps/e2e/todo.steps.ts",
       "vitest.config.mts",
     ]) {
       expect(files).not.toContain(excluded);
     }
-    expect(files.filter((file) => file.includes("/.next/"))).toEqual([]);
+
+    const result = files.filter((file) => file.includes("/.next/"));
+
+    // then
+    expect(result).toEqual([]);
   });
 
   for (const rule of HARDCODED_TEXT_RULES) {
     it(rule.name, () => {
+      // given: 前提なし
+      // when
+      const violations = findHardcodedTextViolations(repoRoot, rule);
+
+      // then
       // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
-      expect(findHardcodedTextViolations(repoRoot, rule)).toEqual([]);
+      expect(violations).toEqual([]);
     });
   }
 
   it(PRESENTATION_WITH_PROBLEM_RESPONSE.name, () => {
+    // given: 前提なし
+    // when
+    const violations = findProblemResponseViolations(repoRoot);
+
+    // then
     // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
-    expect(findProblemResponseViolations(repoRoot)).toEqual([]);
+    expect(violations).toEqual([]);
   });
 
   // WHY 本物の 5 本が列挙に入っていることを見る: 列挙（パスの正規表現）が壊れて 0 件になると、違反も 0 件で常に緑になる。
   it("handle を ProblemResponse.wrap で包む規則は、本物の api ファイル 6 本を対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
+    // given: 前提なし
+    // when
     const files = listProblemResponseCheckedFiles(repoRoot);
+
+    // then
     expect(files).toEqual(
       expect.arrayContaining([
         "apps/backend/features/todo/internal/presentation/create-todo.api.ts",
@@ -2524,17 +2651,31 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "apps/backend/features/todo/internal/presentation/change-todo-completion.api.ts",
       ]),
     );
-    expect(files.filter((file) => TEST_FILE.test(file))).toEqual([]);
+
+    // when
+    const result = files.filter((file) => TEST_FILE.test(file));
+
+    // then
+    expect(result).toEqual([]);
   });
 
-  it(BACKEND_CLASS_BASED.name, () => {
+  it(CLASS_BASED.name, () => {
+    // given: 前提なし
+    // when
+    const violations = findClassBasedViolations(repoRoot);
+
+    // then
     // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
-    expect(findClassBasedViolations(repoRoot)).toEqual([]);
+    expect(violations).toEqual([]);
   });
 
   // WHY 本物のファイルが列挙に入っていることを見る: 列挙（パスの判定）が壊れて 0 件になると、違反も 0 件で常に緑になる。
-  it("最上位に関数を置かない規則は、apps/backend の本番コード（層・expose・drizzle.config.ts）を対象にし、テスト・test-support/・spec/ は対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
+  it("最上位に関数を置かない規則は、apps/backend の本番コード（層・expose・drizzle.config.ts）・apps/shared の本番コード・テストの補助（test-support/・spec/ の support.ts・apps/e2e/ の spec 以外）・frontend の React 以外のモジュール（features/・shared/ の .ts）を対象にし、テスト・E2E の *.spec.ts・リポジトリ直下・frontend の *.tsx・*.hook.ts・app/・直下のファイルは対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
+    // given: 前提なし
+    // when
     const files = listClassBasedCheckedFiles(repoRoot);
+
+    // then
     expect(files).toEqual(
       expect.arrayContaining([
         "apps/backend/shared/domain/validate.ts",
@@ -2544,36 +2685,108 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "apps/backend/features/notification/expose/notifier.ts",
         "apps/backend/features/todo/internal/domain/todo.ts",
         "apps/backend/features/todo/internal/presentation/create-todo.api.ts",
+        "apps/shared/env.ts",
+        "apps/shared/log-event.ts",
+        "apps/shared/logger.ts",
+        "apps/shared/now.ts",
+        "apps/backend/test-support/database.ts",
+        "apps/backend/test-support/transaction-runner.in-memory.ts",
+        "apps/backend/test-support/todo/todo-builder.ts",
+        "apps/backend/test-support/todo/todo-repository.in-memory.ts",
+        "apps/backend/spec/api/todo/support.ts",
+        "apps/e2e/database.ts",
+        "apps/e2e/playwright.config.ts",
+        "apps/e2e/fixtures.ts",
+        "apps/e2e/todo.steps.ts",
+        "apps/frontend_customer/features/todo/api/todo-api.ts",
+        "apps/frontend_customer/features/todo/api/api-error.ts",
+        "apps/frontend_customer/features/todo/index.ts",
+        "apps/frontend_customer/features/todo/components/todo-item.messages.ts",
+        "apps/frontend_customer/shared/i18n/locale.ts",
+        "apps/frontend_customer/shared/i18n/format.ts",
+        "apps/frontend_customer/shared/request-log/request-log.ts",
       ]),
     );
-    expect(
-      files.filter(
-        (file) =>
-          TEST_FILE.test(file) ||
-          isUnder(file, `${BACKEND_ROOT}/test-support`) ||
-          isUnder(file, `${BACKEND_ROOT}/spec`),
-      ),
-    ).toEqual([]);
+
+    // when
+    const result = files.filter(
+      (file) =>
+        TEST_FILE.test(file) ||
+        E2E_SPEC_FILE.test(file) ||
+        !(
+          isUnder(file, BACKEND_ROOT) ||
+          isUnder(file, SHARED_ROOT) ||
+          isUnder(file, E2E_ROOT) ||
+          isUnder(file, FRONTEND_ROOT)
+        ),
+    );
+
+    // WHY frontend の対象外を別に見る: 対象外（React の component・hook、Next の規約のファイル）が列挙に入ると、関数の形を
+    //   外の仕様が求めるファイルが違反になる（判定の例でも固定するが、実ファイルの列挙でも確かめる）。
+    const frontendExcluded = files.filter(
+      (file) =>
+        isUnder(file, FRONTEND_ROOT) &&
+        (/\.[jt]sx$/.test(file) ||
+          /\.hook\./.test(file) ||
+          isUnder(file, `${FRONTEND_ROOT}/app`) ||
+          /^apps\/frontend_customer\/[^/]+$/.test(file)),
+    );
+    const frontendFiles = listSourceFiles(repoRoot, FRONTEND_ROOT);
+
+    // then
+    expect(result).toEqual([]);
+    expect(frontendExcluded).toEqual([]);
+    // 前提: 対象外の実ファイルがリポジトリにあること（無ければ上の検査は何も確かめていない）。
+    expect(frontendFiles).toEqual(
+      expect.arrayContaining([
+        "apps/frontend_customer/features/todo/components/todo-item.tsx",
+        "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.hook.ts",
+        "apps/frontend_customer/app/page.tsx",
+        "apps/frontend_customer/app/api/todos/route.ts",
+        "apps/frontend_customer/proxy.ts",
+        "apps/frontend_customer/instrumentation.ts",
+        "apps/frontend_customer/instrumentation-node.ts",
+        "apps/frontend_customer/next.config.ts",
+      ]),
+    );
   });
 
   for (const pkg of EXPORTED_PACKAGES) {
     it(pkg.name, () => {
-      expect(findPackageExportsViolations(repoRoot, pkg, references)).toEqual(
-        [],
+      // given: 前提なし
+      // when
+      const violations = findPackageExportsViolations(
+        repoRoot,
+        pkg,
+        references,
       );
+
+      // then
+      expect(violations).toEqual([]);
     });
   }
 
   it("apps/backend の exports を 1 件以上読め、apps/frontend_customer の @repo/backend の参照を取り出せている（読み込みや列挙が壊れて素通りするのを防ぐ）", () => {
-    expect(
-      Object.keys(readPackageExports(repoRoot, BACKEND_EXPORTS)).length,
-    ).toBeGreaterThan(0);
+    // given: 前提なし
+    // when
+    const exportCount = Object.keys(
+      readPackageExports(repoRoot, BACKEND_EXPORTS),
+    ).length;
+
+    // then
+    expect(exportCount).toBeGreaterThan(0);
+
+    // when
     const consumers = new Set(
       references
         .filter((ref) => isBackendPackage(ref.specifier))
         .map((ref) => ref.from),
     );
-    expect([...consumers]).toEqual(
+
+    const result = [...consumers];
+
+    // then
+    expect(result).toEqual(
       expect.arrayContaining([
         "apps/frontend_customer/app/api/todos/route.ts",
         "apps/frontend_customer/features/todo/api/todo-api.ts",
@@ -2582,15 +2795,26 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
   });
 
   it("apps/shared の exports を読め、apps/frontend_customer 直下・apps/backend・apps/e2e/・リポジトリ直下の @repo/shared の参照を取り出せている（読み込みや列挙が壊れて素通りするのを防ぐ）", () => {
-    expect(
-      Object.keys(readPackageExports(repoRoot, SHARED_EXPORTS)).sort(),
-    ).toEqual(["./env", "./logger", "./now"]);
+    // given: 前提なし
+    // when
+    const result = Object.keys(
+      readPackageExports(repoRoot, SHARED_EXPORTS),
+    ).sort();
+
+    // then
+    expect(result).toEqual(["./env", "./logger", "./now"]);
+
+    // when
     const consumers = new Set(
       references
         .filter((ref) => isSharedPackage(ref.specifier))
         .map((ref) => ref.from),
     );
-    expect([...consumers]).toEqual(
+
+    const sharedConsumers = [...consumers];
+
+    // then
+    expect(sharedConsumers).toEqual(
       expect.arrayContaining([
         "apps/frontend_customer/instrumentation-node.ts",
         "apps/frontend_customer/proxy.ts",
@@ -2608,7 +2832,11 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
   });
 
   it("環境変数の直参照の検査は、各ディレクトリとルート直下の設定ファイルを対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
+    // given: 前提なし
+    // when
     const files = listEnvCheckedFiles(repoRoot);
+
+    // then
     expect(files).toEqual(
       expect.arrayContaining([
         "apps/shared/env.ts",
@@ -2631,12 +2859,21 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
     );
     expect(files).not.toContain("rule-tests/architecture.test.ts");
     expect(files).not.toContain("apps/shared/env.test.ts");
+
+    // when
+    const result = files.filter((file) => file.includes("/.next/"));
+
+    // then
     // next build の生成物（apps/frontend_customer/.next/）は数えない（あれば数千件の JS を検査することになる）。
-    expect(files.filter((file) => file.includes("/.next/"))).toEqual([]);
+    expect(result).toEqual([]);
   });
 
   it("console の直接の呼び出しの検査は、各ディレクトリ・scripts/・ルート直下の設定ファイルを対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
+    // given: 前提なし
+    // when
     const files = listConsoleCheckedFiles(repoRoot);
+
+    // then
     expect(files).toEqual(
       expect.arrayContaining([
         "apps/shared/logger.ts",
@@ -2651,7 +2888,8 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "apps/frontend_customer/app/page.tsx",
         "apps/e2e/database.ts",
         "apps/e2e/playwright.config.ts",
-        "apps/e2e/request-log.spec.ts",
+        "apps/e2e/log-server.ts",
+        "apps/e2e/request-log.steps.ts",
         "vitest.config.mts",
         "vitest.global-setup.ts",
         "stryker.config.mjs",
@@ -2660,14 +2898,23 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
     expect(files).not.toContain("rule-tests/architecture.test.ts");
     expect(files).not.toContain("apps/shared/logger.test.ts");
     expect(files).not.toContain("scripts/hooks/guard-git.test.ts");
-    expect(files.filter((file) => file.includes("/.next/"))).toEqual([]);
+
+    // when
+    const result = files.filter((file) => file.includes("/.next/"));
+
+    // then
+    expect(result).toEqual([]);
   });
 
   it("ハードコードの文言の検査は、apps/frontend_customer・apps/backend・apps/shared のソース（辞書 *.messages.ts を含む）を対象にし、テスト・生成物は対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
+    // given: 前提なし
+    // when
     const frontend = listHardcodedTextCheckedFiles(
       repoRoot,
       FRONTEND_HARDCODED_TEXT,
     );
+
+    // then
     expect(frontend).toEqual(
       expect.arrayContaining([
         "apps/frontend_customer/app/layout.tsx",
@@ -2678,10 +2925,15 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "apps/frontend_customer/proxy.ts",
       ]),
     );
+
+    // when
+    const result = frontend.filter((file) => I18N_MESSAGES.test(file));
+
+    // then
     // WHY 辞書も対象に入っていることを見る（Issue #125 の reviewer 指摘で、辞書を対象から外すのをやめた）: 辞書も
     //   defineMessages(...) の引数の外は同じ検査をかける。対象から外れると、辞書に書いた引数の外の文言が素通りする。
     //   辞書の例外（I18N_MESSAGES）が実在のファイルに当たっていることも、ここで見る（名前の付け方が変わったら落ちる）。
-    expect(frontend.filter((file) => I18N_MESSAGES.test(file))).toEqual(
+    expect(result).toEqual(
       expect.arrayContaining([
         "apps/frontend_customer/shared/i18n/common.messages.ts",
         "apps/frontend_customer/features/todo/components/todo-item.messages.ts",
@@ -2689,10 +2941,14 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "apps/frontend_customer/features/todo/screens/todo-detail-screen/todo-detail-screen.messages.ts",
       ]),
     );
+
+    // when
     const backend = listHardcodedTextCheckedFiles(
       repoRoot,
       SERVER_HARDCODED_TEXT,
     );
+
+    // then
     expect(backend).toEqual(
       expect.arrayContaining([
         "apps/backend/shared/domain/domain-error.ts",
@@ -2713,19 +2969,25 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
   });
 
   it("logger.ts の中の console は拾えている（抽出が壊れて 0 件になり、規則が素通りするのを防ぐ）", () => {
-    expect(
-      findConsoleAccesses(
-        readFileSync(join(repoRoot, CONSOLE_DIRECT_ACCESS.allowedFile), "utf8"),
-      ).length,
-    ).toBeGreaterThan(0);
+    // given: 前提なし
+    // when
+    const consoleAccessCount = findConsoleAccesses(
+      readFileSync(join(repoRoot, CONSOLE_DIRECT_ACCESS.allowedFile), "utf8"),
+    ).length;
+
+    // then
+    expect(consoleAccessCount).toBeGreaterThan(0);
   });
 
   it("env.ts の中の process.env は拾えている（抽出が壊れて 0 件になり、規則が素通りするのを防ぐ）", () => {
-    expect(
-      findProcessEnvAccesses(
-        readFileSync(join(repoRoot, ENV_DIRECT_ACCESS.allowedFile), "utf8"),
-      ).length,
-    ).toBeGreaterThan(0);
+    // given: 前提なし
+    // when
+    const envAccessCount = findProcessEnvAccesses(
+      readFileSync(join(repoRoot, ENV_DIRECT_ACCESS.allowedFile), "utf8"),
+    ).length;
+
+    // then
+    expect(envAccessCount).toBeGreaterThan(0);
   });
 });
 
@@ -4819,10 +5081,20 @@ const SHARED_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
 
 describe("backend の置き場所の判定", () => {
   it.each(PLACEMENT_EXAMPLES.misplaced)("%s は置き場所の違反", (file) => {
-    expect(BACKEND_PLACEMENT.isMisplaced(file)).toBe(true);
+    // given: 前提なし
+    // when
+    const result = BACKEND_PLACEMENT.isMisplaced(file);
+
+    // then
+    expect(result).toBe(true);
   });
   it.each(PLACEMENT_EXAMPLES.placed)("%s は置き場所の違反ではない", (file) => {
-    expect(BACKEND_PLACEMENT.isMisplaced(file)).toBe(false);
+    // given: 前提なし
+    // when
+    const result = BACKEND_PLACEMENT.isMisplaced(file);
+
+    // then
+    expect(result).toBe(false);
   });
 });
 
@@ -4830,13 +5102,23 @@ describe("apps/shared の置き場所の判定", () => {
   it.each(SHARED_PLACEMENT_EXAMPLES.misplaced)(
     "%s は置き場所の違反",
     (file) => {
-      expect(SHARED_PLACEMENT.isMisplaced(file)).toBe(true);
+      // given: 前提なし
+      // when
+      const result = SHARED_PLACEMENT.isMisplaced(file);
+
+      // then
+      expect(result).toBe(true);
     },
   );
   it.each(SHARED_PLACEMENT_EXAMPLES.placed)(
     "%s は置き場所の違反ではない",
     (file) => {
-      expect(SHARED_PLACEMENT.isMisplaced(file)).toBe(false);
+      // given: 前提なし
+      // when
+      const result = SHARED_PLACEMENT.isMisplaced(file);
+
+      // then
+      expect(result).toBe(false);
     },
   );
 });
@@ -4845,13 +5127,23 @@ describe("frontend の置き場所の判定", () => {
   it.each(FRONTEND_PLACEMENT_EXAMPLES.misplaced)(
     "%s は置き場所の違反",
     (file) => {
-      expect(FRONTEND_PLACEMENT.isMisplaced(file)).toBe(true);
+      // given: 前提なし
+      // when
+      const result = FRONTEND_PLACEMENT.isMisplaced(file);
+
+      // then
+      expect(result).toBe(true);
     },
   );
   it.each(FRONTEND_PLACEMENT_EXAMPLES.placed)(
     "%s は置き場所の違反ではない",
     (file) => {
-      expect(FRONTEND_PLACEMENT.isMisplaced(file)).toBe(false);
+      // given: 前提なし
+      // when
+      const result = FRONTEND_PLACEMENT.isMisplaced(file);
+
+      // then
+      expect(result).toBe(false);
     },
   );
 });
@@ -4977,22 +5269,43 @@ function judgeEnvAccess([file, source]: [string, string]): boolean {
 
 describe("環境変数の直参照の判定", () => {
   it("違反例・許可例はそれぞれ 4 件以上ある", () => {
-    expect(ENV_ACCESS_EXAMPLES.violating.length).toBeGreaterThanOrEqual(4);
-    expect(ENV_ACCESS_EXAMPLES.allowed.length).toBeGreaterThanOrEqual(4);
+    // given: 前提なし
+    // when
+    const violatingExampleCount = ENV_ACCESS_EXAMPLES.violating.length;
+
+    // then
+    expect(violatingExampleCount).toBeGreaterThanOrEqual(4);
+
+    // when
+    const allowedExampleCount = ENV_ACCESS_EXAMPLES.allowed.length;
+
+    // then
+    expect(allowedExampleCount).toBeGreaterThanOrEqual(4);
   });
   it.each(ENV_ACCESS_EXAMPLES.violating)("%s の %j は違反", (...example) => {
-    expect(judgeEnvAccess(example)).toBe(true);
+    // given: 前提なし
+    // when
+    const result = judgeEnvAccess(example);
+
+    // then
+    expect(result).toBe(true);
   });
   it.each(ENV_ACCESS_EXAMPLES.allowed)(
     "%s の %j は違反ではない",
     (...example) => {
-      expect(judgeEnvAccess(example)).toBe(false);
+      // given: 前提なし
+      // when
+      const result = judgeEnvAccess(example);
+
+      // then
+      expect(result).toBe(false);
     },
   );
 });
 
 describe("環境変数の直参照の抽出（findProcessEnvAccesses）", () => {
   it("参照ごとに、読んだ変数の名前を返す（.NAME / ?.NAME の形だけ。取れない形は undefined）", () => {
+    // given
     const source = [
       "const a = process.env.NEXT_RUNTIME;",
       "const b = process?.env?.DATABASE_URL;",
@@ -5000,12 +5313,24 @@ describe("環境変数の直参照の抽出（findProcessEnvAccesses）", () => 
       'const d = process.env["Y"];',
       "const e = process.env;",
     ].join("\n");
-    expect(
-      findProcessEnvAccesses(source).map(({ variable }) => variable),
-    ).toEqual(["NEXT_RUNTIME", "DATABASE_URL", "X", undefined, undefined]);
+
+    // when
+    const result = findProcessEnvAccesses(source).map(
+      ({ variable }) => variable,
+    );
+
+    // then
+    expect(result).toEqual([
+      "NEXT_RUNTIME",
+      "DATABASE_URL",
+      "X",
+      undefined,
+      undefined,
+    ]);
   });
 
   it("参照ごとに、書かれた行番号を返す（コメントを消しても行はずれない）", () => {
+    // given
     const source = [
       "/*",
       " * process.env は読まない",
@@ -5014,34 +5339,55 @@ describe("環境変数の直参照の抽出（findProcessEnvAccesses）", () => 
       "// process.env",
       'const c = process["env"].C;',
     ].join("\n");
-    expect(findProcessEnvAccesses(source).map(({ line }) => line)).toEqual([
-      4, 4, 6,
-    ]);
+
+    // when
+    const result = findProcessEnvAccesses(source).map(({ line }) => line);
+
+    // then
+    expect(result).toEqual([4, 4, 6]);
   });
 
   it("分割代入・別名・Reflect.get・node:process の default import 経由の参照は拾わない（見逃す方向の限界。Biome の noProcessEnv も検出しない）", () => {
+    // given
     const source = [
       "const { env } = process;",
       "const p = process; p.env;",
       'const e = Reflect.get(process, "env");',
       'import proc from "node:process"; proc.env.X;',
     ].join("\n");
-    expect(findProcessEnvAccesses(source)).toEqual([]);
+
+    // when
+    const processEnvAccesses = findProcessEnvAccesses(source);
+
+    // then
+    expect(processEnvAccesses).toEqual([]);
   });
 
   it('node:process の名前付き import（import { env } from "node:process"）は拾わない（見逃す方向の限界。Biome の noProcessEnv が検出する）', () => {
+    // given
     const source = [
       'import { env } from "node:process";',
       "export const u = env.X;",
     ].join("\n");
-    expect(findProcessEnvAccesses(source)).toEqual([]);
+
+    // when
+    const processEnvAccesses = findProcessEnvAccesses(source);
+
+    // then
+    expect(processEnvAccesses).toEqual([]);
   });
 
   it("テンプレートリテラルの埋め込み式の中の参照は拾わない（見逃す方向の限界。Biome の noProcessEnv が検出する）", () => {
+    // given
     // WHY テンプレートリテラルで書く: 普通の文字列の中に埋め込み式の形を書くと Biome の noTemplateCurlyInString が
     //   書き間違いとして検出するため、\${ でエスケープして同じ文字列を作る。
     const source = `const url = \`db: \${process.env.DATABASE_URL}\`;`;
-    expect(findProcessEnvAccesses(source)).toEqual([]);
+
+    // when
+    const processEnvAccesses = findProcessEnvAccesses(source);
+
+    // then
+    expect(processEnvAccesses).toEqual([]);
   });
 });
 
@@ -5147,25 +5493,46 @@ function judgeConsoleAccess([file, source]: [string, string]): boolean {
 
 describe("console を直接書く規則の判定", () => {
   it("違反例・許可例はそれぞれ 4 件以上ある", () => {
-    expect(CONSOLE_ACCESS_EXAMPLES.violating.length).toBeGreaterThanOrEqual(4);
-    expect(CONSOLE_ACCESS_EXAMPLES.allowed.length).toBeGreaterThanOrEqual(4);
+    // given: 前提なし
+    // when
+    const violatingExampleCount = CONSOLE_ACCESS_EXAMPLES.violating.length;
+
+    // then
+    expect(violatingExampleCount).toBeGreaterThanOrEqual(4);
+
+    // when
+    const allowedExampleCount = CONSOLE_ACCESS_EXAMPLES.allowed.length;
+
+    // then
+    expect(allowedExampleCount).toBeGreaterThanOrEqual(4);
   });
   it.each(CONSOLE_ACCESS_EXAMPLES.violating)(
     "%s の %j は違反",
     (...example) => {
-      expect(judgeConsoleAccess(example)).toBe(true);
+      // given: 前提なし
+      // when
+      const result = judgeConsoleAccess(example);
+
+      // then
+      expect(result).toBe(true);
     },
   );
   it.each(CONSOLE_ACCESS_EXAMPLES.allowed)(
     "%s の %j は違反ではない",
     (...example) => {
-      expect(judgeConsoleAccess(example)).toBe(false);
+      // given: 前提なし
+      // when
+      const result = judgeConsoleAccess(example);
+
+      // then
+      expect(result).toBe(false);
     },
   );
 });
 
 describe("console の参照の抽出（findConsoleAccesses）", () => {
   it("参照ごとに、書かれた行番号を返す（コメントを消しても行はずれない）", () => {
+    // given
     const source = [
       "/*",
       " * console.log は書かない",
@@ -5174,22 +5541,39 @@ describe("console の参照の抽出（findConsoleAccesses）", () => {
       "// console.warn",
       'globalThis.console["info"](3);',
     ].join("\n");
-    expect(findConsoleAccesses(source)).toEqual([4, 4, 6]);
+
+    // when
+    const consoleAccesses = findConsoleAccesses(source);
+
+    // then
+    expect(consoleAccesses).toEqual([4, 4, 6]);
   });
 
   it('node:console の import（import { log } from "node:console" / import c from "node:console"）は拾わない（見逃す方向の限界。Biome の noConsole も検出しない）', () => {
+    // given
     const source = [
       'import { log } from "node:console";',
       'import c from "node:console";',
       "log(1); c.log(2);",
     ].join("\n");
-    expect(findConsoleAccesses(source)).toEqual([]);
+
+    // when
+    const consoleAccesses = findConsoleAccesses(source);
+
+    // then
+    expect(consoleAccesses).toEqual([]);
   });
 
   it("テンプレートリテラルの埋め込み式の中の console は拾わない（見逃す方向の限界。Biome の noConsole が検出する）", () => {
+    // given
     // WHY テンプレートリテラルで書く: 環境変数の抽出のテストと同じく、noTemplateCurlyInString を避けるため。
     const source = `const s = \`x: \${console.log(1)}\`;`;
-    expect(findConsoleAccesses(source)).toEqual([]);
+
+    // when
+    const consoleAccesses = findConsoleAccesses(source);
+
+    // then
+    expect(consoleAccesses).toEqual([]);
   });
 });
 
@@ -5323,22 +5707,43 @@ function judgeNowAccess([file, source]: [string, string]): boolean {
 
 describe("現在時刻を読む規則の判定", () => {
   it("違反例・許可例はそれぞれ 4 件以上ある", () => {
-    expect(NOW_ACCESS_EXAMPLES.violating.length).toBeGreaterThanOrEqual(4);
-    expect(NOW_ACCESS_EXAMPLES.allowed.length).toBeGreaterThanOrEqual(4);
+    // given: 前提なし
+    // when
+    const violatingExampleCount = NOW_ACCESS_EXAMPLES.violating.length;
+
+    // then
+    expect(violatingExampleCount).toBeGreaterThanOrEqual(4);
+
+    // when
+    const allowedExampleCount = NOW_ACCESS_EXAMPLES.allowed.length;
+
+    // then
+    expect(allowedExampleCount).toBeGreaterThanOrEqual(4);
   });
   it.each(NOW_ACCESS_EXAMPLES.violating)("%s の %j は違反", (...example) => {
-    expect(judgeNowAccess(example)).toBe(true);
+    // given: 前提なし
+    // when
+    const result = judgeNowAccess(example);
+
+    // then
+    expect(result).toBe(true);
   });
   it.each(NOW_ACCESS_EXAMPLES.allowed)(
     "%s の %j は違反ではない",
     (...example) => {
-      expect(judgeNowAccess(example)).toBe(false);
+      // given: 前提なし
+      // when
+      const result = judgeNowAccess(example);
+
+      // then
+      expect(result).toBe(false);
     },
   );
 });
 
 describe("現在時刻の読み取りの抽出（findCurrentTimeAccesses）", () => {
   it("読み取りごとに、書かれた行番号を返す（1 行に 2 つあれば 2 件。コメントを消しても行はずれない）", () => {
+    // given
     const source = [
       "/*",
       " * new Date() は書かない",
@@ -5349,10 +5754,16 @@ describe("現在時刻の読み取りの抽出（findCurrentTimeAccesses）", ()
       "const d = new Date(",
       ");",
     ].join("\n");
-    expect(findCurrentTimeAccesses(source)).toEqual([4, 4, 7]);
+
+    // when
+    const currentTimeAccesses = findCurrentTimeAccesses(source);
+
+    // then
+    expect(currentTimeAccesses).toEqual([4, 4, 7]);
   });
 
   it("別名・分割代入・括弧で囲んだ Date・空のスプレッド・Reflect.construct は拾わない（見逃す方向の限界）", () => {
+    // given
     const source = [
       "const D = Date; const a = new D();",
       "const { now: read } = Date; read();",
@@ -5360,17 +5771,33 @@ describe("現在時刻の読み取りの抽出（findCurrentTimeAccesses）", ()
       "const c = new Date(...[]);",
       "const d = Reflect.construct(Date, []);",
     ].join("\n");
-    expect(findCurrentTimeAccesses(source)).toEqual([]);
+
+    // when
+    const currentTimeAccesses = findCurrentTimeAccesses(source);
+
+    // then
+    expect(currentTimeAccesses).toEqual([]);
   });
 
   it("テンプレートリテラルの埋め込み式の中は拾わない（見逃す方向の限界）", () => {
+    // given
     // WHY テンプレートリテラルで書く: console の抽出のテストと同じく、noTemplateCurlyInString を避けるため。
     const source = `const s = \`at: \${Date.now()}\`;`;
-    expect(findCurrentTimeAccesses(source)).toEqual([]);
+
+    // when
+    const currentTimeAccesses = findCurrentTimeAccesses(source);
+
+    // then
+    expect(currentTimeAccesses).toEqual([]);
   });
 
   it("Date という名前のメソッドの呼び出し（calendar.Date()）も new の無い Date() として数える（多く検出する方向の限界）", () => {
-    expect(findCurrentTimeAccesses("calendar.Date();")).toEqual([1]);
+    // given: 前提なし
+    // when
+    const currentTimeAccesses = findCurrentTimeAccesses("calendar.Date();");
+
+    // then
+    expect(currentTimeAccesses).toEqual([1]);
   });
 });
 
@@ -5705,18 +6132,38 @@ for (const rule of HARDCODED_TEXT_RULES) {
       return verdicts;
     };
     it("違反例・許可例はそれぞれ 4 件以上ある", () => {
-      expect(examples.violating.length).toBeGreaterThanOrEqual(4);
-      expect(examples.allowed.length).toBeGreaterThanOrEqual(4);
+      // given: 前提なし
+      // when
+      const violatingExampleCount = examples.violating.length;
+
+      // then
+      expect(violatingExampleCount).toBeGreaterThanOrEqual(4);
+
+      // when
+      const allowedExampleCount = examples.allowed.length;
+
+      // then
+      expect(allowedExampleCount).toBeGreaterThanOrEqual(4);
     });
     it.each(
       examples.violating.map(([file, source], i) => ({ file, source, i })),
     )("$file の $source は違反", ({ i }) => {
-      expect(verdictsOf().violating[i]).toBe(true);
+      // given: 前提なし
+      // when
+      const result = verdictsOf().violating[i];
+
+      // then
+      expect(result).toBe(true);
     });
     it.each(examples.allowed.map(([file, source], i) => ({ file, source, i })))(
       "$file の $source は違反ではない",
       ({ i }) => {
-        expect(verdictsOf().allowed[i]).toBe(false);
+        // given: 前提なし
+        // when
+        const result = verdictsOf().allowed[i];
+
+        // then
+        expect(result).toBe(false);
       },
     );
   });
@@ -5737,6 +6184,7 @@ function hardcodedTextLinesOf(
 
 describe("ハードコードの文言の抽出（findHardcodedTexts）", () => {
   it("文言ごとに、書かれた行番号を返す（JSX のテキストは最初の文字の行。属性と日本語の両方に当たる値は 1 件）", () => {
+    // given
     const source = [
       "/*",
       " * 削除のボタン",
@@ -5750,12 +6198,20 @@ describe("ハードコードの文言の抽出（findHardcodedTexts）", () => {
       `export const D = ({ todo }) => <img alt={\`「\${todo.title}」\`} />;`,
       'export const m = "保存しました"; // 日本語',
     ].join("\n");
-    expect(
-      hardcodedTextLinesOf("x.tsx", source, FRONTEND_HARDCODED_TEXT),
-    ).toEqual([5, 5, 7, 10, 11]);
+
+    // when
+    const result = hardcodedTextLinesOf(
+      "x.tsx",
+      source,
+      FRONTEND_HARDCODED_TEXT,
+    );
+
+    // then
+    expect(result).toEqual([5, 5, 7, 10, 11]);
   });
 
   it("ASCII の文字列を変数に入れてから JSX に渡す・JSX の子に式で書く・一覧に無い props・三項演算子の中は拾わない（見逃す方向の限界。日本語なら拾う）", () => {
+    // given
     const source = [
       'const s = "Delete";',
       "export const A = () => <p>{s}</p>;",
@@ -5764,12 +6220,20 @@ describe("ハードコードの文言の抽出（findHardcodedTexts）", () => {
       'export const D = (x) => <a title={x ? "Open" : "Close"} />;',
       'export const E = (x) => <a title={x ? "開く" : "閉じる"} />;',
     ].join("\n");
-    expect(
-      hardcodedTextLinesOf("x.tsx", source, FRONTEND_HARDCODED_TEXT),
-    ).toEqual([6, 6]);
+
+    // when
+    const result = hardcodedTextLinesOf(
+      "x.tsx",
+      source,
+      FRONTEND_HARDCODED_TEXT,
+    );
+
+    // then
+    expect(result).toEqual([6, 6]);
   });
 
   it("辞書（*.messages.ts）では defineMessages(...) の引数の中だけを通し、引数の外の文言は行番号で返す", () => {
+    // given
     const source = [
       'import { defineMessages } from "@/shared/i18n/i18n";',
       'export const label = "削除";',
@@ -5779,28 +6243,37 @@ describe("ハードコードの文言の抽出（findHardcodedTexts）", () => {
       "});",
       'export const e = createElement("button", { "aria-label": "閉じる" });',
     ].join("\n");
-    expect(
-      hardcodedTextLinesOf(
-        "apps/frontend_customer/features/todo/components/x.messages.ts",
-        source,
-        FRONTEND_HARDCODED_TEXT,
-      ),
-    ).toEqual([2, 7]);
+
+    // when
+    const result = hardcodedTextLinesOf(
+      "apps/frontend_customer/features/todo/components/x.messages.ts",
+      source,
+      FRONTEND_HARDCODED_TEXT,
+    );
+
+    // then
+    expect(result).toEqual([2, 7]);
+
+    // when
+    const nonDictionaryLines = hardcodedTextLinesOf(
+      "apps/frontend_customer/features/todo/components/x.ts",
+      source,
+      FRONTEND_HARDCODED_TEXT,
+    );
+
+    // then
     // 同じ中身でも辞書でないファイルなら、defineMessages の引数の中も違反。
-    expect(
-      hardcodedTextLinesOf(
-        "apps/frontend_customer/features/todo/components/x.ts",
-        source,
-        FRONTEND_HARDCODED_TEXT,
-      ),
-    ).toEqual([2, 4, 7]);
+    expect(nonDictionaryLines).toEqual([2, 4, 7]);
   });
 
   it("構文解析の結果に無いファイルを渡すと例外にする（黙って飛ばして素通りさせない）", () => {
+    // given: 前提なし
+    // when
+    const action = () => parseSourceFiles({ "README.md": "# x" });
+
+    // then
     // .md は tsconfig の files に書いても TypeScript のソースにならない。
-    expect(() => parseSourceFiles({ "README.md": "# x" })).toThrow(
-      new Error("構文解析の結果に README.md が無い"),
-    );
+    expect(action).toThrow(new Error("構文解析の結果に README.md が無い"));
   });
 });
 
@@ -6062,19 +6535,30 @@ describe(`handle を ProblemResponse.wrap で包む規則の判定（${PRESENTAT
   it.each(violating.map(([file], i) => ({ file, i })))(
     "違反例 $i（$file）は違反",
     ({ i }) => {
-      expect(verdictsOf().violating[i]).toBe(true);
+      // given: 前提なし
+      // when
+      const result = verdictsOf().violating[i];
+
+      // then
+      expect(result).toBe(true);
     },
   );
   it.each(allowed.map(([file], i) => ({ file, i })))(
     "許可例 $i（$file）は違反ではない",
     ({ i }) => {
-      expect(verdictsOf().allowed[i]).toBe(false);
+      // given: 前提なし
+      // when
+      const result = verdictsOf().allowed[i];
+
+      // then
+      expect(result).toBe(false);
     },
   );
 });
 
 describe("ProblemResponse.wrap で包んでいない handle の抽出（findUnwrappedHandles）", () => {
   it("包んでいない handle ごとに、メンバーの書き出しの行番号を返す（包んだ handle・ほかの名前のメンバーは返さない）", () => {
+    // given
     const source = lines(
       IMPORT_WITH_PROBLEM_RESPONSE,
       "export class AApi {",
@@ -6090,17 +6574,20 @@ describe("ProblemResponse.wrap で包んでいない handle の抽出（findUnwr
       "  }",
       "};",
     );
-    expect(
-      findUnwrappedHandles(
-        parseSourceFiles({ [API_FILE]: source }).get(API_FILE) as SourceFile,
-      ),
-    ).toEqual([7, 10]);
+
+    // when
+    const unwrappedHandles = findUnwrappedHandles(
+      parseSourceFiles({ [API_FILE]: source }).get(API_FILE) as SourceFile,
+    );
+
+    // then
+    expect(unwrappedHandles).toEqual([7, 10]);
   });
 });
 
 const DOMAIN_FILE = "apps/backend/shared/domain/x.ts";
 
-// 規則 backend-class-based の判定の例。違反例は 1 例 1 つの書き方にして、他の書き方の巻き添えで違反になっていないことを示す。
+// 規則 class-based の判定の例。違反例は 1 例 1 つの書き方にして、他の書き方の巻き添えで違反になっていないことを示す。
 const CLASS_BASED_EXAMPLES: {
   violating: [file: string, source: string][];
   allowed: [file: string, source: string][];
@@ -6187,7 +6674,8 @@ const CLASS_BASED_EXAMPLES: {
       "apps/backend/features/notification/expose/notify.ts",
       lines("export function notify(message: string): void {}"),
     ],
-    // 15〜17: 対象外のディレクトリと名前の前方一致だけが同じ別ディレクトリ・直下でない test-support/ は対象。
+    // 15〜17: 名前の前方一致だけが同じ別ディレクトリ・直下でない test-support/（以前は直下の test-support/ と spec/ を除いていたときの境界。
+    //   今はどれも apps/backend の下なので対象）。
     ["apps/backend/test-support-x/x.ts", lines("export function f(): void {}")],
     ["apps/backend/spec-x/x.ts", lines("export function f(): void {}")],
     [
@@ -6197,6 +6685,71 @@ const CLASS_BASED_EXAMPLES: {
     // 18: パスに test を含む本番のファイル（*.test.* ではない）。
     [
       "apps/backend/shared/infra/test-clock.ts",
+      lines("export function f(): void {}"),
+    ],
+    // 19〜21: apps/shared の本番コード（Issue #262 で対象に広げた）。env.ts・now.ts の関数と、.mts・入れ子のディレクトリ。
+    ["apps/shared/env.ts", lines("export function load(): void {}")],
+    ["apps/shared/now.ts", lines("export const now = (): Date => new Date();")],
+    [
+      "apps/shared/nested/x.mts",
+      lines("function f(): number {", "  return 1;", "}"),
+    ],
+    // 22〜27: テストの補助（Issue #262 の 2 つ目の PR で対象に広げた）。apps/backend/test-support/（直下と feature の下）、
+    //   apps/backend/spec/ の support.ts、apps/e2e/ の spec 以外の補助（database.ts・入れ子・Playwright の設定）。
+    [
+      "apps/backend/test-support/builder.ts",
+      lines("export function build(): void {}"),
+    ],
+    [
+      "apps/backend/test-support/todo/todo-builder.ts",
+      lines("function defaults(): number {", "  return 1;", "}"),
+    ],
+    [
+      "apps/backend/spec/api/todo/support.ts",
+      lines("export function given(): void {}"),
+    ],
+    [
+      "apps/e2e/database.ts",
+      lines("export async function resetTodos(): Promise<void> {}"),
+    ],
+    ["apps/e2e/nested/x.mts", lines("export const f = (): number => 1;")],
+    [
+      "apps/e2e/playwright.config.ts",
+      lines(
+        "function port(): number {",
+        "  return 3100;",
+        "}",
+        "export default { port: port() };",
+      ),
+    ],
+    // 28〜34: frontend の React 以外のモジュール（ADR 20261002-class-based-frontend-modules.md で対象に広げた）。features/<f>/api/・
+    //   feature の直下・shared/ の入れ子・.mts と .js・辞書（*.messages.ts）・test-support/ の .ts・hook に似た名前（.hooks.ts）。
+    [
+      "apps/frontend_customer/features/todo/api/todo-api.ts",
+      lines("export function listTodos(): void {}"),
+    ],
+    [
+      "apps/frontend_customer/features/todo/x.ts",
+      lines("export function f(): void {}"),
+    ],
+    [
+      "apps/frontend_customer/shared/i18n/nested/x.mts",
+      lines("export const f = (): number => 1;"),
+    ],
+    [
+      "apps/frontend_customer/shared/request-log/x.js",
+      lines("export default function () {}"),
+    ],
+    [
+      "apps/frontend_customer/features/todo/components/todo-item.messages.ts",
+      lines("const pick = (x: string): string => x;"),
+    ],
+    [
+      "apps/frontend_customer/test-support/fetch.ts",
+      lines("export async function stubFetch(): Promise<void> {}"),
+    ],
+    [
+      "apps/frontend_customer/features/todo/hooks/todo.hooks.ts",
       lines("export function f(): void {}"),
     ],
   ],
@@ -6281,22 +6834,94 @@ const CLASS_BASED_EXAMPLES: {
         "/* const g = () => 1; */",
       ),
     ],
-    // 7〜11: 対象外（テスト・test-support/・spec/・apps/shared・frontend）。
+    // 7〜14: 対象外（テスト（test-support/・spec/ の中のテストも）・E2E のテスト *.spec.ts・リポジトリ直下の
+    //   vitest.global-setup.ts・apps/shared のテスト・前方一致だけが同じ apps/shared-x と apps/e2e-x）。
     [
       "apps/backend/shared/domain/x.test.ts",
       lines("function helper(): number {", "  return 1;", "}"),
     ],
     [
-      "apps/backend/test-support/builder.ts",
-      lines("export function build(): void {}"),
+      "apps/backend/test-support/todo/todo-builder.test.ts",
+      lines("function helper(): number {", "  return 1;", "}"),
     ],
     [
-      "apps/backend/spec/api/todo/support.ts",
-      lines("export function given(): void {}"),
+      "apps/backend/spec/api/todo/create-todo.api-spec.test.ts",
+      lines("function given(): void {}"),
     ],
-    ["apps/shared/env.ts", lines("export function load(): void {}")],
     [
-      "apps/frontend_customer/features/todo/x.ts",
+      "apps/e2e/todo.spec.ts",
+      lines("async function addTodo(): Promise<void> {}"),
+    ],
+    [
+      "vitest.global-setup.ts",
+      lines("export default async function setup(): Promise<void> {}"),
+    ],
+    ["apps/e2e-x/x.ts", lines("export function f(): void {}")],
+    [
+      "apps/shared/env.test.ts",
+      lines("function helper(): number {", "  return 1;", "}"),
+    ],
+    ["apps/shared-x/x.ts", lines("export function f(): void {}")],
+    // 15〜27: frontend の対象外（CLASS_BASED の「frontend の次は対象外にする」）。React の component（.tsx・.jsx）と hook
+    //   （.hook.ts・.hook.tsx）、app/ の下（page.tsx・route.ts・.ts の補助）、直下のファイル（proxy.ts・instrumentation.ts・
+    //   instrumentation-node.ts・next.config.ts）、frontend のテスト、前方一致だけが同じ別ディレクトリ（features-x/・apps/frontend_customer-x/）。
+    [
+      "apps/frontend_customer/features/todo/components/todo-item.tsx",
+      lines("export function TodoItem() {", "  return null;", "}"),
+    ],
+    [
+      "apps/frontend_customer/shared/ui/button.jsx",
+      lines("export const Button = () => null;"),
+    ],
+    [
+      "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.hook.ts",
+      lines("export function useTodoScreen(): void {}"),
+    ],
+    [
+      "apps/frontend_customer/shared/i18n/locale.hook.tsx",
+      lines("export function useLocale(): void {}"),
+    ],
+    [
+      "apps/frontend_customer/app/page.tsx",
+      lines("export default function Page() {", "  return null;", "}"),
+    ],
+    [
+      "apps/frontend_customer/app/api/todos/route.ts",
+      lines(
+        "export async function GET(): Promise<Response> {",
+        "  return new Response(null);",
+        "}",
+      ),
+    ],
+    [
+      "apps/frontend_customer/proxy.ts",
+      lines(
+        "export function proxy(): void {}",
+        "function withLocale(): void {}",
+      ),
+    ],
+    [
+      "apps/frontend_customer/instrumentation.ts",
+      lines("export async function register(): Promise<void> {}"),
+    ],
+    [
+      "apps/frontend_customer/instrumentation-node.ts",
+      lines("export async function verifyEnvAtStartup(): Promise<void> {}"),
+    ],
+    [
+      "apps/frontend_customer/next.config.ts",
+      lines("const f = (): number => 1;", "export default { x: f() };"),
+    ],
+    [
+      "apps/frontend_customer/features/todo/api/todo-api.test.ts",
+      lines("function jsonResponse(): void {}"),
+    ],
+    [
+      "apps/frontend_customer/features-x/x.ts",
+      lines("export function f(): void {}"),
+    ],
+    [
+      "apps/frontend_customer-x/shared/x.ts",
       lines("export function f(): void {}"),
     ],
   ],
@@ -6308,9 +6933,7 @@ function judgeClassBased(examples: [string, string][]): boolean[] {
   const sourceFiles = parseSourceFiles(
     Object.fromEntries(
       examples.flatMap(([file, source], i) =>
-        BACKEND_CLASS_BASED.appliesTo(file)
-          ? [[virtualPath(i, file), source]]
-          : [],
+        CLASS_BASED.appliesTo(file) ? [[virtualPath(i, file), source]] : [],
       ),
     ),
   );
@@ -6322,7 +6945,7 @@ function judgeClassBased(examples: [string, string][]): boolean[] {
   });
 }
 
-describe(`backend の本番コードの最上位に関数を置かない規則の判定（${BACKEND_CLASS_BASED.id}）`, () => {
+describe(`backend と apps/shared の本番コードとテストの補助、frontend の React 以外のモジュールの最上位に関数を置かない規則の判定（${CLASS_BASED.id}）`, () => {
   const { violating, allowed } = CLASS_BASED_EXAMPLES;
   // WHY 遅延して 1 回だけ判定する: 例ごとに tsgo を起動すると遅いため（handle の規則の判定と同じ）。
   let verdicts: { violating: boolean[]; allowed: boolean[] } | undefined;
@@ -6336,19 +6959,30 @@ describe(`backend の本番コードの最上位に関数を置かない規則�
   it.each(violating.map(([file], i) => ({ file, i })))(
     "違反例 $i（$file）は違反",
     ({ i }) => {
-      expect(verdictsOf().violating[i]).toBe(true);
+      // given: 前提なし
+      // when
+      const result = verdictsOf().violating[i];
+
+      // then
+      expect(result).toBe(true);
     },
   );
   it.each(allowed.map(([file], i) => ({ file, i })))(
     "許可例 $i（$file）は違反ではない",
     ({ i }) => {
-      expect(verdictsOf().allowed[i]).toBe(false);
+      // given: 前提なし
+      // when
+      const result = verdictsOf().allowed[i];
+
+      // then
+      expect(result).toBe(false);
     },
   );
 });
 
 describe("最上位の関数の抽出（findTopLevelFunctions）", () => {
   it("最上位の関数ごとに宣言の書き出しの行番号を返す（オーバーロードは宣言ごと、1 つの文の変数は関数のものだけ、クラスの中は返さない）", () => {
+    // given
     const source = lines(
       "export function f(x: string): string;",
       "export function f(x: number): number;",
@@ -6363,22 +6997,28 @@ describe("最上位の関数の抽出（findTopLevelFunctions）", () => {
       "  b = () => a;",
       "export default function () {}",
     );
-    expect(
-      findTopLevelFunctions(
-        parseSourceFiles({ [DOMAIN_FILE]: source }).get(
-          DOMAIN_FILE,
-        ) as SourceFile,
-      ),
-    ).toEqual([1, 2, 3, 11, 12]);
+
+    // when
+    const topLevelFunctions = findTopLevelFunctions(
+      parseSourceFiles({ [DOMAIN_FILE]: source }).get(
+        DOMAIN_FILE,
+      ) as SourceFile,
+    );
+
+    // then
+    expect(topLevelFunctions).toEqual([1, 2, 3, 11, 12]);
   });
 });
 
 describe("規則ごとの判定", () => {
   // WHY: 規則を足したのに判定の例を足し忘れると、その規則の判定は下の it.each で 1 度も確かめられない（Issue #68 で 3 規則を足した）。
   it("RULES のすべての規則に判定の例があり、RULES に無い規則の例は無い", () => {
-    expect(Object.keys(RULE_EXAMPLES).sort()).toEqual(
-      RULES.map((rule) => rule.id).sort(),
-    );
+    // given: 前提なし
+    // when
+    const result = Object.keys(RULE_EXAMPLES).sort();
+
+    // then
+    expect(result).toEqual(RULES.map((rule) => rule.id).sort());
   });
 
   // WHY 件数をそろえる: 例が 1 件だけだと、規則の書き方を少し崩した（条件を 1 つ落とした）ときに気づけない。
@@ -6386,9 +7026,20 @@ describe("規則ごとの判定", () => {
   it.each(Object.keys(RULE_EXAMPLES))(
     "%s の違反例・許可例はそれぞれ 3 件以上ある",
     (id) => {
+      // given
       const { violating, allowed } = RULE_EXAMPLES[id as RuleId];
-      expect(violating.length).toBeGreaterThanOrEqual(3);
-      expect(allowed.length).toBeGreaterThanOrEqual(3);
+
+      // when
+      const violatingExampleCount = violating.length;
+
+      // then
+      expect(violatingExampleCount).toBeGreaterThanOrEqual(3);
+
+      // when
+      const allowedExampleCount = allowed.length;
+
+      // then
+      expect(allowedExampleCount).toBeGreaterThanOrEqual(3);
     },
   );
 
@@ -6398,10 +7049,20 @@ describe("規則ごとの判定", () => {
   ][]) {
     describe(id, () => {
       it.each(violating)("%s → %s（%s）は違反", (...example) => {
-        expect(judge(id, example)).toBe(true);
+        // given: 前提なし
+        // when
+        const result = judge(id, example);
+
+        // then
+        expect(result).toBe(true);
       });
       it.each(allowed)("%s → %s（%s）は違反ではない", (...example) => {
-        expect(judge(id, example)).toBe(false);
+        // given: 前提なし
+        // when
+        const result = judge(id, example);
+
+        // then
+        expect(result).toBe(false);
       });
     });
   }
@@ -6453,31 +7114,47 @@ const EXPORT_KEY_EXAMPLES: {
 
 describe("exports のキーの照合（resolveExportKey）", () => {
   it("当たる例・当たらない例はそれぞれ 3 件以上ある", () => {
-    expect(EXPORT_KEY_EXAMPLES.resolved.length).toBeGreaterThanOrEqual(3);
-    expect(EXPORT_KEY_EXAMPLES.unresolved.length).toBeGreaterThanOrEqual(3);
+    // given: 前提なし
+    // when
+    const resolvedExampleCount = EXPORT_KEY_EXAMPLES.resolved.length;
+
+    // then
+    expect(resolvedExampleCount).toBeGreaterThanOrEqual(3);
+
+    // when
+    const unresolvedExampleCount = EXPORT_KEY_EXAMPLES.unresolved.length;
+
+    // then
+    expect(unresolvedExampleCount).toBeGreaterThanOrEqual(3);
   });
 
   it.each(EXPORT_KEY_EXAMPLES.resolved)(
     "%s は %s に当たる",
     (specifier, key) => {
-      expect(
-        resolveExportKey(
-          exportSubpath(BACKEND_EXPORTS, specifier),
-          EXPORT_KEY_EXAMPLES.keys,
-        ),
-      ).toBe(key);
+      // given: 前提なし
+      // when
+      const result = resolveExportKey(
+        exportSubpath(BACKEND_EXPORTS, specifier),
+        EXPORT_KEY_EXAMPLES.keys,
+      );
+
+      // then
+      expect(result).toBe(key);
     },
   );
 
   it.each(EXPORT_KEY_EXAMPLES.unresolved)(
     "%s はどのキーにも当たらない",
     (specifier) => {
-      expect(
-        resolveExportKey(
-          exportSubpath(BACKEND_EXPORTS, specifier),
-          EXPORT_KEY_EXAMPLES.keys,
-        ),
-      ).toBeUndefined();
+      // given: 前提なし
+      // when
+      const result = resolveExportKey(
+        exportSubpath(BACKEND_EXPORTS, specifier),
+        EXPORT_KEY_EXAMPLES.keys,
+      );
+
+      // then
+      expect(result).toBeUndefined();
     },
   );
 });
@@ -6494,68 +7171,73 @@ describe("exports の違反の検出（findExportsViolations）", () => {
   ];
 
   it("すべての参照がキーに当たり、すべてのキーが使われ、値がキーのパスの .ts でファイルがあれば、違反は 0 件", () => {
-    expect(
-      findExportsViolations(
-        BACKEND_EXPORTS,
-        {
-          "./features/todo/internal/presentation/*.api":
-            "./features/todo/internal/presentation/*.api.ts",
-          "./shared/infra/env": "./shared/infra/env.ts",
-        },
-        [
-          ref(
-            "apps/frontend_customer/app/api/todos/route.ts",
-            "@repo/backend/features/todo/internal/presentation/list-todos.api",
-          ),
-          ref("apps/e2e/database.ts", "@repo/backend/shared/infra/env"),
-          // backend の中の参照（backend-relative-only が見る）と、前方一致だけが同じ別パッケージは数えない。
-          ref(
-            "apps/backend/features/todo/internal/infra/x.ts",
-            "@repo/backend/features/todo/internal/infra/todo-repository.postgres",
-          ),
-          ref("apps/frontend_customer/app/page.tsx", "@repo/backend-extra/x"),
-        ],
-        backendFiles,
-      ),
-    ).toEqual([]);
+    // given: 前提なし
+    // when
+    const violations = findExportsViolations(
+      BACKEND_EXPORTS,
+      {
+        "./features/todo/internal/presentation/*.api":
+          "./features/todo/internal/presentation/*.api.ts",
+        "./shared/infra/env": "./shared/infra/env.ts",
+      },
+      [
+        ref(
+          "apps/frontend_customer/app/api/todos/route.ts",
+          "@repo/backend/features/todo/internal/presentation/list-todos.api",
+        ),
+        ref("apps/e2e/database.ts", "@repo/backend/shared/infra/env"),
+        // backend の中の参照（backend-relative-only が見る）と、前方一致だけが同じ別パッケージは数えない。
+        ref(
+          "apps/backend/features/todo/internal/infra/x.ts",
+          "@repo/backend/features/todo/internal/infra/todo-repository.postgres",
+        ),
+        ref("apps/frontend_customer/app/page.tsx", "@repo/backend-extra/x"),
+      ],
+      backendFiles,
+    );
+
+    // then
+    expect(violations).toEqual([]);
   });
 
   it("キーに当たらない参照、使われないキー、キーと違う値、ファイルの無いキーを、それぞれ検出する", () => {
-    expect(
-      findExportsViolations(
-        BACKEND_EXPORTS,
-        {
-          "./features/todo/internal/presentation/*.api":
-            "./features/todo/internal/presentation/*.api.ts",
-          "./unused": "./unused.ts",
-          "./mismatch":
-            "./features/todo/internal/presentation/list-todos.api.ts",
-          "./object": { import: "./object.ts" },
-          "./missing": "./missing.ts",
-          "./features/todo/internal/domain/*":
-            "./features/todo/internal/domain/*.ts",
-        },
-        [
-          ref(
-            "apps/frontend_customer/app/api/todos/route.ts",
-            "@repo/backend/features/todo/internal/presentation/list-todos.api",
-          ),
-          ref(
-            "apps/frontend_customer/features/todo/api/x.ts",
-            "@repo/backend/features/todo/internal/infra/todo-repository.postgres",
-          ),
-          ref("apps/e2e/playwright.config.ts", "@repo/backend"),
-          ref("apps/e2e/a.ts", "@repo/backend/mismatch"),
-          ref("apps/e2e/a.ts", "@repo/backend/object"),
-          ref("apps/e2e/a.ts", "@repo/backend/missing"),
-          ref(
-            "apps/e2e/a.ts",
-            "@repo/backend/features/todo/internal/domain/todo",
-          ),
-        ],
-        backendFiles,
-      ),
-    ).toEqual([
+    // given: 前提なし
+    // when
+    const violations = findExportsViolations(
+      BACKEND_EXPORTS,
+      {
+        "./features/todo/internal/presentation/*.api":
+          "./features/todo/internal/presentation/*.api.ts",
+        "./unused": "./unused.ts",
+        "./mismatch": "./features/todo/internal/presentation/list-todos.api.ts",
+        "./object": { import: "./object.ts" },
+        "./missing": "./missing.ts",
+        "./features/todo/internal/domain/*":
+          "./features/todo/internal/domain/*.ts",
+      },
+      [
+        ref(
+          "apps/frontend_customer/app/api/todos/route.ts",
+          "@repo/backend/features/todo/internal/presentation/list-todos.api",
+        ),
+        ref(
+          "apps/frontend_customer/features/todo/api/x.ts",
+          "@repo/backend/features/todo/internal/infra/todo-repository.postgres",
+        ),
+        ref("apps/e2e/playwright.config.ts", "@repo/backend"),
+        ref("apps/e2e/a.ts", "@repo/backend/mismatch"),
+        ref("apps/e2e/a.ts", "@repo/backend/object"),
+        ref("apps/e2e/a.ts", "@repo/backend/missing"),
+        ref(
+          "apps/e2e/a.ts",
+          "@repo/backend/features/todo/internal/domain/todo",
+        ),
+      ],
+      backendFiles,
+    );
+
+    // then
+    expect(violations).toEqual([
       "apps/frontend_customer/features/todo/api/x.ts → @repo/backend/features/todo/internal/infra/todo-repository.postgres",
       "apps/e2e/playwright.config.ts → @repo/backend",
       'apps/backend/package.json の exports "./unused" はどこからも参照されていない',
@@ -6567,14 +7249,17 @@ describe("exports の違反の検出（findExportsViolations）", () => {
   });
 
   it('キーが "./" で始まらないものは、値の形の違反にする', () => {
-    expect(
-      findExportsViolations(
-        BACKEND_EXPORTS,
-        { "./x": "./x.ts", x: "x.ts" },
-        [ref("apps/e2e/a.ts", "@repo/backend/x")],
-        ["apps/backend/x.ts"],
-      ),
-    ).toEqual([
+    // given: 前提なし
+    // when
+    const violations = findExportsViolations(
+      BACKEND_EXPORTS,
+      { "./x": "./x.ts", x: "x.ts" },
+      [ref("apps/e2e/a.ts", "@repo/backend/x")],
+      ["apps/backend/x.ts"],
+    );
+
+    // then
+    expect(violations).toEqual([
       'apps/backend/package.json の exports "x" はどこからも参照されていない',
       'apps/backend/package.json の exports "x" の値 "x.ts" は、キーのパスに .ts を付けたものではない',
       'apps/backend/package.json の exports "x" が指すファイルが無い',
@@ -6592,44 +7277,50 @@ describe("apps/shared の exports の違反の検出（findExportsViolations と
   };
 
   it("frontend 直下・backend・apps/e2e/・リポジトリ直下の参照がすべてキーに当たり、すべてのキーが使われていれば、違反は 0 件", () => {
-    expect(
-      findExportsViolations(
-        SHARED_EXPORTS,
-        exports,
-        [
-          ref("apps/frontend_customer/proxy.ts", "@repo/shared/logger"),
-          ref("apps/backend/shared/infra/database.ts", "@repo/shared/env"),
-          ref("apps/e2e/database.ts", "@repo/shared/env"),
-          ref("vitest.global-setup.ts", "@repo/shared/env"),
-          // apps/shared の中の参照と、前方一致だけが同じ別パッケージ・@repo/backend の参照は数えない。
-          ref("apps/shared/x.ts", "@repo/shared/missing"),
-          ref("apps/frontend_customer/app/page.tsx", "@repo/shared-extra/x"),
-          ref("apps/e2e/a.ts", "@repo/backend/env"),
-        ],
-        sharedFiles,
-      ),
-    ).toEqual([]);
+    // given: 前提なし
+    // when
+    const violations = findExportsViolations(
+      SHARED_EXPORTS,
+      exports,
+      [
+        ref("apps/frontend_customer/proxy.ts", "@repo/shared/logger"),
+        ref("apps/backend/shared/infra/database.ts", "@repo/shared/env"),
+        ref("apps/e2e/database.ts", "@repo/shared/env"),
+        ref("vitest.global-setup.ts", "@repo/shared/env"),
+        // apps/shared の中の参照と、前方一致だけが同じ別パッケージ・@repo/backend の参照は数えない。
+        ref("apps/shared/x.ts", "@repo/shared/missing"),
+        ref("apps/frontend_customer/app/page.tsx", "@repo/shared-extra/x"),
+        ref("apps/e2e/a.ts", "@repo/backend/env"),
+      ],
+      sharedFiles,
+    );
+
+    // then
+    expect(violations).toEqual([]);
   });
 
   it("キーに当たらない参照（backend からのものも）、使われないキー、キーと違う値、ファイルの無いキーを検出し、apps/shared/package.json の名前で出す", () => {
-    expect(
-      findExportsViolations(
-        SHARED_EXPORTS,
-        {
-          ...exports,
-          "./unused": "./unused.ts",
-          "./mismatch": "./env.ts",
-        },
-        [
-          ref("apps/frontend_customer/proxy.ts", "@repo/shared/logger"),
-          ref("apps/backend/shared/infra/database.ts", "@repo/shared/env"),
-          ref("apps/backend/shared/infra/database.ts", "@repo/shared/database"),
-          ref("apps/e2e/a.ts", "@repo/shared"),
-          ref("apps/e2e/a.ts", "@repo/shared/mismatch"),
-        ],
-        sharedFiles,
-      ),
-    ).toEqual([
+    // given: 前提なし
+    // when
+    const violations = findExportsViolations(
+      SHARED_EXPORTS,
+      {
+        ...exports,
+        "./unused": "./unused.ts",
+        "./mismatch": "./env.ts",
+      },
+      [
+        ref("apps/frontend_customer/proxy.ts", "@repo/shared/logger"),
+        ref("apps/backend/shared/infra/database.ts", "@repo/shared/env"),
+        ref("apps/backend/shared/infra/database.ts", "@repo/shared/database"),
+        ref("apps/e2e/a.ts", "@repo/shared"),
+        ref("apps/e2e/a.ts", "@repo/shared/mismatch"),
+      ],
+      sharedFiles,
+    );
+
+    // then
+    expect(violations).toEqual([
       "apps/backend/shared/infra/database.ts → @repo/shared/database",
       "apps/e2e/a.ts → @repo/shared",
       'apps/shared/package.json の exports "./unused" はどこからも参照されていない',
@@ -6678,9 +7369,9 @@ function violationsOfFixture(files: Record<string, string>): string[] {
 // Issue #90 で frontend-to-shared-specifier・screen-to-shared・shared-self-contained・SHARED_PLACEMENT・SHARED_EXPORTS を足した。
 // Issue #141 で presentation-with-problem-response（PRESENTATION_WITH_PROBLEM_RESPONSE）を足した。
 // Issue #208 で module-internal・module-expose-only-from-presentation・expose-imports（モジュールの境界）を足した。
-// Issue #262 で backend-class-based（BACKEND_CLASS_BASED。最上位の関数）を足した。
+// Issue #262 で class-based（CLASS_BASED。最上位の関数）を足した。
 const MUST_REJECT_FILES: Record<string, string> = {
-  // backend-class-based（Issue #262）: 最上位の関数（function 宣言・async・generator・オーバーロード・アロー関数と function 式の
+  // class-based（Issue #262）: 最上位の関数（function 宣言・async・generator・オーバーロード・アロー関数と function 式の
   //   変数・export default のアロー関数・namespace の中）。クラスのメソッド・フィールド・メソッドの中の関数（8〜13 行目）は拾わない。
   //   .mts と expose/・drizzle-kit の設定も対象（前方一致だけが同じ別ディレクトリ test-support-x/ などは判定の例 CLASS_BASED_EXAMPLES）。
   "apps/backend/shared/domain/bad-function.ts": lines(
@@ -7120,7 +7811,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/e2e/bad-console.spec.ts": lines("console.log(line);"),
   "scripts/bad-console.ts": lines("console.log(1);"),
   "bad-console.config.mjs": lines("console.log(1);"),
-  // WHY クラスのフィールドにする: 最上位のアロー関数は backend-class-based にも当たり、console の違反だけを置けなくなる。
+  // WHY クラスのフィールドにする: 最上位のアロー関数は class-based にも当たり、console の違反だけを置けなくなる。
   "apps/backend/shared/infra/logger-helper.ts": lines(
     "export class L { static l = () => console.log(1); }",
   ),
@@ -7144,11 +7835,12 @@ const MUST_REJECT_FILES: Record<string, string> = {
     `export const count = (n) => \`\${n}件\`;`,
   ),
   //   拡張子（.jsx）、JSX の無い .ts の日本語、辞書の例外の外（messages/ の下の階層、messages/ の外）。
+  //   .ts の日本語は、最上位の関数にしない（class-based の巻き添えにしない。frontend の api/ も対象）ため、クラスの static フィールドにする。
   "apps/frontend_customer/features/todo/components/bad-text.jsx": lines(
     "export const C = () => <p>Hello</p>;",
   ),
   "apps/frontend_customer/features/todo/api/bad-text.ts": lines(
-    'export const e = () => { throw new Error("取得に失敗しました"); };',
+    'export class E { static e = () => { throw new Error("取得に失敗しました"); }; }',
   ),
   "apps/frontend_customer/shared/i18n/messages/nested/ja.ts": lines(
     'export const ja = { "todo.item.delete": "削除" };',
@@ -7194,7 +7886,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import { commonMessages } from "../frontend_customer/shared/i18n/common.messages";',
   ),
   // server-hardcoded-text（Issue #116）: 日本語の文字列（テンプレートリテラル・zod の error）。コメント（3 行目）と ErrorKey（5 行目）は拾わない。
-  //   最上位の関数にしない（backend-class-based の巻き添えにしない）ため、クラスの static フィールドにする。
+  //   最上位の関数にしない（class-based の巻き添えにしない）ため、クラスの static フィールドにする。
   "apps/backend/features/todo/internal/domain/bad-text.ts": lines(
     "export class NotFound { static of = (id) =>",
     `  new DomainError("not_found", \`Todo（id: \${id}）が見つかりません\`); }`,
@@ -7327,6 +8019,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   //   "./env" は上の参照で使われ、ファイルもある（違反なし）。"./mismatch" は使われるが、値が別のファイルでキーのファイルも無い。
   //   "./unused" は使われず、ファイルも無い。
   //   shared-self-contained: apps/shared から外の自前コード（相対パス・"@/"）、フレームワーク・DB、node: 以外のパッケージ。
+  //   class-based（Issue #262）: 最後の行の最上位の関数（apps/shared も対象）。
   "apps/shared/env.ts": lines(
     "export const env = process.env;",
     'import { todoRepository } from "../backend/features/todo/internal/infra/todo-repository.postgres";',
@@ -7337,6 +8030,13 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import { z as zod } from "zod";',
     'import { existsSync } from "node:fs";',
     'import { logger } from "./logger";',
+    "export function load(): void {}",
+  ),
+  // class-based（Issue #262）: apps/shared の置いてよい名前のファイルの最上位の関数（置き場所の違反の巻き添えにしない）。
+  //   クラスの static メソッド（2 行目）は拾わない。
+  "apps/shared/log-event.ts": lines(
+    "export const f = (x: number): number => x;",
+    "export class LogSeverity { static of(): void {} }",
   ),
   "apps/shared/package.json": JSON.stringify({
     name: "@repo/shared",
@@ -7399,6 +8099,31 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/backend/shared/infra/old.test-support.ts": lines(
     "export const n = Date.now();",
   ),
+  // class-based（Issue #262 の 2 つ目の PR）: テストの補助（test-support/・spec/ の support.ts・apps/e2e/ の spec 以外）の最上位の関数。
+  "apps/backend/test-support/todo/bad-builder.ts": lines(
+    "export function aThing(): void {}",
+  ),
+  "apps/backend/spec/api/todo/support.ts": lines(
+    "export function given(): void {}",
+  ),
+  "apps/e2e/bad-helper.ts": lines(
+    "export const reset = async (): Promise<void> => {};",
+  ),
+  // class-based（ADR 20261002-class-based-frontend-modules.md）: frontend の React 以外のモジュール（features/<f>/api/・shared/）の
+  //   最上位の関数。同じディレクトリの component（.tsx）と hook（.hook.ts）の関数は対象外（拾わない）。
+  "apps/frontend_customer/features/todo/api/bad-class-api.ts": lines(
+    "export class TodoApi { static list(): void {} }",
+    "export function listTodos(): void {}",
+  ),
+  "apps/frontend_customer/shared/i18n/bad-format.ts": lines(
+    "export const formatDateTime = (iso: string): string => iso;",
+  ),
+  "apps/frontend_customer/features/todo/api/bad-api-view.tsx": lines(
+    "export function View() { return null; }",
+  ),
+  "apps/frontend_customer/features/todo/api/bad-api.hook.ts": lines(
+    "export function useApi(): void {}",
+  ),
   // backend-placement / frontend-placement（Issue #181）: 直下の test-support/ と前方一致だけが同じ別ディレクトリ。
   "apps/backend/test-support-x/x.ts": lines("export const x = 1;"),
   "apps/frontend_customer/test-support-x/x.ts": lines("export const x = 1;"),
@@ -7406,12 +8131,18 @@ const MUST_REJECT_FILES: Record<string, string> = {
 
 const MUST_REJECT_VIOLATIONS = [
   ...[1, 2, 3, 4, 5, 6, 7, 14].map(
-    (line) =>
-      `backend-class-based: apps/backend/shared/domain/bad-function.ts:${line}`,
+    (line) => `class-based: apps/backend/shared/domain/bad-function.ts:${line}`,
   ),
-  "backend-class-based: apps/backend/shared/infra/bad-function.mts:1",
-  "backend-class-based: apps/backend/features/notification/expose/bad-notify.ts:1",
-  "backend-class-based: apps/backend/shared/drizzle/drizzle.config.mts:1",
+  "class-based: apps/backend/shared/infra/bad-function.mts:1",
+  "class-based: apps/backend/features/notification/expose/bad-notify.ts:1",
+  "class-based: apps/backend/shared/drizzle/drizzle.config.mts:1",
+  "class-based: apps/shared/env.ts:10",
+  "class-based: apps/shared/log-event.ts:1",
+  "class-based: apps/backend/test-support/todo/bad-builder.ts:1",
+  "class-based: apps/backend/spec/api/todo/support.ts:1",
+  "class-based: apps/e2e/bad-helper.ts:1",
+  "class-based: apps/frontend_customer/features/todo/api/bad-class-api.ts:2",
+  "class-based: apps/frontend_customer/shared/i18n/bad-format.ts:1",
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(
     (line) =>
       `now-single-source: apps/backend/features/todo/internal/domain/bad-now.ts:${line}`,
@@ -7922,9 +8653,10 @@ const MUST_REJECT_VIOLATIONS = [
 // （`git grep -h "from \"" -- '*.ts' '*.tsx'` で列挙したもの）をすべて含め、alias と相対の両方を置く。
 // コメント・文字列の中の import 風の文字列、from の無い `export type {...};`、テストファイル・TS 以外のファイルも置く。
 const MUST_PASS_FILES: Record<string, string> = {
-  // backend-class-based（Issue #262）: static だけのクラス・クラスフィールドのアロー関数・メソッドの中の関数・クラス式・
-  //   型と interface・定数のオブジェクト・コメントと文字列の中の function。テスト・test-support/・spec/ の関数は対象外
-  //   （apps/shared の関数は下の now-single-source の apps/shared/now.ts）。
+  // class-based（Issue #262）: static だけのクラス・クラスフィールドのアロー関数・メソッドの中の関数・クラス式・
+  //   型と interface・定数のオブジェクト・コメントと文字列の中の function。テスト（test-support/ の中のテストも）と
+  //   E2E のテスト（*.spec.ts）の関数は対象外（apps/shared のクラスは下の now-single-source の apps/shared/now.ts、
+  //   テストの関数は apps/shared/env.test.ts、E2E のテストの関数は下の apps/e2e/todo.spec.ts）。
   "apps/backend/shared/domain/good-class.ts": lines(
     "export type F = (x: number) => number;",
     "export interface Notifier { notify(message: string): void; }",
@@ -7940,11 +8672,11 @@ const MUST_PASS_FILES: Record<string, string> = {
   "apps/backend/shared/domain/good-class.test.ts": lines(
     "function helper(): number { return 1; }",
   ),
-  "apps/backend/test-support/class-based-helper.ts": lines(
-    "export function build(): void {}",
+  "apps/backend/test-support/class-based-helper.test.ts": lines(
+    "function helper(): number { return 1; }",
   ),
-  "apps/backend/spec/api/todo/support.ts": lines(
-    "export function given(): void {}",
+  "apps/backend/test-support/class-based-helper.ts": lines(
+    "export class Helper { static build(): void {} }",
   ),
   // presentation-with-problem-response（Issue #141）: ProblemResponse.wrap で包んだ handle（ctx あり・なし）。
   //   対象外: api ファイルでない presentation のファイル、テスト、ほかの層の handle。
@@ -8055,9 +8787,8 @@ const MUST_PASS_FILES: Record<string, string> = {
       'import { useCallback, useEffect, useRef, useState } from "react";',
       'import type { todoScreenMessages } from "@/features/todo/screens/todo-screen/todo-screen.messages";',
       "import {",
-      "  listTodos,",
+      "  TodoApi,",
       "  type Todo,",
-      "  updateTodo,",
       '} from "@/features/todo/api/todo-api";',
     ),
   "apps/frontend_customer/features/todo/screens/todo-detail-screen/todo-detail-screen.tsx":
@@ -8070,9 +8801,8 @@ const MUST_PASS_FILES: Record<string, string> = {
     lines(
       'import { useCallback, useEffect, useRef, useState } from "react";',
       "import {",
-      "  getTodo,",
+      "  TodoApi,",
       "  type Todo,",
-      "  updateTodo,",
       '} from "@/features/todo/api/todo-api";',
     ),
   // 別 feature からは index だけ（alias と相対、index の明示あり・なし）。画面側の shared/ は参照してよい。
@@ -8325,7 +9055,11 @@ const MUST_PASS_FILES: Record<string, string> = {
     "const v = myprocess.env; process.envelope;",
   ),
   // テスト、対象外の場所（scripts/・ルート直下のディレクトリの中）、TS / JS 以外のファイルは検査しない。
-  "apps/shared/env.test.ts": lines("const p = process.env.PATH;"),
+  //   class-based（Issue #262）: apps/shared のテストの中の最上位の関数は対象外。
+  "apps/shared/env.test.ts": lines(
+    "const p = process.env.PATH;",
+    "function helper(): number { return 1; }",
+  ),
   // apps/shared の package.json・tsconfig.json は置いてよい。依存のディレクトリ（node_modules）の中は置き場所の規則でも見ない。
   "apps/shared/package.json": JSON.stringify({
     name: "@repo/shared",
@@ -8398,13 +9132,16 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { logger } from "@repo/shared/logger";',
     'import { now } from "@repo/shared/now";',
     'import { type NextRequest, NextResponse } from "next/server";',
-    'import { buildRequestLog } from "@/shared/request-log/request-log";',
-    "logger.emit(buildRequestLog({ receivedAt: now() }));",
+    'import { RequestLogBuilder } from "@/shared/request-log/request-log";',
+    "logger.emit(RequestLogBuilder.build({ receivedAt: now() }));",
   ),
-  // now-single-source: 現在時刻は apps/shared/now.ts だけが読み、ほかは now() を使う（backend の 4 層すべてと frontend 直下）。
+  // now-single-source: 現在時刻は apps/shared/now.ts だけが読み、ほかは Clock.now() を使う（backend の 4 層すべてと frontend 直下）。
+  //   class-based（Issue #262）: apps/shared/now.ts もクラスの static メソッドにする。
   "apps/shared/now.ts": lines(
-    "export function now(): Date {",
-    "  return new Date();",
+    "export class Clock {",
+    "  static now(): Date {",
+    "    return new Date();",
+    "  }",
     "}",
   ),
   "apps/backend/features/todo/internal/application/uses-now.command.ts": lines(
@@ -8442,8 +9179,9 @@ const MUST_PASS_FILES: Record<string, string> = {
   "apps/e2e/clock.spec.ts": lines("export const runId = Date.now();"),
   "scripts/clock.ts": lines("export const t = Date.now();"),
   "clock.config.mts": lines("export default { at: new Date() };"),
+  // class-based（ADR 20261002-class-based-frontend-modules.md）: frontend の shared/ もクラスの static メソッドにする。
   "apps/frontend_customer/shared/request-log/request-log.ts": lines(
-    "export function buildRequestLog() {}",
+    "export class RequestLogBuilder { static build() {} }",
   ),
   // env.ts は apps/shared（@repo/shared。Issue #90）にあり、apps/backend の設定ファイル（apps/backend/shared/drizzle/drizzle.config.ts）・apps/e2e/・
   //   リポジトリ直下の設定ファイルは "@repo/shared/env" で import する。
@@ -8464,15 +9202,14 @@ const MUST_PASS_FILES: Record<string, string> = {
   //   （BACKEND_PLACEMENT / FRONTEND_PLACEMENT）の対象外で、直下に置いても違反にならない（Issue #84）。
   "apps/e2e/todo.spec.ts": lines(
     'import { expect, test } from "@playwright/test";',
-    'import { resetTodos } from "./database";',
+    'import { E2eDatabase } from "./database";',
+    "async function addTodo(): Promise<void> {}",
   ),
   // テスト基盤の vitest.global-setup.ts だけは、test-support/database を相対パスで参照する（exports に含めない例外）。
   "vitest.global-setup.ts": lines(
     'import { env, toolEnv } from "@repo/shared/env";',
-    "import {",
-    "  cleanupTestSchemas,",
-    "  testSchemaPrefix,",
-    '} from "./apps/backend/test-support/database";',
+    'import { TestDatabase } from "./apps/backend/test-support/database";',
+    "export default async function setup(): Promise<void> {}",
   ),
   // exports（Issue #68 の段階 2）: 外が "@repo/backend/..." で参照するものだけを、キーのパスの .ts で公開する。
   //   すべてのキーが上の参照で使われ、指すファイルがある（パターンは *.api の 5 ファイルに当たる）。
@@ -8584,11 +9321,12 @@ const MUST_PASS_FILES: Record<string, string> = {
 //   中に入るかどうか（かかる時間と memory）だけ。循環する symlink の fixture は、以前の列挙でも ELOOP（symlink 40 段）で
 //   止まって結果が同じになるか、2 本以上あると止まらなくなり（2^40）、どちらも決定的な失敗にならない（2026-09-29 に実測）。
 describe("ファイルの列挙（walkFiles・listSourceFiles・listAllFiles）", () => {
-  function withTree(
+  // WHY 結果を返す: テストの本体で when（実行）と then（検証）を分けるため、一時ツリーの中で集めた結果を外に返す（後始末は finally のまま）。
+  function withTree<T>(
     files: Record<string, string>,
     symlinks: Record<string, string>,
-    check: (root: string) => void,
-  ) {
+    collect: (root: string) => T,
+  ): T {
     const root = mkdtempSync(join(tmpdir(), "architecture-list-test-"));
     try {
       for (const [path, content] of Object.entries(files)) {
@@ -8599,7 +9337,7 @@ describe("ファイルの列挙（walkFiles・listSourceFiles・listAllFiles）"
         mkdirSync(dirname(join(root, path)), { recursive: true });
         symlinkSync(target, join(root, path));
       }
-      check(root);
+      return collect(root);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -8625,70 +9363,85 @@ describe("ファイルの列挙（walkFiles・listSourceFiles・listAllFiles）"
   };
 
   it("除外するディレクトリ（node_modules・.next）は、どの階層でも読まない（中に入ってから除くのではない）", () => {
-    withTree(GENERATED_TREE, {}, (root) => {
-      expect(walkRecordingReads(root, FRONTEND_ROOT)).toEqual({
-        read: [
-          "apps/frontend_customer",
-          "apps/frontend_customer/.lib",
-          "apps/frontend_customer/app",
-          "apps/frontend_customer/features",
-          "apps/frontend_customer/features/todo",
-        ],
-        files: [
-          "apps/frontend_customer/.lib/x.ts",
-          "apps/frontend_customer/app/page.tsx",
-        ],
-      });
+    // given: モジュールの定数 GENERATED_TREE（生成物のディレクトリを含むツリー）
+    // when
+    const walked = withTree(GENERATED_TREE, {}, (root) =>
+      walkRecordingReads(root, FRONTEND_ROOT),
+    );
+
+    // then
+    expect(walked).toEqual({
+      read: [
+        "apps/frontend_customer",
+        "apps/frontend_customer/.lib",
+        "apps/frontend_customer/app",
+        "apps/frontend_customer/features",
+        "apps/frontend_customer/features/todo",
+      ],
+      files: [
+        "apps/frontend_customer/.lib/x.ts",
+        "apps/frontend_customer/app/page.tsx",
+      ],
     });
   });
 
   // Issue #142 の再現の形: .next/standalone/ に複製された pnpm の相対 symlink が循環する（2 本あると以前の列挙は 2^40 で
   //   止まらない）。除外のディレクトリの中なので、読まずに完走する。中に入ってから除くと statSync が ELOOP を投げて失敗する。
   it("除外するディレクトリの中に循環する symlink（.next/standalone/node_modules/x -> ../..）があっても、中に入らずに完走する", () => {
-    withTree(
-      GENERATED_TREE,
-      {
-        "apps/frontend_customer/.next/standalone/node_modules/x": "../..",
-        "apps/frontend_customer/.next/standalone/node_modules/y": "../..",
-        "apps/frontend_customer/node_modules/node_modules": "..",
-      },
-      (root) => {
-        expect(walkRecordingReads(root, FRONTEND_ROOT)).toEqual({
-          read: [
-            "apps/frontend_customer",
-            "apps/frontend_customer/.lib",
-            "apps/frontend_customer/app",
-            "apps/frontend_customer/features",
-            "apps/frontend_customer/features/todo",
-          ],
-          files: [
-            "apps/frontend_customer/.lib/x.ts",
-            "apps/frontend_customer/app/page.tsx",
-          ],
-        });
-      },
+    // given
+    const symlinks = {
+      "apps/frontend_customer/.next/standalone/node_modules/x": "../..",
+      "apps/frontend_customer/.next/standalone/node_modules/y": "../..",
+      "apps/frontend_customer/node_modules/node_modules": "..",
+    };
+
+    // when
+    const walked = withTree(GENERATED_TREE, symlinks, (root) =>
+      walkRecordingReads(root, FRONTEND_ROOT),
     );
+
+    // then
+    expect(walked).toEqual({
+      read: [
+        "apps/frontend_customer",
+        "apps/frontend_customer/.lib",
+        "apps/frontend_customer/app",
+        "apps/frontend_customer/features",
+        "apps/frontend_customer/features/todo",
+      ],
+      files: [
+        "apps/frontend_customer/.lib/x.ts",
+        "apps/frontend_customer/app/page.tsx",
+      ],
+    });
   });
 
   it("listSourceFiles・listAllFiles は、除外するディレクトリの中に自分を指す symlink があっても、その外のファイルだけを返す", () => {
-    withTree(
-      {
-        ...GENERATED_TREE,
-        "apps/shared/env.ts": "export const env = 1;",
-        "apps/shared/node_modules/pkg/index.js": "process.env;",
-      },
-      {
-        "apps/frontend_customer/.next/standalone/self": ".",
-        "apps/shared/node_modules/self": ".",
-      },
-      (root) => {
-        expect(listSourceFiles(root, FRONTEND_ROOT).sort()).toEqual([
-          "apps/frontend_customer/.lib/x.ts",
-          "apps/frontend_customer/app/page.tsx",
-        ]);
-        expect(listAllFiles(root, SHARED_ROOT)).toEqual(["apps/shared/env.ts"]);
-      },
-    );
+    // given
+    const files = {
+      ...GENERATED_TREE,
+      "apps/shared/env.ts": "export const env = 1;",
+      "apps/shared/node_modules/pkg/index.js": "process.env;",
+    };
+    const symlinks = {
+      "apps/frontend_customer/.next/standalone/self": ".",
+      "apps/shared/node_modules/self": ".",
+    };
+
+    // when
+    const listed = withTree(files, symlinks, (root) => ({
+      source: listSourceFiles(root, FRONTEND_ROOT).sort(),
+      all: listAllFiles(root, SHARED_ROOT),
+    }));
+
+    // then
+    expect(listed).toEqual({
+      source: [
+        "apps/frontend_customer/.lib/x.ts",
+        "apps/frontend_customer/app/page.tsx",
+      ],
+      all: ["apps/shared/env.ts"],
+    });
   });
 
   // WHY symlink の先も列挙する: 以前の列挙（readdirSync の recursive: true）と同じ範囲を検査し、symlink で置いたディレクトリの
@@ -8696,85 +9449,114 @@ describe("ファイルの列挙（walkFiles・listSourceFiles・listAllFiles）"
   // listAllFiles の挙動の差: 以前は通常ファイル（entry.isFile()）だけを返し、ファイルを指す symlink は数えなかった。今は
   //   ディレクトリ以外をすべて返すので、ファイルへの symlink（と先の無い symlink）も返す（置き場所の規則で違反にできる）。
   it("除外しないディレクトリの symlink は、先のディレクトリの中も列挙し、ファイルへの symlink もファイルとして返す", () => {
-    withTree(
-      {
-        "apps/frontend_customer/app/page.tsx": "export default 1;",
-        "outside/lib/db.ts": "export const db = 1;",
-        "outside/shared-extra/extra.ts": "export const x = 1;",
-        "outside/note.md": "x",
-      },
-      {
-        "apps/frontend_customer/lib": "../../outside/lib",
-        "apps/shared/extra": "../../outside/shared-extra",
-        "apps/shared/note.md": "../../outside/note.md",
-        "apps/shared/dangling.ts": "../../outside/missing.ts",
-      },
-      (root) => {
-        expect(listSourceFiles(root, FRONTEND_ROOT).sort()).toEqual([
-          "apps/frontend_customer/app/page.tsx",
-          "apps/frontend_customer/lib/db.ts",
-        ]);
-        expect(listAllFiles(root, SHARED_ROOT).sort()).toEqual([
-          "apps/shared/dangling.ts",
-          "apps/shared/extra/extra.ts",
-          "apps/shared/note.md",
-        ]);
-      },
-    );
+    // given
+    const files = {
+      "apps/frontend_customer/app/page.tsx": "export default 1;",
+      "outside/lib/db.ts": "export const db = 1;",
+      "outside/shared-extra/extra.ts": "export const x = 1;",
+      "outside/note.md": "x",
+    };
+    const symlinks = {
+      "apps/frontend_customer/lib": "../../outside/lib",
+      "apps/shared/extra": "../../outside/shared-extra",
+      "apps/shared/note.md": "../../outside/note.md",
+      "apps/shared/dangling.ts": "../../outside/missing.ts",
+    };
+
+    // when
+    const listed = withTree(files, symlinks, (root) => ({
+      source: listSourceFiles(root, FRONTEND_ROOT).sort(),
+      all: listAllFiles(root, SHARED_ROOT).sort(),
+    }));
+
+    // then
+    expect(listed).toEqual({
+      source: [
+        "apps/frontend_customer/app/page.tsx",
+        "apps/frontend_customer/lib/db.ts",
+      ],
+      all: [
+        "apps/shared/dangling.ts",
+        "apps/shared/extra/extra.ts",
+        "apps/shared/note.md",
+      ],
+    });
   });
 
   // WHY 例外で止まることを固定する: 除外の外で循環すると、statSync が ELOOP（symlink 40 段）を投げて列挙が失敗する（無限には
   //   再帰しない）。以前の列挙（readdirSync の recursive: true）は ELOOP を黙って握りつぶし、途中までの一覧を返していた
   //   （検査が一部だけで緑になりうる）。今は音を立てて失敗する。
   it("除外の外に置いた循環する symlink（apps/backend/loop -> ..）は、ELOOP の例外で止まる（無限に回らない）", () => {
-    withTree(
-      {
-        "apps/backend/features/todo/internal/domain/todo.ts":
-          "export const x = 1;",
-      },
-      { "apps/backend/loop": ".." },
-      (root) => {
-        let thrown: unknown;
-        try {
-          walkFiles(root, BACKEND_ROOT);
-        } catch (error) {
-          thrown = error;
-        }
-        expect(thrown).toMatchObject({ code: "ELOOP", syscall: "stat" });
-      },
-    );
+    // given
+    const files = {
+      "apps/backend/features/todo/internal/domain/todo.ts":
+        "export const x = 1;",
+    };
+    const symlinks = { "apps/backend/loop": ".." };
+
+    // when
+    const thrown = withTree(files, symlinks, (root) => {
+      try {
+        walkFiles(root, BACKEND_ROOT);
+        return undefined;
+      } catch (error) {
+        return error;
+      }
+    });
+
+    // then
+    expect(thrown).toMatchObject({ code: "ELOOP", syscall: "stat" });
   });
 
   it("ディレクトリが無ければ空を返す", () => {
-    withTree({}, {}, (root) => {
-      expect(walkFiles(root, FRONTEND_ROOT)).toEqual([]);
-      expect(listSourceFiles(root, FRONTEND_ROOT)).toEqual([]);
-      expect(listAllFiles(root, SHARED_ROOT)).toEqual([]);
-    });
+    // given: 前提なし（空のツリー）
+    // when
+    const listed = withTree({}, {}, (root) => ({
+      walked: walkFiles(root, FRONTEND_ROOT),
+      source: listSourceFiles(root, FRONTEND_ROOT),
+      all: listAllFiles(root, SHARED_ROOT),
+    }));
+
+    // then
+    expect(listed).toEqual({ walked: [], source: [], all: [] });
   });
 });
 
 describe("fixture のツリーを検査したときに検出される違反", () => {
   it("must-reject: 置いた違反がすべて、置いたとおりの規則で検出され、それ以外は検出されない", () => {
-    expect(violationsOfFixture(MUST_REJECT_FILES)).toEqual(
-      [...MUST_REJECT_VIOLATIONS].sort(),
-    );
+    // given: 前提なし
+    // when
+    const result = violationsOfFixture(MUST_REJECT_FILES);
+
+    // then
+    expect(result).toEqual([...MUST_REJECT_VIOLATIONS].sort());
   });
 
   it("must-pass: 許可される参照だけのツリーでは違反が 0 件", () => {
-    expect(violationsOfFixture(MUST_PASS_FILES)).toEqual([]);
+    // given: 前提なし
+    // when
+    const result = violationsOfFixture(MUST_PASS_FILES);
+
+    // then
+    expect(result).toEqual([]);
   });
 });
 
 describe("参照の抽出（extractImports）", () => {
   it("複数行にまたがる import を 1 つの参照として取り出す", () => {
+    // given
     const source = [
       "import {",
       "  CreateTodoCommand,",
       "  DeleteTodoCommand,",
       '} from "@/backend/features/todo/internal/application/x";',
     ].join("\n");
-    expect(extractImports(source)).toEqual([
+
+    // when
+    const imports = extractImports(source);
+
+    // then
+    expect(imports).toEqual([
       {
         specifier: "@/backend/features/todo/internal/application/x",
         typeOnly: false,
@@ -8783,6 +9565,7 @@ describe("参照の抽出（extractImports）", () => {
   });
 
   it("import type / export type は型だけの参照、export { X } from は値の参照になる。export ... from は re-export の印を持つ", () => {
+    // given
     const source = [
       'import type { A } from "a";',
       'export type { B } from "b";',
@@ -8790,9 +9573,14 @@ describe("参照の抽出（extractImports）", () => {
       'export * from "d";',
       'import { Entity } from "e";',
     ].join("\n");
+
+    // when
+    const imports = extractImports(source);
+
+    // then
     // WHY import に reExport が無いことも toEqual で見る: toEqual は undefined のプロパティを無いものと同じに扱うが、
     //   reExport: true が付けば一致しない（import を re-export と取り違えると、同じディレクトリの辞書の import まで違反になる）。
-    expect(extractImports(source)).toEqual([
+    expect(imports).toEqual([
       { specifier: "a", typeOnly: true },
       { specifier: "b", typeOnly: true, reExport: true },
       { specifier: "c", typeOnly: false, reExport: true },
@@ -8802,6 +9590,7 @@ describe("参照の抽出（extractImports）", () => {
   });
 
   it("inline の type は、すべての名前に付いているときだけ型だけの参照になる", () => {
+    // given
     const source = [
       'import { type A, type B } from "all-type";',
       'import { type A, Value } from "mixed";',
@@ -8814,7 +9603,12 @@ describe("参照の抽出（extractImports）", () => {
       'import { type    as portValue } from "named-type-spaces";',
       'import { type /* keep */ as portValue } from "named-type-comment";',
     ].join("\n");
-    expect(extractImports(source)).toEqual([
+
+    // when
+    const imports = extractImports(source);
+
+    // then
+    expect(imports).toEqual([
       { specifier: "all-type", typeOnly: true },
       { specifier: "mixed", typeOnly: false },
       { specifier: "with-default", typeOnly: false },
@@ -8832,6 +9626,7 @@ describe("参照の抽出（extractImports）", () => {
   // WHY re-export・default・* as・{} は印を持たない: re-export は presentation から domain の値を外へ出す。default と * as は
   //   名前で中身が分からない（モジュール全体・任意の値）。{} は名前が無い。
   it("名前がすべて UPPER_SNAKE_CASE の定数の import だけが、定数だけの印を持つ", () => {
+    // given
     const source = [
       'import { TODO_TITLE_MAX_LENGTH } from "constant";',
       'import { MAX_2, A } from "constants";',
@@ -8858,7 +9653,12 @@ describe("参照の抽出（extractImports）", () => {
       'import "side-effect";',
       'const m = import("dynamic");',
     ].join("\n");
-    expect(extractImports(source)).toEqual([
+
+    // when
+    const imports = extractImports(source);
+
+    // then
+    expect(imports).toEqual([
       { specifier: "constant", typeOnly: false, constantsOnly: true },
       { specifier: "constants", typeOnly: false, constantsOnly: true },
       { specifier: "constant-and-type", typeOnly: false, constantsOnly: true },
@@ -8884,17 +9684,24 @@ describe("参照の抽出（extractImports）", () => {
   });
 
   it("副作用だけの import と dynamic import を値の参照として取り出す", () => {
+    // given
     const source = [
       'import "./globals.css";',
       'const mod = await import("@/features/todo");',
     ].join("\n");
-    expect(extractImports(source)).toEqual([
+
+    // when
+    const imports = extractImports(source);
+
+    // then
+    expect(imports).toEqual([
       { specifier: "./globals.css", typeOnly: false },
       { specifier: "@/features/todo", typeOnly: false },
     ]);
   });
 
   it("コメントの中の import は拾わず、文字列の中の // でその後ろを消さない", () => {
+    // given
     const source = [
       '// 例: import { GET } from "@/backend/line-comment";',
       "/*",
@@ -8903,23 +9710,33 @@ describe("参照の抽出（extractImports）", () => {
       'const url = "https://example.com"; import { a } from "after-string";',
       "const s = '/* not a comment */'; import { b } from \"after-quote\";",
     ].join("\n");
-    expect(extractImports(source)).toEqual([
+
+    // when
+    const imports = extractImports(source);
+
+    // then
+    expect(imports).toEqual([
       { specifier: "after-string", typeOnly: false },
       { specifier: "after-quote", typeOnly: false },
     ]);
   });
 
   it("セミコロンの無い文の直後の import type を、前の文とつなげずに型だけの参照として取り出す", () => {
+    // given
     const source = [
       "export enum E { A }",
       'import type { X } from "after-enum";',
     ].join("\n");
-    expect(extractImports(source)).toEqual([
-      { specifier: "after-enum", typeOnly: true },
-    ]);
+
+    // when
+    const imports = extractImports(source);
+
+    // then
+    expect(imports).toEqual([{ specifier: "after-enum", typeOnly: true }]);
   });
 
   it("文字列リテラル（テンプレートリテラルを含む）の中の import 風の文字列は拾わない", () => {
+    // given
     const source = [
       "const a = 'import(\"@/backend/x\")';",
       "const b = 'import \"@/backend/y\"';",
@@ -8928,24 +9745,32 @@ describe("参照の抽出（extractImports）", () => {
       "`;",
       'import { real } from "real";',
     ].join("\n");
-    expect(extractImports(source)).toEqual([
-      { specifier: "real", typeOnly: false },
-    ]);
+
+    // when
+    const imports = extractImports(source);
+
+    // then
+    expect(imports).toEqual([{ specifier: "real", typeOnly: false }]);
   });
 
   it("埋め込み式（ドル記号と波かっこ）を含むテンプレートリテラルの import() は、参照先を静的に決められないので拾わない（見逃す方向の限界）", () => {
+    // given
     // WHY テンプレートリテラルで書く: 普通の文字列の中に埋め込み式の形を書くと Biome の noTemplateCurlyInString が
     //   書き間違いとして検出するため、\${ でエスケープして同じ文字列を作る。
     const source = [
       `const m = import(\`@/backend/\${name}/presentation/x.api\`);`,
       'import { real } from "real";',
     ].join("\n");
-    expect(extractImports(source)).toEqual([
-      { specifier: "real", typeOnly: false },
-    ]);
+
+    // when
+    const imports = extractImports(source);
+
+    // then
+    expect(imports).toEqual([{ specifier: "real", typeOnly: false }]);
   });
 
   it("from を持たない export 文から、後ろの文の from まで一致を伸ばさない", () => {
+    // given
     const source = [
       "export const GET = new ListTodosApi(new ListTodosQuery(repository)).handle;",
       "export default function Page() {",
@@ -8953,9 +9778,12 @@ describe("参照の抽出（extractImports）", () => {
       "}",
       'import { x } from "real";',
     ].join("\n");
-    expect(extractImports(source)).toEqual([
-      { specifier: "real", typeOnly: false },
-    ]);
+
+    // when
+    const imports = extractImports(source);
+
+    // then
+    expect(imports).toEqual([{ specifier: "real", typeOnly: false }]);
   });
 });
 
@@ -8964,12 +9792,15 @@ describe("参照先の正規化（toReference）", () => {
     "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.tsx";
 
   it('"@/" は apps/frontend_customer からのパスにする（tsconfig の paths の "@/*" は apps/frontend_customer/*）', () => {
-    expect(
-      toReference(from, {
-        specifier: "@/features/todo/api/todo-api",
-        typeOnly: true,
-      }),
-    ).toEqual({
+    // given: 前提なし
+    // when
+    const result = toReference(from, {
+      specifier: "@/features/todo/api/todo-api",
+      typeOnly: true,
+    });
+
+    // then
+    expect(result).toEqual({
       from,
       specifier: "@/features/todo/api/todo-api",
       to: "apps/frontend_customer/features/todo/api/todo-api",
@@ -8979,13 +9810,16 @@ describe("参照先の正規化（toReference）", () => {
   });
 
   it('"@repo/backend/" と "@repo/backend" は apps/backend からのパスにする', () => {
-    expect(
-      toReference(from, {
-        specifier:
-          "@repo/backend/features/todo/internal/presentation/list-todos.api.ts",
-        typeOnly: true,
-      }),
-    ).toEqual({
+    // given: 前提なし
+    // when
+    const result = toReference(from, {
+      specifier:
+        "@repo/backend/features/todo/internal/presentation/list-todos.api.ts",
+      typeOnly: true,
+    });
+
+    // then
+    expect(result).toEqual({
       from,
       specifier:
         "@repo/backend/features/todo/internal/presentation/list-todos.api.ts",
@@ -8993,33 +9827,60 @@ describe("参照先の正規化（toReference）", () => {
       own: true,
       typeOnly: true,
     });
-    expect(
-      toReference(from, { specifier: "@repo/backend", typeOnly: false }).to,
-    ).toBe("apps/backend");
+
+    // when
+    const to2 = toReference(from, {
+      specifier: "@repo/backend",
+      typeOnly: false,
+    }).to;
+
+    // then
+    expect(to2).toBe("apps/backend");
   });
 
   it('"@repo/shared/" と "@repo/shared" は apps/shared からのパスにし、"@repo/shared-extra/x" は自前のコードにしない（Issue #90）', () => {
-    expect(
-      toReference(from, { specifier: "@repo/shared/env.ts", typeOnly: false }),
-    ).toEqual({
+    // given: 前提なし
+    // when
+    const result = toReference(from, {
+      specifier: "@repo/shared/env.ts",
+      typeOnly: false,
+    });
+
+    // then
+    expect(result).toEqual({
       from,
       specifier: "@repo/shared/env.ts",
       to: "apps/shared/env",
       own: true,
       typeOnly: false,
     });
-    expect(
-      toReference(from, { specifier: "@repo/shared", typeOnly: false }).to,
-    ).toBe("apps/shared");
-    expect(
-      toReference(from, {
-        specifier: "@repo/shared/../backend/x",
-        typeOnly: false,
-      }).to,
-    ).toBe("apps/backend/x");
-    expect(
-      toReference(from, { specifier: "@repo/shared-extra/x", typeOnly: false }),
-    ).toEqual({
+
+    // when
+    const to2 = toReference(from, {
+      specifier: "@repo/shared",
+      typeOnly: false,
+    }).to;
+
+    // then
+    expect(to2).toBe("apps/shared");
+
+    // when
+    const to3 = toReference(from, {
+      specifier: "@repo/shared/../backend/x",
+      typeOnly: false,
+    }).to;
+
+    // then
+    expect(to3).toBe("apps/backend/x");
+
+    // when
+    const sharedExtraReference = toReference(from, {
+      specifier: "@repo/shared-extra/x",
+      typeOnly: false,
+    });
+
+    // then
+    expect(sharedExtraReference).toEqual({
       from,
       specifier: "@repo/shared-extra/x",
       to: "@repo/shared-extra/x",
@@ -9029,28 +9890,39 @@ describe("参照先の正規化（toReference）", () => {
   });
 
   it('"@/" と "@repo/backend/" の後ろの ".." は解決する（"@/../backend/x" は apps/backend/x）', () => {
-    expect(
-      toReference(from, {
-        specifier:
-          "@/../backend/features/todo/internal/presentation/list-todos.api",
-        typeOnly: true,
-      }).to,
-    ).toBe("apps/backend/features/todo/internal/presentation/list-todos.api");
-    expect(
-      toReference(from, {
-        specifier: "@repo/backend/../frontend_customer/features/todo",
-        typeOnly: false,
-      }).to,
-    ).toBe("apps/frontend_customer/features/todo");
+    // given: 前提なし
+    // when
+    const to2 = toReference(from, {
+      specifier:
+        "@/../backend/features/todo/internal/presentation/list-todos.api",
+      typeOnly: true,
+    }).to;
+
+    // then
+    expect(to2).toBe(
+      "apps/backend/features/todo/internal/presentation/list-todos.api",
+    );
+
+    // when
+    const to3 = toReference(from, {
+      specifier: "@repo/backend/../frontend_customer/features/todo",
+      typeOnly: false,
+    }).to;
+
+    // then
+    expect(to3).toBe("apps/frontend_customer/features/todo");
   });
 
   it('名前の前方一致だけが同じ別パッケージ（"@repo/backend-extra/x"）は自前のコードにしない', () => {
-    expect(
-      toReference(from, {
-        specifier: "@repo/backend-extra/x",
-        typeOnly: false,
-      }),
-    ).toEqual({
+    // given: 前提なし
+    // when
+    const result = toReference(from, {
+      specifier: "@repo/backend-extra/x",
+      typeOnly: false,
+    });
+
+    // then
+    expect(result).toEqual({
       from,
       specifier: "@repo/backend-extra/x",
       to: "@repo/backend-extra/x",
@@ -9060,31 +9932,43 @@ describe("参照先の正規化（toReference）", () => {
   });
 
   it("相対パスは参照元の位置から解決し、拡張子を外す", () => {
-    expect(
-      toReference(from, {
-        specifier: "../../components/todo-item.tsx",
-        typeOnly: false,
-      }),
-    ).toEqual({
+    // given: 前提なし
+    // when
+    const result = toReference(from, {
+      specifier: "../../components/todo-item.tsx",
+      typeOnly: false,
+    });
+
+    // then
+    expect(result).toEqual({
       from,
       specifier: "../../components/todo-item.tsx",
       to: "apps/frontend_customer/features/todo/components/todo-item",
       own: true,
       typeOnly: false,
     });
+
+    // when
+    const to2 = toReference(from, {
+      specifier: "../../../../../backend/features/todo/internal/domain/todo",
+      typeOnly: false,
+    }).to;
+
+    // then
     // apps をまたぐ相対パスも、リポジトリ相対のパスに解決する。
-    expect(
-      toReference(from, {
-        specifier: "../../../../../backend/features/todo/internal/domain/todo",
-        typeOnly: false,
-      }).to,
-    ).toBe("apps/backend/features/todo/internal/domain/todo");
+    expect(to2).toBe("apps/backend/features/todo/internal/domain/todo");
   });
 
   it("それ以外はパッケージとして specifier のまま扱う", () => {
-    expect(
-      toReference(from, { specifier: "next/link", typeOnly: false }),
-    ).toEqual({
+    // given: 前提なし
+    // when
+    const result = toReference(from, {
+      specifier: "next/link",
+      typeOnly: false,
+    });
+
+    // then
+    expect(result).toEqual({
       from,
       specifier: "next/link",
       to: "next/link",

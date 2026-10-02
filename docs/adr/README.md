@@ -81,6 +81,8 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-30 | Todo の完了の遷移は集約の子表（insert のみ）に積み、最新の状態は集約の現在値の列にも持つ | 採用 | [20260930-status-transitions-as-append-only-child-table.md](architecture/20260930-status-transitions-as-append-only-child-table.md) |
 | 2026-09-30 | command がトランザクションを張って Repository に渡し、Repository は insert / update に分け、変更履歴とログは書き込みの口 Writer が文ごとに記録する | 採用 | [20260930-transaction-from-application.md](architecture/20260930-transaction-from-application.md) |
 | 2026-10-02 | apps/backend の本番コードはクラスを基本にし、関数を export せず、補助の関数もクラスのメソッドにする | 採用 | [20261002-class-based-backend.md](architecture/20261002-class-based-backend.md) |
+| 2026-10-02 | クラスベースの対象を apps/shared とテストの補助（test-support・e2e の補助・spec の support.ts）に広げる | 採用 | [20261002-class-based-shared-and-test-support.md](architecture/20261002-class-based-shared-and-test-support.md) |
+| 2026-10-02 | クラスベースの対象を frontend の React 以外のモジュールに広げる | 採用 | [20261002-class-based-frontend-modules.md](architecture/20261002-class-based-frontend-modules.md) |
 
 ### tech-stack/
 言語・ツール・ライブラリの選定
@@ -109,6 +111,8 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-30 | API 1 つごとの仕様を Gherkin の .feature に業務の言葉で書き、実 DB で本番の組み立てを通して確かめる（API 仕様。apps/backend/spec/api/） | 採用 | [20260930-api-spec-in-feature.md](quality/20260930-api-spec-in-feature.md) |
 | 2026-10-01 | 書き込みの API 仕様は、メインの変更（作成 / 更新 / 削除）とレスポンスを別の Scenario に分け、見出しを一覧の順に並べる | 採用 | [20261001-api-spec-mutation-heading.md](quality/20261001-api-spec-mutation-heading.md) |
 | 2026-10-01 | 人が読む backend の仕様（API 仕様・API ジャーニー）を apps/backend/spec/ の下の api/ と journey/ にまとめる | 採用 | [20261001-backend-spec-directory.md](quality/20261001-backend-spec-directory.md) |
+| 2026-10-02 | E2E を API ジャーニーと同じ Gherkin の .feature と step のクラスで書き、playwright-bdd で Playwright のランナーのまま実行する | 採用 | [20261002-e2e-in-gherkin-with-playwright-bdd.md](quality/20261002-e2e-in-gherkin-with-playwright-bdd.md) |
+| 2026-10-02 | API ジャーニーの実行で全 API が 1 回は呼ばれることを API 網羅率として測り、100% を CI のゲートにする | 採用 | [20261002-api-journey-coverage-gate.md](quality/20261002-api-journey-coverage-gate.md) |
 
 ### workflow/
 開発プロセス・環境・AI エージェントの運用

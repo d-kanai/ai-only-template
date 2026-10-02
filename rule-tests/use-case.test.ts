@@ -294,7 +294,12 @@ describe("command の入力の判定（findUseCaseViolations）: must pass", () 
       ),
     ],
   ])("%s は違反なし", (_name, text) => {
-    expect(findUseCaseViolations(text)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findUseCaseViolations(text);
+
+    // then
+    expect(violations).toEqual([]);
   });
 });
 
@@ -392,7 +397,12 @@ describe("command の入力の判定（findUseCaseViolations）: must reject", (
       ],
     ],
   ])("%s は違反", (_name, text, expected) => {
-    expect(findUseCaseViolations(text)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const violations = findUseCaseViolations(text);
+
+    // then
+    expect(violations).toEqual(expected);
   });
 });
 
@@ -447,7 +457,12 @@ describe("command のトランザクションの判定（findCommandTransactionV
       ),
     ],
   ])("%s は違反なし", (_name, text) => {
-    expect(findCommandTransactionViolations(text)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findCommandTransactionViolations(text);
+
+    // then
+    expect(violations).toEqual([]);
   });
 });
 
@@ -532,7 +547,12 @@ describe("command のトランザクションの判定（findCommandTransactionV
       [{ rule: "command-runs-in-transaction", line: 2 }],
     ],
   ])("%s は違反", (_name, text, expected) => {
-    expect(findCommandTransactionViolations(text)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const violations = findCommandTransactionViolations(text);
+
+    // then
+    expect(violations).toEqual(expected);
   });
 });
 
@@ -564,6 +584,7 @@ describe("command / query の列挙と検査（fixture）", () => {
   );
 
   it("features/<f>/internal/application/*.command.ts・*.query.ts だけを対象にし、違反を「規則: パス:行: 行の内容」で返す", () => {
+    // given
     const root = fixture({
       "apps/backend/features/x/internal/application/rename-x.command.ts":
         source(
@@ -619,10 +640,15 @@ describe("command / query の列挙と検査（fixture）", () => {
       "apps/frontend_customer/features/x/application/y.command.ts":
         partialUpdate,
     });
-    expect({
+
+    // when
+    const result = {
       files: listUseCaseFiles(root),
       violations: collectUseCaseViolations(root),
-    }).toEqual({
+    };
+
+    // then
+    expect(result).toEqual({
       files: [
         "apps/backend/features/x/internal/application/delete-x.command.ts",
         "apps/backend/features/x/internal/application/list-x.query.ts",
@@ -638,24 +664,35 @@ describe("command / query の列挙と検査（fixture）", () => {
   });
 
   it("apps/backend/features が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）", () => {
+    // given
     const root = fixture({ "README.md": "# x\n" });
-    expect({
+
+    // when
+    const result = {
       files: listUseCaseFiles(root),
       violations: collectUseCaseViolations(root),
-    }).toEqual({ files: [], violations: [] });
+    };
+
+    // then
+    expect(result).toEqual({ files: [], violations: [] });
   });
 });
 
 describe("1 ユースケース = 1 command（実ファイル）", () => {
   it("command / query の Input に任意の項目が無く、input の項目の有無で分岐せず、command の execute はトランザクション（runner の run）で包む", () => {
-    // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
+    // given: 実ファイル（repoRoot）
+    // when
     const files = listUseCaseFiles(repoRoot);
+    const violations = collectUseCaseViolations(repoRoot);
+
+    // then
+    // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     expect(files).toContain(
       "apps/backend/features/todo/internal/application/rename-todo.command.ts",
     );
     expect(files).toContain(
       "apps/backend/features/todo/internal/application/list-todos.query.ts",
     );
-    expect(collectUseCaseViolations(repoRoot)).toEqual([]);
+    expect(violations).toEqual([]);
   });
 });

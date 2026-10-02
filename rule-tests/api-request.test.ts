@@ -155,7 +155,12 @@ describe("リクエストの任意項目の判定（findOptionalViolations）: m
       ),
     ],
   ])("%s は違反なし", (_name, text) => {
-    expect(findOptionalViolations(text)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findOptionalViolations(text);
+
+    // then
+    expect(violations).toEqual([]);
   });
 });
 
@@ -262,7 +267,12 @@ describe("リクエストの任意項目の判定（findOptionalViolations）: m
       [1],
     ],
   ])("%s は違反", (_name, text, expected) => {
-    expect(findOptionalViolations(text)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const violations = findOptionalViolations(text);
+
+    // then
+    expect(violations).toEqual(expected);
   });
 });
 
@@ -293,6 +303,7 @@ describe("api ファイルの列挙と検査（fixture）", () => {
   );
 
   it("features/<f>/internal/presentation/*.api.ts だけを対象にし、違反を「パス:行: 行の内容」で返す", () => {
+    // given
     const root = fixture({
       "apps/backend/features/a/internal/presentation/rename-a.api.ts": source(
         "RequestBody.schema({",
@@ -325,10 +336,15 @@ describe("api ファイルの列挙と検査（fixture）", () => {
       "apps/backend/features/a/presentation/old-a.api.ts": partialUpdate,
       "apps/frontend_customer/features/a/presentation/x.api.ts": partialUpdate,
     });
-    expect({
+
+    // when
+    const result = {
       files: listApiFiles(root),
       violations: collectApiRequestViolations(root),
-    }).toEqual({
+    };
+
+    // then
+    expect(result).toEqual({
       files: [
         "apps/backend/features/a/internal/presentation/rename-a.api.ts",
         "apps/backend/features/a/internal/presentation/update-a.api.ts",
@@ -342,20 +358,32 @@ describe("api ファイルの列挙と検査（fixture）", () => {
   });
 
   it("apps/backend/features が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）", () => {
+    // given
     const root = fixture({ "README.md": "# x\n" });
-    expect({
+
+    // when
+    const result = {
       files: listApiFiles(root),
       violations: collectApiRequestViolations(root),
-    }).toEqual({ files: [], violations: [] });
+    };
+
+    // then
+    expect(result).toEqual({ files: [], violations: [] });
   });
 });
 
 describe("リクエストの任意項目（実ファイル）", () => {
   it("apps/backend/features/*/internal/presentation/*.api.ts は .optional() を WHY 任意: 無しで使わない", () => {
+    // given: 実ファイル（repoRoot）
+    // when
+    const files = listApiFiles(repoRoot);
+    const violations = collectApiRequestViolations(repoRoot);
+
+    // then
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
-    expect(listApiFiles(repoRoot)).toContain(
+    expect(files).toContain(
       "apps/backend/features/todo/internal/presentation/create-todo.api.ts",
     );
-    expect(collectApiRequestViolations(repoRoot)).toEqual([]);
+    expect(violations).toEqual([]);
   });
 });

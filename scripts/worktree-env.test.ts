@@ -49,9 +49,13 @@ const MINIMAL = [
 
 describe("worktree-env.sh（must pass: 導出した値）", () => {
   it("リポジトリの .env.example から、DATABASE_URL のデータベース名と E2E_PORT だけを worktree の名前から導いた値に置き換える", () => {
+    // given
     const example = readFileSync(join(repoRoot, ".env.example"), "utf8");
+
+    // when
     const result = run(["agent-a3f2", join(repoRoot, ".env.example")]);
 
+    // then
     expect(result.status).toBe(0);
     expect(dotenvValue(result.stdout, "DATABASE_URL")).toBe(
       "postgresql://app:app@localhost:5432/app_wt_agent_a3f2",
@@ -74,8 +78,13 @@ describe("worktree-env.sh（must pass: 導出した値）", () => {
   });
 
   it("DATABASE_URL と E2E_PORT 以外の行（コメント・空行・他の変数）はそのまま出す", () => {
-    const result = run(["feat-64", exampleFile("minimal.env", MINIMAL)]);
+    // given
+    const example = exampleFile("minimal.env", MINIMAL);
 
+    // when
+    const result = run(["feat-64", example]);
+
+    // then
     expect(result.status).toBe(0);
     expect(result.stdout.split("\n").slice(1).join("\n")).toBe(
       [
@@ -91,34 +100,44 @@ describe("worktree-env.sh（must pass: 導出した値）", () => {
   });
 
   it("DATABASE_URL のクエリ（?sslmode=...）は残し、パスのデータベース名だけを置き換える", () => {
-    const result = run([
-      "feat-64",
-      exampleFile(
-        "query.env",
-        "DATABASE_URL=postgresql://u:p@db.example:6543/main?sslmode=disable\nE2E_PORT=3100\n",
-      ),
-    ]);
+    // given
+    const example = exampleFile(
+      "query.env",
+      "DATABASE_URL=postgresql://u:p@db.example:6543/main?sslmode=disable\nE2E_PORT=3100\n",
+    );
 
+    // when
+    const result = run(["feat-64", example]);
+
+    // then
     expect(dotenvValue(result.stdout, "DATABASE_URL")).toBe(
       "postgresql://u:p@db.example:6543/app_wt_feat_64?sslmode=disable",
     );
   });
 
   it("同じ名前からは何度実行しても同じ内容になる（決定的）", () => {
+    // given
     const example = exampleFile("determinism.env", MINIMAL);
+
+    // when
     const first = run(["bold-oak-a3f2", example]);
     const second = run(["bold-oak-a3f2", example]);
 
+    // then
     expect(first.status).toBe(0);
     expect(second.stdout).toBe(first.stdout);
     expect(dotenvValue(first.stdout, "E2E_PORT")).toBe("3693");
   });
 
   it("名前が違えば、データベース名もポートも違う値になる", () => {
+    // given
     const example = exampleFile("distinct.env", MINIMAL);
+
+    // when
     const a = run(["agent-a3f2", example]).stdout;
     const b = run(["feat-64", example]).stdout;
 
+    // then
     expect(dotenvValue(a, "DATABASE_URL")).not.toBe(
       dotenvValue(b, "DATABASE_URL"),
     );
@@ -126,11 +145,15 @@ describe("worktree-env.sh（must pass: 導出した値）", () => {
   });
 
   it("E2E_PORT は 3101〜3900 に収まり、メインの 3100 と重ならない", () => {
+    // given
     const example = exampleFile("range.env", MINIMAL);
+
+    // when
     const ports = Array.from({ length: 40 }, (_, i) =>
       Number(dotenvValue(run([`agent-${i}`, example]).stdout, "E2E_PORT")),
     );
 
+    // then
     for (const port of ports) {
       expect(port).toBeGreaterThanOrEqual(3101);
       expect(port).toBeLessThanOrEqual(3900);
@@ -162,12 +185,20 @@ describe("worktree_db_name（データベース名の sanitize）", () => {
     ["64-fix", "app_wt__64_fix", "先頭が数字なら _ を前に付ける"],
     ["a_b", "app_wt_a_b", "_ はそのまま"],
   ])("%s → %s（%s）", (name, expected) => {
-    expect(dbName(name)).toBe(expected);
+    // given: it.each の name と expected
+    // when
+    const actual = dbName(name);
+
+    // then
+    expect(actual).toBe(expected);
   });
 
   it("長い名前は、Postgres の識別子の上限（63 バイト）に収まるよう app_wt_ を含めて 63 文字に切る", () => {
+    // given: 前提なし（100 文字の名前を渡す）
+    // when
     const name = dbName("a".repeat(100));
 
+    // then
     expect(name).toBe(`app_wt_${"a".repeat(56)}`);
     expect(name.length).toBe(63);
   });
@@ -175,8 +206,13 @@ describe("worktree_db_name（データベース名の sanitize）", () => {
 
 describe("worktree-env.sh（must reject: 分離できない入力は失敗する）", () => {
   it("名前が空なら、何も出さずに失敗する", () => {
-    const result = run(["", exampleFile("empty-name.env", MINIMAL)]);
+    // given
+    const example = exampleFile("empty-name.env", MINIMAL);
 
+    // when
+    const result = run(["", example]);
+
+    // then
     expect(result.status).not.toBe(0);
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("usage");
@@ -188,11 +224,13 @@ describe("worktree-env.sh（must reject: 分離できない入力は失敗する
   ])(
     ".env.example に %s が無ければ、その名前を出して失敗する（分離されないまま共有のリソースを指す .env を作らない）",
     (missing, content) => {
-      const result = run([
-        "feat-64",
-        exampleFile(`no-${missing}.env`, content),
-      ]);
+      // given
+      const example = exampleFile(`no-${missing}.env`, content);
 
+      // when
+      const result = run(["feat-64", example]);
+
+      // then
       expect(result.status).not.toBe(0);
       expect(result.stdout).toBe("");
       expect(result.stderr).toContain(missing);
@@ -200,22 +238,27 @@ describe("worktree-env.sh（must reject: 分離できない入力は失敗する
   );
 
   it("DATABASE_URL にデータベース名のパスが無ければ失敗する（置き換える場所が無い）", () => {
-    const result = run([
-      "feat-64",
-      exampleFile(
-        "no-path.env",
-        "DATABASE_URL=postgresql://app:app@localhost:5432\nE2E_PORT=3100\n",
-      ),
-    ]);
+    // given
+    const example = exampleFile(
+      "no-path.env",
+      "DATABASE_URL=postgresql://app:app@localhost:5432\nE2E_PORT=3100\n",
+    );
 
+    // when
+    const result = run(["feat-64", example]);
+
+    // then
     expect(result.status).not.toBe(0);
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("DATABASE_URL");
   });
 
   it(".env.example が無ければ失敗する", () => {
+    // given: 前提なし（存在しないパスを渡す）
+    // when
     const result = run(["feat-64", join(workDir, "missing.env")]);
 
+    // then
     expect(result.status).not.toBe(0);
     expect(result.stdout).toBe("");
   });

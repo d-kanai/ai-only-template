@@ -8,20 +8,28 @@ import { GetTodoQuery } from "./get-todo.query";
 
 describe("GetTodoQuery", () => {
   test("id に一致する Todo を返す", async () => {
+    // given
     const repository = new InMemoryTodoRepository();
     const todo = Todo.create("牛乳を買う");
     await repository.insert(todo, inMemoryTransaction);
 
-    await expect(
-      new GetTodoQuery(repository).execute(todo.id),
-    ).resolves.toEqual(todo);
+    // when
+    const found = new GetTodoQuery(repository).execute(todo.id);
+
+    // then
+    await expect(found).resolves.toEqual(todo);
   });
 
   test("無ければ、その id を params に持つ DomainError(not_found, todo.notFound) を投げる", async () => {
+    // given
     const query = new GetTodoQuery(new InMemoryTodoRepository());
 
-    await expect(query.execute("missing")).rejects.toBeInstanceOf(DomainError);
-    await expect(query.execute("missing")).rejects.toMatchObject({
+    // when
+    const action = () => query.execute("missing");
+
+    // then
+    await expect(action()).rejects.toBeInstanceOf(DomainError);
+    await expect(action()).rejects.toMatchObject({
       code: "not_found",
       key: "todo.notFound",
       params: { id: "missing" },

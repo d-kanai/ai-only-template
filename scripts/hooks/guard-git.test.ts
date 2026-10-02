@@ -131,7 +131,11 @@ describe("サブエージェント（agent_type / agent_id がある）", () => 
     // 誤検知として受け入れる例（.claude/rules/git-guard.md の「誤検知」）: 文字列の中の git commit も拒否する。
     ['echo "git commit -m x"'],
   ])("%s は拒否する", (command) => {
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
     const result = bash(command, () => featureRepo, SUBAGENT)();
+
+    // then
     expect(result.denied).toBe(true);
     expect(result.reason).toContain("サブエージェント");
   });
@@ -153,20 +157,33 @@ describe("サブエージェント（agent_type / agent_id がある）", () => 
     ["gh pr list"],
     ["pnpm test"],
   ])("%s は許可する", (command) => {
-    expect(bash(command, () => featureRepo, SUBAGENT)().denied).toBe(false);
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
+    const result = bash(command, () => featureRepo, SUBAGENT)();
+
+    // then
+    expect(result.denied).toBe(false);
   });
 
   it("agent_id だけがあってもサブエージェントとして拒否する", () => {
+    // given: 前提なし（agent_id だけを渡す）
+    // when
     const result = bash("git commit -m x", () => featureRepo, {
       agent_id: "agent-123",
     })();
+
+    // then
     expect(result.denied).toBe(true);
   });
 
   it("agent_type だけがあってもサブエージェントとして拒否する", () => {
+    // given: 前提なし（agent_type だけを渡す）
+    // when
     const result = bash("git commit -m x", () => featureRepo, {
       agent_type: "worker",
     })();
+
+    // then
     expect(result.denied).toBe(true);
   });
 
@@ -178,12 +195,16 @@ describe("サブエージェント（agent_type / agent_id がある）", () => 
     ["mcp__github__delete_file"],
     ["mcp__github__update_pull_request_branch"],
   ])("MCP の書き込みツール %s は拒否する", (toolName) => {
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
     const result = decide({
       tool_name: toolName,
       tool_input: { owner: "o", repo: "r", branch: "feat/1-x" },
       cwd: featureRepo,
       ...SUBAGENT,
     });
+
+    // then
     expect(result.denied).toBe(true);
     expect(result.reason).toContain(toolName);
   });
@@ -193,12 +214,16 @@ describe("サブエージェント（agent_type / agent_id がある）", () => 
     ["mcp__github__pull_request_read"],
     ["Read"],
   ])("書き込みでないツール %s は許可する", (toolName) => {
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
     const result = decide({
       tool_name: toolName,
       tool_input: {},
       cwd: featureRepo,
       ...SUBAGENT,
     });
+
+    // then
     expect(result.denied).toBe(false);
   });
 });
@@ -212,21 +237,35 @@ describe("メイン（agent_type / agent_id が無い）", () => {
 
   describe.each(MAIN_AGENTS)("%s", (_label, agent) => {
     it("feature ブランチでの git commit は許可する", () => {
-      expect(bash("git commit -m x", () => featureRepo, agent)().denied).toBe(
-        false,
-      );
+      // given: 前提なし（リポジトリは beforeAll で作成済み）
+      // when
+      const result = bash("git commit -m x", () => featureRepo, agent)();
+
+      // then
+      expect(result.denied).toBe(false);
     });
 
     it("main での git commit は拒否する", () => {
+      // given: 前提なし（リポジトリは beforeAll で作成済み）
+      // when
       const result = bash("git commit -m x", () => mainRepo, agent)();
+
+      // then
       expect(result.denied).toBe(true);
       expect(result.reason).toContain("main");
     });
 
     it("git push --force は拒否する", () => {
-      expect(
-        bash("git push --force origin feat", () => featureRepo, agent)().denied,
-      ).toBe(true);
+      // given: 前提なし（リポジトリは beforeAll で作成済み）
+      // when
+      const result = bash(
+        "git push --force origin feat",
+        () => featureRepo,
+        agent,
+      )();
+
+      // then
+      expect(result.denied).toBe(true);
     });
   });
 
@@ -254,7 +293,12 @@ describe("メイン（agent_type / agent_id が無い）", () => {
       ["bash -c 'git push origin main'"],
       ["git push --no-verify origin feat/1-x"],
     ])("%s は拒否する", (command) => {
-      expect(bash(command, () => featureRepo)().denied).toBe(true);
+      // given: 前提なし（リポジトリは beforeAll で作成済み）
+      // when
+      const result = bash(command, () => featureRepo)();
+
+      // then
+      expect(result.denied).toBe(true);
     });
 
     it.each([
@@ -271,11 +315,21 @@ describe("メイン（agent_type / agent_id が無い）", () => {
       ["git fetch origin main"],
       ["git log main..HEAD"],
     ])("%s は許可する", (command) => {
-      expect(bash(command, () => featureRepo)().denied).toBe(false);
+      // given: 前提なし（リポジトリは beforeAll で作成済み）
+      // when
+      const result = bash(command, () => featureRepo)();
+
+      // then
+      expect(result.denied).toBe(false);
     });
 
     it("main で引数なしの git push は拒否する（プッシュ先がカレントブランチ = main になるため）", () => {
-      expect(bash("git push", () => mainRepo)().denied).toBe(true);
+      // given: 前提なし（リポジトリは beforeAll で作成済み）
+      // when
+      const result = bash("git push", () => mainRepo)();
+
+      // then
+      expect(result.denied).toBe(true);
       expect(bash("git push origin", () => mainRepo)().denied).toBe(true);
       expect(bash("git push -u origin", () => mainRepo)().denied).toBe(true);
       expect(bash("git push -u origin HEAD", () => mainRepo)().denied).toBe(
@@ -284,9 +338,12 @@ describe("メイン（agent_type / agent_id が無い）", () => {
     });
 
     it("main でもプッシュ先を明示した feature ブランチへの git push は許可する", () => {
-      expect(bash("git push origin feat/1-x", () => mainRepo)().denied).toBe(
-        false,
-      );
+      // given: 前提なし（リポジトリは beforeAll で作成済み）
+      // when
+      const result = bash("git push origin feat/1-x", () => mainRepo)();
+
+      // then
+      expect(result.denied).toBe(false);
     });
   });
 
@@ -307,8 +364,13 @@ describe("メイン（agent_type / agent_id が無い）", () => {
       ["export LEFTHOOK=0 && git commit -m x", () => featureRepo],
       ["git merge --squash feat/2-y", () => featureRepo],
     ])("%s は拒否する", (command, cwd) => {
+      // given
       const resolved = command.replace("MAIN", mainRepo);
-      expect(bash(resolved, cwd)().denied).toBe(true);
+      // when
+      const result = bash(resolved, cwd)();
+
+      // then
+      expect(result.denied).toBe(true);
     });
 
     it.each([
@@ -328,8 +390,13 @@ describe("メイン（agent_type / agent_id が無い）", () => {
       // git リポジトリでない場所ではカレントブランチが分からないので判定しない。
       ["git commit -m x", () => notRepo],
     ])("%s は許可する", (command, cwd) => {
+      // given
       const resolved = command.replace("FEATURE", featureRepo);
-      expect(bash(resolved, cwd)().denied).toBe(false);
+      // when
+      const result = bash(resolved, cwd)();
+
+      // then
+      expect(result.denied).toBe(false);
     });
   });
 
@@ -340,34 +407,52 @@ describe("メイン（agent_type / agent_id が無い）", () => {
       ["gh pr merge 12 --rebase"],
       ["gh pr merge 12 -r"],
     ])("%s は拒否する", (command) => {
-      expect(bash(command, () => featureRepo)().denied).toBe(true);
+      // given: 前提なし（リポジトリは beforeAll で作成済み）
+      // when
+      const result = bash(command, () => featureRepo)();
+
+      // then
+      expect(result.denied).toBe(true);
     });
 
     it.each([
       ["gh pr merge 12 --merge"],
       ["gh pr create --fill --label chore"],
     ])("%s は許可する", (command) => {
-      expect(bash(command, () => featureRepo)().denied).toBe(false);
+      // given: 前提なし（リポジトリは beforeAll で作成済み）
+      // when
+      const result = bash(command, () => featureRepo)();
+
+      // then
+      expect(result.denied).toBe(false);
     });
 
     it.each([["squash"], ["rebase"]])(
       "merge_pull_request の merge_method が %s なら拒否する",
       (method) => {
+        // given: 前提なし（リポジトリは beforeAll で作成済み）
+        // when
         const result = decide({
           tool_name: "mcp__github__merge_pull_request",
           tool_input: { pullNumber: 1, merge_method: method },
           cwd: featureRepo,
         });
+
+        // then
         expect(result.denied).toBe(true);
       },
     );
 
     it("merge_pull_request の merge_method が merge なら許可する", () => {
+      // given: 前提なし（リポジトリは beforeAll で作成済み）
+      // when
       const result = decide({
         tool_name: "mcp__github__merge_pull_request",
         tool_input: { pullNumber: 1, merge_method: "merge" },
         cwd: featureRepo,
       });
+
+      // then
       expect(result.denied).toBe(false);
     });
 
@@ -376,6 +461,8 @@ describe("メイン（agent_type / agent_id が無い）", () => {
       ["mcp__github__create_or_update_file"],
       ["mcp__github__delete_file"],
     ])("%s で branch が main なら拒否し、feature なら許可する", (toolName) => {
+      // given: 前提なし（リポジトリは beforeAll で作成済み）
+      // when
       const toMain = decide({
         tool_name: toolName,
         tool_input: { branch: "main" },
@@ -386,15 +473,21 @@ describe("メイン（agent_type / agent_id が無い）", () => {
         tool_input: { branch: "feat/1-x" },
         cwd: featureRepo,
       });
+
+      // then
       expect([toMain.denied, toFeature.denied]).toEqual([true, false]);
     });
 
     it("create_pull_request は許可する", () => {
+      // given: 前提なし（リポジトリは beforeAll で作成済み）
+      // when
       const result = decide({
         tool_name: "mcp__github__create_pull_request",
         tool_input: { head: "feat/1-x", base: "main" },
         cwd: featureRepo,
       });
+
+      // then
       expect(result.denied).toBe(false);
     });
   });
@@ -402,12 +495,18 @@ describe("メイン（agent_type / agent_id が無い）", () => {
 
 describe("入力を読めないとき", () => {
   it("JSON でない入力は拒否せず（exit 0・stdout なし）、stderr に理由を出す", () => {
+    // given: 前提なし（JSON でない文字列を渡す）
+    // when
     const result = runGuard("not json");
+
+    // then
     expect([result.status, result.stdout]).toEqual([0, ""]);
     expect(result.stderr).toContain("guard-git");
   });
 
   it("node が無いときは拒否せず（exit 0・stdout なし）、stderr に理由を出す", () => {
+    // given: 前提なし（PATH から node を見つけられなくする）
+    // when
     const result = runGuard(
       {
         tool_name: "Bash",
@@ -417,16 +516,22 @@ describe("入力を読めないとき", () => {
       // WHY process.env を展開する: 型（Next の型定義で NODE_ENV が必須）を満たすため。node を見つけられなくするのは PATH だけで足りる。
       { ...process.env, PATH: join(workDir, "no-such-bin") },
     );
+
+    // then
     expect([result.status, result.stdout]).toEqual([0, ""]);
     expect(result.stderr).toContain("node");
   });
 
   it("command が無い Bash の入力は許可する", () => {
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
     const result = decide({
       tool_name: "Bash",
       tool_input: {},
       cwd: featureRepo,
     });
+
+    // then
     expect(result.denied).toBe(false);
   });
 });
@@ -456,7 +561,12 @@ describe("長いオプションの省略形（git は一意な接頭辞を受け
     ["git merge --squas feat/2-y"],
     ["git merge --sq feat/2-y"],
   ])("%s は拒否する", (command) => {
-    expect(bash(command, () => featureRepo)().denied).toBe(true);
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
+    const result = bash(command, () => featureRepo)();
+
+    // then
+    expect(result.denied).toBe(true);
   });
 
   it.each([
@@ -478,7 +588,12 @@ describe("長いオプションの省略形（git は一意な接頭辞を受け
     ["git push --fo origin feat/1-x"],
     ["git push --a origin feat/1-x"],
   ])("%s は許可する", (command) => {
-    expect(bash(command, () => featureRepo)().denied).toBe(false);
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
+    const result = bash(command, () => featureRepo)();
+
+    // then
+    expect(result.denied).toBe(false);
   });
 });
 
@@ -496,7 +611,12 @@ describe("フックを飛ばす設定と環境変数", () => {
     ["LEFTHOOK_BIN=true git commit -m x"],
     ["LEFTHOOK_CONFIG=/tmp/empty.yml git commit -m x"],
   ])("%s は拒否する", (command) => {
-    expect(bash(command, () => featureRepo)().denied).toBe(true);
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
+    const result = bash(command, () => featureRepo)();
+
+    // then
+    expect(result.denied).toBe(true);
   });
 
   it.each([
@@ -505,7 +625,12 @@ describe("フックを飛ばす設定と環境変数", () => {
     ["LEFTHOOK_VERBOSE=1 git commit -m x"],
     ["LEFTHOOK_OUTPUT=summary git commit -m x"],
   ])("%s は許可する", (command) => {
-    expect(bash(command, () => featureRepo)().denied).toBe(false);
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
+    const result = bash(command, () => featureRepo)();
+
+    // then
+    expect(result.denied).toBe(false);
   });
 });
 
@@ -518,7 +643,12 @@ describe("gh pr merge の書き方（pflag は省略形を受け付けないが�
     ["gh pr merge 12 -rd"],
     ["gh pr merge 12 --delete-branch --squash"],
   ])("%s は拒否する", (command) => {
-    expect(bash(command, () => featureRepo)().denied).toBe(true);
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
+    const result = bash(command, () => featureRepo)();
+
+    // then
+    expect(result.denied).toBe(true);
   });
 
   it.each([
@@ -528,7 +658,12 @@ describe("gh pr merge の書き方（pflag は省略形を受け付けないが�
     // -t の値（件名）の中の s は -s ではない。
     ["gh pr merge 12 --merge -tsubject"],
   ])("%s は許可する", (command) => {
-    expect(bash(command, () => featureRepo)().denied).toBe(false);
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
+    const result = bash(command, () => featureRepo)();
+
+    // then
+    expect(result.denied).toBe(false);
   });
 });
 
@@ -539,13 +674,21 @@ describe("push のオプションの値を読み飛ばす", () => {
     ["git push origin --push-option ci.skip"],
     ["git push -o ci.skip"],
   ])("main で %s は拒否する", (command) => {
-    expect(bash(command, () => mainRepo)().denied).toBe(true);
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
+    const result = bash(command, () => mainRepo)();
+
+    // then
+    expect(result.denied).toBe(true);
   });
 
   it("feature で git push origin -o ci.skip は許可する", () => {
-    expect(bash("git push origin -o ci.skip", () => featureRepo)().denied).toBe(
-      false,
-    );
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
+    const result = bash("git push origin -o ci.skip", () => featureRepo)();
+
+    // then
+    expect(result.denied).toBe(false);
   });
 });
 
@@ -557,8 +700,13 @@ describe("コマンド置換・cd・--git-dir でブランチの場所が変わ�
     ["git --git-dir=MAIN/.git commit -m x"],
     ["git --git-dir MAIN/.git commit -m x"],
   ])("feature から %s は拒否する（main のリポジトリで判定する）", (command) => {
+    // given
     const resolved = command.replace("MAIN", mainRepo);
-    expect(bash(resolved, () => featureRepo)().denied).toBe(true);
+    // when
+    const result = bash(resolved, () => featureRepo)();
+
+    // then
+    expect(result.denied).toBe(true);
   });
 
   it.each([
@@ -566,17 +714,28 @@ describe("コマンド置換・cd・--git-dir でブランチの場所が変わ�
     ["git --git-dir=FEATURE/.git commit -m x"],
     ["cd FEATURE && git merge main"],
   ])("main から %s は許可する（feature のリポジトリで判定する）", (command) => {
+    // given
     const resolved = command.replace("FEATURE", featureRepo);
-    expect(bash(resolved, () => mainRepo)().denied).toBe(false);
+    // when
+    const result = bash(resolved, () => mainRepo)();
+
+    // then
+    expect(result.denied).toBe(false);
   });
 
   it("サブシェルの中の cd は、サブシェルを閉じた後のコマンドに効かない", () => {
+    // given
     const outside = `(cd ${featureRepo}) && git commit -m x`;
     const inside = `(cd ${featureRepo} && git commit -m x)`;
-    expect([
+
+    // when
+    const denied = [
       bash(outside, () => mainRepo)().denied,
       bash(inside, () => mainRepo)().denied,
-    ]).toEqual([true, false]);
+    ];
+
+    // then
+    expect(denied).toEqual([true, false]);
   });
 });
 
@@ -596,7 +755,11 @@ describe("サブエージェントの追加の拒否", () => {
     ["git config alias.ci commit"],
     ["git config --global alias.ci commit"],
   ])("%s は拒否する", (command) => {
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
     const result = bash(command, () => featureRepo, SUBAGENT)();
+
+    // then
     expect(result.denied).toBe(true);
     expect(result.reason).toContain("サブエージェント");
   });
@@ -608,7 +771,12 @@ describe("サブエージェントの追加の拒否", () => {
     ["git log --grep=alias.x"],
     ["git fetch origin"],
   ])("%s は許可する", (command) => {
-    expect(bash(command, () => featureRepo, SUBAGENT)().denied).toBe(false);
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
+    const result = bash(command, () => featureRepo, SUBAGENT)();
+
+    // then
+    expect(result.denied).toBe(false);
   });
 });
 
@@ -620,7 +788,12 @@ describe("同じコマンドの中でブランチを切り替えてから commit
   ])(
     "feature から %s は拒否する（切り替えた後の main で判定する）",
     (command) => {
-      expect(bash(command, () => featureRepo)().denied).toBe(true);
+      // given: 前提なし（リポジトリは beforeAll で作成済み）
+      // when
+      const result = bash(command, () => featureRepo)();
+
+      // then
+      expect(result.denied).toBe(true);
     },
   );
 
@@ -629,13 +802,24 @@ describe("同じコマンドの中でブランチを切り替えてから commit
     ["git switch -c feat/2-y && git commit -m x"],
     ["git checkout main && git checkout -b feat/2-y && git commit -m x"],
   ])("main から %s は許可する（新しいブランチで判定する）", (command) => {
-    expect(bash(command, () => mainRepo)().denied).toBe(false);
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
+    const result = bash(command, () => mainRepo)();
+
+    // then
+    expect(result.denied).toBe(false);
   });
 
   it("ブランチでないもの（ファイル）の checkout の後は、今のブランチで判定する", () => {
-    expect(
-      bash("git checkout -- x.ts && git commit -m x", () => mainRepo)().denied,
-    ).toBe(true);
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
+    const result = bash(
+      "git checkout -- x.ts && git commit -m x",
+      () => mainRepo,
+    )();
+
+    // then
+    expect(result.denied).toBe(true);
   });
 });
 
@@ -647,13 +831,23 @@ describe("main を含みうる push", () => {
     ["git push origin refs/heads/*:refs/heads/*"],
     ["git push origin *:*"],
   ])("%s は拒否する", (command) => {
-    expect(bash(command, () => featureRepo)().denied).toBe(true);
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
+    const result = bash(command, () => featureRepo)();
+
+    // then
+    expect(result.denied).toBe(true);
   });
 
   it.each([["git push --atomic origin feat/1-x"], ["git push --tags origin"]])(
     "%s は許可する",
     (command) => {
-      expect(bash(command, () => featureRepo)().denied).toBe(false);
+      // given: 前提なし（リポジトリは beforeAll で作成済み）
+      // when
+      const result = bash(command, () => featureRepo)();
+
+      // then
+      expect(result.denied).toBe(false);
     },
   );
 });
@@ -663,12 +857,20 @@ describe("サブエージェントの低レベルのコミット操作", () => {
     ["git commit-tree HEAD^{tree} -m x"],
     ["git update-ref refs/heads/main 0123abc"],
   ])("%s は拒否する", (command) => {
-    expect(bash(command, () => featureRepo, SUBAGENT)().denied).toBe(true);
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
+    const result = bash(command, () => featureRepo, SUBAGENT)();
+
+    // then
+    expect(result.denied).toBe(true);
   });
 
   it("git rev-parse HEAD は許可する", () => {
-    expect(
-      bash("git rev-parse HEAD", () => featureRepo, SUBAGENT)().denied,
-    ).toBe(false);
+    // given: 前提なし（リポジトリは beforeAll で作成済み）
+    // when
+    const result = bash("git rev-parse HEAD", () => featureRepo, SUBAGENT)();
+
+    // then
+    expect(result.denied).toBe(false);
   });
 });

@@ -16,7 +16,7 @@ paths:
    - `E2E_PORT`: `3101 + (cksum(名前) % 800)`（3101〜3900。メインの 3100 と pnpm dev の 3000 に重ねない）。`env.ts` では任意（`toolEnv`。未設定なら 3100）だが、`.env.example` に行が無ければ導出は失敗する。
    - それ以外の行はそのまま。一覧の変数が `.env.example` に無ければ失敗する（分離されないまま共有のリソースを指す `.env` を作らない）。
 3. WorktreeCreate フック（`scripts/hooks/worktree-create.sh`）がその出力を worktree の `.env` に書き、必要な作成（`create database`、`pnpm db:migrate`）まで行う。
-4. アプリ・テスト・ツールは `apps/shared/env.ts` 経由で worktree の `.env` を読む（`findRepoRoot` は worktree の `pnpm-workspace.yaml` で止まる）ので、コードは何も変えずに worktree 専用のリソースを使う。
+4. アプリ・テスト・ツールは `apps/shared/env.ts` 経由で worktree の `.env` を読む（`DotEnvFile.findRepoRoot` は worktree の `pnpm-workspace.yaml` で止まる）ので、コードは何も変えずに worktree 専用のリソースを使う。
 
 - WHY 決定的に導く: 乱数や空きの探索にすると、作り直したときに値が変わって作ったリソースを見失う。名前から計算できれば、後始末も名前だけで対象を決められる。
 - WHY 値の入口を `.env` にする: 値の入口は `env.ts` の 1 か所（`.claude/rules/env.md`）。worktree ごとに `.env` を変えれば、分離のための分岐をコードに持たずに済む。

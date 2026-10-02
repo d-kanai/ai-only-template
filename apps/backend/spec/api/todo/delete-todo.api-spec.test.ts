@@ -2,23 +2,15 @@
 import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";
 import type { DeleteTodoApi } from "../../../features/todo/internal/presentation/delete-todo.api";
+import { TestDatabase } from "../../../test-support/database";
+import { TodoBuilder } from "../../../test-support/todo/todo-builder";
 import {
-  createTestDatabase,
-  type TestDatabase,
-} from "../../../test-support/database";
-import { aTodo } from "../../../test-support/todo/todo-builder";
-import {
-  bodylessRequest,
-  context,
-  deleteTodoApi,
-  emptyTodos,
-  expectProblem,
-  logEntries,
-  notFoundProblem,
-  statusRows,
-  statusRowsOf,
-  todoRowOf,
-  todoRows,
+  DeleteTodoApiAssembly,
+  TodoSpecExpected,
+  TodoSpecLogs,
+  TodoSpecProblems,
+  TodoSpecRequests,
+  TodoSpecRows,
 } from "./support";
 
 // API 仕様（Issue #219）: delete-todo.feature の `*` の step を、実 Postgres の上で本番と同じ組み立ての handler（DeleteTodoApi.handle）を
@@ -27,12 +19,12 @@ import {
 // 前提をビルダーで作るので、変更の記録（change_logs）は前提の分を含まず、削除が残した記録だけになる。
 
 let database: TestDatabase;
-let handler: ReturnType<typeof deleteTodoApi>;
+let handler: ReturnType<typeof DeleteTodoApiAssembly.handler>;
 
 beforeAll(async () => {
-  database = await createTestDatabase();
+  database = await TestDatabase.create();
   await database.migrate();
-  handler = deleteTodoApi(database.db);
+  handler = DeleteTodoApiAssembly.handler(database.db);
 });
 
 afterAll(async () => {
@@ -40,13 +32,16 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await emptyTodos(database.db);
+  await TodoSpecRows.empty(database.db);
 });
 
 // WHY 戻り値を DeleteTodoApi の handle の型にする: 対の api ファイルの型を使い、この仕様が delete-todo.api のものだと import で示す
 //   （rule-tests/api-spec.test.ts の api-spec-uses-own-api）。
 async function deleteTodo(id: string): ReturnType<DeleteTodoApi["handle"]> {
-  return handler(bodylessRequest("DELETE", `/api/todos/${id}`), context(id));
+  return handler(
+    TodoSpecRequests.bodyless("DELETE", `/api/todos/${id}`),
+    TodoSpecRequests.context(id),
+  );
 }
 
 // uuid の形だが、どの Todo も指さない id。
@@ -61,15 +56,22 @@ describeFeature(feature, ({ Scenario }) => {
     // 変更の記録（.feature には書かない。create-todo.api-spec.test.ts の冒頭）: 消した Todo の消す前の全列の before が 1 件だけ残る
     //   （日時は ISO 8601 の文字列。cascade で消えた完了の履歴の行は記録しない。前提はビルダーで入れたので記録を残さない）。
     And("削除した Todo は無くなり、ほかの Todo は残る", async () => {
-      const milk = await aTodo(database.db).title("牛乳を買う").build();
-      const bread = await aTodo(database.db).title("パンを買う").build();
+      // given
+      const milk = await TodoBuilder.of(database.db)
+        .title("牛乳を買う")
+        .build();
+      const bread = await TodoBuilder.of(database.db)
+        .title("パンを買う")
+        .build();
 
+      // when
       await deleteTodo(milk.id);
 
-      await expect(todoRows(database.db)).resolves.toStrictEqual([
-        todoRowOf(bread),
+      // then
+      await expect(TodoSpecRows.todos(database.db)).resolves.toStrictEqual([
+        TodoSpecExpected.row(bread),
       ]);
-      await expect(logEntries(database.db)).resolves.toStrictEqual([
+      await expect(TodoSpecLogs.entries(database.db)).resolves.toStrictEqual([
         {
           tableName: "todos",
           rowId: milk.id,
@@ -89,10 +91,15 @@ describeFeature(feature, ({ Scenario }) => {
   Scenario("レスポンス", ({ And }) => {
     // 削除の後に返す内容は無い（204 で本文が空）。
     And("Todo を削除すると、何も返さずに成功を伝える", async () => {
-      const milk = await aTodo(database.db).title("牛乳を買う").build();
+      // given
+      const milk = await TodoBuilder.of(database.db)
+        .title("牛乳を買う")
+        .build();
 
+      // when
       const response = await deleteTodo(milk.id);
 
+      // then
       expect(response.status).toBe(204);
       await expect(response.text()).resolves.toBe("");
     });
@@ -102,16 +109,21 @@ describeFeature(feature, ({ Scenario }) => {
     // 外部キーの on delete cascade で消える（履歴の DELETE は書かない。schema.ts の todoStatusChanges）。ほかの Todo の履歴は残る。
     // WHY 消す Todo を完了にしておく: 履歴が 2 件ある Todo でも 1 件目だけを消す誤りを見分ける。
     And("削除した Todo の完了の履歴も無くなる", async () => {
-      const milk = await aTodo(database.db)
+      // given
+      const milk = await TodoBuilder.of(database.db)
         .title("牛乳を買う")
         .completed(true)
         .build();
-      const bread = await aTodo(database.db).title("パンを買う").build();
+      const bread = await TodoBuilder.of(database.db)
+        .title("パンを買う")
+        .build();
 
+      // when
       await deleteTodo(milk.id);
 
-      await expect(statusRows(database.db)).resolves.toStrictEqual(
-        statusRowsOf(bread),
+      // then
+      await expect(TodoSpecRows.statuses(database.db)).resolves.toStrictEqual(
+        TodoSpecExpected.statusRows(bread),
       );
     });
   });
@@ -119,33 +131,45 @@ describeFeature(feature, ({ Scenario }) => {
   Scenario("異常系", ({ And }) => {
     // WHY 別の Todo を 1 件置く: 空のときだけ「無い」と返す実装・無い id で別の Todo を消す誤りを通さない。
     And("存在しない Todo は、存在しないと伝えられる", async () => {
-      const milk = await aTodo(database.db).title("牛乳を買う").build();
+      // given
+      const milk = await TodoBuilder.of(database.db)
+        .title("牛乳を買う")
+        .build();
 
+      // when
       const response = await deleteTodo(MISSING_ID);
 
-      await expectProblem(
+      // then
+      await TodoSpecProblems.expectResponse(
         response,
-        notFoundProblem(MISSING_ID, `/api/todos/${MISSING_ID}`),
+        TodoSpecProblems.notFound(MISSING_ID, `/api/todos/${MISSING_ID}`),
       );
-      await expect(todoRows(database.db)).resolves.toStrictEqual([
-        todoRowOf(milk),
+      await expect(TodoSpecRows.todos(database.db)).resolves.toStrictEqual([
+        TodoSpecExpected.row(milk),
       ]);
     });
 
     And(
       "削除済みの Todo をもう一度削除すると、存在しないと伝えられる",
       async () => {
-        const milk = await aTodo(database.db).title("牛乳を買う").build();
+        // given
+        const milk = await TodoBuilder.of(database.db)
+          .title("牛乳を買う")
+          .build();
         await deleteTodo(milk.id);
-        const logs = await logEntries(database.db);
+        const logs = await TodoSpecLogs.entries(database.db);
 
+        // when
         const response = await deleteTodo(milk.id);
 
-        await expectProblem(
+        // then
+        await TodoSpecProblems.expectResponse(
           response,
-          notFoundProblem(milk.id, `/api/todos/${milk.id}`),
+          TodoSpecProblems.notFound(milk.id, `/api/todos/${milk.id}`),
         );
-        await expect(logEntries(database.db)).resolves.toStrictEqual(logs);
+        await expect(TodoSpecLogs.entries(database.db)).resolves.toStrictEqual(
+          logs,
+        );
       },
     );
   });

@@ -106,7 +106,25 @@
       }
     },
     {
-      "includes": ["apps/backend/**"],
+      "includes": ["apps/backend/**", "apps/shared/**", "apps/e2e/**"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noStaticOnlyClass": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "apps/frontend_customer/features/**",
+        "apps/frontend_customer/shared/**",
+        "apps/frontend_customer/test-support/**",
+        "!**/*.tsx",
+        "!**/*.jsx",
+        "!**/*.hook.*",
+        "!**/*.test.*"
+      ],
       "linter": {
         "rules": {
           "complexity": {

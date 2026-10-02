@@ -210,7 +210,12 @@ describe("domain の検証の判定（findDomainValidationViolations）: must pa
       ),
     ],
   ])("%s は違反なし", (_name, text) => {
-    expect(findDomainValidationViolations(text)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findDomainValidationViolations(text);
+
+    // then
+    expect(violations).toEqual([]);
   });
 });
 
@@ -320,7 +325,12 @@ describe("domain の検証の判定（findDomainValidationViolations）: must re
       [{ rule: "no-direct-zod-parse-in-domain", line: 1 }],
     ],
   ])("%s は違反", (_name, text, expected) => {
-    expect(findDomainValidationViolations(text)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const violations = findDomainValidationViolations(text);
+
+    // then
+    expect(violations).toEqual(expected);
   });
 });
 
@@ -334,7 +344,12 @@ describe("ファイルごとの規則の範囲（rulesFor）", () => {
     "apps/backend/shared/domain/keyed-issue.ts",
     "apps/backend/shared/domain/nested/other.ts",
   ])("%s は domain なので両方の規則", (path) => {
-    expect(rulesFor(path)).toEqual([
+    // given: it.each の path
+    // when
+    const rules = rulesFor(path);
+
+    // then
+    expect(rules).toEqual([
       "no-direct-zod-parse-in-domain",
       "validation-error-only-in-validate",
     ]);
@@ -355,7 +370,12 @@ describe("ファイルごとの規則の範囲（rulesFor）", () => {
     "apps/backend/features/todo/domain/todo.ts",
     "apps/backend/features/todo/internal-x/domain/x.ts",
   ])("%s は validation_error の規則だけ", (path) => {
-    expect(rulesFor(path)).toEqual(["validation-error-only-in-validate"]);
+    // given: it.each の入力
+    // when
+    const result = rulesFor(path);
+
+    // then
+    expect(result).toEqual(["validation-error-only-in-validate"]);
   });
 
   it.each([
@@ -371,7 +391,12 @@ describe("ファイルごとの規則の範囲（rulesFor）", () => {
     "apps/backend/features/todo/internal/domain/README.md",
     "apps/backend/node_modules/zod/v4/classic/schemas.ts",
   ])("%s は対象外", (path) => {
-    expect(rulesFor(path)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const result = rulesFor(path);
+
+    // then
+    expect(result).toEqual([]);
   });
 });
 
@@ -401,6 +426,7 @@ describe("domain のファイルの列挙と検査（fixture）", () => {
   );
 
   it("apps/backend の *.ts（テスト・依存・validate.ts を除く）を対象にし、parse の規則は domain だけに当て、違反を「規則: パス:行: 行の内容」で返す", () => {
+    // given
     const root = fixture({
       "apps/backend/features/x/internal/domain/x.ts": source(
         'import { DomainValidation } from "../../../../shared/domain/validate";',
@@ -432,10 +458,15 @@ describe("domain のファイルの列挙と検査（fixture）", () => {
       "apps/frontend_customer/features/x/domain/x.ts": directParse,
       "apps/backend/node_modules/x/domain/x.ts": directParse,
     });
-    expect({
+
+    // when
+    const result = {
       files: listBackendSources(root),
       violations: collectDomainValidationViolations(root),
-    }).toEqual({
+    };
+
+    // then
+    expect(result).toEqual({
       files: [
         "apps/backend/features/x/internal/application/x.command.ts",
         "apps/backend/features/x/internal/domain/x.ts",
@@ -455,19 +486,30 @@ describe("domain のファイルの列挙と検査（fixture）", () => {
   });
 
   it("apps/backend が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）", () => {
+    // given
     const root = fixture({ "README.md": "# x\n" });
-    expect({
+
+    // when
+    const result = {
       files: listBackendSources(root),
       violations: collectDomainValidationViolations(root),
-    }).toEqual({ files: [], violations: [] });
+    };
+
+    // then
+    expect(result).toEqual({ files: [], violations: [] });
   });
 });
 
 describe("domain の検証（実ファイル）", () => {
   it("domain は zod の parse を直接呼ばず、backend で validation_error の DomainError を作るのは validate.ts だけ", () => {
+    // given: 実ファイル（repoRoot）
+    // when
+    const files = listBackendSources(repoRoot);
+    const violations = collectDomainValidationViolations(repoRoot);
+
+    // then
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
     //   domain（parse と validation_error）と domain 以外の層（validation_error だけ）の両方が列挙に入ることを見る。
-    const files = listBackendSources(repoRoot);
     expect(files).toContain(
       "apps/backend/features/todo/internal/domain/todo.ts",
     );
@@ -476,6 +518,6 @@ describe("domain の検証（実ファイル）", () => {
       "apps/backend/features/todo/internal/application/rename-todo.command.ts",
     );
     expect(files).toContain("apps/backend/shared/presentation/json-body.ts");
-    expect(collectDomainValidationViolations(repoRoot)).toEqual([]);
+    expect(violations).toEqual([]);
   });
 });

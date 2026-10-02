@@ -40,10 +40,8 @@ import type { ChangeEntry } from "../../shared/infra/change-log";
 import { changeLogs } from "../../shared/infra/schema";
 import { PostgresTransactionRunner } from "../../shared/infra/transaction.postgres";
 import type { Problem } from "../../shared/presentation/problem";
-import {
-  createTestDatabase,
-  type TestDatabase,
-} from "../../test-support/database";
+import { ApiCoverage } from "../../test-support/api-coverage";
+import { TestDatabase } from "../../test-support/database";
 
 // API ジャーニーテスト（Issue #187 / #200。.claude/rules/testing.md の「API ジャーニーテスト」、ADR
 //   docs/adr/quality/20260930-backend-journey-tests.md と docs/adr/quality/20260930-gherkin-journeys-with-vitest-cucumber.md）:
@@ -57,7 +55,7 @@ import {
 //   通すので遅く、失敗の原因が画面か API か DB かを切り分けにくい。ここは本番と同じ組み立て（Postgres の Repository → command /
 //   query → Api）で、画面を通さずに API の流れだけを見る。
 // WHY 本番の export（GET / POST など）を使わず、ここで組み立てる: 本番の handler は AppDatabase.get()（.env の DATABASE_URL の public
-//   スキーマ）を使い、テストファイルごとの別スキーマ（createTestDatabase）に向けられない。組み立ての形は各 *.api.ts の最下部と同じ。
+//   スキーマ）を使い、テストファイルごとの別スキーマ（TestDatabase.create）に向けられない。組み立ての形は各 *.api.ts の最下部と同じ。
 // WHY テストダブルを使わない（vitest から vi を import しない・InMemory も無し。rule-tests/api-journey.test.ts が止める）: 本番と同じ
 //   部品の組み合わせで動くことを確かめるのが目的で、差し替えるとその部分のつながりを確かめなくなる。
 // WHY 変更系の API（POST / PUT / DELETE）の後は、応答に加えて DB の行も見る（読み取り系の GET の後は見ない。ユーザー判断、
@@ -93,7 +91,7 @@ let handlers: ReturnType<typeof api>;
 const notifications: string[] = [];
 
 beforeAll(async () => {
-  database = await createTestDatabase();
+  database = await TestDatabase.create();
   await database.migrate();
   handlers = api();
 });
@@ -107,26 +105,35 @@ afterAll(async () => {
 //   が呼び出しの名前で変更系（post / put / patch / delete）を見分け、その後に DB の読み取りがあるかを検査する（.claude/rules/testing.md
 //   の「API ジャーニーテスト」）。
 // 書き込みの command には、本番と同じくトランザクションを張る PostgresTransactionRunner を同じ db で渡す（Issue #215）。
+// 各 Api を ApiCoverage.track で包む（API 網羅率。Issue #281）。呼ばれた Api のクラス名が step の meta に残り、全 API が
+//   どこかのジャーニーで呼ばれたかを reporter（test-support/api-coverage-reporter.ts）が判定する。
+// WHY 包み忘れても通らない: 包まずに呼んだ API は記録されず、網羅率が下がって落ちる（見逃す方向には働かない）。
 function api() {
   const repository = new PostgresTodoRepository(database.db);
   const transactions = new PostgresTransactionRunner(database.db);
   return {
-    postTodo: new CreateTodoApi(new CreateTodoCommand(repository, transactions))
-      .handle,
-    listTodos: new ListTodosApi(new ListTodosQuery(repository)).handle,
-    getTodo: new GetTodoApi(new GetTodoQuery(repository)).handle,
-    putTitle: new RenameTodoApi(new RenameTodoCommand(repository, transactions))
-      .handle,
-    putCompletion: new ChangeTodoCompletionApi(
-      new ChangeTodoCompletionCommand(repository, transactions, {
-        notify(message) {
-          notifications.push(message);
-        },
-      }),
-    ).handle,
-    deleteTodo: new DeleteTodoApi(
-      new DeleteTodoCommand(repository, transactions),
-    ).handle,
+    postTodo: ApiCoverage.track(
+      new CreateTodoApi(new CreateTodoCommand(repository, transactions)),
+    ),
+    listTodos: ApiCoverage.track(
+      new ListTodosApi(new ListTodosQuery(repository)),
+    ),
+    getTodo: ApiCoverage.track(new GetTodoApi(new GetTodoQuery(repository))),
+    putTitle: ApiCoverage.track(
+      new RenameTodoApi(new RenameTodoCommand(repository, transactions)),
+    ),
+    putCompletion: ApiCoverage.track(
+      new ChangeTodoCompletionApi(
+        new ChangeTodoCompletionCommand(repository, transactions, {
+          notify(message) {
+            notifications.push(message);
+          },
+        }),
+      ),
+    ),
+    deleteTodo: ApiCoverage.track(
+      new DeleteTodoApi(new DeleteTodoCommand(repository, transactions)),
+    ),
   };
 }
 

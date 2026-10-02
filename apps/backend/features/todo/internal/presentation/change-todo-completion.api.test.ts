@@ -109,13 +109,16 @@ const NOT_UUID_IDS = [
 
 describe("PUT /api/todos/:id/completion", () => {
   test("completed を true にし、200 と変えた後の Todo（ChangeTodoCompletionResponse）を返す。title はそのまま", async () => {
+    // given
     const { repository, todo, PUT } = await setup();
 
+    // when
     const response = await PUT(
       putRequest(todo.id, JSON.stringify({ completed: true })),
       context(todo.id),
     );
 
+    // then
     expect(response.status).toBe(200);
     const body = (await response.json()) as ChangeTodoCompletionResponse;
     expect(body).toEqual({
@@ -132,17 +135,20 @@ describe("PUT /api/todos/:id/completion", () => {
 
   // WHY false に戻す場合も見る: 本文の値を無視して常に true にする実装を通さないため。
   test("completed を false にすると、完了済みの Todo を未完了に戻す", async () => {
+    // given
     const { repository, todo, PUT } = await setup();
     await PUT(
       putRequest(todo.id, JSON.stringify({ completed: true })),
       context(todo.id),
     );
 
+    // when
     const response = await PUT(
       putRequest(todo.id, JSON.stringify({ completed: false })),
       context(todo.id),
     );
 
+    // then
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ completed: false });
     await expect(repository.findById(todo.id)).resolves.toMatchObject({
@@ -153,6 +159,7 @@ describe("PUT /api/todos/:id/completion", () => {
   // WHY 本番の PUT（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない（Issue #59）
   //   ことを、Postgres の Repository が呼ばれることで固定する。runner の run と findByIdForUpdate と update を差し替えるので DB には接続しない。
   test("本番の PUT は Postgres の runner が張ったトランザクションで、Postgres の Repository に保存する", async () => {
+    // given
     const todo = Todo.create("牛乳を買う");
     // WHY runner の run を差し替える: 本番の組み立ての PostgresTransactionRunner が DB に接続しないよう、work を呼ぶだけにする。
     //   run が 1 回呼ばれ、Repository がその tx を受け取ることで、本番の command がトランザクションを張ることも確かめる。
@@ -169,11 +176,13 @@ describe("PUT /api/todos/:id/completion", () => {
     // 完了にすると通知のログが 1 行出る（下のテストで確かめる）。ここではテストの出力に出さないためだけに差し替える。
     vi.spyOn(console, "log").mockImplementation(() => undefined);
 
+    // when
     const response = await productionPut(
       putRequest(todo.id, JSON.stringify({ completed: true })),
       context(todo.id),
     );
 
+    // then
     expect(response.status).toBe(200);
     expect(run).toHaveBeenCalledTimes(1);
     expect(update).toHaveBeenCalledTimes(1);
@@ -188,6 +197,7 @@ describe("PUT /api/todos/:id/completion", () => {
   //   後にその行が出れば、notification の expose につながっていることが分かる。runner の run と findByIdForUpdate と update を
   //   差し替えるので DB には接続しない。
   test("本番の PUT は、未完了の Todo を完了にすると notification の expose で Todo completed: <id> を通知する（ログの 1 行）", async () => {
+    // given
     const todo = Todo.create("牛乳を買う");
     vi.spyOn(PostgresTransactionRunner.prototype, "run").mockImplementation(
       (work) => work(inMemoryTransaction),
@@ -199,11 +209,13 @@ describe("PUT /api/todos/:id/completion", () => {
     vi.spyOn(PostgresTodoRepository.prototype, "update").mockResolvedValue();
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
+    // when
     const response = await productionPut(
       putRequest(todo.id, JSON.stringify({ completed: true })),
       context(todo.id),
     );
 
+    // then
     expect(response.status).toBe(200);
     await vi.waitFor(() => expect(log).toHaveBeenCalledTimes(1));
     expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toMatchObject({
@@ -215,14 +227,17 @@ describe("PUT /api/todos/:id/completion", () => {
   });
 
   test("uuid の形だが存在しない id なら 404 の /problems/not-found を、todo.notFound と id の params 付きで返す", async () => {
+    // given
     const { PUT } = await setup();
     const id = randomUUID();
 
+    // when
     const response = await PUT(
       putRequest(id, JSON.stringify({ completed: true })),
       context(id),
     );
 
+    // then
     await expectProblem(response, notFoundProblem(id));
   });
 
@@ -244,6 +259,7 @@ describe("PUT /api/todos/:id/completion", () => {
   )(
     "id が %s なら、%sときも、Repository に問い合わせずに 404 の /problems/not-found（todo.notFound と id の params）を返す",
     async (_idLabel, _bodyLabel, id, requestBody) => {
+      // given
       const { repository, ...spies } = spiedRepository();
       const PUT = new ChangeTodoCompletionApi(
         new ChangeTodoCompletionCommand(
@@ -253,8 +269,10 @@ describe("PUT /api/todos/:id/completion", () => {
         ),
       ).handle;
 
+      // when
       const response = await PUT(putRequest(id, requestBody), context(id));
 
+      // then
       await expectProblem(response, notFoundProblem(id));
       expect(spies.findById).not.toHaveBeenCalled();
       expect(spies.findByIdForUpdate).not.toHaveBeenCalled();
@@ -369,10 +387,13 @@ describe("PUT /api/todos/:id/completion", () => {
   ])(
     "%s なら 400 の /problems/validation-error を、理由の key（と params・errors）と英語の detail 付きで返し、Todo は変わらない",
     async (_label, body, expected) => {
+      // given
       const { repository, todo, PUT } = await setup();
 
+      // when
       const response = await PUT(putRequest(todo.id, body), context(todo.id));
 
+      // then
       await expectProblem(response, {
         type: "/problems/validation-error",
         title: "Validation error",

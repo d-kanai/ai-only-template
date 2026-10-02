@@ -85,12 +85,15 @@ const NOT_UUID_IDS = [
 
 describe("GET /api/todos/:id", () => {
   test("200 と Todo（GetTodoResponse）を返す", async () => {
+    // given
     const { repository, GET } = setup();
     const todo = Todo.create("牛乳を買う");
     await repository.insert(todo, inMemoryTransaction);
 
+    // when
     const response = await GET(getRequest(todo.id), context(todo.id));
 
+    // then
     expect(response.status).toBe(200);
     const body = (await response.json()) as GetTodoResponse;
     expect(body).toEqual({
@@ -104,35 +107,44 @@ describe("GET /api/todos/:id", () => {
   // WHY 本番の GET（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない（Issue #59）
   //   ことを、Postgres の Repository が呼ばれることで固定する。findById を差し替えるので DB には接続しない。
   test("本番の GET は Postgres の Repository から読む", async () => {
+    // given
     const todo = Todo.create("牛乳を買う");
     const findById = vi
       .spyOn(PostgresTodoRepository.prototype, "findById")
       .mockResolvedValue(todo);
 
+    // when
     const response = await productionGet(getRequest(todo.id), context(todo.id));
 
+    // then
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ id: todo.id });
     expect(findById.mock.calls).toEqual([[todo.id]]);
   });
 
   test("uuid の形だが存在しない id なら 404 の /problems/not-found を、todo.notFound と id の params 付きで返す", async () => {
+    // given
     const { GET } = setup();
     const id = randomUUID();
 
+    // when
     const response = await GET(getRequest(id), context(id));
 
+    // then
     await expectProblem(response, notFoundProblem(id));
   });
 
   test.each(NOT_UUID_IDS)(
     "id が %s なら、Repository に問い合わせずに 404 の /problems/not-found（todo.notFound と id の params）を返す",
     async (_label, id) => {
+      // given
       const { repository, ...spies } = spiedRepository();
       const GET = new GetTodoApi(new GetTodoQuery(repository)).handle;
 
+      // when
       const response = await GET(getRequest(id), context(id));
 
+      // then
       await expectProblem(response, notFoundProblem(id));
       expect(spies.findById).not.toHaveBeenCalled();
       expect(spies.findByIdForUpdate).not.toHaveBeenCalled();

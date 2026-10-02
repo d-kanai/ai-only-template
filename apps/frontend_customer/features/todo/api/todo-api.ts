@@ -39,164 +39,182 @@ export type {
 // WHY 一覧 API の契約から導出する: backend に共通の DTO 型の別名を持たせず、画面側の 1 か所（ここ）で決める（Issue #139）。
 export type Todo = ListTodosResponse["todos"][number];
 
-// 一覧・作成の URL。
-// WHY 関数の中に置く（モジュールの最上位の定数にしない）: 最上位の式は読み込み時にだけ評価される static な変異になり、
-//   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に評価すれば、変異をテストで検出できる（Issue #55）。
-function todosPath(): string {
-  return "/api/todos";
-}
-
-// id はユーザー入力由来の URL（/todo/[id]）から来るため、"/" や "?" を含んでも別のパスやクエリにならないようエンコードする。
-function todoPath(id: string): string {
-  return `${todosPath()}/${encodeURIComponent(id)}`;
-}
-
-// 本文を送るときだけ Content-Type を付ける。GET / DELETE には本文がないため不要。
-function jsonInit(method: "POST" | "PUT", body: unknown): RequestInit {
-  return {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  };
-}
-
-// null を除くオブジェクトか（配列も含む）。プロパティを読んでも例外にならないことだけを確かめる。
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-// 本文が backend の Problem Details（RFC 9457。apps/backend/shared/presentation/problem.ts）かを確かめる。
-// 見るもの: 標準のメンバーの type（文字列）と status（数値）、拡張メンバーの key（共通の辞書のキー）と params（省略かオブジェクト）と
-//   errors（省略か、項目ごとの誤りの配列。isProblemError）。
-// WHY detail・title・instance を見ない: 画面はこれらを使わない（detail は開発者向けの英語で契約外、title は type と 1 対 1）。
-//   使わない値の検査は、崩れていても画面が壊れないのに失敗を error.unknown に変えるだけになる。
-// WHY type と status も確かめる: key だけだと、ほかの形の本文（以前の { error: { key } } の形は key が入れ子なので外れるが、
-//   偶然 key を持つ JSON など）も Problem Details とみなしてしまう。RFC 9457 の標準のメンバーを持つことで backend の応答と見分ける。
-//   type が "/problems/..." のどれかまでは確かめない（ApiError の type は文字列のまま持つ。api-error.ts）。
-// WHY `"key" in value` で絞り込まない: 無いプロパティは undefined として読めるので、in の検査は判定の結果を変えない。
-//   結果を変えない検査は mutation testing で消しても落ちない（等価な変異）ため、Record として読んで型だけで判定する（Issue #55）。
-// WHY key が共通の辞書（shared/i18n/common.messages.ts）のキーかまで確かめる: 版の違う backend が辞書に無いキーを返すと、
-//   翻訳できない（formatMessage が辞書を引けない）。その応答は Problem Details とみなさず、HTTP ステータスだけを伝える（toError）。
-//   実行時に確かめられるのは「共通の辞書のキー」までで、ErrorKey（サーバのエラーのキー）かどうかは確かめない。error.unknown・
-//   error.unexpected が返っても、その文言が出るだけで壊れない。画面ごとの辞書のキー（"delete" など）は共通の辞書に無いので通さない。
-// WHY params は省略か、配列でないオブジェクト: 値の型（string / number）までは確かめない。置換は String() で文字列にするので壊れない。
-//   配列は Object.hasOwn で名前を引けず {id} が置き換わらないまま画面に出るので、Problem Details とみなさない（reviewer 指摘、Issue #126）。
-// WHY 型の述語を Problem にする: 上の検査は Problem のすべてのメンバーを確かめるわけではない（type は和のどれか、key は ErrorKey か
-//   までは見ない）が、読むのは type・key・params だけで、読む値はどれも検査済みの形（文字列・辞書のキー・オブジェクト）。
-// WHY errors（項目ごとの誤り）は省略か配列で、要素が 1 件でも崩れていれば本文全体を Problem Details とみなさない（Issue #144）:
-//   崩れた要素だけを捨てると、捨てた誤り（本文全体の誤りなど）が画面に出ないまま、残りの誤りだけで「その項目だけを直せばよい」
-//   ように見える。本文の key・params が崩れているときと同じく、HTTP ステータス（error.unknown）で失敗だけを確かに伝える。
-//   画面と API は同じリポジトリで同時に変えるので、崩れた要素は版のずれか不具合で、通常の応答では起きない。
-//   要素の detail は本文の detail と同じ理由で見ない。
-function isProblem(value: unknown): value is Problem {
-  return (
-    isRecord(value) &&
-    typeof value.type === "string" &&
-    typeof value.status === "number" &&
-    isTranslatableKey(value.key) &&
-    isParams(value.params) &&
-    (value.errors === undefined ||
-      (Array.isArray(value.errors) && value.errors.every(isProblemError)))
-  );
-}
-
-// errors の要素 1 件: pointer（文字列）、key（共通の辞書のキー）、params（省略かオブジェクト）。本文の key・params と同じ検査。
-// WHY pointer の中身（"#" で始まるか）までは確かめない: 画面は "#/<項目名>" と完全一致で比べ、一致しない pointer は
-//   フォーム全体の文言にする（api-error.ts の toErrorMessages）ので、形が違っても文言は失われない。
-function isProblemError(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    typeof value.pointer === "string" &&
-    isTranslatableKey(value.key) &&
-    isParams(value.params)
-  );
-}
-
-// 共通の辞書（shared/i18n/common.messages.ts）のキーの文字列か（isProblem の key の WHY）。
-function isTranslatableKey(value: unknown): boolean {
-  return typeof value === "string" && isMessageKey(commonMessages, value);
-}
-
-// params は省略か、配列でないオブジェクト（isProblem の params の WHY）。
-function isParams(value: unknown): boolean {
-  return value === undefined || (isRecord(value) && !Array.isArray(value));
-}
-
-// backend は失敗時に Problem Details（key と params）を返す契約なので、それを ApiError に載せる。文言は画面が辞書で決める（api-error.ts）。
-// ただしプロキシや Next 自体のエラーページなど、backend を通らないエラーは JSON でないことがある。
-// その場合も「失敗した」ことは伝わるよう、HTTP ステータスを error.unknown（画面側だけのキー）の params にする。
-// WHY ApiError の status は本文の status ではなく HTTP の応答のステータス: RFC 9457 の 3.1.2 節で本文の status は参考（advisory）
-//   とされ、途中の中継（プロキシ・キャッシュ）がステータスを変えることがある。画面が実際に受け取った値を正とし、本文を読めない
-//   失敗（error.unknown）と同じ取り方にそろえる。
-// WHY Content-Type（application/problem+json）を判定に使わない: response.json() は Content-Type にかかわらず本文を JSON として
-//   読む（Fetch の仕様）。backend の応答かは本文の形（isProblem）で決め、判定の根拠を 1 つにする。
-async function toError(response: Response): Promise<ApiError> {
-  // 本文が JSON として読めない場合は Problem Details ではないので、undefined（形の判定で必ず外れる値）として扱う。
-  // WHY 例外を握りつぶすのを response.json() だけにする: 以前は形の判定まで try の中に入れていたため、
-  //   判定の書き間違い（null のプロパティを読むなど）で投げた TypeError も「JSON でない」扱いになり、
-  //   ステータスの表示に化けて気づけなかった（Issue #55 の mutation testing で、判定の変異が生き残って判明）。
-  const body: unknown = await response.json().catch(() => undefined);
-  return isProblem(body)
-    ? new ApiError({
-        status: response.status,
-        type: body.type,
-        key: body.key,
-        params: body.params,
-        errors: body.errors,
-      })
-    : new ApiError({
-        status: response.status,
-        key: "error.unknown",
-        params: { status: response.status },
-      });
-}
-
-async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
-  const response = await fetch(path, init);
-  if (!response.ok) {
-    throw await toError(response);
+// /api/todos の呼び出し。画面・hook は TodoApi.list() のように static メソッドで呼ぶ。
+// WHY クラスの static メソッドにする（最上位の関数にしない）: frontend の React 以外のモジュールもクラスを基本にする（規則 class-based。
+//   ADR docs/adr/architecture/20261002-class-based-frontend-modules.md）。状態を持たないのでインスタンスは作らない。
+//   画面・hook のテストは vi.mock("@/features/todo/api/todo-api") の自動モックで差し替え、vi.mocked(TodoApi.list) で戻り値を決める
+//   （自動モックはクラスの static メソッドも mock に差し替える。Issue #262 の調査）。
+// WHY 補助（todosPath・isProblem など）を private static にする: 以前のファイルの中だけの関数と同じく、外から呼ばせない。
+export class TodoApi {
+  // 一覧・作成の URL。
+  // WHY 関数の中に置く（モジュールの最上位の定数にしない）: 最上位の式は読み込み時にだけ評価される static な変異になり、
+  //   mutation testing では数えない（stryker.config.mjs の ignoreStatic）。呼び出し時に評価すれば、変異をテストで検出できる（Issue #55）。
+  private static todosPath(): string {
+    return "/api/todos";
   }
-  return (await response.json()) as T;
-}
 
-export function listTodos(): Promise<ListTodosResponse> {
-  return requestJson(todosPath(), { method: "GET" });
-}
+  // id はユーザー入力由来の URL（/todo/[id]）から来るため、"/" や "?" を含んでも別のパスやクエリにならないようエンコードする。
+  private static todoPath(id: string): string {
+    return `${TodoApi.todosPath()}/${encodeURIComponent(id)}`;
+  }
 
-export function getTodo(id: string): Promise<GetTodoResponse> {
-  return requestJson(todoPath(id), { method: "GET" });
-}
+  // 本文を送るときだけ Content-Type を付ける。GET / DELETE には本文がないため不要。
+  private static jsonInit(method: "POST" | "PUT", body: unknown): RequestInit {
+    return {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    };
+  }
 
-export function createTodo(
-  request: CreateTodoRequest,
-): Promise<CreateTodoResponse> {
-  return requestJson(todosPath(), jsonInit("POST", request));
-}
+  // null を除くオブジェクトか（配列も含む）。プロパティを読んでも例外にならないことだけを確かめる。
+  private static isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+  }
 
-// 名前の変更と完了の切り替えは、ユースケースごとに別の API を呼ぶ（1 ユースケース = 1 API。Issue #175）。
-// WHY 引数を request オブジェクトではなく値 1 つにする: 本文の項目はユースケースで決まる 1 つだけで、呼び出し側に本文の形を
-//   組み立てさせると、相手の項目（title に completed など）を混ぜる余地が残る（backend は未知の項目を 400 で拒否する）。
-// WHY 本文を Request 型の変数に置く: 本文の形が backend の契約（*Request）とずれたら型チェックで止める。
-export function renameTodo(
-  id: string,
-  title: string,
-): Promise<RenameTodoResponse> {
-  const body: RenameTodoRequest = { title };
-  return requestJson(`${todoPath(id)}/title`, jsonInit("PUT", body));
-}
+  // 本文が backend の Problem Details（RFC 9457。apps/backend/shared/presentation/problem.ts）かを確かめる。
+  // 見るもの: 標準のメンバーの type（文字列）と status（数値）、拡張メンバーの key（共通の辞書のキー）と params（省略かオブジェクト）と
+  //   errors（省略か、項目ごとの誤りの配列。isProblemError）。
+  // WHY detail・title・instance を見ない: 画面はこれらを使わない（detail は開発者向けの英語で契約外、title は type と 1 対 1）。
+  //   使わない値の検査は、崩れていても画面が壊れないのに失敗を error.unknown に変えるだけになる。
+  // WHY type と status も確かめる: key だけだと、ほかの形の本文（以前の { error: { key } } の形は key が入れ子なので外れるが、
+  //   偶然 key を持つ JSON など）も Problem Details とみなしてしまう。RFC 9457 の標準のメンバーを持つことで backend の応答と見分ける。
+  //   type が "/problems/..." のどれかまでは確かめない（ApiError の type は文字列のまま持つ。api-error.ts）。
+  // WHY `"key" in value` で絞り込まない: 無いプロパティは undefined として読めるので、in の検査は判定の結果を変えない。
+  //   結果を変えない検査は mutation testing で消しても落ちない（等価な変異）ため、Record として読んで型だけで判定する（Issue #55）。
+  // WHY key が共通の辞書（shared/i18n/common.messages.ts）のキーかまで確かめる: 版の違う backend が辞書に無いキーを返すと、
+  //   翻訳できない（formatMessage が辞書を引けない）。その応答は Problem Details とみなさず、HTTP ステータスだけを伝える（toError）。
+  //   実行時に確かめられるのは「共通の辞書のキー」までで、ErrorKey（サーバのエラーのキー）かどうかは確かめない。error.unknown・
+  //   error.unexpected が返っても、その文言が出るだけで壊れない。画面ごとの辞書のキー（"delete" など）は共通の辞書に無いので通さない。
+  // WHY params は省略か、配列でないオブジェクト: 値の型（string / number）までは確かめない。置換は String() で文字列にするので壊れない。
+  //   配列は Object.hasOwn で名前を引けず {id} が置き換わらないまま画面に出るので、Problem Details とみなさない（reviewer 指摘、Issue #126）。
+  // WHY 型の述語を Problem にする: 上の検査は Problem のすべてのメンバーを確かめるわけではない（type は和のどれか、key は ErrorKey か
+  //   までは見ない）が、読むのは type・key・params だけで、読む値はどれも検査済みの形（文字列・辞書のキー・オブジェクト）。
+  // WHY errors（項目ごとの誤り）は省略か配列で、要素が 1 件でも崩れていれば本文全体を Problem Details とみなさない（Issue #144）:
+  //   崩れた要素だけを捨てると、捨てた誤り（本文全体の誤りなど）が画面に出ないまま、残りの誤りだけで「その項目だけを直せばよい」
+  //   ように見える。本文の key・params が崩れているときと同じく、HTTP ステータス（error.unknown）で失敗だけを確かに伝える。
+  //   画面と API は同じリポジトリで同時に変えるので、崩れた要素は版のずれか不具合で、通常の応答では起きない。
+  //   要素の detail は本文の detail と同じ理由で見ない。
+  private static isProblem(value: unknown): value is Problem {
+    return (
+      TodoApi.isRecord(value) &&
+      typeof value.type === "string" &&
+      typeof value.status === "number" &&
+      TodoApi.isTranslatableKey(value.key) &&
+      TodoApi.isParams(value.params) &&
+      (value.errors === undefined ||
+        (Array.isArray(value.errors) &&
+          value.errors.every((error) => TodoApi.isProblemError(error))))
+    );
+  }
 
-export function changeTodoCompletion(
-  id: string,
-  completed: boolean,
-): Promise<ChangeTodoCompletionResponse> {
-  const body: ChangeTodoCompletionRequest = { completed };
-  return requestJson(`${todoPath(id)}/completion`, jsonInit("PUT", body));
-}
+  // errors の要素 1 件: pointer（文字列）、key（共通の辞書のキー）、params（省略かオブジェクト）。本文の key・params と同じ検査。
+  // WHY pointer の中身（"#" で始まるか）までは確かめない: 画面は "#/<項目名>" と完全一致で比べ、一致しない pointer は
+  //   フォーム全体の文言にする（api-error.ts の ApiErrorMessage.toMessages）ので、形が違っても文言は失われない。
+  private static isProblemError(value: unknown): boolean {
+    return (
+      TodoApi.isRecord(value) &&
+      typeof value.pointer === "string" &&
+      TodoApi.isTranslatableKey(value.key) &&
+      TodoApi.isParams(value.params)
+    );
+  }
 
-// DELETE は 204（本文なし）を返す契約なので、requestJson で本文を読むと JSON の解析に失敗する。本文は読まない。
-export async function deleteTodo(id: string): Promise<void> {
-  const response = await fetch(todoPath(id), { method: "DELETE" });
-  if (!response.ok) {
-    throw await toError(response);
+  // 共通の辞書（shared/i18n/common.messages.ts）のキーの文字列か（isProblem の key の WHY）。
+  private static isTranslatableKey(value: unknown): boolean {
+    return typeof value === "string" && isMessageKey(commonMessages, value);
+  }
+
+  // params は省略か、配列でないオブジェクト（isProblem の params の WHY）。
+  private static isParams(value: unknown): boolean {
+    return (
+      value === undefined || (TodoApi.isRecord(value) && !Array.isArray(value))
+    );
+  }
+
+  // backend は失敗時に Problem Details（key と params）を返す契約なので、それを ApiError に載せる。文言は画面が辞書で決める（api-error.ts）。
+  // ただしプロキシや Next 自体のエラーページなど、backend を通らないエラーは JSON でないことがある。
+  // その場合も「失敗した」ことは伝わるよう、HTTP ステータスを error.unknown（画面側だけのキー）の params にする。
+  // WHY ApiError の status は本文の status ではなく HTTP の応答のステータス: RFC 9457 の 3.1.2 節で本文の status は参考（advisory）
+  //   とされ、途中の中継（プロキシ・キャッシュ）がステータスを変えることがある。画面が実際に受け取った値を正とし、本文を読めない
+  //   失敗（error.unknown）と同じ取り方にそろえる。
+  // WHY Content-Type（application/problem+json）を判定に使わない: response.json() は Content-Type にかかわらず本文を JSON として
+  //   読む（Fetch の仕様）。backend の応答かは本文の形（isProblem）で決め、判定の根拠を 1 つにする。
+  private static async toError(response: Response): Promise<ApiError> {
+    // 本文が JSON として読めない場合は Problem Details ではないので、undefined（形の判定で必ず外れる値）として扱う。
+    // WHY 例外を握りつぶすのを response.json() だけにする: 以前は形の判定まで try の中に入れていたため、
+    //   判定の書き間違い（null のプロパティを読むなど）で投げた TypeError も「JSON でない」扱いになり、
+    //   ステータスの表示に化けて気づけなかった（Issue #55 の mutation testing で、判定の変異が生き残って判明）。
+    const body: unknown = await response.json().catch(() => undefined);
+    return TodoApi.isProblem(body)
+      ? new ApiError({
+          status: response.status,
+          type: body.type,
+          key: body.key,
+          params: body.params,
+          errors: body.errors,
+        })
+      : new ApiError({
+          status: response.status,
+          key: "error.unknown",
+          params: { status: response.status },
+        });
+  }
+
+  private static async requestJson<T>(
+    path: string,
+    init: RequestInit,
+  ): Promise<T> {
+    const response = await fetch(path, init);
+    if (!response.ok) {
+      throw await TodoApi.toError(response);
+    }
+    return (await response.json()) as T;
+  }
+
+  static list(): Promise<ListTodosResponse> {
+    return TodoApi.requestJson(TodoApi.todosPath(), { method: "GET" });
+  }
+
+  static get(id: string): Promise<GetTodoResponse> {
+    return TodoApi.requestJson(TodoApi.todoPath(id), { method: "GET" });
+  }
+
+  static create(request: CreateTodoRequest): Promise<CreateTodoResponse> {
+    return TodoApi.requestJson(
+      TodoApi.todosPath(),
+      TodoApi.jsonInit("POST", request),
+    );
+  }
+
+  // 名前の変更と完了の切り替えは、ユースケースごとに別の API を呼ぶ（1 ユースケース = 1 API。Issue #175）。
+  // WHY 引数を request オブジェクトではなく値 1 つにする: 本文の項目はユースケースで決まる 1 つだけで、呼び出し側に本文の形を
+  //   組み立てさせると、相手の項目（title に completed など）を混ぜる余地が残る（backend は未知の項目を 400 で拒否する）。
+  // WHY 本文を Request 型の変数に置く: 本文の形が backend の契約（*Request）とずれたら型チェックで止める。
+  static rename(id: string, title: string): Promise<RenameTodoResponse> {
+    const body: RenameTodoRequest = { title };
+    return TodoApi.requestJson(
+      `${TodoApi.todoPath(id)}/title`,
+      TodoApi.jsonInit("PUT", body),
+    );
+  }
+
+  static changeCompletion(
+    id: string,
+    completed: boolean,
+  ): Promise<ChangeTodoCompletionResponse> {
+    const body: ChangeTodoCompletionRequest = { completed };
+    return TodoApi.requestJson(
+      `${TodoApi.todoPath(id)}/completion`,
+      TodoApi.jsonInit("PUT", body),
+    );
+  }
+
+  // DELETE は 204（本文なし）を返す契約なので、requestJson で本文を読むと JSON の解析に失敗する。本文は読まない。
+  static async delete(id: string): Promise<void> {
+    const response = await fetch(TodoApi.todoPath(id), { method: "DELETE" });
+    if (!response.ok) {
+      throw await TodoApi.toError(response);
+    }
   }
 }

@@ -40,7 +40,8 @@ export default defineConfig({
       "rule-tests/**/*.test.ts",
       "scripts/**/*.test.ts",
     ],
-    // apps/e2e/**: Playwright の E2E テスト（apps/e2e/*.spec.ts。workspace パッケージ @repo/e2e。Issue #84 で e2e/ から移した）を
+    // apps/e2e/**: Playwright の E2E テスト（apps/e2e/*.feature と step の *.steps.ts。bddgen が apps/e2e/.features-gen/ に *.spec.js を
+    //   生成する。workspace パッケージ @repo/e2e。Issue #84 で e2e/ から移した。Issue #279 で .feature にした）を
     //   Vitest の対象から外す。上の include（apps/**/*.test.{ts,tsx}）は *.spec.ts を拾わないが、E2E の置き場所に *.test.ts を
     //   置いたときや include を既定に戻したときにも拾わないよう、明示して外す。
     //   Vitest の既定 include（**/*.{test,spec}.?(c|m)[jt]s?(x)）は *.spec.ts も拾うため、除外しないと
@@ -63,6 +64,18 @@ export default defineConfig({
     //   表示が変わり、テストの期待値が実行環境で変わる。サーバも UTC で動かす（package.json の dev / start の TZ=UTC）のでそろえる。
     //   Node は process.env.TZ を書き換えると Intl の既定のタイムゾーンも切り替える（todo-item.test.tsx の「作成日時」のテストで確認）。
     env: { TZ: "UTC" },
+    // reporters: Vitest の既定の reporter（configDefaults.reporters。AI エージェントからは minimal、GitHub Actions では
+    //   github-actions も足される）に、API 網羅率の reporter（Issue #281）を足す。
+    //   API 網羅率 = API ジャーニー（apps/backend/spec/journey/）の実行で 1 回以上呼ばれた API / 全 API（route.ts が公開するもの）。
+    //   すべての API ジャーニーを含む実行（pnpm test・pnpm test:api-journey・CI）の終わりに網羅率を出し、100% 未満なら終了コードを
+    //   1 にする。一部のファイルだけ・-t で絞った実行では判定しない。仕組みと WHY は apps/backend/test-support/api-coverage*.ts。
+    //   WHY 既定を残して足す: reporters を指定すると既定を置き換えるので、結合しないと端末やエージェント向けの出力が変わる。
+    //   WHY パスの文字列で渡す（import しない）: Vitest は文字列の reporter を default export のクラスとして読む。リポジトリ直下から
+    //   apps/backend/ への相対 import は rule-tests/architecture.test.ts の frontend-to-backend-specifier が止める。
+    reporters: [
+      ...configDefaults.reporters,
+      "./apps/backend/test-support/api-coverage-reporter.ts",
+    ],
     // coverage: 単体テストのカバレッジを計測し、100% に満たなければ失敗させる（Issue #45）。
     //   `vitest run --coverage`（= pnpm test）のときだけ有効。enabled は既定の false のままにし、
     //   pnpm test:unit（vitest run）ではカバレッジを計測せず速く回せるようにしている。
@@ -84,7 +97,7 @@ export default defineConfig({
       //     同じく直下の Next の規約ファイル proxy.ts（リクエストログ。Issue #80）も含めない: next start / next dev の中で
       //     リクエストごとに Next から呼ばれるだけで、NextRequest の値を渡して 1 行を出力する結線しか持たない。1 行の中身は
       //     apps/frontend_customer/shared/request-log/request-log.ts（計測の対象）のテストで固定し、結線（matcher・stdout・応答ヘッダ）は
-      //     E2E（apps/e2e/request-log.spec.ts）で確かめる。include に apps/frontend_customer 直下を入れていないので、exclude は要らない。
+      //     E2E（apps/e2e/request-log.feature）で確かめる。include に apps/frontend_customer 直下を入れていないので、exclude は要らない。
       //   - apps/e2e/: Playwright の E2E テストとその設定（apps/e2e/playwright.config.ts）。Vitest では実行しない（上の test.exclude）。
       //   - scripts/ のシェルスクリプト（.sh）: include に入れても、@vitest/coverage-v8 が JS として解析しようとして
       //     失敗し、「Failed to parse ... cloud-session-start.sh. Excluding it from coverage.」とエラーを出して結局外す

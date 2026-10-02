@@ -4,7 +4,7 @@ import { env } from "@repo/shared/env";
 import { sql } from "drizzle-orm";
 import type { Pool, PoolConfig } from "pg";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { createTestDatabase } from "../../test-support/database";
+import { TestDatabase } from "../../test-support/database";
 import { AppDatabase, type DatabaseConfig } from "./database";
 
 // AppDatabase.create に渡す設定の例。接続先は架空（プールは作るだけなら接続しない）。
@@ -43,9 +43,13 @@ afterEach(async () => {
 
 describe("AppDatabase.create", () => {
   test("設定をプールに渡す（DB 側のタイムアウトは node-postgres の接続パラメータの名前にする）", () => {
+    // given
     const pool = fakePool();
+
+    // when
     AppDatabase.create(CONFIG, pool.create);
 
+    // then
     expect(pool.configs).toEqual([
       {
         connectionString: "postgresql://u:p@db.example:5432/x",
@@ -60,6 +64,7 @@ describe("AppDatabase.create", () => {
   });
 
   test("アイドル中の接続のエラーはログに出すだけで、プロセスを落とさない（error ハンドラを登録する）", () => {
+    // given
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
@@ -69,9 +74,13 @@ describe("AppDatabase.create", () => {
       "terminating connection due to administrator command",
     );
 
+    // when
     const handler = pool.handlers.get("error");
+    const action = () => handler?.(error);
+
+    // then
     expect(handler).toBeDefined();
-    expect(() => handler?.(error)).not.toThrow();
+    expect(action).not.toThrow();
     // logger.emit（db_pool_error は ERROR なので中で console.error）が、文言・event.name（db_pool_error）と例外の type・message を 1 行の JSON で出す。
     expect(consoleError).toHaveBeenCalledTimes(1);
     const [line] = consoleError.mock.calls[0] as [string];
@@ -88,8 +97,11 @@ describe("AppDatabase.create", () => {
   });
 
   test("プールを省略すると node-postgres の Pool を作る（作るだけでは接続しない）", async () => {
+    // given: 前提なし
+    // when
     const { pool } = AppDatabase.create(CONFIG);
 
+    // then
     expect(pool.options.max).toBe(3);
     expect(pool.totalCount).toBe(0);
     await pool.end();
@@ -98,15 +110,20 @@ describe("AppDatabase.create", () => {
   // WHY 実 Postgres で確かめる: node-postgres は 0 などの偽の値を接続パラメータに載せない（pg 8.23.0 の client.js の
   //   getStartupConf）。名前の取り違えや値の落ちは、DB のセッションの設定（SHOW）を見ないと分からない。
   test("DB 側のタイムアウトが接続ごとのセッションの設定になる", async () => {
-    const database = await createTestDatabase();
+    // given
+    const database = await TestDatabase.create();
     try {
       const { pool } = AppDatabase.create({
         ...CONFIG,
         connectionString: database.url,
       });
+
+      // when
       const shown = await pool.query(
         "select current_setting('statement_timeout') as statement, current_setting('lock_timeout') as lock, current_setting('idle_in_transaction_session_timeout') as idle",
       );
+
+      // then
       expect(shown.rows).toEqual([
         { statement: "2s", lock: "500ms", idle: "4s" },
       ]);
@@ -117,14 +134,20 @@ describe("AppDatabase.create", () => {
   });
 
   test("statement_timeout を超えたクエリは DB が打ち切る（SQLSTATE 57014 query_canceled）", async () => {
-    const database = await createTestDatabase();
+    // given
+    const database = await TestDatabase.create();
     try {
       const { pool } = AppDatabase.create({
         ...CONFIG,
         connectionString: database.url,
         statementTimeoutMillis: 100,
       });
-      await expect(pool.query("select pg_sleep(2)")).rejects.toMatchObject({
+
+      // when
+      const promise = pool.query("select pg_sleep(2)");
+
+      // then
+      await expect(promise).rejects.toMatchObject({
         code: "57014",
       });
       await pool.end();
@@ -134,13 +157,18 @@ describe("AppDatabase.create", () => {
   });
 
   test("作った db で実際にクエリを実行できる", async () => {
-    const database = await createTestDatabase();
+    // given
+    const database = await TestDatabase.create();
     try {
       const { db, pool } = AppDatabase.create({
         ...CONFIG,
         connectionString: database.url,
       });
+
+      // when
       const result = await db.execute(sql`select 1 as one`);
+
+      // then
       expect(result.rows).toEqual([{ one: 1 }]);
       await pool.end();
     } finally {
@@ -151,16 +179,22 @@ describe("AppDatabase.create", () => {
 
 describe("AppDatabase.get / AppDatabase.close", () => {
   test("何度呼んでも同じプールを返す（next dev の再読み込みでプールを増やさない）", () => {
+    // given: 前提なし（afterEach でプールを閉じてある）
+    // when
     const first = AppDatabase.get();
     const second = AppDatabase.get();
 
+    // then
     expect(second).toBe(first);
     expect(second.pool).toBe(first.pool);
   });
 
   test("プロセス全体（globalThis）で 1 つだけ保持する", () => {
+    // given: 前提なし（afterEach でプールを閉じてある）
+    // when
     const database = AppDatabase.get();
 
+    // then
     expect((globalThis as { __appDatabase?: unknown }).__appDatabase).toBe(
       database,
     );
@@ -170,11 +204,14 @@ describe("AppDatabase.get / AppDatabase.close", () => {
   //   「モジュールの変数に置く実装」（読み直すたびに新しいプールができる）を見分けられない。vi.resetModules() で
   //   database.ts を別のモジュール実体として読み込み、それでも globalThis の同じプールが返ることを固定する（Issue #132）。
   test("モジュールを読み直しても（next dev の HMR 相当）、globalThis に置いた同じプールを返す", async () => {
+    // given
     const before = AppDatabase.get();
 
+    // when
     vi.resetModules();
     const reloaded = await import("./database");
 
+    // then
     // 別のモジュール実体であること（読み直しが起きていないなら、この検査に意味がない）。
     expect(reloaded.AppDatabase.get).not.toBe(AppDatabase.get);
     expect(reloaded.AppDatabase.get()).toBe(before);
@@ -182,26 +219,37 @@ describe("AppDatabase.get / AppDatabase.close", () => {
   });
 
   test("AppDatabase.close でプールを閉じ、次の AppDatabase.get は新しいプールを作る", async () => {
+    // given
     const first = AppDatabase.get();
     const end = vi.spyOn(first.pool, "end");
 
+    // when
     await AppDatabase.close();
     const second = AppDatabase.get();
 
+    // then
     expect(end).toHaveBeenCalledTimes(1);
     expect(second).not.toBe(first);
   });
 
   test("プールが無いときの AppDatabase.close は何もしない", async () => {
-    await expect(AppDatabase.close()).resolves.toBeUndefined();
+    // given: 前提なし（afterEach でプールを閉じてある）
+    // when
+    const closing = AppDatabase.close();
+
+    // then
+    await expect(closing).resolves.toBeUndefined();
     expect(
       (globalThis as { __appDatabase?: unknown }).__appDatabase,
     ).toBeUndefined();
   });
 
   test("プールの設定は env（.env / 環境変数を env.ts で検証した値）から取る", () => {
+    // given: 前提なし（afterEach でプールを閉じてある）
+    // when
     const { pool } = AppDatabase.get();
 
+    // then
     expect(pool.options).toMatchObject({
       connectionString: env.DATABASE_URL,
       max: env.DATABASE_POOL_MAX,

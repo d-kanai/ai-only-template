@@ -580,7 +580,12 @@ describe("列の型の判定（findColumnTypeViolations）: must pass", () => {
       ),
     ],
   ])("%s は違反なし", (_name, text) => {
-    expect(findColumnTypeViolations(text)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findColumnTypeViolations(text);
+
+    // then
+    expect(violations).toEqual([]);
   });
 });
 
@@ -764,7 +769,12 @@ describe("列の型の判定（findColumnTypeViolations）: must reject", () => 
       [{ rule: "varchar", line: 5 }],
     ],
   ])("%s は違反", (_name, text, expected) => {
-    expect(findColumnTypeViolations(text)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const violations = findColumnTypeViolations(text);
+
+    // then
+    expect(violations).toEqual(expected);
   });
 });
 
@@ -869,7 +879,12 @@ describe("サロゲートキーの判定（findSurrogateKeyViolations）: must p
       source(TABLE_IMPORT, 'const c = { title: text("title") };'),
     ],
   ])("%s は違反なし", (_name, text) => {
-    expect(findSurrogateKeyViolations(text)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findSurrogateKeyViolations(text);
+
+    // then
+    expect(violations).toEqual([]);
   });
 });
 
@@ -1130,7 +1145,12 @@ describe("サロゲートキーの判定（findSurrogateKeyViolations）: must r
       [{ rule: "surrogate-key", line: 3 }],
     ],
   ])("%s は違反", (_name, text, expected) => {
-    expect(findSurrogateKeyViolations(text)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const violations = findSurrogateKeyViolations(text);
+
+    // then
+    expect(violations).toEqual(expected);
   });
 });
 
@@ -1189,7 +1209,12 @@ describe("列の分類表の判定（findColumnClassificationViolations）: must
       source("// pgTable( は書かない", 'const s = "pgTable(";'),
     ],
   ])("%s", (_name, text) => {
-    expect(findColumnClassificationViolations(text)).toEqual([]);
+    // given: it.each の入力
+    // when
+    const violations = findColumnClassificationViolations(text);
+
+    // then
+    expect(violations).toEqual([]);
   });
 });
 
@@ -1366,7 +1391,12 @@ describe("列の分類表の判定（findColumnClassificationViolations）: must
       [{ rule: "column-classification", line: 3 }],
     ],
   ])("%s は違反", (_name, text, expected) => {
-    expect(findColumnClassificationViolations(text)).toEqual(expected);
+    // given: it.each の入力
+    // when
+    const violations = findColumnClassificationViolations(text);
+
+    // then
+    expect(violations).toEqual(expected);
   });
 });
 
@@ -1400,7 +1430,8 @@ describe("スキーマの列挙と検査（fixture）", () => {
   );
 
   it("apps/backend の features と shared の infra/schema.ts だけを対象にし、すべての規則（列の型・surrogate-key・column-classification）の違反を「規則: パス:行」の行の順で返す", () => {
-    const result = violationsOfFixture({
+    // given
+    const fixtureFiles = {
       "apps/backend/features/a/internal/infra/schema.ts": source(
         IMPORT,
         'export const a = pg.pgTable("a", {',
@@ -1425,7 +1456,12 @@ describe("スキーマの列挙と検査（fixture）", () => {
       "apps/backend/features/c/internal/infra/schema.test.ts": varcharColumn,
       "apps/backend/node_modules/x/infra/schema.ts": varcharColumn,
       "apps/frontend_customer/features/x/infra/schema.ts": varcharColumn,
-    });
+    };
+
+    // when
+    const result = violationsOfFixture(fixtureFiles);
+
+    // then
     expect(result).toEqual({
       files: [
         "apps/backend/features/a/internal/infra/schema.ts",
@@ -1444,7 +1480,12 @@ describe("スキーマの列挙と検査（fixture）", () => {
   });
 
   it("apps/backend が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）", () => {
-    expect(violationsOfFixture({ "README.md": "# x\n" })).toEqual({
+    // given: 前提なし
+    // when
+    const result = violationsOfFixture({ "README.md": "# x\n" });
+
+    // then
+    expect(result).toEqual({
       files: [],
       violations: [],
     });
@@ -1453,10 +1494,16 @@ describe("スキーマの列挙と検査（fixture）", () => {
 
 describe("DB の列の型・サロゲートキー・列の分類表（実ファイル）", () => {
   it("apps/backend の infra/schema.ts はすべて列の型の既定に従い、すべての表が uuid の id の primaryKey と列の分類表を持つ", () => {
+    // given: 実ファイル（repoRoot）
+    // when
+    const files = listSchemaFiles(repoRoot);
+    const violations = collectSchemaViolations(repoRoot);
+
+    // then
     // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
-    expect(listSchemaFiles(repoRoot)).toContain(
+    expect(files).toContain(
       "apps/backend/features/todo/internal/infra/schema.ts",
     );
-    expect(collectSchemaViolations(repoRoot)).toEqual([]);
+    expect(violations).toEqual([]);
   });
 });

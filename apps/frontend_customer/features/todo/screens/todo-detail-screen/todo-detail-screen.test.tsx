@@ -8,11 +8,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { TodoDetailScreen } from "@/features/todo";
 import { ApiError } from "@/features/todo/api/api-error";
-import {
-  changeTodoCompletion,
-  getTodo,
-  renameTodo,
-} from "@/features/todo/api/todo-api";
+import { TodoApi } from "@/features/todo/api/todo-api";
 import { commonMessages } from "@/shared/i18n/common.messages";
 import { LocaleProvider } from "@/shared/i18n/i18n";
 import { JaLocale, tJa } from "@/test-support/i18n";
@@ -37,10 +33,13 @@ const milk = {
 };
 
 test("取得中は読み込み中と表示され、取得後は level 1 の見出しに title が表示される", async () => {
-  vi.mocked(getTodo).mockResolvedValue(milk);
+  // given
+  vi.mocked(TodoApi.get).mockResolvedValue(milk);
 
+  // when
   render(<TodoDetailScreen todoId={milk.id} />, { wrapper: JaLocale });
 
+  // then
   expect(
     screen.getByText(tJa(todoDetailScreenMessages, "loading")),
   ).toBeDefined();
@@ -50,14 +49,17 @@ test("取得中は読み込み中と表示され、取得後は level 1 の見�
   expect(
     screen.queryByText(tJa(todoDetailScreenMessages, "loading")),
   ).toBeNull();
-  expect(getTodo).toHaveBeenCalledWith("todo-1");
+  expect(TodoApi.get).toHaveBeenCalledWith("todo-1");
 });
 
 test("エラーが無いときは alert を表示しない", async () => {
-  vi.mocked(getTodo).mockResolvedValue(milk);
+  // given
+  vi.mocked(TodoApi.get).mockResolvedValue(milk);
 
+  // when
   render(<TodoDetailScreen todoId={milk.id} />, { wrapper: JaLocale });
 
+  // then
   expect(
     await screen.findByRole("heading", { level: 1, name: "牛乳を買う" }),
   ).toBeDefined();
@@ -66,10 +68,10 @@ test("エラーが無いときは alert を表示しない", async () => {
 
 // fireEvent.submit は、ハンドラが preventDefault したときだけ false を返す（dispatchEvent の戻り値）。
 test("title のフォームを送信しても、ブラウザの既定の送信（ページの再読み込み）はしない", async () => {
-  vi.mocked(getTodo).mockResolvedValue(milk);
-  vi.mocked(renameTodo).mockResolvedValue(milk);
+  // given
+  vi.mocked(TodoApi.get).mockResolvedValue(milk);
+  vi.mocked(TodoApi.rename).mockResolvedValue(milk);
   render(<TodoDetailScreen todoId={milk.id} />, { wrapper: JaLocale });
-
   const form = (
     await screen.findByRole("button", {
       name: tJa(todoDetailScreenMessages, "save"),
@@ -77,18 +79,25 @@ test("title のフォームを送信しても、ブラウザの既定の送信�
   ).closest("form");
   if (form === null) throw new Error("保存ボタンが form の中にない");
 
-  expect(fireEvent.submit(form)).toBe(false);
-  // 送信で始まった保存（renameTodo）の反映を待ってからテストを終える（終了後の state 更新を残さないため）。
+  // when
+  const notPrevented = fireEvent.submit(form);
+
+  // then
+  expect(notPrevented).toBe(false);
+  // 送信で始まった保存（TodoApi.rename）の反映を待ってからテストを終える（終了後の state 更新を残さないため）。
   await waitFor(() =>
-    expect(renameTodo).toHaveBeenCalledWith("todo-1", "牛乳を買う"),
+    expect(TodoApi.rename).toHaveBeenCalledWith("todo-1", "牛乳を買う"),
   );
 });
 
 test("一覧へ戻るリンクは / を指す", async () => {
-  vi.mocked(getTodo).mockResolvedValue(milk);
+  // given
+  vi.mocked(TodoApi.get).mockResolvedValue(milk);
 
+  // when
   render(<TodoDetailScreen todoId={milk.id} />, { wrapper: JaLocale });
 
+  // then
   expect(
     (
       await screen.findByRole("link", {
@@ -99,7 +108,8 @@ test("一覧へ戻るリンクは / を指す", async () => {
 });
 
 test("取得に失敗すると（not_found など）、エラーのキーを翻訳した文言が alert として表示され、一覧へ戻るリンクは残る", async () => {
-  vi.mocked(getTodo).mockRejectedValue(
+  // given
+  vi.mocked(TodoApi.get).mockRejectedValue(
     new ApiError({
       status: 404,
       type: "/problems/not-found",
@@ -108,8 +118,10 @@ test("取得に失敗すると（not_found など）、エラーのキーを翻�
     }),
   );
 
+  // when
   render(<TodoDetailScreen todoId="missing" />, { wrapper: JaLocale });
 
+  // then
   expect((await screen.findByRole("alert")).textContent).toBe(
     tJa(commonMessages, "todo.notFound", { id: "missing" }),
   );
@@ -120,39 +132,46 @@ test("取得に失敗すると（not_found など）、エラーのキーを翻�
 });
 
 test("title を編集して保存ボタンを押すと、その title で更新され見出しに反映される", async () => {
-  vi.mocked(getTodo).mockResolvedValue(milk);
-  vi.mocked(renameTodo).mockResolvedValue({ ...milk, title: "豆乳を買う" });
+  // given
+  vi.mocked(TodoApi.get).mockResolvedValue(milk);
+  vi.mocked(TodoApi.rename).mockResolvedValue({ ...milk, title: "豆乳を買う" });
   render(<TodoDetailScreen todoId={milk.id} />, { wrapper: JaLocale });
-
   const input = (await screen.findByRole("textbox", {
     name: tJa(todoDetailScreenMessages, "titleLabel"),
   })) as HTMLInputElement;
-  expect(input.value).toBe("牛乳を買う");
-  fireEvent.change(input, { target: { value: "豆乳を買う" } });
-  fireEvent.click(
-    screen.getByRole("button", { name: tJa(todoDetailScreenMessages, "save") }),
-  );
+  const initialValue = input.value;
+  const saveButton = screen.getByRole("button", {
+    name: tJa(todoDetailScreenMessages, "save"),
+  });
 
+  // when
+  fireEvent.change(input, { target: { value: "豆乳を買う" } });
+  fireEvent.click(saveButton);
+
+  // then
+  expect(initialValue).toBe("牛乳を買う");
   expect(
     await screen.findByRole("heading", { level: 1, name: "豆乳を買う" }),
   ).toBeDefined();
-  expect(renameTodo).toHaveBeenCalledWith("todo-1", "豆乳を買う");
+  expect(TodoApi.rename).toHaveBeenCalledWith("todo-1", "豆乳を買う");
 });
 
 test("完了チェックボックスを押すと、完了に更新されチェックが付く", async () => {
-  vi.mocked(getTodo).mockResolvedValue(milk);
-  vi.mocked(changeTodoCompletion).mockResolvedValue({
+  // given
+  vi.mocked(TodoApi.get).mockResolvedValue(milk);
+  vi.mocked(TodoApi.changeCompletion).mockResolvedValue({
     ...milk,
     completed: true,
   });
   render(<TodoDetailScreen todoId={milk.id} />, { wrapper: JaLocale });
+  const checkbox = await screen.findByRole("checkbox", {
+    name: tJa(todoDetailScreenMessages, "completed"),
+  });
 
-  fireEvent.click(
-    await screen.findByRole("checkbox", {
-      name: tJa(todoDetailScreenMessages, "completed"),
-    }),
-  );
+  // when
+  fireEvent.click(checkbox);
 
+  // then
   await waitFor(() =>
     expect(
       (
@@ -162,19 +181,22 @@ test("完了チェックボックスを押すと、完了に更新されチェ�
       ).checked,
     ).toBe(true),
   );
-  expect(changeTodoCompletion).toHaveBeenCalledWith("todo-1", true);
+  expect(TodoApi.changeCompletion).toHaveBeenCalledWith("todo-1", true);
 });
 
 // 画面の文言が LocaleProvider のロケールに従うこと（ja と en で違う文言のキーで見る）。
 test("LocaleProvider のロケールが en なら、英語の文言で表示する", async () => {
-  vi.mocked(getTodo).mockResolvedValue(milk);
+  // given
+  vi.mocked(TodoApi.get).mockResolvedValue(milk);
 
+  // when
   render(
     <LocaleProvider locale="en">
       <TodoDetailScreen todoId={milk.id} />
     </LocaleProvider>,
   );
 
+  // then
   expect(screen.getByText("Loading…")).toBeDefined();
   expect(await screen.findByRole("button", { name: "Save" })).toBeDefined();
   expect(screen.getByRole("link", { name: "Back to list" })).toBeDefined();
@@ -185,8 +207,8 @@ test("LocaleProvider のロケールが en なら、英語の文言で表示す�
 // 400 の項目ごとの誤り（ApiError の errors）は、その入力の直下に出し、aria-describedby と aria-invalid で入力と結び付ける。
 // WHY role="alert" はフォーム全体の文言だけ: 項目の文言は入力の説明（accessible description）として読まれる。
 async function saveTitleWithFailure(reason: unknown) {
-  vi.mocked(getTodo).mockResolvedValue(milk);
-  vi.mocked(renameTodo).mockRejectedValue(reason);
+  vi.mocked(TodoApi.get).mockResolvedValue(milk);
+  vi.mocked(TodoApi.rename).mockRejectedValue(reason);
   render(<TodoDetailScreen todoId={milk.id} />, { wrapper: JaLocale });
   fireEvent.click(
     await screen.findByRole("button", {
@@ -196,9 +218,13 @@ async function saveTitleWithFailure(reason: unknown) {
 }
 
 test("エラーが無いときは、title の入力は invalid でなく、説明も無い", async () => {
-  vi.mocked(getTodo).mockResolvedValue(milk);
+  // given
+  vi.mocked(TodoApi.get).mockResolvedValue(milk);
+
+  // when
   render(<TodoDetailScreen todoId={milk.id} />, { wrapper: JaLocale });
 
+  // then
   const input = await screen.findByRole("textbox", {
     name: tJa(todoDetailScreenMessages, "titleLabel"),
     description: "",
@@ -211,16 +237,19 @@ test("エラーが無いときは、title の入力は invalid でなく、説�
 });
 
 test("空タイトルの 400（#/title）は、title の入力の説明として直下に出し、alert は出さない", async () => {
+  // given
   const message = tJa(commonMessages, "todo.title.empty");
-  await saveTitleWithFailure(
-    new ApiError({
-      status: 400,
-      type: "/problems/validation-error",
-      key: "todo.title.empty",
-      errors: [{ pointer: "#/title", key: "todo.title.empty" }],
-    }),
-  );
+  const failure = new ApiError({
+    status: 400,
+    type: "/problems/validation-error",
+    key: "todo.title.empty",
+    errors: [{ pointer: "#/title", key: "todo.title.empty" }],
+  });
 
+  // when
+  await saveTitleWithFailure(failure);
+
+  // then
   const input = await screen.findByRole("textbox", {
     name: tJa(todoDetailScreenMessages, "titleLabel"),
     description: message,
@@ -234,27 +263,30 @@ test("空タイトルの 400（#/title）は、title の入力の説明として
 });
 
 test("title の型の誤り（#/title）と未知の項目（#）の 2 件は、title の入力の下に 1 件、未知の項目は alert に出す", async () => {
-  await saveTitleWithFailure(
-    new ApiError({
-      status: 400,
-      type: "/problems/validation-error",
-      key: "request.field.notString",
-      params: { path: "title" },
-      errors: [
-        {
-          pointer: "#/title",
-          key: "request.field.notString",
-          params: { path: "title" },
-        },
-        {
-          pointer: "#",
-          key: "request.body.unknownKeys",
-          params: { keys: "extra" },
-        },
-      ],
-    }),
-  );
+  // given
+  const failure = new ApiError({
+    status: 400,
+    type: "/problems/validation-error",
+    key: "request.field.notString",
+    params: { path: "title" },
+    errors: [
+      {
+        pointer: "#/title",
+        key: "request.field.notString",
+        params: { path: "title" },
+      },
+      {
+        pointer: "#",
+        key: "request.body.unknownKeys",
+        params: { keys: "extra" },
+      },
+    ],
+  });
 
+  // when
+  await saveTitleWithFailure(failure);
+
+  // then
   expect(
     await screen.findByRole("textbox", {
       name: tJa(todoDetailScreenMessages, "titleLabel"),
@@ -269,15 +301,18 @@ test("title の型の誤り（#/title）と未知の項目（#）の 2 件は、
 });
 
 test("errors の無い 404 は、alert に全体の文言だけを出し、title の入力は invalid にしない", async () => {
-  await saveTitleWithFailure(
-    new ApiError({
-      status: 404,
-      type: "/problems/not-found",
-      key: "todo.notFound",
-      params: { id: "todo-1" },
-    }),
-  );
+  // given
+  const failure = new ApiError({
+    status: 404,
+    type: "/problems/not-found",
+    key: "todo.notFound",
+    params: { id: "todo-1" },
+  });
 
+  // when
+  await saveTitleWithFailure(failure);
+
+  // then
   expect((await screen.findByRole("alert")).textContent).toBe(
     tJa(commonMessages, "todo.notFound", { id: "todo-1" }),
   );

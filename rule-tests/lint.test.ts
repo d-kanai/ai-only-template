@@ -100,6 +100,8 @@ describe("biome check（pnpm lint と同じ引数）", () => {
   }
 
   it("未使用変数と == を含むファイルは非 0 で終わり、ルール名が出力される", () => {
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
     const { status, output } = checkSource("violation.ts", [
       "export function isAnswer(value: number): boolean {",
       "  const unused = 1;",
@@ -107,6 +109,7 @@ describe("biome check（pnpm lint と同じ引数）", () => {
       "}",
     ]);
 
+    // then
     expect(status, output).not.toBe(0);
     expect(output).toContain("noUnusedVariables");
     expect(output).toContain("noDoubleEquals");
@@ -144,8 +147,11 @@ describe("biome check（pnpm lint と同じ引数）", () => {
       ],
     ],
   ])("%s（%s）の違反だけでも非 0 で終わる", (_kind, rule, lines) => {
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
     const { status, output } = checkSource(`${rule}.ts`, lines);
 
+    // then
     expect(status, output).not.toBe(0);
     expect(output).toContain(rule);
   });
@@ -165,10 +171,13 @@ describe("biome check（pnpm lint と同じ引数）", () => {
   ])(
     "%s で process.env を読むと非 0 で終わり、noProcessEnv が出力される",
     (_kind, fileName) => {
+      // given: 前提なし（入力は when の呼び出しに直接書く）
+      // when
       const { status, output } = checkSource(fileName, [
         "export const url = process.env.DATABASE_URL;",
       ]);
 
+      // then
       expect(status, output).not.toBe(0);
       expect(output).toContain("noProcessEnv");
     },
@@ -177,23 +186,29 @@ describe("biome check（pnpm lint と同じ引数）", () => {
   it.each([["x.test.ts"], ["x.test.tsx"]])(
     "テスト（%s）では process.env を読んでも 0 で終わる（子プロセスに PATH を渡すなどで使う）",
     (fileName) => {
+      // given: 前提なし（入力は when の呼び出しに直接書く）
+      // when
       const { status, output } = checkSource(fileName, [
         "export const path = process.env.PATH;",
       ]);
 
+      // then
       expect(status, output).toBe(0);
     },
   );
 
   it("apps/shared/env.ts は process.env を読んでいても 0 で終わる（環境変数の唯一の入口）", () => {
+    // given
     const envModule = "apps/shared/env.ts";
+
+    // when
+    const result = pnpmExec("biome", ["check", ERROR_ON_WARNINGS, envModule]);
+
+    // then
     // 前提: env.ts が実際に process.env を読んでいること（読んでいなければ、この検査は何も確かめていない）。
     expect(readFileSync(join(repoRoot, envModule), "utf8")).toContain(
       "process.env",
     );
-
-    const result = pnpmExec("biome", ["check", ERROR_ON_WARNINGS, envModule]);
-
     expect(result.status, result.stdout + result.stderr).toBe(0);
   });
 
@@ -227,12 +242,15 @@ describe("biome check（pnpm lint と同じ引数）", () => {
   ])(
     "%s を %s に書くと非 0 で終わり、noConsole が出力される",
     (call, _kind, fileName) => {
+      // given: 前提なし（入力は when の呼び出しに直接書く）
+      // when
       const { status, output } = checkSource(fileName, [
         "export function report(value: unknown): void {",
         `  ${call}(value);`,
         "}",
       ]);
 
+      // then
       expect(status, output).not.toBe(0);
       expect(output).toContain("noConsole");
     },
@@ -241,6 +259,8 @@ describe("biome check（pnpm lint と同じ引数）", () => {
   it.each([["x.test.ts"], ["x.test.tsx"]])(
     "テスト（%s）では console を書いても 0 で終わる（vi.spyOn(console, ...) で出力を抑える・確かめる）",
     (fileName) => {
+      // given: 前提なし（入力は when の呼び出しに直接書く）
+      // when
       const { status, output } = checkSource(fileName, [
         "export function report(value: unknown): void {",
         "  console.log(value);",
@@ -248,23 +268,27 @@ describe("biome check（pnpm lint と同じ引数）", () => {
         "}",
       ]);
 
+      // then
       expect(status, output).toBe(0);
     },
   );
 
   it("apps/shared/logger.ts は console を書いていても 0 で終わる（ログの唯一の出口）", () => {
+    // given
     const loggerModule = "apps/shared/logger.ts";
     // 前提: logger.ts が実際に console を使っていること（使っていなければ、この検査は何も確かめていない）。
     const source = readFileSync(join(repoRoot, loggerModule), "utf8");
-    expect(source).toContain("console.log(");
-    expect(source).toContain("console.error(");
 
+    // when
     const result = pnpmExec("biome", [
       "check",
       ERROR_ON_WARNINGS,
       loggerModule,
     ]);
 
+    // then
+    expect(source).toContain("console.log(");
+    expect(source).toContain("console.error(");
     expect(result.status, result.stdout + result.stderr).toBe(0);
   });
 
@@ -292,25 +316,35 @@ describe("biome check（pnpm lint と同じ引数）", () => {
       ],
     ],
   ])("%s: %s書き方は 0 で終わる", (rule, _how, lines) => {
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
     const { status, output } = checkSource(`allowed-${rule}.ts`, lines);
 
+    // then
     expect(status, output).toBe(0);
   });
 
   it("違反のないファイルは 0 で終わる", () => {
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
     const { status, output } = checkSource("clean.ts", [
       "export function isAnswer(value: number): boolean {",
       "  return value === 42;",
       "}",
     ]);
 
+    // then
     expect(status, output).toBe(0);
   });
 });
 
-// complexity/noStaticOnlyClass の override（Issue #262）: apps/backend/** だけ off にする。backend は最上位に関数を置かず、状態の無い
-//   補助を static だけのクラスにする（ADR docs/adr/architecture/20261002-class-based-backend.md）。apps/shared・apps/frontend_customer は
-//   関数のままなので、static だけのクラスは recommended どおり警告（--error-on-warnings で失敗）のままにする。
+// complexity/noStaticOnlyClass の override（Issue #262）: apps/backend/**・apps/shared/**・apps/e2e/** と、apps/frontend_customer の
+//   features/**・shared/**・test-support/** のうち *.tsx・*.jsx・*.hook.*・*.test.* 以外だけ off にする。どれも最上位に関数を置かず（apps/e2e は
+//   spec 以外の補助。database.ts の E2eDatabase。frontend は React 以外のモジュール。todo-api.ts の TodoApi）、状態の無い補助を
+//   static だけのクラスにする（ADR docs/adr/architecture/20261002-class-based-backend.md・20261002-class-based-shared-and-test-support.md・
+//   20261002-class-based-frontend-modules.md）。範囲は rule-tests/architecture.test.ts の規則 class-based の対象と同じにする。
+//   frontend の React の component（*.tsx・*.jsx）・hook（*.hook.*）・app/・直下のファイル（Next の規約）は関数のままなので、
+//   static だけのクラスは recommended どおり警告（--error-on-warnings で失敗）のままにする。
 // WHY 一時ディレクトリにリポジトリの biome.json を写して、その下の apps/... に置いたファイルを検査する: overrides の includes は
 //   設定ファイルのディレクトリからの相対パスで照合され、リポジトリの外のファイル（noProcessEnv の検査の一時ファイル）には
 //   apps/backend/** が一致しない。リポジトリの中の apps/backend に一時ファイルを置くと、並行して走る architecture.test.ts の
@@ -319,7 +353,7 @@ describe("biome check（pnpm lint と同じ引数）", () => {
 //   「couldn't find an ignore file」で設定エラーになり、違反の有無と関係なく非 0 で終わる。空の .gitignore も無いものとして
 //   同じエラーになった（Biome 2.5.13、2026-10-02 実測）。
 // WHY node_modules/.bin/biome を直接起動する: cwd を一時ディレクトリにするため、pnpm exec はリポジトリの workspace を見つけられない。
-describe("biome check の noStaticOnlyClass は apps/backend だけで off（Issue #262）", () => {
+describe("biome check の noStaticOnlyClass は apps/backend・apps/shared・apps/e2e と frontend の React 以外のモジュールだけで off（Issue #262）", () => {
   let dir: string;
 
   beforeAll(() => {
@@ -358,22 +392,60 @@ describe("biome check の noStaticOnlyClass は apps/backend だけで off（Iss
   it.each([
     ["apps/backend/shared/domain/static-only.ts"],
     ["apps/backend/features/todo/internal/infra/static-only.ts"],
-  ])("%s（apps/backend）では static だけのクラスが 0 で終わる", (path) => {
-    const { status, output } = checkAt(path, STATIC_ONLY_CLASS);
+    ["apps/shared/static-only.ts"],
+    ["apps/backend/test-support/static-only.ts"],
+    ["apps/e2e/static-only.ts"],
+    ["apps/frontend_customer/features/todo/api/static-only.ts"],
+    ["apps/frontend_customer/shared/i18n/static-only.ts"],
+    ["apps/frontend_customer/shared/request-log/nested/static-only.mts"],
+    ["apps/frontend_customer/test-support/static-only.ts"],
+  ])(
+    "%s（apps/backend・apps/shared・apps/e2e・frontend の React 以外のモジュール）では static だけのクラスが 0 で終わる",
+    (path) => {
+      // given: 前提なし（入力は when の呼び出しに直接書く）
+      // when
+      const { status, output } = checkAt(path, STATIC_ONLY_CLASS);
 
-    expect(status, output).toBe(0);
-  });
+      // then
+      expect(status, output).toBe(0);
+    },
+  );
 
   it.each([
-    ["apps/shared/static-only.ts", "apps/shared"],
-    ["apps/frontend_customer/shared/static-only.ts", "apps/frontend_customer"],
+    ["apps/shared-x/static-only.ts", "名前の前方一致だけが同じ別ディレクトリ"],
+    [
+      "apps/frontend_customer/features/todo/components/static-only.tsx",
+      "frontend の React の component",
+    ],
+    [
+      "apps/frontend_customer/shared/ui/static-only.jsx",
+      "frontend の React の component",
+    ],
+    [
+      "apps/frontend_customer/features/todo/screens/x/static-only.hook.ts",
+      "frontend の React の hook",
+    ],
+    [
+      "apps/frontend_customer/features/todo/api/static-only.test.ts",
+      "frontend のテスト（規則 class-based の対象外）",
+    ],
+    ["apps/frontend_customer/app/static-only.ts", "frontend の app/"],
+    ["apps/frontend_customer/static-only.ts", "frontend の直下"],
+    [
+      "apps/frontend_customer/features-x/static-only.ts",
+      "名前の前方一致だけが同じ別ディレクトリ",
+    ],
     ["apps/backend-x/static-only.ts", "名前の前方一致だけが同じ別ディレクトリ"],
+    ["apps/e2e-x/static-only.ts", "名前の前方一致だけが同じ別ディレクトリ"],
     ["static-only.ts", "リポジトリ直下"],
   ])(
     "%s（%s）では static だけのクラスが非 0 で終わり、noStaticOnlyClass が出力される",
     (path) => {
+      // given: 前提なし（入力は when の呼び出しに直接書く）
+      // when
       const { status, output } = checkAt(path, STATIC_ONLY_CLASS);
 
+      // then
       expect(status, output).not.toBe(0);
       expect(output).toContain("noStaticOnlyClass");
     },
@@ -381,27 +453,36 @@ describe("biome check の noStaticOnlyClass は apps/backend だけで off（Iss
 
   // WHY: 上の非 0 が、設定の読み込みの失敗など noStaticOnlyClass 以外の理由ではないことを示す（同じ場所でインスタンスのメンバーを
   //   持つクラスは通る）。
-  it("apps/shared でもインスタンスのメンバーを持つクラスは 0 で終わる", () => {
-    const { status, output } = checkAt("apps/shared/instance-class.ts", [
-      "export class Paths {",
-      "  of(name: string): string {",
-      "    return name;",
-      "  }",
-      "}",
-    ]);
+  it("apps/frontend_customer の app/ でもインスタンスのメンバーを持つクラスは 0 で終わる", () => {
+    // given: 前提なし（入力は when の呼び出しに直接書く）
+    // when
+    const { status, output } = checkAt(
+      "apps/frontend_customer/app/instance-class.ts",
+      [
+        "export class Paths {",
+        "  of(name: string): string {",
+        "    return name;",
+        "  }",
+        "}",
+      ],
+    );
 
+    // then
     expect(status, output).toBe(0);
   });
 
   it("リポジトリの apps/backend/shared/drizzle/drizzle.config.ts（static だけのクラス DrizzleConfigPath）は 0 で終わる", () => {
+    // given
     const configFile = "apps/backend/shared/drizzle/drizzle.config.ts";
     // 前提: static だけのクラスを実際に持つこと（持たなければ、この検査は何も確かめていない）。
     const source = readFileSync(join(repoRoot, configFile), "utf8");
-    expect(source).toContain("class DrizzleConfigPath {");
-    expect(source).toContain("  static fromConfigDir(");
 
+    // when
     const result = pnpmExec("biome", ["check", ERROR_ON_WARNINGS, configFile]);
 
+    // then
+    expect(source).toContain("class DrizzleConfigPath {");
+    expect(source).toContain("  static fromConfigDir(");
     expect(result.status, result.stdout + result.stderr).toBe(0);
   });
 });
@@ -416,7 +497,12 @@ describe("--error-on-warnings 付きの biome check かの判定（runsBiomeChec
     ],
     ["pnpm install && biome check --error-on-warnings ."],
   ])("%s は許可する", (command) => {
-    expect(runsBiomeCheckWithErrorOnWarnings(command)).toBe(true);
+    // given: it.each の入力
+    // when
+    const result = runsBiomeCheckWithErrorOnWarnings(command);
+
+    // then
+    expect(result).toBe(true);
   });
 
   it.each([
@@ -481,7 +567,12 @@ describe("--error-on-warnings 付きの biome check かの判定（runsBiomeChec
     ],
     ["", "空文字"],
   ])("%s（%s）は拒否する", (command) => {
-    expect(runsBiomeCheckWithErrorOnWarnings(command)).toBe(false);
+    // given: it.each の入力
+    // when
+    const result = runsBiomeCheckWithErrorOnWarnings(command);
+
+    // then
+    expect(result).toBe(false);
   });
 });
 
@@ -492,24 +583,32 @@ describe("package.json scripts", () => {
   ])(
     "%s は --error-on-warnings 付きで biome check を実行する",
     (_name, script) => {
-      expect(runsBiomeCheckWithErrorOnWarnings(script), script).toBe(true);
+      // given: it.each の script
+      // when
+      const result = runsBiomeCheckWithErrorOnWarnings(script);
+
+      // then
+      expect(result, script).toBe(true);
     },
   );
 });
 
 describe("lefthook.yml", () => {
   it("pre-commit で --error-on-warnings 付きの biome check を実行するコマンドが定義されている", () => {
+    // given: 前提なし（リポジトリの lefthook.yml を読む）
+    // when
     // WHY: YAML を自前でパースせず `lefthook dump` を使うのは、Lefthook 自身が解釈した結果
     //   （インデント崩れなどで意図と違う構造になっていないか）を検査するため。
     const result = pnpmExec("lefthook", ["dump", "--format", "json"]);
-    expect(result.status, result.stdout + result.stderr).toBe(0);
-
     const config = JSON.parse(result.stdout) as {
       "pre-commit"?: { commands?: Record<string, { run?: string }> };
     };
     const runs = Object.values(config["pre-commit"]?.commands ?? {}).map(
       (command) => command.run ?? "",
     );
+
+    // then
+    expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(runs.filter(runsBiomeCheckWithErrorOnWarnings)).toHaveLength(1);
   });
 });

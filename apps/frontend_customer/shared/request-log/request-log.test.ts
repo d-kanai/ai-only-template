@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
-  buildRequestLog,
   type RequestLog,
+  RequestLogBuilder,
   type RequestLogInput,
 } from "@/shared/request-log/request-log";
 
@@ -28,26 +28,30 @@ function input(overrides: Partial<RequestLogInput> = {}): RequestLogInput {
   };
 }
 
-describe("buildRequestLog: 5W1H の各項目", () => {
+describe("RequestLogBuilder.build: 5W1H の各項目", () => {
   test("ブラウザの画面アクセスのヘッダから、1 行のすべての項目を組み立てる", () => {
-    const log = buildRequestLog(
-      input({
-        method: "GET",
-        url: "http://localhost:3100/todo/abc?tab=detail&sort=asc",
-        headers: {
-          "x-request-id": "req-1",
-          traceparent: `00-${TRACE_ID}-${SPAN_ID}-01`,
-          "x-forwarded-for": "203.0.113.5, 10.0.0.1",
-          "x-real-ip": "10.0.0.9",
-          "user-agent": "Mozilla/5.0 (X11; Linux x86_64)",
-          host: "localhost:3100",
-          referer: "http://localhost:3100/",
-          accept: "text/html,application/xhtml+xml",
-          "content-type": "text/plain",
-          "content-length": "12",
-        },
-      }),
-    );
+    // given
+    const requestInput = input({
+      method: "GET",
+      url: "http://localhost:3100/todo/abc?tab=detail&sort=asc",
+      headers: {
+        "x-request-id": "req-1",
+        traceparent: `00-${TRACE_ID}-${SPAN_ID}-01`,
+        "x-forwarded-for": "203.0.113.5, 10.0.0.1",
+        "x-real-ip": "10.0.0.9",
+        "user-agent": "Mozilla/5.0 (X11; Linux x86_64)",
+        host: "localhost:3100",
+        referer: "http://localhost:3100/",
+        accept: "text/html,application/xhtml+xml",
+        "content-type": "text/plain",
+        "content-length": "12",
+      },
+    });
+
+    // when
+    const log = RequestLogBuilder.build(requestInput);
+
+    // then
     expect(log).toEqual({
       message: "GET /todo/abc",
       event: { name: "page_request" },
@@ -76,11 +80,14 @@ describe("buildRequestLog: 5W1H の各項目", () => {
   });
 
   test("ヘッダが 1 つも無いときは、ヘッダ由来の項目をすべて null にし、http.request.id を生成し、trace のキーを出さない", () => {
-    expect(
-      buildRequestLog(
-        input({ method: "POST", url: "http://localhost:3100/api/todos" }),
-      ),
-    ).toStrictEqual({
+    // given: 前提なし
+    // when
+    const log = RequestLogBuilder.build(
+      input({ method: "POST", url: "http://localhost:3100/api/todos" }),
+    );
+
+    // then
+    expect(log).toStrictEqual({
       message: "POST /api/todos",
       event: { name: "api_request" },
       time: "2026-09-29T01:02:03.456Z",
@@ -101,51 +108,72 @@ describe("buildRequestLog: 5W1H の各項目", () => {
   });
 
   test("headers は Headers でも受け取り、名前の大文字・小文字を区別しない", () => {
-    const log = buildRequestLog(
-      input({
-        headers: new Headers({
-          "User-Agent": "curl/8.5.0",
-          Host: "example.com",
-          Accept: "*/*",
-        }),
-      }),
-    );
+    // given
+    const headers = new Headers({
+      "User-Agent": "curl/8.5.0",
+      Host: "example.com",
+      Accept: "*/*",
+    });
+
+    // when
+    const log = RequestLogBuilder.build(input({ headers }));
+
+    // then
     expect(log.user_agent.original).toBe("curl/8.5.0");
     expect(log.server.address).toBe("example.com");
     expect(log.http.request.header.accept).toBe("*/*");
   });
 
   test("record のヘッダ名が大文字でも読む", () => {
-    const log = buildRequestLog(
-      input({ headers: { "Content-Type": "application/json" } }),
-    );
+    // given
+    const headers = { "Content-Type": "application/json" };
+
+    // when
+    const log = RequestLogBuilder.build(input({ headers }));
+
+    // then
     expect(log.http.request.header["content-type"]).toBe("application/json");
   });
 
   test("user.id は認証が入るまで常に null（ヘッダに何があっても埋めない）", () => {
-    const log = buildRequestLog(
-      input({ headers: { "x-user-id": "u-1", authorization: "Bearer t" } }),
-    );
+    // given
+    const headers = { "x-user-id": "u-1", authorization: "Bearer t" };
+
+    // when
+    const log = RequestLogBuilder.build(input({ headers }));
+
+    // then
     expect(log.user).toEqual({ id: null });
   });
 
   test("time は受信時刻の RFC 3339（ISO 8601、UTC）", () => {
-    const log = buildRequestLog(
-      input({ receivedAt: new Date(Date.UTC(2026, 0, 2, 3, 4, 5, 6)) }),
-    );
+    // given
+    const at = new Date(Date.UTC(2026, 0, 2, 3, 4, 5, 6));
+
+    // when
+    const log = RequestLogBuilder.build(input({ receivedAt: at }));
+
+    // then
     expect(log.time).toBe("2026-01-02T03:04:05.006Z");
   });
 
   test("method は受け取った値のまま出し、message は「<method> <path>」（クエリを含めない）", () => {
-    const log = buildRequestLog(
-      input({ method: "DELETE", url: "http://localhost/api/todos/abc?x=1" }),
-    );
+    // given
+    const requestInput = input({
+      method: "DELETE",
+      url: "http://localhost/api/todos/abc?x=1",
+    });
+
+    // when
+    const log = RequestLogBuilder.build(requestInput);
+
+    // then
     expect(log.http.request.method).toBe("DELETE");
     expect(log.message).toBe("DELETE /api/todos/abc");
   });
 });
 
-describe("buildRequestLog: event.name の判定（/api/** は api_request、それ以外は page_request）", () => {
+describe("RequestLogBuilder.build: event.name の判定（/api/** は api_request、それ以外は page_request）", () => {
   // must pass（api と判定する）
   test.each([
     "http://localhost/api",
@@ -153,7 +181,12 @@ describe("buildRequestLog: event.name の判定（/api/** は api_request、そ�
     "http://localhost/api/todos",
     "http://localhost/api/todos/abc?x=1",
   ])("%s は api_request", (url) => {
-    expect(buildRequestLog(input({ url })).event).toEqual({
+    // given: 前提なし（url は test.each の引数）
+    // when
+    const log = RequestLogBuilder.build(input({ url }));
+
+    // then
+    expect(log.event).toEqual({
       name: "api_request",
     });
   });
@@ -168,7 +201,12 @@ describe("buildRequestLog: event.name の判定（/api/** は api_request、そ�
     "http://localhost/API/todos",
     "http://localhost/?next=/api/todos",
   ])("%s は page_request", (url) => {
-    expect(buildRequestLog(input({ url })).event).toEqual({
+    // given: 前提なし（url は test.each の引数）
+    // when
+    const log = RequestLogBuilder.build(input({ url }));
+
+    // then
+    expect(log.event).toEqual({
       name: "page_request",
     });
   });
@@ -178,14 +216,17 @@ describe("buildRequestLog: event.name の判定（/api/** は api_request、そ�
 //   api_request のスキーマ）が行い、url.query の値は *** に、キーは自由文の網（メールアドレスなど）を通して出す（Issue #216）。
 //   ここで値を落とすと、logger のスキーマでマスクされていることを確かめる意味が無くなり、マスクの判断が 2 か所に分かれる。
 //   画面側の shared/ は apps/shared を参照できない（規則 screen-to-shared）ので、マスクの済んだ行の形は logger.test.ts と
-//   E2E（apps/e2e/request-log.spec.ts。stdout にクエリの値が出ないこと）で確かめる。
-describe("buildRequestLog: url.path と url.query（キーと値の組。マスクは logger が行う）", () => {
+//   E2E（apps/e2e/request-log.feature。stdout にクエリの値が出ないこと）で確かめる。
+describe("RequestLogBuilder.build: url.path と url.query（キーと値の組。マスクは logger が行う）", () => {
   test("クエリをキーと値の組（デコードした値）にして、出現順に出す", () => {
-    const log = buildRequestLog(
-      input({
-        url: "http://localhost/api/todos?email=secret%40example.com&token=s3cr3t",
-      }),
-    );
+    // given
+    const url =
+      "http://localhost/api/todos?email=secret%40example.com&token=s3cr3t";
+
+    // when
+    const log = RequestLogBuilder.build(input({ url }));
+
+    // then
     expect(log.url).toEqual({
       path: "/api/todos",
       query: { email: "secret@example.com", token: "s3cr3t" },
@@ -196,119 +237,162 @@ describe("buildRequestLog: url.path と url.query（キーと値の組。マス�
   // WHY 後の値を使う: 値は logger が *** にするので、どの値を残すかは行の中身に影響しない。キーの種類と順（最初に出た位置）が
   //   分かれば足りる。
   test("同じキーが複数回あっても 1 回だけ出す（位置は最初に出た所、値は後のもの）", () => {
-    const { query } = buildRequestLog(
-      input({ url: "http://localhost/?a=1&b=2&a=3" }),
-    ).url;
+    // given
+    const url = "http://localhost/?a=1&b=2&a=3";
+
+    // when
+    const { query } = RequestLogBuilder.build(input({ url })).url;
+
+    // then
     expect(query).toEqual({ a: "3", b: "2" });
     expect(Object.keys(query)).toEqual(["a", "b"]);
   });
 
   test("値の無いキー・空のクエリ・フラグメントを扱う", () => {
-    expect(
-      buildRequestLog(input({ url: "http://localhost/x?flag#frag" })),
-    ).toMatchObject({ url: { path: "/x", query: { flag: "" } } });
-    expect(
-      buildRequestLog(input({ url: "http://localhost/x?" })).url.query,
-    ).toEqual({});
+    // given: 前提なし（input はヘッダなどの既定値を持つヘルパー）
+    // when
+    const withFlag = RequestLogBuilder.build(
+      input({ url: "http://localhost/x?flag#frag" }),
+    );
+    const emptyQuery = RequestLogBuilder.build(
+      input({ url: "http://localhost/x?" }),
+    ).url.query;
+
+    // then
+    expect(withFlag).toMatchObject({
+      url: { path: "/x", query: { flag: "" } },
+    });
+    expect(emptyQuery).toEqual({});
   });
 });
 
-describe("buildRequestLog: http.request.id（x-request-id）", () => {
+describe("RequestLogBuilder.build: http.request.id（x-request-id）", () => {
   test("x-request-id があればそれを使い、生成しない", () => {
+    // given
     let calls = 0;
-    const log = buildRequestLog(
-      input({
-        headers: { "x-request-id": "from-upstream" },
-        generateRequestId: () => {
-          calls += 1;
-          return "generated-id";
-        },
-      }),
-    );
+    const requestInput = input({
+      headers: { "x-request-id": "from-upstream" },
+      generateRequestId: () => {
+        calls += 1;
+        return "generated-id";
+      },
+    });
+
+    // when
+    const log = RequestLogBuilder.build(requestInput);
+
+    // then
     expect(log.http.request.id).toBe("from-upstream");
     expect(calls).toBe(0);
   });
 
   test("x-request-id が無いときと空のときは生成した値を使う", () => {
-    expect(buildRequestLog(input()).http.request.id).toBe("generated-id");
-    expect(
-      buildRequestLog(input({ headers: { "x-request-id": "" } })).http.request
-        .id,
-    ).toBe("generated-id");
+    // given: 前提なし（input はヘッダなどの既定値を持つヘルパー）
+    // when
+    const missing = RequestLogBuilder.build(input()).http.request.id;
+    const empty = RequestLogBuilder.build(
+      input({ headers: { "x-request-id": "" } }),
+    ).http.request.id;
+
+    // then
+    expect(missing).toBe("generated-id");
+    expect(empty).toBe("generated-id");
   });
 });
 
-describe("buildRequestLog: client.address（x-forwarded-for の先頭 → x-real-ip → null）", () => {
+describe("RequestLogBuilder.build: client.address（x-forwarded-for の先頭 → x-real-ip → null）", () => {
   test("x-forwarded-for の先頭（前後の空白を除く）を使い、x-real-ip より優先する", () => {
-    expect(
-      buildRequestLog(
-        input({
-          headers: {
-            "x-forwarded-for": "  198.51.100.7 ,203.0.113.5",
-            "x-real-ip": "10.0.0.9",
-          },
-        }),
-      ).client.address,
-    ).toBe("198.51.100.7");
+    // given
+    const headers = {
+      "x-forwarded-for": "  198.51.100.7 ,203.0.113.5",
+      "x-real-ip": "10.0.0.9",
+    };
+
+    // when
+    const address = RequestLogBuilder.build(input({ headers })).client.address;
+
+    // then
+    expect(address).toBe("198.51.100.7");
   });
 
   test("x-forwarded-for が 1 件だけならそれを使う", () => {
-    expect(
-      buildRequestLog(input({ headers: { "x-forwarded-for": "::1" } })).client
-        .address,
-    ).toBe("::1");
+    // given
+    const headers = { "x-forwarded-for": "::1" };
+
+    // when
+    const address = RequestLogBuilder.build(input({ headers })).client.address;
+
+    // then
+    expect(address).toBe("::1");
   });
 
   test("x-forwarded-for が無いときは x-real-ip を使う", () => {
-    expect(
-      buildRequestLog(input({ headers: { "x-real-ip": "10.0.0.9" } })).client
-        .address,
-    ).toBe("10.0.0.9");
+    // given
+    const headers = { "x-real-ip": "10.0.0.9" };
+
+    // when
+    const address = RequestLogBuilder.build(input({ headers })).client.address;
+
+    // then
+    expect(address).toBe("10.0.0.9");
   });
 
   test("x-forwarded-for の先頭が空なら x-real-ip を使う", () => {
-    expect(
-      buildRequestLog(
-        input({
-          headers: {
-            "x-forwarded-for": " , 203.0.113.5",
-            "x-real-ip": "10.0.0.9",
-          },
-        }),
-      ).client.address,
-    ).toBe("10.0.0.9");
+    // given
+    const headers = {
+      "x-forwarded-for": " , 203.0.113.5",
+      "x-real-ip": "10.0.0.9",
+    };
+
+    // when
+    const address = RequestLogBuilder.build(input({ headers })).client.address;
+
+    // then
+    expect(address).toBe("10.0.0.9");
   });
 
   test("どちらも無い・空なら null", () => {
-    expect(buildRequestLog(input()).client.address).toBeNull();
-    expect(
-      buildRequestLog(
-        input({ headers: { "x-forwarded-for": "", "x-real-ip": "" } }),
-      ).client.address,
-    ).toBeNull();
+    // given: 前提なし（input はヘッダなどの既定値を持つヘルパー）
+    // when
+    const missing = RequestLogBuilder.build(input()).client.address;
+    const empty = RequestLogBuilder.build(
+      input({ headers: { "x-forwarded-for": "", "x-real-ip": "" } }),
+    ).client.address;
+
+    // then
+    expect(missing).toBeNull();
+    expect(empty).toBeNull();
   });
 });
 
-describe("buildRequestLog: http.request.body.size（Content-Length）", () => {
+describe("RequestLogBuilder.build: http.request.body.size（Content-Length）", () => {
   test.each([
     ["0", 0],
     ["12", 12],
     ["1048576", 1048576],
   ])("Content-Length %s は %d バイト", (value, bytes) => {
-    expect(
-      buildRequestLog(input({ headers: { "content-length": value } })).http
-        .request.body.size,
-    ).toBe(bytes);
+    // given: 前提なし（value は test.each の引数）
+    // when
+    const size = RequestLogBuilder.build(
+      input({ headers: { "content-length": value } }),
+    ).http.request.body.size;
+
+    // then
+    expect(size).toBe(bytes);
   });
 
   // 数値として読めない値は推測で埋めず null にする（負の数・小数・数字以外・空）。
   test.each(["", "-1", "1.5", "abc", "12abc", " "])(
     "Content-Length %j は null",
     (value) => {
-      expect(
-        buildRequestLog(input({ headers: { "content-length": value } })).http
-          .request.body.size,
-      ).toBeNull();
+      // given: 前提なし（value は test.each の引数）
+      // when
+      const size = RequestLogBuilder.build(
+        input({ headers: { "content-length": value } }),
+      ).http.request.body.size;
+
+      // then
+      expect(size).toBeNull();
     },
   );
 });
@@ -316,9 +400,11 @@ describe("buildRequestLog: http.request.body.size（Content-Length）", () => {
 // trace（Cloud Logging の特別フィールド。https://docs.cloud.google.com/logging/docs/agent/logging/configuration#special-fields ）。
 // traceparent は W3C Trace Context（https://www.w3.org/TR/trace-context/#traceparent-header ）の
 //   「00-<trace-id 32 桁>-<parent-id 16 桁>-<trace-flags 2 桁>」（16 進数は小文字だけ）。
-describe("buildRequestLog: traceparent から logging.googleapis.com/trace・spanId・trace_sampled", () => {
+describe("RequestLogBuilder.build: traceparent から logging.googleapis.com/trace・spanId・trace_sampled", () => {
   function traceOf(traceparent: string, projectId = "my-project") {
-    const log = buildRequestLog(input({ headers: { traceparent }, projectId }));
+    const log = RequestLogBuilder.build(
+      input({ headers: { traceparent }, projectId }),
+    );
     return {
       trace: log["logging.googleapis.com/trace"],
       spanId: log["logging.googleapis.com/spanId"],
@@ -328,7 +414,12 @@ describe("buildRequestLog: traceparent から logging.googleapis.com/trace・spa
 
   // must pass（trace を出す）
   test("trace は projects/<プロジェクト ID>/traces/<trace-id>、spanId は parent-id", () => {
-    expect(traceOf(`00-${TRACE_ID}-${SPAN_ID}-01`, "prod-123")).toEqual({
+    // given: 前提なし
+    // when
+    const trace = traceOf(`00-${TRACE_ID}-${SPAN_ID}-01`, "prod-123");
+
+    // then
+    expect(trace).toEqual({
       trace: `projects/prod-123/traces/${TRACE_ID}`,
       spanId: SPAN_ID,
       sampled: true,
@@ -342,7 +433,12 @@ describe("buildRequestLog: traceparent から logging.googleapis.com/trace・spa
   ])(
     "trace-id %s・parent-id %s（すべて 0 ではない）なら出す",
     (traceId, spanId) => {
-      expect(traceOf(`00-${traceId}-${spanId}-00`)).toEqual({
+      // given: 前提なし（traceId・spanId は test.each の引数）
+      // when
+      const trace = traceOf(`00-${traceId}-${spanId}-00`);
+
+      // then
+      expect(trace).toEqual({
         trace: `projects/my-project/traces/${traceId}`,
         spanId,
         sampled: false,
@@ -361,7 +457,12 @@ describe("buildRequestLog: traceparent から logging.googleapis.com/trace・spa
     ["fe", false],
     ["ff", true],
   ])("trace-flags %s の trace_sampled は %s", (flags, sampled) => {
-    expect(traceOf(`00-${TRACE_ID}-${SPAN_ID}-${flags}`).sampled).toBe(sampled);
+    // given: 前提なし（flags は test.each の引数）
+    // when
+    const trace = traceOf(`00-${TRACE_ID}-${SPAN_ID}-${flags}`);
+
+    // then
+    expect(trace.sampled).toBe(sampled);
   });
 
   // must reject（形が違えば 3 つのキーをどれも出さない）
@@ -383,15 +484,22 @@ describe("buildRequestLog: traceparent から logging.googleapis.com/trace・spa
     ["後ろに続きがある", `00-${TRACE_ID}-${SPAN_ID}-01-extra`],
     ["前に余分な文字がある", `x00-${TRACE_ID}-${SPAN_ID}-01`],
   ])("traceparent が%sなら trace のキーを出さない", (_label, traceparent) => {
-    const log = buildRequestLog(input({ headers: { traceparent } }));
+    // given: 前提なし（traceparent は test.each の引数）
+    // when
+    const log = RequestLogBuilder.build(input({ headers: { traceparent } }));
+
+    // then
     expect(
       Object.keys(log).filter((key) => key.startsWith("logging.")),
     ).toEqual([]);
   });
 
   test("traceparent が無ければ trace のキーを出さない（null も入れない）", () => {
-    expect(Object.keys(buildRequestLog(input()))).not.toContain(
-      "logging.googleapis.com/trace",
-    );
+    // given: 前提なし（input はヘッダなどの既定値を持つヘルパー）
+    // when
+    const keys = Object.keys(RequestLogBuilder.build(input()));
+
+    // then
+    expect(keys).not.toContain("logging.googleapis.com/trace");
   });
 });

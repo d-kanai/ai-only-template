@@ -372,21 +372,29 @@ describe("scripts/cloud-session-start.sh", () => {
     // DRY_RUN を付けるのは、変異などで CLAUDE_CODE_REMOTE の判定が外れたときに本物のダウンロードや
     // pnpm install を走らせないため。DRY_RUN でも実行予定が stdout に出るので、判定漏れは検出できる。
     it("CLAUDE_CODE_REMOTE が未設定なら何もせず exit 0（ローカルのセッションに影響しない）", () => {
+      // given: 前提なし（beforeEach で偽のコマンドと一時ディレクトリを用意してある）
+      // when
       const result = runScript([], {
         CLOUD_SESSION_START_DRY_RUN: "1",
         CLAUDE_ENV_FILE: envFile,
       });
+
+      // then
       expect(result.status).toBe(0);
       expect(result.stdout).toBe("");
       expect(readFileSync(envFile, "utf8")).toBe("export EXISTING=1\n");
     });
 
     it("CLAUDE_CODE_REMOTE=false なら何もせず exit 0", () => {
+      // given: 前提なし（beforeEach で偽のコマンドと一時ディレクトリを用意してある）
+      // when
       const result = runScript([], {
         CLAUDE_CODE_REMOTE: "false",
         CLOUD_SESSION_START_DRY_RUN: "1",
         CLAUDE_ENV_FILE: envFile,
       });
+
+      // then
       expect(result.status).toBe(0);
       expect(result.stdout).toBe("");
       expect(readFileSync(envFile, "utf8")).toBe("export EXISTING=1\n");
@@ -398,11 +406,15 @@ describe("scripts/cloud-session-start.sh", () => {
     ])(
       "HOME が%sなら warn を出して何もせず exit 0（インストール先が /.local/node-<版> になるのを防ぐ）",
       (_label, homeValue) => {
+        // given: 前提なし（beforeEach で偽のコマンドと一時ディレクトリを用意してある）
+        // when
         const result = runScript([], {
           ...remoteEnv(),
           CLOUD_SESSION_START_DRY_RUN: "1",
           HOME: homeValue,
         });
+
+        // then
         expect(result.status).toBe(0);
         expect(result.stdout).toBe("");
         expect(result.stderr).toContain("HOME");
@@ -413,7 +425,11 @@ describe("scripts/cloud-session-start.sh", () => {
 
   describe("--print-plan", () => {
     it(".tool-versions の Node / pnpm の版とインストール先を表示して exit 0（/opt に書けなければ $HOME/.local）", () => {
+      // given: 前提なし（beforeEach で偽のコマンドと一時ディレクトリを用意してある）
+      // when
       const result = runScript(["--print-plan"], {});
+
+      // then
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(`nodejs ${nodeVersion}`);
       expect(result.stdout).toContain(`pnpm ${pnpmVersion}`);
@@ -423,7 +439,11 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("nodejs.org に届かないときに使う npm レジストリの URL（Node と pnpm）も表示する", () => {
+      // given: 前提なし（beforeEach で偽のコマンドと一時ディレクトリを用意してある）
+      // when
       const result = runScript(["--print-plan"], {});
+
+      // then
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(nodeRegistryMetaUrl("linux-x64"));
       expect(result.stdout).toContain(pnpmMetaUrl);
@@ -431,24 +451,34 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("/opt に書き込めるなら /opt/node-<版> に入れる", () => {
+      // given
       optDir = join(tmp, "opt-writable");
       mkdirSync(optDir);
+
+      // when
       const result = runScript(["--print-plan"], {});
+
+      // then
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(join(optDir, `node-${nodeVersion}`));
       expect(result.stdout).not.toContain(join(home, ".local"));
     });
 
     it(".tool-versions が CRLF でも版に \\r を含めない", () => {
+      // given
       const project = join(tmp, "project");
       mkdirSync(project);
       writeFileSync(
         join(project, ".tool-versions"),
         `nodejs ${nodeVersion}\r\npnpm ${pnpmVersion}\r\n`,
       );
+
+      // when
       const result = runScript(["--print-plan"], {
         CLAUDE_PROJECT_DIR: project,
       });
+
+      // then
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(`nodejs ${nodeVersion}\n`);
       expect(result.stdout).toContain(`pnpm ${pnpmVersion}\n`);
@@ -458,11 +488,14 @@ describe("scripts/cloud-session-start.sh", () => {
 
   describe("DRY_RUN", () => {
     it("CLAUDE_CODE_REMOTE=true（未インストール）なら、インストール予定を表示し CLAUDE_ENV_FILE に PATH を追記する", () => {
+      // given: 前提なし（beforeEach で偽のコマンドと一時ディレクトリを用意してある）
+      // when
       const result = runScript([], {
         ...remoteEnv(),
         CLOUD_SESSION_START_DRY_RUN: "1",
       });
 
+      // then
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(nodeTarballUrl);
       expect(result.stdout).toContain(`SHASUMS256.txt`);
@@ -471,7 +504,6 @@ describe("scripts/cloud-session-start.sh", () => {
       expect(result.stdout).toContain(pnpmExeMetaUrl("linux-x64"));
       expect(result.stdout).not.toContain("npm install -g");
       expect(result.stdout).toContain("pnpm install --frozen-lockfile");
-
       const nodeBin = join(home, ".local", `node-${nodeVersion}`, "bin");
       expect(readFileSync(envFile, "utf8")).toBe(
         `export EXISTING=1\nexport PATH="${nodeBin}:$PATH"\n`,
@@ -479,11 +511,14 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("--install-only は CLAUDE_CODE_REMOTE が無くてもインストール予定を出し、CLAUDE_ENV_FILE に書かず pnpm install もしない（setup script 用）", () => {
+      // given: 前提なし（beforeEach で偽のコマンドと一時ディレクトリを用意してある）
+      // when
       const result = runScript(["--install-only"], {
         CLAUDE_ENV_FILE: envFile,
         CLOUD_SESSION_START_DRY_RUN: "1",
       });
 
+      // then
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(nodeTarballUrl);
       expect(result.stdout).toContain(nodeRegistryMetaUrl("linux-x64"));
@@ -500,14 +535,17 @@ describe("scripts/cloud-session-start.sh", () => {
     ])(
       "既存インストール（%s）があればダウンロード予定を出さず、その bin を PATH に追記して pnpm install する",
       (_label, nodeDirOf) => {
+        // given
         const nodeDir = nodeDirOf();
         placeFakeNode(nodeDir);
 
+        // when
         const result = runScript([], {
           ...remoteEnv(),
           CLOUD_SESSION_START_DRY_RUN: "1",
         });
 
+        // then
         expect(result.status).toBe(0);
         expect(result.stdout).not.toContain(nodeTarballUrl);
         expect(result.stdout).not.toContain("SHASUMS256.txt");
@@ -527,10 +565,13 @@ describe("scripts/cloud-session-start.sh", () => {
       `export EXISTING=1\nexport PATH="${join(nodeDirIn(), "bin")}:$PATH"\n`;
 
     it("正常: 展開して bin/node を配置し PATH を追記する。nodejs.org で取れればレジストリには行かない。pnpm が取れなくても warn だけで exit 0", () => {
+      // given
       buildNodeFixture("linux-x64", "ok");
 
+      // when
       const result = runScript([], remoteEnv());
 
+      // then
       expect(result.status).toBe(0);
       expect(existsSync(join(nodeDirIn(), "bin", "node"))).toBe(true);
       // ダウンロード用の一時ディレクトリが残っていない
@@ -543,13 +584,16 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("curl に接続タイムアウト 15 秒と、取得物ごとの全体タイムアウトを付け、最悪ケースの合計をフックの 600 秒打ち切りより十分小さく（400 秒以下に）する", () => {
+      // given
       // nodejs.org の SHASUMS 不一致でレジストリにフォールバックさせ、Node・pnpm の取得 8 回をすべて通す。
       buildNodeFixture("linux-x64", "mismatch");
       buildRegistryNodeFixture("linux-x64", "ok");
       buildPnpmFixtures();
 
+      // when
       runScript([], remoteEnv());
 
+      // then
       const calls = curlCalls();
       const expected: [string, (c: string) => boolean, number][] = [
         ["nodejs.org tarball", (c) => c.endsWith(".tar.xz"), 60],
@@ -597,10 +641,13 @@ describe("scripts/cloud-session-start.sh", () => {
     ] as const)(
       "%s（レジストリにも無い）: 展開せず、一時ディレクトリも残さず、PATH も書かずに exit 0",
       (_label, shasums) => {
+        // given
         buildNodeFixture("linux-x64", shasums);
 
+        // when
         const result = runScript([], remoteEnv());
 
+        // then
         expect(result.status).toBe(0);
         expect(result.stderr).toContain("sha256 mismatch");
         expect(readdirSync(join(home, ".local"))).toEqual([]);
@@ -609,11 +656,14 @@ describe("scripts/cloud-session-start.sh", () => {
     );
 
     it("uname -m が aarch64 なら linux-arm64 の配布物（Node と @pnpm/exe）を取得する", () => {
+      // given
       buildNodeFixture("linux-arm64", "ok");
       buildPnpmFixtures("linux-arm64");
 
+      // when
       const result = runScript([], { ...remoteEnv(), FAKE_UNAME_M: "aarch64" });
 
+      // then
       expect(result.status).toBe(0);
       const urls = curlCalls().join("\n");
       expect(urls).toContain(`node-v${nodeVersion}-linux-arm64.tar.xz`);
@@ -624,10 +674,13 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("uname -m が x86_64 / aarch64 以外なら warn を出してダウンロードせず、PATH も書かずに exit 0", () => {
+      // given
       buildNodeFixture("linux-x64", "ok");
 
+      // when
       const result = runScript([], { ...remoteEnv(), FAKE_UNAME_M: "armv7l" });
 
+      // then
       expect(result.status).toBe(0);
       expect(result.stderr).toContain("armv7l");
       expect(curlCalls()).toEqual([]);
@@ -635,12 +688,15 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("bin/node が無い壊れた node-<版> ディレクトリがあれば、置き換えてから配置する（入れ子にしない）", () => {
+      // given
       buildNodeFixture("linux-x64", "ok");
       mkdirSync(nodeDirIn(), { recursive: true });
       writeFileSync(join(nodeDirIn(), "leftover"), "broken");
 
+      // when
       const result = runScript([], remoteEnv());
 
+      // then
       expect(result.status).toBe(0);
       expect(existsSync(join(nodeDirIn(), "bin", "node"))).toBe(true);
       expect(
@@ -656,10 +712,13 @@ describe("scripts/cloud-session-start.sh", () => {
     const nodeDirIn = () => join(home, ".local", `node-${nodeVersion}`);
 
     it("レジストリの node-linux-x64 を integrity 検証して展開し、bin/node を配置して PATH を追記する", () => {
+      // given
       buildRegistryNodeFixture("linux-x64", "ok");
 
+      // when
       const result = runScript([], remoteEnv());
 
+      // then
       expect(result.status).toBe(0);
       const urls = curlCalls().join("\n");
       expect(urls).toContain(nodeTarballUrl);
@@ -681,10 +740,13 @@ describe("scripts/cloud-session-start.sh", () => {
     ] as const)(
       "%s: 展開せず、一時ディレクトリも残さず、PATH も書かずに exit 0",
       (_label, integrity) => {
+        // given
         buildRegistryNodeFixture("linux-x64", integrity);
 
+        // when
         const result = runScript([], remoteEnv());
 
+        // then
         expect(result.status).toBe(0);
         expect(result.stderr).toContain("integrity");
         expect(readdirSync(join(home, ".local"))).toEqual([]);
@@ -693,10 +755,13 @@ describe("scripts/cloud-session-start.sh", () => {
     );
 
     it("uname -m が aarch64 なら node-linux-arm64 を取得する", () => {
+      // given
       buildRegistryNodeFixture("linux-arm64", "ok");
 
+      // when
       const result = runScript([], { ...remoteEnv(), FAKE_UNAME_M: "aarch64" });
 
+      // then
       expect(result.status).toBe(0);
       const urls = curlCalls().join("\n");
       expect(urls).toContain(nodeRegistryMetaUrl("linux-arm64"));
@@ -710,11 +775,14 @@ describe("scripts/cloud-session-start.sh", () => {
     const nodeDirIn = () => join(home, ".local", `node-${nodeVersion}`);
 
     it("pnpm と @pnpm/exe.linux-x64 を integrity 検証して lib/node_modules/pnpm に置き、ネイティブバイナリを bin/pnpm から実行できるようにして pnpm install する（npm は使わない）", () => {
+      // given
       buildNodeFixture("linux-x64", "ok");
       buildPnpmFixtures();
 
+      // when
       const result = runScript([], remoteEnv());
 
+      // then
       expect(result.status).toBe(0);
       const pnpmBin = join(nodeDirIn(), "bin", "pnpm");
       expect(lstatSync(pnpmBin).isSymbolicLink()).toBe(true);
@@ -731,11 +799,14 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("@pnpm/exe の integrity が一致しなければ bin/pnpm を作らず一時ディレクトリも残さない（Node の PATH は書く）", () => {
+      // given
       buildNodeFixture("linux-x64", "ok");
       buildPnpmFixtures("linux-x64", "mismatch");
 
+      // when
       const result = runScript([], remoteEnv());
 
+      // then
       expect(result.status).toBe(0);
       expect(result.stderr).toContain("integrity mismatch");
       expect(result.stderr).toContain(`failed to install pnpm@${pnpmVersion}`);
@@ -747,13 +818,16 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("同じ版の pnpm が既にあれば何も取得しない（冪等）", () => {
+      // given
       placeFakeNode(nodeDirIn());
       writeFileSync(join(nodeDirIn(), "bin", "pnpm"), FAKE_NATIVE_PNPM, {
         mode: 0o755,
       });
 
+      // when
       const result = runScript([], remoteEnv());
 
+      // then
       expect(result.status).toBe(0);
       expect(curlCalls()).toEqual([]);
       expect(result.stderr).toContain(
@@ -803,19 +877,27 @@ describe("scripts/cloud-session-start.sh", () => {
     };
 
     it("ローカル（CLAUDE_CODE_REMOTE が true でない）では docker を一切呼ばない", () => {
+      // given: 前提なし（beforeEach で偽のコマンドと一時ディレクトリを用意してある）
+      // when
       const result = runScript([], {
         CLOUD_SESSION_START_DRY_RUN: "1",
         CLAUDE_ENV_FILE: envFile,
       });
+
+      // then
       expect(result.status).toBe(0);
       expect(logLines(dockerLog)).toEqual([]);
       expect(logLines(dockerdLog)).toEqual([]);
     });
 
     it("--install-only（setup script）では docker を一切呼ばない", () => {
+      // given: 前提なし（beforeEach で偽のコマンドと一時ディレクトリを用意してある）
+      // when
       const result = runScript(["--install-only"], {
         CLOUD_SESSION_START_DRY_RUN: "1",
       });
+
+      // then
       expect(result.status).toBe(0);
       expect(result.stdout).not.toContain("docker");
       expect(logLines(dockerLog)).toEqual([]);
@@ -823,11 +905,16 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("DRY_RUN でデーモンが動いていなければ、dockerd の起動予定と docker compose pull / up の予定を表示し、実際には起動しない", () => {
+      // given
       rmSync(dockerReady);
+
+      // when
       const result = runScript([], {
         ...remoteEnv(),
         CLOUD_SESSION_START_DRY_RUN: "1",
       });
+
+      // then
       expect(result.status).toBe(0);
       expect(result.stdout).toContain("dockerd");
       expect(result.stdout).toContain(join(tmp, "dockerd.log"));
@@ -844,10 +931,14 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("DRY_RUN でデーモンが動いていれば、dockerd の起動予定は出さず docker compose pull / up と pnpm db:migrate の予定だけを表示する", () => {
+      // given: 前提なし（beforeEach で偽のコマンドと一時ディレクトリを用意してある）
+      // when
       const result = runScript([], {
         ...remoteEnv(),
         CLOUD_SESSION_START_DRY_RUN: "1",
       });
+
+      // then
       expect(result.status).toBe(0);
       expect(result.stdout).not.toContain("dockerd");
       expect(result.stdout).toContain(
@@ -877,8 +968,13 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("デーモンが動いていれば dockerd は起動せず、リポジトリ直下で docker compose pull → up -d --wait --wait-timeout 120 の順に実行し、その後マイグレーションを当てる", () => {
+      // given
       placeInstalledNodeAndPnpm();
+
+      // when
       const result = runScript([], remoteEnv());
+
+      // then
       expect(result.status).toBe(0);
       expect(logLines(dockerdLog)).toEqual([]);
       const calls = logLines(dockerLog);
@@ -895,12 +991,17 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("docker compose pull が 2 回失敗しても、2 秒・4 秒待って 3 回目で成功すれば up に進む", () => {
+      // given
       placeInstalledNodeAndPnpm();
       writeFileSync(join(fakeBin, "sleep"), FAKE_SLEEP, { mode: 0o755 });
+
+      // when
       const result = runScript([], {
         ...remoteEnv(),
         FAKE_COMPOSE_PULL_FAILS: "2",
       });
+
+      // then
       expect(result.status).toBe(0);
       const calls = logLines(dockerLog);
       expect(calls.filter((c) => c === composePull)).toHaveLength(3);
@@ -910,12 +1011,17 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("docker compose pull が 3 回とも失敗したら、warn を出して up は実行せず exit 0（4 回目は試さない）", () => {
+      // given
       placeInstalledNodeAndPnpm();
       writeFileSync(join(fakeBin, "sleep"), FAKE_SLEEP, { mode: 0o755 });
+
+      // when
       const result = runScript([], {
         ...remoteEnv(),
         FAKE_COMPOSE_PULL_FAILS: "3",
       });
+
+      // then
       expect(result.status).toBe(0);
       const calls = logLines(dockerLog);
       expect(calls.filter((c) => c === composePull)).toHaveLength(3);
@@ -930,9 +1036,14 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("デーモンが動いていなければ dockerd をバックグラウンドで起動し（出力は $TMPDIR/dockerd.log）、docker info が通ってから docker compose up を実行する", () => {
+      // given
       placeInstalledNodeAndPnpm();
       rmSync(dockerReady);
+
+      // when
       const result = runScript([], remoteEnv());
+
+      // then
       expect(result.status).toBe(0);
       // 既定のソケット・データ置き場で使うので、引数なしで起動する（2026-09-28 の work-logs の VM の実測）
       expect(logLines(dockerdLog)).toEqual(["dockerd "]);
@@ -948,13 +1059,18 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("dockerd はバックグラウンドで起動し、終わるのを待たない（本物の dockerd は終わらない）", () => {
+      // given
       placeInstalledNodeAndPnpm();
       rmSync(dockerReady);
       const started = Date.now();
+
+      // when
       const result = runScript([], {
         ...remoteEnv(),
         FAKE_DOCKERD_SLEEP_SECONDS: "5",
       });
+
+      // then
       expect(result.status).toBe(0);
       expect(logLines(dockerLog)).toContain(composeUp);
       // 偽 dockerd は 5 秒動き続ける。待っていれば 5 秒以上かかる（docker info の再確認の 1 秒を見込んで 3 秒未満）
@@ -962,11 +1078,16 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("dockerd は setsid があれば別セッションで起動する（フックの終了で一緒に止まらないように）。無ければ nohup だけで同じセッション", () => {
+      // given
       placeInstalledNodeAndPnpm();
       rmSync(dockerReady);
       const hasSetsid =
         spawnSync("bash", ["-c", "command -v setsid"]).status === 0;
+
+      // when
       const result = runScript([], remoteEnv());
+
+      // then
       expect(result.status).toBe(0);
       const scriptSid = readFileSync(join(tmp, "docker-sid"), "utf8").trim();
       const dockerdSid = readFileSync(join(tmp, "dockerd-sid"), "utf8").trim();
@@ -979,14 +1100,19 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("dockerd を起動しても待ち時間内に docker info が通らなければ、warn を出して compose は実行せず exit 0", () => {
+      // given
       placeInstalledNodeAndPnpm();
       rmSync(dockerReady);
       const started = Date.now();
+
+      // when
       const result = runScript([], {
         ...remoteEnv(),
         FAKE_DOCKERD_STARTS: "0",
         CLOUD_SESSION_START_DOCKER_WAIT_SECONDS: "1",
       });
+
+      // then
       expect(result.status).toBe(0);
       expect(result.stderr).toContain("docker daemon did not become ready");
       expect(result.stderr).toContain(join(tmp, "dockerd.log"));
@@ -996,8 +1122,13 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("docker compose up が失敗しても warn を出して exit 0", () => {
+      // given
       placeInstalledNodeAndPnpm();
+
+      // when
       const result = runScript([], { ...remoteEnv(), FAKE_COMPOSE_EXIT: "1" });
+
+      // then
       expect(result.status).toBe(0);
       expect(logLines(dockerLog)).toContain(composeUp);
       expect(result.stderr).toContain(
@@ -1006,20 +1137,29 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("Node の取得に失敗しても Postgres は起動する（Postgres は Node に依存しない）", () => {
+      // given: 前提なし（beforeEach で偽のコマンドと一時ディレクトリを用意してある）
+      // when
       // フィクスチャを置かないので、nodejs.org もレジストリも 22 で失敗する。
       const result = runScript([], remoteEnv());
+
+      // then
       expect(result.status).toBe(0);
       expect(existsSync(nodeDirIn())).toBe(false);
       expect(logLines(dockerLog)).toContain(composeUp);
     });
 
     it("docker が無ければ warn を出して何もせず exit 0", () => {
+      // given
       placeInstalledNodeAndPnpm();
+
+      // when
       const result = runScript([], {
         ...remoteEnv(),
         CLOUD_SESSION_START_DRY_RUN: "1",
         PATH: limitedPath(false),
       });
+
+      // then
       expect(result.status).toBe(0);
       expect(result.stderr).toContain("docker not found");
       expect(result.stdout).not.toContain("docker compose");
@@ -1028,11 +1168,16 @@ describe("scripts/cloud-session-start.sh", () => {
     // .env は Docker の段より前に用意する（Issue #59 の reviewer 指摘）。Docker が使えなくても、pnpm test / pnpm dev などは
     //   .env が無いと必須の変数が欠けて止まるため。
     it("docker が無くても .env は .env.example から作る（Docker の段より前に用意する）", () => {
+      // given
       placeInstalledNodeAndPnpm();
+
+      // when
       const result = runScript([], {
         ...remoteEnv(),
         PATH: limitedPath(false),
       });
+
+      // then
       expect(result.status).toBe(0);
       expect(result.stderr).toContain("docker not found");
       expect(readFileSync(projectEnvFile, "utf8")).toBe(
@@ -1041,12 +1186,17 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("DRY_RUN で docker が無くても、.env のコピーの予定を表示する", () => {
+      // given
       placeInstalledNodeAndPnpm();
+
+      // when
       const result = runScript([], {
         ...remoteEnv(),
         CLOUD_SESSION_START_DRY_RUN: "1",
         PATH: limitedPath(false),
       });
+
+      // then
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(
         `(cd ${projectDir} && cp .env.example .env)`,
@@ -1055,10 +1205,14 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("DRY_RUN では .env のコピーの予定が docker compose の予定より前に出る", () => {
+      // given: 前提なし（beforeEach で偽のコマンドと一時ディレクトリを用意してある）
+      // when
       const result = runScript([], {
         ...remoteEnv(),
         CLOUD_SESSION_START_DRY_RUN: "1",
       });
+
+      // then
       expect(result.status).toBe(0);
       expect(result.stdout.indexOf("cp .env.example .env")).toBeGreaterThan(-1);
       expect(result.stdout.indexOf("cp .env.example .env")).toBeLessThan(
@@ -1070,36 +1224,55 @@ describe("scripts/cloud-session-start.sh", () => {
       ["docker compose up が失敗", { FAKE_COMPOSE_EXIT: "1" }],
       ["docker compose pull が 3 回とも失敗", { FAKE_COMPOSE_PULL_FAILS: "3" }],
     ])("%sしても .env は作る", (_label, failure) => {
+      // given
       placeInstalledNodeAndPnpm();
       writeFileSync(join(fakeBin, "sleep"), FAKE_SLEEP, { mode: 0o755 });
+
+      // when
       const result = runScript([], { ...remoteEnv(), ...failure });
+
+      // then
       expect(result.status).toBe(0);
       expect(result.stderr).toContain("cloud-session-start:");
       expect(existsSync(projectEnvFile)).toBe(true);
     });
 
     it("Node の取得に失敗しても .env は作る", () => {
+      // given: 前提なし（beforeEach で偽のコマンドと一時ディレクトリを用意してある）
+      // when
       const result = runScript([], { ...remoteEnv(), FAKE_COMPOSE_EXIT: "1" });
+
+      // then
       expect(result.status).toBe(0);
       expect(existsSync(nodeDirIn())).toBe(false);
       expect(existsSync(projectEnvFile)).toBe(true);
     });
 
     it("デーモンが動いておらず dockerd も無ければ、待たずに warn を出して compose は実行せず exit 0", () => {
+      // given
       placeInstalledNodeAndPnpm();
       rmSync(dockerReady);
+
+      // when
       const result = runScript([], {
         ...remoteEnv(),
         PATH: limitedPath(true),
       });
+
+      // then
       expect(result.status).toBe(0);
       expect(result.stderr).toContain("dockerd not found");
       expect(logLines(dockerLog)).not.toContain(composeUp);
     });
 
     it("docker compose up の後に、リポジトリ直下で .env を用意してから pnpm db:migrate を実行する（接続先を差し込まない。上限 15 秒）", () => {
+      // given
       placeInstalledNodeAndPnpm();
+
+      // when
       const result = runScript([], { ...remoteEnv(), PNPM_LOG: dockerLog });
+
+      // then
       expect(result.status).toBe(0);
       const calls = logLines(dockerLog);
       // DATABASE_URL は空（スクリプトは既定値を持たず、.env から env.ts が読む）で、実行時に .env がある。
@@ -1114,8 +1287,13 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it(".env が無ければ .env.example をそのままコピーして作る", () => {
+      // given
       placeInstalledNodeAndPnpm();
+
+      // when
       const result = runScript([], { ...remoteEnv(), PNPM_LOG: dockerLog });
+
+      // then
       expect(result.status).toBe(0);
       expect(readFileSync(projectEnvFile, "utf8")).toBe(
         readFileSync(join(projectDir, ".env.example"), "utf8"),
@@ -1123,12 +1301,17 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it(".env が既にあれば上書きせず、そのまま pnpm db:migrate を実行する（利用者が書き換えた値を消さない）", () => {
+      // given
       placeInstalledNodeAndPnpm();
       writeFileSync(
         projectEnvFile,
         "DATABASE_URL=postgresql://u:p@db.example:5432/x\n",
       );
+
+      // when
       const result = runScript([], { ...remoteEnv(), PNPM_LOG: dockerLog });
+
+      // then
       expect(result.status).toBe(0);
       expect(readFileSync(projectEnvFile, "utf8")).toBe(
         "DATABASE_URL=postgresql://u:p@db.example:5432/x\n",
@@ -1138,11 +1321,16 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("DRY_RUN で .env が既にあれば、コピーの予定は出さずに残すことを表示する", () => {
+      // given
       writeFileSync(projectEnvFile, "DATABASE_URL=x\n");
+
+      // when
       const result = runScript([], {
         ...remoteEnv(),
         CLOUD_SESSION_START_DRY_RUN: "1",
       });
+
+      // then
       expect(result.status).toBe(0);
       expect(result.stdout).not.toContain("cp .env.example .env");
       expect(result.stdout).toContain(`${projectEnvFile} exists; keep it`);
@@ -1152,6 +1340,7 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it(".env も .env.example も無ければ warn を出し、pnpm db:migrate は試す（環境変数だけで渡されている場合があるため）", () => {
+      // given
       placeInstalledNodeAndPnpm();
       const bare = join(tmp, "bare-project");
       mkdirSync(bare);
@@ -1159,11 +1348,15 @@ describe("scripts/cloud-session-start.sh", () => {
         join(bare, ".tool-versions"),
         readFileSync(join(repoRoot, ".tool-versions")),
       );
+
+      // when
       const result = runScript([], {
         ...remoteEnv(),
         CLAUDE_PROJECT_DIR: bare,
         PNPM_LOG: dockerLog,
       });
+
+      // then
       expect(result.status).toBe(0);
       expect(result.stderr).toContain(".env.example not found");
       expect(existsSync(join(bare, ".env"))).toBe(false);
@@ -1173,13 +1366,18 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("環境に DATABASE_URL があれば、そのまま引き継いで pnpm db:migrate を実行する（env.ts で .env より優先される）", () => {
+      // given
       placeInstalledNodeAndPnpm();
       const url = "postgresql://u:p@db.example:5432/other";
+
+      // when
       const result = runScript([], {
         ...remoteEnv(),
         PNPM_LOG: dockerLog,
         DATABASE_URL: url,
       });
+
+      // then
       expect(result.status).toBe(0);
       expect(
         logLines(dockerLog).filter((c) => c.endsWith("pnpm db:migrate")),
@@ -1187,24 +1385,34 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("pnpm db:migrate が失敗しても warn を出して exit 0", () => {
+      // given
       placeInstalledNodeAndPnpm();
+
+      // when
       const result = runScript([], {
         ...remoteEnv(),
         PNPM_LOG: dockerLog,
         FAKE_PNPM_MIGRATE_EXIT: "1",
       });
+
+      // then
       expect(result.status).toBe(0);
       expect(logLines(dockerLog)).toContain(migrate());
       expect(result.stderr).toContain("pnpm db:migrate failed");
     });
 
     it("docker compose up が失敗したら pnpm db:migrate は実行しない", () => {
+      // given
       placeInstalledNodeAndPnpm();
+
+      // when
       const result = runScript([], {
         ...remoteEnv(),
         PNPM_LOG: dockerLog,
         FAKE_COMPOSE_EXIT: "1",
       });
+
+      // then
       expect(result.status).toBe(0);
       expect(
         logLines(dockerLog).filter((c) => c.endsWith("pnpm db:migrate")),
@@ -1213,8 +1421,13 @@ describe("scripts/cloud-session-start.sh", () => {
     });
 
     it("--install-only（setup script）では pnpm db:migrate を実行せず、.env も作らない", () => {
+      // given
       placeInstalledNodeAndPnpm();
+
+      // when
       const result = runScript(["--install-only"], { PNPM_LOG: dockerLog });
+
+      // then
       expect(result.status).toBe(0);
       expect(logLines(dockerLog)).toEqual([]);
       expect(existsSync(projectEnvFile)).toBe(false);

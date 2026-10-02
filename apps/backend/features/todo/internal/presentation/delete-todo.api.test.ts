@@ -86,12 +86,15 @@ const NOT_UUID_IDS = [
 
 describe("DELETE /api/todos/:id", () => {
   test("204 と空の本文を返し、Todo が消える", async () => {
+    // given
     const { repository, DELETE } = setup();
     const todo = Todo.create("牛乳を買う");
     await repository.insert(todo, inMemoryTransaction);
 
+    // when
     const response = await DELETE(deleteRequest(todo.id), context(todo.id));
 
+    // then
     expect(response.status).toBe(204);
     await expect(response.text()).resolves.toBe("");
     await expect(repository.findAll()).resolves.toEqual([]);
@@ -100,6 +103,7 @@ describe("DELETE /api/todos/:id", () => {
   // WHY 本番の DELETE（モジュールの最下部で組み立てたもの）を確かめる: InMemory に切り替える分岐を持たない（Issue #59）
   //   ことを、Postgres の Repository が呼ばれることで固定する。runner の run と findByIdForUpdate と delete を差し替えるので DB には接続しない。
   test("本番の DELETE は Postgres の runner が張ったトランザクションで、Postgres の Repository から削除する", async () => {
+    // given
     const todo = Todo.create("牛乳を買う");
     // WHY runner の run を差し替える: 本番の組み立ての PostgresTransactionRunner が DB に接続しないよう、work を呼ぶだけにする。
     //   run が 1 回呼ばれ、Repository がその tx を受け取ることで、本番の command がトランザクションを張ることも確かめる。
@@ -114,35 +118,43 @@ describe("DELETE /api/todos/:id", () => {
       .spyOn(PostgresTodoRepository.prototype, "delete")
       .mockResolvedValue();
 
+    // when
     const response = await productionDelete(
       deleteRequest(todo.id),
       context(todo.id),
     );
 
+    // then
     expect(response.status).toBe(204);
     expect(run).toHaveBeenCalledTimes(1);
     expect(remove.mock.calls).toEqual([[todo.id, inMemoryTransaction]]);
   });
 
   test("uuid の形だが存在しない id なら 404 の /problems/not-found を、todo.notFound と id の params 付きで返す", async () => {
+    // given
     const { DELETE } = setup();
     const id = randomUUID();
 
+    // when
     const response = await DELETE(deleteRequest(id), context(id));
 
+    // then
     await expectProblem(response, notFoundProblem(id));
   });
 
   test.each(NOT_UUID_IDS)(
     "id が %s なら、Repository に問い合わせずに 404 の /problems/not-found（todo.notFound と id の params）を返す",
     async (_label, id) => {
+      // given
       const { repository, ...spies } = spiedRepository();
       const DELETE = new DeleteTodoApi(
         new DeleteTodoCommand(repository, new InMemoryTransactionRunner()),
       ).handle;
 
+      // when
       const response = await DELETE(deleteRequest(id), context(id));
 
+      // then
       await expectProblem(response, notFoundProblem(id));
       expect(spies.findById).not.toHaveBeenCalled();
       expect(spies.findByIdForUpdate).not.toHaveBeenCalled();

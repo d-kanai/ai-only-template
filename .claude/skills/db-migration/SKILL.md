@@ -24,12 +24,12 @@ description: Drizzle のスキーマ変更とマイグレーション（schema.t
    - SQL に `"public".` が無いこと（表をスキーマで修飾しない）。あると `rule-tests/migration.test.ts` の `no-public-schema-qualifier` が失敗する（WHY は下の「外部キー」）。
    - `--custom` の SQL（下の「外部キー」）を書いたら、別の一時スキーマにデータを入れてから当て、行の中身・外部キーの参照先（`pg_constraint` の `confrelid::regclass` が当てたスキーマの表か）・選んだ削除時の動作（親を消したときに子が消える / 拒否される / `NULL` になる）を確かめる。WHY: テストはファイルごとの別スキーマに当てるので、参照先が public だとテストでは気づけないまま壊れる。
 5. **当てる**: `pnpm db:migrate`（`drizzle-kit migrate`）。まだ当てていない SQL だけを当てる。当てた記録は DB の `drizzle.__drizzle_migrations` 表に残り、何度実行しても同じ結果になる。
-6. **テストを通す**: `pnpm test`。実 Postgres のテストは `createTestDatabase()` がテストファイルごとの別スキーマにマイグレーションを当てるので、テスト用に migrate する必要はない。E2E（`pnpm test:e2e`）は `public` の表を使うので手順 5 が要る。
+6. **テストを通す**: `pnpm test`。実 Postgres のテストは `TestDatabase.create()` がテストファイルごとの別スキーマにマイグレーションを当てるので、テスト用に migrate する必要はない。E2E（`pnpm test:e2e`）は `public` の表を使うので手順 5 が要る。
 7. **コミット**: `schema.ts`・テスト・`apps/backend/shared/drizzle/`（SQL と `meta/` をまとめて）を同じコミットに入れる。
 - データの移行（既存の行を足す・直す）の仕組みは今は無い（Issue #247 で backfill を外した。本番環境が無く移すデータが無い）。要るようになったら方法を決め直す（`.claude/rules/backend.md` の「永続化」）。
 
 ## 外部キー（`--custom` の SQL で張る。Issue #188）
-- `schema.ts` に `.references()` を書かない。WHY: drizzle-kit 0.31.11 の generate は `REFERENCES "public"."todos"` とスキーマ付きで書く（`bin.cjs` の `schemaTo || "public"`。2026-09-30 に生成して確認）。`createTestDatabase()` はテストファイルごとの別スキーマ（search_path）にマイグレーションを当てるので、public を指す外部キーはテストのスキーマの表を指さず壊れる。
+- `schema.ts` に `.references()` を書かない。WHY: drizzle-kit 0.31.11 の generate は `REFERENCES "public"."todos"` とスキーマ付きで書く（`bin.cjs` の `schemaTo || "public"`。2026-09-30 に生成して確認）。`TestDatabase.create()` はテストファイルごとの別スキーマ（search_path）にマイグレーションを当てるので、public を指す外部キーはテストのスキーマの表を指さず壊れる。
 - 手順: `pnpm db:generate --custom --name <内容>` で空の SQL を作り、`ALTER TABLE "<子>" ADD CONSTRAINT "<子>_<列>_<親>_id_fk" FOREIGN KEY ("<列>") REFERENCES "<親>"("id") ON DELETE <動作>;` をスキーマなしで手で書く（`--custom` の SQL は手で書くもの。手順 4 の「手で直さない」は generate が書いた SQL のこと）。例は `apps/backend/shared/drizzle/0002_todo_status_changes_foreign_key_and_backfill.sql`。列の側の `schema.ts` には、外部キーを SQL で張ったことと WHY をコメントで書く（`features/todo/internal/infra/schema.ts` の `todoId`）。
 - `ON DELETE` の動作は関係ごとに選び、理由を SQL のコメントに書く: 子が親に属し親と一緒に消えてよいなら `cascade`（Todo の完了の履歴 `todo_status_changes`）、子が残る間は親を消させないなら `restrict` / `no action`、子を残して参照だけ外すなら `set null`（列は null 可）。WHY: `cascade` を既定にすると、残すべき子が親の削除で黙って消える。
 - 張った後は手順 4 の一時スキーマでの確認をする。テストの `truncate` と E2E の後始末は、参照する表と参照される表を同じ文で消す（`.claude/rules/backend.md` の「永続化」）。
