@@ -22,6 +22,14 @@ export type EvaluateFeatureFlagsResponse = {
   flags: { key: string; value: boolean; reason: "STATIC" }[];
 };
 
+// 画面が読んでよいフラグの key（domain の一覧 FEATURE_FLAGS の key の集合）。画面（apps/frontend_customer/features/feature-flag/api/）が
+//   import type で読み、フラグの key の打ち間違いをコンパイルエラーにする（Issue #156）。
+// WHY この api ファイルから re-export する（画面に domain を直接読ませない）: 画面側が backend を参照してよいのは自 feature の
+//   presentation の *.api の型だけ（rule-tests/architecture.test.ts の feature-api-to-backend）。key の集合はこの API の契約
+//   （画面が一括の評価で受け取るフラグ）の一部なので、契約のファイルから出す。
+// WHY 一括の評価のファイルに置く: 画面の OFREP の web provider が呼ぶのは一括の評価（起動時と再取得）だけ。
+export type { FeatureFlagKey } from "../domain/feature-flags";
+
 // POST /api/ofrep/v1/evaluate/flags の Route Handler を持つクラス（形の WHY は evaluate-feature-flag.api.ts の EvaluateFeatureFlagApi）。
 export class EvaluateFeatureFlagsApi {
   constructor(

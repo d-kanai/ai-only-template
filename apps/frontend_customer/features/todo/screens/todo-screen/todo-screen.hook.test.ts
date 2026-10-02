@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { Activity, type ActivityProps, createElement, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { useFeatureFlag } from "@/features/feature-flag";
 import { ApiError } from "@/features/todo/api/api-error";
 import { TodoApi } from "@/features/todo/api/todo-api";
 import { useTodoScreen } from "@/features/todo/screens/todo-screen/todo-screen.hook";
@@ -16,12 +17,18 @@ import { JaLocale, tJa } from "@/test-support/i18n";
 
 // hook の関心は「いつ・何で API を呼び、結果をどの状態に反映するか」なので、HTTP の詳細（todo-api.test.ts で検証済み）は差し替える。
 vi.mock("@/features/todo/api/todo-api");
+// フィーチャーフラグ（Issue #156）は feature-flag feature の公開 API（index）で差し替え、値をテストで決める。
+// WHY OpenFeature の provider を登録しない: hook の関心は「フラグの値をどう返すか」で、フラグの読み方（provider・準備・OFREP）は
+//   features/feature-flag/ のテストで固定している。境界の index で切ると、todo のテストが OpenFeature の状態に依存しない。
+vi.mock("@/features/feature-flag");
 
 // globals 無効のため Testing Library の自動 cleanup が働かない。renderHook のコンポーネントもテストごとに unmount する。
 afterEach(cleanup);
 
 beforeEach(() => {
   vi.resetAllMocks();
+  // 本番の一覧（backend の FEATURE_FLAGS）と同じく、詳細画面のフラグは on を前提にする。off は「詳細画面のフラグ」の describe で見る。
+  vi.mocked(useFeatureFlag).mockReturnValue(true);
 });
 
 const milk = {
@@ -631,5 +638,33 @@ describe("削除", () => {
 
     // then
     expect(result.current.error).toBeNull();
+  });
+});
+
+describe("詳細画面のフラグ", () => {
+  test("todo-detail-screen のフラグが on なら、showsDetailLink が true になる", async () => {
+    // given
+    vi.mocked(TodoApi.list).mockResolvedValue({ todos: [milk] });
+    vi.mocked(useFeatureFlag).mockReturnValue(true);
+
+    // when
+    const { result } = await renderLoaded();
+
+    // then
+    expect(result.current.showsDetailLink).toBe(true);
+    expect(useFeatureFlag).toHaveBeenCalledWith("todo-detail-screen");
+  });
+
+  test("todo-detail-screen のフラグが off なら、showsDetailLink が false になる", async () => {
+    // given
+    vi.mocked(TodoApi.list).mockResolvedValue({ todos: [milk] });
+    vi.mocked(useFeatureFlag).mockReturnValue(false);
+
+    // when
+    const { result } = await renderLoaded();
+
+    // then
+    expect(result.current.showsDetailLink).toBe(false);
+    expect(useFeatureFlag).toHaveBeenCalledWith("todo-detail-screen");
   });
 });
