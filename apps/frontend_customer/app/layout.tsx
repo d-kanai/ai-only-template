@@ -2,6 +2,11 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { LocaleProvider } from "@/shared/i18n/i18n";
 import { LOCALE_HEADER, Locales } from "@/shared/i18n/locale";
+import {
+  DesignSystemHead,
+  designSystemHtmlProps,
+} from "@/shared/ui/design-system-document";
+import { DesignSystemProvider } from "@/shared/ui/design-system-provider";
 
 export const metadata: Metadata = {
   title: "ai-only-template",
@@ -25,9 +30,15 @@ export default async function RootLayout({
 }) {
   const locale = Locales.fromHeader((await headers()).get(LOCALE_HEADER));
   return (
-    <html lang={locale}>
+    // デザインシステム（Issue #292）が <html> と <head> に要るもの（中身と WHY は shared/ui/design-system-document.tsx）。
+    <html lang={locale} {...designSystemHtmlProps}>
+      <head>
+        <DesignSystemHead />
+      </head>
       <body>
-        <LocaleProvider locale={locale}>{children}</LocaleProvider>
+        <DesignSystemProvider>
+          <LocaleProvider locale={locale}>{children}</LocaleProvider>
+        </DesignSystemProvider>
       </body>
     </html>
   );
