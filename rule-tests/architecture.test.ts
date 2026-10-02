@@ -1188,7 +1188,7 @@ const RULES: Rule[] = [
     //   "./todo-screen.messages" は同じファイルを指し、書き方の規則は別の関心（今は無い）。子・親のディレクトリも「別の場所」とする。
     // WHY 参照元を apps/frontend_customer に限らない: apps/e2e/ やリポジトリ直下から辞書を import すると、E2E が文言ではなく辞書の値で
     //   探すことになり、画面に出る文言を確かめなくなる。共通の辞書も apps/frontend_customer の外からは不可。
-    //   テストは対象外（列挙がテストを除く）。画面のテストが部品の辞書で期待値を作る（tJa(todoItemMessages, ...)）のは許す。
+    //   テストは対象外（列挙がテストを除く）。画面のテストが部品の辞書で期待値を作る（tJa(todoScreenMessages, ...)）のは許す。
     // WHY re-export（export ... from）は同じディレクトリでも、共通の辞書でも違反にする（Issue #125 の reviewer 指摘）: 同じ
     //   ディレクトリの中継のファイル（zz-barrel.ts の export { x } from "./x.messages"）を別のディレクトリから import すると、
     //   参照先が *.messages ではないので、この規則を素通りして辞書を別のディレクトリから使えてしまう。辞書を使うファイルは
@@ -9114,7 +9114,7 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
             "apps/frontend_customer/proxy.ts",
             "apps/frontend_customer/shared/i18n/format.ts",
-            "apps/frontend_customer/features/todo/components/todo-item.tsx",
+            "apps/frontend_customer/features/todo/screens/todo-detail-screen/todo-detail-screen.tsx",
             "apps/frontend_customer/app/page.tsx",
           ]),
         );
@@ -9281,7 +9281,7 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/frontend_customer/features/todo/api/todo-api.ts",
             "apps/frontend_customer/features/todo/api/api-error.ts",
             "apps/frontend_customer/features/todo/index.ts",
-            "apps/frontend_customer/features/todo/components/todo-item.messages.ts",
+            "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.messages.ts",
             "apps/frontend_customer/shared/i18n/locale.ts",
             "apps/frontend_customer/shared/i18n/format.ts",
             "apps/frontend_customer/shared/request-log/request-log.ts",
@@ -9321,7 +9321,7 @@ describeFeature(feature, ({ Scenario }) => {
         // 前提: 対象外の実ファイルがリポジトリにあること（無ければ上の検査は何も確かめていない）。
         expect(listSourceFiles(repoRoot, FRONTEND_ROOT)).toEqual(
           expect.arrayContaining([
-            "apps/frontend_customer/features/todo/components/todo-item.tsx",
+            "apps/frontend_customer/features/todo/screens/todo-detail-screen/todo-detail-screen.tsx",
             "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.hook.ts",
             "apps/frontend_customer/app/page.tsx",
             "apps/frontend_customer/app/api/todos/route.ts",
@@ -9516,7 +9516,7 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/frontend_customer/app/layout.tsx",
             "apps/frontend_customer/app/page.tsx",
             "apps/frontend_customer/features/todo/api/todo-api.ts",
-            "apps/frontend_customer/features/todo/components/todo-item.tsx",
+            "apps/frontend_customer/features/todo/screens/todo-detail-screen/todo-detail-screen.tsx",
             "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.tsx",
             "apps/frontend_customer/proxy.ts",
           ]),
@@ -9532,7 +9532,6 @@ describeFeature(feature, ({ Scenario }) => {
         expect(result).toEqual(
           expect.arrayContaining([
             "apps/frontend_customer/shared/i18n/common.messages.ts",
-            "apps/frontend_customer/features/todo/components/todo-item.messages.ts",
             "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.messages.ts",
             "apps/frontend_customer/features/todo/screens/todo-detail-screen/todo-detail-screen.messages.ts",
           ]),

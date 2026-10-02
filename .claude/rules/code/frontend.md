@@ -19,8 +19,9 @@ paths:
 | 直下 | ソースは `app/`・`features/`・`shared/`・`test-support/` の下か、直下の `next.config.ts`・`instrumentation.ts`・`instrumentation-node.ts`・`proxy.ts`・`next-env.d.ts` だけ（規則 `frontend-placement`）。`src/` は使わない | 依存の規則はこれらの場所にしかかからず、`apps/frontend_customer/lib/db.ts` のような場所から backend の container を import しても素通りしていた（Issue #68 の reviewer 指摘） | `rule-tests/architecture.test.ts` の `frontend-placement` |
 | 直下 | `instrumentation.ts` は Next の規約で `apps/frontend_customer/` 直下に置く（起動時の環境変数の検証。`.claude/rules/tooling/env.md`） | - | 説明 |
 | 直下 | `proxy.ts`（Next の Proxy。旧 `middleware.ts` は使わない）も規約で直下に置く | - | `rule-tests/architecture.test.ts` の `frontend-placement` |
-| feature | `screens/<name>-screen/`: 1 画面 = 1 ディレクトリ。`<name>-screen.tsx`（見た目。先頭に `"use client"`。hook の戻り値を描くだけで、形は下の「画面の骨組み」）と `<name>-screen.hook.ts`（状態・イベント・データ取得。`use<Name>Screen`）と `<name>-screen.messages.ts`（辞書）と、それぞれのテストを隣に置く。ほかのファイル（部品の別ファイル・入れ子のディレクトリ）は置かない（規則 `screen-outline-placement`） | ロジックは `renderHook` で、見た目は操作ベースで小さくテストでき、画面を消すときはディレクトリごと消せる | `rule-tests/screen-outline.test.ts` の `screen-outline-placement` |
-| feature | `components/`: feature 内で画面をまたぐ部品（atom を組み合わせて描く。今あるのは `todo-item.tsx`）。1 つの画面だけで使う部品は画面のファイルの中に export せずに置く（下の「画面の骨組み」） | - | レビュー |
+| feature | `screens/<name>-screen/`: 1 画面 = 1 ディレクトリ。`<name>-screen.tsx`（見た目。先頭に `"use client"`。hook の戻り値を描くだけで、形は下の「画面の骨組み」）と `<name>-screen.hook.ts`（状態・イベント・データ取得。`use<Name>Screen`）と `<name>-screen.messages.ts`（辞書）を置く。ほかのファイル（部品の別ファイル・入れ子のディレクトリ）は置かない（規則 `screen-outline-placement`。テストの `*.test.*` は対象外） | ロジックは `renderHook` で、見た目は操作ベースで小さくテストでき、画面を消すときはディレクトリごと消せる | `rule-tests/screen-outline.test.ts` の `screen-outline-placement` |
+| feature | 画面・hook のテスト（`<name>-screen.test.tsx`・`<name>-screen.hook.test.ts`）は画面のディレクトリに隣に置く | 画面を消すときにテストもディレクトリごと消せる。限界: `screen-outline-placement` はテスト（`*.test.*`）を列挙から外すので、テストの置き場所は見ない | レビュー |
+| feature | `components/`: feature 内で画面をまたぐ部品（atom を組み合わせて描く）の置き場所で、今は無い。1 つの画面だけで使う部品は画面のファイルの中に export せずに置く（下の「画面の骨組み」。一覧の 1 行 `TodoItem` は一覧画面だけが使うので `todo-screen.tsx` の中。Issue #340） | - | レビュー |
 | feature | `hooks/`: 画面をまたぐ hook | - | 説明 |
 | feature | `api/`: `/api/...` を fetch する薄いラッパー。feature の中で backend を参照してよいのはここだけ | - | `rule-tests/architecture.test.ts` の `screen-to-backend` |
 | feature | `index.ts`: 公開 API。feature の外（`app/`・他の feature）から import してよいのはここだけ | 内部の構成を変えても外の import を直さずに済む | `rule-tests/architecture.test.ts` の `feature-to-feature`・`app` |
@@ -30,7 +31,7 @@ paths:
 | shared | `apps/frontend_customer/shared/`（画面側の部品）と `apps/shared/`（frontend と backend で共通のサーバ側の基盤。`.claude/rules/code/shared.md`）は別のもの | - | 説明 |
 | test-support | `apps/frontend_customer/test-support/`（Issue #181）: テストだけが使うコード（`i18n.tsx` の `JaLocale`・`tJa`、`design-system.tsx` の `DesignSystem`）を置く | WHY は `.claude/rules/code/backend.md` の `apps/backend/test-support/` と同じ | 説明 |
 | test-support | 本番のコード（`app/`・`features/`・`shared/`・直下のファイル）から参照しない（`@/test-support/...` はテストからだけ） | WHY は `.claude/rules/code/backend.md` の `apps/backend/test-support/` と同じ | `rule-tests/test-support.test.ts` の `production-imports-test-support` |
-| test-support | Docker のイメージに入らない（`.dockerignore` の `**/test-support`）。検査は `rule-tests/test-support.test.ts` と `.github/workflows/deploy.yml` | WHY は `.claude/rules/code/backend.md` の `apps/backend/test-support/` と同じ | `rule-tests/test-support.test.ts` の `dockerignore-excludes`、`.github/workflows/deploy.yml` の `test-support` |
+| test-support | Docker のイメージに入らない（`.dockerignore` の `**/test-support`）。検査は `rule-tests/test-support.test.ts`（`.dockerignore` の行と、除外されるファイル）と `.github/workflows/deploy.yml`（push した runtime のイメージ。step があることは `deploy-verifies-images` が見る） | WHY は `.claude/rules/code/backend.md` の `apps/backend/test-support/` と同じ | `rule-tests/test-support.test.ts` の `dockerignore-entry`・`dockerignore-excludes`・`deploy-verifies-images`、`.github/workflows/deploy.yml` の `Verify runtime image has no test-support` |
 
 ## 依存の向き
 
@@ -51,7 +52,7 @@ paths:
 | --- | --- | --- | --- |
 | 規約ファイル | 置くもの: Next の規約ファイル（`page.tsx` / `layout.tsx` / `loading.tsx` / `error.tsx` など）と `app/api/**/route.ts` だけ。テストは置かない。`app/` はルーティングだけ | 仕様は screen と api ファイルのテストで固定し、ルーティングにロジックを置かせない | レビュー |
 | 規約ファイル | `page.tsx` は screen を返すだけ（`return <TodoScreen />`。動的セグメントは `await params` で取り出して props で渡す） | ルーティングを分ける: URL を変えてもコードを動かさずに済む（Next は構成について unopinionated で、`app/` の外にコードを置くのは公式の例の 1 つ） | レビュー |
-| 規約ファイル | `app/`（`app/api` 以外）が参照してよいのは `features/<f>`（index）と `shared/` だけ | ルーティングを分ける（上の行） | `rule-tests/architecture.test.ts` の `app` |
+| 規約ファイル | `app/`（`app/api` 以外）が `features/` と backend を参照するなら `features/<f>`（index）だけ（`shared/` は可） | ルーティングを分ける（上の行）。限界: 規則 `app` が見るのは自前のコードのうち `features/` と backend への参照だけで、パッケージ（`next/font` など）・`app/` の中の相対参照（`./globals.css`）・直下のファイルへの参照は見ない（`apps/shared` は `screen-to-shared`、`test-support/` は `production-imports-test-support` が止める） | `rule-tests/architecture.test.ts` の `app` |
 | Route Handler | `app/api/**/route.ts` は backend の api ファイルが export する HTTP メソッド名の関数を re-export するだけ（`export { GET } from "@repo/backend/features/todo/internal/presentation/list-todos.api";`）。同じ URL の複数メソッドはそれぞれ別の api ファイルから re-export する。入力検証やレスポンスの組み立ては書かない | ルーティングを分ける（上の行）。`app-api` が見るのは参照先だけで、route.ts に処理を書くことは止めない | レビュー |
 | Route Handler | `app/api/` が参照してよいのは backend の api ファイルだけ | - | `rule-tests/architecture.test.ts` の `app-api` |
 
@@ -59,7 +60,7 @@ paths:
 
 | カテゴリ | WHAT | WHY | 強制 |
 | --- | --- | --- | --- |
-| 書き方 | frontend の中は `@/<path>`（tsconfig の paths `@/*` → `apps/frontend_customer/*`） | - | レビュー |
+| 書き方 | frontend の中で同じディレクトリのファイルは `./<name>`（`./todo-screen.hook`）でよく、ディレクトリをまたぐときは `@/<path>`（tsconfig の paths `@/*` → `apps/frontend_customer/*`）。`../` は使わない（Issue #340 で 19 か所を `@/` に直した） | `../` はファイルの場所で指す先が変わり、どこを指すかを階層を数えないと読めない。`@/` なら書いた文字列だけで場所が分かる。同じディレクトリの `./` は隣に置いたもの（辞書・hook）を指し、場所の取り違えが起きない。限界: `../` を止める検査は無い | レビュー |
 | 書き方 | backend へは `@repo/backend/<path>` だけ（workspace パッケージと `apps/backend/package.json` の `exports` で解決）。相対パス（`../backend/...`）と `@/../backend/...` は使わない（規則 `frontend-to-backend-specifier`） | 相対パスは `exports`（公開する入口）を通らずに backend のどのファイルでも指せ、後で別プロセスに分けたときにも壊れる | `rule-tests/architecture.test.ts` の `frontend-to-backend-specifier` |
 | 書き方 | `apps/shared` へは `@repo/shared/<name>` だけ（直下のファイルから。`apps/shared/package.json` の `exports`）。相対パス（`../shared/...`）と `@/../shared/...` は使わない（規則 `frontend-to-shared-specifier`） | 同上 | `rule-tests/architecture.test.ts` の `frontend-to-shared-specifier` |
 | 解決 | exports に無いファイルを import すると `tsc` / `next build` が「Cannot find module」で止まる。足し方は `.claude/rules/code/backend.md` の「import と exports」の表の「exports」 | - | `pnpm typecheck` |
@@ -96,7 +97,7 @@ export function TodoScreen() {
 
 | カテゴリ | WHAT | WHY | 強制 |
 | --- | --- | --- | --- |
-| 構成 | 置き場所は `shared/ui/` だけ: `atoms/`（Mantine の部品を包む atom。今は Alert / Button / Checkbox / Form / Group / Layout / Link / List / ListItem / PageTitle / Stack / Surface / Text / TextInput / Time の 15 個）、`themes/<名前>/`（`<名前>.theme.ts` と `<名前>.module.css`。今は `bento` と `pop`）と `themes/theme-definition.ts`（テーマの型）、`active-theme.ts`（使うテーマ。今は `bento`）、`design-system-provider.tsx`（`MantineProvider`。`app/layout.tsx` が包む）、`design-system-document.tsx`（`<html>` / `<head>` に要るもの）。Mantine を使う。規則 `design-system-*`、Issue #292 | - | 説明 |
+| 構成 | 置き場所は `shared/ui/` だけ: `atoms/`（Mantine の部品を包む atom。今は Alert / Button / Checkbox / Form / Group / Layout / Link / List / ListItem / PageTitle / Stack / Surface / Text / TextInput / Time の 15 個）、`themes/<名前>/`（`<名前>.theme.ts` と `<名前>.module.css`。今は `bento` と `pop`）と `themes/theme-definition.ts`（テーマの型）、`active-theme.ts`（使うテーマ。今は `bento`）、`css-modules.d.ts`（`*.module.css` と CSS の副作用 import の型。ビルド前の `tsc` に型を与える）、`design-system-provider.tsx`（`MantineProvider`。`app/layout.tsx` が包む）、`design-system-document.tsx`（`<html>` / `<head>` に要るもの）。Mantine を使う。規則 `design-system-*`、Issue #292 | - | 説明 |
 | 構成 | テーマを替える: `active-theme.ts` の 1 行を別のテーマに差し替える（画面のコードは変えない） | - | 説明 |
 | 構成 | テーマを足すときは `ThemeDefinition` の型（`spacing` の全段階と `ThemedComponent` の全部品が必須）を満たす | - | `pnpm typecheck` |
 | 画面の書き方 | `shared/ui/` の外のテスト以外のソース（`app/`・`features/`・`shared/` のほかの場所・`test-support/`・直下のファイル）は Mantine を値でも型でも参照せず（`design-system-mantine-boundary`）、画面は atom を置くだけにする | テーマを差し替えるだけで全体の見た目が変わるようにする（daiki の要望 2026-10-02）。atom で包むと、画面が Mantine を知らずに済み、ライブラリを替えても atom の中だけ直せばよい | `rule-tests/design-system.test.ts` の `design-system-mantine-boundary` |
@@ -125,7 +126,7 @@ export function TodoScreen() {
 | --- | --- | --- | --- |
 | 構成 | 対応するロケールは `ja`（既定）と `en`（`shared/i18n/locale.ts` の `SUPPORTED_LOCALES`） | - | 説明 |
 | 構成 | ライブラリは使わない | 決定と採用しなかった案は ADR `docs/adr/architecture/20260929-i18n-without-library.md` と `docs/adr/architecture/20260929-messages-colocated-per-screen.md`（Issue #116・#125） | レビュー |
-| 構成 | `shared/i18n/` は `i18n.tsx`（`defineMessages`・`useT`・`useLocale`・`LocaleProvider`・`formatMessage`・`isMessageKey`・型）、`locale.ts`（ロケールの判定。Proxy から React なしで使う）、`format.ts`（日時の表示）、`common.messages.ts`（共通の辞書）だけ（テスト用の `JaLocale`・`tJa` は `apps/frontend_customer/test-support/i18n.tsx`） | - | レビュー |
+| 構成 | `shared/i18n/` は `i18n.tsx`（`defineMessages`・`useT`・`useLocale`・`LocaleProvider`・`formatMessage`・`createTranslator`（辞書とロケールを固定した `t`。`useT` とテストの `tJa` が使う）・`isMessageKey`・型）、`locale.ts`（ロケールの判定。Proxy から React なしで使う）、`format.ts`（日時の表示）、`common.messages.ts`（共通の辞書）だけ（テスト用の `JaLocale`・`tJa` は `apps/frontend_customer/test-support/i18n.tsx`） | - | レビュー |
 | 辞書 | 辞書は画面・部品ごとに隣に置く（colocation）: `screens/<name>-screen/<name>-screen.messages.ts`、`components/<name>.messages.ts`。書き方は `export const todoScreenMessages = defineMessages({ ja: {...}, en: {...} })`。平坦なオブジェクトで、キーは dot 区切りの 1 つの文字列 | 1 つの辞書では、画面を消す・言い回しを変えるときに、どのキーがどの画面のものかを辞書を読んで探すことになる。隣に置けば、画面のディレクトリだけで完結し、ディレクトリごと消せる（`screens/` の方針と同じ） | レビュー |
 | 辞書 | 共通の辞書 `shared/i18n/common.messages.ts` に置くのは、API から返る `ErrorKey` の文言と画面側だけのエラー `error.*` だけ（どの画面の操作でも同じキーで出るため）。画面・部品に固有の文言は置かない（`api-error.test.ts` が「共通の辞書のキー = `ErrorKey` + `error.unknown` + `error.unexpected`」を型で検査する） | どの画面の操作でも同じキーで出るため | `apps/frontend_customer/features/todo/api/api-error.test.ts` の `ErrorKey`、`pnpm typecheck` |
 | 辞書 | `*.messages.ts` を import してよいのは同じディレクトリのファイルだけ（`./todo-screen.messages`）。`common.messages.ts` だけは `apps/frontend_customer/` のどこからでも可（`@/shared/i18n/common.messages`）。検査は `rule-tests/architecture.test.ts` の規則 `messages-colocation`（テストは対象外で、画面のテストが部品の辞書で期待値を作るのは可）。辞書を re-export（`export ... from`）して中継しない（同じディレクトリでも違反） | 隣に置く（上の行） | `rule-tests/architecture.test.ts` の `messages-colocation` |
@@ -160,7 +161,7 @@ export function TodoScreen() {
 | 項目ごとの誤り | 表示は `api-error.ts` の `ApiErrorMessage.toMessages(reason, locale, fields)` で、フォーム全体の文言（`form`）と入力の下の文言（`fields`）に分ける。`fields` はその画面が入力を描く項目の名前（本文の最上位のキー）で、`pointer` が `#/<項目名>` と完全一致する誤りをその項目に、それ以外（`#`・描いていない項目・入れ子の位置）を `form` に出す。項目・`form` とも最初の 1 件。`errors` が無い失敗（404・500・JSON でない応答・fetch の失敗）は今までどおり `form` だけ | - | 説明 |
 | 項目ごとの誤り | 項目の誤りも全体の文言も、入力を編集しても消えず、次の送信の成功・失敗で置き換わる（hook の `setFailure`。既存の全体のエラーと同じ扱い） | 編集で消すと「まだ直っていない」状態で文言が消え、送信するまで結果が分からない。項目の誤りだけのときは `role="alert"` が無いのでスクリーンリーダーは自動では読み上げない（入力にフォーカスしたときに説明として読まれる。変えるなら入力にフォーカスを移す）。方針の ADR は `docs/adr/architecture/20260930-presentation-overlaps-domain-validation.md` | レビュー |
 | 項目ごとの誤り | 項目の誤りがあるときは、本文の `key`（全体の文言）を重ねて出さない | 本文の `key` は `errors` の最初の 1 件と同じ（backend の `Problem`）で、両方出すと同じ文言が 2 回出る | レビュー |
-| 項目ごとの誤り | hook は `error`（`form`）と `fieldErrors`（`fields`）を返し、画面は項目の文言を入力を包む `label` の直後（外）に出して、入力の `aria-describedby`（`useId` の id）と `aria-invalid` で結び付ける。`role="alert"` はフォーム全体の文言だけに付ける | `label` の外: `label` の中の文字はすべて入力の名前（accessible name）になる | レビュー |
+| 項目ごとの誤り | hook は `error`（`form`）と `fieldErrors`（`fields`）を返し、画面は項目の文言を atom の `TextInput` の `error` に渡す。入力の下（`label` の外）に出し、`aria-invalid` と `aria-describedby`（Mantine が振る id）で入力と結び付けるのは Mantine（`shared/ui/atoms/text-input.tsx`）。`role="alert"` はフォーム全体の文言（atom の `Alert`）だけに付く | `label` の外: `label` の中の文字はすべて入力の名前（accessible name）になる。DOM の組み立ては Mantine が決めるので、画面のテスト（`todo-screen.test.tsx`）が説明の要素が入力より後ろ・`label` の外にあることを確かめる | レビュー |
 
 ## ログ
 
@@ -184,7 +185,7 @@ export function TodoScreen() {
 | カテゴリ | WHAT | WHY | 強制 |
 | --- | --- | --- | --- |
 | クラス | `features/`・`shared/`・`test-support/` の React 以外のモジュール（`.ts` など。`*.tsx`・`*.jsx`・`*.hook.*` 以外）は、ファイルの最上位に関数を置かず、クラスのメソッド（状態が無ければ static だけのクラス。インスタンスで使うクラスには自分を返すファクトリ以外の static を置かない。規則 `no-static-in-instance-class`、Issue #300）にする。検査は `rule-tests/architecture.test.ts` の `class-based` | daiki の判断（2026-10-02「クラス必須でルールにして」）。backend・apps/shared と同じ形にそろえ、画面のテストの差し替えも `vi.mocked(TodoApi.list)` の形になる（`vi.mocked(Clock.now)` と同じ）。ADR `docs/adr/architecture/20261002-class-based-frontend-modules.md` | `rule-tests/architecture.test.ts` の `class-based`・`no-static-in-instance-class` |
-| クラス | 今あるもの: `TodoApi`（`list`・`get`・`create`・`rename`・`changeCompletion`・`delete`）・`ApiErrorMessage`（`toMessage`・`toMessages`）・`Locales`（`is`・`negotiate`・`fromHeader`）・`DateTimeFormatter`（`format`）・`RequestLogBuilder`（`build`）。定数（`SUPPORTED_LOCALES`・`LOCALE_HEADER` など）と型はクラスの外の値のまま | - | 説明 |
+| クラス | 今あるもの: `TodoApi`（`list`・`get`・`create`・`rename`・`changeCompletion`・`delete`）・`ApiError`（`Error` を継承した例外のインスタンス。`status`・`type`・`key`・`params`・`errors`）・`ApiErrorMessage`（`toMessage`・`toMessages`）・`Locales`（`is`・`negotiate`・`fromHeader`）・`DateTimeFormatter`（`format`）・`RequestLogBuilder`（`build`）。定数（`SUPPORTED_LOCALES`・`LOCALE_HEADER` など）と型はクラスの外の値のまま | - | 説明 |
 | クラス | static だけのクラスの許可は `biome.json` の override（`.claude/rules/quality/lint.md`） | - | `biome.json` の `noStaticOnlyClass`、`rule-tests/lint.test.ts` の `noStaticOnlyClass` |
 | クラス | 対象外（関数のまま）: React の component（`*.tsx`・`*.jsx`。JSX を含むファイルの補助 `i18n.tsx` の `defineMessages`・`formatMessage` なども、ファイルごと外す）、hook（`*.hook.*`）、`app/` の下（Next の規約）、直下のファイル（`proxy.ts`・`instrumentation.ts`・`instrumentation-node.ts`・`next.config.ts`）。対象外の範囲を広げない | React と Next が関数の形を求める（クラスの component は非推奨、hook は Rules of Hooks、`proxy`・`register`・`page` の default export は規約）。`instrumentation-node.ts` は Vitest のカバレッジの対象外で、形を変えても単体テストで確かめられない | 説明 |
 | 命名 | ディレクトリ・ファイルは kebab-case（`todo-screen/`） | - | レビュー |

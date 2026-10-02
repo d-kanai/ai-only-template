@@ -39,7 +39,7 @@ apps/
     features/todo/      # 画面側
       screens/todo-screen/  # 一覧画面。todo-screen.tsx（見た目）+ todo-screen.hook.ts（状態・データ取得）+ テスト
       screens/todo-detail-screen/  # 詳細画面（/todo/[id]）。構成は todo-screen/ と同じ
-      components/         # feature 内で画面をまたぐ部品（todo-item.tsx）
+      components/         # feature 内で画面をまたぐ部品（今は無い。1 画面だけで使う部品は画面のファイルの中）
       api/                # /api/... を fetch する薄いラッパー（型は backend の api ファイルから import type）
       index.ts            # 公開 API（外から import してよいのはここだけ）
     shared/             # 画面側で feature をまたぐ共通部品（必要になったら作る）

@@ -1,6 +1,6 @@
 import { Group as MantineGroup } from "@mantine/core";
 import type { ReactNode } from "react";
-import type { SpacingStep } from "../themes/theme-definition";
+import type { SpacingStep } from "@/shared/ui/themes/theme-definition";
 
 // atom（Issue #292。WHY は button.tsx の冒頭）: 中身を横に並べる。
 // WHY 画面がまだ使っていないのに用意する: 余白を段階名で書く仕組み（daiki が同意、2026-10-02）の入口で、画面が並べ方を

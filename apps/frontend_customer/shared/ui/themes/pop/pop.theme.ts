@@ -12,7 +12,7 @@ import {
   TextInput,
   Title,
 } from "@mantine/core";
-import type { ThemeDefinition } from "../theme-definition";
+import type { ThemeDefinition } from "@/shared/ui/themes/theme-definition";
 import classes from "./pop.module.css";
 
 // pop テーマ（Issue #292）: 太い黒の枠線とずらした影、角丸なし、等幅のフォント、黄色とピンク。bento とまったく違う

@@ -59,10 +59,10 @@ export default defineConfig({
     //   （Issue #57。WHY は vitest.global-setup.ts と .claude/rules/quality/testing.md）。
     globalSetup: ["./vitest.global-setup.ts"],
     // env.TZ: テストのプロセスのタイムゾーンを UTC に固定する（Issue #116）。
-    //   WHY: 日時の表示（apps/frontend_customer/shared/i18n/format.ts・features/todo/components/todo-item.tsx）はブラウザのタイムゾーン
+    //   WHY: 日時の表示（apps/frontend_customer/shared/i18n/format.ts・features/todo/screens/todo-screen/todo-screen.tsx の TodoItem）はブラウザのタイムゾーン
     //   （Intl.DateTimeFormat().resolvedOptions().timeZone）を使う。固定しないと、開発者の端末（Asia/Tokyo など）と CI（UTC）で
     //   表示が変わり、テストの期待値が実行環境で変わる。サーバも UTC で動かす（package.json の dev / start の TZ=UTC）のでそろえる。
-    //   Node は process.env.TZ を書き換えると Intl の既定のタイムゾーンも切り替える（todo-item.test.tsx の「作成日時」のテストで確認）。
+    //   Node は process.env.TZ を書き換えると Intl の既定のタイムゾーンも切り替える（todo-screen.test.tsx の「作成日時」のテストで確認）。
     env: { TZ: "UTC" },
     // reporters: Vitest の既定の reporter（configDefaults.reporters。AI エージェントからは minimal、GitHub Actions では
     //   github-actions も足される）に、API 網羅率の reporter（Issue #281）を足す。

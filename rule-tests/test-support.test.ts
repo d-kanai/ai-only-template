@@ -1532,7 +1532,7 @@ describeFeature(feature, ({ Scenario }) => {
           "apps/backend/features/todo/internal/infra/todo-repository.postgres.test.ts",
         );
         expect(files).toContain(
-          "apps/frontend_customer/features/todo/components/todo-item.test.tsx",
+          "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.test.tsx",
         );
         // Issue #219 / #251: API 仕様（.feature・step・support.ts）と API ジャーニーの .feature も .dockerignore の **/spec で外す。
         expect(files).toContain("apps/backend/spec/api/todo/support.ts");
