@@ -9,8 +9,12 @@ Feature: command と query の書き方
     * execute の本体を this.transactions.run で包めば違反なし（複数行・return・修飾子・型引数・空白と改行・run の後の通知など）
   Scenario: command のトランザクションの判定（findCommandTransactionViolations）: must reject
     * execute を run で包まなければ違反（Repository を直接呼ぶ・run が execute の外にだけあるなど）
+  Scenario: query の書き込みの判定（findQueryWriteViolations）: must pass
+    * 読むだけの query は違反なし（findById・findAll・名前の一部が run / insert / update / delete なだけの別のもの・コメントの中など）
+  Scenario: query の書き込みの判定（findQueryWriteViolations）: must reject
+    * query のトランザクションの run と Repository の insert / update / delete の呼び出しは、規則と行で違反になる（改行した chain・空白・型引数・optional chaining など）
   Scenario: command / query の列挙と検査（fixture）
-    * features/<f>/internal/application/ の .command.ts・.query.ts だけを対象にし、違反を「規則: パス:行: 行の内容」で返す
+    * features/<f>/internal/application/ の .command.ts・.query.ts だけを対象にし、query の書き込みの規則は .query.ts だけに当て、違反を「規則: パス:行: 行の内容」で返す
     * apps/backend/features が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）
   Scenario: 1 ユースケース = 1 command（実ファイル）
-    * command / query の Input に任意の項目が無く、input の項目の有無で分岐せず、command の execute はトランザクション（runner の run）で包む
+    * command / query の Input に任意の項目が無く、input の項目の有無で分岐せず、command の execute はトランザクション（runner の run）で包み、query は書き込まない

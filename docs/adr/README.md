@@ -85,6 +85,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-10-02 | クラスベースの対象を frontend の React 以外のモジュールに広げる | 採用 | [20261002-class-based-frontend-modules.md](architecture/20261002-class-based-frontend-modules.md) |
 | 2026-10-02 | backend/shared は層ではなく意味の単位（error / transaction / http / drizzle / change-log）で置き、feature からの参照を縛らない | 採用 | [20261002-backend-shared-colocated-by-meaning.md](architecture/20261002-backend-shared-colocated-by-meaning.md) |
 | 2026-10-02 | Writer の update は変更履歴の before に呼び出し側の origin を使い、before のために行を読み直さない | 採用 | [20261002-update-before-from-origin.md](architecture/20261002-update-before-from-origin.md) |
+| 2026-10-02 | インスタンスで使うクラスに static を置かない（自分を返すファクトリは除く） | 採用 | [20261002-no-static-in-instance-class.md](architecture/20261002-no-static-in-instance-class.md) |
 
 ### tech-stack/
 言語・ツール・ライブラリの選定
@@ -117,6 +118,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-10-02 | E2E を API ジャーニーと同じ Gherkin の .feature と step のクラスで書き、playwright-bdd で Playwright のランナーのまま実行する | 採用 | [20261002-e2e-in-gherkin-with-playwright-bdd.md](quality/20261002-e2e-in-gherkin-with-playwright-bdd.md) |
 | 2026-10-02 | API ジャーニーの実行で全 API が 1 回は呼ばれることを API 網羅率として測り、100% を CI のゲートにする | 採用 | [20261002-api-journey-coverage-gate.md](quality/20261002-api-journey-coverage-gate.md) |
 | 2026-10-02 | ルール検査テストを .feature（`*` の箇条書き）と step の実装に分ける | 採用 | [20261002-rule-tests-in-feature.md](quality/20261002-rule-tests-in-feature.md) |
+| 2026-10-02 | コード・設計ルールのレビューは rules の表の「レビュー」の行を観点にし、検出 → 1 件ずつ検証 → 重大度で報告するスキルで行う | 採用 | [20261002-rule-review-from-rules-tables.md](quality/20261002-rule-review-from-rules-tables.md) |
 
 ### workflow/
 開発プロセス・環境・AI エージェントの運用
@@ -139,3 +141,4 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-10-02 | 本番環境ができるまでデータの移行（backfill）の仕組みを持たず、下位互換の処理を残さない | 採用 | [20261002-drop-backfill-without-production.md](workflow/20261002-drop-backfill-without-production.md) |
 | 2026-10-02 | データの移行（backfill）は切替の後に冪等な SQL で流す方針を保ち、切替から backfill までの間の repair on read / write はやめる | 置き換え（→ workflow/20261002-drop-backfill-without-production.md） | [20261002-drop-repair-on-read-without-production.md](workflow/20261002-drop-repair-on-read-without-production.md) |
 | 2026-10-02 | 常時読み込む要点を .claude/general から .claude/rules/workflow に移し、rules を分類のサブディレクトリに分ける | 採用 | [20261002-always-loaded-rules-in-rules-workflow.md](workflow/20261002-always-loaded-rules-in-rules-workflow.md) |
+| 2026-10-02 | .claude/rules/code の規則はカテゴリ・WHAT・WHY・強制の 4 列の表で書き、何が止めるかを行ごとに示す | 採用 | [20261002-code-rules-as-tables.md](workflow/20261002-code-rules-as-tables.md) |

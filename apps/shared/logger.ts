@@ -40,15 +40,16 @@ const SCHEMA_MISMATCH_MESSAGE =
 const UNREADABLE_MESSAGE = "logger: reading the event threw an exception";
 
 // WHY クラスにする（Issue #262）: apps/shared も最上位に関数を置かない（規則 class-based。ADR
-//   docs/adr/architecture/20261002-class-based-shared-and-test-support.md）。補助は状態を使わないので private static にする。
+//   docs/adr/architecture/20261002-class-based-shared-and-test-support.md）。補助は状態を使わないが、
+//   private のインスタンスのメソッドにする（インスタンスで使うクラスに static を置かない（規則 no-static-in-instance-class。Issue #300））。
 // WHY emit をインスタンスのメソッドにし、export するのはインスタンス logger だけにする: 呼び出し側の logger.emit(...) と
 //   テストの vi.spyOn(logger, "emit") の書き方を変えない。クラスは export しない（logger を 1 つにし、別のインスタンスを作らせない）。
 class Logger {
   // WHY 口を emit の 1 つにする（info / warn / error を置かない。Issue #216）: 重大度は種類（と phase）が決める（log-event.ts の
   //   LogSeverity.of）。呼び出し側が選べると、同じ種類の行が呼び出し側ごとに違う重大度になる。
   emit(event: LogEvent): void {
-    const { severity, line } = Logger.toLine(event);
-    Logger.writerOf(severity)(line);
+    const { severity, line } = this.toLine(event);
+    this.writerOf(severity)(line);
   }
 
   // severity に対する console のメソッド。
@@ -57,7 +58,7 @@ class Logger {
   // WHY 対応表をメソッドの中に置く（最上位の定数・static フィールドにしない）: 最上位の値は Stryker の static な変異になり、
   //   ignoreStatic で検査から外れる（.claude/rules/quality/testing.md の mutation testing）。クラスの static フィールドの初期化も読み込み時に
   //   1 回だけ評価されるので、同じく外れるおそれがある（未確認。ADR docs/adr/architecture/20261002-class-based-backend.md）。
-  private static writerOf(severity: Severity): (line: string) => void {
+  private writerOf(severity: Severity): (line: string) => void {
     const writers = {
       INFO: (line: string) => console.log(line),
       WARNING: (line: string) => console.warn(line),
@@ -70,7 +71,7 @@ class Logger {
   // WHY Object.hasOwn: "toString" のような Object.prototype のプロパティの名前で、スキーマでない値を引かないようにする。
   // WHY 型を z.ZodType の safeParse の形に広げる: スキーマの union のままだと、呼び出しのシグネチャが種類ごとに違い 1 つに
   //   まとまらない（どの種類でも「unknown を受けて成否と値を返す」ことだけを使う）。
-  private static schemaOf(
+  private schemaOf(
     name: unknown,
   ):
     | { safeParse: (value: unknown) => { success: boolean; data?: unknown } }
@@ -85,7 +86,7 @@ class Logger {
   // WHY event.name を専用の logger_error にする（元の event.name を使わない）: 元の名前（db_write など）で出すと、その種類で
   //   引いたときに種類ごとの項目（db など）の無い行が混ざる。専用の名前なら「ログを出せなかった」ことを 1 つの条件で引け、
   //   アラートにもできる。
-  private static loggerErrorLine(
+  private loggerErrorLine(
     time: string,
     message: string,
     failedName?: LogEventName,
@@ -101,11 +102,11 @@ class Logger {
     };
   }
 
-  private static knownName(name: unknown): LogEventName | undefined {
+  private knownName(name: unknown): LogEventName | undefined {
     return LOG_EVENT_NAMES.find((known) => known === name);
   }
 
-  private static toLine(event: LogEvent): { severity: Severity; line: string } {
+  private toLine(event: LogEvent): { severity: Severity; line: string } {
     // WHY Clock.now() から取る: 現在時刻の唯一の出口（now.ts）を通し、テストが時刻を差し替えて行を丸ごと比べられるようにする。
     // WHY toISOString: RFC 3339 の文字列（UTC の Z 付き）で、Cloud Logging の特別フィールド time が受け付ける形。
     const time = Clock.now().toISOString();
@@ -115,12 +116,12 @@ class Logger {
       // WHY parse の失敗で例外にしない（safeParse）: ログの失敗で本来の処理（応答を返すなど）を止めない。生の event は出さない
       //   （どの項目が sensitive かを決められない形なので）。
       const name: unknown = event.event?.name;
-      const result = Logger.schemaOf(name)?.safeParse(event);
+      const result = this.schemaOf(name)?.safeParse(event);
       if (!result?.success) {
-        return Logger.loggerErrorLine(
+        return this.loggerErrorLine(
           time,
           SCHEMA_MISMATCH_MESSAGE,
-          Logger.knownName(name),
+          this.knownName(name),
         );
       }
       const parsed = result.data as ParsedLogEvent;
@@ -136,7 +137,7 @@ class Logger {
     } catch {
       // WHY 例外で落とさない: event の getter が例外を投げても、呼び出し側に伝えず、読めなかった旨の 1 行を残す。元の event の
       //   読み取り自体が例外を投げうるので、失敗した種類の名前も出さない。
-      return Logger.loggerErrorLine(time, UNREADABLE_MESSAGE);
+      return this.loggerErrorLine(time, UNREADABLE_MESSAGE);
     }
   }
 }

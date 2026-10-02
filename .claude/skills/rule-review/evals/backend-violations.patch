@@ -1,0 +1,23 @@
+diff --git a/apps/backend/features/notification/expose/notifier.ts b/apps/backend/features/notification/expose/notifier.ts
+index 66b9d5f..e46f62f 100644
+--- a/apps/backend/features/notification/expose/notifier.ts
++++ b/apps/backend/features/notification/expose/notifier.ts
+@@ -38,3 +38,5 @@ export class Notifier {
+     });
+   }
+ }
++
++export { SendNotificationCommand } from "../internal/application/send-notification.command";
+diff --git a/apps/backend/features/todo/internal/application/change-todo-completion.command.ts b/apps/backend/features/todo/internal/application/change-todo-completion.command.ts
+index 6cb4e9a..fd8eea5 100644
+--- a/apps/backend/features/todo/internal/application/change-todo-completion.command.ts
++++ b/apps/backend/features/todo/internal/application/change-todo-completion.command.ts
+@@ -46,7 +46,7 @@ export class ChangeTodoCompletionCommand {
+     // WHY 未完了 → 完了に変わったときだけ: PUT は冪等で、同じ要求を 2 回送っても通知は 1 回にする。未完了に戻すときは知らせない。
+     // WHY 本文は id だけの英語: title などの利用者の値をログに出さない（通知は今はログに出るだけ）。
+     if (!current.completed && changed.completed) {
+-      this.notifier.notify(`Todo completed: ${changed.id}`);
++      this.notifier.notify(`Todo completed: ${changed.id} (${changed.title})`);
+     }
+     return changed;
+   }
