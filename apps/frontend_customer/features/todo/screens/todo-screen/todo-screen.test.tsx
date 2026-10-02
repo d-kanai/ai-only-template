@@ -252,8 +252,9 @@ test("エラーが無いときは、title の入力は invalid でなく、説�
   // aria-invalid は付けない（Mantine の TextInput は誤りが無いと属性を出さない。Issue #292 で "false" から変わった）。
   expect(input.getAttribute("aria-invalid")).toBeNull();
   expect(input.getAttribute("aria-describedby")).toBeNull();
-  // 項目のエラーの文言の要素も描画しない（フォームの文字はラベルとボタンだけ）。WHY: aria-invalid / aria-describedby だけを
-  //   見ると、エラーが無いのに空の要素を描画しても通ってしまう（Issue #202 で、描画の条件を常に偽にする変異が生き残った）。
+  // 項目のエラーの文言も描画しない（フォームの文字はラベルとボタンだけ）。WHY: aria-invalid / aria-describedby だけを
+  //   見ると、エラーが無いのに文言の要素を描画しても通ってしまう（Issue #202 で、描画の条件を常に偽にする変異が生き残った）。
+  //   限界: 文字の無い要素を描いても通る（Mantine は error に空でない値が入ると aria-invalid="true" も付けるので、上の検証で落ちる）。
   expect(input.closest("form")?.textContent).toBe(
     tJa(todoScreenMessages, "form.newTitle") +
       tJa(todoScreenMessages, "form.submit"),
