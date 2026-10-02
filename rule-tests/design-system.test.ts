@@ -14,6 +14,9 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
+  type ExportSpecifier,
+  type ImportDeclaration,
+  type ImportSpecifier,
   isCallExpression,
   isExportDeclaration,
   isExternalModuleReference,
@@ -21,8 +24,12 @@ import {
   isImportDeclaration,
   isImportEqualsDeclaration,
   isJsxAttribute,
+  isNamedExports,
+  isNamedImports,
+  isNamespaceImport,
   isNoSubstitutionTemplateLiteral,
   isStringLiteral,
+  isTypeAliasDeclaration,
   type Node,
   type SourceFile,
   SyntaxKind,
@@ -40,6 +47,9 @@ import { afterAll, describe, expect, it } from "vitest";
 //   - design-system-no-direct-style: apps/frontend_customer の下のテスト以外のソース（shared/ui/ の中を除く）の JSX 属性のうち、
 //     名前が style / className / classNames / styles / vars（Mantine の Styles API と素の React の見た目の口）か、Mantine の
 //     style props（@mantine/core の実行時の値 STYLE_PROPS_DATA のキー。m・mt・p・bg・c・fz・w・h・pos・display・flex など）のもの。
+//     加えて、Mantine の部品の見た目を選ぶ props（LOOK_PROPS: color / variant / size / radius / autoContrast / gradient / shadow /
+//     withBorder / underline）も違反。WHY: <Button color="red" variant="light"> はテーマを差し替えてもその見た目のまま残る。
+//     部品ごとの既定の見た目はテーマの components の defaultProps に書く（shared/ui/themes/calm/calm.theme.ts）。
 //     値の形（文字列・式・テーマの値の参照）は問わない。要素は問わない（素の <div style> も <Button mt="md"> も違反）。
 //     WHY style props の一覧を @mantine/core から読む: 手で写すと Mantine の更新で増えた名前（mis / mie など）を見逃す。
 //     @mantine/core は apps/frontend_customer だけの依存なので、そこの package.json から解決する（createRequire）。
@@ -48,17 +58,34 @@ import { afterAll, describe, expect, it } from "vitest";
 //     shared/ui/ の外のテスト以外のソースから .css を import しない（import / export … from / import() / require() /
 //     import x = require()）。WHY: CSS を画面の近くに置くと、テーマの外に見た目の正ができる。Mantine の styles.css は
 //     shared/ui/ の Provider が import する（app/layout.tsx も import しない）。
+//   - design-system-themed-components: shared/ui/ の外のテスト以外のソースが @mantine/core から値として import する名前
+//     （import { X }・export { X } from。`import type` と inline の `type X` は除く）は、shared/ui/themes/theme-definition.ts の
+//     型 ThemedComponent（文字列リテラルの union）にあるものだけ。既定の import・名前空間の import（`* as M`）・`export * from`・
+//     import() / require() は、使う名前が決まらないので名前 `*` / `default` の違反にする。
+//     WHY: ThemedComponent はすべてのテーマに部品ごとの見た目を型で書かせる一覧で、そこに無い部品を画面が使うと Mantine の既定の
+//     見た目のまま残り、テーマを差し替えても変わらない。部品を画面で使い始めたら、一覧とすべてのテーマに足すことを強制する。
+//     一覧は theme-definition.ts を構文木で読む（手で写すとずれる）。読めた名前が 0 件なら実ファイルのテストで失敗させる。
 // 対象: apps/frontend_customer の下のソース（.ts .tsx .js .jsx .mjs .cjs .mts .cts）のうち、テスト（*.test.*）と shared/ui/ の中を除いたもの。
 //   node_modules と .next（依存と生成物）は列挙で入らない。test-support/ はテスト以外のソースとして対象にする（見た目を書く理由が無い）。
 // 検査の対象の列挙（テスト以外のソース）と style props の一覧が 0 件なら、実ファイルのテストで失敗させる
 //   （0 件なら違反も 0 件で常に緑になるため）。
 // 限界: 属性は名前で見るので、スプレッド（`<Box {...{ mt: "md" }} />`・`{...props}`）、名前空間付きの属性、
 //   React.createElement / cloneElement の props、useMantineTheme で値を取り出して別の口から当てる書き方は見ない（レビューで見る）。
-//   style props と同じ名前の素の属性（SVG の <path opacity="0.5">・display）も違反と数える（安全側）。
+//   style props・LOOK_PROPS と同じ名前の素の属性（SVG の <path opacity="0.5">・display、HTML の <input size>・<font color>）も
+//   違反と数える（安全側。今の画面は素の要素でこれらを使わない）。
+//   design-system-themed-components は @mantine/core の名前だけを見る（部品の中身・別のパッケージ（@mantine/dates など）・
+//   shared/ui/ を経由した再公開は見ない。ThemedComponent の union は文字列リテラルだけを読み、別の型の参照は展開しない）。
+//   部品でない値（ColorSchemeScript・mantineHtmlProps・hook）も名前が一覧に無ければ違反と数える（shared/ui/ に置く）。
 //   .css の import は参照先の文字列が `.css` で終わるもの（大文字小文字は区別しない）だけを見る（`?inline` などのクエリ付き・
 //   テンプレートリテラルに埋め込み式のある import()・.scss などほかの書き方は見ない）。
 
-type RuleId = "design-system-no-direct-style" | "design-system-css-placement";
+// @mantine/core から取り込む値 1 つ（名前と、行を出す節）。
+type MantineImport = { node: Node; name: string };
+
+type RuleId =
+  | "design-system-no-direct-style"
+  | "design-system-css-placement"
+  | "design-system-themed-components";
 
 const repoRoot = join(import.meta.dirname, "..");
 
@@ -68,6 +95,23 @@ class DesignSystemRule {
   // デザインシステムの置き場所。見た目（テーマ・CSS・style）を書いてよいのはここだけ。
   static readonly DESIGN_SYSTEM_DIR =
     `${DesignSystemRule.FRONTEND_ROOT}/shared/ui`;
+  // テーマが見た目を必ず書く部品の一覧（型 ThemedComponent）を宣言するファイル。
+  static readonly THEME_DEFINITION =
+    `${DesignSystemRule.DESIGN_SYSTEM_DIR}/themes/theme-definition.ts`;
+  static readonly THEMED_COMPONENT_TYPE = "ThemedComponent";
+  static readonly MANTINE_CORE = "@mantine/core";
+  // Mantine の部品の見た目を選ぶ props（WHY は冒頭の design-system-no-direct-style）。c は style props に含まれる。
+  static readonly LOOK_PROPS = [
+    "color",
+    "variant",
+    "size",
+    "radius",
+    "autoContrast",
+    "gradient",
+    "shadow",
+    "withBorder",
+    "underline",
+  ];
 
   // Mantine の style props の名前（@mantine/core の STYLE_PROPS_DATA のキー）。
   static mantineStyleProps(root: string): string[] {
@@ -80,7 +124,7 @@ class DesignSystemRule {
     return Object.keys(mantine.STYLE_PROPS_DATA ?? {});
   }
 
-  // 見た目を直接書く JSX 属性の名前（style props の一覧に、Styles API と素の React の口を足したもの）。
+  // 見た目を直接書く JSX 属性の名前（style props の一覧に、Styles API と素の React の口と、見た目を選ぶ props を足したもの）。
   static forbiddenAttributes(styleProps: readonly string[]): Set<string> {
     return new Set([
       "style",
@@ -88,6 +132,7 @@ class DesignSystemRule {
       "classNames",
       "styles",
       "vars",
+      ...DesignSystemRule.LOOK_PROPS,
       ...styleProps,
     ]);
   }
@@ -189,6 +234,101 @@ class DesignSystemRule {
     return lines;
   }
 
+  // theme-definition.ts の型 ThemedComponent の union に書かれた文字列リテラル（書かれた順）。型が無ければ空。
+  static themedComponents(sourceFile: SourceFile | undefined): string[] {
+    const names: string[] = [];
+    if (sourceFile === undefined) {
+      return names;
+    }
+    DesignSystemRule.visit(sourceFile, (node) => {
+      if (
+        isTypeAliasDeclaration(node) &&
+        node.name.text === DesignSystemRule.THEMED_COMPONENT_TYPE
+      ) {
+        DesignSystemRule.visit(node.type, (child) => {
+          if (isStringLiteral(child)) {
+            names.push(child.text);
+          }
+        });
+      }
+    });
+    return names;
+  }
+
+  // 名前の付いた取り込み・再公開の要素のうち、値のもの（`type X` を除く）。名前は別名ではなく元の名前（`Text as T` は Text）。
+  static valueSpecifiers(
+    elements: readonly (ImportSpecifier | ExportSpecifier)[],
+  ): MantineImport[] {
+    return elements
+      .filter((element) => !element.isTypeOnly)
+      .map((element) => ({
+        node: element,
+        name: (element.propertyName ?? element.name).text,
+      }));
+  }
+
+  // import 文で @mantine/core から値として取り込むもの。型だけ（`import type`）・副作用だけの import は空。
+  static importedValues(node: ImportDeclaration): MantineImport[] {
+    const clause = node.importClause;
+    if (
+      clause === undefined ||
+      clause.phaseModifier === SyntaxKind.TypeKeyword
+    ) {
+      return [];
+    }
+    const bindings = clause.namedBindings;
+    return [
+      ...(clause.name === undefined
+        ? []
+        : [{ node: clause.name, name: "default" }]),
+      ...(bindings !== undefined && isNamespaceImport(bindings)
+        ? [{ node: bindings, name: "*" }]
+        : []),
+      ...(bindings !== undefined && isNamedImports(bindings)
+        ? DesignSystemRule.valueSpecifiers(bindings.elements)
+        : []),
+    ];
+  }
+
+  // 参照先が @mantine/core の節が取り込む値。export * / import() / require() / import x = require() は名前が決まらないので `*`。
+  static mantineValuesOf(node: Node): MantineImport[] {
+    if (isImportDeclaration(node)) {
+      return DesignSystemRule.importedValues(node);
+    }
+    if (isExportDeclaration(node)) {
+      if (node.isTypeOnly) {
+        return [];
+      }
+      const clause = node.exportClause;
+      return clause !== undefined && isNamedExports(clause)
+        ? DesignSystemRule.valueSpecifiers(clause.elements)
+        : [{ node, name: "*" }];
+    }
+    return [{ node, name: "*" }];
+  }
+
+  // @mantine/core から値として取り込む名前のうち、themed に無いもの（書かれた順。行は名前の節の行）。
+  static findUnthemedMantineImports(
+    sourceFile: SourceFile,
+    themed: ReadonlySet<string>,
+  ): { line: number; name: string }[] {
+    const found: { line: number; name: string }[] = [];
+    DesignSystemRule.visit(sourceFile, (node) => {
+      if (
+        DesignSystemRule.moduleSpecifierOf(node) !==
+        DesignSystemRule.MANTINE_CORE
+      ) {
+        return;
+      }
+      for (const { node: at, name } of DesignSystemRule.mantineValuesOf(node)) {
+        if (!themed.has(name)) {
+          found.push({ line: DesignSystemRule.lineOf(sourceFile, at), name });
+        }
+      }
+    });
+    return found;
+  }
+
   // files（リポジトリ相対のパス → ソース）を 1 回の tsgo の起動でまとめて構文解析する。
   // WHY 仮想のファイルシステムに置く・まとめて解析する・見つからなければ例外: architecture.test.ts の parseSourceFiles と同じ
   //   （tsconfig の include や node_modules に左右されない、tsgo の起動は 1 回 100ms ほど、黙って飛ばすと素通りする）。
@@ -274,9 +414,21 @@ class DesignSystemRule {
   ): Record<RuleId, string[]> {
     const forbidden = DesignSystemRule.forbiddenAttributes(styleProps);
     const sources = DesignSystemRule.listCheckedSources(root);
+    // WHY theme-definition.ts も同じ起動で解析する: tsgo の起動を 1 回にする。無ければ一覧は空（すべての取り込みが違反）。
+    const themeDefinition = DesignSystemRule.listFrontendFiles(root).filter(
+      (path) => path === DesignSystemRule.THEME_DEFINITION,
+    );
     const parsed = DesignSystemRule.parse(
       Object.fromEntries(
-        sources.map((path) => [path, readFileSync(join(root, path), "utf8")]),
+        [...sources, ...themeDefinition].map((path) => [
+          path,
+          readFileSync(join(root, path), "utf8"),
+        ]),
+      ),
+    );
+    const themed = new Set(
+      DesignSystemRule.themedComponents(
+        parsed.get(DesignSystemRule.THEME_DEFINITION),
       ),
     );
     const linesIn = (
@@ -303,6 +455,15 @@ class DesignSystemRule {
           "design-system-css-placement",
         ),
       ],
+      "design-system-themed-components": sources.flatMap((path) =>
+        DesignSystemRule.findUnthemedMantineImports(
+          parsed.get(path) as SourceFile,
+          themed,
+        ).map(
+          ({ line, name }) =>
+            `design-system-themed-components: ${path}:${line} ${name}`,
+        ),
+      ),
     };
   }
 }
@@ -343,7 +504,7 @@ describe("見た目を直接書く JSX 属性（findDirectStyles）", () => {
     const sources = {
       "a.tsx": lines(
         "export const A = () => (",
-        '  <Stack gap="md" aria-label="x" data-style="x" variant="filled">',
+        '  <Stack gap="md" aria-label="x" data-style="x" data-variant="filled">',
         "    {/* <div style={{ color: 'red' }} /> */}",
         '    <Text title="mt=1 style className">style className mt</Text>',
         '    <Button onClick={() => {}} type="submit">ok</Button>',
@@ -354,6 +515,7 @@ describe("見た目を直接書く JSX 属性（findDirectStyles）", () => {
       "b.tsx": lines(
         "export const B = () => (",
         '  <Box mtx={1} pad={1} Style={1} classname="x" styleName="x" bgColor="x" />',
+        '  <Box colors="x" variants="x" sizes="x" Radius="x" shadowX="x" withBorders underlined />',
         ");",
       ),
       // .ts の <x> は型アサーションで JSX ではない。オブジェクトのキーの style も属性ではない。
@@ -370,7 +532,7 @@ describe("見た目を直接書く JSX 属性（findDirectStyles）", () => {
     expect(result).toEqual({ "a.tsx": [], "b.tsx": [], "c.ts": [] });
   });
 
-  it("must reject: style / className / classNames / styles / vars と style props は、要素・値の形・拡張子を問わず違反", () => {
+  it("must reject: style / className / classNames / styles / vars・style props・見た目を選ぶ props は、要素・値の形・拡張子を問わず違反", () => {
     // given
     const sources = {
       "a.tsx": lines(
@@ -383,6 +545,9 @@ describe("見た目を直接書く JSX 属性（findDirectStyles）", () => {
         '      gap="md"',
         '      mt="xl"', // 8
         "    />",
+        '    <Button color="red" variant="light" size="xs" radius="xl" autoContrast />', // 10 x5
+        '    <Paper gradient={{ from: "a", to: "b" }} shadow="md" withBorder />', // 11 x3
+        '    <Anchor underline="always" />', // 12
         "  </div>",
         ");",
       ),
@@ -398,8 +563,135 @@ describe("見た目を直接書く JSX 属性（findDirectStyles）", () => {
 
     // then
     expect(result).toEqual({
-      "a.tsx": [2, 3, 4, 4, 4, 5, 5, 5, 5, 5, 8],
+      "a.tsx": [
+        2, 3, 4, 4, 4, 5, 5, 5, 5, 5, 8, 10, 10, 10, 10, 10, 11, 11, 11, 12,
+      ],
       "b.jsx": [1],
+    });
+  });
+});
+
+// 例をまとめて構文解析し、例ごとの「行 名前」を返す（一覧は架空の Button と Text）。
+function unthemedImports(sources: Record<string, string>) {
+  const parsed = DesignSystemRule.parse(sources);
+  const themed = new Set(["Button", "Text"]);
+  return Object.fromEntries(
+    Object.keys(sources).map((path) => [
+      path,
+      DesignSystemRule.findUnthemedMantineImports(
+        parsed.get(path) as SourceFile,
+        themed,
+      ).map(({ line, name }) => `${line} ${name}`),
+    ]),
+  );
+}
+
+describe("テーマの部品の一覧（themedComponents）", () => {
+  it("型 ThemedComponent の union の文字列リテラルを書かれた順に読み、ほかの型・コメント・文字列は読まない", () => {
+    // given
+    const file = "apps/frontend_customer/shared/ui/themes/theme-definition.ts";
+    const source = lines(
+      '// "Comment"',
+      'export type Other = "Other";',
+      'const s = "Str";',
+      'export type ThemedComponent = | "Button" | "Text"',
+      '  | "TextInput";',
+      'export type ThemedComponentX = "X";',
+    );
+
+    // when
+    const result = DesignSystemRule.themedComponents(
+      DesignSystemRule.parse({ [file]: source }).get(file),
+    );
+
+    // then
+    expect(result).toEqual(["Button", "Text", "TextInput"]);
+  });
+
+  it("ファイルが無い・型が無ければ空", () => {
+    // given
+    const file = "a.ts";
+
+    // when
+    const missing = DesignSystemRule.themedComponents(undefined);
+    const noType = DesignSystemRule.themedComponents(
+      DesignSystemRule.parse({ [file]: 'export type X = "Button";\n' }).get(
+        file,
+      ),
+    );
+
+    // then
+    expect(missing).toEqual([]);
+    expect(noType).toEqual([]);
+  });
+});
+
+describe("@mantine/core の部品の取り込み（findUnthemedMantineImports）", () => {
+  it("must pass: 一覧にある名前の値の import・型だけの import・ほかのパッケージ・サブパスは違反にしない", () => {
+    // given
+    const sources = {
+      "a.tsx": lines(
+        'import { Button, Text as T } from "@mantine/core";',
+        'import type { Box, MantineTheme } from "@mantine/core";',
+        'import { type Stack, Button as B } from "@mantine/core";',
+        'export type { Group } from "@mantine/core";',
+        'export { Text } from "@mantine/core";',
+        'import { Box as X } from "@mantine/dates";',
+        'import "@mantine/core/styles.css";',
+        'import { Box as Y } from "@mantine/core-x";',
+        '// import { Box } from "@mantine/core";',
+        "export const z = [Button, T, B, X, Y];",
+      ),
+    };
+
+    // when
+    const result = unthemedImports(sources);
+
+    // then
+    expect(result).toEqual({ "a.tsx": [] });
+  });
+
+  it("must reject: 一覧に無い名前（別名の元の名前で見る）、既定・名前空間・export *・import()・require() は違反", () => {
+    // given
+    const sources = {
+      "a.tsx": lines(
+        'import { Button, Box, Text as Stack } from "@mantine/core";', // 1 Box
+        'import { Group as Text } from "@mantine/core";', // 2 Group
+        "import {",
+        "  Button as B,",
+        "  ColorSchemeScript,", // 5
+        '} from "@mantine/core";',
+        'import Mantine from "@mantine/core";', // 7 default
+        'import * as M from "@mantine/core";', // 8 *
+        'export { Paper } from "@mantine/core";', // 9 Paper
+        'export * from "@mantine/core";', // 10 *
+        'export const d = import("@mantine/core");', // 11 *
+        "export const r = require(`@mantine/core`);", // 12 *
+        "export const z = [Button, Box, Stack, Text, B, ColorSchemeScript, Mantine, M];",
+      ),
+      "b.ts": lines(
+        "import M = require('@mantine/core');", // 1 *
+        "export const y = M;",
+      ),
+    };
+
+    // when
+    const result = unthemedImports(sources);
+
+    // then
+    expect(result).toEqual({
+      "a.tsx": [
+        "1 Box",
+        "2 Group",
+        "5 ColorSchemeScript",
+        "7 default",
+        "8 *",
+        "9 Paper",
+        "10 *",
+        "11 *",
+        "12 *",
+      ],
+      "b.ts": ["1 *"],
     });
   });
 });
@@ -529,6 +821,11 @@ describe("列挙と検査（fixture）", () => {
       'export const P = () => <div className={classes.root} style={{}} mt="md" />;',
     ),
     "apps/frontend_customer/shared/ui/themes/x/x.module.css": ".root {}\n",
+    "apps/frontend_customer/shared/ui/themes/theme-definition.ts":
+      'export type ThemedComponent = "Button" | "Text";\n',
+    // shared/ui/ の中は一覧に無い部品を import してよい。
+    "apps/frontend_customer/shared/ui/provider-x.tsx":
+      'import { MantineProvider } from "@mantine/core";\nexport const p = MantineProvider;\n',
     // テストは対象外。
     "apps/frontend_customer/features/x/x.test.tsx":
       'import "./x.css";\nexport const T = () => <div style={{}} />;\n',
@@ -545,8 +842,10 @@ describe("列挙と検査（fixture）", () => {
       ...designSystemFiles,
       "apps/frontend_customer/app/layout.tsx":
         'import { UiProvider } from "@/shared/ui/provider";\nexport default function L() { return <UiProvider />; }\n',
-      "apps/frontend_customer/features/x/x.tsx":
-        'export const X = () => <Button variant="filled">x</Button>;\n',
+      "apps/frontend_customer/features/x/x.tsx": lines(
+        'import { Button, type MantineTheme } from "@mantine/core";',
+        "export const X = () => <Button>x</Button>;",
+      ),
     });
 
     // when
@@ -564,6 +863,7 @@ describe("列挙と検査（fixture）", () => {
     expect(violations).toEqual({
       "design-system-no-direct-style": [],
       "design-system-css-placement": [],
+      "design-system-themed-components": [],
     });
   });
 
@@ -574,13 +874,15 @@ describe("列挙と検査（fixture）", () => {
       "apps/frontend_customer/app/layout.tsx": lines(
         'import "@mantine/core/styles.css";',
         'export default function L() { return <body className="x" />; }',
+        'import { ColorSchemeScript } from "@mantine/core";',
       ),
       "apps/frontend_customer/app/globals.css": "body {}\n",
       "apps/frontend_customer/features/x/x.tsx": lines(
         'import classes from "./x.module.css";',
         "export const X = () => (",
-        '  <Box mt="md" classNames={classes} />',
+        '  <Box mt="md" classNames={classes} color="red" />',
         ");",
+        'import { Box, Text } from "@mantine/core";',
       ),
       "apps/frontend_customer/features/x/x.module.css": ".a {}\n",
     });
@@ -597,6 +899,7 @@ describe("列挙と検査（fixture）", () => {
         "design-system-no-direct-style: apps/frontend_customer/app/layout.tsx:2",
         "design-system-no-direct-style: apps/frontend_customer/features/x/x.tsx:3",
         "design-system-no-direct-style: apps/frontend_customer/features/x/x.tsx:3",
+        "design-system-no-direct-style: apps/frontend_customer/features/x/x.tsx:3",
       ],
       "design-system-css-placement": [
         "design-system-css-placement: apps/frontend_customer/app/globals.css",
@@ -604,7 +907,30 @@ describe("列挙と検査（fixture）", () => {
         "design-system-css-placement: apps/frontend_customer/app/layout.tsx:1",
         "design-system-css-placement: apps/frontend_customer/features/x/x.tsx:1",
       ],
+      "design-system-themed-components": [
+        "design-system-themed-components: apps/frontend_customer/app/layout.tsx:3 ColorSchemeScript",
+        "design-system-themed-components: apps/frontend_customer/features/x/x.tsx:5 Box",
+      ],
     });
+  });
+
+  it("theme-definition.ts が無ければ一覧は空で、@mantine/core の値の import はすべて違反", () => {
+    // given
+    const root = fixture({
+      "apps/frontend_customer/features/x/x.tsx":
+        'import { Button } from "@mantine/core";\nexport const b = Button;\n',
+    });
+
+    // when
+    const violations = DesignSystemRule.collectViolations(
+      root,
+      FAKE_STYLE_PROPS,
+    );
+
+    // then
+    expect(violations["design-system-themed-components"]).toEqual([
+      "design-system-themed-components: apps/frontend_customer/features/x/x.tsx:1 Button",
+    ]);
   });
 
   it("apps/frontend_customer が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）", () => {
@@ -623,6 +949,7 @@ describe("列挙と検査（fixture）", () => {
     expect(violations).toEqual({
       "design-system-no-direct-style": [],
       "design-system-css-placement": [],
+      "design-system-themed-components": [],
     });
   });
 });
@@ -638,6 +965,20 @@ describe("デザインシステム（実ファイル）", () => {
     expect(styleProps).toEqual(
       expect.arrayContaining(["m", "mt", "p", "bg", "c", "w", "h", "display"]),
     );
+  });
+
+  it("テーマの部品の一覧（theme-definition.ts の ThemedComponent）を読める（空でない）", () => {
+    // given
+    const file = DesignSystemRule.THEME_DEFINITION;
+    const source = readFileSync(join(repoRoot, file), "utf8");
+
+    // when
+    const themed = DesignSystemRule.themedComponents(
+      DesignSystemRule.parse({ [file]: source }).get(file),
+    );
+
+    // then
+    expect(themed).toEqual(expect.arrayContaining(["Button", "Text"]));
   });
 
   describe("規則ごとの検査", () => {
@@ -670,6 +1011,16 @@ describe("デザインシステム（実ファイル）", () => {
 
       // when
       const result = violations["design-system-css-placement"];
+
+      // then
+      expect(result).toEqual([]);
+    });
+
+    it("design-system-themed-components: shared/ui/ の外で @mantine/core から値で取り込むのは ThemedComponent にある部品だけ", () => {
+      // given: describe の冒頭で collectViolations(repoRoot) 済み（実ファイル）
+
+      // when
+      const result = violations["design-system-themed-components"];
 
       // then
       expect(result).toEqual([]);

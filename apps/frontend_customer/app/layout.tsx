@@ -1,8 +1,11 @@
-import { ColorSchemeScript, mantineHtmlProps } from "@mantine/core";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { LocaleProvider } from "@/shared/i18n/i18n";
 import { LOCALE_HEADER, Locales } from "@/shared/i18n/locale";
+import {
+  DesignSystemHead,
+  designSystemHtmlProps,
+} from "@/shared/ui/design-system-document";
 import { DesignSystemProvider } from "@/shared/ui/design-system-provider";
 
 export const metadata: Metadata = {
@@ -27,12 +30,10 @@ export default async function RootLayout({
 }) {
   const locale = Locales.fromHeader((await headers()).get(LOCALE_HEADER));
   return (
-    // デザインシステム（Mantine。Issue #292）: mantineHtmlProps（data-mantine-color-scheme と suppressHydrationWarning）と
-    // ColorSchemeScript は、描画の前に配色（light）を html に付けてちらつきを防ぐ Mantine の Next の設定
-    // （https://mantine.dev/guides/next/）。DesignSystemProvider の forceColorScheme と同じ light にそろえる。
-    <html lang={locale} {...mantineHtmlProps}>
+    // デザインシステム（Issue #292）が <html> と <head> に要るもの（中身と WHY は shared/ui/design-system-document.tsx）。
+    <html lang={locale} {...designSystemHtmlProps}>
       <head>
-        <ColorSchemeScript forceColorScheme="light" />
+        <DesignSystemHead />
       </head>
       <body>
         <DesignSystemProvider>
