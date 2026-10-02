@@ -5,6 +5,11 @@ import { DomainError } from "../../../../shared/error/domain-error";
 import type { ErrorKey } from "../../../../shared/error/error-key";
 import { TODO_TITLE_MAX_LENGTH, Todo } from "./todo";
 
+// Todo の技術の仕組み（id の形・現在時刻の読み方・不変（元の Todo を変えない）・値の凍結・型を偽った値・Invalid Date・
+//   読み込んだときの値 origin・どの口も全体を検証する完全コンストラクタ）の単体テスト。
+// 業務ルール（タイトルの規則・完了と履歴の規則・履歴の不変条件）は domain 仕様 apps/backend/spec/domain/todo/todo.feature
+//   （step の実装は todo.domain-spec.test.ts）に書き、ここでは重ねない（Issue #318）。
+
 // WHY 時計（Clock.now）を差し替える: Todo.create は作成日時を Clock.now() から自動で入れる（引数では受け取らない）。
 //   テストで決まった時刻にするには、現在時刻の唯一の出口（apps/shared/now.ts）を差し替えるしかない。
 //   自動モックの Clock.now は既定で undefined を返すので、beforeEach で決まった時刻を返させる（返させ忘れた Todo.create は
@@ -53,22 +58,12 @@ const INVALID_CREATED_AT = { key: "todo.createdAt.invalid" } as const;
 const INVALID_STATUS_CHANGES = { key: "todo.statusChanges.invalid" } as const;
 
 describe("Todo.create", () => {
-  test("未完了で作られ、id と、作成日時として現在時刻（Clock.now()）が付く", () => {
-    // given
-    const createdAt = new Date("2026-09-28T12:34:56.789Z");
-    vi.mocked(Clock.now).mockReturnValueOnce(createdAt);
-
+  test("id は randomUUID の形で付き、現在時刻（Clock.now()）は 1 回だけ読む", () => {
+    // given: beforeEach で now() が NOW を返すようにしてある
     // when
     const todo = Todo.create("牛乳を買う");
 
     // then
-    expect(todo.title).toBe("牛乳を買う");
-    expect(todo.completed).toBe(false);
-    expect(todo.createdAt).toEqual(createdAt);
-    // 完了の履歴は「作成日時に未完了になった」の 1 件から始まる（Issue #188）。
-    expect(todo.statusChanges).toStrictEqual([
-      { completed: false, changedAt: createdAt },
-    ]);
     expect(Clock.now).toHaveBeenCalledTimes(1);
     // randomUUID の形式（8-4-4-4-12 の 16 進）。
     expect(todo.id).toMatch(
@@ -99,26 +94,6 @@ describe("Todo.create", () => {
     expect(first.id).not.toBe(second.id);
   });
 
-  test("タイトルの前後の空白は取り除いて保持する", () => {
-    // given: beforeEach で now() が NOW を返すようにしてある
-    // when
-    const todo = Todo.create("  牛乳を買う \n");
-
-    // then
-    expect(todo.title).toBe("牛乳を買う");
-  });
-
-  test("タイトルは 1 文字と 100 文字を受け付ける", () => {
-    // given: beforeEach で now() が NOW を返すようにしてある
-    // when
-    const shortest = Todo.create("a");
-    const longest = Todo.create("a".repeat(100));
-
-    // then
-    expect(shortest.title).toBe("a");
-    expect(longest.title).toBe("a".repeat(100));
-  });
-
   // WHY 定数の値を固定する: presentation のリクエストのスキーマ（create-todo.api.ts・rename-todo.api.ts）がこの定数を参照して
   //   同じ上限を重ねる（Issue #144）。値を変えると画面の文言（params.max）と API の契約が変わるので、変えるときはここも直す。
   test("タイトルの上限の文字数 TODO_TITLE_MAX_LENGTH は 100 で、それを超えると validation_error になる", () => {
@@ -130,44 +105,6 @@ describe("Todo.create", () => {
     expect(TODO_TITLE_MAX_LENGTH).toBe(100);
     expectValidationError(action, TOO_LONG_TITLE);
   });
-
-  test("絵文字などのサロゲートペアも 1 文字と数える（100 個まで受け付ける）", () => {
-    // given: beforeEach で now() が NOW を返すようにしてある
-    // when
-    // "🍎".length は 2 だが、利用者から見れば 1 文字。
-    // String#length（UTF-16 のコード単位の数。zod の .max(100) もこれで数える）なら 200 文字になり弾かれる。
-    const todo = Todo.create("🍎".repeat(100));
-
-    // then
-    expect(todo.title).toBe("🍎".repeat(100));
-  });
-
-  test("前後の空白は文字数に数えない（空白を除いて 100 文字なら受け付ける）", () => {
-    // given: beforeEach で now() が NOW を返すようにしてある
-    // when
-    const todo = Todo.create(`  ${"a".repeat(100)}\t`);
-
-    // then
-    expect(todo.title).toBe("a".repeat(100));
-  });
-
-  test.each([
-    ["空文字", "", EMPTY_TITLE],
-    ["空白だけ", "   \t\n", EMPTY_TITLE],
-    ["101 文字", "a".repeat(101), TOO_LONG_TITLE],
-    ["空白を除いて 101 文字", ` ${"a".repeat(101)} `, TOO_LONG_TITLE],
-    ["絵文字 101 個", "🍎".repeat(101), TOO_LONG_TITLE],
-  ])(
-    "タイトルが%sなら validation_error を、理由の key（と params）付きで投げる",
-    (_label, title, expected) => {
-      // given: beforeEach で now() が NOW を返すようにしてある
-      // when
-      const action = () => Todo.create(title);
-
-      // then
-      expectValidationError(action, expected);
-    },
-  );
 
   // 完全コンストラクタ: create はタイトルだけでなく Todo のすべての値（TodoProps）を検証してから作る。
   test("作成日時が日付として不正（Invalid Date）なら validation_error を投げる", () => {
@@ -191,7 +128,7 @@ describe("Todo#rename", () => {
     const original = Todo.create("牛乳を買う");
 
     // when
-    const renamed = original.rename(" 卵を買う ");
+    const renamed = original.rename("卵を買う");
 
     // then
     expect(renamed.title).toBe("卵を買う");
@@ -199,40 +136,6 @@ describe("Todo#rename", () => {
     expect(renamed.createdAt).toEqual(createdAt);
     expect(original.title).toBe("牛乳を買う");
   });
-
-  test("完了済みの Todo の名前を変えても、完了状態・id・作成日時は変わらない", () => {
-    // given
-    // rename はタイトルだけを差し替え、他の値は今の値（props()）から引き継ぐので、
-    //   completed を未完了に戻す（false 固定にする）ような書き換えを検出するため、完了済みから始める。
-    //   未完了から始めると、false 固定にしても結果が同じで見逃す。
-    const completed = Todo.create("牛乳を買う").changeCompletion(true);
-
-    // when
-    const renamed = completed.rename("卵を買う");
-
-    // then
-    expect(renamed.completed).toBe(true);
-    expect(renamed.id).toBe(completed.id);
-    expect(renamed.createdAt).toEqual(completed.createdAt);
-    expect(renamed.title).toBe("卵を買う");
-  });
-
-  test.each([
-    ["空白だけ", " ", EMPTY_TITLE],
-    ["101 文字", "a".repeat(101), TOO_LONG_TITLE],
-  ])(
-    "作成時と同じ不変条件を守る（%sなら validation_error）",
-    (_label, title, expected) => {
-      // given
-      const todo = Todo.create("牛乳を買う");
-
-      // when
-      const action = () => todo.rename(title);
-
-      // then
-      expectValidationError(action, expected);
-    },
-  );
 });
 
 describe("Todo#changeCompletion", () => {
@@ -257,41 +160,29 @@ describe("Todo#changeCompletion", () => {
     expect(original.completed).toBe(false);
   });
 
-  // 完了の履歴（Issue #188）: 完了状態が変わるたびに、変わった後の値と日時（Clock.now()）を末尾に 1 件足す。
-  test("完了状態を変えると、変えた後の値と現在時刻（Clock.now()）の履歴を末尾に 1 件足す（元の Todo の履歴は変えない）", () => {
+  // WHY 元の履歴を見る: 履歴は Todo の値で、Todo は不変。足した履歴が元の Todo に混ざると、保存前の値や origin との差分が変わる。
+  test("完了状態を変えても、元の Todo の完了の履歴は変えない", () => {
     // given
-    const createdAt = new Date("2026-09-27T00:00:00.000Z");
-    const completedAt = new Date("2026-09-27T01:00:00.000Z");
-    const reopenedAt = new Date("2026-09-27T02:00:00.000Z");
-    vi.mocked(Clock.now)
-      .mockReturnValueOnce(createdAt)
-      .mockReturnValueOnce(completedAt)
-      .mockReturnValueOnce(reopenedAt);
     const original = Todo.create("牛乳を買う");
 
     // when
     const completed = original.changeCompletion(true);
-    const reopened = completed.changeCompletion(false);
+    completed.changeCompletion(false);
 
     // then
-    expect(reopened.statusChanges).toStrictEqual([
-      { completed: false, changedAt: createdAt },
-      { completed: true, changedAt: completedAt },
-      { completed: false, changedAt: reopenedAt },
+    expect(original.statusChanges).toStrictEqual([
+      { completed: false, changedAt: NOW },
     ]);
     expect(completed.statusChanges).toStrictEqual([
-      { completed: false, changedAt: createdAt },
-      { completed: true, changedAt: completedAt },
-    ]);
-    expect(original.statusChanges).toStrictEqual([
-      { completed: false, changedAt: createdAt },
+      { completed: false, changedAt: NOW },
+      { completed: true, changedAt: NOW },
     ]);
   });
 
-  // WHY 同じ値なら遷移しない: 同じ状態への遷移を積むと履歴にノイズが入る。Todo が同じなら Repository の update も差分が無く
-  //   SQL を発行しない。
+  // WHY 現在時刻を読まないことを見る: 同じ状態の指定は何も変えない（domain 仕様）。時刻を読むのは履歴を足すときだけで、読む誤りは
+  //   結果の Todo（toBe）では分からない（reviewer の指摘、Issue #318）。
   test.each([false, true])(
-    "今と同じ値（%s）を渡すと、履歴を足さず同じ Todo を返す（Clock.now() も読まない）",
+    "今と同じ値（%s）を渡すと、現在時刻（Clock.now()）を読まない",
     (value) => {
       // given
       const todo =
@@ -301,37 +192,12 @@ describe("Todo#changeCompletion", () => {
       vi.mocked(Clock.now).mockClear();
 
       // when
-      const changed = todo.changeCompletion(value);
+      todo.changeCompletion(value);
 
       // then
-      expect(changed).toBe(todo);
       expect(Clock.now).not.toHaveBeenCalled();
     },
   );
-
-  // 作成と完了が同じミリ秒でも受け付ける（履歴の日時は同じ値を許す）。
-  test("作成と同じ時刻に完了にしても受け付ける（履歴の日時は昇順で、同じ値を許す）", () => {
-    // given: beforeEach で now() が NOW を返すようにしてある
-    // when
-    const todo = Todo.create("牛乳を買う").changeCompletion(true);
-
-    // then
-    expect(todo.statusChanges).toStrictEqual([
-      { completed: false, changedAt: NOW },
-      { completed: true, changedAt: NOW },
-    ]);
-  });
-
-  test("rename は完了の履歴を変えない", () => {
-    // given
-    const todo = Todo.create("牛乳を買う").changeCompletion(true);
-
-    // when
-    const renamed = todo.rename("卵を買う");
-
-    // then
-    expect(renamed.statusChanges).toStrictEqual(todo.statusChanges);
-  });
 
   // WHY 型に反する値を as で渡す: 型の上では boolean しか渡せないが、完全コンストラクタは口によらず全体を検証する
   //   （todo.ts のコメント）。completed の規則（boolean であること）も、changeCompletion を通って守られることを確かめる。
@@ -350,9 +216,6 @@ describe("Todo#changeCompletion", () => {
 describe("Todo.reconstruct", () => {
   const VALID_ID = "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e";
   const CREATED_AT = new Date("2026-09-28T00:00:00.000Z");
-  const BEFORE = new Date("2026-09-27T23:59:59.999Z");
-  const AFTER = new Date("2026-09-28T01:00:00.000Z");
-  const LATER = new Date("2026-09-28T02:00:00.000Z");
 
   // WHY 型に反する値を as で渡す: 型の上では string しか渡せないが、文字列でない値にもキーを付ける
   //   （zod の既定の英語の文言を domain の外に出さない。todo.ts の todoPropsSchema の title のコメント）。
@@ -434,7 +297,8 @@ describe("Todo.reconstruct", () => {
     expect(todo.title).toBe("牛乳を買う");
   });
 
-  // Issue #94: 保存済みの値も今の不変条件で検査する（Todo 型 = 不変条件を満たす値）。規則を厳しくしたときは、
+  // Issue #94: 保存済みの値も今の不変条件で検査する（Todo 型 = 不変条件を満たす値）。タイトルの規則そのものは domain 仕様が
+  //   見るので、ここで見るのは「読み出しの口も同じ規則を通る」こと（完全コンストラクタ。上の前後の空白の除去も同じ）。規則を厳しくしたときは、
   //   既存のデータを移行（スキル db-migration）してから規則を変える。
   test.each([
     ["タイトルが空文字", { title: "" }, EMPTY_TITLE],
@@ -454,37 +318,10 @@ describe("Todo.reconstruct", () => {
     ],
     // 完了の履歴の不変条件（Issue #188）: 1 件以上、日時は昇順（同じ値は可）、最初の日時は作成日時以上、最後の completed は
     //   今の completed と等しい。
-    ["完了の履歴が空", { statusChanges: [] }, INVALID_STATUS_CHANGES],
     // 型に反する値を as で渡す（DB からは来ないが、配列でない値にもキーを付ける。title が文字列でないときと同じ）。
     [
       "完了の履歴が配列でない",
       { statusChanges: undefined as unknown as [] },
-      INVALID_STATUS_CHANGES,
-    ],
-    [
-      "最後の履歴の completed が今の completed と違う",
-      {
-        statusChanges: [
-          { completed: false, changedAt: CREATED_AT },
-          { completed: true, changedAt: AFTER },
-        ],
-      },
-      INVALID_STATUS_CHANGES,
-    ],
-    [
-      "履歴の日時が降順",
-      {
-        statusChanges: [
-          { completed: false, changedAt: CREATED_AT },
-          { completed: true, changedAt: LATER },
-          { completed: false, changedAt: AFTER },
-        ],
-      },
-      INVALID_STATUS_CHANGES,
-    ],
-    [
-      "最初の履歴の日時が作成日時より前",
-      { statusChanges: [{ completed: false, changedAt: BEFORE }] },
       INVALID_STATUS_CHANGES,
     ],
     [
@@ -524,43 +361,6 @@ describe("Todo.reconstruct", () => {
       expectValidationError(action, expected);
     },
   );
-
-  // 境界: 日時が同じ値は昇順として受け付ける（作成と完了が同じミリ秒でも作れる。Todo.create の後すぐ changeCompletion）。
-  test("最初の履歴の日時が作成日時と同じ、履歴どうしの日時が同じ、は受け付ける", () => {
-    // given: 前提なし
-    // when
-    const todo = Todo.reconstruct({
-      id: VALID_ID,
-      title: "牛乳を買う",
-      completed: false,
-      createdAt: CREATED_AT,
-      statusChanges: [
-        { completed: false, changedAt: CREATED_AT },
-        { completed: true, changedAt: AFTER },
-        { completed: false, changedAt: AFTER },
-      ],
-    });
-
-    // then
-    expect(todo.statusChanges).toHaveLength(3);
-  });
-
-  test("最初の履歴の日時は作成日時より後でもよい（作成日時と同時でなくてよい）", () => {
-    // given: 前提なし
-    // when
-    const todo = Todo.reconstruct({
-      id: VALID_ID,
-      title: "牛乳を買う",
-      completed: true,
-      createdAt: CREATED_AT,
-      statusChanges: [{ completed: true, changedAt: AFTER }],
-    });
-
-    // then
-    expect(todo.statusChanges).toStrictEqual([
-      { completed: true, changedAt: AFTER },
-    ]);
-  });
 });
 
 // origin: 読み込んだとき（reconstruct）の値。Repository の update が「変わった列だけ」を書くために差分を取る（Issue #165）。
