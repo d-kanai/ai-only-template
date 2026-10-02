@@ -14,6 +14,8 @@ import { FeatureFlagApi } from "@/features/feature-flag/api/feature-flag-api";
 // WHY OpenFeature の既定の provider（domain なし）に登録する: フラグの置き場所は backend の 1 つだけ（ADR
 //   docs/adr/architecture/20261002-feature-flag-ofrep-hardcoded.md）で、domain で分ける相手が無い。
 // 開発時の StrictMode では effect が 2 回走り provider を 2 つ作るが、OpenFeature は差し替えた前の provider を閉じる。
+//   限界: 閉じても 1 つ目の initialize（一括の評価の POST）は止まらないので、開発時は一括の評価が 2 回飛び、2 つ目の準備が
+//   できるまで一瞬既定値で評価し直す。本番（next start。StrictMode の 2 回実行なし）では起きない。
 export function FeatureFlagProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // WHY 準備を待たない（setProviderAndWait にしない）: 画面を待たせない。準備ができたことは react-sdk が Ready のイベントで受け取る。
