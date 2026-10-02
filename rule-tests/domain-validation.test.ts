@@ -11,7 +11,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
+import { afterAll, expect } from "vitest";
+import { casesByName } from "./case-table";
 
 // 「domain の検証は validate（DomainValidation.validated）を通す」（.claude/rules/backend.md の「入力検証」の domain の項、apps/backend/shared/domain/validate.ts、
 // Issue #177）を、backend のソースで機械的に検査するテスト。
@@ -152,372 +154,438 @@ const repoRoot = join(import.meta.dirname, "..");
 
 // テストの入力を行の配列で書き、1 行目を 1 として違反の行番号を読みやすくする。
 const source = (...lines: string[]) => lines.join("\n");
-
-describe("domain の検証の判定（findDomainValidationViolations）: must pass", () => {
-  it.each([
-    [
-      "DomainValidation.validated を通して検証する（Entity の完全コンストラクタ）",
-      source(
-        'import { DomainValidation } from "../../../../shared/domain/validate";',
-        "const valid = DomainValidation.validated(todoPropsSchema(), props);",
-        // プロジェクトの検証は `.validated(` で、zod の `.validate(` ではない（Issue #262 で関数 validate からクラスの static メソッドにした）。
-        "return DomainValidation.validated(schema, value);",
-      ),
-    ],
-    [
-      "JSON.parse / Date.parse（zod ではない組み込み）",
-      source(
-        "const value = JSON.parse(text);",
-        "const time = Date.parse(iso);",
-        "const spaced = JSON . parse (text);",
-      ),
-    ],
-    [
-      "Number.parseInt / parseInt / parseFloat（名前が parse ではない）",
-      source(
-        "const a = Number.parseInt(x, 10);",
-        "const b = parseInt(x, 10);",
-        "const c = Number.parseFloat(x);",
-      ),
-    ],
-    [
-      "名前の一部が parse / validate / decode なだけの別のもの（parseTitle / .parsed / .parseLater / .validated / .decoder）",
-      source(
-        "const a = parseTitle(x);",
-        "const b = result.parsed;",
-        "const c = schema.parseLater(x);",
-        "const d = result.validated;",
-        "const e = codec.decoder(x);",
-      ),
-    ],
-    [
-      "not_found など validation_error 以外の DomainError",
-      source(
-        'throw new DomainError("not_found", "todo.notFound", { id });',
-        "throw new DomainError(",
-        '  "not_found",',
-        '  "todo.notFound",',
-        ");",
-      ),
-    ],
-    [
-      "コメントの中の parse / validation_error は数えない",
-      source(
-        "// schema.safeParse(x) を直接呼ばず validate を通す。",
-        '// 違反は DomainError("validation_error", key) になる。',
-        "const valid = DomainValidation.validated(schema(), x); // schema.parse(x) にしない",
-        '// new DomainError("validation_error", "todo.title.empty")',
-      ),
-    ],
-  ])("%s は違反なし", (_name, text) => {
-    // given: it.each の入力
-    // when
-    const violations = findDomainValidationViolations(text);
-
-    // then
-    expect(violations).toEqual([]);
-  });
+// WHY OS の一時ディレクトリに置く: リポジトリ内に置くと本番の検査や Biome・git の差分に混ざる。afterAll で消す。
+const roots: string[] = [];
+afterAll(() => {
+  for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
 
-describe("domain の検証の判定（findDomainValidationViolations）: must reject", () => {
-  it.each<[string, string, DomainValidationViolation[]]>([
-    [
-      "schema.parse(x)",
-      source("const valid = todoPropsSchema.parse(props);"),
-      [{ rule: "no-direct-zod-parse-in-domain", line: 1 }],
-    ],
-    [
-      "safeParse / parseAsync / safeParseAsync（各 1 件）",
-      source(
-        "const a = schema.safeParse(x);",
-        "const b = await schema.parseAsync(x);",
-        "const c = await schema.safeParseAsync(x);",
-      ),
-      [
-        { rule: "no-direct-zod-parse-in-domain", line: 1 },
-        { rule: "no-direct-zod-parse-in-domain", line: 2 },
-        { rule: "no-direct-zod-parse-in-domain", line: 3 },
-      ],
-    ],
-    [
-      "zod の parse 以外の検証メソッド（spa / decode / safeDecode / decodeAsync / safeDecodeAsync / validate / validateAsync）",
-      source(
-        "const a = await schema.spa(x);",
-        "const b = schema.decode(x);",
-        "const c = schema.safeDecode(x);",
-        "const d = await schema.decodeAsync(x);",
-        "const e = await schema.safeDecodeAsync(x);",
-        "if (schema.validate(x)) ok();",
-        "const f = await schema.validateAsync(x);",
-      ),
-      [1, 2, 3, 4, 5, 6, 7].map((line) => ({
-        rule: "no-direct-zod-parse-in-domain" as const,
-        line,
-      })),
-    ],
-    [
-      "受け手が呼び出しの結果（todoPropsSchema().safeParse(x)）",
-      source("const result = todoPropsSchema().safeParse(props);"),
-      [{ rule: "no-direct-zod-parse-in-domain", line: 1 }],
-    ],
-    [
-      "z.string().trim().parse(x) のような chain・改行した chain（.parse の行を報告する）",
-      source(
-        "const a = z.string().trim().parse(x);",
-        "const b = z",
-        "  .string()",
-        "  .parse(x);",
-      ),
-      [
-        { rule: "no-direct-zod-parse-in-domain", line: 1 },
-        { rule: "no-direct-zod-parse-in-domain", line: 4 },
-      ],
-    ],
-    [
-      "JSON という名前のプロパティの parse（foo.JSON.parse）は組み込みの JSON ではない",
-      source("const a = config.JSON.parse(x);"),
-      [{ rule: "no-direct-zod-parse-in-domain", line: 1 }],
-    ],
-    [
-      'new DomainError("validation_error", ...)',
-      source('throw new DomainError("validation_error", "todo.title.empty");'),
-      [{ rule: "validation-error-only-in-validate", line: 1 }],
-    ],
-    [
-      'new DomainError( の後で改行して "validation_error"（new の行を報告する）',
-      source(
-        "if (!ok) {",
-        "  throw new DomainError(",
-        '    "validation_error",',
-        '    "todo.title.empty",',
-        "  );",
-        "}",
-      ),
-      [{ rule: "validation-error-only-in-validate", line: 2 }],
-    ],
-    [
-      "単引用符・テンプレートリテラルの validation_error",
-      source(
-        "throw new DomainError('validation_error', key);",
-        "throw new DomainError(`validation_error`, key);",
-      ),
-      [
-        { rule: "validation-error-only-in-validate", line: 1 },
-        { rule: "validation-error-only-in-validate", line: 2 },
-      ],
-    ],
-    [
-      "parse と validation_error を両方持つ（validate を自前で書き直した形）",
-      source(
-        "const result = schema.safeParse(value);",
-        "if (!result.success) {",
-        '  throw new DomainError("validation_error", result.error.issues[0].message);',
-        "}",
-      ),
-      [
-        { rule: "no-direct-zod-parse-in-domain", line: 1 },
-        { rule: "validation-error-only-in-validate", line: 3 },
-      ],
-    ],
-    [
-      "コード部分の後ろのコメントは落とすが、コード部分の parse は数える",
-      source("const a = schema.parse(x); // WHY: validate を通さない"),
-      [{ rule: "no-direct-zod-parse-in-domain", line: 1 }],
-    ],
-  ])("%s は違反", (_name, text, expected) => {
-    // given: it.each の入力
-    // when
-    const violations = findDomainValidationViolations(text);
-
-    // then
-    expect(violations).toEqual(expected);
-  });
-});
-
-describe("ファイルごとの規則の範囲（rulesFor）", () => {
-  it.each([
-    "apps/backend/features/todo/internal/domain/todo.ts",
-    "apps/backend/features/todo/internal/domain/todo-repository.ts",
-    "apps/backend/features/x/internal/domain/nested/value.ts",
-    // 除くのは shared/domain/validate.ts だけで、features の下の validate.ts は対象。
-    "apps/backend/features/x/internal/domain/validate.ts",
-    "apps/backend/shared/domain/keyed-issue.ts",
-    "apps/backend/shared/domain/nested/other.ts",
-  ])("%s は domain なので両方の規則", (path) => {
-    // given: it.each の path
-    // when
-    const rules = rulesFor(path);
-
-    // then
-    expect(rules).toEqual([
-      "no-direct-zod-parse-in-domain",
-      "validation-error-only-in-validate",
-    ]);
-  });
-
-  it.each([
-    // domain 以外の層（presentation はリクエストのスキーマを safeParse してよいが、validation_error の DomainError は作らない）。
-    "apps/backend/features/todo/internal/application/rename-todo.command.ts",
-    "apps/backend/features/todo/internal/presentation/rename-todo.api.ts",
-    "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
-    "apps/backend/shared/presentation/json-body.ts",
-    "apps/backend/shared/drizzle/drizzle.config.ts",
-    // features の直下でない domain・domain で始まる別のディレクトリ（前方一致の境界）。
-    "apps/backend/domain/x.ts",
-    "apps/backend/shared/domain-x/x.ts",
-    // Issue #208: feature の domain は internal/ の下だけ。internal/ を挟まない domain（Issue #208 より前の置き場所。
-    //   置き場所の規則 backend-placement が違反にする）と、前方一致だけが同じ別ディレクトリ（internal-x）は domain ではない。
-    "apps/backend/features/todo/domain/todo.ts",
-    "apps/backend/features/todo/internal-x/domain/x.ts",
-  ])("%s は validation_error の規則だけ", (path) => {
-    // given: it.each の入力
-    // when
-    const result = rulesFor(path);
-
-    // then
-    expect(result).toEqual(["validation-error-only-in-validate"]);
-  });
-
-  it.each([
-    // validate.ts は変換を持つ唯一の場所。
-    "apps/backend/shared/domain/validate.ts",
-    // テスト（zod の結果を safeParse で確かめ、期待する DomainError を作ってよい）。
-    "apps/backend/features/todo/internal/domain/todo.test.ts",
-    "apps/backend/shared/domain/validate.test.ts",
-    "apps/backend/features/todo/internal/presentation/rename-todo.api.test.ts",
-    // backend の外・ts でないもの・依存。
-    "apps/frontend_customer/features/todo/domain/x.ts",
-    "apps/backend-x/features/todo/internal/domain/x.ts",
-    "apps/backend/features/todo/internal/domain/README.md",
-    "apps/backend/node_modules/zod/v4/classic/schemas.ts",
-  ])("%s は対象外", (path) => {
-    // given: it.each の入力
-    // when
-    const result = rulesFor(path);
-
-    // then
-    expect(result).toEqual([]);
-  });
-});
-
-// --- 列挙 → 読み取り → 判定を通した fixture テスト ---
-// WHY: 判定が正しくても、対象の列挙（domain の見つけ方）が漏れれば見逃す。一時ディレクトリに架空のツリーを置き、
-//   本番と同じ collectDomainValidationViolations に通して、違反の集合を丸ごと比較する（見逃しも余分な検出も失敗にする）。
-describe("domain のファイルの列挙と検査（fixture）", () => {
-  // WHY OS の一時ディレクトリに置く: リポジトリ内に置くと本番の検査や Biome・git の差分に混ざる。afterAll で消す。
-  const roots: string[] = [];
-  afterAll(() => {
-    for (const root of roots) rmSync(root, { recursive: true, force: true });
-  });
-
-  function fixture(files: Record<string, string>): string {
-    const root = mkdtempSync(join(tmpdir(), "domain-validation-"));
-    roots.push(root);
-    for (const [path, content] of Object.entries(files)) {
-      mkdirSync(dirname(join(root, path)), { recursive: true });
-      writeFileSync(join(root, path), content);
-    }
-    return root;
+function fixture(files: Record<string, string>): string {
+  const root = mkdtempSync(join(tmpdir(), "domain-validation-"));
+  roots.push(root);
+  for (const [path, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), content);
   }
+  return root;
+}
 
-  const directParse = source(
-    "const result = schema.safeParse(value);",
-    'throw new DomainError("validation_error", "x.invalid");',
+const directParse = source(
+  "const result = schema.safeParse(value);",
+  'throw new DomainError("validation_error", "x.invalid");',
+);
+
+const feature = await loadFeature("./domain-validation.feature");
+
+describeFeature(feature, ({ Scenario }) => {
+  Scenario(
+    "domain の検証の判定（findDomainValidationViolations）: must pass",
+    ({ And }) => {
+      And(
+        "DomainValidation.validated を通す検証と zod でない parse は違反なし（Entity の完全コンストラクタ・JSON.parse / Date.parse など）",
+        () => {
+          // given
+          const cases: [string, string][] = [
+            [
+              "DomainValidation.validated を通して検証する（Entity の完全コンストラクタ）",
+              source(
+                'import { DomainValidation } from "../../../../shared/domain/validate";',
+                "const valid = DomainValidation.validated(todoPropsSchema(), props);",
+                // プロジェクトの検証は `.validated(` で、zod の `.validate(` ではない（Issue #262 で関数 validate からクラスの static メソッドにした）。
+                "return DomainValidation.validated(schema, value);",
+              ),
+            ],
+            [
+              "JSON.parse / Date.parse（zod ではない組み込み）",
+              source(
+                "const value = JSON.parse(text);",
+                "const time = Date.parse(iso);",
+                "const spaced = JSON . parse (text);",
+              ),
+            ],
+            [
+              "Number.parseInt / parseInt / parseFloat（名前が parse ではない）",
+              source(
+                "const a = Number.parseInt(x, 10);",
+                "const b = parseInt(x, 10);",
+                "const c = Number.parseFloat(x);",
+              ),
+            ],
+            [
+              "名前の一部が parse / validate / decode なだけの別のもの（parseTitle / .parsed / .parseLater / .validated / .decoder）",
+              source(
+                "const a = parseTitle(x);",
+                "const b = result.parsed;",
+                "const c = schema.parseLater(x);",
+                "const d = result.validated;",
+                "const e = codec.decoder(x);",
+              ),
+            ],
+            [
+              "not_found など validation_error 以外の DomainError",
+              source(
+                'throw new DomainError("not_found", "todo.notFound", { id });',
+                "throw new DomainError(",
+                '  "not_found",',
+                '  "todo.notFound",',
+                ");",
+              ),
+            ],
+            [
+              "コメントの中の parse / validation_error は数えない",
+              source(
+                "// schema.safeParse(x) を直接呼ばず validate を通す。",
+                '// 違反は DomainError("validation_error", key) になる。',
+                "const valid = DomainValidation.validated(schema(), x); // schema.parse(x) にしない",
+                '// new DomainError("validation_error", "todo.title.empty")',
+              ),
+            ],
+          ];
+
+          // when
+          const violations = casesByName(cases, ([, text]) =>
+            findDomainValidationViolations(text),
+          );
+
+          // then
+          expect(violations).toEqual(casesByName(cases, () => []));
+        },
+      );
+    },
   );
 
-  it("apps/backend の *.ts（テスト・依存・validate.ts を除く）を対象にし、parse の規則は domain だけに当て、違反を「規則: パス:行: 行の内容」で返す", () => {
-    // given
-    const root = fixture({
-      "apps/backend/features/x/internal/domain/x.ts": source(
-        'import { DomainValidation } from "../../../../shared/domain/validate";',
-        "const valid = DomainValidation.validated(xSchema(), props);",
-        'throw new DomainError("not_found", "x.notFound", { id });',
-      ),
-      "apps/backend/features/x/internal/domain/y.ts": source(
-        "const a = JSON.parse(text);",
-        "const b = ySchema().parse(a);",
-      ),
-      "apps/backend/shared/domain/validate.ts": directParse,
-      "apps/backend/shared/domain/other.ts": directParse,
-      // domain 以外の層: parse は可、validation_error の DomainError は違反。
-      "apps/backend/features/x/internal/application/x.command.ts": directParse,
-      "apps/backend/features/x/internal/presentation/x.api.ts": source(
-        "const result = requestSchema().safeParse(body);",
-      ),
-      "apps/backend/shared/presentation/y.ts": source(
-        "throw new DomainError(",
-        '  "validation_error",',
-        '  "x.invalid",',
-        ");",
-      ),
-      // 対象外: テスト、frontend、依存。
-      "apps/backend/features/x/internal/domain/x.test.ts": directParse,
-      "apps/backend/shared/domain/validate.test.ts": directParse,
-      "apps/backend/features/x/internal/presentation/x.api.test.ts":
-        directParse,
-      "apps/frontend_customer/features/x/domain/x.ts": directParse,
-      "apps/backend/node_modules/x/domain/x.ts": directParse,
-    });
+  Scenario(
+    "domain の検証の判定（findDomainValidationViolations）: must reject",
+    ({ And }) => {
+      And(
+        "domain の zod の parse の直接の呼び出しと validate.ts の外の validation_error は、規則と行で違反になる（schema.parse(x)・safeParse / parseAsync など）",
+        () => {
+          // given
+          const cases: [string, string, DomainValidationViolation[]][] = [
+            [
+              "schema.parse(x)",
+              source("const valid = todoPropsSchema.parse(props);"),
+              [{ rule: "no-direct-zod-parse-in-domain", line: 1 }],
+            ],
+            [
+              "safeParse / parseAsync / safeParseAsync（各 1 件）",
+              source(
+                "const a = schema.safeParse(x);",
+                "const b = await schema.parseAsync(x);",
+                "const c = await schema.safeParseAsync(x);",
+              ),
+              [
+                { rule: "no-direct-zod-parse-in-domain", line: 1 },
+                { rule: "no-direct-zod-parse-in-domain", line: 2 },
+                { rule: "no-direct-zod-parse-in-domain", line: 3 },
+              ],
+            ],
+            [
+              "zod の parse 以外の検証メソッド（spa / decode / safeDecode / decodeAsync / safeDecodeAsync / validate / validateAsync）",
+              source(
+                "const a = await schema.spa(x);",
+                "const b = schema.decode(x);",
+                "const c = schema.safeDecode(x);",
+                "const d = await schema.decodeAsync(x);",
+                "const e = await schema.safeDecodeAsync(x);",
+                "if (schema.validate(x)) ok();",
+                "const f = await schema.validateAsync(x);",
+              ),
+              [1, 2, 3, 4, 5, 6, 7].map((line) => ({
+                rule: "no-direct-zod-parse-in-domain" as const,
+                line,
+              })),
+            ],
+            [
+              "受け手が呼び出しの結果（todoPropsSchema().safeParse(x)）",
+              source("const result = todoPropsSchema().safeParse(props);"),
+              [{ rule: "no-direct-zod-parse-in-domain", line: 1 }],
+            ],
+            [
+              "z.string().trim().parse(x) のような chain・改行した chain（.parse の行を報告する）",
+              source(
+                "const a = z.string().trim().parse(x);",
+                "const b = z",
+                "  .string()",
+                "  .parse(x);",
+              ),
+              [
+                { rule: "no-direct-zod-parse-in-domain", line: 1 },
+                { rule: "no-direct-zod-parse-in-domain", line: 4 },
+              ],
+            ],
+            [
+              "JSON という名前のプロパティの parse（foo.JSON.parse）は組み込みの JSON ではない",
+              source("const a = config.JSON.parse(x);"),
+              [{ rule: "no-direct-zod-parse-in-domain", line: 1 }],
+            ],
+            [
+              'new DomainError("validation_error", ...)',
+              source(
+                'throw new DomainError("validation_error", "todo.title.empty");',
+              ),
+              [{ rule: "validation-error-only-in-validate", line: 1 }],
+            ],
+            [
+              'new DomainError( の後で改行して "validation_error"（new の行を報告する）',
+              source(
+                "if (!ok) {",
+                "  throw new DomainError(",
+                '    "validation_error",',
+                '    "todo.title.empty",',
+                "  );",
+                "}",
+              ),
+              [{ rule: "validation-error-only-in-validate", line: 2 }],
+            ],
+            [
+              "単引用符・テンプレートリテラルの validation_error",
+              source(
+                "throw new DomainError('validation_error', key);",
+                "throw new DomainError(`validation_error`, key);",
+              ),
+              [
+                { rule: "validation-error-only-in-validate", line: 1 },
+                { rule: "validation-error-only-in-validate", line: 2 },
+              ],
+            ],
+            [
+              "parse と validation_error を両方持つ（validate を自前で書き直した形）",
+              source(
+                "const result = schema.safeParse(value);",
+                "if (!result.success) {",
+                '  throw new DomainError("validation_error", result.error.issues[0].message);',
+                "}",
+              ),
+              [
+                { rule: "no-direct-zod-parse-in-domain", line: 1 },
+                { rule: "validation-error-only-in-validate", line: 3 },
+              ],
+            ],
+            [
+              "コード部分の後ろのコメントは落とすが、コード部分の parse は数える",
+              source("const a = schema.parse(x); // WHY: validate を通さない"),
+              [{ rule: "no-direct-zod-parse-in-domain", line: 1 }],
+            ],
+          ];
 
-    // when
-    const result = {
-      files: listBackendSources(root),
-      violations: collectDomainValidationViolations(root),
-    };
+          // when
+          const violations = casesByName(cases, ([, text]) =>
+            findDomainValidationViolations(text),
+          );
 
-    // then
-    expect(result).toEqual({
-      files: [
-        "apps/backend/features/x/internal/application/x.command.ts",
-        "apps/backend/features/x/internal/domain/x.ts",
-        "apps/backend/features/x/internal/domain/y.ts",
-        "apps/backend/features/x/internal/presentation/x.api.ts",
-        "apps/backend/shared/domain/other.ts",
-        "apps/backend/shared/presentation/y.ts",
-      ],
-      violations: [
-        'validation-error-only-in-validate: apps/backend/features/x/internal/application/x.command.ts:2: throw new DomainError("validation_error", "x.invalid");',
-        "no-direct-zod-parse-in-domain: apps/backend/features/x/internal/domain/y.ts:2: const b = ySchema().parse(a);",
-        "no-direct-zod-parse-in-domain: apps/backend/shared/domain/other.ts:1: const result = schema.safeParse(value);",
-        'validation-error-only-in-validate: apps/backend/shared/domain/other.ts:2: throw new DomainError("validation_error", "x.invalid");',
-        "validation-error-only-in-validate: apps/backend/shared/presentation/y.ts:1: throw new DomainError(",
-      ],
-    });
+          // then
+          expect(violations).toEqual(
+            casesByName(cases, ([, , expected]) => expected),
+          );
+        },
+      );
+    },
+  );
+
+  Scenario("ファイルごとの規則の範囲（rulesFor）", ({ And }) => {
+    And(
+      "domain のファイルには両方の規則を当てる（features の internal/domain・shared/domain・サブディレクトリ・features の validate.ts）",
+      () => {
+        // given
+        const cases: [string][] = [
+          ["apps/backend/features/todo/internal/domain/todo.ts"],
+          ["apps/backend/features/todo/internal/domain/todo-repository.ts"],
+          ["apps/backend/features/x/internal/domain/nested/value.ts"],
+          // 除くのは shared/domain/validate.ts だけで、features の下の validate.ts は対象。
+          ["apps/backend/features/x/internal/domain/validate.ts"],
+          ["apps/backend/shared/domain/keyed-issue.ts"],
+          ["apps/backend/shared/domain/nested/other.ts"],
+        ];
+
+        // when
+        const rules = casesByName(cases, ([path]) => rulesFor(path));
+
+        // then
+        expect(rules).toEqual(
+          casesByName(cases, () => [
+            "no-direct-zod-parse-in-domain",
+            "validation-error-only-in-validate",
+          ]),
+        );
+      },
+    );
+
+    And(
+      "domain 以外の backend のファイルには validation_error の規則だけを当てる（application・presentation・infra・internal/ を挟まない domain など）",
+      () => {
+        // given
+        const cases: [string][] = [
+          // domain 以外の層（presentation はリクエストのスキーマを safeParse してよいが、validation_error の DomainError は作らない）。
+          [
+            "apps/backend/features/todo/internal/application/rename-todo.command.ts",
+          ],
+          [
+            "apps/backend/features/todo/internal/presentation/rename-todo.api.ts",
+          ],
+          [
+            "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
+          ],
+          ["apps/backend/shared/presentation/json-body.ts"],
+          ["apps/backend/shared/drizzle/drizzle.config.ts"],
+          // features の直下でない domain・domain で始まる別のディレクトリ（前方一致の境界）。
+          ["apps/backend/domain/x.ts"],
+          ["apps/backend/shared/domain-x/x.ts"],
+          // Issue #208: feature の domain は internal/ の下だけ。internal/ を挟まない domain（Issue #208 より前の置き場所。
+          //   置き場所の規則 backend-placement が違反にする）と、前方一致だけが同じ別ディレクトリ（internal-x）は domain ではない。
+          ["apps/backend/features/todo/domain/todo.ts"],
+          ["apps/backend/features/todo/internal-x/domain/x.ts"],
+        ];
+
+        // when
+        const result = casesByName(cases, ([path]) => rulesFor(path));
+
+        // then
+        expect(result).toEqual(
+          casesByName(cases, () => ["validation-error-only-in-validate"]),
+        );
+      },
+    );
+
+    And(
+      "validate.ts・テスト・backend の外・ts でないもの・依存は対象外",
+      () => {
+        // given
+        const cases: [string][] = [
+          // validate.ts は変換を持つ唯一の場所。
+          ["apps/backend/shared/domain/validate.ts"],
+          // テスト（zod の結果を safeParse で確かめ、期待する DomainError を作ってよい）。
+          ["apps/backend/features/todo/internal/domain/todo.test.ts"],
+          ["apps/backend/shared/domain/validate.test.ts"],
+          [
+            "apps/backend/features/todo/internal/presentation/rename-todo.api.test.ts",
+          ],
+          // backend の外・ts でないもの・依存。
+          ["apps/frontend_customer/features/todo/domain/x.ts"],
+          ["apps/backend-x/features/todo/internal/domain/x.ts"],
+          ["apps/backend/features/todo/internal/domain/README.md"],
+          ["apps/backend/node_modules/zod/v4/classic/schemas.ts"],
+        ];
+
+        // when
+        const result = casesByName(cases, ([path]) => rulesFor(path));
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => []));
+      },
+    );
   });
 
-  it("apps/backend が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）", () => {
-    // given
-    const root = fixture({ "README.md": "# x\n" });
+  // --- 列挙 → 読み取り → 判定を通した fixture テスト ---
+  // WHY: 判定が正しくても、対象の列挙（domain の見つけ方）が漏れれば見逃す。一時ディレクトリに架空のツリーを置き、
+  //   本番と同じ collectDomainValidationViolations に通して、違反の集合を丸ごと比較する（見逃しも余分な検出も失敗にする）。
+  Scenario("domain のファイルの列挙と検査（fixture）", ({ And }) => {
+    And(
+      "apps/backend の .ts（テスト・依存・validate.ts を除く）を対象にし、parse の規則は domain だけに当て、違反を「規則: パス:行: 行の内容」で返す",
+      () => {
+        // given
+        const root = fixture({
+          "apps/backend/features/x/internal/domain/x.ts": source(
+            'import { DomainValidation } from "../../../../shared/domain/validate";',
+            "const valid = DomainValidation.validated(xSchema(), props);",
+            'throw new DomainError("not_found", "x.notFound", { id });',
+          ),
+          "apps/backend/features/x/internal/domain/y.ts": source(
+            "const a = JSON.parse(text);",
+            "const b = ySchema().parse(a);",
+          ),
+          "apps/backend/shared/domain/validate.ts": directParse,
+          "apps/backend/shared/domain/other.ts": directParse,
+          // domain 以外の層: parse は可、validation_error の DomainError は違反。
+          "apps/backend/features/x/internal/application/x.command.ts":
+            directParse,
+          "apps/backend/features/x/internal/presentation/x.api.ts": source(
+            "const result = requestSchema().safeParse(body);",
+          ),
+          "apps/backend/shared/presentation/y.ts": source(
+            "throw new DomainError(",
+            '  "validation_error",',
+            '  "x.invalid",',
+            ");",
+          ),
+          // 対象外: テスト、frontend、依存。
+          "apps/backend/features/x/internal/domain/x.test.ts": directParse,
+          "apps/backend/shared/domain/validate.test.ts": directParse,
+          "apps/backend/features/x/internal/presentation/x.api.test.ts":
+            directParse,
+          "apps/frontend_customer/features/x/domain/x.ts": directParse,
+          "apps/backend/node_modules/x/domain/x.ts": directParse,
+        });
 
-    // when
-    const result = {
-      files: listBackendSources(root),
-      violations: collectDomainValidationViolations(root),
-    };
+        // when
+        const result = {
+          files: listBackendSources(root),
+          violations: collectDomainValidationViolations(root),
+        };
 
-    // then
-    expect(result).toEqual({ files: [], violations: [] });
+        // then
+        expect(result).toEqual({
+          files: [
+            "apps/backend/features/x/internal/application/x.command.ts",
+            "apps/backend/features/x/internal/domain/x.ts",
+            "apps/backend/features/x/internal/domain/y.ts",
+            "apps/backend/features/x/internal/presentation/x.api.ts",
+            "apps/backend/shared/domain/other.ts",
+            "apps/backend/shared/presentation/y.ts",
+          ],
+          violations: [
+            'validation-error-only-in-validate: apps/backend/features/x/internal/application/x.command.ts:2: throw new DomainError("validation_error", "x.invalid");',
+            "no-direct-zod-parse-in-domain: apps/backend/features/x/internal/domain/y.ts:2: const b = ySchema().parse(a);",
+            "no-direct-zod-parse-in-domain: apps/backend/shared/domain/other.ts:1: const result = schema.safeParse(value);",
+            'validation-error-only-in-validate: apps/backend/shared/domain/other.ts:2: throw new DomainError("validation_error", "x.invalid");',
+            "validation-error-only-in-validate: apps/backend/shared/presentation/y.ts:1: throw new DomainError(",
+          ],
+        });
+      },
+    );
+
+    And(
+      "apps/backend が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）",
+      () => {
+        // given
+        const root = fixture({ "README.md": "# x\n" });
+
+        // when
+        const result = {
+          files: listBackendSources(root),
+          violations: collectDomainValidationViolations(root),
+        };
+
+        // then
+        expect(result).toEqual({ files: [], violations: [] });
+      },
+    );
   });
-});
 
-describe("domain の検証（実ファイル）", () => {
-  it("domain は zod の parse を直接呼ばず、backend で validation_error の DomainError を作るのは validate.ts だけ", () => {
-    // given: 実ファイル（repoRoot）
-    // when
-    const files = listBackendSources(repoRoot);
-    const violations = collectDomainValidationViolations(repoRoot);
+  Scenario("domain の検証（実ファイル）", ({ And }) => {
+    And(
+      "domain は zod の parse を直接呼ばず、backend で validation_error の DomainError を作るのは validate.ts だけ",
+      () => {
+        // given: 実ファイル（repoRoot）
+        // when
+        const files = listBackendSources(repoRoot);
+        const violations = collectDomainValidationViolations(repoRoot);
 
-    // then
-    // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
-    //   domain（parse と validation_error）と domain 以外の層（validation_error だけ）の両方が列挙に入ることを見る。
-    expect(files).toContain(
-      "apps/backend/features/todo/internal/domain/todo.ts",
+        // then
+        // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
+        //   domain（parse と validation_error）と domain 以外の層（validation_error だけ）の両方が列挙に入ることを見る。
+        expect(files).toContain(
+          "apps/backend/features/todo/internal/domain/todo.ts",
+        );
+        expect(files).toContain("apps/backend/shared/domain/keyed-issue.ts");
+        expect(files).toContain(
+          "apps/backend/features/todo/internal/application/rename-todo.command.ts",
+        );
+        expect(files).toContain(
+          "apps/backend/shared/presentation/json-body.ts",
+        );
+        expect(violations).toEqual([]);
+      },
     );
-    expect(files).toContain("apps/backend/shared/domain/keyed-issue.ts");
-    expect(files).toContain(
-      "apps/backend/features/todo/internal/application/rename-todo.command.ts",
-    );
-    expect(files).toContain("apps/backend/shared/presentation/json-body.ts");
-    expect(violations).toEqual([]);
   });
 });

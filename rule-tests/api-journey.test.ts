@@ -12,7 +12,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
+import { afterAll, expect } from "vitest";
+import { casesByName } from "./case-table";
 import { containsForbiddenWord } from "./feature-business-language";
 import {
   type FeatureSection,
@@ -152,6 +154,7 @@ import {
 //     検査の順（ソースの順）がずれる。
 // WHY 文字列で判定する（AST にしない）: 見るのはパスと import の参照先と名前・呼び出しの形だけで、正規表現で足りる
 //   （rule-tests/test-doubles.test.ts と同じ）。
+// .feature（api-journey.feature）と step の実装（このファイル）に分けた（Issue #282）。
 
 type ApiJourneyRuleId =
   | "api-journey-placement"
@@ -597,1278 +600,1452 @@ const JOURNEY_HEAD = [
 const DB_READ =
   "expect(await database.db.select().from(xs)).toStrictEqual([]);";
 
-describe("API ジャーニーの置き場所（isMisplacedApiJourneyFile）", () => {
-  it.each([
-    [
-      "apps/backend/spec/journey/ の直下の *.api-journey.test.ts（step の実装）",
-      API_JOURNEY,
-    ],
-    ["apps/backend/spec/journey/ の直下の *.feature（Gherkin）", FEATURE],
-    [
-      "apps/backend/ の層の下の普通のテスト",
-      "apps/backend/features/x/internal/presentation/x.api.test.ts",
-    ],
-    ["apps/backend/ のソース", "apps/backend/features/x/internal/domain/x.ts"],
-    [
-      "名前に journey を含むが *.journey.test.* ではないファイル",
-      "apps/backend/features/journey/internal/domain/journey.test.ts",
-    ],
-    [
-      "名前に feature を含むが .feature で終わらないファイル（spec/journey/ の外）",
-      "apps/backend/features/feature/internal/domain/x.feature.ts",
-    ],
-    // API 仕様の .feature は api-spec.test.ts が見る（Issue #219）。
-    [
-      "apps/backend/spec/api/ の下の .feature（API 仕様）",
-      "apps/backend/spec/api/todo/create-todo.feature",
-    ],
-  ])("%s は違反なし", (_name, path) => {
-    // given: it.each の入力
-    // when
-    const result = isMisplacedApiJourneyFile(path);
-
-    // then
-    expect(result).toBe(false);
-  });
-
-  it.each([
-    [
-      "spec/journey/ の .api-journey の無いテスト",
-      "apps/backend/spec/journey/x.test.ts",
-    ],
-    [
-      "spec/journey/ の廃止した TS だけのジャーニー（*.journey.test.ts）",
-      "apps/backend/spec/journey/x.journey.test.ts",
-    ],
-    [
-      "spec/journey/ の旧名の step（*.feature.journey.test.ts）",
-      "apps/backend/spec/journey/x.feature.journey.test.ts",
-    ],
-    [
-      "spec/journey/ のテスト以外のソース",
-      "apps/backend/spec/journey/helper.ts",
-    ],
-    ["spec/journey/ の .md", "apps/backend/spec/journey/README.md"],
-    [
-      "spec/journey/ のサブディレクトリの中の API ジャーニー",
-      "apps/backend/spec/journey/todo/x.api-journey.test.ts",
-    ],
-    [
-      "spec/journey/ のサブディレクトリの中の .feature",
-      "apps/backend/spec/journey/todo/x.feature",
-    ],
-    [
-      "spec/journey/ の .feature の後ろに拡張子を足したもの（.feature.md）",
-      "apps/backend/spec/journey/x.feature.md",
-    ],
-    ["spec/journey/ の .features", "apps/backend/spec/journey/x.features"],
-    [
-      "spec/journey/ の大文字の .FEATURE",
-      "apps/backend/spec/journey/x.FEATURE",
-    ],
-    [
-      "spec/journey/ の .tsx の API ジャーニー",
-      "apps/backend/spec/journey/x.api-journey.test.tsx",
-    ],
-    [
-      "feature の下の spec/journey/ の API ジャーニー",
-      "apps/backend/features/x/spec/journey/x.api-journey.test.ts",
-    ],
-    [
-      "apps/backend/ の直下以外の spec/journey/（shared/spec/journey/）",
-      "apps/backend/shared/spec/journey/x.api-journey.test.ts",
-    ],
-    [
-      "旧名の journeys/ の API ジャーニー",
-      "apps/backend/journeys/x.api-journey.test.ts",
-    ],
-    [
-      "旧名の journeys/ の TS だけのジャーニー",
-      "apps/backend/journeys/x.journey.test.ts",
-    ],
-    [
-      "frontend の TS だけのジャーニー",
-      "apps/frontend_customer/features/x/x.journey.test.tsx",
-    ],
-    [
-      "frontend の API ジャーニー（.js）",
-      "apps/frontend_customer/features/x/x.api-journey.test.js",
-    ],
-    // .feature は spec/journey/ の直下にだけ置く（reviewer の指摘、Issue #200）。
-    ["backend の feature の下の .feature", "apps/backend/features/x/x.feature"],
-    ["旧名の journeys/ の .feature", "apps/backend/journeys/x.feature"],
-    // E2E の例外は apps/e2e/ の下だけ（前方一致だけの別ディレクトリは違反）。
-    ["e2e の前方一致だけの別ディレクトリの .feature", "apps/e2e-x/x.feature"],
-    ["frontend の直下の .feature", "apps/frontend_customer/x.feature"],
-    // API 仕様の例外は .feature だけ（spec/api/ の下でも API ジャーニーの名前は違反）。
-    [
-      "apps/backend/spec/api/ の下の API ジャーニー",
-      "apps/backend/spec/api/todo/x.api-journey.test.ts",
-    ],
-    [
-      "spec/api の前方一致だけの別ディレクトリの .feature",
-      "apps/backend/spec/api-x/todo/x.feature",
-    ],
-  ])("%s は違反", (_name, path) => {
-    // given: it.each の入力
-    // when
-    const result = isMisplacedApiJourneyFile(path);
-
-    // then
-    expect(result).toBe(true);
-  });
+// WHY OS の一時ディレクトリに置く: リポジトリ内に置くと本番の検査や Biome・git の差分に混ざる。afterAll で消す。
+const roots: string[] = [];
+afterAll(() => {
+  for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
 
-describe("API ジャーニーの中身（findApiJourneyViolations）: must pass", () => {
-  it.each([
-    ["実 DB と 2 つの api を値で import", source(...REQUIRED_IMPORTS)],
-    [
-      "複数行の import・type の混じった import・@repo/backend/ の書き方",
-      source(
-        "import {",
-        "  createTestDatabase,",
-        "  type TestDatabase,",
-        '} from "@repo/backend/test-support/database";',
-        "import {",
-        "  CreateXApi,",
-        "  type CreateXResponse,",
-        `} from "${CREATE_API}";`,
-        'import { ListXApi } from "@repo/backend/features/x/internal/presentation/list-x.api.ts";',
-      ),
-    ],
-    [
-      "別の feature の api を 1 つずつ（feature をまたぐ流れ）",
-      source(
-        DATABASE_IMPORT,
-        'import { CreateXApi } from "../../features/x/internal/presentation/create-x.api";',
-        'import { CreateYApi } from "../../features/y/internal/presentation/create-y.api";',
-      ),
-    ],
-    [
-      "Postgres の Repository・command / query を import（InMemory ではない）",
-      source(
-        ...REQUIRED_IMPORTS,
-        'import { PostgresXRepository } from "../../features/x/internal/infra/x-repository.postgres";',
-        'import { CreateXCommand } from "../../features/x/internal/application/create-x.command";',
-      ),
-    ],
-    [
-      "コメントの中の vi.mock( / vi.doMock( / InMemory の import（行コメントとブロックコメント）",
-      source(
-        ...REQUIRED_IMPORTS,
-        '// vi.mock("@repo/shared/now") は使わない。',
-        '/* vi.doMock("./x"); import { InMemoryXRepository } from "../../features/x/internal/infra/x-repository.in-memory"; */',
-        '// import { vi } from "vitest";',
-        'const url = "http://localhost"; // import "../../features/x/internal/infra/x-repository.in-memory";',
-      ),
-    ],
-    [
-      "vitest から vi 以外（afterAll・expect・test）と、型だけ（import type・inline の type）を import",
-      source(
-        ...REQUIRED_IMPORTS,
-        'import { afterAll, beforeAll, expect, test } from "vitest";',
-        'import type { Mock } from "vitest";',
-        'import type * as V from "vitest";',
-        'import { type MockInstance, describe, type vi } from "vitest";',
-      ),
-    ],
-    [
-      "変更系の後ごとに db.select(（GET の後は無くてよい。複数行のメソッドチェーン・同じ行・.handle 経由も可）",
-      source(
-        ...JOURNEY_HEAD,
-        "const getX = new GetXApi(query).handle;",
-        "await postX(request);",
-        DB_READ,
-        "await listXs(request);",
-        "await getX(request);",
-        "await postX.handle(request); const rows = await database.db",
-        "  .select()",
-        "  .from(xs);",
-        "await getX(request);",
-      ),
-    ],
-    [
-      "handler の名前が HTTP メソッド（get・list・post・put・patch・delete）で始まる（大文字小文字を区別しない・オブジェクトのキー・複数行）",
-      source(
-        ...REQUIRED_IMPORTS,
-        "const PostX = new CreateXApi(command).handle;",
-        "let getX;",
-        "getX = new GetXApi(query);",
-        "const handlers = {",
-        "  listXs: new ListXApi(query).handle,",
-        "  putName: new RenameXApi(command).handle,",
-        "  PATCHX: new PatchXApi(command).handle,",
-        "  deleteX: new DeleteXApi(command).handle,",
-        "};",
-        "const getY =",
-        "  new GetYApi(query).handle;",
-        "const handlersWithCoverage = {",
-        "  postX: ApiCoverage.track(new CreateXApi(command)),",
-        "  putX: ApiCoverage.track(",
-        "    new RenameXApi(command),",
-        "  ),",
-        "};",
-        "const repository = new PostgresXRepository(database.db);",
-        "const client = new XApiClient();",
-      ),
-    ],
-    [
-      "名前の一部だけが in-memory のモジュール（in-memory-x・x.in-memory-y）",
-      source(
-        ...REQUIRED_IMPORTS,
-        'import { a } from "./in-memory-x";',
-        'import { b } from "./x.in-memory-y";',
-      ),
-    ],
-  ])("%s は違反なし", (_name, text) => {
-    // given: it.each の入力
-    // when
-    const violations = findApiJourneyViolations(API_JOURNEY, text);
-
-    // then
-    expect(violations).toEqual([]);
-  });
-
-  it("API ジャーニーでないファイル（層の下のテスト）は中身を見ない", () => {
-    // given: 前提なし（入力は when の呼び出しに直接書く）
-    // when
-    const violations = findApiJourneyViolations(
-      "apps/backend/features/x/internal/presentation/x.api.test.ts",
-      source(
-        'import { vi } from "vitest";',
-        "const renameX = new RenameXApi(command).handle;",
-      ),
-    );
-
-    // then
-    expect(violations).toEqual([]);
-  });
-});
-
-describe("API ジャーニーの中身（findApiJourneyViolations）: must reject", () => {
-  it.each<[string, string, ApiJourneyViolation[]]>([
-    [
-      "InMemory の Repository を値で import",
-      source(
-        ...REQUIRED_IMPORTS,
-        'import { InMemoryXRepository } from "../../features/x/internal/infra/x-repository.in-memory";',
-      ),
-      [{ rule: "api-journey-no-in-memory", line: 4 }],
-    ],
-    [
-      "InMemory を import type で（型だけでも違反）",
-      source(
-        ...REQUIRED_IMPORTS,
-        'import type { InMemoryXRepository } from "../../features/x/internal/infra/x-repository.in-memory";',
-      ),
-      [{ rule: "api-journey-no-in-memory", line: 4 }],
-    ],
-    [
-      "InMemory を inline の type・拡張子付き・@repo/backend/ で",
-      source(
-        ...REQUIRED_IMPORTS,
-        'import { type InMemoryXRepository } from "@repo/backend/features/x/internal/infra/x-repository.in-memory.ts";',
-      ),
-      [{ rule: "api-journey-no-in-memory", line: 4 }],
-    ],
-    [
-      "InMemory を dynamic import()・副作用の import・export … from（複数行）",
-      source(
-        ...REQUIRED_IMPORTS,
-        'const m = await import("../../features/x/internal/infra/x-repository.in-memory");',
-        'import "../../features/x/internal/infra/x-repository.in-memory";',
-        "export {",
-        "  InMemoryXRepository,",
-        '} from "../../features/x/internal/infra/x-repository.in-memory";',
-      ),
-      [
-        { rule: "api-journey-no-in-memory", line: 4 },
-        { rule: "api-journey-no-in-memory", line: 5 },
-        { rule: "api-journey-no-in-memory", line: 8 },
-      ],
-    ],
-    [
-      "vitest から vi を import（vi.mock・vi.spyOn(...).mockResolvedValue・vi.fn も。使い方によらず import で止める）",
-      source(
-        ...REQUIRED_IMPORTS,
-        'import { expect, vi } from "vitest";',
-        'vi.mock("@repo/shared/now", { spy: true });',
-        'vi.spyOn(console, "error").mockResolvedValue(undefined);',
-        "const f = vi.fn();",
-      ),
-      [{ rule: "api-journey-no-vi", line: 4 }],
-    ],
-    [
-      "vi の別名（vi as v）と vitest（vi と同じもの）を複数行の import で（行は参照先の行）",
-      source(
-        ...REQUIRED_IMPORTS,
-        "import {",
-        "  expect,",
-        "  vi as v,",
-        "  vitest,",
-        "} from 'vitest';",
-        "v.useFakeTimers();",
-        "vitest.setSystemTime(0);",
-      ),
-      [{ rule: "api-journey-no-vi", line: 8 }],
-    ],
-    [
-      "vi と同じものの別名 vitest を単独で import（vitest.spyOn などが使える）",
-      source(
-        ...REQUIRED_IMPORTS,
-        'import { vitest } from "vitest";',
-        'vitest.spyOn(console, "error");',
-      ),
-      [{ rule: "api-journey-no-vi", line: 4 }],
-    ],
-    [
-      "vitest の名前空間・既定の import（名前空間経由で vi に届く）",
-      source(
-        ...REQUIRED_IMPORTS,
-        'import * as vt from "vitest";',
-        'vt.vi.stubGlobal("fetch", undefined);',
-        'import V, { expect } from "vitest";',
-      ),
-      [
-        { rule: "api-journey-no-vi", line: 4 },
-        { rule: "api-journey-no-vi", line: 6 },
-      ],
-    ],
-    [
-      'dynamic import("vitest")（vi?.mock も）',
-      source(
-        ...REQUIRED_IMPORTS,
-        'const { vi } = await import("vitest");',
-        'vi?.mock("./x");',
-      ),
-      [{ rule: "api-journey-no-vi", line: 4 }],
-    ],
-    [
-      "handler の名前が HTTP メソッドで始まらない（改名・作成の名前、オブジェクトのキー、読み取りも、名前の無い new XxxApi(）",
-      source(
-        ...REQUIRED_IMPORTS,
-        "const renameX = new RenameXApi(command).handle;",
-        "const handlers = { createX: new CreateXApi(command).handle };",
-        "const api = new ListXApi(query);",
-        "await new CreateXApi(command).handle(request);",
-        "const fetchX =",
-        "  new GetXApi(query).handle;",
-        "const completeX = new CompleteXApi (command).handle;",
-        "const renameY = ApiCoverage.track(new RenameYApi(command));",
-        "const postY = wrap(new CreateYApi(command));",
-      ),
-      [
-        { rule: "api-journey-handler-naming", line: 4 },
-        { rule: "api-journey-handler-naming", line: 5 },
-        { rule: "api-journey-handler-naming", line: 6 },
-        { rule: "api-journey-handler-naming", line: 7 },
-        { rule: "api-journey-handler-naming", line: 9 },
-        { rule: "api-journey-handler-naming", line: 10 },
-        { rule: "api-journey-handler-naming", line: 11 },
-        { rule: "api-journey-handler-naming", line: 12 },
-      ],
-    ],
-    [
-      "変更系が 2 回続き、db.select( がその後に 1 回だけ（1 回目の後に無い）",
-      source(
-        ...JOURNEY_HEAD,
-        "await postX(request);",
-        "await postX(request);",
-        DB_READ,
-      ),
-      [{ rule: "api-journey-asserts-db-after-mutation", line: 6 }],
-    ],
-    [
-      "末尾の変更系の後に db.select( が無い（GET の後にも無い）",
-      source(
-        ...JOURNEY_HEAD,
-        "await postX(request);",
-        DB_READ,
-        "await postX(request);",
-        "await listXs(request);",
-      ),
-      [{ rule: "api-journey-asserts-db-after-mutation", line: 8 }],
-    ],
-    [
-      "db.select( が変更系より前にだけある",
-      source(...JOURNEY_HEAD, DB_READ, "await postX(request);"),
-      [{ rule: "api-journey-asserts-db-after-mutation", line: 7 }],
-    ],
-    [
-      ".select( だけ（db. でない・名前の一部が db）",
-      source(
-        ...JOURNEY_HEAD,
-        "await postX(request);",
-        "await repository.select();",
-        "await tx.select().from(xs);",
-        "await mydb.select().from(xs);",
-      ),
-      [{ rule: "api-journey-asserts-db-after-mutation", line: 6 }],
-    ],
-    [
-      "コメント・文字列の中の db.select(",
-      source(
-        ...JOURNEY_HEAD,
-        "await postX(request); // database.db.select().from(xs)",
-        "/* database.db.select() */",
-        'const s = "database.db.select()";',
-        "const t = `db.select(`;",
-      ),
-      [{ rule: "api-journey-asserts-db-after-mutation", line: 6 }],
-    ],
-    [
-      "put・patch・delete も変更系（大文字小文字を区別しない・オブジェクトのメンバー・.handle 経由・複数行の引数の中）",
-      source(
-        ...REQUIRED_IMPORTS,
-        "const handlers = {",
-        "  PutName: new RenameXApi(command),",
-        "  patchX: new PatchXApi(command).handle,",
-        "  DELETEX: new DeleteXApi(command).handle,",
-        "};",
-        "await handlers.PutName.handle(request);",
-        "await handlers.patchX(request);",
-        "await expectProblem(",
-        "  await handlers.DELETEX(request),",
-        "  problem,",
-        ");",
-      ),
-      [
-        { rule: "api-journey-asserts-db-after-mutation", line: 9 },
-        { rule: "api-journey-asserts-db-after-mutation", line: 10 },
-        { rule: "api-journey-asserts-db-after-mutation", line: 12 },
-      ],
-    ],
-    [
-      "api を 1 つだけ import",
-      source(DATABASE_IMPORT, CREATE_API_IMPORT),
-      [{ rule: "api-journey-uses-multiple-apis" }],
-    ],
-    [
-      "同じ api を書き方を変えて 2 回（相対・拡張子付き・@repo/backend/）",
-      source(
-        DATABASE_IMPORT,
-        `import { CreateXApi } from "${CREATE_API}";`,
-        `import { CreateXApi as ApiWithExtension } from "${CREATE_API}.ts";`,
-        'import { CreateXApi as Api } from "@repo/backend/features/x/internal/presentation/create-x.api";',
-      ),
-      [{ rule: "api-journey-uses-multiple-apis" }],
-    ],
-    [
-      "2 つ目の api が import type・inline の type だけ",
-      source(
-        DATABASE_IMPORT,
-        CREATE_API_IMPORT,
-        `import type { ListXResponse } from "${LIST_API}";`,
-        'import { type GetXResponse } from "../../features/x/internal/presentation/get-x.api";',
-      ),
-      [{ rule: "api-journey-uses-multiple-apis" }],
-    ],
-    [
-      "2 つ目の api が副作用の import・dynamic import()・export … from",
-      source(
-        DATABASE_IMPORT,
-        CREATE_API_IMPORT,
-        `import "${LIST_API}";`,
-        `const m = await import("${LIST_API}");`,
-        `export { ListXApi } from "${LIST_API}";`,
-      ),
-      [{ rule: "api-journey-uses-multiple-apis" }],
-    ],
-    [
-      "api の単体テストや名前の一部だけが api のモジュール（x.api.test・x.api-helper・api）",
-      source(
-        DATABASE_IMPORT,
-        CREATE_API_IMPORT,
-        'import { a } from "../../features/x/internal/presentation/list-x.api.test";',
-        'import { b } from "../../features/x/internal/presentation/x.api-helper";',
-        'import { c } from "../../features/x/internal/presentation/api";',
-      ),
-      [{ rule: "api-journey-uses-multiple-apis" }],
-    ],
-    [
-      "api をコメントの中でだけ import",
-      source(
-        DATABASE_IMPORT,
-        CREATE_API_IMPORT,
-        `// import { ListXApi } from "${LIST_API}";`,
-      ),
-      [{ rule: "api-journey-uses-multiple-apis" }],
-    ],
-    [
-      "test-support/database を import しない",
-      source(CREATE_API_IMPORT, LIST_API_IMPORT),
-      [{ rule: "api-journey-uses-real-database" }],
-    ],
-    [
-      "test-support/database を import type だけ",
-      source(
-        'import type { TestDatabase } from "../../test-support/database";',
-        CREATE_API_IMPORT,
-        LIST_API_IMPORT,
-      ),
-      [{ rule: "api-journey-uses-real-database" }],
-    ],
-    [
-      "名前・場所の一部だけが同じ別のモジュール（shared/infra/database・database-x・別の場所の test-support/database）",
-      source(
-        'import { AppDatabase } from "../../shared/infra/database";',
-        'import { a } from "../../test-support/database-x";',
-        'import { b } from "./test-support/database";',
-        CREATE_API_IMPORT,
-        LIST_API_IMPORT,
-      ),
-      [{ rule: "api-journey-uses-real-database" }],
-    ],
-    [
-      "空のファイル（すべての必須を欠く）",
-      "",
-      [
-        { rule: "api-journey-uses-multiple-apis" },
-        { rule: "api-journey-uses-real-database" },
-      ],
-    ],
-    [
-      "違反が重なる（行のある違反を行の順に、その後にファイル全体の違反）",
-      source(
-        'import { vi } from "vitest";',
-        'import { InMemoryXRepository } from "../../features/x/internal/infra/x-repository.in-memory";',
-        CREATE_API_IMPORT,
-        "const createX = new CreateXApi(command).handle;",
-        "await createX(request);",
-        "const postX = new CreateXApi(command).handle;",
-        "await postX(request);",
-      ),
-      [
-        { rule: "api-journey-no-vi", line: 1 },
-        { rule: "api-journey-no-in-memory", line: 2 },
-        { rule: "api-journey-handler-naming", line: 4 },
-        { rule: "api-journey-asserts-db-after-mutation", line: 7 },
-        { rule: "api-journey-uses-multiple-apis" },
-        { rule: "api-journey-uses-real-database" },
-      ],
-    ],
-  ])("%s は違反", (_name, text, expected) => {
-    // given: it.each の入力
-    // when
-    const violations = findApiJourneyViolations(API_JOURNEY, text);
-
-    // then
-    expect(violations).toEqual(expected);
-  });
-
-  it("置き場所が違えば置き場所の違反だけを返す（中身は見ない）", () => {
-    // given: 前提なし（入力は when の呼び出しに直接書く）
-    // when
-    const violations = findApiJourneyViolations(
-      "apps/backend/spec/journey/x.test.ts",
-      'import { vi } from "vitest";',
-    );
-
-    // then
-    expect(violations).toEqual([{ rule: "api-journey-placement" }]);
-  });
-});
-
-describe("Gherkin の .feature と step の対（findFeaturePairViolations）", () => {
-  // files: 同じディレクトリにあるファイルの一覧（listApiJourneyTargets の結果に当たる）。
-  it.each<[string, string, string[]]>([
-    [
-      ".feature と同じ名前の step（.api-journey.test.ts）がある",
-      FEATURE,
-      [FEATURE, API_JOURNEY],
-    ],
-    [
-      ".api-journey.test.ts と同じ名前の .feature がある",
-      API_JOURNEY,
-      [FEATURE, API_JOURNEY],
-    ],
-    [
-      "対象外のファイル（置き場所の違反は api-journey-placement が見る）",
-      "apps/backend/spec/journey/nested/x.feature",
-      ["apps/backend/spec/journey/nested/x.feature"],
-    ],
-  ])("%s は違反なし", (_name, path, files) => {
-    // given: it.each の入力
-    // when
-    const violations = findFeaturePairViolations(path, new Set(files));
-
-    // then
-    expect(violations).toEqual([]);
-  });
-
-  it.each<[string, string, string[]]>([
-    [".feature だけで step が無い", FEATURE, [FEATURE]],
-    [
-      ".api-journey.test.ts だけで .feature が無い（TS だけのジャーニーは廃止）",
-      API_JOURNEY,
-      [API_JOURNEY],
-    ],
-    [
-      ".feature の名前と step の名前が違う（.feature 側）",
-      FEATURE,
-      [FEATURE, "apps/backend/spec/journey/y.api-journey.test.ts"],
-    ],
-    [
-      ".feature の名前と step の名前が違う（step 側）",
-      API_JOURNEY,
-      ["apps/backend/spec/journey/y.feature", API_JOURNEY],
-    ],
-    [
-      "step が旧名（x.feature.journey.test.ts・x.journey.test.ts）",
-      FEATURE,
-      [
-        FEATURE,
-        "apps/backend/spec/journey/x.feature.journey.test.ts",
-        "apps/backend/spec/journey/x.journey.test.ts",
-      ],
-    ],
-    [
-      "対の .feature がサブディレクトリにある",
-      API_JOURNEY,
-      ["apps/backend/spec/journey/nested/x.feature", API_JOURNEY],
-    ],
-  ])("%s は違反", (_name, path, files) => {
-    // given
-    const existing = new Set(files);
-
-    // when
-    const violations = findFeaturePairViolations(path, existing);
-
-    // then
-    expect(violations).toEqual([{ rule: "api-journey-feature-pair" }]);
-  });
-});
-
-// .feature の例の部品。仕切り（api-journey-section-divider の形）と、業務の言葉だけの Background。
-const DIVIDER = "    # ───── Todo を作る ─────";
-const FEATURE_HEAD = [
-  "Feature: Todo のライフサイクル",
-  "",
-  "  Background: 空の Todo 一覧",
-  "    Given Todo が 1 件も無い",
-  "",
-  "  Scenario: 作成から削除まで",
-];
-
-describe(".feature の業務の言葉と仕切り（findApiJourneyViolations）: must pass", () => {
-  it.each([
-    [
-      "業務の言葉だけで、API を呼ぶ step（When）の直前ごとに仕切りがある",
-      source(
-        ...FEATURE_HEAD,
-        DIVIDER,
-        '    When Todo "牛乳を買う" を作る',
-        '    Then 未完了の Todo "牛乳を買う" が作られる',
-        '    And Todo は "牛乳を買う" の 1 件だけになる',
-        "    # ───── 一覧を見る ─────",
-        "    When Todo の一覧を見る",
-        "    Then 一覧に 1 件が並ぶ",
-        "",
-        "  Scenario: 不正な入力は保存されない",
-        '    Given Todo "牛乳を買う" が作られている',
-        "    # ───── 空のタイトルで Todo を作る ─────",
-        "    When タイトルが空の Todo を作る",
-        "    Then タイトルが空という理由で拒否される",
-      ),
-    ],
-    [
-      "# のコメント行（字下げも）と空行は禁止語があっても見ない",
-      source(
-        "# step の実装は DB の todos を SQL で読み、状態 201 と Problem Details の JSON を確かめる。",
-        ...FEATURE_HEAD,
-        "      # API の返り値の id・title・completed は step の実装が見る（not found・uuid・null・undefined）。",
-        "",
-        DIVIDER,
-        '    When Todo "牛乳を買う" を作る',
-      ),
-    ],
-    [
-      "3 桁の数の後ろが「文字」「件」「行」（空白の有無によらない）・3 桁でない数・1xx〜5xx でない 3 桁の数",
-      source(
-        ...FEATURE_HEAD,
-        DIVIDER,
-        '    When 100 文字のタイトルの Todo "牛乳を買う" を作る',
-        "    Then 200件が並ぶ",
-        "    And メモは 300 行まで書ける",
-        "    And 2 件目・10 件目・1000 円・600 円・099 番は業務の数",
-      ),
-    ],
-    [
-      "禁止語を語の一部に含むだけの言葉（Todo・MongoDB・idea・subtitle・APIs でない API 風の語・completely）",
-      source(
-        ...FEATURE_HEAD,
-        DIVIDER,
-        '    When Todo "idea を MongoDB に書く subtitle" を作る',
-        "    Then completely な Todo と APIary の Todo が並ぶ",
-      ),
-    ],
-    [
-      "Background の中の When（仕切りは要らない）・When 以外の step（Given / Then / And / But / *）",
-      source(
-        "Feature: x",
-        "  Background: y",
-        "    When Todo を 1 件も持たない",
-        "  Scenario: z",
-        "    Given Todo が 1 件ある",
-        "    Then 1 件が並ぶ",
-        "    And 1 件目が見える",
-        "    But 2 件目は見えない",
-        "    * 何もしない",
-      ),
-    ],
-    [
-      "仕切りの字下げが When と違う・見出しの中に空白や ─ がある（Scenario Outline・Example・Rule の中でも）",
-      source(
-        "Feature: x",
-        "  Rule: r",
-        "    Scenario Outline: y",
-        "# ───── Todo を作る ─────",
-        '      When Todo "牛乳を買う" を作る',
-        "    Example: z",
-        "        # ───── 一覧 を 見る（─ の入った見出し） ─────",
-        "    When Todo の一覧を見る",
-      ),
-    ],
-    ["When の無い .feature（Feature だけ）", "Feature: x\n"],
-    [
-      "改行が CRLF（Windows の改行。仕切りの行末の \\r を形の違いにしない）",
-      [
-        ...FEATURE_HEAD,
-        DIVIDER,
-        '    When Todo "牛乳を買う" を作る',
-        '    Then 未完了の Todo "牛乳を買う" が作られる',
-        "",
-      ].join("\r\n"),
-    ],
-  ])("%s は違反なし", (_name, text) => {
-    // given: it.each の入力
-    // when
-    const violations = findApiJourneyViolations(FEATURE, text);
-
-    // then
-    expect(violations).toEqual([]);
-  });
-
-  it("spec/journey/ の外の .feature は置き場所の違反だけを返す（中身は見ない）", () => {
-    // given: 前提なし（入力は when の呼び出しに直接書く）
-    // when
-    const violations = findApiJourneyViolations(
-      "apps/frontend_customer/x.feature",
-      source("Feature: DB", "  Scenario: y", "    When 状態 201 を返す"),
-    );
-
-    // then
-    expect(violations).toEqual([{ rule: "api-journey-placement" }]);
-  });
-});
-
-describe(".feature の業務の言葉（api-journey-business-language）: must reject", () => {
-  // 禁止語を 1 つだけ含む step（When の直前には仕切りを置き、仕切りの違反と混ざらないようにする）。行は 9 行目の Then。
-  it.each([
-    ["DB（語の境界）", "Then DB の Todo は 1 件になる"],
-    ["DB の大文字小文字違い（Db・db）", "Then Db と db の Todo は 1 件になる"],
-    ["データベース", "Then データベースに 1 件ある"],
-    ["SQL（PostgreSQL の中も）", "Then PostgreSQL に 1 件ある"],
-    ["テーブル", "Then テーブルに 1 件ある"],
-    ["カラム", "Then カラムが 1 つ変わる"],
-    ["返り値", "Then 返り値は Todo になる"],
-    ["戻り値", "Then 戻り値は Todo になる"],
-    ["レスポンス", "Then レスポンスに Todo がある"],
-    ["ステータス", "Then ステータスは成功になる"],
-    ["状態 \\d{3}（空白なし）", "Then 状態201 で作られる"],
-    ["HTTP の状態コード（3 桁の 1xx〜5xx）", "Then 201 で作られる"],
-    [
-      "HTTP の状態コード（行末・後ろが「文字」「件」「行」以外）",
-      "Then 作られた Todo が 404",
-    ],
-    [
-      "Problem Details（空白なし・大文字小文字違い）",
-      "Then problemdetails が届く",
-    ],
-    ["JSON", "Then Json の Todo が届く"],
-    ["null", "Then 期限は NULL になる"],
-    ["undefined", "Then 期限は undefined になる"],
-    ["insert", "Then Todo の Insert が 1 件になる"],
-    ["update", "Then Todo の update が 1 件になる"],
-    ["delete", "Then Todo の delete が 1 件になる"],
-    ["表名 todos", "Then todos は 1 件になる"],
-    ["表名 todo_status_changes", "Then todo_status_changes は 1 件になる"],
-    ["表名 change_logs", "Then change_logs は 2 件になる"],
-    ["change log（空白区切り・単数形）", "Then Change log が 1 件足される"],
-    [
-      "変更の記録（Writer が自動で残す技術の仕組み）",
-      "Then 変更の記録が 1 件足される",
-    ],
-    ["変更履歴", "Then 変更履歴は 2 件になる"],
-    ["id", "Then その ID の Todo は無い"],
-    ["uuid", "Then UUID の Todo は無い"],
-    ["not found（空白なし）", "Then NotFound と伝えられる"],
-    ["title（業務の言葉はタイトル）", "Then Title が空と伝えられる"],
-    ["completed", "Then completed が真になる"],
-    ["API", "Then Api が Todo を返す"],
-    ["HTTP（HTTPS も）", "Then HTTPS で Todo が届く"],
-    ["HTTP のメソッド（GET）", "Then get で Todo を読む"],
-    ["HTTP のメソッド（POST・PUT・PATCH）", "Then Post と Put と Patch で送る"],
-    ["エンドポイント", "Then エンドポイントが Todo を返す"],
-    ["リクエスト", "Then リクエストが拒否される"],
-    ["レコード", "Then レコードが 1 件ある"],
-    ["バリデーション", "Then バリデーションで拒否される"],
-    ["状態コード", "Then 状態コードで成功が分かる"],
-    [
-      "not found（- 区切り。/problems/not-found）",
-      "Then /problems/not-found と伝えられる",
-    ],
-    ["not found（_ 区切り）", "Then not_found と伝えられる"],
-    ["Problem Details（- 区切り）", "Then problem-details が届く"],
-    ["Problem Details（_ 区切り）", "Then problem_details が届く"],
-  ])("step（Then）に %s は違反", (_name, step) => {
-    // given: 前提なし（入力は when の呼び出しに直接書く）
-    // when
-    const violations = findApiJourneyViolations(
-      FEATURE,
-      source(...FEATURE_HEAD, DIVIDER, "    When Todo を作る", `    ${step}`),
-    );
-
-    // then
-    expect(violations).toEqual([
-      { rule: "api-journey-business-language", line: 9 },
-    ]);
-  });
-
-  it("見出し（Feature / Background / Scenario / Rule / Scenario Outline / Example）と各 step（Given / When / And / But / *）・説明の行・表の行も見る（1 行 1 件、行番号付き）", () => {
-    // given: 前提なし（入力は when の呼び出しに直接書く）
-    // when
-    const violations = findApiJourneyViolations(
-      FEATURE,
-      source(
-        "Feature: Todo の API",
-        "  Todo の DB を説明する行",
-        "  Background: 空の todos",
-        "    Given DB が空",
-        "  Rule: 状態 404 の扱い",
-        "  Scenario: 作成の JSON",
-        "    # ───── Todo を作る ─────",
-        "    When POST で Todo を作る",
-        "    And Todo の id を控える",
-        "    But title は空でない",
-        "    * uuid が振られる",
-        "      | id | title |",
-        "  Scenario Outline: 改名の update",
-        "  Example: 削除の delete",
-      ),
-    );
-
-    // then
-    expect(violations).toEqual(
-      [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14].map((line) => ({
-        rule: "api-journey-business-language",
-        line,
-      })),
-    );
-  });
-
-  // 仕切りは `#` で始まるが、読者が拾い読みする見出しなので禁止語を見る（reviewer の指摘、Issue #217）。
-  //   仕切りの形は正しいので、仕切りの違反（section-divider）は出さない。
-  it("仕切りの見出しに禁止語があれば、仕切りの行を違反にする", () => {
-    // given: 前提なし（入力は when の呼び出しに直接書く）
-    // when
-    const violations = findApiJourneyViolations(
-      FEATURE,
-      source(
-        ...FEATURE_HEAD,
-        "    # ───── POST /api/todos で DB に insert ─────",
-        "    When Todo を作る",
-        "    Then 1 件になる",
-        "    # ───── Db を見る ─────",
-        "    When Todo の一覧を見る",
-      ),
-    );
-
-    // then
-    expect(violations).toEqual([
-      { rule: "api-journey-business-language", line: 7 },
-      { rule: "api-journey-business-language", line: 10 },
-    ]);
-  });
-
-  it("禁止語と仕切りの違反が同じ When の行にあれば、両方を行の順に返す", () => {
-    // given: 前提なし（入力は when の呼び出しに直接書く）
-    // when
-    const violations = findApiJourneyViolations(
-      FEATURE,
-      source(...FEATURE_HEAD, "    When DB に Todo を入れる"),
-    );
-
-    // then
-    expect(violations).toEqual([
-      { rule: "api-journey-business-language", line: 7 },
-      { rule: "api-journey-section-divider", line: 7 },
-    ]);
-  });
-});
-
-describe(".feature の仕切り（api-journey-section-divider）: must reject", () => {
-  // 7 行目に仕切りの候補（または別の行）、8 行目に When を置く。違反の行は When の行（8 行目）。
-  it.each([
-    ["直前が Then（仕切りが無い）", "    Then 1 件になる"],
-    ["直前が普通のコメント", "    # Todo を作る"],
-    ["─ が 4 つ（左）", "    # ──── Todo を作る ─────"],
-    ["─ が 6 つ（左）", "    # ────── Todo を作る ─────"],
-    ["─ が 4 つ（右）", "    # ───── Todo を作る ────"],
-    ["─ が 6 つ（右）", "    # ───── Todo を作る ──────"],
-    ["見出しが空（空白 1 つ）", "    # ───── ─────"],
-    ["見出しが空白だけ", "    # ─────   ─────"],
-    ["# の後に空白が無い", "    #───── Todo を作る ─────"],
-    ["# の後の空白が 2 つ", "    #  ───── Todo を作る ─────"],
-    ["─ と見出しの間に空白が無い", "    # ─────Todo を作る─────"],
-    ["─ と見出しの間の空白が 2 つ", "    # ─────  Todo を作る  ─────"],
-    ["─ でなく - を使う", "    # ----- Todo を作る -----"],
-    ["─ でなく太い ━ を使う", "    # ━━━━━ Todo を作る ━━━━━"],
-    ["右の ─ の後ろに文字がある", "    # ───── Todo を作る ───── 作成"],
-    ["右の ─ の後ろに空白がある", "    # ───── Todo を作る ───── "],
-    ["# でなく // のコメント風", "    // ───── Todo を作る ─────"],
-  ])("When の直前の行が %s は違反", (_name, previous) => {
-    // given: 前提なし（入力は when の呼び出しに直接書く）
-    // when
-    const violations = findApiJourneyViolations(
-      FEATURE,
-      source(...FEATURE_HEAD, previous, "    When Todo を作る"),
-    );
-
-    // then
-    expect(violations).toEqual([
-      { rule: "api-journey-section-divider", line: 8 },
-    ]);
-  });
-
-  it("仕切りと When の間に空行・コメント行がある、シナリオの見出しの直後の When、Background の後・2 つ目のシナリオ・Rule の中の When も見る", () => {
-    // given: 前提なし（入力は when の呼び出しに直接書く）
-    // when
-    const violations = findApiJourneyViolations(
-      FEATURE,
-      source(
-        ...FEATURE_HEAD,
-        DIVIDER,
-        "",
-        "    When Todo を作る",
-        DIVIDER,
-        "    # 作る",
-        "    When Todo を作る",
-        "  Scenario: 2 つ目",
-        "    When Todo を作る",
-        "  Rule: r",
-        "  Background: b",
-        "    When Todo を持たない",
-        "  Example: e",
-        DIVIDER,
-        "    When Todo を作る",
-        "    When 続けて Todo を作る",
-      ),
-    );
-
-    // then
-    expect(violations).toEqual([
-      { rule: "api-journey-section-divider", line: 9 },
-      { rule: "api-journey-section-divider", line: 12 },
-      { rule: "api-journey-section-divider", line: 14 },
-      { rule: "api-journey-section-divider", line: 21 },
-    ]);
-  });
-});
-
-describe("タグ・skip・行の区切り（api-journey-tag / api-journey-no-skip。Issue #219 の reviewer の指摘）", () => {
-  it.each([
-    [
-      ".feature の改行が CR だけ（単独の \\r も行の区切り）",
-      FEATURE,
-      [...FEATURE_HEAD, DIVIDER, '    When Todo "牛乳を買う" を作る'].join(
-        "\r",
-      ),
-    ],
-    [
-      ".feature の行の途中の @",
-      FEATURE,
-      source(
-        ...FEATURE_HEAD,
-        DIVIDER,
-        "    When 宛先の @ の後ろに Todo を作る",
-      ),
-    ],
-    [
-      "step のコメント・文字列の中の .skip( / .only(・スプレッド（...only）・名前の一部（skipped・.skipper）",
-      API_JOURNEY,
-      source(
-        ...JOURNEY_HEAD,
-        '// Scenario.skip("a", () => {});',
-        'const note = "Scenario.only( と excludeTags は使わない";',
-        "const skipped = { ...only, ...todo, s: list.skipper() };",
-      ),
-    ],
-  ])("%s は違反なし", (_name, path, text) => {
-    // given: it.each の入力
-    // when
-    const violations = findApiJourneyViolations(path, text);
-
-    // then
-    expect(violations).toEqual([]);
-  });
-
-  it.each([
-    [
-      ".feature の単独の CR で区切った行も 1 行ずつ見る",
-      FEATURE,
-      ["Feature: x", "  Scenario: y", "    When 状態 201 を返す"].join("\r"),
-      [
-        { rule: "api-journey-business-language", line: 3 },
-        { rule: "api-journey-section-divider", line: 3 },
-      ],
-    ],
-    [
-      ".feature の @ のタグの行（@ignore・字下げ・複数のタグ・Feature の前）",
-      FEATURE,
-      source(
-        "@ignore",
-        "Feature: x",
-        "  @skip @wip",
-        "  Scenario: y",
-        "    Given Todo が 1 件ある",
-      ),
-      [
-        { rule: "api-journey-tag", line: 1 },
-        { rule: "api-journey-tag", line: 3 },
-      ],
-    ],
-    [
-      "step の skip・only・skipIf・runIf（Scenario・Background・describeFeature・it・空白・?.）とタグの絞り込み",
-      API_JOURNEY,
-      source(
-        ...JOURNEY_HEAD,
-        'Scenario.skip("a", () => {});',
-        'Scenario.only("a", () => {});',
-        "Background . skip(() => {});",
-        "describeFeature.skip(feature, () => {});",
-        'it.skipIf(true)("a", () => {});',
-        'it.runIf(false)("a", () => {});',
-        'Scenario?.skip("a", () => {});',
-        'describeFeature(feature, () => {}, { excludeTags: ["x"] });',
-        'describeFeature(feature, () => {}, { includeTags: ["x"] });',
-      ),
-      [6, 7, 8, 9, 10, 11, 12, 13, 14].map((line) => ({
-        rule: "api-journey-no-skip",
-        line,
-      })),
-    ],
-  ])("%s は違反", (_name, path, text, expected) => {
-    // given: it.each の入力
-    // when
-    const violations = findApiJourneyViolations(path, text);
-
-    // then
-    expect(violations).toEqual(expected);
-  });
-});
-
-// --- 列挙 → 読み取り → 判定を通した fixture テスト ---
-// WHY: 判定が正しくても、対象の列挙（spec/journey/ の下と、外に置くと違反になる名前の見つけ方）が漏れれば見逃す。一時ディレクトリに
-//   架空のツリーを置き、本番と同じ collectApiJourneyViolations に通して、違反の集合を丸ごと比較する（見逃しも余分な検出も失敗にする）。
-describe("API ジャーニーの列挙と検査（fixture）", () => {
-  // WHY OS の一時ディレクトリに置く: リポジトリ内に置くと本番の検査や Biome・git の差分に混ざる。afterAll で消す。
-  const roots: string[] = [];
-  afterAll(() => {
-    for (const root of roots) rmSync(root, { recursive: true, force: true });
-  });
-
-  function fixture(files: Record<string, string>): string {
-    const root = mkdtempSync(join(tmpdir(), "api-journey-"));
-    roots.push(root);
-    for (const [path, content] of Object.entries(files)) {
-      mkdirSync(dirname(join(root, path)), { recursive: true });
-      writeFileSync(join(root, path), content);
-    }
-    return root;
+function fixture(files: Record<string, string>): string {
+  const root = mkdtempSync(join(tmpdir(), "api-journey-"));
+  roots.push(root);
+  for (const [path, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), content);
   }
+  return root;
+}
 
-  it("spec/journey/ の下と、外に置くと違反になる名前（*.api-journey.test.*・*.journey.test.*・*.feature）を対象にし、違反を「規則: パス(:行)」で返す", () => {
-    // given
-    const root = fixture({
-      // 対になった .feature と step（違反なし）。
-      [FEATURE]: "Feature: x\n",
-      [API_JOURNEY]: source(...REQUIRED_IMPORTS),
-      // 対になっているが、中身の規則に違反する step。
-      "apps/backend/spec/journey/mock.feature": "Feature: mock\n",
-      "apps/backend/spec/journey/mock.api-journey.test.ts": source(
-        ...REQUIRED_IMPORTS,
-        'import { vi } from "vitest";',
-        'vi.mock("@repo/shared/now");',
-        'Scenario.only("a", () => {});',
-      ),
-      "apps/backend/spec/journey/no-db-check.feature": "Feature: no-check\n",
-      "apps/backend/spec/journey/no-db-check.api-journey.test.ts": source(
-        ...JOURNEY_HEAD,
-        "const renameX = new RenameXApi(command).handle;",
-        "await postX(request);",
-        DB_READ,
-        "await renameX(request);",
-        "await postX(request);",
-      ),
-      "apps/backend/spec/journey/single-api.feature": "Feature: single\n",
-      // 対になっているが、.feature が業務の言葉と仕切りの規則に違反する（step の実装は違反なし）。
-      "apps/backend/spec/journey/wording.feature": source(
-        "Feature: wording",
-        "  Scenario: w",
-        "    # ───── Todo を作る ─────",
-        "    When Todo を作る",
-        "    Then 状態 201 で返る",
-        "    When Todo の一覧を見る",
-        "  @ignore",
-      ),
-      "apps/backend/spec/journey/wording.api-journey.test.ts": source(
-        ...REQUIRED_IMPORTS,
-      ),
-      "apps/backend/spec/journey/single-api.api-journey.test.ts": source(
-        DATABASE_IMPORT,
-        CREATE_API_IMPORT,
-        'import { InMemoryXRepository } from "../../features/x/internal/infra/x-repository.in-memory";',
-      ),
-      // 置き場所の違反: 名前に .api-journey の無いテスト、補助の .ts、廃止した TS だけのジャーニー。
-      "apps/backend/spec/journey/x.test.ts": source(...REQUIRED_IMPORTS),
-      "apps/backend/spec/journey/helper.ts": "export const a = 1;\n",
-      "apps/backend/spec/journey/old.journey.test.ts": source(
-        ...REQUIRED_IMPORTS,
-      ),
-      // 対の違反: 片方だけ、名前の違う対。
-      "apps/backend/spec/journey/only-feature.feature": "Feature: y\n",
-      "apps/backend/spec/journey/only-steps.api-journey.test.ts": source(
-        ...REQUIRED_IMPORTS,
-      ),
-      "apps/backend/spec/journey/a.feature": "Feature: a\n",
-      "apps/backend/spec/journey/b.api-journey.test.ts": source(
-        ...REQUIRED_IMPORTS,
-      ),
-      // 置き場所の違反: サブディレクトリの中、spec/journey/ の外（旧名の journeys/・feature の下・frontend）。
-      "apps/backend/spec/journey/nested/z.feature": "Feature: z\n",
-      "apps/backend/spec/journey/nested/y.api-journey.test.ts": source(
-        ...REQUIRED_IMPORTS,
-      ),
-      "apps/backend/journeys/x.journey.test.ts": source(...REQUIRED_IMPORTS),
-      "apps/backend/features/x/spec/journey/x.api-journey.test.ts": source(
-        ...REQUIRED_IMPORTS,
-      ),
-      "apps/backend/features/todo/out.feature": "Feature: out\n",
-      // 置き場所の違反の .feature は中身を見ない（DB があっても置き場所の違反だけ）。
-      "apps/frontend_customer/x.feature": "Feature: front の DB\n",
-      // 対象外: 層の下のテスト（vi.mock があっても API ジャーニーではない）、名前に feature を含むだけのソース、
-      //   node_modules と . で始まるディレクトリの中。
-      "apps/backend/features/x/internal/presentation/x.api.test.ts": source(
-        'import { vi } from "vitest";',
-        "await renameX(request);",
-      ),
-      "apps/backend/features/x/internal/domain/x.feature.ts":
-        "export const a = 1;\n",
-      // API 仕様の .feature は対象外（中身に DB があっても見ない。api-spec.test.ts が見る）。
-      "apps/backend/spec/api/todo/create-todo.feature": "Feature: DB\n",
-      // E2E の .feature も対象外（中身に DB があっても見ない。e2e-feature.test.ts が見る。Issue #279）。
-      "apps/e2e/out.feature": "Feature: e2e の DB\n",
-      "apps/backend/spec/api/todo/x.api-journey.test.ts": source(
-        ...REQUIRED_IMPORTS,
-      ),
-      "apps/backend/node_modules/x/x.api-journey.test.ts": "",
-      "apps/backend/node_modules/x/x.feature": "",
-      "apps/frontend_customer/.next/x.feature": "",
-    });
+const feature = await loadFeature("./api-journey.feature");
 
-    // when
-    const result = {
-      files: listApiJourneyTargets(root),
-      violations: collectApiJourneyViolations(root),
-    };
+describeFeature(feature, ({ Scenario }) => {
+  Scenario(
+    "API ジャーニーの置き場所（isMisplacedApiJourneyFile）",
+    ({ And }) => {
+      And(
+        "spec/journey/ の直下の API ジャーニーと .feature、層の下のテストとソース、名前の一部だけが同じファイル、spec/api/ の下の .feature は違反なし",
+        () => {
+          // given
+          const cases: [string, string][] = [
+            [
+              "apps/backend/spec/journey/ の直下の *.api-journey.test.ts（step の実装）",
+              API_JOURNEY,
+            ],
+            [
+              "apps/backend/spec/journey/ の直下の *.feature（Gherkin）",
+              FEATURE,
+            ],
+            [
+              "apps/backend/ の層の下の普通のテスト",
+              "apps/backend/features/x/internal/presentation/x.api.test.ts",
+            ],
+            [
+              "apps/backend/ のソース",
+              "apps/backend/features/x/internal/domain/x.ts",
+            ],
+            [
+              "名前に journey を含むが *.journey.test.* ではないファイル",
+              "apps/backend/features/journey/internal/domain/journey.test.ts",
+            ],
+            [
+              "名前に feature を含むが .feature で終わらないファイル（spec/journey/ の外）",
+              "apps/backend/features/feature/internal/domain/x.feature.ts",
+            ],
+            // API 仕様の .feature は api-spec.test.ts が見る（Issue #219）。
+            [
+              "apps/backend/spec/api/ の下の .feature（API 仕様）",
+              "apps/backend/spec/api/todo/create-todo.feature",
+            ],
+          ];
 
-    // then
-    expect(result).toEqual({
-      files: [
-        "apps/backend/features/todo/out.feature",
-        "apps/backend/features/x/spec/journey/x.api-journey.test.ts",
-        "apps/backend/journeys/x.journey.test.ts",
-        "apps/backend/spec/api/todo/x.api-journey.test.ts",
-        "apps/backend/spec/journey/a.feature",
-        "apps/backend/spec/journey/b.api-journey.test.ts",
-        "apps/backend/spec/journey/helper.ts",
-        "apps/backend/spec/journey/mock.api-journey.test.ts",
-        "apps/backend/spec/journey/mock.feature",
-        "apps/backend/spec/journey/nested/y.api-journey.test.ts",
-        "apps/backend/spec/journey/nested/z.feature",
-        "apps/backend/spec/journey/no-db-check.api-journey.test.ts",
-        "apps/backend/spec/journey/no-db-check.feature",
-        "apps/backend/spec/journey/old.journey.test.ts",
-        "apps/backend/spec/journey/only-feature.feature",
-        "apps/backend/spec/journey/only-steps.api-journey.test.ts",
-        "apps/backend/spec/journey/single-api.api-journey.test.ts",
-        "apps/backend/spec/journey/single-api.feature",
-        "apps/backend/spec/journey/wording.api-journey.test.ts",
-        "apps/backend/spec/journey/wording.feature",
-        "apps/backend/spec/journey/x.api-journey.test.ts",
-        "apps/backend/spec/journey/x.feature",
-        "apps/backend/spec/journey/x.test.ts",
-        "apps/frontend_customer/x.feature",
-      ],
-      violations: [
-        "api-journey-placement: apps/backend/features/todo/out.feature",
-        "api-journey-placement: apps/backend/features/x/spec/journey/x.api-journey.test.ts",
-        "api-journey-placement: apps/backend/journeys/x.journey.test.ts",
-        "api-journey-placement: apps/backend/spec/api/todo/x.api-journey.test.ts",
-        "api-journey-feature-pair: apps/backend/spec/journey/a.feature",
-        "api-journey-feature-pair: apps/backend/spec/journey/b.api-journey.test.ts",
-        "api-journey-placement: apps/backend/spec/journey/helper.ts",
-        "api-journey-no-vi: apps/backend/spec/journey/mock.api-journey.test.ts:4",
-        "api-journey-no-skip: apps/backend/spec/journey/mock.api-journey.test.ts:6",
-        "api-journey-placement: apps/backend/spec/journey/nested/y.api-journey.test.ts",
-        "api-journey-placement: apps/backend/spec/journey/nested/z.feature",
-        "api-journey-handler-naming: apps/backend/spec/journey/no-db-check.api-journey.test.ts:6",
-        "api-journey-asserts-db-after-mutation: apps/backend/spec/journey/no-db-check.api-journey.test.ts:10",
-        "api-journey-placement: apps/backend/spec/journey/old.journey.test.ts",
-        "api-journey-feature-pair: apps/backend/spec/journey/only-feature.feature",
-        "api-journey-feature-pair: apps/backend/spec/journey/only-steps.api-journey.test.ts",
-        "api-journey-no-in-memory: apps/backend/spec/journey/single-api.api-journey.test.ts:3",
-        "api-journey-uses-multiple-apis: apps/backend/spec/journey/single-api.api-journey.test.ts",
-        "api-journey-business-language: apps/backend/spec/journey/wording.feature:5",
-        "api-journey-section-divider: apps/backend/spec/journey/wording.feature:6",
-        "api-journey-tag: apps/backend/spec/journey/wording.feature:7",
-        "api-journey-placement: apps/backend/spec/journey/x.test.ts",
-        "api-journey-placement: apps/frontend_customer/x.feature",
-      ],
-    });
-  });
+          // when
+          const result = casesByName(cases, ([, path]) =>
+            isMisplacedApiJourneyFile(path),
+          );
 
-  it("apps/ が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）", () => {
-    // given
-    const root = fixture({ "README.md": "# x\n" });
+          // then
+          expect(result).toEqual(casesByName(cases, () => false));
+        },
+      );
 
-    // when
-    const result = {
-      files: listApiJourneyTargets(root),
-      violations: collectApiJourneyViolations(root),
-    };
+      And(
+        "spec/journey/ の名前の違うテスト・テスト以外・サブディレクトリの中、spec/journey/ の外のジャーニーと .feature、spec/api/ の下の API ジャーニーは違反",
+        () => {
+          // given
+          const cases: [string, string][] = [
+            [
+              "spec/journey/ の .api-journey の無いテスト",
+              "apps/backend/spec/journey/x.test.ts",
+            ],
+            [
+              "spec/journey/ の廃止した TS だけのジャーニー（*.journey.test.ts）",
+              "apps/backend/spec/journey/x.journey.test.ts",
+            ],
+            [
+              "spec/journey/ の旧名の step（*.feature.journey.test.ts）",
+              "apps/backend/spec/journey/x.feature.journey.test.ts",
+            ],
+            [
+              "spec/journey/ のテスト以外のソース",
+              "apps/backend/spec/journey/helper.ts",
+            ],
+            ["spec/journey/ の .md", "apps/backend/spec/journey/README.md"],
+            [
+              "spec/journey/ のサブディレクトリの中の API ジャーニー",
+              "apps/backend/spec/journey/todo/x.api-journey.test.ts",
+            ],
+            [
+              "spec/journey/ のサブディレクトリの中の .feature",
+              "apps/backend/spec/journey/todo/x.feature",
+            ],
+            [
+              "spec/journey/ の .feature の後ろに拡張子を足したもの（.feature.md）",
+              "apps/backend/spec/journey/x.feature.md",
+            ],
+            [
+              "spec/journey/ の .features",
+              "apps/backend/spec/journey/x.features",
+            ],
+            [
+              "spec/journey/ の大文字の .FEATURE",
+              "apps/backend/spec/journey/x.FEATURE",
+            ],
+            [
+              "spec/journey/ の .tsx の API ジャーニー",
+              "apps/backend/spec/journey/x.api-journey.test.tsx",
+            ],
+            [
+              "feature の下の spec/journey/ の API ジャーニー",
+              "apps/backend/features/x/spec/journey/x.api-journey.test.ts",
+            ],
+            [
+              "apps/backend/ の直下以外の spec/journey/（shared/spec/journey/）",
+              "apps/backend/shared/spec/journey/x.api-journey.test.ts",
+            ],
+            [
+              "旧名の journeys/ の API ジャーニー",
+              "apps/backend/journeys/x.api-journey.test.ts",
+            ],
+            [
+              "旧名の journeys/ の TS だけのジャーニー",
+              "apps/backend/journeys/x.journey.test.ts",
+            ],
+            [
+              "frontend の TS だけのジャーニー",
+              "apps/frontend_customer/features/x/x.journey.test.tsx",
+            ],
+            [
+              "frontend の API ジャーニー（.js）",
+              "apps/frontend_customer/features/x/x.api-journey.test.js",
+            ],
+            // .feature は spec/journey/ の直下にだけ置く（reviewer の指摘、Issue #200）。
+            [
+              "backend の feature の下の .feature",
+              "apps/backend/features/x/x.feature",
+            ],
+            ["旧名の journeys/ の .feature", "apps/backend/journeys/x.feature"],
+            // E2E の例外は apps/e2e/ の下だけ（前方一致だけの別ディレクトリは違反）。
+            [
+              "e2e の前方一致だけの別ディレクトリの .feature",
+              "apps/e2e-x/x.feature",
+            ],
+            ["frontend の直下の .feature", "apps/frontend_customer/x.feature"],
+            // API 仕様の例外は .feature だけ（spec/api/ の下でも API ジャーニーの名前は違反）。
+            [
+              "apps/backend/spec/api/ の下の API ジャーニー",
+              "apps/backend/spec/api/todo/x.api-journey.test.ts",
+            ],
+            [
+              "spec/api の前方一致だけの別ディレクトリの .feature",
+              "apps/backend/spec/api-x/todo/x.feature",
+            ],
+          ];
 
-    // then
-    expect(result).toEqual({ files: [], violations: [] });
-  });
-});
+          // when
+          const result = casesByName(cases, ([, path]) =>
+            isMisplacedApiJourneyFile(path),
+          );
 
-describe("API ジャーニー（実ファイル）", () => {
-  it("apps/backend/spec/journey/ には対になった *.feature と *.api-journey.test.ts だけがあり、.feature は業務の言葉だけで API を呼ぶ step の前に仕切りがあり、各 API ジャーニーは InMemory と vi を使わず、実 DB と 2 つ以上の API を使い、変更系の API の後に DB を読む", () => {
-    // given: 前提なし（入力は when の呼び出しに直接書く）
-    // when
-    const apiJourneyTargets = listApiJourneyTargets(repoRoot);
-    const violations = collectApiJourneyViolations(repoRoot);
+          // then
+          expect(result).toEqual(casesByName(cases, () => true));
+        },
+      );
+    },
+  );
 
-    // then
-    // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
-    expect(apiJourneyTargets).toEqual(
-      expect.arrayContaining([
-        "apps/backend/spec/journey/todo-lifecycle.feature",
-        "apps/backend/spec/journey/todo-lifecycle.api-journey.test.ts",
-      ]),
+  Scenario(
+    "API ジャーニーの中身（findApiJourneyViolations）: must pass",
+    ({ And }) => {
+      And(
+        "実 DB と 2 つ以上の api を値で import し、InMemory と vi を使わない API ジャーニーは違反なし（複数行・type の混じった import・別の feature の api・Postgres の Repository・コメントの中・vi 以外の vitest の import など）",
+        () => {
+          // given
+          const cases: [string, string][] = [
+            ["実 DB と 2 つの api を値で import", source(...REQUIRED_IMPORTS)],
+            [
+              "複数行の import・type の混じった import・@repo/backend/ の書き方",
+              source(
+                "import {",
+                "  createTestDatabase,",
+                "  type TestDatabase,",
+                '} from "@repo/backend/test-support/database";',
+                "import {",
+                "  CreateXApi,",
+                "  type CreateXResponse,",
+                `} from "${CREATE_API}";`,
+                'import { ListXApi } from "@repo/backend/features/x/internal/presentation/list-x.api.ts";',
+              ),
+            ],
+            [
+              "別の feature の api を 1 つずつ（feature をまたぐ流れ）",
+              source(
+                DATABASE_IMPORT,
+                'import { CreateXApi } from "../../features/x/internal/presentation/create-x.api";',
+                'import { CreateYApi } from "../../features/y/internal/presentation/create-y.api";',
+              ),
+            ],
+            [
+              "Postgres の Repository・command / query を import（InMemory ではない）",
+              source(
+                ...REQUIRED_IMPORTS,
+                'import { PostgresXRepository } from "../../features/x/internal/infra/x-repository.postgres";',
+                'import { CreateXCommand } from "../../features/x/internal/application/create-x.command";',
+              ),
+            ],
+            [
+              "コメントの中の vi.mock( / vi.doMock( / InMemory の import（行コメントとブロックコメント）",
+              source(
+                ...REQUIRED_IMPORTS,
+                '// vi.mock("@repo/shared/now") は使わない。',
+                '/* vi.doMock("./x"); import { InMemoryXRepository } from "../../features/x/internal/infra/x-repository.in-memory"; */',
+                '// import { vi } from "vitest";',
+                'const url = "http://localhost"; // import "../../features/x/internal/infra/x-repository.in-memory";',
+              ),
+            ],
+            [
+              "vitest から vi 以外（afterAll・expect・test）と、型だけ（import type・inline の type）を import",
+              source(
+                ...REQUIRED_IMPORTS,
+                'import { afterAll, beforeAll, expect, test } from "vitest";',
+                'import type { Mock } from "vitest";',
+                'import type * as V from "vitest";',
+                'import { type MockInstance, describe, type vi } from "vitest";',
+              ),
+            ],
+            [
+              "変更系の後ごとに db.select(（GET の後は無くてよい。複数行のメソッドチェーン・同じ行・.handle 経由も可）",
+              source(
+                ...JOURNEY_HEAD,
+                "const getX = new GetXApi(query).handle;",
+                "await postX(request);",
+                DB_READ,
+                "await listXs(request);",
+                "await getX(request);",
+                "await postX.handle(request); const rows = await database.db",
+                "  .select()",
+                "  .from(xs);",
+                "await getX(request);",
+              ),
+            ],
+            [
+              "handler の名前が HTTP メソッド（get・list・post・put・patch・delete）で始まる（大文字小文字を区別しない・オブジェクトのキー・複数行）",
+              source(
+                ...REQUIRED_IMPORTS,
+                "const PostX = new CreateXApi(command).handle;",
+                "let getX;",
+                "getX = new GetXApi(query);",
+                "const handlers = {",
+                "  listXs: new ListXApi(query).handle,",
+                "  putName: new RenameXApi(command).handle,",
+                "  PATCHX: new PatchXApi(command).handle,",
+                "  deleteX: new DeleteXApi(command).handle,",
+                "};",
+                "const getY =",
+                "  new GetYApi(query).handle;",
+                "const handlersWithCoverage = {",
+                "  postX: ApiCoverage.track(new CreateXApi(command)),",
+                "  putX: ApiCoverage.track(",
+                "    new RenameXApi(command),",
+                "  ),",
+                "};",
+                "const repository = new PostgresXRepository(database.db);",
+                "const client = new XApiClient();",
+              ),
+            ],
+            [
+              "名前の一部だけが in-memory のモジュール（in-memory-x・x.in-memory-y）",
+              source(
+                ...REQUIRED_IMPORTS,
+                'import { a } from "./in-memory-x";',
+                'import { b } from "./x.in-memory-y";',
+              ),
+            ],
+          ];
+
+          // when
+          const result = casesByName(cases, ([, text]) =>
+            findApiJourneyViolations(API_JOURNEY, text),
+          );
+
+          // then
+          expect(result).toEqual(casesByName(cases, () => []));
+        },
+      );
+
+      And(
+        "API ジャーニーでないファイル（層の下のテスト）は中身を見ない",
+        () => {
+          // given: 前提なし（入力は when の呼び出しに直接書く）
+          // when
+          const violations = findApiJourneyViolations(
+            "apps/backend/features/x/internal/presentation/x.api.test.ts",
+            source(
+              'import { vi } from "vitest";',
+              "const renameX = new RenameXApi(command).handle;",
+            ),
+          );
+
+          // then
+          expect(violations).toEqual([]);
+        },
+      );
+    },
+  );
+
+  Scenario(
+    "API ジャーニーの中身（findApiJourneyViolations）: must reject",
+    ({ And }) => {
+      And(
+        "InMemory の import・vi の import・実 DB や 2 つ以上の api の欠け・変更系の API の後に DB を読まないことは、規則と行で違反になる",
+        () => {
+          // given
+          const cases: [string, string, ApiJourneyViolation[]][] = [
+            [
+              "InMemory の Repository を値で import",
+              source(
+                ...REQUIRED_IMPORTS,
+                'import { InMemoryXRepository } from "../../features/x/internal/infra/x-repository.in-memory";',
+              ),
+              [{ rule: "api-journey-no-in-memory", line: 4 }],
+            ],
+            [
+              "InMemory を import type で（型だけでも違反）",
+              source(
+                ...REQUIRED_IMPORTS,
+                'import type { InMemoryXRepository } from "../../features/x/internal/infra/x-repository.in-memory";',
+              ),
+              [{ rule: "api-journey-no-in-memory", line: 4 }],
+            ],
+            [
+              "InMemory を inline の type・拡張子付き・@repo/backend/ で",
+              source(
+                ...REQUIRED_IMPORTS,
+                'import { type InMemoryXRepository } from "@repo/backend/features/x/internal/infra/x-repository.in-memory.ts";',
+              ),
+              [{ rule: "api-journey-no-in-memory", line: 4 }],
+            ],
+            [
+              "InMemory を dynamic import()・副作用の import・export … from（複数行）",
+              source(
+                ...REQUIRED_IMPORTS,
+                'const m = await import("../../features/x/internal/infra/x-repository.in-memory");',
+                'import "../../features/x/internal/infra/x-repository.in-memory";',
+                "export {",
+                "  InMemoryXRepository,",
+                '} from "../../features/x/internal/infra/x-repository.in-memory";',
+              ),
+              [
+                { rule: "api-journey-no-in-memory", line: 4 },
+                { rule: "api-journey-no-in-memory", line: 5 },
+                { rule: "api-journey-no-in-memory", line: 8 },
+              ],
+            ],
+            [
+              "vitest から vi を import（vi.mock・vi.spyOn(...).mockResolvedValue・vi.fn も。使い方によらず import で止める）",
+              source(
+                ...REQUIRED_IMPORTS,
+                'import { expect, vi } from "vitest";',
+                'vi.mock("@repo/shared/now", { spy: true });',
+                'vi.spyOn(console, "error").mockResolvedValue(undefined);',
+                "const f = vi.fn();",
+              ),
+              [{ rule: "api-journey-no-vi", line: 4 }],
+            ],
+            [
+              "vi の別名（vi as v）と vitest（vi と同じもの）を複数行の import で（行は参照先の行）",
+              source(
+                ...REQUIRED_IMPORTS,
+                "import {",
+                "  expect,",
+                "  vi as v,",
+                "  vitest,",
+                "} from 'vitest';",
+                "v.useFakeTimers();",
+                "vitest.setSystemTime(0);",
+              ),
+              [{ rule: "api-journey-no-vi", line: 8 }],
+            ],
+            [
+              "vi と同じものの別名 vitest を単独で import（vitest.spyOn などが使える）",
+              source(
+                ...REQUIRED_IMPORTS,
+                'import { vitest } from "vitest";',
+                'vitest.spyOn(console, "error");',
+              ),
+              [{ rule: "api-journey-no-vi", line: 4 }],
+            ],
+            [
+              "vitest の名前空間・既定の import（名前空間経由で vi に届く）",
+              source(
+                ...REQUIRED_IMPORTS,
+                'import * as vt from "vitest";',
+                'vt.vi.stubGlobal("fetch", undefined);',
+                'import V, { expect } from "vitest";',
+              ),
+              [
+                { rule: "api-journey-no-vi", line: 4 },
+                { rule: "api-journey-no-vi", line: 6 },
+              ],
+            ],
+            [
+              'dynamic import("vitest")（vi?.mock も）',
+              source(
+                ...REQUIRED_IMPORTS,
+                'const { vi } = await import("vitest");',
+                'vi?.mock("./x");',
+              ),
+              [{ rule: "api-journey-no-vi", line: 4 }],
+            ],
+            [
+              "handler の名前が HTTP メソッドで始まらない（改名・作成の名前、オブジェクトのキー、読み取りも、名前の無い new XxxApi(）",
+              source(
+                ...REQUIRED_IMPORTS,
+                "const renameX = new RenameXApi(command).handle;",
+                "const handlers = { createX: new CreateXApi(command).handle };",
+                "const api = new ListXApi(query);",
+                "await new CreateXApi(command).handle(request);",
+                "const fetchX =",
+                "  new GetXApi(query).handle;",
+                "const completeX = new CompleteXApi (command).handle;",
+                "const renameY = ApiCoverage.track(new RenameYApi(command));",
+                "const postY = wrap(new CreateYApi(command));",
+              ),
+              [
+                { rule: "api-journey-handler-naming", line: 4 },
+                { rule: "api-journey-handler-naming", line: 5 },
+                { rule: "api-journey-handler-naming", line: 6 },
+                { rule: "api-journey-handler-naming", line: 7 },
+                { rule: "api-journey-handler-naming", line: 9 },
+                { rule: "api-journey-handler-naming", line: 10 },
+                { rule: "api-journey-handler-naming", line: 11 },
+                { rule: "api-journey-handler-naming", line: 12 },
+              ],
+            ],
+            [
+              "変更系が 2 回続き、db.select( がその後に 1 回だけ（1 回目の後に無い）",
+              source(
+                ...JOURNEY_HEAD,
+                "await postX(request);",
+                "await postX(request);",
+                DB_READ,
+              ),
+              [{ rule: "api-journey-asserts-db-after-mutation", line: 6 }],
+            ],
+            [
+              "末尾の変更系の後に db.select( が無い（GET の後にも無い）",
+              source(
+                ...JOURNEY_HEAD,
+                "await postX(request);",
+                DB_READ,
+                "await postX(request);",
+                "await listXs(request);",
+              ),
+              [{ rule: "api-journey-asserts-db-after-mutation", line: 8 }],
+            ],
+            [
+              "db.select( が変更系より前にだけある",
+              source(...JOURNEY_HEAD, DB_READ, "await postX(request);"),
+              [{ rule: "api-journey-asserts-db-after-mutation", line: 7 }],
+            ],
+            [
+              ".select( だけ（db. でない・名前の一部が db）",
+              source(
+                ...JOURNEY_HEAD,
+                "await postX(request);",
+                "await repository.select();",
+                "await tx.select().from(xs);",
+                "await mydb.select().from(xs);",
+              ),
+              [{ rule: "api-journey-asserts-db-after-mutation", line: 6 }],
+            ],
+            [
+              "コメント・文字列の中の db.select(",
+              source(
+                ...JOURNEY_HEAD,
+                "await postX(request); // database.db.select().from(xs)",
+                "/* database.db.select() */",
+                'const s = "database.db.select()";',
+                "const t = `db.select(`;",
+              ),
+              [{ rule: "api-journey-asserts-db-after-mutation", line: 6 }],
+            ],
+            [
+              "put・patch・delete も変更系（大文字小文字を区別しない・オブジェクトのメンバー・.handle 経由・複数行の引数の中）",
+              source(
+                ...REQUIRED_IMPORTS,
+                "const handlers = {",
+                "  PutName: new RenameXApi(command),",
+                "  patchX: new PatchXApi(command).handle,",
+                "  DELETEX: new DeleteXApi(command).handle,",
+                "};",
+                "await handlers.PutName.handle(request);",
+                "await handlers.patchX(request);",
+                "await expectProblem(",
+                "  await handlers.DELETEX(request),",
+                "  problem,",
+                ");",
+              ),
+              [
+                { rule: "api-journey-asserts-db-after-mutation", line: 9 },
+                { rule: "api-journey-asserts-db-after-mutation", line: 10 },
+                { rule: "api-journey-asserts-db-after-mutation", line: 12 },
+              ],
+            ],
+            [
+              "api を 1 つだけ import",
+              source(DATABASE_IMPORT, CREATE_API_IMPORT),
+              [{ rule: "api-journey-uses-multiple-apis" }],
+            ],
+            [
+              "同じ api を書き方を変えて 2 回（相対・拡張子付き・@repo/backend/）",
+              source(
+                DATABASE_IMPORT,
+                `import { CreateXApi } from "${CREATE_API}";`,
+                `import { CreateXApi as ApiWithExtension } from "${CREATE_API}.ts";`,
+                'import { CreateXApi as Api } from "@repo/backend/features/x/internal/presentation/create-x.api";',
+              ),
+              [{ rule: "api-journey-uses-multiple-apis" }],
+            ],
+            [
+              "2 つ目の api が import type・inline の type だけ",
+              source(
+                DATABASE_IMPORT,
+                CREATE_API_IMPORT,
+                `import type { ListXResponse } from "${LIST_API}";`,
+                'import { type GetXResponse } from "../../features/x/internal/presentation/get-x.api";',
+              ),
+              [{ rule: "api-journey-uses-multiple-apis" }],
+            ],
+            [
+              "2 つ目の api が副作用の import・dynamic import()・export … from",
+              source(
+                DATABASE_IMPORT,
+                CREATE_API_IMPORT,
+                `import "${LIST_API}";`,
+                `const m = await import("${LIST_API}");`,
+                `export { ListXApi } from "${LIST_API}";`,
+              ),
+              [{ rule: "api-journey-uses-multiple-apis" }],
+            ],
+            [
+              "api の単体テストや名前の一部だけが api のモジュール（x.api.test・x.api-helper・api）",
+              source(
+                DATABASE_IMPORT,
+                CREATE_API_IMPORT,
+                'import { a } from "../../features/x/internal/presentation/list-x.api.test";',
+                'import { b } from "../../features/x/internal/presentation/x.api-helper";',
+                'import { c } from "../../features/x/internal/presentation/api";',
+              ),
+              [{ rule: "api-journey-uses-multiple-apis" }],
+            ],
+            [
+              "api をコメントの中でだけ import",
+              source(
+                DATABASE_IMPORT,
+                CREATE_API_IMPORT,
+                `// import { ListXApi } from "${LIST_API}";`,
+              ),
+              [{ rule: "api-journey-uses-multiple-apis" }],
+            ],
+            [
+              "test-support/database を import しない",
+              source(CREATE_API_IMPORT, LIST_API_IMPORT),
+              [{ rule: "api-journey-uses-real-database" }],
+            ],
+            [
+              "test-support/database を import type だけ",
+              source(
+                'import type { TestDatabase } from "../../test-support/database";',
+                CREATE_API_IMPORT,
+                LIST_API_IMPORT,
+              ),
+              [{ rule: "api-journey-uses-real-database" }],
+            ],
+            [
+              "名前・場所の一部だけが同じ別のモジュール（shared/infra/database・database-x・別の場所の test-support/database）",
+              source(
+                'import { AppDatabase } from "../../shared/infra/database";',
+                'import { a } from "../../test-support/database-x";',
+                'import { b } from "./test-support/database";',
+                CREATE_API_IMPORT,
+                LIST_API_IMPORT,
+              ),
+              [{ rule: "api-journey-uses-real-database" }],
+            ],
+            [
+              "空のファイル（すべての必須を欠く）",
+              "",
+              [
+                { rule: "api-journey-uses-multiple-apis" },
+                { rule: "api-journey-uses-real-database" },
+              ],
+            ],
+            [
+              "違反が重なる（行のある違反を行の順に、その後にファイル全体の違反）",
+              source(
+                'import { vi } from "vitest";',
+                'import { InMemoryXRepository } from "../../features/x/internal/infra/x-repository.in-memory";',
+                CREATE_API_IMPORT,
+                "const createX = new CreateXApi(command).handle;",
+                "await createX(request);",
+                "const postX = new CreateXApi(command).handle;",
+                "await postX(request);",
+              ),
+              [
+                { rule: "api-journey-no-vi", line: 1 },
+                { rule: "api-journey-no-in-memory", line: 2 },
+                { rule: "api-journey-handler-naming", line: 4 },
+                { rule: "api-journey-asserts-db-after-mutation", line: 7 },
+                { rule: "api-journey-uses-multiple-apis" },
+                { rule: "api-journey-uses-real-database" },
+              ],
+            ],
+          ];
+
+          // when
+          const result = casesByName(cases, ([, text]) =>
+            findApiJourneyViolations(API_JOURNEY, text),
+          );
+
+          // then
+          expect(result).toEqual(
+            casesByName(cases, ([, , expected]) => expected),
+          );
+        },
+      );
+
+      And("置き場所が違えば置き場所の違反だけを返す（中身は見ない）", () => {
+        // given: 前提なし（入力は when の呼び出しに直接書く）
+        // when
+        const violations = findApiJourneyViolations(
+          "apps/backend/spec/journey/x.test.ts",
+          'import { vi } from "vitest";',
+        );
+
+        // then
+        expect(violations).toEqual([{ rule: "api-journey-placement" }]);
+      });
+    },
+  );
+
+  Scenario(
+    "Gherkin の .feature と step の対（findFeaturePairViolations）",
+    ({ And }) => {
+      // files: 同じディレクトリにあるファイルの一覧（listApiJourneyTargets の結果に当たる）。
+      And(
+        ".feature と同じ名前の step があるもの・対象外のファイルは違反なし",
+        () => {
+          // given
+          const cases: [string, string, string[]][] = [
+            [
+              ".feature と同じ名前の step（.api-journey.test.ts）がある",
+              FEATURE,
+              [FEATURE, API_JOURNEY],
+            ],
+            [
+              ".api-journey.test.ts と同じ名前の .feature がある",
+              API_JOURNEY,
+              [FEATURE, API_JOURNEY],
+            ],
+            [
+              "対象外のファイル（置き場所の違反は api-journey-placement が見る）",
+              "apps/backend/spec/journey/nested/x.feature",
+              ["apps/backend/spec/journey/nested/x.feature"],
+            ],
+          ];
+
+          // when
+          const result = casesByName(cases, ([, path, files]) =>
+            findFeaturePairViolations(path, new Set(files)),
+          );
+
+          // then
+          expect(result).toEqual(casesByName(cases, () => []));
+        },
+      );
+
+      And(
+        ".feature か step の片方だけ・名前の違い・旧名の step・サブディレクトリの対は違反",
+        () => {
+          // given
+          const cases: [string, string, string[]][] = [
+            [".feature だけで step が無い", FEATURE, [FEATURE]],
+            [
+              ".api-journey.test.ts だけで .feature が無い（TS だけのジャーニーは廃止）",
+              API_JOURNEY,
+              [API_JOURNEY],
+            ],
+            [
+              ".feature の名前と step の名前が違う（.feature 側）",
+              FEATURE,
+              [FEATURE, "apps/backend/spec/journey/y.api-journey.test.ts"],
+            ],
+            [
+              ".feature の名前と step の名前が違う（step 側）",
+              API_JOURNEY,
+              ["apps/backend/spec/journey/y.feature", API_JOURNEY],
+            ],
+            [
+              "step が旧名（x.feature.journey.test.ts・x.journey.test.ts）",
+              FEATURE,
+              [
+                FEATURE,
+                "apps/backend/spec/journey/x.feature.journey.test.ts",
+                "apps/backend/spec/journey/x.journey.test.ts",
+              ],
+            ],
+            [
+              "対の .feature がサブディレクトリにある",
+              API_JOURNEY,
+              ["apps/backend/spec/journey/nested/x.feature", API_JOURNEY],
+            ],
+          ];
+
+          // when
+          const result = casesByName(cases, ([, path, files]) => {
+            const existing = new Set(files);
+            return findFeaturePairViolations(path, existing);
+          });
+
+          // then
+          expect(result).toEqual(
+            casesByName(cases, () => [{ rule: "api-journey-feature-pair" }]),
+          );
+        },
+      );
+    },
+  );
+
+  // .feature の例の部品。仕切り（api-journey-section-divider の形）と、業務の言葉だけの Background。
+  const DIVIDER = "    # ───── Todo を作る ─────";
+  const FEATURE_HEAD = [
+    "Feature: Todo のライフサイクル",
+    "",
+    "  Background: 空の Todo 一覧",
+    "    Given Todo が 1 件も無い",
+    "",
+    "  Scenario: 作成から削除まで",
+  ];
+
+  Scenario(
+    ".feature の業務の言葉と仕切り（findApiJourneyViolations）: must pass",
+    ({ And }) => {
+      And(
+        "業務の言葉だけで、API を呼ぶ step の直前ごとに仕切りのある .feature は違反なし（コメント行と空行・語の一部・仕切りの後の空行とコメントなど）",
+        () => {
+          // given
+          const cases: [string, string][] = [
+            [
+              "業務の言葉だけで、API を呼ぶ step（When）の直前ごとに仕切りがある",
+              source(
+                ...FEATURE_HEAD,
+                DIVIDER,
+                '    When Todo "牛乳を買う" を作る',
+                '    Then 未完了の Todo "牛乳を買う" が作られる',
+                '    And Todo は "牛乳を買う" の 1 件だけになる',
+                "    # ───── 一覧を見る ─────",
+                "    When Todo の一覧を見る",
+                "    Then 一覧に 1 件が並ぶ",
+                "",
+                "  Scenario: 不正な入力は保存されない",
+                '    Given Todo "牛乳を買う" が作られている',
+                "    # ───── 空のタイトルで Todo を作る ─────",
+                "    When タイトルが空の Todo を作る",
+                "    Then タイトルが空という理由で拒否される",
+              ),
+            ],
+            [
+              "# のコメント行（字下げも）と空行は禁止語があっても見ない",
+              source(
+                "# step の実装は DB の todos を SQL で読み、状態 201 と Problem Details の JSON を確かめる。",
+                ...FEATURE_HEAD,
+                "      # API の返り値の id・title・completed は step の実装が見る（not found・uuid・null・undefined）。",
+                "",
+                DIVIDER,
+                '    When Todo "牛乳を買う" を作る',
+              ),
+            ],
+            [
+              "3 桁の数の後ろが「文字」「件」「行」（空白の有無によらない）・3 桁でない数・1xx〜5xx でない 3 桁の数",
+              source(
+                ...FEATURE_HEAD,
+                DIVIDER,
+                '    When 100 文字のタイトルの Todo "牛乳を買う" を作る',
+                "    Then 200件が並ぶ",
+                "    And メモは 300 行まで書ける",
+                "    And 2 件目・10 件目・1000 円・600 円・099 番は業務の数",
+              ),
+            ],
+            [
+              "禁止語を語の一部に含むだけの言葉（Todo・MongoDB・idea・subtitle・APIs でない API 風の語・completely）",
+              source(
+                ...FEATURE_HEAD,
+                DIVIDER,
+                '    When Todo "idea を MongoDB に書く subtitle" を作る',
+                "    Then completely な Todo と APIary の Todo が並ぶ",
+              ),
+            ],
+            [
+              "Background の中の When（仕切りは要らない）・When 以外の step（Given / Then / And / But / *）",
+              source(
+                "Feature: x",
+                "  Background: y",
+                "    When Todo を 1 件も持たない",
+                "  Scenario: z",
+                "    Given Todo が 1 件ある",
+                "    Then 1 件が並ぶ",
+                "    And 1 件目が見える",
+                "    But 2 件目は見えない",
+                "    * 何もしない",
+              ),
+            ],
+            [
+              "仕切りの字下げが When と違う・見出しの中に空白や ─ がある（Scenario Outline・Example・Rule の中でも）",
+              source(
+                "Feature: x",
+                "  Rule: r",
+                "    Scenario Outline: y",
+                "# ───── Todo を作る ─────",
+                '      When Todo "牛乳を買う" を作る',
+                "    Example: z",
+                "        # ───── 一覧 を 見る（─ の入った見出し） ─────",
+                "    When Todo の一覧を見る",
+              ),
+            ],
+            ["When の無い .feature（Feature だけ）", "Feature: x\n"],
+            [
+              "改行が CRLF（Windows の改行。仕切りの行末の \\r を形の違いにしない）",
+              [
+                ...FEATURE_HEAD,
+                DIVIDER,
+                '    When Todo "牛乳を買う" を作る',
+                '    Then 未完了の Todo "牛乳を買う" が作られる',
+                "",
+              ].join("\r\n"),
+            ],
+          ];
+
+          // when
+          const result = casesByName(cases, ([, text]) =>
+            findApiJourneyViolations(FEATURE, text),
+          );
+
+          // then
+          expect(result).toEqual(casesByName(cases, () => []));
+        },
+      );
+
+      And(
+        "spec/journey/ の外の .feature は置き場所の違反だけを返す（中身は見ない）",
+        () => {
+          // given: 前提なし（入力は when の呼び出しに直接書く）
+          // when
+          const violations = findApiJourneyViolations(
+            "apps/frontend_customer/x.feature",
+            source("Feature: DB", "  Scenario: y", "    When 状態 201 を返す"),
+          );
+
+          // then
+          expect(violations).toEqual([{ rule: "api-journey-placement" }]);
+        },
+      );
+    },
+  );
+
+  Scenario(
+    ".feature の業務の言葉（api-journey-business-language）: must reject",
+    ({ And }) => {
+      // 禁止語を 1 つだけ含む step（When の直前には仕切りを置き、仕切りの違反と混ざらないようにする）。行は 9 行目の Then。
+      And(
+        "step（Then）に DB・SQL・表名・API や HTTP の言葉（返り値・状態コード・Problem Details・JSON など）があれば違反",
+        () => {
+          // given
+          const cases: [string, string][] = [
+            ["DB（語の境界）", "Then DB の Todo は 1 件になる"],
+            [
+              "DB の大文字小文字違い（Db・db）",
+              "Then Db と db の Todo は 1 件になる",
+            ],
+            ["データベース", "Then データベースに 1 件ある"],
+            ["SQL（PostgreSQL の中も）", "Then PostgreSQL に 1 件ある"],
+            ["テーブル", "Then テーブルに 1 件ある"],
+            ["カラム", "Then カラムが 1 つ変わる"],
+            ["返り値", "Then 返り値は Todo になる"],
+            ["戻り値", "Then 戻り値は Todo になる"],
+            ["レスポンス", "Then レスポンスに Todo がある"],
+            ["ステータス", "Then ステータスは成功になる"],
+            ["状態 \\d{3}（空白なし）", "Then 状態201 で作られる"],
+            ["HTTP の状態コード（3 桁の 1xx〜5xx）", "Then 201 で作られる"],
+            [
+              "HTTP の状態コード（行末・後ろが「文字」「件」「行」以外）",
+              "Then 作られた Todo が 404",
+            ],
+            [
+              "Problem Details（空白なし・大文字小文字違い）",
+              "Then problemdetails が届く",
+            ],
+            ["JSON", "Then Json の Todo が届く"],
+            ["null", "Then 期限は NULL になる"],
+            ["undefined", "Then 期限は undefined になる"],
+            ["insert", "Then Todo の Insert が 1 件になる"],
+            ["update", "Then Todo の update が 1 件になる"],
+            ["delete", "Then Todo の delete が 1 件になる"],
+            ["表名 todos", "Then todos は 1 件になる"],
+            [
+              "表名 todo_status_changes",
+              "Then todo_status_changes は 1 件になる",
+            ],
+            ["表名 change_logs", "Then change_logs は 2 件になる"],
+            [
+              "change log（空白区切り・単数形）",
+              "Then Change log が 1 件足される",
+            ],
+            [
+              "変更の記録（Writer が自動で残す技術の仕組み）",
+              "Then 変更の記録が 1 件足される",
+            ],
+            ["変更履歴", "Then 変更履歴は 2 件になる"],
+            ["id", "Then その ID の Todo は無い"],
+            ["uuid", "Then UUID の Todo は無い"],
+            ["not found（空白なし）", "Then NotFound と伝えられる"],
+            ["title（業務の言葉はタイトル）", "Then Title が空と伝えられる"],
+            ["completed", "Then completed が真になる"],
+            ["API", "Then Api が Todo を返す"],
+            ["HTTP（HTTPS も）", "Then HTTPS で Todo が届く"],
+            ["HTTP のメソッド（GET）", "Then get で Todo を読む"],
+            [
+              "HTTP のメソッド（POST・PUT・PATCH）",
+              "Then Post と Put と Patch で送る",
+            ],
+            ["エンドポイント", "Then エンドポイントが Todo を返す"],
+            ["リクエスト", "Then リクエストが拒否される"],
+            ["レコード", "Then レコードが 1 件ある"],
+            ["バリデーション", "Then バリデーションで拒否される"],
+            ["状態コード", "Then 状態コードで成功が分かる"],
+            [
+              "not found（- 区切り。/problems/not-found）",
+              "Then /problems/not-found と伝えられる",
+            ],
+            ["not found（_ 区切り）", "Then not_found と伝えられる"],
+            ["Problem Details（- 区切り）", "Then problem-details が届く"],
+            ["Problem Details（_ 区切り）", "Then problem_details が届く"],
+          ];
+
+          // when
+          const result = casesByName(cases, ([, step]) =>
+            findApiJourneyViolations(
+              FEATURE,
+              source(
+                ...FEATURE_HEAD,
+                DIVIDER,
+                "    When Todo を作る",
+                `    ${step}`,
+              ),
+            ),
+          );
+
+          // then
+          expect(result).toEqual(
+            casesByName(cases, () => [
+              { rule: "api-journey-business-language", line: 9 },
+            ]),
+          );
+        },
+      );
+
+      And(
+        "見出し（Feature / Background / Scenario / Rule / Scenario Outline / Example）と各 step（Given / When / And / But / 星印）・説明の行・表の行も見る（1 行 1 件、行番号付き）",
+        () => {
+          // given: 前提なし（入力は when の呼び出しに直接書く）
+          // when
+          const violations = findApiJourneyViolations(
+            FEATURE,
+            source(
+              "Feature: Todo の API",
+              "  Todo の DB を説明する行",
+              "  Background: 空の todos",
+              "    Given DB が空",
+              "  Rule: 状態 404 の扱い",
+              "  Scenario: 作成の JSON",
+              "    # ───── Todo を作る ─────",
+              "    When POST で Todo を作る",
+              "    And Todo の id を控える",
+              "    But title は空でない",
+              "    * uuid が振られる",
+              "      | id | title |",
+              "  Scenario Outline: 改名の update",
+              "  Example: 削除の delete",
+            ),
+          );
+
+          // then
+          expect(violations).toEqual(
+            [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14].map((line) => ({
+              rule: "api-journey-business-language",
+              line,
+            })),
+          );
+        },
+      );
+
+      // 仕切りは `#` で始まるが、読者が拾い読みする見出しなので禁止語を見る（reviewer の指摘、Issue #217）。
+      //   仕切りの形は正しいので、仕切りの違反（section-divider）は出さない。
+      And("仕切りの見出しに禁止語があれば、仕切りの行を違反にする", () => {
+        // given: 前提なし（入力は when の呼び出しに直接書く）
+        // when
+        const violations = findApiJourneyViolations(
+          FEATURE,
+          source(
+            ...FEATURE_HEAD,
+            "    # ───── POST /api/todos で DB に insert ─────",
+            "    When Todo を作る",
+            "    Then 1 件になる",
+            "    # ───── Db を見る ─────",
+            "    When Todo の一覧を見る",
+          ),
+        );
+
+        // then
+        expect(violations).toEqual([
+          { rule: "api-journey-business-language", line: 7 },
+          { rule: "api-journey-business-language", line: 10 },
+        ]);
+      });
+
+      And(
+        "禁止語と仕切りの違反が同じ When の行にあれば、両方を行の順に返す",
+        () => {
+          // given: 前提なし（入力は when の呼び出しに直接書く）
+          // when
+          const violations = findApiJourneyViolations(
+            FEATURE,
+            source(...FEATURE_HEAD, "    When DB に Todo を入れる"),
+          );
+
+          // then
+          expect(violations).toEqual([
+            { rule: "api-journey-business-language", line: 7 },
+            { rule: "api-journey-section-divider", line: 7 },
+          ]);
+        },
+      );
+    },
+  );
+
+  Scenario(
+    ".feature の仕切り（api-journey-section-divider）: must reject",
+    ({ And }) => {
+      // 7 行目に仕切りの候補（または別の行）、8 行目に When を置く。違反の行は When の行（8 行目）。
+      And(
+        "When の直前の行が仕切りの形でなければ違反（仕切りが無い・普通のコメント・罫線の数・見出しの空・空白の数・罫線の文字・後ろの文字・別のコメントの書き方）",
+        () => {
+          // given
+          const cases: [string, string][] = [
+            ["直前が Then（仕切りが無い）", "    Then 1 件になる"],
+            ["直前が普通のコメント", "    # Todo を作る"],
+            ["─ が 4 つ（左）", "    # ──── Todo を作る ─────"],
+            ["─ が 6 つ（左）", "    # ────── Todo を作る ─────"],
+            ["─ が 4 つ（右）", "    # ───── Todo を作る ────"],
+            ["─ が 6 つ（右）", "    # ───── Todo を作る ──────"],
+            ["見出しが空（空白 1 つ）", "    # ───── ─────"],
+            ["見出しが空白だけ", "    # ─────   ─────"],
+            ["# の後に空白が無い", "    #───── Todo を作る ─────"],
+            ["# の後の空白が 2 つ", "    #  ───── Todo を作る ─────"],
+            ["─ と見出しの間に空白が無い", "    # ─────Todo を作る─────"],
+            ["─ と見出しの間の空白が 2 つ", "    # ─────  Todo を作る  ─────"],
+            ["─ でなく - を使う", "    # ----- Todo を作る -----"],
+            ["─ でなく太い ━ を使う", "    # ━━━━━ Todo を作る ━━━━━"],
+            ["右の ─ の後ろに文字がある", "    # ───── Todo を作る ───── 作成"],
+            ["右の ─ の後ろに空白がある", "    # ───── Todo を作る ───── "],
+            ["# でなく // のコメント風", "    // ───── Todo を作る ─────"],
+          ];
+
+          // when
+          const result = casesByName(cases, ([, previous]) =>
+            findApiJourneyViolations(
+              FEATURE,
+              source(...FEATURE_HEAD, previous, "    When Todo を作る"),
+            ),
+          );
+
+          // then
+          expect(result).toEqual(
+            casesByName(cases, () => [
+              { rule: "api-journey-section-divider", line: 8 },
+            ]),
+          );
+        },
+      );
+
+      And(
+        "仕切りと When の間に空行・コメント行がある、シナリオの見出しの直後の When、Background の後・2 つ目のシナリオ・Rule の中の When も見る",
+        () => {
+          // given: 前提なし（入力は when の呼び出しに直接書く）
+          // when
+          const violations = findApiJourneyViolations(
+            FEATURE,
+            source(
+              ...FEATURE_HEAD,
+              DIVIDER,
+              "",
+              "    When Todo を作る",
+              DIVIDER,
+              "    # 作る",
+              "    When Todo を作る",
+              "  Scenario: 2 つ目",
+              "    When Todo を作る",
+              "  Rule: r",
+              "  Background: b",
+              "    When Todo を持たない",
+              "  Example: e",
+              DIVIDER,
+              "    When Todo を作る",
+              "    When 続けて Todo を作る",
+            ),
+          );
+
+          // then
+          expect(violations).toEqual([
+            { rule: "api-journey-section-divider", line: 9 },
+            { rule: "api-journey-section-divider", line: 12 },
+            { rule: "api-journey-section-divider", line: 14 },
+            { rule: "api-journey-section-divider", line: 21 },
+          ]);
+        },
+      );
+    },
+  );
+
+  Scenario(
+    "タグ・skip・行の区切り（api-journey-tag / api-journey-no-skip。Issue #219 の reviewer の指摘）",
+    ({ And }) => {
+      And(
+        "行の途中の @・単独の CR の改行・コメントや文字列の中の skip と only・名前の一部は違反なし",
+        () => {
+          // given
+          const cases: [string, string, string][] = [
+            [
+              ".feature の改行が CR だけ（単独の \\r も行の区切り）",
+              FEATURE,
+              [
+                ...FEATURE_HEAD,
+                DIVIDER,
+                '    When Todo "牛乳を買う" を作る',
+              ].join("\r"),
+            ],
+            [
+              ".feature の行の途中の @",
+              FEATURE,
+              source(
+                ...FEATURE_HEAD,
+                DIVIDER,
+                "    When 宛先の @ の後ろに Todo を作る",
+              ),
+            ],
+            [
+              "step のコメント・文字列の中の .skip( / .only(・スプレッド（...only）・名前の一部（skipped・.skipper）",
+              API_JOURNEY,
+              source(
+                ...JOURNEY_HEAD,
+                '// Scenario.skip("a", () => {});',
+                'const note = "Scenario.only( と excludeTags は使わない";',
+                "const skipped = { ...only, ...todo, s: list.skipper() };",
+              ),
+            ],
+          ];
+
+          // when
+          const result = casesByName(cases, ([, path, text]) =>
+            findApiJourneyViolations(path, text),
+          );
+
+          // then
+          expect(result).toEqual(casesByName(cases, () => []));
+        },
+      );
+
+      And(
+        ".feature のタグの行と、step の skip・only・skipIf・runIf は、規則と行で違反になる（単独の CR で区切った行も 1 行ずつ見る）",
+        () => {
+          // given
+          const cases: [string, string, string, ApiJourneyViolation[]][] = [
+            [
+              ".feature の単独の CR で区切った行も 1 行ずつ見る",
+              FEATURE,
+              ["Feature: x", "  Scenario: y", "    When 状態 201 を返す"].join(
+                "\r",
+              ),
+              [
+                { rule: "api-journey-business-language", line: 3 },
+                { rule: "api-journey-section-divider", line: 3 },
+              ],
+            ],
+            [
+              ".feature の @ のタグの行（@ignore・字下げ・複数のタグ・Feature の前）",
+              FEATURE,
+              source(
+                "@ignore",
+                "Feature: x",
+                "  @skip @wip",
+                "  Scenario: y",
+                "    Given Todo が 1 件ある",
+              ),
+              [
+                { rule: "api-journey-tag", line: 1 },
+                { rule: "api-journey-tag", line: 3 },
+              ],
+            ],
+            [
+              "step の skip・only・skipIf・runIf（Scenario・Background・describeFeature・it・空白・?.）とタグの絞り込み",
+              API_JOURNEY,
+              source(
+                ...JOURNEY_HEAD,
+                'Scenario.skip("a", () => {});',
+                'Scenario.only("a", () => {});',
+                "Background . skip(() => {});",
+                "describeFeature.skip(feature, () => {});",
+                'it.skipIf(true)("a", () => {});',
+                'it.runIf(false)("a", () => {});',
+                'Scenario?.skip("a", () => {});',
+                'describeFeature(feature, () => {}, { excludeTags: ["x"] });',
+                'describeFeature(feature, () => {}, { includeTags: ["x"] });',
+              ),
+              [6, 7, 8, 9, 10, 11, 12, 13, 14].map((line) => ({
+                rule: "api-journey-no-skip",
+                line,
+              })),
+            ],
+          ];
+
+          // when
+          const result = casesByName(cases, ([, path, text]) =>
+            findApiJourneyViolations(path, text),
+          );
+
+          // then
+          expect(result).toEqual(
+            casesByName(cases, ([, , , expected]) => expected),
+          );
+        },
+      );
+    },
+  );
+
+  // --- 列挙 → 読み取り → 判定を通した fixture テスト ---
+  // WHY: 判定が正しくても、対象の列挙（spec/journey/ の下と、外に置くと違反になる名前の見つけ方）が漏れれば見逃す。一時ディレクトリに
+  //   架空のツリーを置き、本番と同じ collectApiJourneyViolations に通して、違反の集合を丸ごと比較する（見逃しも余分な検出も失敗にする）。
+  Scenario("API ジャーニーの列挙と検査（fixture）", ({ And }) => {
+    And(
+      "spec/journey/ の下と、外に置くと違反になる名前（.api-journey.test.・.journey.test. を含む名前と .feature）を対象にし、違反を「規則: パス(:行)」で返す",
+      () => {
+        // given
+        const root = fixture({
+          // 対になった .feature と step（違反なし）。
+          [FEATURE]: "Feature: x\n",
+          [API_JOURNEY]: source(...REQUIRED_IMPORTS),
+          // 対になっているが、中身の規則に違反する step。
+          "apps/backend/spec/journey/mock.feature": "Feature: mock\n",
+          "apps/backend/spec/journey/mock.api-journey.test.ts": source(
+            ...REQUIRED_IMPORTS,
+            'import { vi } from "vitest";',
+            'vi.mock("@repo/shared/now");',
+            'Scenario.only("a", () => {});',
+          ),
+          "apps/backend/spec/journey/no-db-check.feature":
+            "Feature: no-check\n",
+          "apps/backend/spec/journey/no-db-check.api-journey.test.ts": source(
+            ...JOURNEY_HEAD,
+            "const renameX = new RenameXApi(command).handle;",
+            "await postX(request);",
+            DB_READ,
+            "await renameX(request);",
+            "await postX(request);",
+          ),
+          "apps/backend/spec/journey/single-api.feature": "Feature: single\n",
+          // 対になっているが、.feature が業務の言葉と仕切りの規則に違反する（step の実装は違反なし）。
+          "apps/backend/spec/journey/wording.feature": source(
+            "Feature: wording",
+            "  Scenario: w",
+            "    # ───── Todo を作る ─────",
+            "    When Todo を作る",
+            "    Then 状態 201 で返る",
+            "    When Todo の一覧を見る",
+            "  @ignore",
+          ),
+          "apps/backend/spec/journey/wording.api-journey.test.ts": source(
+            ...REQUIRED_IMPORTS,
+          ),
+          "apps/backend/spec/journey/single-api.api-journey.test.ts": source(
+            DATABASE_IMPORT,
+            CREATE_API_IMPORT,
+            'import { InMemoryXRepository } from "../../features/x/internal/infra/x-repository.in-memory";',
+          ),
+          // 置き場所の違反: 名前に .api-journey の無いテスト、補助の .ts、廃止した TS だけのジャーニー。
+          "apps/backend/spec/journey/x.test.ts": source(...REQUIRED_IMPORTS),
+          "apps/backend/spec/journey/helper.ts": "export const a = 1;\n",
+          "apps/backend/spec/journey/old.journey.test.ts": source(
+            ...REQUIRED_IMPORTS,
+          ),
+          // 対の違反: 片方だけ、名前の違う対。
+          "apps/backend/spec/journey/only-feature.feature": "Feature: y\n",
+          "apps/backend/spec/journey/only-steps.api-journey.test.ts": source(
+            ...REQUIRED_IMPORTS,
+          ),
+          "apps/backend/spec/journey/a.feature": "Feature: a\n",
+          "apps/backend/spec/journey/b.api-journey.test.ts": source(
+            ...REQUIRED_IMPORTS,
+          ),
+          // 置き場所の違反: サブディレクトリの中、spec/journey/ の外（旧名の journeys/・feature の下・frontend）。
+          "apps/backend/spec/journey/nested/z.feature": "Feature: z\n",
+          "apps/backend/spec/journey/nested/y.api-journey.test.ts": source(
+            ...REQUIRED_IMPORTS,
+          ),
+          "apps/backend/journeys/x.journey.test.ts": source(
+            ...REQUIRED_IMPORTS,
+          ),
+          "apps/backend/features/x/spec/journey/x.api-journey.test.ts": source(
+            ...REQUIRED_IMPORTS,
+          ),
+          "apps/backend/features/todo/out.feature": "Feature: out\n",
+          // 置き場所の違反の .feature は中身を見ない（DB があっても置き場所の違反だけ）。
+          "apps/frontend_customer/x.feature": "Feature: front の DB\n",
+          // 対象外: 層の下のテスト（vi.mock があっても API ジャーニーではない）、名前に feature を含むだけのソース、
+          //   node_modules と . で始まるディレクトリの中。
+          "apps/backend/features/x/internal/presentation/x.api.test.ts": source(
+            'import { vi } from "vitest";',
+            "await renameX(request);",
+          ),
+          "apps/backend/features/x/internal/domain/x.feature.ts":
+            "export const a = 1;\n",
+          // API 仕様の .feature は対象外（中身に DB があっても見ない。api-spec.test.ts が見る）。
+          "apps/backend/spec/api/todo/create-todo.feature": "Feature: DB\n",
+          // E2E の .feature も対象外（中身に DB があっても見ない。e2e-feature.test.ts が見る。Issue #279）。
+          "apps/e2e/out.feature": "Feature: e2e の DB\n",
+          "apps/backend/spec/api/todo/x.api-journey.test.ts": source(
+            ...REQUIRED_IMPORTS,
+          ),
+          "apps/backend/node_modules/x/x.api-journey.test.ts": "",
+          "apps/backend/node_modules/x/x.feature": "",
+          "apps/frontend_customer/.next/x.feature": "",
+        });
+
+        // when
+        const result = {
+          files: listApiJourneyTargets(root),
+          violations: collectApiJourneyViolations(root),
+        };
+
+        // then
+        expect(result).toEqual({
+          files: [
+            "apps/backend/features/todo/out.feature",
+            "apps/backend/features/x/spec/journey/x.api-journey.test.ts",
+            "apps/backend/journeys/x.journey.test.ts",
+            "apps/backend/spec/api/todo/x.api-journey.test.ts",
+            "apps/backend/spec/journey/a.feature",
+            "apps/backend/spec/journey/b.api-journey.test.ts",
+            "apps/backend/spec/journey/helper.ts",
+            "apps/backend/spec/journey/mock.api-journey.test.ts",
+            "apps/backend/spec/journey/mock.feature",
+            "apps/backend/spec/journey/nested/y.api-journey.test.ts",
+            "apps/backend/spec/journey/nested/z.feature",
+            "apps/backend/spec/journey/no-db-check.api-journey.test.ts",
+            "apps/backend/spec/journey/no-db-check.feature",
+            "apps/backend/spec/journey/old.journey.test.ts",
+            "apps/backend/spec/journey/only-feature.feature",
+            "apps/backend/spec/journey/only-steps.api-journey.test.ts",
+            "apps/backend/spec/journey/single-api.api-journey.test.ts",
+            "apps/backend/spec/journey/single-api.feature",
+            "apps/backend/spec/journey/wording.api-journey.test.ts",
+            "apps/backend/spec/journey/wording.feature",
+            "apps/backend/spec/journey/x.api-journey.test.ts",
+            "apps/backend/spec/journey/x.feature",
+            "apps/backend/spec/journey/x.test.ts",
+            "apps/frontend_customer/x.feature",
+          ],
+          violations: [
+            "api-journey-placement: apps/backend/features/todo/out.feature",
+            "api-journey-placement: apps/backend/features/x/spec/journey/x.api-journey.test.ts",
+            "api-journey-placement: apps/backend/journeys/x.journey.test.ts",
+            "api-journey-placement: apps/backend/spec/api/todo/x.api-journey.test.ts",
+            "api-journey-feature-pair: apps/backend/spec/journey/a.feature",
+            "api-journey-feature-pair: apps/backend/spec/journey/b.api-journey.test.ts",
+            "api-journey-placement: apps/backend/spec/journey/helper.ts",
+            "api-journey-no-vi: apps/backend/spec/journey/mock.api-journey.test.ts:4",
+            "api-journey-no-skip: apps/backend/spec/journey/mock.api-journey.test.ts:6",
+            "api-journey-placement: apps/backend/spec/journey/nested/y.api-journey.test.ts",
+            "api-journey-placement: apps/backend/spec/journey/nested/z.feature",
+            "api-journey-handler-naming: apps/backend/spec/journey/no-db-check.api-journey.test.ts:6",
+            "api-journey-asserts-db-after-mutation: apps/backend/spec/journey/no-db-check.api-journey.test.ts:10",
+            "api-journey-placement: apps/backend/spec/journey/old.journey.test.ts",
+            "api-journey-feature-pair: apps/backend/spec/journey/only-feature.feature",
+            "api-journey-feature-pair: apps/backend/spec/journey/only-steps.api-journey.test.ts",
+            "api-journey-no-in-memory: apps/backend/spec/journey/single-api.api-journey.test.ts:3",
+            "api-journey-uses-multiple-apis: apps/backend/spec/journey/single-api.api-journey.test.ts",
+            "api-journey-business-language: apps/backend/spec/journey/wording.feature:5",
+            "api-journey-section-divider: apps/backend/spec/journey/wording.feature:6",
+            "api-journey-tag: apps/backend/spec/journey/wording.feature:7",
+            "api-journey-placement: apps/backend/spec/journey/x.test.ts",
+            "api-journey-placement: apps/frontend_customer/x.feature",
+          ],
+        });
+      },
     );
-    expect(violations).toEqual([]);
+
+    And("apps/ が無ければ対象は 0 件（本番の検査は 0 件を失敗にする）", () => {
+      // given
+      const root = fixture({ "README.md": "# x\n" });
+
+      // when
+      const result = {
+        files: listApiJourneyTargets(root),
+        violations: collectApiJourneyViolations(root),
+      };
+
+      // then
+      expect(result).toEqual({ files: [], violations: [] });
+    });
+  });
+
+  Scenario("API ジャーニー（実ファイル）", ({ And }) => {
+    And(
+      "apps/backend/spec/journey/ には対になった .feature と .api-journey.test.ts だけがあり、.feature は業務の言葉だけで API を呼ぶ step の前に仕切りがあり、各 API ジャーニーは InMemory と vi を使わず、実 DB と 2 つ以上の API を使い、変更系の API の後に DB を読む",
+      () => {
+        // given: 前提なし（入力は when の呼び出しに直接書く）
+        // when
+        const apiJourneyTargets = listApiJourneyTargets(repoRoot);
+        const violations = collectApiJourneyViolations(repoRoot);
+
+        // then
+        // WHY 対象を確かめてから違反 0 件を見る: 列挙が壊れて 0 件になると、違反も 0 件になり常に緑になる。
+        expect(apiJourneyTargets).toEqual(
+          expect.arrayContaining([
+            "apps/backend/spec/journey/todo-lifecycle.feature",
+            "apps/backend/spec/journey/todo-lifecycle.api-journey.test.ts",
+          ]),
+        );
+        expect(violations).toEqual([]);
+      },
+    );
   });
 });

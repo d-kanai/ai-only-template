@@ -113,6 +113,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-10-01 | 人が読む backend の仕様（API 仕様・API ジャーニー）を apps/backend/spec/ の下の api/ と journey/ にまとめる | 採用 | [20261001-backend-spec-directory.md](quality/20261001-backend-spec-directory.md) |
 | 2026-10-02 | E2E を API ジャーニーと同じ Gherkin の .feature と step のクラスで書き、playwright-bdd で Playwright のランナーのまま実行する | 採用 | [20261002-e2e-in-gherkin-with-playwright-bdd.md](quality/20261002-e2e-in-gherkin-with-playwright-bdd.md) |
 | 2026-10-02 | API ジャーニーの実行で全 API が 1 回は呼ばれることを API 網羅率として測り、100% を CI のゲートにする | 採用 | [20261002-api-journey-coverage-gate.md](quality/20261002-api-journey-coverage-gate.md) |
+| 2026-10-02 | ルール検査テストを .feature（`*` の箇条書き）と step の実装に分ける | 採用 | [20261002-rule-tests-in-feature.md](quality/20261002-rule-tests-in-feature.md) |
 
 ### workflow/
 開発プロセス・環境・AI エージェントの運用
