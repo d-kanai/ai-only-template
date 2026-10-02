@@ -52,7 +52,8 @@ paths:
 | カテゴリ | WHAT | WHY | 強制 |
 | --- | --- | --- | --- |
 | screens | `screens/<name>-screen/`: 1 画面 = 1 ディレクトリ。`<name>-screen.tsx`（見た目。先頭に `"use client"`。hook の戻り値を描くだけで、形は下の「画面の骨組み」）と `<name>-screen.hook.ts`（状態・イベント・データ取得。`use<Name>Screen`）と `<name>-screen.messages.ts`（辞書）と、それぞれのテストを隣に置く。ほかのファイル（部品の別ファイル・入れ子のディレクトリ）は置かない（規則 `screen-outline-placement`） | ロジックは `renderHook` で、見た目は操作ベースで小さくテストでき、画面を消すときはディレクトリごと消せる | `rule-tests/screen-outline.test.ts` の `screen-outline-placement` |
-| screens | `<name>-screen.tsx` の先頭に `"use client"` を書き、hook の戻り値を描くだけにする | `screen-outline-placement` はファイルの置き方だけを見る | レビュー |
+| screens | `<name>-screen.tsx` の最初の文は `"use client"` のディレクティブ（前のコメントは可。Issue #332） | Next の文書: import より前、ファイルの先頭に置く（`node_modules/next/dist/docs/01-app/03-api-reference/01-directives/index.md`） | `rule-tests/screen-outline.test.ts` の `screen-outline-use-client` |
+| screens | `<name>-screen.tsx` は hook の戻り値を描くだけにする | `screen-outline-placement` はファイルの置き方だけを見る | レビュー |
 | components | `components/`: feature 内で画面をまたぐ部品（atom を組み合わせて描く。今あるのは `todo-item.tsx`）。1 つの画面だけで使う部品は画面のファイルの中に export せずに置く（下の「画面の骨組み」） | - | レビュー |
 | hooks | `hooks/`: 画面をまたぐ hook | - | 説明 |
 | api | `api/`: `/api/...` を fetch する薄いラッパー。feature の中で backend を参照してよいのはここだけ | - | `rule-tests/architecture.test.ts` の `screen-to-backend` |

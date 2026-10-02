@@ -40,6 +40,9 @@ Feature: ディレクトリ構成ルール（依存の向き）
     * apps/backend と apps/shared の非テストコードは日本語のリテラルを持たない（エラーは ErrorKey と params で表し、運用者向けの文言は英語。テストは除く。例外なし）
     * apps/backend の presentation と shared/http の api ファイル（<名前>.api.ts）のクラスの handle は ProblemResponse.wrap(...) の呼び出しで初期化する（try / catch の手書き・素の async・別の関数で包むのは違反。テストは除く）
     * handle を ProblemResponse.wrap で包む規則は、本物の api ファイル 6 本を対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）
+    * apps/backend の presentation と shared/http の api ファイル（<名前>.api.ts）のクラスの handle の中に try / catch を書かない（エラーの変換は ProblemResponse.wrap に任せる。try / finally は可。テストは除く）
+    * ProblemResponse.from を書いてよいのは apps/backend/shared/http/problem.ts だけ（api は ProblemResponse.wrap 経由で使う。apps/backend の本番コードが対象で、テストは除く）
+    * ProblemResponse.from の規則は、本物の api ファイル 6 本を対象にし、problem.ts とテストは対象にしない（列挙が壊れて素通りするのを防ぐ）
     * apps/backend と apps/shared の本番コードとテストの補助（apps/backend の test-support/・spec/ の support.ts、apps/e2e の <名前>.spec.<名前> 以外）と apps/frontend_customer の features/・shared/・test-support/ の React 以外のモジュール（<名前>.tsx・<名前>.jsx・<名前>.hook.<名前> 以外）はファイルの最上位に関数を置かない（テストと E2E の <名前>.spec.<名前>、frontend の app/ と直下のファイルは除く。function 宣言・関数を入れた変数・export default の関数は違反。クラスのメソッド・クラスフィールドのアロー関数・メソッドの中の関数は可）
     * 規則 class-based の対象のファイルでは、インスタンスのメンバー（コンストラクタ・static でないメソッド・フィールド・アクセサ）を持つクラスに static のメンバーを置かない（自分のクラスか Promise<自分のクラス> を返す static のファクトリは可。static だけのクラスは対象外）
     * 最上位に関数を置かない規則は、apps/backend の本番コード（層・expose・drizzle.config.ts）・apps/shared の本番コード・テストの補助（test-support/・spec/ の support.ts・apps/e2e/ の spec 以外）・frontend の React 以外のモジュール（features/・shared/ の .ts）を対象にし、テスト・E2E の .spec.ts・リポジトリ直下・frontend の .tsx・.hook.ts・app/・直下のファイルは対象にしない（列挙が壊れて素通りするのを防ぐ）
@@ -106,6 +109,12 @@ Feature: ディレクトリ構成ルール（依存の向き）
     * 許可例（PROBLEM_RESPONSE_EXAMPLES.allowed）はどれも違反にならない
   Scenario: ProblemResponse.wrap で包んでいない handle の抽出（findUnwrappedHandles）
     * 包んでいない handle ごとに、メンバーの書き出しの行番号を返す（包んだ handle・ほかの名前のメンバーは返さない）
+  Scenario: handle の中に try / catch を書かない規則の判定（handle-without-try-catch）
+    * 違反例（HANDLE_TRY_CATCH_EXAMPLES.violating）はすべて違反になる
+    * 許可例（HANDLE_TRY_CATCH_EXAMPLES.allowed）はどれも違反にならない
+  Scenario: ProblemResponse.from を problem.ts だけに書く規則の判定（problem-response-from-only-in-problem）
+    * 違反例（PROBLEM_RESPONSE_FROM_EXAMPLES.violating）はすべて違反になる
+    * 許可例（PROBLEM_RESPONSE_FROM_EXAMPLES.allowed）はどれも違反にならない
   Scenario: backend と apps/shared の本番コードとテストの補助、frontend の React 以外のモジュールの最上位に関数を置かない規則の判定（class-based）
     * 違反例（CLASS_BASED_EXAMPLES.violating）はすべて違反になる
     * 許可例（CLASS_BASED_EXAMPLES.allowed）はどれも違反にならない

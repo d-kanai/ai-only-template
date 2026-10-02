@@ -19,6 +19,7 @@ import {
   isEnumDeclaration,
   isExportAssignment,
   isExportDeclaration,
+  isExpressionStatement,
   isFunctionDeclaration,
   isIdentifier,
   isImportDeclaration,
@@ -68,8 +69,8 @@ import { casesByName } from "./case-table";
 //     テストの `*.test.*` は除く）は、screens/<name>-screen/ の直下の `<name>-screen.tsx`（画面）・`<name>-screen.hook.ts`（hook）・
 //     `<name>-screen.messages.ts`（辞書）だけ。screens の直下のファイル・`-screen` で終わらないディレクトリ・名前のそろって
 //     いないファイル・入れ子・拡張子の違うファイル（`.hook.tsx` など）は違反。
-//     WHY: 下の 4 規則は名前のそろった画面のファイルだけを対象に列挙するので、`screens/settings/settings.tsx` のような
-//     名前のそろっていない画面は列挙されず、4 規則をすべてすり抜ける（reviewer の指摘）。置き方を止めて、画面を必ず列挙に載せる。
+//     WHY: 下の 5 規則は名前のそろった画面のファイルだけを対象に列挙するので、`screens/settings/settings.tsx` のような
+//     名前のそろっていない画面は列挙されず、5 規則をすべてすり抜ける（reviewer の指摘）。置き方を止めて、画面を必ず列挙に載せる。
 //     部品を別ファイルに切り出すのも違反（部品は画面のファイルの中の private か、features/<f>/components/ に置く）。
 //   - screen-outline-single-export: 画面のファイルが export する値は、画面の関数 1 つ（`export function <Name>Screen`。
 //     <Name> はファイル名の PascalCase）だけ。型（type / interface・export type）は数えない。
@@ -86,6 +87,20 @@ import { casesByName } from "./case-table";
 //   - screen-outline-single-return: 画面の関数の return は 1 つ（中で定義した関数の return は数えない）。0 個も違反。
 //     WHY: 早期 return（`if (isLoading) return <Text />`）で骨組みを分けると、状態ごとに別のレイアウトになり、最初の関数を
 //     見ても画面の形が 1 つに決まらない。
+//   - screen-outline-use-client（Issue #332）: 画面のファイルの最初の文は "use client" のディレクティブ（`"use client";` か
+//     `'use client';`。前にコメントがあってもよい）。無い・import や別のディレクティブ（"use strict"）の後・バッククォート・
+//     かっこで包んだもの・式の一部（`"use client".trim()`）・エスケープを含むもの（`"use\u0020client"`）は違反。
+//     WHY: 画面は hook（useState・useEffect）を使うので Client Component でなければならない（.claude/rules/code/frontend.md の
+//     「screens」）。"use client" が無いと、app/ の page.tsx（Server Component）から import したときに Server Component として
+//     扱われ、hook の呼び出しでビルド・描画が失敗する。レビューでは書き忘れを見落としうる。
+//     WHY 最初の文（コメントの後は可）: Next 16.3.6 の文書（node_modules/next/dist/docs/01-app/03-api-reference/01-directives/
+//     index.md）は「must appear at the top of a file, before any imports」とする。コメントは文ではない（構文木の statements に
+//     入らない）ので、前にあってもディレクティブの位置は変わらない。
+//     WHY ソースの文字を比べる（文字列の値を比べない）: ディレクティブは引用符の中の文字がそのまま "use client" であるものだけ。
+//     値で比べると `("use client")`（式）や `"use\u0020client"`（値は同じ）を通してしまう。エスケープを含むものを Next が
+//     ディレクティブとみなすかは未確認で、多く検出する方向に倒す。
+//     WHY 別のディレクティブの後を違反にする（JavaScript の仕様ではディレクティブの並びの 2 つ目以降もディレクティブ）: 画面に
+//     ほかのディレクティブは要らず、「最初の文」の 1 つの形にそろえる（厳しい方向）。
 // 対象: apps/frontend_customer/features/<f>/screens/<name>-screen/<name>-screen.tsx（ディレクトリとファイルの名前がそろったもの）。
 //   0 件なら実ファイルのテストで失敗させる（0 件なら違反も 0 件で常に緑になるため）。置き方の規則は features/<f>/screens/ の
 //   下のテスト以外のコードすべてを見る。
@@ -100,7 +115,8 @@ type RuleId =
   | "screen-outline-single-export"
   | "screen-outline-layout-root"
   | "screen-outline-layout-children"
-  | "screen-outline-single-return";
+  | "screen-outline-single-return"
+  | "screen-outline-use-client";
 
 // 最上位の宣言 1 つ（名前と、行を出す節）。
 type Declared = { node: Node; name: string };
@@ -136,7 +152,7 @@ class ScreenOutlineRule {
 
   // screen-outline-placement: 置き方を検査するファイルのうち、置いてよい形でないもの（渡された順）。
   // WHY: 画面のファイルの列挙（SCREEN_FILE）は名前のそろったものだけを拾うので、`screens/settings/settings.tsx` のように
-  //   名前のそろっていない画面は列挙されず、骨組みの 4 規則をすべてすり抜ける。置き方で止めて、列挙から漏れる画面を無くす。
+  //   名前のそろっていない画面は列挙されず、骨組みの 5 規則をすべてすり抜ける。置き方で止めて、列挙から漏れる画面を無くす。
   static findPlacementViolations(paths: readonly string[]): string[] {
     return paths.filter(
       (path) =>
@@ -484,6 +500,26 @@ class ScreenOutlineRule {
     });
   }
 
+  static readonly USE_CLIENT_DIRECTIVES = ['"use client"', "'use client'"];
+
+  // screen-outline-use-client: 最初の文が "use client" のディレクティブでなければ「行 最初の文が "use client" でない」
+  //   （行は最初の文の行。文が無ければ 1）。
+  static findUseClientViolations(sourceFile: SourceFile): string[] {
+    const first = sourceFile.statements[0];
+    if (
+      first !== undefined &&
+      isExpressionStatement(first) &&
+      ScreenOutlineRule.USE_CLIENT_DIRECTIVES.includes(
+        ScreenOutlineRule.textOf(sourceFile, first.expression),
+      )
+    ) {
+      return [];
+    }
+    const line =
+      first === undefined ? 1 : ScreenOutlineRule.lineOf(sourceFile, first);
+    return [`${line} 最初の文が "use client" でない`];
+  }
+
   // files（リポジトリ相対のパス → ソース）を 1 回の tsgo の起動でまとめて構文解析する。
   // WHY 仮想のファイルシステムに置く・まとめて解析する・見つからなければ例外: design-system.test.ts の parse と同じ
   //   （tsconfig の include や node_modules に左右されない、tsgo の起動は 1 回 100ms ほど、黙って飛ばすと素通りする）。
@@ -597,6 +633,10 @@ class ScreenOutlineRule {
         ScreenOutlineRule.findSingleReturnViolations,
         "screen-outline-single-return",
       ),
+      "screen-outline-use-client": linesIn(
+        ScreenOutlineRule.findUseClientViolations,
+        "screen-outline-use-client",
+      ),
     };
   }
 }
@@ -621,6 +661,8 @@ function findIn(
 
 // 違反の無い画面のファイル（骨組みの例）。
 const OUTLINED_SCREEN = lines(
+  '"use client";',
+  "",
   LAYOUT_IMPORT,
   'import { Text } from "@/shared/ui/atoms/text";',
   "export type XScreenProps = { id: string };",
@@ -1297,6 +1339,78 @@ describeFeature(feature, ({ Scenario }) => {
     );
   });
 
+  Scenario('最初の文の "use client"（findUseClientViolations）', ({ And }) => {
+    And(
+      'must pass: 最初の文が "use client" のディレクティブなら、一重引用符でも、前にコメントがあってもよい',
+      () => {
+        // given
+        const screen = "export function XScreen() { return null; }";
+        const cases = [
+          ["骨組み", OUTLINED_SCREEN],
+          ["二重引用符", lines('"use client";', screen)],
+          ["一重引用符", lines("'use client';", screen)],
+          ["セミコロンなし", lines('"use client"', LAYOUT_IMPORT, screen)],
+          ["前に行コメント", lines("// 画面", '"use client";', screen)],
+          ["前にブロックコメント", lines('/* 画面 */ "use client";', screen)],
+        ] as const;
+
+        // when
+        const result = findIn(cases, ScreenOutlineRule.findUseClientViolations);
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => []));
+      },
+    );
+
+    And(
+      'must reject: "use client" が無い・import の後・ほかのディレクティブの後・バッククォート・かっこで包んだもの・式の一部・別の文字列・空のファイルは違反',
+      () => {
+        // given
+        const screen = "export function XScreen() { return null; }";
+        const cases = [
+          ["無い", lines(LAYOUT_IMPORT, screen)],
+          ["import の後", lines(LAYOUT_IMPORT, '"use client";', screen)],
+          [
+            "ほかのディレクティブの後",
+            lines('"use strict";', '"use client";', screen),
+          ],
+          ["バッククォート", lines("`use client`;", screen)],
+          ["かっこで包んだもの", lines('("use client");', screen)],
+          ["式の一部", lines('"use client".trim();', screen)],
+          ["use server", lines('"use server";', screen)],
+          ["大文字", lines('"Use Client";', screen)],
+          ["エスケープ", lines('"use\\u0020client";', screen)],
+          ["コメントの中だけ", lines('// "use client";', screen)],
+          ["空のファイル", ""],
+        ] as const;
+
+        // when
+        const result = findIn(cases, ScreenOutlineRule.findUseClientViolations);
+
+        // then
+        const notFirst = '最初の文が "use client" でない';
+        expect(result).toEqual(
+          casesByName(cases, ([name]) => {
+            const expected: Record<string, string[]> = {
+              無い: [`1 ${notFirst}`],
+              "import の後": [`1 ${notFirst}`],
+              ほかのディレクティブの後: [`1 ${notFirst}`],
+              バッククォート: [`1 ${notFirst}`],
+              かっこで包んだもの: [`1 ${notFirst}`],
+              式の一部: [`1 ${notFirst}`],
+              "use server": [`1 ${notFirst}`],
+              大文字: [`1 ${notFirst}`],
+              エスケープ: [`1 ${notFirst}`],
+              コメントの中だけ: [`2 ${notFirst}`],
+              空のファイル: [`1 ${notFirst}`],
+            };
+            return expected[name];
+          }),
+        );
+      },
+    );
+  });
+
   Scenario("列挙と検査（fixture）", ({ And }) => {
     And(
       "列挙は features の画面のファイルだけで、違反の無いツリーは違反 0 件",
@@ -1331,6 +1445,7 @@ describeFeature(feature, ({ Scenario }) => {
           "screen-outline-layout-root": [],
           "screen-outline-layout-children": [],
           "screen-outline-single-return": [],
+          "screen-outline-use-client": [],
         });
       },
     );
@@ -1385,6 +1500,9 @@ describeFeature(feature, ({ Scenario }) => {
             `screen-outline-single-return: ${y}:3`,
             `screen-outline-single-return: ${y}:4`,
           ],
+          "screen-outline-use-client": [
+            `screen-outline-use-client: ${y}:1 最初の文が "use client" でない`,
+          ],
         });
       },
     );
@@ -1407,6 +1525,7 @@ describeFeature(feature, ({ Scenario }) => {
           "screen-outline-layout-root": [],
           "screen-outline-layout-children": [],
           "screen-outline-single-return": [],
+          "screen-outline-use-client": [],
         });
       },
     );
@@ -1484,5 +1603,18 @@ describeFeature(feature, ({ Scenario }) => {
       // then
       expect(result).toEqual([]);
     });
+
+    And(
+      'screen-outline-use-client: 画面のファイルの最初の文は "use client" のディレクティブ',
+      () => {
+        // given: Scenario の冒頭で collectViolations(repoRoot) 済み（実ファイル）
+
+        // when
+        const result = violations["screen-outline-use-client"];
+
+        // then
+        expect(result).toEqual([]);
+      },
+    );
   });
 });

@@ -55,11 +55,26 @@ import { casesByName } from "./case-table";
 //       runner の run が渡した tx で Repository が呼ばれることを確かめる）。`const { run } = this.transactions` のような分割代入・
 //       別名の変数（`const t = this.transactions; t.run(…)`）は見逃さず違反と数える（安全側）。本体の範囲は括弧の対応で決めるので、
 //       文字列・正規表現の中の `{` `}` があるとずれる。
+// query の規則（Issue #332。.claude/rules/code/backend.md の application の「読むだけは query」「query はトランザクションを張らない」）:
+//   - query-without-writes: *.query.ts で、トランザクションの `.run(` と Repository の書き込み `.insert(` / `.update(` / `.delete(` を
+//     呼ぶ（`.` と名前と `(` の間の空白・改行、型引数 `.run<T>(`、`?.` は可）。行は名前の行（呼び出しごと）。command（*.command.ts）は対象外。
+//     WHY: query は読むだけ（副作用なし）で、状態を変えるなら command に分ける。query がトランザクションを張ると、command の
+//       トランザクションの範囲の決め方（ADR docs/adr/architecture/20260930-transaction-from-application.md）が query にも広がり、
+//       書き込みが混ざると「ファイル名で副作用の有無を見分ける」が崩れる。
+//     WHY 受け手を問わない（`this.repository.` に限らない）: Repository を別名の変数に入れても書き込みは書き込み。受け手を絞ると
+//       `const r = this.repository; r.delete(…)` を見逃す。
+//     限界: 名前だけを見るので、Repository でない `Map#delete(`・`Set#delete(`・`URLSearchParams#delete(` なども違反と数える
+//       （安全側。query の中で使う書き方は今は無い）。分割代入した関数（`const { insert } = repo; insert(x)`）・ブラケット
+//       （`repo["delete"](x)`）・ほかの名前の書き込み（`save(` / `remove(` / `upsert(`、Repository に書き込みのメソッドを足したとき）・
+//       `findByIdForUpdate`（行ロック。トランザクションの tx が要るので run の無い query では書けない）・Repository の外へ書き込みを
+//       逃がす関数の呼び出しは見ない。行の `//` 以降を落としてから探すので、文字列の中の `//` の後ろは見逃し、文字列の中の
+//       `.run(` は違反と数える。ブロックコメントの中も数える（安全側）。
 
 type RuleId =
   | "no-optional-input-field"
   | "no-undefined-branch-on-input"
-  | "command-runs-in-transaction";
+  | "command-runs-in-transaction"
+  | "query-without-writes";
 
 type UseCaseViolation = { rule: RuleId; line: number };
 
@@ -189,6 +204,19 @@ function findCommandTransactionViolations(text: string): UseCaseViolation[] {
   });
 }
 
+// *.query.ts のトランザクションの run と Repository の書き込み（insert / update / delete）の呼び出し。行は名前の行。
+function findQueryWriteViolations(text: string): UseCaseViolation[] {
+  const code = stripLineComments(text);
+  // WHY 名前の直後に `\s*(?:<[^>(]*>)?\s*\(` を要求する: `.runner(`・`.deleteLater(`・`.updatedAt` のような名前の一部が一致する
+  //   別のものを外し、型引数付きの `.run<X>(` は拾う。`.` の直後を名前にするので `rerun(` も外れる。
+  return [
+    ...code.matchAll(/\.\s*(run|insert|update|delete)\s*(?:<[^>(]*>)?\s*\(/g),
+  ].map((call) => ({
+    rule: "query-without-writes" as const,
+    line: lineOf(code, call.index + call[0].indexOf(call[1] ?? "")),
+  }));
+}
+
 // 検査の対象: apps/backend/features/<f>/internal/application/ の直下の *.command.ts / *.query.ts（テストは除く）。
 //   リポジトリ相対の / 区切りで、名前順。
 // WHY root を引数で受け取る: 本番（リポジトリ直下）と fixture（一時ディレクトリ）で同じ列挙を通すため。
@@ -223,6 +251,7 @@ function collectUseCaseViolations(root: string): string[] {
       ...(path.endsWith(".command.ts")
         ? findCommandTransactionViolations(text)
         : []),
+      ...(path.endsWith(".query.ts") ? findQueryWriteViolations(text) : []),
     ].sort((a, b) => a.line - b.line);
     return violations.map(
       ({ rule, line }) =>
@@ -627,12 +656,151 @@ describeFeature(feature, ({ Scenario }) => {
     },
   );
 
+  Scenario(
+    "query の書き込みの判定（findQueryWriteViolations）: must pass",
+    ({ And }) => {
+      And(
+        "読むだけの query は違反なし（findById・findAll・名前の一部が run / insert / update / delete なだけの別のもの・コメントの中など）",
+        () => {
+          // given
+          const cases: [string, string][] = [
+            [
+              "Repository の読み込みだけ（findById・findAll）",
+              source(
+                "export class GetXQuery {",
+                "  constructor(private readonly repository: XRepository) {}",
+                "  async execute(id: string): Promise<X> {",
+                "    return RequiredX.of(await this.repository.findById(id), id);",
+                "  }",
+                "  list(): Promise<X[]> {",
+                "    return this.repository.findAll();",
+                "  }",
+                "}",
+              ),
+            ],
+            [
+              "名前の一部が run / insert / update / delete なだけの別のもの（.runner・.rerun・.inserted・.updatedAt・.deleteLater・.insertedAt）",
+              source(
+                "const a = this.runner(x);",
+                "const b = job.rerun(x);",
+                "const c = row.inserted;",
+                "const d = todo.updatedAt;",
+                "const e = queue.deleteLater(x);",
+                "const f = sortBy(rows, (r) => r.insertedAt);",
+              ),
+            ],
+            [
+              "受け手の無い関数の呼び出し（run( / update( は . の後ではない）",
+              source("const a = run(x);", "const b = update(x);"),
+            ],
+            [
+              "コメントの中の run / insert / update / delete は数えない",
+              source(
+                "// query は this.transactions.run( を呼ばない。",
+                "// this.repository.insert(todo, tx) は command で行う。",
+                "return this.repository.findAll(); // .delete( しない",
+              ),
+            ],
+          ];
+
+          // when
+          const violations = casesByName(cases, ([, text]) =>
+            findQueryWriteViolations(text),
+          );
+
+          // then
+          expect(violations).toEqual(casesByName(cases, () => []));
+        },
+      );
+    },
+  );
+
+  Scenario(
+    "query の書き込みの判定（findQueryWriteViolations）: must reject",
+    ({ And }) => {
+      And(
+        "query のトランザクションの run と Repository の insert / update / delete の呼び出しは、規則と行で違反になる（改行した chain・空白・型引数・optional chaining など）",
+        () => {
+          // given
+          const cases: [string, string, UseCaseViolation[]][] = [
+            [
+              "トランザクションを張る（this.transactions.run）",
+              source(
+                "export class GetXQuery {",
+                "  async execute(id: string): Promise<X> {",
+                "    return this.transactions.run(async (tx) => {",
+                "      return RequiredX.of(await this.repository.findByIdForUpdate(id, tx), id);",
+                "    });",
+                "  }",
+                "}",
+              ),
+              [{ rule: "query-without-writes", line: 3 }],
+            ],
+            [
+              "Repository の insert / update / delete（各 1 件）",
+              source(
+                "await this.repository.insert(todo, tx);",
+                "await this.repository.update(todo, tx);",
+                "await this.repository.delete(id, tx);",
+              ),
+              [1, 2, 3].map((line) => ({
+                rule: "query-without-writes" as const,
+                line,
+              })),
+            ],
+            [
+              "改行した chain（名前の行を報告する）・. と名前と ( の間の空白",
+              source(
+                "await this.repository",
+                "  .delete(id, tx);",
+                "await this.repository . update ( todo, tx );",
+              ),
+              [
+                { rule: "query-without-writes", line: 2 },
+                { rule: "query-without-writes", line: 3 },
+              ],
+            ],
+            [
+              "型引数（.run<T>）・optional chaining（?.insert）・別名の受け手",
+              source(
+                "const x = await this.transactions.run<X>(async (tx) => read(tx));",
+                "await this.repository?.insert(todo, tx);",
+                "const r = this.repository;",
+                "await r.delete(id, tx);",
+              ),
+              [
+                { rule: "query-without-writes", line: 1 },
+                { rule: "query-without-writes", line: 2 },
+                { rule: "query-without-writes", line: 4 },
+              ],
+            ],
+            [
+              "コード部分の後ろのコメントは落とすが、コード部分の書き込みは数える",
+              source("await this.repository.delete(id, tx); // WHY: 掃除"),
+              [{ rule: "query-without-writes", line: 1 }],
+            ],
+          ];
+
+          // when
+          const violations = casesByName(cases, ([, text]) =>
+            findQueryWriteViolations(text),
+          );
+
+          // then
+          expect(violations).toEqual(
+            casesByName(cases, ([, , expected]) => expected),
+          );
+        },
+      );
+    },
+  );
+
   // --- 列挙 → 読み取り → 判定を通した fixture テスト ---
   // WHY: 判定が正しくても、対象の列挙（application/*.command.ts・*.query.ts の見つけ方）が漏れれば見逃す。一時ディレクトリに
   //   架空のツリーを置き、本番と同じ collectUseCaseViolations に通して、違反の集合を丸ごと比較する（見逃しも余分な検出も失敗にする）。
   Scenario("command / query の列挙と検査（fixture）", ({ And }) => {
     And(
-      "features/<f>/internal/application/ の .command.ts・.query.ts だけを対象にし、違反を「規則: パス:行: 行の内容」で返す",
+      "features/<f>/internal/application/ の .command.ts・.query.ts だけを対象にし、query の書き込みの規則は .query.ts だけに当て、違反を「規則: パス:行: 行の内容」で返す",
       () => {
         // given
         const root = fixture({
@@ -676,7 +844,18 @@ describeFeature(feature, ({ Scenario }) => {
               "  return this.repository.findAll();",
               "}",
             ),
-          // 対象外: command のテスト、application の command / query 以外、入れ子、domain・presentation、shared、frontend。
+          // Issue #332: 書き込む query（トランザクションを張り、Repository の insert を呼ぶ）。
+          "apps/backend/features/x/internal/application/save-x.query.ts":
+            source(
+              "async execute(id: string) {",
+              "  return this.transactions.run(async (tx) => {",
+              "    await this.repository.insert(x, tx);",
+              "  });",
+              "}",
+            ),
+          // 対象外: query のテスト、command のテスト、application の command / query 以外、入れ子、domain・presentation、shared、frontend。
+          "apps/backend/features/x/internal/application/save-x.query.test.ts":
+            source("await this.repository.delete(id, tx);"),
           "apps/backend/features/x/internal/application/update-x.command.test.ts":
             partialUpdate,
           "apps/backend/features/x/internal/application/helper.ts":
@@ -705,10 +884,13 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/backend/features/x/internal/application/delete-x.command.ts",
             "apps/backend/features/x/internal/application/list-x.query.ts",
             "apps/backend/features/x/internal/application/rename-x.command.ts",
+            "apps/backend/features/x/internal/application/save-x.query.ts",
             "apps/backend/features/x/internal/application/update-x.command.ts",
           ],
           violations: [
             "command-runs-in-transaction: apps/backend/features/x/internal/application/delete-x.command.ts:2: async execute(id: string): Promise<void> {",
+            "query-without-writes: apps/backend/features/x/internal/application/save-x.query.ts:2: return this.transactions.run(async (tx) => {",
+            "query-without-writes: apps/backend/features/x/internal/application/save-x.query.ts:3: await this.repository.insert(x, tx);",
             "no-optional-input-field: apps/backend/features/x/internal/application/update-x.command.ts:3: title?: string;",
             "no-undefined-branch-on-input: apps/backend/features/x/internal/application/update-x.command.ts:5: if (input.title !== undefined) current = current.rename(input.title);",
           ],
@@ -736,7 +918,7 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("1 ユースケース = 1 command（実ファイル）", ({ And }) => {
     And(
-      "command / query の Input に任意の項目が無く、input の項目の有無で分岐せず、command の execute はトランザクション（runner の run）で包む",
+      "command / query の Input に任意の項目が無く、input の項目の有無で分岐せず、command の execute はトランザクション（runner の run）で包み、query は書き込まない",
       () => {
         // given: 実ファイル（repoRoot）
         // when

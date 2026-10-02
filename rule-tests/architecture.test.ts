@@ -22,6 +22,7 @@ import {
   isCallExpression,
   isClassLikeDeclaration,
   isClassStaticBlockDeclaration,
+  isElementAccessExpression,
   isExportAssignment,
   isFunctionDeclaration,
   isFunctionExpression,
@@ -44,6 +45,7 @@ import {
   isSetAccessorDeclaration,
   isStringLiteral,
   isTemplateExpression,
+  isTryStatement,
   isTypeAssertion,
   isTypeReferenceNode,
   isVariableStatement,
@@ -2055,6 +2057,155 @@ function findProblemResponseViolations(root: string): string[] {
   );
 }
 
+// --- api の handle の中に try / catch を書かない（規則 handle-without-try-catch。Issue #332） ---
+// presentation-with-problem-response と同じ api ファイルのクラスの handle という名前のメンバー（プロパティ・メソッド・getter・
+//   setter。名前は識別子と文字列リテラル。static も、クラス式も、入れ子の関数の中のクラスも）の中に、catch の付いた try 文
+//   （try / catch・try / catch / finally）を書かない。行は try 文の書き出し。
+// WHY 規則にする: 例外を Problem Details に変える場所を ProblemResponse.wrap の 1 か所にした（Issue #141）。handle の中で
+//   catch すると、wrap の変換（DomainError → 400 / 404、想定外の例外 → ログと 500）を通らずに独自の応答を返すか、例外を
+//   握りつぶして成功の応答にしてしまう。wrap で包んでいても中で catch すれば包み方の規則は通るので、別の規則で止める
+//   （.claude/rules/code/backend.md の handle）。
+// WHY catch の付いた try だけ（try / finally は許す）: finally は例外を捕まえずに wrap へ伝えるので、変換の場所は変わらない。
+// WHY handle の中で定義した関数の中も見る: 中の関数で catch しても、handle の応答が wrap を通らないことは同じ。
+// 対象: presentation-with-problem-response と同じ（*.api.<拡張子>、テストは除く）。
+// 限界（見逃す方向）: handle 以外のメンバー（handle から呼ぶ private のメソッド）・クラスの外の関数の中の try / catch、
+//   Promise の .catch(...)・.then(_, onRejected) は見ない（レビューで見る）。
+const HANDLE_WITHOUT_TRY_CATCH = {
+  id: "handle-without-try-catch",
+  name: "apps/backend の presentation と shared/http の api ファイル（*.api.ts）のクラスの handle の中に try / catch を書かない（エラーの変換は ProblemResponse.wrap に任せる。try / finally は可。テストは除く）",
+  appliesTo: PRESENTATION_WITH_PROBLEM_RESPONSE.appliesTo,
+};
+
+// 構文木の中のクラス（宣言と式。入れ子も）の handle の中の、catch の付いた try 文の行番号（書かれた順。重複なし）。
+// WHY 節の集合で重複を除く: handle の中のクラスの handle は、外の handle の走査と中のクラスの走査の両方で見つかる。
+function findHandleTryCatches(sourceFile: SourceFile): number[] {
+  const found = new Set<Node>();
+  const collectTryCatches = (node: Node): void => {
+    if (isTryStatement(node) && node.catchClause !== undefined) {
+      found.add(node);
+    }
+    node.forEachChild(collectTryCatches);
+  };
+  const visit = (node: Node): void => {
+    if (isClassLikeDeclaration(node)) {
+      for (const member of node.members) {
+        if (classMemberNameOf(member) === HANDLE_MEMBER) {
+          collectTryCatches(member);
+        }
+      }
+    }
+    node.forEachChild(visit);
+  };
+  visit(sourceFile);
+  return [...found]
+    .map((node) => lineOf(sourceFile, node))
+    .sort((a, b) => a - b);
+}
+
+// 「ファイル:行」の一覧。対象のファイルは presentation-with-problem-response と同じ列挙（listProblemResponseCheckedFiles）。
+function findHandleTryCatchViolations(root: string): string[] {
+  const files = listProblemResponseCheckedFiles(root);
+  const sourceFiles = parseSourceFiles(
+    Object.fromEntries(
+      files.map((file) => [file, readFileSync(join(root, file), "utf8")]),
+    ),
+  );
+  return files.flatMap((file) =>
+    findHandleTryCatches(sourceFiles.get(file) as SourceFile).map(
+      (line) => `${file}:${line}`,
+    ),
+  );
+}
+
+// --- ProblemResponse.from を書いてよいのは problem.ts だけ（規則 problem-response-from-only-in-problem。Issue #332） ---
+// apps/backend の本番コード（テストは除く）で、apps/backend/shared/http/problem.ts 以外のファイルは ProblemResponse.from を
+//   書かない（呼び出し・呼ばない参照・ブラケット ProblemResponse["from"]・名前空間の経由 problem.ProblemResponse.from）。
+//   行は ProblemResponse.from の書き出し。
+// WHY 規則にする: 例外から Problem Details を作るのは ProblemResponse.from で、呼ぶのは各 api の handle を包む
+//   ProblemResponse.wrap だけにした（.claude/rules/code/backend.md の Problem Details）。api などから直接呼ぶと、wrap を
+//   通らない変換（try / catch の手書き、Issue #141 の前の形）が戻る。
+// WHY テストは除く: problem.ts のテスト（problem.test.ts）は from を直接呼んで変換の表を確かめる。テストは本番の応答の経路に
+//   入らない。
+// WHY 名前（ProblemResponse という名前の受け手の from）だけで見る: import 元を確かめない（presentation-with-problem-response と
+//   同じ）。同じ名前の別のクラスの from も違反になる（多く検出する方向）。
+// 対象: apps/backend の下のテスト以外のソース（8 つの拡張子）のうち、problem.ts 以外。
+// 限界（見逃す方向）: 別名で import したクラス（import { ProblemResponse as P } の P.from）、分割代入（const { from } =
+//   ProblemResponse）、変数に入れ直したクラスの from、型の位置（typeof ProblemResponse.from）、apps/backend の外は見ない
+//   （レビューで見る。画面側は ProblemResponse を値で参照できない: feature-api-to-backend が型だけにする）。
+const PROBLEM_RESPONSE_FILE = "apps/backend/shared/http/problem.ts";
+const PROBLEM_RESPONSE_FROM = "from";
+
+const PROBLEM_RESPONSE_FROM_ONLY_IN_PROBLEM = {
+  id: "problem-response-from-only-in-problem",
+  name: "ProblemResponse.from を書いてよいのは apps/backend/shared/http/problem.ts だけ（api は ProblemResponse.wrap 経由で使う。apps/backend の本番コードが対象で、テストは除く）",
+  appliesTo: (file: string) =>
+    isSourceNonTest(file) &&
+    file.startsWith(`${BACKEND_ROOT}/`) &&
+    file !== PROBLEM_RESPONSE_FILE,
+};
+
+// node が ProblemResponse という名前の受け手（識別子か、名前空間などのプロパティアクセスの末尾）か。
+function isProblemResponseReceiver(node: Node): boolean {
+  if (isIdentifier(node)) {
+    return node.text === PROBLEM_RESPONSE_CLASS;
+  }
+  return (
+    isPropertyAccessExpression(node) &&
+    isIdentifier(node.name) &&
+    node.name.text === PROBLEM_RESPONSE_CLASS
+  );
+}
+
+// node が ProblemResponse.from（ブラケットも）か。
+function isProblemResponseFrom(node: Node): boolean {
+  if (isPropertyAccessExpression(node)) {
+    return (
+      isIdentifier(node.name) &&
+      node.name.text === PROBLEM_RESPONSE_FROM &&
+      isProblemResponseReceiver(node.expression)
+    );
+  }
+  return (
+    isElementAccessExpression(node) &&
+    literalTextOf(node.argumentExpression) === PROBLEM_RESPONSE_FROM &&
+    isProblemResponseReceiver(node.expression)
+  );
+}
+
+// 構文木の中の ProblemResponse.from の行番号（書かれた順）。
+function findProblemResponseFroms(sourceFile: SourceFile): number[] {
+  const found: number[] = [];
+  const visit = (node: Node): void => {
+    if (isProblemResponseFrom(node)) {
+      found.push(lineOf(sourceFile, node));
+    }
+    node.forEachChild(visit);
+  };
+  visit(sourceFile);
+  return found;
+}
+
+function listProblemResponseFromCheckedFiles(root: string): string[] {
+  return listSourceFiles(root, BACKEND_ROOT).filter(
+    PROBLEM_RESPONSE_FROM_ONLY_IN_PROBLEM.appliesTo,
+  );
+}
+
+// 「ファイル:行」の一覧。
+function findProblemResponseFromViolations(root: string): string[] {
+  const files = listProblemResponseFromCheckedFiles(root);
+  const sourceFiles = parseSourceFiles(
+    Object.fromEntries(
+      files.map((file) => [file, readFileSync(join(root, file), "utf8")]),
+    ),
+  );
+  return files.flatMap((file) =>
+    findProblemResponseFroms(sourceFiles.get(file) as SourceFile).map(
+      (line) => `${file}:${line}`,
+    ),
+  );
+}
+
 // --- backend と apps/shared の本番コードとテストの補助、frontend の React 以外のモジュールはクラスを基本にする（規則 class-based。Issue #262） ---
 // apps/backend と apps/shared の本番コード、テストの補助（apps/backend/test-support/・apps/backend/spec/ の support.ts・apps/e2e/ の
 //   spec 以外）は、ファイルの最上位（モジュールの直下と namespace の中）に関数を置かない。補助の関数もクラスのメソッド（状態を
@@ -2549,6 +2700,8 @@ function findViolations(references: Reference[], rule: Rule): string[] {
 //   現在時刻の読み取りも「now-single-source: ファイル:行」で同じく出す。
 //   ハードコードの文言も「frontend-hardcoded-text: ファイル:行」「server-hardcoded-text: ファイル:行」を文言ごとに 1 行で出す。
 //   ProblemResponse.wrap で包んでいない handle も「presentation-with-problem-response: ファイル:行」を handle ごとに 1 行で出す。
+//   handle の中の try / catch も「handle-without-try-catch: ファイル:行」を try 文ごとに、problem.ts の外の ProblemResponse.from も
+//   「problem-response-from-only-in-problem: ファイル:行」を書いたところごとに 1 行で出す（Issue #332）。
 //   backend と apps/shared の本番コードとテストの補助の最上位の関数も「class-based: ファイル:行」を関数ごとに 1 行で出す。
 //   インスタンスで使うクラスの static メンバーも「no-static-in-instance-class: ファイル:行」をメンバーごとに 1 行で出す。
 //   exports の違反は「backend-exports: ...」「shared-exports: ...」の 1 行で出す（findExportsViolations）。
@@ -2585,6 +2738,12 @@ function collectViolations(root: string): string[] {
     ),
     ...findProblemResponseViolations(root).map(
       (line) => `${PRESENTATION_WITH_PROBLEM_RESPONSE.id}: ${line}`,
+    ),
+    ...findHandleTryCatchViolations(root).map(
+      (line) => `${HANDLE_WITHOUT_TRY_CATCH.id}: ${line}`,
+    ),
+    ...findProblemResponseFromViolations(root).map(
+      (line) => `${PROBLEM_RESPONSE_FROM_ONLY_IN_PROBLEM.id}: ${line}`,
     ),
     ...findClassBasedViolations(root).map(
       (line) => `${CLASS_BASED.id}: ${line}`,
@@ -5742,6 +5901,295 @@ function judgeProblemResponses(examples: [string, string][]): boolean[] {
   });
 }
 
+// handle の中に try / catch を書かない規則（HANDLE_WITHOUT_TRY_CATCH。Issue #332）の判定例。[ファイル, ソース] で決まる。
+// WHY 架空のソースで固定する: 実リポジトリの検査は「今の 6 本に try / catch が無い」ことしか確かめず、判定が緩すぎても通る。
+//   違反例は 1 例 1 つの書き方にし、包み方の規則（presentation-with-problem-response）の巻き添えでないことを示すため、
+//   ProblemResponse.wrap で包んだ handle の中の try / catch を中心に置く。許可例には本物の 6 本も入れる（must pass）。
+const WRAPPED_HANDLE_OPEN =
+  "  readonly handle = ProblemResponse.wrap(async (request: Request) => {";
+
+const HANDLE_TRY_CATCH_EXAMPLES: {
+  violating: [file: string, source: string][];
+  allowed: [file: string, source: string][];
+} = {
+  violating: [
+    // 0: 包んだ handle の本体の try / catch（catch で Response を作る）。
+    [
+      API_FILE,
+      lines(
+        IMPORT_WITH_PROBLEM_RESPONSE,
+        "export class XApi {",
+        WRAPPED_HANDLE_OPEN,
+        "    try {",
+        "      return new Response(null);",
+        "    } catch (error) {",
+        "      return new Response(null, { status: 500 });",
+        "    }",
+        "  });",
+        "}",
+      ),
+    ],
+    // 1: 束縛の無い catch と finally の付いた try / catch / finally。
+    [
+      API_FILE,
+      lines(
+        IMPORT_WITH_PROBLEM_RESPONSE,
+        "export class XApi {",
+        WRAPPED_HANDLE_OPEN,
+        "    try { return new Response(null); } catch { return new Response(null); } finally { }",
+        "  });",
+        "}",
+      ),
+    ],
+    // 2: handle の中で定義した関数の中の try / catch。
+    [
+      API_FILE,
+      lines(
+        IMPORT_WITH_PROBLEM_RESPONSE,
+        "export class XApi {",
+        WRAPPED_HANDLE_OPEN,
+        "    const run = async () => { try { return 1; } catch { return 2; } };",
+        "    await run();",
+        "    return new Response(null);",
+        "  });",
+        "}",
+      ),
+    ],
+    // 3: 入れ子のブロック（if の中）の try / catch。
+    [
+      API_FILE,
+      lines(
+        IMPORT_WITH_PROBLEM_RESPONSE,
+        "export class XApi {",
+        WRAPPED_HANDLE_OPEN,
+        "    if (request.method === 'GET') {",
+        "      try { return new Response(null); } catch { return new Response(null); }",
+        "    }",
+        "    return new Response(null);",
+        "  });",
+        "}",
+      ),
+    ],
+    // 4: 包んでいない handle（presentation-with-problem-response にも違反する、Issue #141 の前の形）。
+    [
+      API_FILE,
+      lines(
+        "export class XApi {",
+        "  readonly handle = async (request: Request): Promise<Response> => {",
+        "    try { return new Response(null); } catch (error) { return ProblemResponse.from(error, request); }",
+        "  };",
+        "}",
+      ),
+    ],
+    // 5〜7: メソッドの handle・名前が文字列リテラル・static・クラス式。
+    [
+      API_FILE,
+      "export class XApi { async handle(request: Request) { try { return 1; } catch { return 2; } } }",
+    ],
+    [
+      API_FILE,
+      'export class XApi { "handle" = ProblemResponse.wrap(async () => { try { return 1; } catch { return 2; } }); }',
+    ],
+    [
+      API_FILE,
+      "export const XApi = class { static handle = ProblemResponse.wrap(async () => { try { return 1; } catch { return 2; } }); };",
+    ],
+    // 8〜10: 対象の場所の境界（shared/http とその入れ子、.ts 以外の拡張子）。
+    [
+      "apps/backend/shared/http/x.api.ts",
+      "export class XApi { handle = ProblemResponse.wrap(async () => { try { return 1; } catch { return 2; } }); }",
+    ],
+    [
+      "apps/backend/shared/http/nested/x.api.ts",
+      "export class XApi { handle = ProblemResponse.wrap(async () => { try { return 1; } catch { return 2; } }); }",
+    ],
+    [
+      "apps/backend/features/todo/internal/presentation/x.api.mts",
+      "export class XApi { handle = ProblemResponse.wrap(async () => { try { return 1; } catch { return 2; } }); }",
+    ],
+  ],
+  allowed: [
+    // 本物の 6 本。
+    ...REAL_API_FILES.map((file): [string, string] => [
+      file,
+      readFileSync(join(repoRoot, file), "utf8"),
+    ]),
+    // try / finally（例外を捕まえず、片付けだけをする）。
+    [
+      API_FILE,
+      lines(
+        IMPORT_WITH_PROBLEM_RESPONSE,
+        "export class XApi {",
+        WRAPPED_HANDLE_OPEN,
+        "    try { return new Response(null); } finally { }",
+        "  });",
+        "}",
+      ),
+    ],
+    // handle 以外のメンバー・クラスの外の try / catch（見ない。限界）、コメント・文字列の中の try / catch。
+    [
+      API_FILE,
+      lines(
+        IMPORT_WITH_PROBLEM_RESPONSE,
+        "export class XApi {",
+        "  readonly handle = ProblemResponse.wrap(async (request: Request) => new Response(null));",
+        "  private readonly run = () => { try { return 1; } catch { return 2; } };",
+        "}",
+        "export const x = { handle: () => { try { return 1; } catch { return 2; } } };",
+      ),
+    ],
+    [
+      API_FILE,
+      lines(
+        IMPORT_WITH_PROBLEM_RESPONSE,
+        "export class XApi {",
+        WRAPPED_HANDLE_OPEN,
+        "    // try { } catch { } は書かない",
+        '    const s = "try { } catch { }";',
+        "    return new Response(s);",
+        "  });",
+        "}",
+      ),
+    ],
+    // 対象外のファイル: api ファイルでない presentation のファイル（problem.ts）、テスト、ほかの層、画面側。
+    [
+      "apps/backend/shared/http/problem.ts",
+      "export class X { handle = async () => { try { return 1; } catch { return 2; } }; }",
+    ],
+    [
+      "apps/backend/features/todo/internal/presentation/x.api.test.ts",
+      "export class XApi { handle = async () => { try { return 1; } catch { return 2; } }; }",
+    ],
+    [
+      "apps/backend/features/todo/internal/application/x.api.ts",
+      "export class XApi { handle = async () => { try { return 1; } catch { return 2; } }; }",
+    ],
+    [
+      "apps/frontend_customer/features/todo/api/x.api.ts",
+      "export class XApi { handle = async () => { try { return 1; } catch { return 2; } }; }",
+    ],
+  ],
+};
+
+// ProblemResponse.from を problem.ts だけに書く規則（PROBLEM_RESPONSE_FROM_ONLY_IN_PROBLEM。Issue #332）の判定例。
+// WHY 架空のソースで固定する: 今のリポジトリでは problem.ts の 1 か所だけなので、判定が常に「違反なし」でも実ファイルの検査は通る。
+const PROBLEM_RESPONSE_FROM_EXAMPLES: {
+  violating: [file: string, source: string][];
+  allowed: [file: string, source: string][];
+} = {
+  violating: [
+    // 0: api ファイルの handle の中で呼ぶ（Issue #141 の前の形）。
+    [
+      API_FILE,
+      lines(
+        IMPORT_WITH_PROBLEM_RESPONSE,
+        "export class XApi {",
+        "  readonly handle = ProblemResponse.wrap(async (request: Request) => ProblemResponse.from(new Error(), request));",
+        "}",
+      ),
+    ],
+    // 1: 呼ばずに参照する（変数に入れてから呼ぶ）。
+    [
+      API_FILE,
+      "export class XApi { private readonly toProblem = ProblemResponse.from; }",
+    ],
+    // 2: ブラケット。
+    [
+      API_FILE,
+      'export class XApi { private readonly toProblem = ProblemResponse["from"]; }',
+    ],
+    // 3: 名前空間の import の経由。
+    [
+      API_FILE,
+      lines(
+        'import * as problem from "../../../../shared/http/problem";',
+        "export class XApi { run(e: unknown, r: Request) { return problem.ProblemResponse.from(e, r); } }",
+      ),
+    ],
+    // 4〜8: api ファイル以外の backend の本番コード（ほかの層・shared/http のほかのファイル・名前の似た problem・入れ子・.mts）。
+    [
+      "apps/backend/features/todo/internal/application/x.ts",
+      "export class X { run(e: unknown, r: Request) { return ProblemResponse.from(e, r); } }",
+    ],
+    [
+      "apps/backend/shared/http/json-body.ts",
+      "export class X { run(e: unknown, r: Request) { return ProblemResponse.from(e, r); } }",
+    ],
+    [
+      "apps/backend/shared/http/problem-x.ts",
+      "export class X { run(e: unknown, r: Request) { return ProblemResponse.from(e, r); } }",
+    ],
+    [
+      "apps/backend/shared/http/nested/problem.ts",
+      "export class X { run(e: unknown, r: Request) { return ProblemResponse.from(e, r); } }",
+    ],
+    [
+      "apps/backend/shared/http/problem.mts",
+      "export class X { run(e: unknown, r: Request) { return ProblemResponse.from(e, r); } }",
+    ],
+  ],
+  allowed: [
+    // 本物の problem.ts（wrap の中で from を呼ぶ）と本物の 6 本。
+    [
+      "apps/backend/shared/http/problem.ts",
+      readFileSync(
+        join(repoRoot, "apps/backend/shared/http/problem.ts"),
+        "utf8",
+      ),
+    ],
+    ...REAL_API_FILES.map((file): [string, string] => [
+      file,
+      readFileSync(join(repoRoot, file), "utf8"),
+    ]),
+    // ProblemResponse のほかのメソッド、ほかのクラスの from、名前の前方一致（fromX）、コメント・文字列の中。
+    [
+      API_FILE,
+      lines(
+        IMPORT_WITH_PROBLEM_RESPONSE,
+        "export class XApi {",
+        "  readonly handle = ProblemResponse.wrap(async (request: Request) => new Response(JSON.stringify(Array.from([1]))));",
+        "  private readonly a = [Other.from, ProblemResponse.fromX, ProblemResponse.wrap];",
+        "  // ProblemResponse.from(error, request) は wrap が呼ぶ",
+        '  private readonly s = "ProblemResponse.from(error, request)";',
+        "}",
+      ),
+    ],
+    // 対象外: テスト（problem.test.ts）、画面側。
+    [
+      "apps/backend/shared/http/problem.test.ts",
+      "ProblemResponse.from(new Error(), new Request('http://x'));",
+    ],
+    [
+      "apps/backend/features/todo/internal/presentation/x.api.test.ts",
+      "ProblemResponse.from(new Error(), new Request('http://x'));",
+    ],
+    [
+      "apps/frontend_customer/features/todo/api/x.ts",
+      "ProblemResponse.from(new Error(), new Request('http://x'));",
+    ],
+  ],
+};
+
+// [ファイル, ソース] の例をまとめて 1 回で構文解析し、例ごとに違反か（find が 1 件以上返すか）を返す。対象外のファイルは解析せずに false。
+function judgeSourceExamples(
+  examples: [string, string][],
+  appliesTo: (file: string) => boolean,
+  find: (sourceFile: SourceFile) => number[],
+): boolean[] {
+  const virtualPath = (i: number, file: string) => `example-${i}/${file}`;
+  const sourceFiles = parseSourceFiles(
+    Object.fromEntries(
+      examples.flatMap(([file, source], i) =>
+        appliesTo(file) ? [[virtualPath(i, file), source]] : [],
+      ),
+    ),
+  );
+  return examples.map(([file], i) => {
+    const sourceFile = sourceFiles.get(virtualPath(i, file));
+    return sourceFile !== undefined && find(sourceFile).length > 0;
+  });
+}
+
 const SHARED_ERROR_FILE = "apps/backend/shared/error/x.ts";
 
 // 規則 class-based の判定の例。違反例は 1 例 1 つの書き方にして、他の書き方の巻き添えで違反になっていないことを示す。
@@ -6474,13 +6922,15 @@ function violationsOfFixture(files: Record<string, string>): string[] {
 // apps/shared の許可 SHARED_MODULES_BY_LAYER）の違反も置く。
 // ハードコードの文言の規則（FRONTEND_HARDCODED_TEXT・SERVER_HARDCODED_TEXT。Issue #116）と、辞書の置き場所の規則
 // （messages-colocation。Issue #125）の違反も置く。
-// 規則は全部で 37（RULES の 24 + 置き場所 3 + 環境変数の直参照 + console + 現在時刻の読み取り + exports 2 + ハードコードの文言 2 + handle を ProblemResponse.wrap で包む 1 + 最上位の関数 1 + インスタンスのクラスの static 1）。Issue #68 で RULES に 3 規則（backend-to-frontend・
+// 規則は全部で 39（RULES の 24 + 置き場所 3 + 環境変数の直参照 + console + 現在時刻の読み取り + exports 2 + ハードコードの文言 2 + handle を ProblemResponse.wrap で包む 1 + handle の中の try / catch 1 + ProblemResponse.from の置き場所 1 + 最上位の関数 1 + インスタンスのクラスの static 1）。Issue #68 で RULES に 3 規則（backend-to-frontend・
 // backend-relative-only・frontend-root-to-backend）を足し、段階 2 で frontend-to-backend-specifier と BACKEND_EXPORTS を足した。
 // Issue #90 で frontend-to-shared-specifier・screen-to-shared・shared-self-contained・SHARED_PLACEMENT・SHARED_EXPORTS を足した。
 // Issue #141 で presentation-with-problem-response（PRESENTATION_WITH_PROBLEM_RESPONSE）を足した。
 // Issue #208 で module-internal・module-expose-only-from-presentation・expose-imports（モジュールの境界）を足した。
 // Issue #262 で class-based（CLASS_BASED。最上位の関数）を足した。
 // Issue #300 で no-static-in-instance-class（NO_STATIC_IN_INSTANCE_CLASS。インスタンスで使うクラスの static）を足した。
+// Issue #332 で handle-without-try-catch（HANDLE_WITHOUT_TRY_CATCH）と problem-response-from-only-in-problem
+//   （PROBLEM_RESPONSE_FROM_ONLY_IN_PROBLEM）を足した。
 const MUST_REJECT_FILES: Record<string, string> = {
   // class-based（Issue #262）: 最上位の関数（function 宣言・async・generator・オーバーロード・アロー関数と function 式の
   //   変数・export default のアロー関数・namespace の中）。クラスのメソッド・フィールド・メソッドの中の関数（8〜13 行目）は拾わない。
@@ -6542,6 +6992,46 @@ const MUST_REJECT_FILES: Record<string, string> = {
     ),
   "apps/backend/shared/http/bad-handle.api.ts": lines(
     "export class RawApi { handle = async (request: Request) => new Response(null); }",
+  ),
+  // handle-without-try-catch（Issue #332）: ProblemResponse.wrap で包んだ handle の中の try / catch（本体と、中で定義した関数）。
+  //   try / finally（14 行目）と handle 以外のメンバー（17 行目）は拾わない。bad-handle.api.ts の TryCatchApi（4 行目）も違反。
+  "apps/backend/features/todo/internal/presentation/bad-try-catch.api.ts":
+    lines(
+      'import { ProblemResponse } from "../../../../shared/http/problem";',
+      "export class WrappedTryCatchApi {",
+      "  readonly handle = ProblemResponse.wrap(async (request: Request) => {",
+      "    try {",
+      "      return new Response(null);",
+      "    } catch {",
+      "      return new Response(null, { status: 500 });",
+      "    }",
+      "  });",
+      "}",
+      "export class NestedTryCatchApi {",
+      "  readonly handle = ProblemResponse.wrap(async (request: Request) => {",
+      "    const run = async () => { try { return 1; } catch { return 2; } };",
+      "    try { await run(); } finally { }",
+      "    return new Response(null);",
+      "  });",
+      "  private readonly helper = () => { try { return 1; } catch { return 2; } };",
+      "}",
+    ),
+  // problem-response-from-only-in-problem（Issue #332）: problem.ts の外の ProblemResponse.from（呼び出し・参照・ブラケット・
+  //   名前空間の経由）。ほかのクラスの from・ProblemResponse.wrap（8 行目）は拾わない。bad-handle.api.ts の 7 行目も違反。
+  "apps/backend/features/todo/internal/application/bad-problem-from.ts": lines(
+    'import * as problem from "../../../../shared/http/problem";',
+    'import { ProblemResponse } from "../../../../shared/http/problem";',
+    "export class BadProblem {",
+    "  call(error: unknown, request: Request): Response { return ProblemResponse.from(error, request); }",
+    "  reference(): unknown { return ProblemResponse.from; }",
+    '  bracket(): unknown { return ProblemResponse["from"]; }',
+    "  namespaced(error: unknown, request: Request): Response { return problem.ProblemResponse.from(error, request); }",
+    "  other(): unknown { return [Array.from([]), ProblemResponse.wrap, Other.from]; }",
+    "}",
+  ),
+  "apps/backend/shared/http/problem-x.ts": lines(
+    'import { ProblemResponse } from "./problem";',
+    "export class X { run(e: unknown, r: Request): Response { return ProblemResponse.from(e, r); } }",
   ),
   // screen-to-backend: apps/frontend_customer/features/<f>/ の api/ 以外から backend への参照は、型でも相対でも違反。
   "apps/frontend_customer/features/todo/components/bad-backend.ts": lines(
@@ -7264,6 +7754,17 @@ const MUST_REJECT_VIOLATIONS = [
   ),
   "presentation-with-problem-response: apps/backend/features/todo/internal/presentation/nested/bad-handle.api.mts:1",
   "presentation-with-problem-response: apps/backend/shared/http/bad-handle.api.ts:1",
+  ...[4, 13].map(
+    (line) =>
+      `handle-without-try-catch: apps/backend/features/todo/internal/presentation/bad-try-catch.api.ts:${line}`,
+  ),
+  "handle-without-try-catch: apps/backend/features/todo/internal/presentation/bad-handle.api.ts:4",
+  ...[4, 5, 6, 7].map(
+    (line) =>
+      `problem-response-from-only-in-problem: apps/backend/features/todo/internal/application/bad-problem-from.ts:${line}`,
+  ),
+  "problem-response-from-only-in-problem: apps/backend/features/todo/internal/presentation/bad-handle.api.ts:7",
+  "problem-response-from-only-in-problem: apps/backend/shared/http/problem-x.ts:2",
   "frontend-placement: apps/frontend_customer/lib/db.ts",
   "frontend-placement: apps/frontend_customer/.lib/x.ts",
   "frontend-placement: apps/frontend_customer/next.config.mjs",
@@ -7770,6 +8271,12 @@ const MUST_PASS_FILES: Record<string, string> = {
     "export class ListApi {",
     "  readonly handle = ProblemResponse.wrap(async (request: Request) => new Response(null));",
     "}",
+    // handle-without-try-catch（Issue #332）: try / finally は例外を捕まえないので可。
+    "export class FinallyApi {",
+    "  readonly handle = ProblemResponse.wrap(async (request: Request) => {",
+    "    try { return new Response(null); } finally { }",
+    "  });",
+    "}",
     "export class GetApi {",
     "  readonly handle = ProblemResponse.wrap(",
     "    async (request: Request, ctx: { params: Promise<{ id: string }> }) => {",
@@ -7929,6 +8436,18 @@ const MUST_PASS_FILES: Record<string, string> = {
     // Issue #85: 想定外の例外はログの唯一の出口（Issue #90 で apps/shared に移した logger）で残す。
     'import { logger } from "@repo/shared/logger";',
     'logger.emit({ message: "x", event: { name: "server_error" } });',
+    // problem-response-from-only-in-problem（Issue #332）: problem.ts の中では ProblemResponse.from を書いてよい。
+    "export class ProblemResponse {",
+    "  static from(error: unknown, request: Request): Response { return new Response(null); }",
+    "  static wrap(handler: (request: Request) => Promise<Response>) {",
+    "    return async (request: Request) => { try { return await handler(request); } catch (error) { return ProblemResponse.from(error, request); } };",
+    "  }",
+    "}",
+  ),
+  // problem-response-from-only-in-problem（Issue #332）: テストは対象外。
+  "apps/backend/shared/http/problem.test.ts": lines(
+    'import { ProblemResponse } from "./problem";',
+    'ProblemResponse.from(new Error(), new Request("http://x"));',
   ),
   // console を直接書いてよいのは logger.ts だけ（Issue #85。Issue #90 で apps/shared に移した）。
   "apps/shared/logger.ts": lines(
@@ -8667,6 +9186,45 @@ describeFeature(feature, ({ Scenario }) => {
 
         // then
         expect(result).toEqual([]);
+      },
+    );
+
+    And(ruleStepText(HANDLE_WITHOUT_TRY_CATCH.name), () => {
+      // given: 前提なし
+      // when
+      const violations = findHandleTryCatchViolations(repoRoot);
+
+      // then
+      // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
+      expect(violations).toEqual([]);
+    });
+
+    And(ruleStepText(PROBLEM_RESPONSE_FROM_ONLY_IN_PROBLEM.name), () => {
+      // given: 前提なし
+      // when
+      const violations = findProblemResponseFromViolations(repoRoot);
+
+      // then
+      // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
+      expect(violations).toEqual([]);
+    });
+
+    // WHY 本物の 6 本が列挙に入っていて problem.ts が入っていないことを見る: 列挙が壊れて 0 件になると常に緑になり、
+    //   problem.ts が入ると wrap の中の from で常に落ちる。
+    And(
+      "ProblemResponse.from の規則は、本物の api ファイル 6 本を対象にし、problem.ts とテストは対象にしない（列挙が壊れて素通りするのを防ぐ）",
+      () => {
+        // given: 前提なし
+        // when
+        const files = listProblemResponseFromCheckedFiles(repoRoot);
+
+        // then
+        expect(files).toEqual(expect.arrayContaining(REAL_API_FILES));
+        expect(
+          files.filter(
+            (file) => TEST_FILE.test(file) || file === PROBLEM_RESPONSE_FILE,
+          ),
+        ).toEqual([]);
       },
     );
 
@@ -9717,6 +10275,124 @@ describeFeature(feature, ({ Scenario }) => {
       );
       And(
         "許可例（PROBLEM_RESPONSE_EXAMPLES.allowed）はどれも違反にならない",
+        () => {
+          // given
+          const cases = allowed.map(([file], i): [string, number] => [
+            `許可例 ${i}（${file}）`,
+            i,
+          ]);
+
+          // when
+          const result = casesByName(cases, ([, i]) => verdictsOf().allowed[i]);
+
+          // then
+          expect(result).toEqual(casesByName(cases, () => false));
+        },
+      );
+    },
+  );
+
+  Scenario(
+    `handle の中に try / catch を書かない規則の判定（${HANDLE_WITHOUT_TRY_CATCH.id}）`,
+    ({ And }) => {
+      const { violating, allowed } = HANDLE_TRY_CATCH_EXAMPLES;
+      // WHY 遅延して 1 回だけ判定する: 例ごとに tsgo を起動すると遅いため（ProblemResponse.wrap の判定と同じ）。
+      let verdicts: { violating: boolean[]; allowed: boolean[] } | undefined;
+      const verdictsOf = () => {
+        verdicts ??= {
+          violating: judgeSourceExamples(
+            violating,
+            HANDLE_WITHOUT_TRY_CATCH.appliesTo,
+            findHandleTryCatches,
+          ),
+          allowed: judgeSourceExamples(
+            allowed,
+            HANDLE_WITHOUT_TRY_CATCH.appliesTo,
+            findHandleTryCatches,
+          ),
+        };
+        return verdicts;
+      };
+      And(
+        "違反例（HANDLE_TRY_CATCH_EXAMPLES.violating）はすべて違反になる",
+        () => {
+          // given
+          const cases = violating.map(([file], i): [string, number] => [
+            `違反例 ${i}（${file}）`,
+            i,
+          ]);
+
+          // when
+          const result = casesByName(
+            cases,
+            ([, i]) => verdictsOf().violating[i],
+          );
+
+          // then
+          expect(result).toEqual(casesByName(cases, () => true));
+        },
+      );
+      And(
+        "許可例（HANDLE_TRY_CATCH_EXAMPLES.allowed）はどれも違反にならない",
+        () => {
+          // given
+          const cases = allowed.map(([file], i): [string, number] => [
+            `許可例 ${i}（${file}）`,
+            i,
+          ]);
+
+          // when
+          const result = casesByName(cases, ([, i]) => verdictsOf().allowed[i]);
+
+          // then
+          expect(result).toEqual(casesByName(cases, () => false));
+        },
+      );
+    },
+  );
+
+  Scenario(
+    `ProblemResponse.from を problem.ts だけに書く規則の判定（${PROBLEM_RESPONSE_FROM_ONLY_IN_PROBLEM.id}）`,
+    ({ And }) => {
+      const { violating, allowed } = PROBLEM_RESPONSE_FROM_EXAMPLES;
+      // WHY 遅延して 1 回だけ判定する: 例ごとに tsgo を起動すると遅いため（ProblemResponse.wrap の判定と同じ）。
+      let verdicts: { violating: boolean[]; allowed: boolean[] } | undefined;
+      const verdictsOf = () => {
+        verdicts ??= {
+          violating: judgeSourceExamples(
+            violating,
+            PROBLEM_RESPONSE_FROM_ONLY_IN_PROBLEM.appliesTo,
+            findProblemResponseFroms,
+          ),
+          allowed: judgeSourceExamples(
+            allowed,
+            PROBLEM_RESPONSE_FROM_ONLY_IN_PROBLEM.appliesTo,
+            findProblemResponseFroms,
+          ),
+        };
+        return verdicts;
+      };
+      And(
+        "違反例（PROBLEM_RESPONSE_FROM_EXAMPLES.violating）はすべて違反になる",
+        () => {
+          // given
+          const cases = violating.map(([file], i): [string, number] => [
+            `違反例 ${i}（${file}）`,
+            i,
+          ]);
+
+          // when
+          const result = casesByName(
+            cases,
+            ([, i]) => verdictsOf().violating[i],
+          );
+
+          // then
+          expect(result).toEqual(casesByName(cases, () => true));
+        },
+      );
+      And(
+        "許可例（PROBLEM_RESPONSE_FROM_EXAMPLES.allowed）はどれも違反にならない",
         () => {
           // given
           const cases = allowed.map(([file], i): [string, number] => [
