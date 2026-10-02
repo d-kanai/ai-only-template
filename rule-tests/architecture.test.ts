@@ -505,8 +505,8 @@ function referencesOf(root: string, files: string[]): Reference[] {
 // WHY apps/e2e/ とリポジトリ直下を足す: backend を @repo/backend として、apps/shared を @repo/shared として使う側
 //   （frontend-to-backend-specifier・BACKEND_EXPORTS・frontend-to-shared-specifier・SHARED_EXPORTS）の検査の対象にするため
 //   （Issue #68 の段階 2・Issue #90）。ほかの規則は参照元を apps/ の下に絞っているので、足しても影響しない。
-// 限界: リポジトリ直下のほかのディレクトリ（scripts/ の .ts のテスト以外など）は見ない。今は該当するソースが無い
-//   （scripts/ はシェルスクリプトとテストだけ）。そこに backend を参照するソースを置くなら、ここと fixture に足す。
+// 限界: リポジトリ直下のほかのディレクトリ（scripts/ のテスト以外のソースなど）は見ない。今そこにあるソースは
+//   scripts/hooks/work-log-sections.mjs だけで、backend / shared を参照しない。参照するソースを置くなら、ここと fixture に足す。
 function listReferencingFiles(root: string): string[] {
   return [
     ...listAllSourceFiles(root),
@@ -1188,7 +1188,7 @@ const RULES: Rule[] = [
     //   "./todo-screen.messages" は同じファイルを指し、書き方の規則は別の関心（今は無い）。子・親のディレクトリも「別の場所」とする。
     // WHY 参照元を apps/frontend_customer に限らない: apps/e2e/ やリポジトリ直下から辞書を import すると、E2E が文言ではなく辞書の値で
     //   探すことになり、画面に出る文言を確かめなくなる。共通の辞書も apps/frontend_customer の外からは不可。
-    //   テストは対象外（列挙がテストを除く）。画面のテストが部品の辞書で期待値を作る（tJa(todoItemMessages, ...)）のは許す。
+    //   テストは対象外（列挙がテストを除く）。画面のテストが部品の辞書で期待値を作る（tJa(todoScreenMessages, ...)）のは許す。
     // WHY re-export（export ... from）は同じディレクトリでも、共通の辞書でも違反にする（Issue #125 の reviewer 指摘）: 同じ
     //   ディレクトリの中継のファイル（zz-barrel.ts の export { x } from "./x.messages"）を別のディレクトリから import すると、
     //   参照先が *.messages ではないので、この規則を素通りして辞書を別のディレクトリから使えてしまう。辞書を使うファイルは
@@ -1515,7 +1515,7 @@ function findEnvViolations(root: string): string[] {
 //     検出しない。2026-09-29 実測）。決定は ADR docs/adr/architecture/20260929-logger-single-exit.md。
 
 // 検査の対象にするディレクトリ。環境変数の直参照の対象（ENV_CHECK_DIRS）に scripts/ を足す。
-// WHY scripts/ を含める: scripts/ の TS / JS（今はテストだけで、ソースは無い）はフックなどから動かすツールになり、
+// WHY scripts/ を含める: scripts/ の TS / JS（ソースは今 scripts/hooks/work-log-sections.mjs の 1 本、残りはテスト）はフックなどから動かすツールになり、
 //   console で出力を書きたくなる場所なので、置いた時点で検査にかける。
 const SCRIPTS_ROOT = "scripts";
 const CONSOLE_CHECK_DIRS = [...ENV_CHECK_DIRS, SCRIPTS_ROOT];
@@ -5645,8 +5645,8 @@ function hardcodedTextLinesOf(
 }
 
 // ProblemResponse.wrap で包む規則（PRESENTATION_WITH_PROBLEM_RESPONSE。Issue #141）の判定例。[ファイル, ソース] で決まる。
-// WHY 架空のソースで固定する: 実リポジトリの検査は「今の 5 本が包んでいる」ことしか確かめず、判定が緩すぎても（常に違反なし）
-//   通ってしまう。包み忘れの書き方と、対象外のファイル・メンバーの境界を例で持つ。許可例には本物の 5 本も入れる（must pass）。
+// WHY 架空のソースで固定する: 実リポジトリの検査は「今の 6 本が包んでいる」ことしか確かめず、判定が緩すぎても（常に違反なし）
+//   通ってしまう。包み忘れの書き方と、対象外のファイル・メンバーの境界を例で持つ。許可例には本物の 6 本（REAL_API_FILES）も入れる（must pass）。
 // 複数行のソースを 1 つの文字列にする（この下の判定例と、fixture のファイルの中身で使う）。
 const lines = (...source: string[]) => source.join("\n");
 
@@ -5807,7 +5807,7 @@ const PROBLEM_RESPONSE_EXAMPLES: {
     ],
   ],
   allowed: [
-    // 本物の 5 本（動的セグメントの ctx を持つもの・持たないもの）。
+    // 本物の 6 本（動的セグメントの ctx を持つもの・持たないもの）。
     ...REAL_API_FILES.map((file): [string, string] => [
       file,
       readFileSync(join(repoRoot, file), "utf8"),
@@ -9114,7 +9114,7 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
             "apps/frontend_customer/proxy.ts",
             "apps/frontend_customer/shared/i18n/format.ts",
-            "apps/frontend_customer/features/todo/components/todo-item.tsx",
+            "apps/frontend_customer/features/todo/screens/todo-detail-screen/todo-detail-screen.tsx",
             "apps/frontend_customer/app/page.tsx",
           ]),
         );
@@ -9160,7 +9160,7 @@ describeFeature(feature, ({ Scenario }) => {
       expect(violations).toEqual([]);
     });
 
-    // WHY 本物の 5 本が列挙に入っていることを見る: 列挙（パスの正規表現）が壊れて 0 件になると、違反も 0 件で常に緑になる。
+    // WHY 本物の 6 本が列挙に入っていることを見る: 列挙（パスの正規表現）が壊れて 0 件になると、違反も 0 件で常に緑になる。
     And(
       "handle を ProblemResponse.wrap で包む規則は、本物の api ファイル 6 本を対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）",
       () => {
@@ -9281,7 +9281,7 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/frontend_customer/features/todo/api/todo-api.ts",
             "apps/frontend_customer/features/todo/api/api-error.ts",
             "apps/frontend_customer/features/todo/index.ts",
-            "apps/frontend_customer/features/todo/components/todo-item.messages.ts",
+            "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.messages.ts",
             "apps/frontend_customer/shared/i18n/locale.ts",
             "apps/frontend_customer/shared/i18n/format.ts",
             "apps/frontend_customer/shared/request-log/request-log.ts",
@@ -9321,7 +9321,7 @@ describeFeature(feature, ({ Scenario }) => {
         // 前提: 対象外の実ファイルがリポジトリにあること（無ければ上の検査は何も確かめていない）。
         expect(listSourceFiles(repoRoot, FRONTEND_ROOT)).toEqual(
           expect.arrayContaining([
-            "apps/frontend_customer/features/todo/components/todo-item.tsx",
+            "apps/frontend_customer/features/todo/screens/todo-detail-screen/todo-detail-screen.tsx",
             "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.hook.ts",
             "apps/frontend_customer/app/page.tsx",
             "apps/frontend_customer/app/api/todos/route.ts",
@@ -9516,7 +9516,7 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/frontend_customer/app/layout.tsx",
             "apps/frontend_customer/app/page.tsx",
             "apps/frontend_customer/features/todo/api/todo-api.ts",
-            "apps/frontend_customer/features/todo/components/todo-item.tsx",
+            "apps/frontend_customer/features/todo/screens/todo-detail-screen/todo-detail-screen.tsx",
             "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.tsx",
             "apps/frontend_customer/proxy.ts",
           ]),
@@ -9532,7 +9532,6 @@ describeFeature(feature, ({ Scenario }) => {
         expect(result).toEqual(
           expect.arrayContaining([
             "apps/frontend_customer/shared/i18n/common.messages.ts",
-            "apps/frontend_customer/features/todo/components/todo-item.messages.ts",
             "apps/frontend_customer/features/todo/screens/todo-screen/todo-screen.messages.ts",
             "apps/frontend_customer/features/todo/screens/todo-detail-screen/todo-detail-screen.messages.ts",
           ]),

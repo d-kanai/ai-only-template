@@ -132,6 +132,26 @@
           }
         }
       }
+    },
+    {
+      "includes": ["apps/frontend_customer/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["..", "../*", "../**"],
+                    "message": "frontend でディレクトリをまたぐ import は @/<path> で書き、../ は使わない（.claude/rules/code/frontend.md の「import と exports」の表）。"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "assist": {

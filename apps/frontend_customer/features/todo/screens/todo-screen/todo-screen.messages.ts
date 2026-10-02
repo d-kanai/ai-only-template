@@ -9,11 +9,18 @@ export const todoScreenMessages = defineMessages({
     "form.newTitle": "新しい Todo",
     "form.submit": "追加",
     loading: "読み込み中…",
+    // 一覧の 1 行（TodoItem）の文言。
+    toggle: "「{title}」を完了にする",
+    delete: "削除",
+    deleteAria: "「{title}」を削除",
   },
   en: {
     title: "Todo",
     "form.newTitle": "New todo",
     "form.submit": "Add",
     loading: "Loading…",
+    toggle: "Mark “{title}” as completed",
+    delete: "Delete",
+    deleteAria: "Delete “{title}”",
   },
 });

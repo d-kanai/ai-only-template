@@ -107,7 +107,7 @@ import { casesByName } from "./case-table";
 // 限界（見ないもの）: Section / Form の要素の子（`<XSection><Text /></XSection>`）は見ない（props の 1 つとして扱う）。部品の中身
 //   （atom を使っているか）と、部品がファイルの下の方にあるか（並び順）は見ない（レビューで見る）。Layout は名前と取り込み元の
 //   文字列で見る（atom の Layout が中で何を描くかは見ない）。画面の関数の return より前の文（hook の呼び出し以外の処理）は見ない。
-//   features/<f>/components/ の部品（todo-item など）と app/ の page.tsx は対象外。置き方の規則はテストの名前・置き場所と、
+//   features/<f>/components/ の部品と app/ の page.tsx は対象外。置き方の規則はテストの名前・置き場所と、
 //   コード以外のファイル（README・画像など）を見ない。シンボリックリンクはたどらない（walk と同じ）。
 
 type RuleId =

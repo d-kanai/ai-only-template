@@ -12,7 +12,7 @@ import {
   TextInput,
   Title,
 } from "@mantine/core";
-import type { ThemeDefinition } from "../theme-definition";
+import type { ThemeDefinition } from "@/shared/ui/themes/theme-definition";
 import classes from "./bento.module.css";
 
 // bento テーマ（Issue #292）: 既定のテーマ。濃い緑（jade）にライムの差し色。大きく丸めた白い面をお弁当箱のように並べ、
