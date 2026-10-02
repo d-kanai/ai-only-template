@@ -130,7 +130,7 @@ paths:
 | エラーのキー | Error の `message` は開発者向けの `<key> <params の JSON>`（`ErrorKeys.describe`。例 `todo.notFound {"id":"..."}`）。ログから画面の辞書を引ける | - | 説明 |
 | Problem Details | エラー応答は RFC 9457（Problem Details for HTTP APIs。https://www.rfc-editor.org/rfc/rfc9457.html ）の形で、`Content-Type: application/problem+json`（Issue #126。ユーザー判断） | WHY RFC 9457: HTTP API のエラー本文の標準で、Spring の `ProblemDetail`・ASP.NET Core の `ProblemDetails` が実装し、Zalando の API ガイドラインが MUST にしている。汎用のクライアント・ツールが形を個別に知らずに読める。WHY key を残す: `type` は大分類で、画面の文言は細かいキー（`todo.title.tooLong`）で決まる。決定と採用しなかった案は ADR `docs/adr/architecture/20260929-error-response-rfc9457.md` | 説明 |
 | Problem Details | 作るのは `problem.ts` の `ProblemResponse.from(error, request)` だけ（各 api の `handle` を包む `ProblemResponse.wrap` から呼ぶ。api から直接は呼ばない。検査は backend のテスト以外のソースで `problem.ts` の外の `ProblemResponse.from`。Issue #332） | - | `rule-tests/architecture.test.ts` の `problem-response-from-only-in-problem` |
-| Problem Details | 限界: 別名の import（`P.from`）・分割代入・変数に入れ直したクラスは見ない | 限界（見逃す方向） | レビュー |
+| Problem Details | 限界: 別名の import（`P.from`）・分割代入・変数に入れ直したクラス・かっこや非 null 表明で包んだ受け手（`(ProblemResponse).from`・`ProblemResponse!.from`）・型の位置・`apps/backend` の外は見ない | 限界（見逃す方向） | レビュー |
 | Problem Details | 標準のメンバー: `type`（`/problems/validation-error` / `not-found` / `internal-error`。相対参照。`about:blank` は使わない）、`title`（種類ごとに固定の英語）、`status`（HTTP のステータスと同じ 400 / 404 / 500）、`detail`（この発生に固有の英語）、`instance`（リクエストの URL のパス。クエリは含めない） | - | 説明 |
 | Problem Details | 拡張メンバー: `key`（辞書のキー。画面の翻訳と分岐に使う）、`params`（無ければ省略）、`errors`（presentation のスキーマの誤り（形と、重ねた必須・長さ）のときだけ。各要素は `{ pointer, key, params?, detail }`、`pointer` は JSON Pointer（RFC 6901）の fragment の形 `#/title`、本文全体の誤りは `#`） | - | 説明 |
 | Problem Details | `DomainErrorCode`（と想定外の例外）→ `{ type, title, status }` の対応は `problem.ts` の `problemKindOf`（`Record` で網羅。種類を足して書き忘れると型エラー） | - | `pnpm typecheck` |
@@ -154,7 +154,8 @@ paths:
 | domain の検証 | `validation_error` の DomainError を作るのは backend 全体で `validate.ts` だけ | - | `rule-tests/domain-validation.test.ts` の `validation-error-only-in-validate` |
 | domain の検証 | domain の zod スキーマ・refine の `error` にはキーだけを書く（キー以外の文字列は書かない）。`KeyedIssue.of(key)` / `KeyedIssue.refine(key, params)`（`apps/backend/shared/error/keyed-issue.ts`）を通して `{ error: key }` / `{ error: key, params }` を作り、キーと params を型で縛る | WHY キーと params を JSON にして `error` の文字列に詰めない: 文字列の組み立て・解析の誤りが入る。WHY `{ error: "todo.title.empty" }` と直接書かない: zod の `error` は任意の文字列を受け付け、打ち間違い・params の渡し忘れを型で止められない | レビュー |
 | domain の検証 | features の domain で `error:` の値に文字列リテラルを書かない（Issue #332） | 上の行の WHY `{ error: "todo.title.empty" }` と直接書かない | `rule-tests/domain-validation.test.ts` の `no-literal-error-in-domain-schema` |
-| domain の検証 | 限界: `message:`・`z.string("...")`・`.refine(fn, "...")`・変数経由の文字列は見ない | 限界（見逃す方向） | レビュー |
+| domain の検証 | `no-zod-length-in-domain` の限界: `.length(`・`.nonempty(`・`z.minLength(` / `z.maxLength(`（`.check(...)` の中も）は見ない（どれも `String#length` で数える） | 限界（見逃す方向） | レビュー |
+| domain の検証 | `no-literal-error-in-domain-schema` の限界: `message:`・`z.string("...")`・`.refine(fn, "...")`・変数経由の文字列は見ない。型注釈の `error: "a" \| "b"` も違反に数える（誤検知） | 限界 | レビュー |
 | domain の検証 | params は zod の refine の `params` で運ぶ。`DomainValidation.validated` が最初の issue の message（= キー）と params を DomainError に戻す | zod 4.6.5 は refine の `params` を失敗した custom の issue にそのまま載せる（実測 2026-09-29） | 説明 |
 | 生成 | Entity の生成（`Todo.create(title)`）は id・作成日時（`Clock.now()`）・初期状態を自分で決め、作成日時を引数で受け取らない。DB の行から戻す `reconstruct` は保存済みの作成日時を受け取る | 「作ったときの時刻が入る」は生成ルールで、呼び出し側が渡せるとルールが漏れる | レビュー |
 | 生成 | テストで時刻を決めるときは `now` を `vi.mock` で差し替える（`.claude/rules/quality/testing.md` の「テストダブル」） | - | `rule-tests/test-doubles.test.ts` の `vi-mock-only-now` |
@@ -170,7 +171,7 @@ paths:
 | --- | --- | --- | --- |
 | query / command | 読むだけ（副作用なし）は query、状態を変えるものは command に分ける | 副作用の有無をファイル名で見分ける | レビュー |
 | query / command | `*.query.ts` は `.run(` / `.insert(` / `.update(` / `.delete(` を呼ばない（Issue #332） | - | `rule-tests/use-case.test.ts` の `query-without-writes` |
-| query / command | 限界: 名前だけで見るので、別の名前の書き込み（`save` など）・分割代入・ブラケットの呼び出しは見ない | 限界（見逃す方向） | レビュー |
+| query / command | 限界: 名前だけで見るので、別の名前の書き込み（`save` など）・分割代入・ブラケットの呼び出し・入れ子の型引数の `.run<Promise<X>>(`・`this.db.transaction(` で直接張るトランザクションは見ない | 限界（見逃す方向） | レビュー |
 | トランザクション | 状態を変える command はコンストラクタで `TransactionRunner`（`apps/backend/shared/transaction/transaction.ts`。Repository の次の引数）を受け取り、`execute` の本体を `this.transactions.run(async (tx) => …)` で包み、Repository の読み込み（`findByIdForUpdate`）と書き込み（`insert` / `update` / `delete`）に `tx` を渡す（Issue #215。下の「永続化」の「トランザクション」） | - | `rule-tests/use-case.test.ts` の `command-runs-in-transaction` |
 | トランザクション | 検査は `*.command.ts` の `execute` の本体に `this.<依存>.run(` が無いと違反。DB に触らない command は `execute` の直前の行の `// WHY トランザクション無し: <理由>` で通す | - | `rule-tests/use-case.test.ts` の `command-runs-in-transaction` |
 | トランザクション | query はトランザクションを張らない | - | `rule-tests/use-case.test.ts` の `query-without-writes` |
