@@ -11,6 +11,7 @@ import { ApiError } from "@/features/todo/api/api-error";
 import { TodoApi } from "@/features/todo/api/todo-api";
 import { commonMessages } from "@/shared/i18n/common.messages";
 import { LocaleProvider } from "@/shared/i18n/i18n";
+import { DesignSystem } from "@/test-support/design-system";
 import { JaLocale, tJa } from "@/test-support/i18n";
 import { todoDetailScreenMessages } from "./todo-detail-screen.messages";
 
@@ -194,6 +195,7 @@ test("LocaleProvider のロケールが en なら、英語の文言で表示す�
     <LocaleProvider locale="en">
       <TodoDetailScreen todoId={milk.id} />
     </LocaleProvider>,
+    { wrapper: DesignSystem },
   );
 
   // then
@@ -229,11 +231,16 @@ test("エラーが無いときは、title の入力は invalid でなく、説�
     name: tJa(todoDetailScreenMessages, "titleLabel"),
     description: "",
   });
-  expect(input.getAttribute("aria-invalid")).toBe("false");
+  // aria-invalid は付けない（Mantine の TextInput は誤りが無いと属性を出さない。Issue #292 で "false" から変わった）。
+  expect(input.getAttribute("aria-invalid")).toBeNull();
   expect(input.getAttribute("aria-describedby")).toBeNull();
-  // 項目のエラーの段落（<p>）も描画しない。WHY: aria-invalid / aria-describedby だけを見ると、エラーが無いのに
-  //   空の段落を描画しても通ってしまう（Issue #202 で、描画の条件を常に偽にする変異が生き残った）。
-  expect(input.closest("form")?.querySelector("p")).toBeNull();
+  // 項目のエラーの文言も描画しない（フォームの文字はラベルとボタンだけ）。WHY: aria-invalid / aria-describedby だけを
+  //   見ると、エラーが無いのに文言の要素を描画しても通ってしまう（Issue #202 で、描画の条件を常に偽にする変異が生き残った）。
+  //   限界: 文字の無い要素を描いても通る（Mantine は error に空でない値が入ると aria-invalid="true" も付けるので、上の検証で落ちる）。
+  expect(input.closest("form")?.textContent).toBe(
+    tJa(todoDetailScreenMessages, "titleLabel") +
+      tJa(todoDetailScreenMessages, "save"),
+  );
 });
 
 test("空タイトルの 400（#/title）は、title の入力の説明として直下に出し、alert は出さない", async () => {
@@ -255,9 +262,18 @@ test("空タイトルの 400（#/title）は、title の入力の説明として
     description: message,
   });
   expect(input.getAttribute("aria-invalid")).toBe("true");
-  // 直下: 説明の要素は、入力を包む label の次の兄弟。
+  // 直下: 説明の要素（aria-describedby が指す要素）は、入力より後ろにあり、label の外にある。
   // WHY label の中に置かない: label の中の文字はすべて入力の名前（accessible name）になり、名前にエラーの文言が混ざる。
-  expect(input.closest("label")?.nextElementSibling?.textContent).toBe(message);
+  //   部品の DOM の組み立て（label が入力を包むか）は Mantine が決めるので、兄弟の位置ではなく前後関係と label の外かを見る。
+  const description = document.getElementById(
+    input.getAttribute("aria-describedby") ?? "",
+  );
+  expect(description?.textContent).toBe(message);
+  expect(
+    input.compareDocumentPosition(description as Node) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  expect(description?.closest("label")).toBeNull();
   expect(screen.getAllByText(message)).toHaveLength(1);
   expect(screen.queryByRole("alert")).toBeNull();
 });
@@ -320,5 +336,5 @@ test("errors の無い 404 は、alert に全体の文言だけを出し、title
     name: tJa(todoDetailScreenMessages, "titleLabel"),
     description: "",
   });
-  expect(input.getAttribute("aria-invalid")).toBe("false");
+  expect(input.getAttribute("aria-invalid")).toBeNull();
 });

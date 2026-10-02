@@ -6,6 +6,7 @@ import {
   type Messages,
   type TranslateArgs,
 } from "@/shared/i18n/i18n";
+import { DesignSystem } from "./design-system";
 
 // テスト専用（本番のコードからは使わない。test-support/ に置くのが目印で、本番のコードからの import は rule-tests/test-support.test.ts が止め、
 // Docker のイメージには入らない（.dockerignore の **/test-support）。apps/backend/test-support/database.ts と同じ）。
@@ -26,8 +27,14 @@ export function tJa<M extends Messages, K extends MessageKey<M>>(
 }
 
 // render / renderHook の wrapper（render(ui, { wrapper: JaLocale })）。
+// デザインシステムの Provider（./design-system.tsx の DesignSystem）でも包む: 画面・部品は Mantine の部品で描くので、
+//   本番の app/layout.tsx と同じく両方で包まないと描けない（Issue #292）。
 // WHY render を包む関数（renderInJa など）を置かない: Provider の既定値も ja なので、包む処理を消しても結果が変わらず、
 //   mutation testing で等価な変異になる。wrapper を各テストで明示する。
 export function JaLocale({ children }: { children: ReactNode }) {
-  return <LocaleProvider locale="ja">{children}</LocaleProvider>;
+  return (
+    <DesignSystem>
+      <LocaleProvider locale="ja">{children}</LocaleProvider>
+    </DesignSystem>
+  );
 }

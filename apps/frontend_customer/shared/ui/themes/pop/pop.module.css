@@ -1,0 +1,110 @@
+/*
+ * pop テーマの部品ごとの見た目（Issue #292）。pop.theme.ts が Mantine の Styles API（theme.components の classNames）で
+ * 各部品の内側の要素（root・input・label など）に当てる。
+ * 方針: bento とまったく違うテイストにして、テーマの差し替えだけでどこまで変わるかを確かめる試作。
+ *   太い黒の枠線・ずらした影（ネオブルータリズム）、角丸なし、等幅のフォント、黄色の背景とピンクのボタン、大文字のボタン。
+ */
+
+.container {
+  padding-block: var(--mantine-spacing-xl);
+}
+
+/* 見出し。大きく太く、黒い下線を引く。 */
+.title {
+  color: var(--mantine-color-black);
+  text-transform: uppercase;
+  border-block-end: 4px solid var(--mantine-color-black);
+  padding-block-end: var(--mantine-spacing-xs);
+  margin-block-end: var(--mantine-spacing-lg);
+}
+
+/* 面。太い枠線と、右下にずらした影。 */
+.paper {
+  margin-block-end: var(--mantine-spacing-md);
+  background: var(--mantine-color-white);
+  border: 3px solid var(--mantine-color-black);
+  box-shadow: 6px 6px 0 var(--mantine-color-black);
+  padding: var(--mantine-spacing-lg);
+}
+
+.inputLabel {
+  color: var(--mantine-color-black);
+  font-weight: 700;
+  text-transform: uppercase;
+  margin-block-end: 4px;
+}
+
+/* 入力の外枠（TextInput の root）。下のボタンとの間を空ける。 */
+.inputRoot {
+  margin-block-end: var(--mantine-spacing-md);
+}
+
+.input {
+  border: 3px solid var(--mantine-color-black);
+  background: var(--mantine-color-yellow-0);
+}
+
+.input:focus {
+  box-shadow: 3px 3px 0 var(--mantine-color-black);
+}
+
+/* ボタン。押したように見える影と、押下で影が消える動き。 */
+.button {
+  border: 3px solid var(--mantine-color-black);
+  box-shadow: 4px 4px 0 var(--mantine-color-black);
+  text-transform: uppercase;
+  font-weight: 800;
+  transition:
+    transform 80ms,
+    box-shadow 80ms;
+}
+
+.button:active {
+  transform: translate(4px, 4px);
+  box-shadow: none;
+}
+
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-sm);
+}
+
+/* 一覧の行は、1 行ずつ枠で囲んだ札にする。 */
+.listItem {
+  border: 3px solid var(--mantine-color-black);
+  background: var(--mantine-color-pink-1);
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+}
+
+.listItemLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+  width: 100%;
+}
+
+.anchor {
+  color: var(--mantine-color-black);
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-thickness: 3px;
+  flex: 1;
+}
+
+/*
+ * :not(a): Mantine の Anchor は内部で Text として描かれ、Text の classNames も付く。リンクの見た目（.anchor）を補足の文字の
+ * 見た目で上書きしないよう、リンクを除く。
+ */
+.text:not(a) {
+  color: var(--mantine-color-black);
+  font-size: var(--mantine-font-size-xs);
+}
+
+.alert {
+  border: 3px solid var(--mantine-color-black);
+  margin-block: var(--mantine-spacing-md);
+}
