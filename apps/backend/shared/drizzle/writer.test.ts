@@ -315,20 +315,31 @@ describe("PostgresWriter の insert", () => {
 });
 
 describe("PostgresWriter の update", () => {
-  // WHY before は DB が UPDATE の直前に持っていた値（呼び出し側の読み込んだときの値ではない）: Writer が同じトランザクションで
-  //   行を FOR UPDATE で読み、その値を before にする。呼び出し側は変えた列だけを渡す。
-  test("id の行の渡した列だけを UPDATE して更新後の行を返し、変更履歴に DB が UPDATE の直前に持っていた値を before、渡した値を after に書く", async () => {
+  // WHY before は呼び出し側が渡した変える前の値（origin）: 呼び出し側（Repository）は同じトランザクションで先に行を FOR UPDATE で
+  //   ロックして読み込み（command の findByIdForUpdate）、その値との差分を渡す。ロックが取れているので origin は DB が UPDATE の
+  //   直前に持っていた値と同じで、Writer が before のために行を読み直すと SELECT が 1 文増えるだけになる（Issue #312）。
+  test("id の行の渡した列だけを UPDATE して更新後の行を返し、変更履歴に渡した origin の値を before、渡した値を after に書く（before のために行を読まない）", async () => {
     // given
     await database.db.insert(items).values({ id: ID, itemName: "牛乳" });
     const logs = captureLogs();
     fixElapsed(10, 15);
+    let selectCalls: unknown[] | undefined;
 
     // when
-    const updated = await inWriter((writer) =>
-      writer.update(items, ID, { itemName: "卵" }),
-    );
+    const updated = await inWriter(async (writer, tx) => {
+      const select = vi.spyOn(tx, "select");
+      const result = await writer.update(
+        items,
+        ID,
+        { id: ID, itemName: "牛乳" },
+        { itemName: "卵" },
+      );
+      selectCalls = select.mock.calls;
+      return result;
+    });
 
     // then
+    expect(selectCalls).toEqual([]);
     expect(updated).toStrictEqual({ id: ID, itemName: "卵" });
     await expect(database.db.select().from(items)).resolves.toStrictEqual([
       { id: ID, itemName: "卵" },
@@ -360,59 +371,53 @@ describe("PostgresWriter の update", () => {
     ]);
   });
 
-  // WHY FOR UPDATE で読む: before を読んでから UPDATE するまでの間に別のトランザクションが同じ行を変えると、before が
-  //   UPDATE の直前の値でなくなる。ロックすれば別のトランザクションの UPDATE / DELETE はこのトランザクションの終わりまで待つ。
-  // WHY UPDATE の前（before の SELECT の後）で別の接続から書く: UPDATE 文の後だと、UPDATE 自体の行ロックで同じ結果になり、
-  //   SELECT の FOR UPDATE を外しても通ってしまう（Issue #215 の reviewer の実測）。drizzle の tx の update を、別の接続での
-  //   書き込みを試みてから本物の UPDATE を実行するものに差し替え、before を読んだ時点でロックが取れていることを確かめる。
-  // WHY 別の接続の書き込みを終えてから本物の UPDATE を実行する（並行にしない）: 並行だと、ロックが無くても先に走った本物の UPDATE の
-  //   ロックで待ちになることがあり、結果が実行順に左右される。
-  // lock_timeout を短くして、待つ（= ロックがある）ことを 55P03（lock_not_available）で確かめる（時間の長さで判定しない）。
-  test("update は before を読む時点で行を FOR UPDATE でロックするので、UPDATE の前でも別のトランザクションはその行を UPDATE / DELETE できない", async () => {
+  // WHY Error にして SQL を発行しない: origin に無い列は before が分からず、記録が欠ける。呼び出し側（Repository）の実装ミスで、
+  //   UPDATE してから気づくより、書く前に止める。
+  test("origin に変える列が無ければ、表と列を message に持つ Error を投げ、UPDATE せず、失敗のログ（WARNING）を出し、変更履歴を書かない", async () => {
     // given
     await database.db.insert(items).values({ id: ID, itemName: "牛乳" });
-    captureLogs();
-    const writeFromOtherConnection = (
-      write: (other: DrizzleTransaction) => Promise<unknown>,
-    ) =>
-      database.db.transaction(async (other) => {
-        await other.execute(sql`set local lock_timeout = '50ms'`);
-        await write(other);
-      });
-    const probed: string[] = [];
+    const logs = captureLogs();
+    fixElapsed(0, 2);
+    const error = new Error("items origin has no column to update: itemName");
 
     // when
-    const updated = await inWriter(async (writer, tx) => {
-      const realUpdate = tx.update.bind(tx);
-      // writer.ts の update の chain（update(table).set(changes).where(where).returning()）の形で受け、returning の前に確かめる。
-      vi.spyOn(tx, "update").mockImplementation(((table: typeof items) => ({
-        set: (changes: Partial<typeof items.$inferInsert>) => ({
-          where: (where: ReturnType<typeof sql>) => ({
-            returning: async () => {
-              await expect(
-                writeFromOtherConnection((other) =>
-                  other.update(items).set({ itemName: "他" }),
-                ),
-              ).rejects.toMatchObject({ cause: { code: "55P03" } });
-              probed.push("update");
-              await expect(
-                writeFromOtherConnection((other) => other.delete(items)),
-              ).rejects.toMatchObject({ cause: { code: "55P03" } });
-              probed.push("delete");
-              return realUpdate(table).set(changes).where(where).returning();
-            },
-          }),
-        }),
-      })) as never);
-      return writer.update(items, ID, { itemName: "卵" });
-    });
+    const promise = inWriter((writer) =>
+      writer.update(items, ID, { id: ID }, { itemName: "卵" }),
+    );
 
     // then
-    expect(updated).toStrictEqual({ id: ID, itemName: "卵" });
-    expect(probed).toEqual(["update", "delete"]);
+    await expect(promise).rejects.toEqual(error);
     await expect(database.db.select().from(items)).resolves.toStrictEqual([
-      { id: ID, itemName: "卵" },
+      { id: ID, itemName: "牛乳" },
     ]);
+    expect(logs.info()).toStrictEqual([startLine("update", { row_id: ID })]);
+    expect(logs.warn()).toStrictEqual([
+      {
+        severity: "WARNING",
+        time: TIMESTAMP.toISOString(),
+        message: "db write failed",
+        event: { name: "db_write", phase: "failed", duration_ms: 2 },
+        db: { collection: { name: "items" }, operation: { name: "update" } },
+        row_id: ID,
+        error: { type: "Error", message: error.message },
+      },
+    ]);
+    await expect(changeLogRows()).resolves.toStrictEqual([]);
+  });
+
+  // WHY toString で確かめる: origin に列があるかを `in` で見ると、Object.prototype の名前（toString）を「列がある」と取り違える。
+  test("origin に無い列が Object.prototype の名前（toString）でも、origin に列が無いとして Error を投げる", async () => {
+    // given
+    captureLogs();
+    const error = new Error("items origin has no column to update: toString");
+
+    // when
+    const promise = inWriter((writer) =>
+      writer.update(items, ID, {}, { toString: "卵" } as never),
+    );
+
+    // then
+    await expect(promise).rejects.toEqual(error);
   });
 
   test("渡した列が空なら SQL を発行せず、ログも変更履歴も出さずに undefined を返す（行が無くてもエラーにしない）", async () => {
@@ -424,7 +429,7 @@ describe("PostgresWriter の update", () => {
     const updated = await inWriter(async (writer, tx) => {
       const select = vi.spyOn(tx, "select");
       const update = vi.spyOn(tx, "update");
-      const result = await writer.update(items, ID, {});
+      const result = await writer.update(items, ID, {}, {});
       calls = { select: select.mock.calls, update: update.mock.calls };
       return result;
     });
@@ -437,7 +442,7 @@ describe("PostgresWriter の update", () => {
   });
 
   // WHY Error（DomainError の not_found にしない）: 呼び出し側（Repository）は同じトランザクションで行を FOR UPDATE で読んでから
-  //   update するので、行が無いのは呼び出し側の実装ミス（500）。
+  //   update するので、行が無いのは呼び出し側の実装ミス（500）。行が無いことは UPDATE の returning が 0 行であることで分かる。
   test("id の行が無ければ、表と id を message に持つ Error を投げ、失敗のログ（WARNING）を出し、変更履歴を書かない", async () => {
     // given
     const logs = captureLogs();
@@ -446,7 +451,7 @@ describe("PostgresWriter の update", () => {
 
     // when
     const promise = inWriter((writer) =>
-      writer.update(items, ID, { itemName: "卵" }),
+      writer.update(items, ID, { itemName: "牛乳" }, { itemName: "卵" }),
     );
 
     // then
@@ -550,7 +555,7 @@ describe("PostgresWriter の共通の振る舞い", () => {
     // when
     await inWriter(async (writer) => {
       await writer.insert(items, [{ id: ID, itemName: "牛乳" }]);
-      await writer.update(items, ID, { itemName: "卵" });
+      await writer.update(items, ID, { itemName: "牛乳" }, { itemName: "卵" });
       await writer.delete(items, ID);
     }, ACTOR_ID);
 
@@ -815,7 +820,12 @@ describe("PostgresWriter の db_write の changes（before / after）のマス�
     // when
     await inWriter(async (writer) => {
       await writer.insert(notes, [{ id: ID, body: SENTINEL, amount: 3 }]);
-      await writer.update(notes, ID, { body: "卵", amount: null });
+      await writer.update(
+        notes,
+        ID,
+        { body: SENTINEL, amount: 3 },
+        { body: "卵", amount: null },
+      );
       await writer.delete(notes, ID);
     });
 

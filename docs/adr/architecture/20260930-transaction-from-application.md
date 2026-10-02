@@ -1,7 +1,7 @@
 # command がトランザクションを張って Repository に渡し、Repository は insert / update に分け、変更履歴とログは書き込みの口 Writer が文ごとに記録する
 
 - 日付: 2026-09-30
-- 状態: 採用
+- 状態: 置き換え（→ architecture/20261002-update-before-from-origin.md）
 - 関連: Issue #215 / `.claude/rules/backend.md` / `rule-tests/persistence.test.ts` / `rule-tests/use-case.test.ts` / `rule-tests/architecture.test.ts` / `apps/backend/shared/domain/transaction.ts` / `apps/backend/shared/infra/transaction.postgres.ts` / `apps/backend/shared/infra/writer.ts` / ADR `architecture/20260929-constructor-injection-without-container.md` / ADR `architecture/20260930-repository-write-log.md` / ADR `architecture/20260930-change-logs-written-by-repository.md`
 
 ## 背景
