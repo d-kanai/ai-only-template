@@ -119,12 +119,25 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           BASE: ${{ steps.range.outputs.base }}
         run: |
-          echo "$RESULT" | jq -c '.findings[]' | while read -r finding; do
+          # WHY 既にある下書きを飛ばす: 途中の POST が失敗するとこの実行は失敗になり、次の実行は同じ起点から同じ指摘を出し直す
+          #   （起点は成功した実行だけから取る）。起点と場所が同じ下書きがあれば作らない（Codex の指摘。冪等にする）。
+          #   1 件の失敗で残りを止めず、最後にまとめて失敗にする。
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/security-advisories?state=draft&per_page=100" --jq '[.[].description]')
+          failed=0
+          while read -r finding; do
+            location=$(jq -r '.location' <<< "$finding")
+            drafted=$(jq --arg base "- 見た範囲: $BASE..main" --arg loc "- 場所: $location" \
+              'any(.[]; (split("\n") | index($base) != null and index($loc) != null))' <<< "$existing")
+            if [ "$drafted" = "true" ]; then
+              echo "skip (already drafted): $location"
+              continue
+            fi
             jq -n --argjson f "$finding" --arg run "$RUN_URL" --arg base "$BASE" --arg repo "${GITHUB_REPOSITORY#*/}" '{
               summary: ("セキュリティレビュー: " + $f.summary)[0:1000],
               severity: $f.severity,
               description: ("- 場所: " + $f.location + "\n- 悪用の経路: " + $f.exploit + "\n- 直し方の案: " + $f.fix
                 + "\n- 対象のコミット: " + ($f.commit // "") + "\n- 見た範囲: " + $base + "..main\n- 日次のセキュリティレビュー: " + $run),
               vulnerabilities: [{package: {ecosystem: "other", name: $repo}}]
-            }' | gh api --method POST "repos/$GITHUB_REPOSITORY/security-advisories" --input - --jq '.html_url'
-          done
+            }' | gh api --method POST "repos/$GITHUB_REPOSITORY/security-advisories" --input - --jq '.html_url' || failed=1
+          done < <(jq -c '.findings[]' <<< "$RESULT")
+          exit "$failed"
