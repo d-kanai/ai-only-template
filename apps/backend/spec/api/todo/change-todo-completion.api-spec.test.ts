@@ -262,12 +262,26 @@ describeFeature(feature, ({ Scenario }) => {
         TodoSpecExpected.statusRows(milk),
       );
     });
+
+    // 今と同じ状態の指定は変わらない変更（Todo.changeCompletion が同じ Todo を返す）。完了の側と対にして、未完了の側も見る。
+    And("未完了の Todo を未完了にしても、履歴は増えない", async () => {
+      // given
+      const milk = await uncompletedTodo("牛乳を買う");
+
+      // when
+      await putCompletion(milk.id, { completed: false });
+
+      // then
+      await expect(TodoSpecRows.statuses(database.db)).resolves.toStrictEqual(
+        TodoSpecExpected.statusRows(milk),
+      );
+    });
   });
 
   Scenario("副作用", ({ And }) => {
     // 通知の本文は id だけの英語（Issue #208）。同じ要求をもう一度送っても（既に完了）通知は増えない。
     And(
-      "未完了から完了に変わったときだけ、完了の通知が 1 件送られる",
+      "未完了から完了に変わったときだけ、どの Todo が完了したかを知らせる通知が 1 件送られる",
       async () => {
         // given
         const milk = await uncompletedTodo("牛乳を買う");
@@ -284,6 +298,18 @@ describeFeature(feature, ({ Scenario }) => {
     And("未完了に戻したときは通知されない", async () => {
       // given
       const milk = await completedTodo("牛乳を買う");
+
+      // when
+      const response = await putCompletion(milk.id, { completed: false });
+
+      // then
+      expect(response.status).toBe(200);
+      expect(notifications()).toStrictEqual([]);
+    });
+
+    And("未完了の Todo を未完了にしても通知されない", async () => {
+      // given
+      const milk = await uncompletedTodo("牛乳を買う");
 
       // when
       const response = await putCompletion(milk.id, { completed: false });

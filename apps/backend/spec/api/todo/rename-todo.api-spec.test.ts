@@ -138,6 +138,28 @@ describeFeature(feature, ({ Scenario }) => {
       ]);
     });
 
+    // 上限は domain の TODO_TITLE_MAX_LENGTH（100）。presentation が重ねる上限が domain より厳しくなっていないこと（Issue #144）も
+    //   ここで見る。文字数はコードポイント数（絵文字 1 つは String#length では 2）。
+    And(
+      "100 文字のタイトルまで変えられる（絵文字は 1 文字と数える）",
+      async () => {
+        // given
+        const milk = await TodoBuilder.of(database.db)
+          .title("牛乳を買う")
+          .build();
+        const title = "🍎".repeat(100);
+
+        // when
+        const response = await putTitle(milk.id, { title });
+
+        // then
+        expect(response.status).toBe(200);
+        await expect(TodoSpecRows.todos(database.db)).resolves.toMatchObject([
+          { title },
+        ]);
+      },
+    );
+
     // 差分の無い変更は書かない（ChangedProps.of が空なら Writer は SQL も記録も出さない）。応答は成功。Todo の行に加えて、
     //   変更の記録が無いことも見る（expectUnchanged。.feature には書かない）。
     And("同じタイトルに変えても、何も変わらない", async () => {
@@ -237,7 +259,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And(
-      "タイトルが空だと、空という理由で拒否され、タイトルは変わらない",
+      "タイトルが空（空白だけも含む）だと、空という理由で拒否され、タイトルは変わらない",
       async () => {
         // given
         const milk = await TodoBuilder.of(database.db)
