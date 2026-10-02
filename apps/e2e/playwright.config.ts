@@ -11,7 +11,7 @@ import { env, toolEnv } from "@repo/shared/env";
 //   frontend-to-shared-specifier）。apps/e2e/package.json の devDependencies に "@repo/shared": "workspace:*" があるので、Node の解決
 //   （apps/e2e/node_modules/@repo/shared → apps/shared）で見つかる。tsconfig の paths には頼らない。
 // .env: カレントディレクトリは apps/e2e だが、env.ts はカレントディレクトリから上にたどってリポジトリ直下の .env を 1 つだけ読む
-//   （apps/shared/env.ts の findRepoRoot）。E2E_PORT・PLAYWRIGHT_CHROMIUM_EXECUTABLE・DATABASE_URL もそこから読む。
+//   （apps/shared/env.ts の DotEnvFile.findRepoRoot）。E2E_PORT・PLAYWRIGHT_CHROMIUM_EXECUTABLE・DATABASE_URL もそこから読む。
 
 // E2E 用のサーバのポート（toolEnv.E2E_PORT。.env / 環境変数の E2E_PORT を env.ts が 1〜65535 の整数として検証した値。任意）。
 // WHY 既定が 3100: pnpm dev の既定（3000）と重ならないようにし、開発サーバを起動したままでも E2E を実行できるようにする。

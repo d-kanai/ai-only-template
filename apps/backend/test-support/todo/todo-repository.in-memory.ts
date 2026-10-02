@@ -35,7 +35,7 @@ export class InMemoryTodoRepository implements TodoRepository {
     // 新しい配列を返す: 呼び出し側が配列を並べ替え・削除しても保持中のデータに影響させないため。
     // 並び順は Repository の契約（todo-repository.ts）: 作成日時の昇順、同じなら id の昇順。Postgres の
     //   ORDER BY created_at, id と同じ規則で並べる（Map の挿入順には頼らない）。
-    return Array.from(this.todos.values(), load).sort(
+    return Array.from(this.todos.values(), InMemoryTodoRepository.load).sort(
       (a, b) =>
         a.createdAt.getTime() - b.createdAt.getTime() ||
         // id は Map のキーなので同じ値は無く、等しい場合は起きない。
@@ -46,7 +46,9 @@ export class InMemoryTodoRepository implements TodoRepository {
 
   async findById(id: string): Promise<Todo | undefined> {
     const stored = this.todos.get(id);
-    return stored === undefined ? undefined : load(stored);
+    return stored === undefined
+      ? undefined
+      : InMemoryTodoRepository.load(stored);
   }
 
   // WHY findById を通す（Map を直接読まない）: テストが findById を spy したときにも findByIdForUpdate 経由の問い合わせが記録される
@@ -111,7 +113,7 @@ export class InMemoryTodoRepository implements TodoRepository {
     this.todos.set(
       todo.id,
       Todo.reconstruct({
-        ...values(stored),
+        ...InMemoryTodoRepository.values(stored),
         ...changed,
         statusChanges: [...stored.statusChanges, ...appended],
       }),
@@ -122,20 +124,21 @@ export class InMemoryTodoRepository implements TodoRepository {
   async delete(id: string, _tx: Transaction): Promise<void> {
     this.todos.delete(id);
   }
-}
+  // 保持中の Todo から「読み込んだ Todo」（今の値を origin に持つ）を作る。
+  // WHY private static（Issue #262。以前はファイルの最上位の関数）: テストの補助も最上位に関数を置かない（ADR
+  //   docs/adr/architecture/20261002-class-based-shared-and-test-support.md）。状態を使わないので static。
+  private static load(stored: Todo): Todo {
+    return Todo.reconstruct(InMemoryTodoRepository.values(stored));
+  }
 
-// 保持中の Todo から「読み込んだ Todo」（今の値を origin に持つ）を作る。
-function load(stored: Todo): Todo {
-  return Todo.reconstruct(values(stored));
-}
-
-// Todo.reconstruct に渡す値（Postgres の行と同じ項目）。
-function values(todo: Todo) {
-  return {
-    id: todo.id,
-    title: todo.title,
-    completed: todo.completed,
-    createdAt: todo.createdAt,
-    statusChanges: todo.statusChanges,
-  };
+  // Todo.reconstruct に渡す値（Postgres の行と同じ項目）。
+  private static values(todo: Todo) {
+    return {
+      id: todo.id,
+      title: todo.title,
+      completed: todo.completed,
+      createdAt: todo.createdAt,
+      statusChanges: todo.statusChanges,
+    };
+  }
 }

@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { LogEventName } from "./log-event";
 import { type LogEvent, logger } from "./logger";
-import { now } from "./now";
+import { Clock } from "./now";
 
 // logger（サーバ側のログの唯一の出口。Issue #85）の仕様。出力先は console の各メソッドを spy して確かめる。
 // 行の形は Cloud Logging の特別フィールド（severity / time / message）と OTel semconv の名前（Issue #209。ADR
@@ -19,7 +19,7 @@ const NOW = "2026-09-29T01:02:03.456Z";
 //   落ちていることを確かめるため。
 const SENTINEL = "SENTINEL-PII";
 
-// WHY 時計（now）を差し替える: 行の time は現在時刻の唯一の出口 now() から取る。決まった時刻で行を丸ごと比べるため。
+// WHY 時計（Clock.now）を差し替える: 行の time は現在時刻の唯一の出口 Clock.now() から取る。決まった時刻で行を丸ごと比べるため。
 vi.mock("./now");
 
 const consoleMethods = ["log", "warn", "error"] as const;
@@ -312,11 +312,11 @@ function schemaMismatchLine(failedName?: LogEventName): object {
 }
 
 beforeEach(() => {
-  vi.mocked(now).mockReturnValue(new Date(NOW));
+  vi.mocked(Clock.now).mockReturnValue(new Date(NOW));
 });
 
 afterEach(() => {
-  vi.mocked(now).mockReset();
+  vi.mocked(Clock.now).mockReset();
   vi.restoreAllMocks();
 });
 
@@ -326,13 +326,10 @@ describe("logger.emit: 種類ごとのスキーマ（allowlist とマスク）",
   test.each(Object.entries(CASES))(
     "%s: スキーマの項目だけを出し、sensitive の項目は *** にし、一覧に無いキーは落とす（番兵の値が 1 行に含まれない）",
     (_name, { input, method, expected }) => {
-      // given
       const spies = spyConsole();
 
-      // when
       logger.emit(input);
 
-      // then
       const line = onlyLine(spies, method);
       expect(JSON.parse(line)).toEqual(expected);
       expect(line).not.toContain(SENTINEL);
@@ -342,10 +339,8 @@ describe("logger.emit: 種類ごとのスキーマ（allowlist とマスク）",
   // WHY 先頭の並び: 行を目で追うとき、どの行も先頭が severity・time・message・event の順にそろう（apps/e2e/request-log.spec.ts も見る）。
   //   残りはスキーマに書いた順（呼び出し側のキーの順によらない）。
   test("先頭は severity・time・message・event の順で、残りはスキーマの順（呼び出し側のキーの順によらない）", () => {
-    // given
     const spies = spyConsole();
 
-    // when
     logger.emit({
       changes: [],
       row_id: "t-1",
@@ -354,7 +349,6 @@ describe("logger.emit: 種類ごとのスキーマ（allowlist とマスク）",
       message: "db write done",
     });
 
-    // then
     const parsed = parsedLine(spies, "log") as Record<string, unknown>;
     expect(Object.keys(parsed)).toEqual([
       "severity",
@@ -368,13 +362,10 @@ describe("logger.emit: 種類ごとのスキーマ（allowlist とマスク）",
   });
 
   test("event.name はキーを入れ子のまま出す（Logs Explorer で jsonPayload.event.name と書ける。ドット付きの平らなキーにしない）", () => {
-    // given
     const spies = spyConsole();
 
-    // when
     logger.emit({ message: "notification", event: { name: "notification" } });
 
-    // then
     const line = onlyLine(spies, "log");
     expect(line).toContain('"event":{"name":"notification"}');
     expect(line).not.toContain('"event.name"');
@@ -382,7 +373,6 @@ describe("logger.emit: 種類ごとのスキーマ（allowlist とマスク）",
 
   // WHY 入れ子の一覧に無いキーも落とす: z.object は入れ子でも既定で一覧に無いキーを落とす（.strict() にしない。本番で落とさない）。
   test("入れ子のオブジェクトの一覧に無いキー（event・http.request.header の中など）も落とす", () => {
-    // given
     const spies = spyConsole();
     const { input } = CASES.page_request;
     const request = input as Extract<
@@ -390,7 +380,6 @@ describe("logger.emit: 種類ごとのスキーマ（allowlist とマスク）",
       { event: { name: "page_request" } }
     >;
 
-    // when
     logger.emit({
       ...request,
       event: withExtra(request.event, { extra: SENTINEL }),
@@ -402,7 +391,6 @@ describe("logger.emit: 種類ごとのスキーマ（allowlist とマスク）",
       },
     });
 
-    // then
     const line = onlyLine(spies, "log");
     expect(JSON.parse(line)).toEqual(CASES.page_request.expected);
     expect(line).not.toContain(SENTINEL);
@@ -447,13 +435,10 @@ describe("logger.emit: severity と出力先（種類と phase が決める）",
   ] satisfies [string, LogEvent, ConsoleMethod, string][])(
     "%s は console.%s に severity %s で出す",
     (_kind, event, method, severity) => {
-      // given
       const spies = spyConsole();
 
-      // when
       logger.emit(event);
 
-      // then
       expect(parsedLine(spies, method)).toMatchObject({ severity });
     },
   );
@@ -461,26 +446,20 @@ describe("logger.emit: severity と出力先（種類と phase が決める）",
 
 describe("logger.emit: time", () => {
   test("event に time があればそれを使う（リクエストログの受信時刻など、出来事の時刻を優先する）", () => {
-    // given
     const spies = spyConsole();
 
-    // when
     logger.emit(CASES.api_request.input);
 
-    // then
     expect(parsedLine(spies, "log")).toMatchObject({
       time: "2026-01-01T00:00:00.000Z",
     });
   });
 
-  test("time を持たない種類は現在時刻（now()）を使う", () => {
-    // given
+  test("time を持たない種類は現在時刻（Clock.now()）を使う", () => {
     const spies = spyConsole();
 
-    // when
     logger.emit({ message: "notification", event: { name: "notification" } });
 
-    // then
     expect(parsedLine(spies, "log")).toEqual({
       severity: "INFO",
       time: NOW,
@@ -492,16 +471,13 @@ describe("logger.emit: time", () => {
 
 describe("logger.emit: 自由文（message・error.message など）", () => {
   test("値に改行を含んでも 1 行で出す（NDJSON。改行は JSON の中でエスケープされる）", () => {
-    // given
     const spies = spyConsole();
 
-    // when
     logger.emit({
       message: "1 行目\n2 行目\r\n3 行目",
       event: { name: "notification" },
     });
 
-    // then
     const line = onlyLine(spies, "log");
     expect(line).not.toMatch(/[\r\n]/);
     expect(JSON.parse(line)).toMatchObject({
@@ -511,10 +487,8 @@ describe("logger.emit: 自由文（message・error.message など）", () => {
 
   // WHY 置換は logger の中だけ: 呼び出し側は生の値を渡し、出口で必ず通る（Issue #216）。
   test("message・error.message・notification・url.path のメールアドレスなどを *** にする（freeText）", () => {
-    // given
     const spies = spyConsole();
 
-    // when
     logger.emit({
       message: "notification for a@b.io",
       event: { name: "notification", phase: "failed" },
@@ -522,7 +496,6 @@ describe("logger.emit: 自由文（message・error.message など）", () => {
       error: new Error("rejected: Bearer abc.def"),
     });
 
-    // then
     expect(parsedLine(spies, "error")).toEqual({
       severity: "ERROR",
       time: NOW,
@@ -534,21 +507,18 @@ describe("logger.emit: 自由文（message・error.message など）", () => {
   });
 
   test("url.path の自由文もマスクする（パスは利用者が決められる）", () => {
-    // given
     const spies = spyConsole();
     const request = CASES.page_request.input as Extract<
       LogEvent,
       { event: { name: "page_request" } }
     >;
 
-    // when
     logger.emit({
       ...request,
       message: "GET /users/a@b.io",
       url: { path: "/users/a@b.io", query: {} },
     });
 
-    // then
     expect(parsedLine(spies, "log")).toMatchObject({
       message: "GET /users/***",
       url: { path: "/users/***", query: {} },
@@ -556,17 +526,14 @@ describe("logger.emit: 自由文（message・error.message など）", () => {
   });
 
   test("url.query のキーも自由文としてマスクし、値はすべて *** にする", () => {
-    // given
     const spies = spyConsole();
     const request = CASES.page_request.input as Extract<
       LogEvent,
       { event: { name: "page_request" } }
     >;
 
-    // when
     logger.emit({ ...request, url: { path: "/", query: { "a@b.io": "1" } } });
 
-    // then
     expect(parsedLine(spies, "log")).toMatchObject({
       url: { path: "/", query: { "***": "***" } },
     });
@@ -577,7 +544,6 @@ describe("logger.emit: error 項目", () => {
   // WHY type と message: OTel semconv の exception.type / exception.message、ECS の error.type / error.message と同じ名前にする。
   // WHY stack を出さない: 1 行が長くなり、ファイルのパスなど内部の情報も含む。原因の特定は type と message で足りる前提。
   test("Error は { type, message } にして出し、stack と一覧に無いプロパティは出さない", () => {
-    // given
     const spies = spyConsole();
     class RepositoryError extends Error {
       readonly detail = [SENTINEL];
@@ -587,14 +553,12 @@ describe("logger.emit: error 項目", () => {
       }
     }
 
-    // when
     logger.emit({
       message: "unexpected error",
       event: { name: "server_error" },
       error: new RepositoryError("not found"),
     });
 
-    // then
     const line = onlyLine(spies, "error");
     expect(JSON.parse(line)).toEqual({
       severity: "ERROR",
@@ -611,17 +575,14 @@ describe("logger.emit: error 項目", () => {
   // WHY { type } のオブジェクトはそのまま: Writer（apps/backend/shared/infra/writer.ts）は DB のエラーを message の無い
   //   { type: <pg のエラーの name> } で渡す（message は SQL と値を含むので出さない）。
   test("type（文字列）を持つオブジェクトは、type と message だけを出す", () => {
-    // given
     const spies = spyConsole();
 
-    // when
     logger.emit({
       message: "unexpected error",
       event: { name: "server_error" },
       error: { type: "DatabaseError", detail: SENTINEL },
     });
 
-    // then
     expect(parsedLine(spies, "error")).toMatchObject({
       error: { type: "DatabaseError" },
     });
@@ -637,17 +598,14 @@ describe("logger.emit: error 項目", () => {
   ])(
     "Error でない値（%s）は、値を出さず { type: typeof } にする",
     (_kind, error, type) => {
-      // given
       const spies = spyConsole();
 
-      // when
       logger.emit({
         message: "unexpected error",
         event: { name: "server_error" },
         error,
       });
 
-      // then
       const line = onlyLine(spies, "error");
       expect(JSON.parse(line)).toMatchObject({ error: { type } });
       expect(JSON.parse(line).error).toEqual({ type });
@@ -661,7 +619,6 @@ describe("logger.emit: 失敗しても落とさない（logger_error の 1 行�
   //   失敗した種類の名前だけを固定の項目で出し、「ログを出せなかった」ことを 1 つの条件（event.name="logger_error"）で引ける
   //   ようにする。本番で例外にしない: ログの失敗で本来の処理（応答を返すなど）を止めない。
   test("スキーマに合わない event（必須の項目が無い）は、生の値を出さず logger_error の 1 行（ERROR）にする", () => {
-    // given
     const spies = spyConsole();
     const invalid = {
       message: `db write ${SENTINEL}`,
@@ -669,28 +626,22 @@ describe("logger.emit: 失敗しても落とさない（logger_error の 1 行�
       row_id: SENTINEL,
     } as unknown as LogEvent;
 
-    // when
-    const action = () => logger.emit(invalid);
+    expect(() => logger.emit(invalid)).not.toThrow();
 
-    // then
-    expect(action).not.toThrow();
     const line = onlyLine(spies, "error");
     expect(JSON.parse(line)).toEqual(schemaMismatchLine("db_write"));
     expect(line).not.toContain(SENTINEL);
   });
 
   test("値の型が違う event（数値の message）も logger_error の 1 行にする", () => {
-    // given
     const spies = spyConsole();
 
-    // when
     logger.emit({
       message: 1,
       event: { name: "server_error" },
       error: new Error(SENTINEL),
     } as unknown as LogEvent);
 
-    // then
     const line = onlyLine(spies, "error");
     expect(JSON.parse(line)).toEqual(schemaMismatchLine("server_error"));
     expect(line).not.toContain(SENTINEL);
@@ -704,13 +655,10 @@ describe("logger.emit: 失敗しても落とさない（logger_error の 1 行�
   ])(
     "event.name が %s なら、failed_name を付けずに logger_error の 1 行にする",
     (_kind, event) => {
-      // given
       const spies = spyConsole();
 
-      // when
       logger.emit({ message: SENTINEL, event } as unknown as LogEvent);
 
-      // then
       const line = onlyLine(spies, "error");
       expect(JSON.parse(line)).toEqual(schemaMismatchLine());
       expect(line).not.toContain(SENTINEL);
@@ -718,7 +666,6 @@ describe("logger.emit: 失敗しても落とさない（logger_error の 1 行�
   );
 
   test("event のプロパティ（getter）が例外を投げても呼び出し側に伝えず、読めなかった旨の logger_error の 1 行を出す", () => {
-    // given
     const spies = spyConsole();
     const event = {
       event: { name: "notification" as const },
@@ -727,11 +674,8 @@ describe("logger.emit: 失敗しても落とさない（logger_error の 1 行�
       },
     };
 
-    // when
-    const action = () => logger.emit(event);
+    expect(() => logger.emit(event)).not.toThrow();
 
-    // then
-    expect(action).not.toThrow();
     const line = onlyLine(spies, "error");
     expect(JSON.parse(line)).toEqual({
       severity: "ERROR",
@@ -747,10 +691,8 @@ describe("LogEvent の型（種類ごとの必須項目）", () => {
   // 型の検査（pnpm typecheck）で固定する。下の各行の ts-expect-error の指示の行が型エラーにならなければ、tsc が「使われていない
   //   指示」（TS2578）で失敗するので、型を緩めると typecheck が落ちる。実行時は parse に失敗して logger_error の行になる。
   test("一覧に無い event.name・必須の項目が無い・値の型が違う呼び出しは型エラーになる", () => {
-    // given
     const spies = spyConsole();
 
-    // when
     // @ts-expect-error 一覧に無い名前
     logger.emit({ message: "x", event: { name: "todo_created" } });
     // @ts-expect-error event が無い
@@ -780,7 +722,6 @@ describe("LogEvent の型（種類ごとの必須項目）", () => {
     // @ts-expect-error api_request に http などが無い
     logger.emit({ message: "x", event: { name: "api_request" } });
 
-    // then
     expect(spies.error).toHaveBeenCalledTimes(10);
   });
 });

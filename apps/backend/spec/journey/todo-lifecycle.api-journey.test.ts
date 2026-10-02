@@ -40,10 +40,7 @@ import type { ChangeEntry } from "../../shared/infra/change-log";
 import { changeLogs } from "../../shared/infra/schema";
 import { PostgresTransactionRunner } from "../../shared/infra/transaction.postgres";
 import type { Problem } from "../../shared/presentation/problem";
-import {
-  createTestDatabase,
-  type TestDatabase,
-} from "../../test-support/database";
+import { TestDatabase } from "../../test-support/database";
 
 // API ジャーニーテスト（Issue #187 / #200。.claude/rules/testing.md の「API ジャーニーテスト」、ADR
 //   docs/adr/quality/20260930-backend-journey-tests.md と docs/adr/quality/20260930-gherkin-journeys-with-vitest-cucumber.md）:
@@ -57,7 +54,7 @@ import {
 //   通すので遅く、失敗の原因が画面か API か DB かを切り分けにくい。ここは本番と同じ組み立て（Postgres の Repository → command /
 //   query → Api）で、画面を通さずに API の流れだけを見る。
 // WHY 本番の export（GET / POST など）を使わず、ここで組み立てる: 本番の handler は AppDatabase.get()（.env の DATABASE_URL の public
-//   スキーマ）を使い、テストファイルごとの別スキーマ（createTestDatabase）に向けられない。組み立ての形は各 *.api.ts の最下部と同じ。
+//   スキーマ）を使い、テストファイルごとの別スキーマ（TestDatabase.create）に向けられない。組み立ての形は各 *.api.ts の最下部と同じ。
 // WHY テストダブルを使わない（vitest から vi を import しない・InMemory も無し。rule-tests/api-journey.test.ts が止める）: 本番と同じ
 //   部品の組み合わせで動くことを確かめるのが目的で、差し替えるとその部分のつながりを確かめなくなる。
 // WHY 変更系の API（POST / PUT / DELETE）の後は、応答に加えて DB の行も見る（読み取り系の GET の後は見ない。ユーザー判断、
@@ -93,7 +90,7 @@ let handlers: ReturnType<typeof api>;
 const notifications: string[] = [];
 
 beforeAll(async () => {
-  database = await createTestDatabase();
+  database = await TestDatabase.create();
   await database.migrate();
   handlers = api();
 });

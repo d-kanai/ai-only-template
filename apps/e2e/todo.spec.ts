@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { countTodosWithTitle, resetTodos } from "./database";
+import { E2eDatabase } from "./database";
 
 // Todo の CRUD を画面から一周する E2E テスト。API は Postgres（playwright.config.ts の webServer に DATABASE_URL を渡す）で動く。
 // WHY 各テストの前に todos を空にする: データは Postgres に残り、サーバを起動し直しても、前のテスト・前回の実行
@@ -8,7 +8,7 @@ import { countTodosWithTitle, resetTodos } from "./database";
 // WHY 1 テストで一周する: 1 本の中の操作の順序で状態を担保する（追加 → 完了 → 詳細で変更 → 削除）。
 //   最後に削除まで行い、作ったデータを残さない。
 test.beforeEach(async () => {
-  await resetTodos();
+  await E2eDatabase.resetTodos();
 });
 
 // WHY getByRole / getByLabel: 利用者が見る役割と名前（aria-label・label・見出し）で要素を探し、
@@ -44,7 +44,7 @@ test("Todo を追加し、完了にし、詳細で title を変えて、一覧�
   // then
   await expect(page.getByRole("link", { name: originalTitle })).toBeVisible();
   // 画面に出た Todo が Postgres に保存されていること（InMemory で動いていないこと）を DB から直接確かめる。
-  expect(await countTodosWithTitle(originalTitle)).toBe(1);
+  expect(await E2eDatabase.countTodosWithTitle(originalTitle)).toBe(1);
 
   // when
   // 完了にする（Update）
@@ -97,5 +97,5 @@ test("Todo を追加し、完了にし、詳細で title を変えて、一覧�
 
   // then
   await expect(page.getByRole("link", { name: updatedTitle })).toHaveCount(0);
-  expect(await countTodosWithTitle(updatedTitle)).toBe(0);
+  expect(await E2eDatabase.countTodosWithTitle(updatedTitle)).toBe(0);
 });

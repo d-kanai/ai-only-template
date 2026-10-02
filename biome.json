@@ -106,7 +106,7 @@
       }
     },
     {
-      "includes": ["apps/backend/**"],
+      "includes": ["apps/backend/**", "apps/shared/**", "apps/e2e/**"],
       "linter": {
         "rules": {
           "complexity": {

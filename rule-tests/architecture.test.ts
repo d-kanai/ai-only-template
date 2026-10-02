@@ -102,6 +102,9 @@ const SHARED_ALLOWED_PACKAGES = new Set(["zod"]);
 //   **/*.mts を含み、JS のファイルや ESM / CJS を明示した拡張子のファイルも同じビルドに入り、同じ規則の対象になるため。
 const SOURCE_FILE = /\.(?:[cm]?[jt]s|[jt]sx)$/;
 const TEST_FILE = /\.test\.(?:[cm]?[jt]s|[jt]sx)$/;
+// E2E のテスト（Playwright の *.spec.ts。testMatch の既定 **/*.@(spec|test).?(c|m)[jt]s?(x) のうち spec の側。apps/e2e/playwright.config.ts）。
+//   Vitest のテスト（TEST_FILE）ではないので、多くの規則では検査の対象のまま。規則 class-based だけが除く（WHY は CLASS_BASED）。
+const E2E_SPEC_FILE = /\.spec\.(?:[cm]?[jt]s|[jt]sx)$/;
 
 type ImportStatement = {
   // import / export の from に書かれた文字列そのもの（"@repo/backend/..."、"../x"、"next/link" など）。
@@ -1270,7 +1273,7 @@ const RULES: Rule[] = [
 //   backend/shared の中なので backend-shared がかかる（feature のコードを import せず、schema は glob の文字列で指す）。
 // 決定と採用しなかった案は ADR docs/adr/architecture/20260929-backend-features-and-shared-directories.md。
 // WHY 直下の test-support/ も許す（Issue #181。ユーザー判断「test-support が build に入らないルールは頑張って」）: テストだけが使う
-//   コード（createTestDatabase など）の置き場所で、層のコードではない。層の下（shared/infra/）に置くと本番のコードと見分けが付かず、
+//   コード（TestDatabase.create など）の置き場所で、層のコードではない。層の下（shared/infra/）に置くと本番のコードと見分けが付かず、
 //   .dockerignore の 1 行（**/test-support）でイメージから外せない。層の規則は当てない（どの層でもない）が、本番のコードから
 //   参照しないこと・イメージに入らないことは rule-tests/test-support.test.ts が見る（層のファイルから参照すると層の規則にもかかる）。
 //   直下だけに許し、features/<f>/test-support/ や shared/test-support/ は違反のままにする（置き場所を 1 か所にそろえる）。
@@ -2037,20 +2040,35 @@ function findProblemResponseViolations(root: string): string[] {
   );
 }
 
-// --- backend の本番コードはクラスを基本にする（規則 backend-class-based。Issue #262 の 4 本目） ---
-// apps/backend の本番コードは、ファイルの最上位（モジュールの直下と namespace の中）に関数を置かない。補助の関数もクラスの
-//   メソッド（状態を使わないものは static）にする。
+// --- backend と apps/shared の本番コードとテストの補助はクラスを基本にする（規則 class-based。Issue #262） ---
+// apps/backend と apps/shared の本番コード、テストの補助（apps/backend/test-support/・apps/backend/spec/ の support.ts・apps/e2e/ の
+//   spec 以外）は、ファイルの最上位（モジュールの直下と namespace の中）に関数を置かない。補助の関数もクラスのメソッド（状態を
+//   使わないものは static）にする。
 // WHY 規則にする: ADR docs/adr/architecture/20261002-class-based-backend.md（daiki の判断 2026-10-02）で、関数を export せず、
-//   ファイルの中だけの補助の関数も置かないと決めた。PR #264 / #266 / #267 で移行を終え、本番コードの最上位の関数は 0 件になった。
-//   レビューだけでは、関数の import が戻る（依存がコンストラクタに出ず、差し替えに vi.mock が要る形に戻る）のを止められない。
+//   ファイルの中だけの補助の関数も置かないと決めた。PR #264 / #266 / #267 で backend の移行を終え、本番コードの最上位の関数は 0 件に
+//   なった。レビューだけでは、関数の import が戻る（依存がコンストラクタに出ず、差し替えに vi.mock が要る形に戻る）のを止められない。
+// WHY apps/shared も対象にする（Issue #262。規則の名前を backend-class-based から class-based に変えた）: daiki が対象の範囲を
+//   「すべて」と決めた（2026-10-02。ADR docs/adr/architecture/20261002-class-based-shared-and-test-support.md）。apps/shared は
+//   backend と frontend 直下が import する基盤で、ここに関数が残ると backend の呼び出し側に関数の import が戻る。
 // 違反にするもの（ファイル:行。行は宣言の書き出し）:
 //   - function 宣言（export・export default・async・generator・オーバーロードの宣言・declare function も、1 つずつ）。
 //   - 初期化子が関数（アロー関数・function 式）の変数（const / let / var、export も）。括弧・as・satisfies・! ・<T> で包んだものも。
 //   - export default のアロー関数・function 式（export default async () => {}）。
 // 許すもの: クラス（宣言・式）のメンバー（メソッド・アロー関数のクラスフィールド readonly handle = ProblemResponse.wrap(async ...)）、
 //   メソッドや関数の中の関数、型・interface、関数でない値の変数（定数・オブジェクト・new X().handle のようなプロパティの参照）。
-// 対象: apps/backend の下のテスト以外のソース（8 つの拡張子）。テスト・apps/backend/test-support/・apps/backend/spec/ は除く
-//   （ADR の対象外。テストの組み立ての補助は関数のほうが読みやすく、本番の依存の形に影響しない）。
+// 対象: apps/backend・apps/shared・apps/e2e の下のテスト以外のソース（8 つの拡張子）。テスト（*.test.*）と E2E のテスト
+//   （apps/e2e の *.spec.*。E2E_SPEC_FILE）は除く。
+// WHY テストの補助（apps/backend/test-support/・apps/backend/spec/ の support.ts・apps/e2e/database.ts）も対象にする（Issue #262 の
+//   2 つ目の PR。以前は除いていた）: daiki が対象の範囲を「すべて」と決め、テストの補助も移した（ADR
+//   20261002-class-based-shared-and-test-support.md）。テストの組み立てを読むときも依存の形（クラスのメソッド）が本番とそろう。
+// WHY テスト（*.test.*・*.spec.*）は除く: テストの本体は Vitest / Playwright の describe・it・test に関数を渡す形で、ファイルの中だけの
+//   小さな補助の関数（step の中の組み立てなど）まで縛ると、テストの読みやすさを落とすだけで関数の import は増えない（ほかのファイルは
+//   テストを import しない）。
+// WHY リポジトリ直下の vitest.global-setup.ts は対象外のまま（apps/ の下でないので列挙に入らない）: Vitest の globalSetup は
+//   setup を関数の default export で求める（中の処理は test-support の TestDatabase を呼ぶ）。
+// WHY apps/e2e/playwright.config.ts は対象にする（例外にしない）: Playwright が求めるのは default export の設定オブジェクト
+//   （defineConfig の戻り値）だけで、補助の関数の形は求めない。今も最上位は定数と default export だけで関数は無い
+//   （drizzle.config.ts と同じ扱い）。
 // WHY apps/backend/shared/drizzle/drizzle.config.ts も対象にする: drizzle-kit が求めるのは default export の設定オブジェクトだけで、
 //   補助の関数の形は求めない。今もクラス DrizzleConfigPath の static メソッドで書いている（ファイルのコメント）ので、例外は要らない。
 // 限界（見逃す方向）: 最上位の関数呼び出しの引数に書いた関数（即時実行の (() => {})()、z.object(...).refine((x) => ...)）、
@@ -2058,14 +2076,14 @@ function findProblemResponseViolations(root: string): string[] {
 //   （const f = c ? () => 1 : () => 2）、別のファイルの関数の再代入（const f = other.f）は見ない（関数かは型を見ないと決まらない）。
 //   最上位の文のブロックの中の関数（{ ... }・if・try・switch・for の中）も見ない（不自然な書き方なので再帰しない。reviewer の実測）。
 //   レビューで見る。
-const BACKEND_CLASS_BASED = {
-  id: "backend-class-based",
-  name: "apps/backend の本番コード（テスト・test-support/・spec/ を除く）はファイルの最上位に関数を置かない（function 宣言・関数を入れた変数・export default の関数は違反。クラスのメソッド・クラスフィールドのアロー関数・メソッドの中の関数は可）",
+const CLASS_BASED = {
+  id: "class-based",
+  name: "apps/backend と apps/shared の本番コードとテストの補助（apps/backend の test-support/・spec/ の support.ts、apps/e2e の *.spec.* 以外）はファイルの最上位に関数を置かない（テストと E2E の *.spec.* は除く。function 宣言・関数を入れた変数・export default の関数は違反。クラスのメソッド・クラスフィールドのアロー関数・メソッドの中の関数は可）",
   appliesTo: (file: string) =>
     isSourceNonTest(file) &&
-    isUnder(file, BACKEND_ROOT) &&
-    !BACKEND_TEST_SUPPORT_DIR.test(file) &&
-    !isUnder(file, `${BACKEND_ROOT}/spec`),
+    (isUnder(file, BACKEND_ROOT) ||
+      isUnder(file, SHARED_ROOT) ||
+      (isUnder(file, E2E_ROOT) && !E2E_SPEC_FILE.test(file))),
 };
 
 // 括弧・型アサーション（as / <T>）・satisfies・非 null アサーション（!）を外した式。
@@ -2140,9 +2158,11 @@ function findTopLevelFunctions(sourceFile: SourceFile): number[] {
 }
 
 function listClassBasedCheckedFiles(root: string): string[] {
-  return listSourceFiles(root, BACKEND_ROOT).filter(
-    BACKEND_CLASS_BASED.appliesTo,
-  );
+  return [
+    ...listSourceFiles(root, BACKEND_ROOT),
+    ...listSourceFiles(root, SHARED_ROOT),
+    ...listSourceFiles(root, E2E_ROOT),
+  ].filter(CLASS_BASED.appliesTo);
 }
 
 // 「ファイル:行」の一覧。
@@ -2352,7 +2372,7 @@ function findViolations(references: Reference[], rule: Rule): string[] {
 //   現在時刻の読み取りも「now-single-source: ファイル:行」で同じく出す。
 //   ハードコードの文言も「frontend-hardcoded-text: ファイル:行」「server-hardcoded-text: ファイル:行」を文言ごとに 1 行で出す。
 //   ProblemResponse.wrap で包んでいない handle も「presentation-with-problem-response: ファイル:行」を handle ごとに 1 行で出す。
-//   backend の本番コードの最上位の関数も「backend-class-based: ファイル:行」を関数ごとに 1 行で出す。
+//   backend と apps/shared の本番コードとテストの補助の最上位の関数も「class-based: ファイル:行」を関数ごとに 1 行で出す。
 //   exports の違反は「backend-exports: ...」「shared-exports: ...」の 1 行で出す（findExportsViolations）。
 //   apps/shared の置き場所の違反は「shared-placement: ファイル」の 1 行で出す（ソース以外も含め、apps/shared の全ファイルを見る）。
 // WHY 置き場所の規則も参照を取り出すファイル（listReferencingFiles。apps/e2e/ とリポジトリ直下を含む）全体にかける:
@@ -2389,7 +2409,7 @@ function collectViolations(root: string): string[] {
       (line) => `${PRESENTATION_WITH_PROBLEM_RESPONSE.id}: ${line}`,
     ),
     ...findClassBasedViolations(root).map(
-      (line) => `${BACKEND_CLASS_BASED.id}: ${line}`,
+      (line) => `${CLASS_BASED.id}: ${line}`,
     ),
     ...listAllFiles(root, SHARED_ROOT)
       .filter(SHARED_PLACEMENT.isMisplaced)
@@ -2527,13 +2547,13 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
     expect(files.filter((file) => TEST_FILE.test(file))).toEqual([]);
   });
 
-  it(BACKEND_CLASS_BASED.name, () => {
+  it(CLASS_BASED.name, () => {
     // 失敗時に「ファイル:行」が出るよう、一覧を空配列と比較する。
     expect(findClassBasedViolations(repoRoot)).toEqual([]);
   });
 
   // WHY 本物のファイルが列挙に入っていることを見る: 列挙（パスの判定）が壊れて 0 件になると、違反も 0 件で常に緑になる。
-  it("最上位に関数を置かない規則は、apps/backend の本番コード（層・expose・drizzle.config.ts）を対象にし、テスト・test-support/・spec/ は対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
+  it("最上位に関数を置かない規則は、apps/backend の本番コード（層・expose・drizzle.config.ts）・apps/shared の本番コード・テストの補助（test-support/・spec/ の support.ts・apps/e2e/ の spec 以外）を対象にし、テスト・E2E の *.spec.ts・リポジトリ直下は対象にしない（列挙が壊れて素通りするのを防ぐ）", () => {
     const files = listClassBasedCheckedFiles(repoRoot);
     expect(files).toEqual(
       expect.arrayContaining([
@@ -2544,14 +2564,29 @@ describe("依存の向き（.claude/rules/architecture-check.md）", () => {
         "apps/backend/features/notification/expose/notifier.ts",
         "apps/backend/features/todo/internal/domain/todo.ts",
         "apps/backend/features/todo/internal/presentation/create-todo.api.ts",
+        "apps/shared/env.ts",
+        "apps/shared/log-event.ts",
+        "apps/shared/logger.ts",
+        "apps/shared/now.ts",
+        "apps/backend/test-support/database.ts",
+        "apps/backend/test-support/transaction-runner.in-memory.ts",
+        "apps/backend/test-support/todo/todo-builder.ts",
+        "apps/backend/test-support/todo/todo-repository.in-memory.ts",
+        "apps/backend/spec/api/todo/support.ts",
+        "apps/e2e/database.ts",
+        "apps/e2e/playwright.config.ts",
       ]),
     );
     expect(
       files.filter(
         (file) =>
           TEST_FILE.test(file) ||
-          isUnder(file, `${BACKEND_ROOT}/test-support`) ||
-          isUnder(file, `${BACKEND_ROOT}/spec`),
+          E2E_SPEC_FILE.test(file) ||
+          !(
+            isUnder(file, BACKEND_ROOT) ||
+            isUnder(file, SHARED_ROOT) ||
+            isUnder(file, E2E_ROOT)
+          ),
       ),
     ).toEqual([]);
   });
@@ -6100,7 +6135,7 @@ describe("ProblemResponse.wrap で包んでいない handle の抽出（findUnwr
 
 const DOMAIN_FILE = "apps/backend/shared/domain/x.ts";
 
-// 規則 backend-class-based の判定の例。違反例は 1 例 1 つの書き方にして、他の書き方の巻き添えで違反になっていないことを示す。
+// 規則 class-based の判定の例。違反例は 1 例 1 つの書き方にして、他の書き方の巻き添えで違反になっていないことを示す。
 const CLASS_BASED_EXAMPLES: {
   violating: [file: string, source: string][];
   allowed: [file: string, source: string][];
@@ -6187,7 +6222,8 @@ const CLASS_BASED_EXAMPLES: {
       "apps/backend/features/notification/expose/notify.ts",
       lines("export function notify(message: string): void {}"),
     ],
-    // 15〜17: 対象外のディレクトリと名前の前方一致だけが同じ別ディレクトリ・直下でない test-support/ は対象。
+    // 15〜17: 名前の前方一致だけが同じ別ディレクトリ・直下でない test-support/（以前は直下の test-support/ と spec/ を除いていたときの境界。
+    //   今はどれも apps/backend の下なので対象）。
     ["apps/backend/test-support-x/x.ts", lines("export function f(): void {}")],
     ["apps/backend/spec-x/x.ts", lines("export function f(): void {}")],
     [
@@ -6198,6 +6234,41 @@ const CLASS_BASED_EXAMPLES: {
     [
       "apps/backend/shared/infra/test-clock.ts",
       lines("export function f(): void {}"),
+    ],
+    // 19〜21: apps/shared の本番コード（Issue #262 で対象に広げた）。env.ts・now.ts の関数と、.mts・入れ子のディレクトリ。
+    ["apps/shared/env.ts", lines("export function load(): void {}")],
+    ["apps/shared/now.ts", lines("export const now = (): Date => new Date();")],
+    [
+      "apps/shared/nested/x.mts",
+      lines("function f(): number {", "  return 1;", "}"),
+    ],
+    // 22〜27: テストの補助（Issue #262 の 2 つ目の PR で対象に広げた）。apps/backend/test-support/（直下と feature の下）、
+    //   apps/backend/spec/ の support.ts、apps/e2e/ の spec 以外の補助（database.ts・入れ子・Playwright の設定）。
+    [
+      "apps/backend/test-support/builder.ts",
+      lines("export function build(): void {}"),
+    ],
+    [
+      "apps/backend/test-support/todo/todo-builder.ts",
+      lines("function defaults(): number {", "  return 1;", "}"),
+    ],
+    [
+      "apps/backend/spec/api/todo/support.ts",
+      lines("export function given(): void {}"),
+    ],
+    [
+      "apps/e2e/database.ts",
+      lines("export async function resetTodos(): Promise<void> {}"),
+    ],
+    ["apps/e2e/nested/x.mts", lines("export const f = (): number => 1;")],
+    [
+      "apps/e2e/playwright.config.ts",
+      lines(
+        "function port(): number {",
+        "  return 3100;",
+        "}",
+        "export default { port: port() };",
+      ),
     ],
   ],
   allowed: [
@@ -6281,20 +6352,34 @@ const CLASS_BASED_EXAMPLES: {
         "/* const g = () => 1; */",
       ),
     ],
-    // 7〜11: 対象外（テスト・test-support/・spec/・apps/shared・frontend）。
+    // 7〜16: 対象外（テスト（test-support/・spec/ の中のテストも）・E2E のテスト *.spec.ts・リポジトリ直下の
+    //   vitest.global-setup.ts・apps/shared のテスト・前方一致だけが同じ apps/shared-x と apps/e2e-x・frontend）。
     [
       "apps/backend/shared/domain/x.test.ts",
       lines("function helper(): number {", "  return 1;", "}"),
     ],
     [
-      "apps/backend/test-support/builder.ts",
-      lines("export function build(): void {}"),
+      "apps/backend/test-support/todo/todo-builder.test.ts",
+      lines("function helper(): number {", "  return 1;", "}"),
     ],
     [
-      "apps/backend/spec/api/todo/support.ts",
-      lines("export function given(): void {}"),
+      "apps/backend/spec/api/todo/create-todo.api-spec.test.ts",
+      lines("function given(): void {}"),
     ],
-    ["apps/shared/env.ts", lines("export function load(): void {}")],
+    [
+      "apps/e2e/todo.spec.ts",
+      lines("async function addTodo(): Promise<void> {}"),
+    ],
+    [
+      "vitest.global-setup.ts",
+      lines("export default async function setup(): Promise<void> {}"),
+    ],
+    ["apps/e2e-x/x.ts", lines("export function f(): void {}")],
+    [
+      "apps/shared/env.test.ts",
+      lines("function helper(): number {", "  return 1;", "}"),
+    ],
+    ["apps/shared-x/x.ts", lines("export function f(): void {}")],
     [
       "apps/frontend_customer/features/todo/x.ts",
       lines("export function f(): void {}"),
@@ -6308,9 +6393,7 @@ function judgeClassBased(examples: [string, string][]): boolean[] {
   const sourceFiles = parseSourceFiles(
     Object.fromEntries(
       examples.flatMap(([file, source], i) =>
-        BACKEND_CLASS_BASED.appliesTo(file)
-          ? [[virtualPath(i, file), source]]
-          : [],
+        CLASS_BASED.appliesTo(file) ? [[virtualPath(i, file), source]] : [],
       ),
     ),
   );
@@ -6322,7 +6405,7 @@ function judgeClassBased(examples: [string, string][]): boolean[] {
   });
 }
 
-describe(`backend の本番コードの最上位に関数を置かない規則の判定（${BACKEND_CLASS_BASED.id}）`, () => {
+describe(`backend と apps/shared の本番コードとテストの補助の最上位に関数を置かない規則の判定（${CLASS_BASED.id}）`, () => {
   const { violating, allowed } = CLASS_BASED_EXAMPLES;
   // WHY 遅延して 1 回だけ判定する: 例ごとに tsgo を起動すると遅いため（handle の規則の判定と同じ）。
   let verdicts: { violating: boolean[]; allowed: boolean[] } | undefined;
@@ -6678,9 +6761,9 @@ function violationsOfFixture(files: Record<string, string>): string[] {
 // Issue #90 で frontend-to-shared-specifier・screen-to-shared・shared-self-contained・SHARED_PLACEMENT・SHARED_EXPORTS を足した。
 // Issue #141 で presentation-with-problem-response（PRESENTATION_WITH_PROBLEM_RESPONSE）を足した。
 // Issue #208 で module-internal・module-expose-only-from-presentation・expose-imports（モジュールの境界）を足した。
-// Issue #262 で backend-class-based（BACKEND_CLASS_BASED。最上位の関数）を足した。
+// Issue #262 で class-based（CLASS_BASED。最上位の関数）を足した。
 const MUST_REJECT_FILES: Record<string, string> = {
-  // backend-class-based（Issue #262）: 最上位の関数（function 宣言・async・generator・オーバーロード・アロー関数と function 式の
+  // class-based（Issue #262）: 最上位の関数（function 宣言・async・generator・オーバーロード・アロー関数と function 式の
   //   変数・export default のアロー関数・namespace の中）。クラスのメソッド・フィールド・メソッドの中の関数（8〜13 行目）は拾わない。
   //   .mts と expose/・drizzle-kit の設定も対象（前方一致だけが同じ別ディレクトリ test-support-x/ などは判定の例 CLASS_BASED_EXAMPLES）。
   "apps/backend/shared/domain/bad-function.ts": lines(
@@ -7120,7 +7203,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/e2e/bad-console.spec.ts": lines("console.log(line);"),
   "scripts/bad-console.ts": lines("console.log(1);"),
   "bad-console.config.mjs": lines("console.log(1);"),
-  // WHY クラスのフィールドにする: 最上位のアロー関数は backend-class-based にも当たり、console の違反だけを置けなくなる。
+  // WHY クラスのフィールドにする: 最上位のアロー関数は class-based にも当たり、console の違反だけを置けなくなる。
   "apps/backend/shared/infra/logger-helper.ts": lines(
     "export class L { static l = () => console.log(1); }",
   ),
@@ -7194,7 +7277,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import { commonMessages } from "../frontend_customer/shared/i18n/common.messages";',
   ),
   // server-hardcoded-text（Issue #116）: 日本語の文字列（テンプレートリテラル・zod の error）。コメント（3 行目）と ErrorKey（5 行目）は拾わない。
-  //   最上位の関数にしない（backend-class-based の巻き添えにしない）ため、クラスの static フィールドにする。
+  //   最上位の関数にしない（class-based の巻き添えにしない）ため、クラスの static フィールドにする。
   "apps/backend/features/todo/internal/domain/bad-text.ts": lines(
     "export class NotFound { static of = (id) =>",
     `  new DomainError("not_found", \`Todo（id: \${id}）が見つかりません\`); }`,
@@ -7327,6 +7410,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   //   "./env" は上の参照で使われ、ファイルもある（違反なし）。"./mismatch" は使われるが、値が別のファイルでキーのファイルも無い。
   //   "./unused" は使われず、ファイルも無い。
   //   shared-self-contained: apps/shared から外の自前コード（相対パス・"@/"）、フレームワーク・DB、node: 以外のパッケージ。
+  //   class-based（Issue #262）: 最後の行の最上位の関数（apps/shared も対象）。
   "apps/shared/env.ts": lines(
     "export const env = process.env;",
     'import { todoRepository } from "../backend/features/todo/internal/infra/todo-repository.postgres";',
@@ -7337,6 +7421,13 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import { z as zod } from "zod";',
     'import { existsSync } from "node:fs";',
     'import { logger } from "./logger";',
+    "export function load(): void {}",
+  ),
+  // class-based（Issue #262）: apps/shared の置いてよい名前のファイルの最上位の関数（置き場所の違反の巻き添えにしない）。
+  //   クラスの static メソッド（2 行目）は拾わない。
+  "apps/shared/log-event.ts": lines(
+    "export const f = (x: number): number => x;",
+    "export class LogSeverity { static of(): void {} }",
   ),
   "apps/shared/package.json": JSON.stringify({
     name: "@repo/shared",
@@ -7399,6 +7490,16 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/backend/shared/infra/old.test-support.ts": lines(
     "export const n = Date.now();",
   ),
+  // class-based（Issue #262 の 2 つ目の PR）: テストの補助（test-support/・spec/ の support.ts・apps/e2e/ の spec 以外）の最上位の関数。
+  "apps/backend/test-support/todo/bad-builder.ts": lines(
+    "export function aThing(): void {}",
+  ),
+  "apps/backend/spec/api/todo/support.ts": lines(
+    "export function given(): void {}",
+  ),
+  "apps/e2e/bad-helper.ts": lines(
+    "export const reset = async (): Promise<void> => {};",
+  ),
   // backend-placement / frontend-placement（Issue #181）: 直下の test-support/ と前方一致だけが同じ別ディレクトリ。
   "apps/backend/test-support-x/x.ts": lines("export const x = 1;"),
   "apps/frontend_customer/test-support-x/x.ts": lines("export const x = 1;"),
@@ -7406,12 +7507,16 @@ const MUST_REJECT_FILES: Record<string, string> = {
 
 const MUST_REJECT_VIOLATIONS = [
   ...[1, 2, 3, 4, 5, 6, 7, 14].map(
-    (line) =>
-      `backend-class-based: apps/backend/shared/domain/bad-function.ts:${line}`,
+    (line) => `class-based: apps/backend/shared/domain/bad-function.ts:${line}`,
   ),
-  "backend-class-based: apps/backend/shared/infra/bad-function.mts:1",
-  "backend-class-based: apps/backend/features/notification/expose/bad-notify.ts:1",
-  "backend-class-based: apps/backend/shared/drizzle/drizzle.config.mts:1",
+  "class-based: apps/backend/shared/infra/bad-function.mts:1",
+  "class-based: apps/backend/features/notification/expose/bad-notify.ts:1",
+  "class-based: apps/backend/shared/drizzle/drizzle.config.mts:1",
+  "class-based: apps/shared/env.ts:10",
+  "class-based: apps/shared/log-event.ts:1",
+  "class-based: apps/backend/test-support/todo/bad-builder.ts:1",
+  "class-based: apps/backend/spec/api/todo/support.ts:1",
+  "class-based: apps/e2e/bad-helper.ts:1",
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(
     (line) =>
       `now-single-source: apps/backend/features/todo/internal/domain/bad-now.ts:${line}`,
@@ -7922,9 +8027,10 @@ const MUST_REJECT_VIOLATIONS = [
 // （`git grep -h "from \"" -- '*.ts' '*.tsx'` で列挙したもの）をすべて含め、alias と相対の両方を置く。
 // コメント・文字列の中の import 風の文字列、from の無い `export type {...};`、テストファイル・TS 以外のファイルも置く。
 const MUST_PASS_FILES: Record<string, string> = {
-  // backend-class-based（Issue #262）: static だけのクラス・クラスフィールドのアロー関数・メソッドの中の関数・クラス式・
-  //   型と interface・定数のオブジェクト・コメントと文字列の中の function。テスト・test-support/・spec/ の関数は対象外
-  //   （apps/shared の関数は下の now-single-source の apps/shared/now.ts）。
+  // class-based（Issue #262）: static だけのクラス・クラスフィールドのアロー関数・メソッドの中の関数・クラス式・
+  //   型と interface・定数のオブジェクト・コメントと文字列の中の function。テスト（test-support/ の中のテストも）と
+  //   E2E のテスト（*.spec.ts）の関数は対象外（apps/shared のクラスは下の now-single-source の apps/shared/now.ts、
+  //   テストの関数は apps/shared/env.test.ts、E2E のテストの関数は下の apps/e2e/todo.spec.ts）。
   "apps/backend/shared/domain/good-class.ts": lines(
     "export type F = (x: number) => number;",
     "export interface Notifier { notify(message: string): void; }",
@@ -7940,11 +8046,11 @@ const MUST_PASS_FILES: Record<string, string> = {
   "apps/backend/shared/domain/good-class.test.ts": lines(
     "function helper(): number { return 1; }",
   ),
-  "apps/backend/test-support/class-based-helper.ts": lines(
-    "export function build(): void {}",
+  "apps/backend/test-support/class-based-helper.test.ts": lines(
+    "function helper(): number { return 1; }",
   ),
-  "apps/backend/spec/api/todo/support.ts": lines(
-    "export function given(): void {}",
+  "apps/backend/test-support/class-based-helper.ts": lines(
+    "export class Helper { static build(): void {} }",
   ),
   // presentation-with-problem-response（Issue #141）: ProblemResponse.wrap で包んだ handle（ctx あり・なし）。
   //   対象外: api ファイルでない presentation のファイル、テスト、ほかの層の handle。
@@ -8325,7 +8431,11 @@ const MUST_PASS_FILES: Record<string, string> = {
     "const v = myprocess.env; process.envelope;",
   ),
   // テスト、対象外の場所（scripts/・ルート直下のディレクトリの中）、TS / JS 以外のファイルは検査しない。
-  "apps/shared/env.test.ts": lines("const p = process.env.PATH;"),
+  //   class-based（Issue #262）: apps/shared のテストの中の最上位の関数は対象外。
+  "apps/shared/env.test.ts": lines(
+    "const p = process.env.PATH;",
+    "function helper(): number { return 1; }",
+  ),
   // apps/shared の package.json・tsconfig.json は置いてよい。依存のディレクトリ（node_modules）の中は置き場所の規則でも見ない。
   "apps/shared/package.json": JSON.stringify({
     name: "@repo/shared",
@@ -8401,10 +8511,13 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { buildRequestLog } from "@/shared/request-log/request-log";',
     "logger.emit(buildRequestLog({ receivedAt: now() }));",
   ),
-  // now-single-source: 現在時刻は apps/shared/now.ts だけが読み、ほかは now() を使う（backend の 4 層すべてと frontend 直下）。
+  // now-single-source: 現在時刻は apps/shared/now.ts だけが読み、ほかは Clock.now() を使う（backend の 4 層すべてと frontend 直下）。
+  //   class-based（Issue #262）: apps/shared/now.ts もクラスの static メソッドにする。
   "apps/shared/now.ts": lines(
-    "export function now(): Date {",
-    "  return new Date();",
+    "export class Clock {",
+    "  static now(): Date {",
+    "    return new Date();",
+    "  }",
     "}",
   ),
   "apps/backend/features/todo/internal/application/uses-now.command.ts": lines(
@@ -8464,15 +8577,14 @@ const MUST_PASS_FILES: Record<string, string> = {
   //   （BACKEND_PLACEMENT / FRONTEND_PLACEMENT）の対象外で、直下に置いても違反にならない（Issue #84）。
   "apps/e2e/todo.spec.ts": lines(
     'import { expect, test } from "@playwright/test";',
-    'import { resetTodos } from "./database";',
+    'import { E2eDatabase } from "./database";',
+    "async function addTodo(): Promise<void> {}",
   ),
   // テスト基盤の vitest.global-setup.ts だけは、test-support/database を相対パスで参照する（exports に含めない例外）。
   "vitest.global-setup.ts": lines(
     'import { env, toolEnv } from "@repo/shared/env";',
-    "import {",
-    "  cleanupTestSchemas,",
-    "  testSchemaPrefix,",
-    '} from "./apps/backend/test-support/database";',
+    'import { TestDatabase } from "./apps/backend/test-support/database";',
+    "export default async function setup(): Promise<void> {}",
   ),
   // exports（Issue #68 の段階 2）: 外が "@repo/backend/..." で参照するものだけを、キーのパスの .ts で公開する。
   //   すべてのキーが上の参照で使われ、指すファイルがある（パターンは *.api の 5 ファイルに当たる）。

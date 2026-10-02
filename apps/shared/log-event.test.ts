@@ -2,11 +2,10 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import {
-  freeText,
+  FreeTextMask,
   LOG_EVENT_NAMES,
   LOG_EVENT_SCHEMAS,
-  maskFreeText,
-  sensitive,
+  LogFieldMarks,
 } from "./log-event";
 
 // ログの種類（event.name）ごとのスキーマと、マスクの印（sensitive / freeText）の仕様（Issue #216）。
@@ -20,12 +19,7 @@ describe("LOG_EVENT_NAMES（event.name の一覧）", () => {
   // WHY 一覧を固定する: event.name は Logs Explorer で jsonPayload.event.name="<名前>" と引くための値で、名前を変えると
   //   保存したクエリ・アラートが黙って空になる。足す・変えるときはこのテストと ADR を同じ変更で直す。
   test("event.name に使える名前は、決めた一覧だけ（snake_case）", () => {
-    // given: 前提なし
-    // when
-    const names = LOG_EVENT_NAMES;
-
-    // then
-    expect(names).toEqual([
+    expect(LOG_EVENT_NAMES).toEqual([
       "page_request",
       "api_request",
       "db_write",
@@ -40,57 +34,33 @@ describe("LOG_EVENT_NAMES（event.name の一覧）", () => {
   // WHY スキーマの登録と一覧を突き合わせる: 一覧に名前を足してスキーマを足し忘れると、その種類の行はすべて parse できず
   //   logger_error になる（型でも satisfies が止めるが、実行時の値でも確かめる）。
   test("LOG_EVENT_SCHEMAS は一覧のすべての名前のスキーマを持ち、それ以外を持たない", () => {
-    // given: 前提なし
-    // when
-    const registered = Object.keys(LOG_EVENT_SCHEMAS);
-
-    // then
-    expect(registered).toEqual([...LOG_EVENT_NAMES]);
+    expect(Object.keys(LOG_EVENT_SCHEMAS)).toEqual([...LOG_EVENT_NAMES]);
   });
 });
 
-describe("sensitive（値を *** にする印）", () => {
+describe("LogFieldMarks.sensitive（値を *** にする印）", () => {
   test("どんな文字列も *** にする", () => {
-    // given
-    const schema = sensitive(z.string());
-
-    // when
-    const email = schema.parse("alice@example.com");
-    const empty = schema.parse("");
-
-    // then
-    expect(email).toBe("***");
-    expect(empty).toBe("***");
+    const schema = LogFieldMarks.sensitive(z.string());
+    expect(schema.parse("alice@example.com")).toBe("***");
+    expect(schema.parse("")).toBe("***");
   });
 
   // WHY null はそのまま: 値が無いことは個人情報ではない（Issue #216 の既定の判断）。nullable を外側に付けて書く。
   test("nullable を外側に付けると null は null のまま出し、文字列だけを *** にする", () => {
-    // given
-    const schema = sensitive(z.string()).nullable();
-
-    // when
-    const nullValue = schema.parse(null);
-    const text = schema.parse("http://localhost/?q=1");
-
-    // then
-    expect(nullValue).toBeNull();
-    expect(text).toBe("***");
+    const schema = LogFieldMarks.sensitive(z.string()).nullable();
+    expect(schema.parse(null)).toBeNull();
+    expect(schema.parse("http://localhost/?q=1")).toBe("***");
   });
 
   // WHY 包んだスキーマの検査は残す: 印を付けても、形の違う値（数値など）は通さない（allowlist の型の検査を緩めない）。
   test("包んだスキーマに合わない値は parse に失敗する", () => {
-    // given
-    const schema = sensitive(z.string());
-
-    // when
-    const result = schema.safeParse(1);
-
-    // then
-    expect(result.success).toBe(false);
+    expect(LogFieldMarks.sensitive(z.string()).safeParse(1).success).toBe(
+      false,
+    );
   });
 });
 
-describe("maskFreeText / freeText（自由文の最後の網）", () => {
+describe("FreeTextMask.mask / LogFieldMarks.freeText（自由文の最後の網）", () => {
   test.each([
     [
       "メールアドレス",
@@ -125,12 +95,7 @@ describe("maskFreeText / freeText（自由文の最後の網）", () => {
       "*** and *** paid with ***",
     ],
   ])("%s を *** にする", (_kind, input, expected) => {
-    // given: 前提なし（input は test.each の引数）
-    // when
-    const masked = maskFreeText(input);
-
-    // then
-    expect(masked).toBe(expected);
+    expect(FreeTextMask.mask(input)).toBe(expected);
   });
 
   // WHY 残すものを固定する: 誤検知でログの手がかり（件数・id・時刻）が消えないようにする。
@@ -149,49 +114,26 @@ describe("maskFreeText / freeText（自由文の最後の網）", () => {
     ],
     ["日本語の文", "環境変数 DATABASE_URL がありません"],
   ])("%s は残す", (_kind, input) => {
-    // given: 前提なし（input は test.each の引数）
-    // when
-    const masked = maskFreeText(input);
-
-    // then
-    expect(masked).toBe(input);
+    expect(FreeTextMask.mask(input)).toBe(input);
   });
 
   // WHY 長さの上限: 正規表現は入れ子の量指定子を使わない線形のパターンにしているが、1 行が長すぎるとログの費用と読みにくさが
   //   増え、置換の時間も長さに比例する。上限で切り、切った位置にかかった語（途中で切れたメールアドレスなど。切れると正規表現に
   //   一致しない）は捨てる。
   test("2000 文字を超える入力は、2000 文字以内の最後の空白までに切り、[truncated] を付ける（途中で切れた語は出さない）", () => {
-    // given
     const head = `${"word ".repeat(399)}`; // 1995 文字
     const input = `${head}alice@example.com tail`;
 
-    // when
-    const masked = maskFreeText(input);
-
-    // then
-    expect(masked).toBe(`${head.trimEnd()}...[truncated]`);
+    expect(FreeTextMask.mask(input)).toBe(`${head.trimEnd()}...[truncated]`);
   });
 
   test("空白の無い 2000 文字を超える入力は、本文を出さず [truncated] だけにする", () => {
-    // given
-    const input = "a".repeat(2001);
-
-    // when
-    const masked = maskFreeText(input);
-
-    // then
-    expect(masked).toBe("...[truncated]");
+    expect(FreeTextMask.mask("a".repeat(2001))).toBe("...[truncated]");
   });
 
   test("ちょうど 2000 文字は切らない", () => {
-    // given
     const input = "a".repeat(2000);
-
-    // when
-    const masked = maskFreeText(input);
-
-    // then
-    expect(masked).toBe(input);
+    expect(FreeTextMask.mask(input)).toBe(input);
   });
 
   // WHY 時間の上限を測る: 正規表現の置換はログを出す処理の中で同期に動くので、入力（利用者が決められる例外の message など）で
@@ -206,25 +148,14 @@ describe("maskFreeText / freeText（自由文の最後の網）", () => {
     ["長い数字の連続", "1".repeat(100_000)],
     ["4 桁と区切りの繰り返し", "1234 ".repeat(20_000)],
   ])("%s（10 万文字）でも 50ms 以内に返る", (_kind, input) => {
-    // given: 前提なし（input は test.each の引数）
-    // when
     const startedAt = performance.now();
-    maskFreeText(input);
-    const elapsedMs = performance.now() - startedAt;
-
-    // then
-    expect(elapsedMs).toBeLessThan(50);
+    FreeTextMask.mask(input);
+    expect(performance.now() - startedAt).toBeLessThan(50);
   });
 
-  test("freeText() は文字列のスキーマで、maskFreeText を通した値を出す", () => {
-    // given: 前提なし
-    // when
-    const masked = freeText().parse("mail a@b.io");
-    const nonString = freeText().safeParse(1);
-
-    // then
-    expect(masked).toBe("mail ***");
-    expect(nonString.success).toBe(false);
+  test("LogFieldMarks.freeText() は文字列のスキーマで、FreeTextMask.mask を通した値を出す", () => {
+    expect(LogFieldMarks.freeText().parse("mail a@b.io")).toBe("mail ***");
+    expect(LogFieldMarks.freeText().safeParse(1).success).toBe(false);
   });
 });
 
@@ -240,7 +171,6 @@ describe("db_write の changes（before / after）と params", () => {
   // WHY before / after に sensitive の印を付けない: どの列が個人情報かは表ごとに違い、このスキーマは表を知らない。マスクは
   //   Writer が schema.ts の列の分類表（public / sensitive）で済ませてから渡す（apps/backend/shared/infra/column-classification.ts）。
   test("changes の各要素は table・row_id・operation と、列名 → 値の before / after（insert は before が null、delete は after が null）を持ち、値はそのまま出す", () => {
-    // given
     const changes = [
       {
         table: "todos",
@@ -265,11 +195,7 @@ describe("db_write の changes（before / after）と params", () => {
       },
     ];
 
-    // when
-    const parsed = LOG_EVENT_SCHEMAS.db_write.parse({ ...done, changes });
-
-    // then
-    expect(parsed).toEqual({
+    expect(LOG_EVENT_SCHEMAS.db_write.parse({ ...done, changes })).toEqual({
       ...done,
       changes,
     });
@@ -277,42 +203,32 @@ describe("db_write の changes（before / after）と params", () => {
 
   // WHY before / after を必須にする: Writer は必ず渡す（無い側は null）。省くと値の有無と「渡し忘れ」を見分けられない。
   test("changes の要素に before / after が無ければ parse に失敗する", () => {
-    // given
-    const withoutBeforeAfter = {
-      ...done,
-      changes: [{ table: "todos", row_id: "t-1", operation: "update" }],
-    };
-
-    // when
-    const result = LOG_EVENT_SCHEMAS.db_write.safeParse(withoutBeforeAfter);
-
-    // then
-    expect(result.success).toBe(false);
+    expect(
+      LOG_EVENT_SCHEMAS.db_write.safeParse({
+        ...done,
+        changes: [{ table: "todos", row_id: "t-1", operation: "update" }],
+      }).success,
+    ).toBe(false);
   });
 
   // WHY params は値をすべて *** にする（個数だけ残す）: DB のエラー（DrizzleQueryError）の params は SQL に渡した行の値そのもの。
   //   どの値が個人情報かは分からないので、構造（配列）で sensitive にする。個数は「何個の値を渡した文か」の手がかりになる。
   test("params は配列の要素をすべて ***（null も）にし、個数は残す", () => {
-    // given
     const failed = {
       ...done,
       message: "db write failed",
       event: { name: "db_write", phase: "failed", duration_ms: 1 },
     } as const;
 
-    // when
-    const masked = LOG_EVENT_SCHEMAS.db_write.parse({
-      ...failed,
-      params: ["alice@example.com", 3, null, { a: 1 }],
-    });
-    const emptyParams = LOG_EVENT_SCHEMAS.db_write.parse({
-      ...failed,
-      params: [],
-    });
-
-    // then
-    expect(masked).toEqual({ ...failed, params: ["***", "***", "***", "***"] });
-    expect(emptyParams).toEqual({ ...failed, params: [] });
+    expect(
+      LOG_EVENT_SCHEMAS.db_write.parse({
+        ...failed,
+        params: ["alice@example.com", 3, null, { a: 1 }],
+      }),
+    ).toEqual({ ...failed, params: ["***", "***", "***", "***"] });
+    expect(LOG_EVENT_SCHEMAS.db_write.parse({ ...failed, params: [] })).toEqual(
+      { ...failed, params: [] },
+    );
   });
 });
 
@@ -328,78 +244,61 @@ describe("error 項目（Error を { type, message } にする）", () => {
   ])(
     "%s を持つ Error は message を *** にし、生の値を出さない",
     (_kind, extra) => {
-      // given
       const error = Object.assign(
         new Error(`Failed query: insert into todos\nparams: ${SENTINEL}`),
         extra,
       );
 
-      // when
       const parsed = LOG_EVENT_SCHEMAS.server_error.parse({
         message: "unexpected error",
         event: { name: "server_error" },
         error,
       });
 
-      // then
       expect(parsed.error).toEqual({ type: "Error", message: "***" });
       expect(JSON.stringify(parsed)).not.toContain(SENTINEL);
     },
   );
 
   test("query / params を持たない Error の message は自由文として出す", () => {
-    // given
-    const error = new Error("connection refused for a@b.io");
-
-    // when
-    const parsed = LOG_EVENT_SCHEMAS.server_error.parse({
-      message: "unexpected error",
-      event: { name: "server_error" },
-      error,
-    });
-
-    // then
-    expect(parsed.error).toEqual({
-      type: "Error",
-      message: "connection refused for ***",
-    });
+    expect(
+      LOG_EVENT_SCHEMAS.server_error.parse({
+        message: "unexpected error",
+        event: { name: "server_error" },
+        error: new Error("connection refused for a@b.io"),
+      }).error,
+    ).toEqual({ type: "Error", message: "connection refused for ***" });
   });
 
   // WHY type も自由文の網を通す: Error の name と { type } のオブジェクトの type は、投げた側が自由に決められる文字列。
   test("type も自由文として網を通す（Error の name・{ type } のオブジェクト）", () => {
-    // given
     const named = Object.assign(new Error("x"), { name: "Err a@b.io" });
-
-    // when
-    const parsedNamed = LOG_EVENT_SCHEMAS.server_error.parse({
-      message: "unexpected error",
-      event: { name: "server_error" },
-      error: named,
-    });
-    const parsedTyped = LOG_EVENT_SCHEMAS.server_error.parse({
-      message: "unexpected error",
-      event: { name: "server_error" },
-      error: { type: "c@d.io" },
-    });
-
-    // then
-    expect(parsedNamed.error).toEqual({ type: "Err ***", message: "x" });
-    expect(parsedTyped.error).toEqual({ type: "***" });
+    expect(
+      LOG_EVENT_SCHEMAS.server_error.parse({
+        message: "unexpected error",
+        event: { name: "server_error" },
+        error: named,
+      }).error,
+    ).toEqual({ type: "Err ***", message: "x" });
+    expect(
+      LOG_EVENT_SCHEMAS.server_error.parse({
+        message: "unexpected error",
+        event: { name: "server_error" },
+        error: { type: "c@d.io" },
+      }).error,
+    ).toEqual({ type: "***" });
   });
 });
 
 describe("logger_error の message", () => {
   // WHY 呼び出し側も logger_error を emit できるので、message は自由文の網を通す（logger の固定の文言は網に一致しない）。
   test("message を自由文として網に通す", () => {
-    // given: 前提なし
-    // when
-    const parsed = LOG_EVENT_SCHEMAS.logger_error.parse({
-      message: "failed for a@b.io",
-      event: { name: "logger_error" },
-    });
-
-    // then
-    expect(parsed.message).toBe("failed for ***");
+    expect(
+      LOG_EVENT_SCHEMAS.logger_error.parse({
+        message: "failed for a@b.io",
+        event: { name: "logger_error" },
+      }).message,
+    ).toBe("failed for ***");
   });
 });
 
@@ -407,12 +306,8 @@ describe("印の無い文字列の項目の長さの上限（bounded）", () => 
   // WHY 上限を付ける: x-request-id・host・accept・content-type・user-agent・パス・クエリのキーはクライアントが自由に決められ、
   //   長さの制限が無い。parse を失敗させず（行を失わず）、256 文字で切って印を付ける。
   test("256 文字を超える値は 256 文字で切り、...[truncated] を付ける。256 文字ちょうどは切らない", () => {
-    // given
     const long = "x".repeat(300);
     const exact = "y".repeat(256);
-    const cut = `${"x".repeat(256)}...[truncated]`;
-
-    // when
     const parsed = LOG_EVENT_SCHEMAS.page_request.parse({
       message: "GET /",
       event: { name: "page_request" },
@@ -431,8 +326,8 @@ describe("印の無い文字列の項目の長さの上限（bounded）", () => 
       server: { address: exact },
       user: { id: null },
     });
+    const cut = `${"x".repeat(256)}...[truncated]`;
 
-    // then
     expect(parsed.http.request.id).toBe(cut);
     expect(parsed.http.request.header.accept).toBe(cut);
     expect(parsed.http.request.header["content-type"]).toBe(cut);

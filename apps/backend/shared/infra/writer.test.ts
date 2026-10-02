@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { now } from "@repo/shared/now";
+import { Clock } from "@repo/shared/now";
 import { DrizzleQueryError, sql } from "drizzle-orm";
 import { integer, pgTable, text, uuid } from "drizzle-orm/pg-core";
 import {
@@ -12,21 +12,18 @@ import {
   test,
   vi,
 } from "vitest";
-import {
-  createTestDatabase,
-  type TestDatabase,
-} from "../../test-support/database";
+import { TestDatabase } from "../../test-support/database";
 import type { Transaction } from "../application/transaction";
 import { ColumnClassifier } from "./column-classification";
 import { changeLogs } from "./schema";
 import { type DrizzleTransaction, PostgresWriter } from "./writer";
 
-// WHY 時計（now）を差し替える: ログの行の time と、ChangeRecords.recordChange が occurred_at に入れる時刻を決めた値にして、
+// WHY 時計（Clock.now）を差し替える: ログの行の time と、ChangeRecords.recordChange が occurred_at に入れる時刻を決めた値にして、
 //   行を丸ごと比べるため。
 vi.mock("@repo/shared/now");
 
 afterEach(() => {
-  vi.mocked(now).mockReset();
+  vi.mocked(Clock.now).mockReset();
   vi.restoreAllMocks();
 });
 
@@ -63,7 +60,7 @@ const UUID_PATTERN =
 let database: TestDatabase;
 
 beforeAll(async () => {
-  database = await createTestDatabase();
+  database = await TestDatabase.create();
   await database.migrate();
   await database.db.execute(
     sql`create table items (id uuid primary key, item_name text not null)`,
@@ -79,7 +76,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await database.db.execute(sql`truncate change_logs, items, notes`);
-  vi.mocked(now).mockReturnValue(TIMESTAMP);
+  vi.mocked(Clock.now).mockReturnValue(TIMESTAMP);
 });
 
 // drizzle のトランザクションを張り、その tx で作った Writer で work を実行する（本番は PostgresTransactionRunner が同じことをする）。

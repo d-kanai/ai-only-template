@@ -2,7 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import { env } from "@repo/shared/env";
-import { resetTodos } from "./database";
+import { E2eDatabase } from "./database";
 
 // リクエストログ（apps/frontend_customer/proxy.ts。Issue #80）が、本番ビルドの next start の stdout に 1 リクエスト = JSON 1 行で出ることを
 // 確かめる E2E テスト。1 行の中身の決め方は apps/frontend_customer/shared/request-log/request-log.test.ts で固定しているので、ここでは
@@ -114,7 +114,7 @@ test.afterAll(() => {
 });
 
 test.beforeEach(async () => {
-  await resetTodos();
+  await E2eDatabase.resetTodos();
   stdoutLines.length = 0;
 });
 

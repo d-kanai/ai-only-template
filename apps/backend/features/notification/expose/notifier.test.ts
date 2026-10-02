@@ -1,14 +1,14 @@
 // @vitest-environment node
-import { now } from "@repo/shared/now";
+import { Clock } from "@repo/shared/now";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { SendNotificationCommand } from "../internal/application/send-notification.command";
 import { Notifier } from "./notifier";
 
-// WHY 時計（now）を差し替える: ログの行の time を決めた値にして、行を丸ごと比べるため。
+// WHY 時計（Clock.now）を差し替える: ログの行の time を決めた値にして、行を丸ごと比べるため。
 vi.mock("@repo/shared/now");
 
 afterEach(() => {
-  vi.mocked(now).mockReset();
+  vi.mocked(Clock.now).mockReset();
   vi.restoreAllMocks();
 });
 
@@ -18,15 +18,11 @@ describe("Notifier（notification モジュールの公開の入口）", () => {
   // WHY 戻り値が undefined であることを見る: Notifier の notify は同期の void で、呼び出し側（todo の command）は await しない。
   //   Promise を返すと、呼び出し側が受け取らなかった reject が未処理になり、Node 24 ではプロセスが終了する。
   test("同期で undefined を返し、その後に通知の行が INFO で 1 行出る", async () => {
-    // given
-    vi.mocked(now).mockReturnValue(TIMESTAMP);
+    vi.mocked(Clock.now).mockReturnValue(TIMESTAMP);
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
-    // when
-    const returned = new Notifier().notify("Todo completed: 1");
+    expect(new Notifier().notify("Todo completed: 1")).toBeUndefined();
 
-    // then
-    expect(returned).toBeUndefined();
     await vi.waitFor(() => expect(log).toHaveBeenCalledTimes(1));
     expect(log.mock.calls).toEqual([
       [
@@ -47,8 +43,7 @@ describe("Notifier（notification モジュールの公開の入口）", () => {
   // WHY command の execute を prototype で差し替える: 本物の送信口（ログに出すだけ）は失敗しないので、失敗の経路を起こせない。
   //   Notifier は command をコンストラクタの中で作り、外から渡せない（notifier.ts のコメント）ので、prototype を差し替える。
   test("送信が失敗しても例外を投げず、失敗を ERROR の 1 行（event.name: notification、phase: failed）でログに出す", async () => {
-    // given
-    vi.mocked(now).mockReturnValue(TIMESTAMP);
+    vi.mocked(Clock.now).mockReturnValue(TIMESTAMP);
     vi.spyOn(SendNotificationCommand.prototype, "execute").mockRejectedValue(
       new Error("send failed"),
     );
@@ -57,11 +52,8 @@ describe("Notifier（notification モジュールの公開の入口）", () => {
       .mockImplementation(() => undefined);
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
-    // when
-    const returned = new Notifier().notify("Todo completed: 1");
+    expect(new Notifier().notify("Todo completed: 1")).toBeUndefined();
 
-    // then
-    expect(returned).toBeUndefined();
     await vi.waitFor(() => expect(error).toHaveBeenCalledTimes(1));
     expect(error.mock.calls).toEqual([
       [

@@ -2,21 +2,14 @@
 import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";
 import type { GetTodoResponse } from "../../../features/todo/internal/presentation/get-todo.api";
+import { TestDatabase } from "../../../test-support/database";
+import { TodoBuilder } from "../../../test-support/todo/todo-builder";
 import {
-  createTestDatabase,
-  type TestDatabase,
-} from "../../../test-support/database";
-import { aTodo } from "../../../test-support/todo/todo-builder";
-import {
-  bodylessRequest,
-  context,
-  emptyTodos,
-  expectProblem,
-  getTodoApi,
-  internalErrorProblem,
-  notFoundProblem,
-  removeTodoRow,
-  todoResponseOf,
+  GetTodoApiAssembly,
+  TodoSpecExpected,
+  TodoSpecProblems,
+  TodoSpecRequests,
+  TodoSpecRows,
 } from "./support";
 
 // API 仕様（Issue #219）: get-todo.feature の `*` の step を、実 Postgres の上で本番と同じ組み立ての handler（GetTodoApi.handle）を
@@ -24,12 +17,12 @@ import {
 //   list-todos.api-spec.test.ts の冒頭。
 
 let database: TestDatabase;
-let handler: ReturnType<typeof getTodoApi>;
+let handler: ReturnType<typeof GetTodoApiAssembly.handler>;
 
 beforeAll(async () => {
-  database = await createTestDatabase();
+  database = await TestDatabase.create();
   await database.migrate();
-  handler = getTodoApi(database.db);
+  handler = GetTodoApiAssembly.handler(database.db);
 });
 
 afterAll(async () => {
@@ -37,11 +30,14 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await emptyTodos(database.db);
+  await TodoSpecRows.empty(database.db);
 });
 
 async function getTodo(id: string): Promise<Response> {
-  return handler(bodylessRequest("GET", `/api/todos/${id}`), context(id));
+  return handler(
+    TodoSpecRequests.bodyless("GET", `/api/todos/${id}`),
+    TodoSpecRequests.context(id),
+  );
 }
 
 // uuid の形だが、どの Todo も指さない id。
@@ -56,35 +52,31 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "作った Todo の詳細を見ると、タイトル・完了かどうか・作成日時が返る",
       async () => {
-        // given
-        const milk = await aTodo(database.db).title("牛乳を買う").build();
-        await aTodo(database.db).title("パンを買う").build();
+        const milk = await TodoBuilder.of(database.db)
+          .title("牛乳を買う")
+          .build();
+        await TodoBuilder.of(database.db).title("パンを買う").build();
 
-        // when
         const response = await getTodo(milk.id);
 
-        // then
         expect(response.status).toBe(200);
         await expect(response.json()).resolves.toStrictEqual(
-          todoResponseOf(milk) satisfies GetTodoResponse,
+          TodoSpecExpected.response(milk) satisfies GetTodoResponse,
         );
       },
     );
 
     And("完了にした Todo は、完了として返る", async () => {
-      // given
-      const milk = await aTodo(database.db)
+      const milk = await TodoBuilder.of(database.db)
         .title("牛乳を買う")
         .completed(true)
         .build();
 
-      // when
       const response = await getTodo(milk.id);
 
-      // then
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
-        ...todoResponseOf(milk),
+        ...TodoSpecExpected.response(milk),
         completed: true,
       } satisfies GetTodoResponse);
     });
@@ -92,16 +84,15 @@ describeFeature(feature, ({ Scenario }) => {
     // 名前を変えた後の Todo = 表のタイトルが新しいものになった Todo（完了の履歴は名前の変更で増えない）。名前の変更の API は通さず、
     //   その後の状態をビルダーで作る（冒頭の WHY）。名前の変更が表に書く内容は rename-todo の仕様が確かめる。
     And("名前を変えた Todo は、新しいタイトルで返る", async () => {
-      // given
-      const milk = await aTodo(database.db).title("豆乳を買う").build();
+      const milk = await TodoBuilder.of(database.db)
+        .title("豆乳を買う")
+        .build();
 
-      // when
       const response = await getTodo(milk.id);
 
-      // then
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual({
-        ...todoResponseOf(milk),
+        ...TodoSpecExpected.response(milk),
         title: "豆乳を買う",
       } satisfies GetTodoResponse);
     });
@@ -110,16 +101,13 @@ describeFeature(feature, ({ Scenario }) => {
   Scenario("異常系", ({ And }) => {
     // WHY 別の Todo を 1 件置く: 空のときだけ「無い」と返す実装を通さない。
     And("存在しない Todo は、存在しないと伝えられる", async () => {
-      // given
-      await aTodo(database.db).title("牛乳を買う").build();
+      await TodoBuilder.of(database.db).title("牛乳を買う").build();
 
-      // when
       const response = await getTodo(MISSING_ID);
 
-      // then
-      await expectProblem(
+      await TodoSpecProblems.expectResponse(
         response,
-        notFoundProblem(MISSING_ID, `/api/todos/${MISSING_ID}`),
+        TodoSpecProblems.notFound(MISSING_ID, `/api/todos/${MISSING_ID}`),
       );
     });
 
@@ -127,31 +115,27 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "Todo を指す値の形が正しくないときも、存在しないと伝えられる",
       async () => {
-        // given: beforeEach で Todo を空にしてある
-        // when
         const response = await getTodo("missing");
 
-        // then
-        await expectProblem(
+        await TodoSpecProblems.expectResponse(
           response,
-          notFoundProblem("missing", "/api/todos/missing"),
+          TodoSpecProblems.notFound("missing", "/api/todos/missing"),
         );
       },
     );
 
-    // 削除の後の状態（行が無い）を、削除の API を通さずに作る（support.ts の removeTodoRow）。
+    // 削除の後の状態（行が無い）を、削除の API を通さずに作る（support.ts の TodoSpecRows.remove）。
     And("削除した Todo は、存在しないと伝えられる", async () => {
-      // given
-      const milk = await aTodo(database.db).title("牛乳を買う").build();
-      await removeTodoRow(database.db, milk.id);
+      const milk = await TodoBuilder.of(database.db)
+        .title("牛乳を買う")
+        .build();
+      await TodoSpecRows.remove(database.db, milk.id);
 
-      // when
       const response = await getTodo(milk.id);
 
-      // then
-      await expectProblem(
+      await TodoSpecProblems.expectResponse(
         response,
-        notFoundProblem(milk.id, `/api/todos/${milk.id}`),
+        TodoSpecProblems.notFound(milk.id, `/api/todos/${milk.id}`),
       );
     });
 
@@ -162,8 +146,7 @@ describeFeature(feature, ({ Scenario }) => {
     And(
       "壊れた Todo（完了の履歴の日時が、作られた日時より前のもの）は、サーバの誤りとして伝えられる",
       async () => {
-        // given
-        const { id } = await aTodo(database.db)
+        const { id } = await TodoBuilder.of(database.db)
           .title("牛乳を買う")
           .createdAt(new Date("2026-09-01T00:00:00.000Z"))
           .statusChanges([
@@ -174,11 +157,12 @@ describeFeature(feature, ({ Scenario }) => {
           ])
           .build();
 
-        // when
         const response = await getTodo(id);
 
-        // then
-        await expectProblem(response, internalErrorProblem(`/api/todos/${id}`));
+        await TodoSpecProblems.expectResponse(
+          response,
+          TodoSpecProblems.internalError(`/api/todos/${id}`),
+        );
       },
     );
   });

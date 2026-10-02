@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { now } from "@repo/shared/now";
+import { Clock } from "@repo/shared/now";
 import { and, asc, eq, sql } from "drizzle-orm";
 import pg from "pg";
 import {
@@ -18,22 +18,19 @@ import type { ChangeEntry } from "../../../../shared/infra/change-log";
 import { changeLogs } from "../../../../shared/infra/schema";
 import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";
 import { PostgresWriter } from "../../../../shared/infra/writer";
-import {
-  createTestDatabase,
-  type TestDatabase,
-} from "../../../../test-support/database";
+import { TestDatabase } from "../../../../test-support/database";
 import { Todo } from "../domain/todo";
 import { todoStatusChanges, todos } from "./schema";
 import { PostgresTodoRepository } from "./todo-repository.postgres";
 
-// WHY 時計（now）を差し替えられるようにする: 作成日時（Todo.create が now() から入れる）をミリ秒まで決めた値で保存し、
-//   同じ値で読み戻せることを確かめるため。spy: true で本物の now を残し、時刻を決めたいテストだけ次の 1 回の値を返させる。
+// WHY 時計（Clock.now）を差し替えられるようにする: 作成日時（Todo.create が Clock.now() から入れる）をミリ秒まで決めた値で保存し、
+//   同じ値で読み戻せることを確かめるため。spy: true で本物の Clock.now を残し、時刻を決めたいテストだけ次の 1 回の値を返させる。
 vi.mock("@repo/shared/now", { spy: true });
 
 // WHY restoreAllMocks: 文の数を数えるテストが Pool（database.pool）・pg の Client の query を vi.spyOn で包む。失敗したときも次の
-//   テストに spy を残さない（vi.mock の now は restoreAllMocks の対象外で、上の mockReset が戻す）。
+//   テストに spy を残さない（vi.mock の Clock.now は restoreAllMocks の対象外で、上の mockReset が戻す）。
 afterEach(() => {
-  vi.mocked(now).mockReset();
+  vi.mocked(Clock.now).mockReset();
   vi.restoreAllMocks();
 });
 
@@ -45,7 +42,7 @@ afterEach(() => {
 let database: TestDatabase;
 
 beforeAll(async () => {
-  database = await createTestDatabase();
+  database = await TestDatabase.create();
   await database.migrate();
 });
 
@@ -128,7 +125,7 @@ async function waitUntilBlockedBy(pid: number): Promise<void> {
 }
 
 // action の間に書かれた変更履歴（change_logs の行）を、id と occurred_at を除いた記録（ChangeEntry）にして返す。
-// WHY id と occurred_at を除く: id は DB が乱数で作り、occurred_at は now() の時刻（shared/infra/change-log.test.ts が固定する）。
+// WHY id と occurred_at を除く: id は DB が乱数で作り、occurred_at は Clock.now() の時刻（shared/infra/change-log.test.ts が固定する）。
 // WHY 表の名前と changes で並べる: 同じ command の記録の順は文の順だが、DB が返す順は決まらない。
 async function changeLogsWrittenBy(
   action: () => Promise<unknown>,
@@ -255,7 +252,7 @@ describe("PostgresTodoRepository", () => {
   test("insert した Todo を findById / findAll で同じ値（id・title・completed・作成日時）として取り出せる", async () => {
     // given
     const createdAt = new Date("2026-09-28T01:02:03.456Z");
-    vi.mocked(now).mockReturnValueOnce(createdAt);
+    vi.mocked(Clock.now).mockReturnValueOnce(createdAt);
     const todo = Todo.create("牛乳を買う").changeCompletion(true);
     expect(todo.createdAt).toEqual(createdAt);
 
@@ -879,6 +876,63 @@ describe("PostgresTodoRepository", () => {
           changedAt: new Date("2026-09-28T01:00:00.000Z"),
         },
       ],
+    ]);
+  });
+
+  // WHY 2 つの Todo の両方に複数の履歴を持たせ、履歴の行を Todo をまたいで交互・position の逆順に入れる: LEFT JOIN の行を Todo ごとに
+  //   まとめる処理（toTodos）の誤り（境目で履歴が隣の Todo に混ざる・最後の Todo の履歴が落ちる・最初の Todo だけ正しい）は、
+  //   どちらかの Todo の履歴が 1 件だと起きない（.claude/rules/testing.md の「複数件を扱う処理」）。日時を Todo ごと・履歴ごとに
+  //   変え、取り違えたら値で分かるようにする。
+  test("findAll は、2 つの Todo がそれぞれ複数の履歴を持つときも、履歴を Todo ごとに足した順で組み立てる", async () => {
+    const first = "00000000-0000-4000-8000-000000000002";
+    const second = "00000000-0000-4000-8000-000000000001";
+    const at = (hour: number) =>
+      new Date(`2026-09-28T${String(hour).padStart(2, "0")}:00:00.000Z`);
+    await database.db.insert(todos).values([
+      { id: second, title: "卵を買う", completed: true, createdAt: at(5) },
+      { id: first, title: "牛乳を買う", completed: false, createdAt: at(0) },
+    ]);
+    const rows = [
+      { todoId: second, position: 3, completed: true, changedAt: at(8) },
+      { todoId: first, position: 2, completed: false, changedAt: at(2) },
+      { todoId: second, position: 0, completed: false, changedAt: at(5) },
+      { todoId: first, position: 0, completed: false, changedAt: at(0) },
+      { todoId: second, position: 2, completed: false, changedAt: at(7) },
+      { todoId: first, position: 1, completed: true, changedAt: at(1) },
+      { todoId: second, position: 1, completed: true, changedAt: at(6) },
+    ];
+    for (const row of rows) {
+      await database.db.insert(todoStatusChanges).values(row);
+    }
+
+    const all = await repository().findAll();
+
+    expect(
+      all.map(({ id, completed, statusChanges }) => ({
+        id,
+        completed,
+        statusChanges,
+      })),
+    ).toStrictEqual([
+      {
+        id: first,
+        completed: false,
+        statusChanges: [
+          { completed: false, changedAt: at(0) },
+          { completed: true, changedAt: at(1) },
+          { completed: false, changedAt: at(2) },
+        ],
+      },
+      {
+        id: second,
+        completed: true,
+        statusChanges: [
+          { completed: false, changedAt: at(5) },
+          { completed: true, changedAt: at(6) },
+          { completed: false, changedAt: at(7) },
+          { completed: true, changedAt: at(8) },
+        ],
+      },
     ]);
   });
 

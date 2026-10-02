@@ -11,10 +11,7 @@ import {
   test,
   vi,
 } from "vitest";
-import {
-  createTestDatabase,
-  type TestDatabase,
-} from "../../test-support/database";
+import { TestDatabase } from "../../test-support/database";
 import { changeLogs } from "./schema";
 import { PostgresTransactionRunner } from "./transaction.postgres";
 import { PostgresWriter } from "./writer";
@@ -36,7 +33,7 @@ const ACTOR_ID = "22222222-2222-4222-8222-222222222222";
 let database: TestDatabase;
 
 beforeAll(async () => {
-  database = await createTestDatabase();
+  database = await TestDatabase.create();
   await database.migrate();
   await database.db.execute(
     sql`create table items (id uuid primary key, item_name text not null)`,

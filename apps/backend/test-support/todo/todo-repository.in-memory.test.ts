@@ -1,25 +1,25 @@
 // @vitest-environment node
-import { now } from "@repo/shared/now";
+import { Clock } from "@repo/shared/now";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { Todo } from "../../features/todo/internal/domain/todo";
 import { DomainError } from "../../shared/domain/domain-error";
 import { inMemoryTransaction } from "../transaction-runner.in-memory";
 import { InMemoryTodoRepository } from "./todo-repository.in-memory";
 
-// WHY 時計（now）を差し替える: 並び順のテストで作成日時を決めるため（Todo.create は now() から作成日時を入れる）。
+// WHY 時計（Clock.now）を差し替える: 並び順のテストで作成日時を決めるため（Todo.create は Clock.now() から作成日時を入れる）。
 //   ほかのテストは実時刻のままでよいので spy: true で本物を残し、時刻を決めるテストだけ mockReturnValueOnce する。
 vi.mock("@repo/shared/now", { spy: true });
 
 afterEach(() => {
-  vi.mocked(now).mockReset();
+  vi.mocked(Clock.now).mockReset();
 });
 
 // InMemory は tx を使わない（test-support/transaction-runner.in-memory.ts）ので、どの呼び出しにも同じ inMemoryTransaction を渡す。
 const tx = inMemoryTransaction;
 
-// 作成日時を指定して Todo を作る（now() が次に返す時刻を決めてから create する）。
+// 作成日時を指定して Todo を作る（Clock.now() が次に返す時刻を決めてから create する）。
 function createTodoAt(title: string, createdAt: string): Todo {
-  vi.mocked(now).mockReturnValueOnce(new Date(createdAt));
+  vi.mocked(Clock.now).mockReturnValueOnce(new Date(createdAt));
   return Todo.create(title);
 }
 
@@ -441,7 +441,7 @@ describe("InMemoryTodoRepository", () => {
     const repository = new InMemoryTodoRepository();
     const createdAt = "2026-09-28T00:00:00.000Z";
     // 作成・完了・未完了を同じ時刻にして、日時ではなく足した順で並ぶことを確かめる。
-    vi.mocked(now).mockReturnValue(new Date(createdAt));
+    vi.mocked(Clock.now).mockReturnValue(new Date(createdAt));
     const todo = Todo.create("牛乳を買う")
       .changeCompletion(true)
       .changeCompletion(false);

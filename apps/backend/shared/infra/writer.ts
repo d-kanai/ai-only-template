@@ -205,7 +205,7 @@ export class PostgresWriter implements Writer {
   // WHY changes に値（before / after）を出し、列の分類でマスクする（Issue #216。以前（Issue #205〜#215）は値を出さなかった）:
   //   ログだけで「何がどう変わったか」を追えるようにし、障害の調査で本番の change_logs を読む回数を減らす。個人情報を含みうる
   //   列（todos.title など）は schema.ts の分類表で sensitive にし、*** にする。change_logs の表には生の値を残す（監査）。
-  // 重大度（INFO / WARNING）は logger が event.name と phase で決める（apps/shared/log-event.ts の severityOf。Issue #216）。失敗が
+  // 重大度（INFO / WARNING）は logger が event.name と phase で決める（apps/shared/log-event.ts の LogSeverity.of。Issue #216）。失敗が
   //   ERROR でなく WARNING なのは、500 になる想定外の例外は presentation の ProblemResponse.from が server_error（ERROR）で別に残すため。
   // 限界: 後のログは文と記録を書き終えた時点で出す（COMMIT の前）。後から COMMIT が失敗した（遅延制約など）ときは、このログは
   //   done のまま残り、失敗は ProblemResponse.from の 500 のログで分かる（トランザクションを張るのは runner で、Writer は COMMIT を
@@ -388,8 +388,8 @@ export class PostgresWriter implements Writer {
   }
 
   // startedAt（performance.now()）からの経過時間（ミリ秒の整数に四捨五入）。
-  // WHY performance.now（now() にしない）: 経過時間の計測で、時刻ではない（単調に増え、時計の補正で戻らない）。現在時刻の
-  //   唯一の出口 now() の規則 now-single-source の対象外（rule-tests/architecture.test.ts）。
+  // WHY performance.now（Clock.now() にしない）: 経過時間の計測で、時刻ではない（単調に増え、時計の補正で戻らない）。現在時刻の
+  //   唯一の出口 Clock.now() の規則 now-single-source の対象外（rule-tests/architecture.test.ts）。
   // WHY 整数に丸める: ミリ秒未満は書き込みの遅さの判断に要らず、浮動小数の桁（12.300000000000182 のような）で行が読みにくくなる。
   private static elapsedMs(startedAt: number): number {
     return Math.round(performance.now() - startedAt);
