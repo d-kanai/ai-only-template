@@ -1,8 +1,10 @@
+import { List } from "@mantine/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { TodoItem } from "@/features/todo/components/todo-item";
 import { LocaleProvider } from "@/shared/i18n/i18n";
 import type { Locale } from "@/shared/i18n/locale";
+import { DesignSystem } from "@/test-support/design-system";
 import { JaLocale, tJa } from "@/test-support/i18n";
 import { todoItemMessages } from "./todo-item.messages";
 
@@ -21,13 +23,13 @@ function renderItem(overrides: Partial<typeof todo> = {}) {
   const onToggle = vi.fn();
   const onDelete = vi.fn();
   render(
-    <ul>
+    <List>
       <TodoItem
         todo={{ ...todo, ...overrides }}
         onToggle={onToggle}
         onDelete={onDelete}
       />
-    </ul>,
+    </List>,
     { wrapper: JaLocale },
   );
   return { onToggle, onDelete };
@@ -36,10 +38,11 @@ function renderItem(overrides: Partial<typeof todo> = {}) {
 function renderItemIn(locale: Locale) {
   render(
     <LocaleProvider locale={locale}>
-      <ul>
+      <List>
         <TodoItem todo={todo} onToggle={vi.fn()} onDelete={vi.fn()} />
-      </ul>
+      </List>
     </LocaleProvider>,
+    { wrapper: DesignSystem },
   );
 }
 

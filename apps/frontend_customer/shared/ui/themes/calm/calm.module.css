@@ -1,0 +1,98 @@
+/*
+ * calm テーマの部品ごとの見た目（Issue #292）。calm.theme.ts が Mantine の Styles API（theme.components の classNames）で
+ * 各部品の内側の要素（root・input・label など）に当てる。
+ * 方針: 白い面に柔らかい影、大きめの角丸、落ち着いた緑。余白を広めに取り、読みやすさを優先する。
+ * 色・角丸・影は Mantine の CSS 変数（--mantine-*）を使い、値は calm.theme.ts のテーマの値から来る。
+ */
+
+/* 画面の外枠（Container の root）。上下に余白を取り、中身を中央に寄せる。 */
+.container {
+  padding-block: var(--mantine-spacing-xl);
+}
+
+/* 見出し（Title の root）。文字色を少し落とし、字間を詰めて柔らかくする。 */
+.title {
+  color: var(--mantine-color-teal-9);
+  letter-spacing: -0.01em;
+  margin-block-end: var(--mantine-spacing-md);
+}
+
+/* フォーム・リストの面（Paper の root）。 */
+.paper {
+  margin-block-end: var(--mantine-spacing-md);
+  background: var(--mantine-color-white);
+  box-shadow: var(--mantine-shadow-sm);
+  padding: var(--mantine-spacing-lg);
+}
+
+/* 入力のラベル（TextInput の label）。小さめで、色を薄くする。 */
+.inputLabel {
+  color: var(--mantine-color-gray-7);
+  font-size: var(--mantine-font-size-sm);
+  margin-block-end: 6px;
+}
+
+/* 入力欄（TextInput の input）。背景を薄い灰色にし、フォーカスで緑の枠にする。 */
+/* 入力の外枠（TextInput の root）。下のボタンとの間を空ける。 */
+.inputRoot {
+  margin-block-end: var(--mantine-spacing-md);
+}
+
+.input {
+  background: var(--mantine-color-gray-0);
+  border-color: var(--mantine-color-gray-2);
+}
+
+.input:focus {
+  border-color: var(--mantine-color-teal-5);
+}
+
+/* ボタン（Button の root）。 */
+.button {
+  font-weight: 600;
+}
+
+/* 一覧（List の root と各行）。行は区切り線で分けたカードにする。 */
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.listItem {
+  border-block-end: 1px solid var(--mantine-color-gray-2);
+  padding-block: var(--mantine-spacing-sm);
+}
+
+.listItem:last-child {
+  border-block-end: none;
+}
+
+/* 行の中身（List.Item の itemLabel）。チェック・タイトル・日時・削除を横に並べる。 */
+.listItemLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+  width: 100%;
+}
+
+/* リンク（Anchor の root）。 */
+.anchor {
+  color: var(--mantine-color-teal-8);
+  flex: 1;
+}
+
+/* 補足の文字（Text の root。作成日時・読み込み中）。 */
+/*
+ * :not(a): Mantine の Anchor は内部で Text として描かれ、Text の classNames も付く。リンクの見た目（.anchor）を補足の文字の
+ * 見た目で上書きしないよう、リンクを除く。
+ */
+.text:not(a) {
+  color: var(--mantine-color-gray-6);
+  font-size: var(--mantine-font-size-sm);
+}
+
+/* エラー（Alert の root）。 */
+.alert {
+  margin-block: var(--mantine-spacing-md);
+}

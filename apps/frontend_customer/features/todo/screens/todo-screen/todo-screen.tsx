@@ -1,12 +1,22 @@
 "use client";
 
-import { useId } from "react";
+import {
+  Alert,
+  Button,
+  Container,
+  List,
+  Paper,
+  Text,
+  TextInput,
+  Title,
+} from "@mantine/core";
 import { useT } from "@/shared/i18n/i18n";
 import { TodoItem } from "../../components/todo-item";
 import { useTodoScreen } from "./todo-screen.hook";
 import { todoScreenMessages } from "./todo-screen.messages";
 
-// 一覧画面の見た目。状態・データ取得は useTodoScreen に置き、ここは戻り値を描くだけにする。
+// 一覧画面。状態・データ取得は useTodoScreen に置き、ここは戻り値を描くだけにする。
+// 見た目はデザインシステム（Mantine）の部品を置くだけで、色・余白・部品の形はテーマ（shared/ui/themes/）に書く（Issue #292）。
 // "use client": データは hook から /api/todos を fetch して取る（SSR を前提にしない構成）ため、
 // useState / useEffect とイベントハンドラを使うクライアントコンポーネントにする。
 // 文言はすべて隣の辞書（todo-screen.messages.ts）のキーで t から出す（.claude/rules/frontend.md の「i18n」）。
@@ -23,66 +33,48 @@ export function TodoScreen() {
     toggleTodo,
     deleteTodo,
   } = useTodoScreen();
-  // 項目のエラーの要素の id（入力の aria-describedby から指す）。
-  // WHY useId: 固定の文字列の id は、同じ画面を 2 つ描くと重複する（Biome の useUniqueElementIds も固定の id を違反にする）。
-  const titleErrorId = useId();
-
   return (
-    <main>
-      <h1>{t("title")}</h1>
-      <form
+    <Container component="main">
+      <Title order={1}>{t("title")}</Title>
+      <Paper
+        component="form"
         onSubmit={(event) => {
           // フォーム送信によるページ遷移（再読み込み）を止め、hook の追加処理だけを行う。
           event.preventDefault();
           void addTodo();
         }}
       >
-        <label>
-          {t("form.newTitle")}
-          <input
-            // htmlFor + id で結び付けると固定 id が必要になるため、label で input を包んで名前を付ける。
-            value={newTitle}
-            onChange={(event) => setNewTitle(event.target.value)}
-            // 項目のエラー（400 の errors の #/title）を入力の説明として結び付け、入力が誤りであることを伝える。
-            aria-invalid={fieldErrors.title !== undefined}
-            aria-describedby={
-              fieldErrors.title === undefined ? undefined : titleErrorId
-            }
-          />
-        </label>
-        {fieldErrors.title === undefined ? null : (
-          <p
-            // label の外に置く: label の中の文字はすべて入力の名前（accessible name）になり、名前にエラーの文言が混ざる。
-            // role="alert" を付けない: フォーム全体のエラー（下の alert）と分け、入力の説明として読ませる。
-            id={titleErrorId}
-          >
-            {fieldErrors.title}
-          </p>
-        )}
-        <button type="submit">{t("form.submit")}</button>
-      </form>
+        <TextInput
+          label={t("form.newTitle")}
+          value={newTitle}
+          onChange={(event) => setNewTitle(event.target.value)}
+          // 項目のエラー（400 の errors の #/title）。Mantine の TextInput が入力の下に出し、aria-invalid と
+          // aria-describedby（Mantine が振る id）で入力と結び付ける。role="alert" は付かない（フォーム全体のエラーと分け、
+          // 入力の説明として読ませる）。
+          error={fieldErrors.title}
+        />
+        <Button type="submit">{t("form.submit")}</Button>
+      </Paper>
       {error === null ? null : (
-        <p
-          // role="alert": 操作の結果として後から出るエラーを、スクリーンリーダーにも即座に読み上げさせる。
-          role="alert"
-        >
-          {error}
-        </p>
+        // Alert は role="alert" を持つ: 操作の結果として後から出るエラーを、スクリーンリーダーにも即座に読み上げさせる。
+        <Alert>{error}</Alert>
       )}
       {isLoading ? (
-        <p>{t("loading")}</p>
+        <Text>{t("loading")}</Text>
       ) : (
-        <ul>
-          {todos.map((todo) => (
-            <TodoItem
-              key={todo.id}
-              todo={todo}
-              onToggle={(id, completed) => void toggleTodo(id, completed)}
-              onDelete={(id) => void deleteTodo(id)}
-            />
-          ))}
-        </ul>
+        <Paper>
+          <List>
+            {todos.map((todo) => (
+              <TodoItem
+                key={todo.id}
+                todo={todo}
+                onToggle={(id, completed) => void toggleTodo(id, completed)}
+                onDelete={(id) => void deleteTodo(id)}
+              />
+            ))}
+          </List>
+        </Paper>
       )}
-    </main>
+    </Container>
   );
 }
