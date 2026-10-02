@@ -1,7 +1,7 @@
 # ディレクトリ構成ルールの依存の向き・置き場所・exports・環境変数・console・現在時刻・文言などを検査するルール検査テストの仕様（Issue #282）。step の実装は対の architecture.test.ts。
-# 規則の WHY と限界は architecture.test.ts の冒頭（規則の一覧は .claude/rules/architecture-check.md）。
+# 規則の WHY と限界は architecture.test.ts の冒頭（規則の一覧は .claude/rules/code/architecture-check.md）。
 Feature: ディレクトリ構成ルール（依存の向き）
-  Scenario: 依存の向き（.claude/rules/architecture-check.md）
+  Scenario: 依存の向き（rules の code/architecture-check.md）
     * 検査の対象から参照を取り出せている（抽出が壊れて 0 件になり、すべての規則が素通りするのを防ぐ）
     * apps/backend/ のソースファイルは apps/backend/features/<f>/internal/ か apps/backend/shared/ の domain/・application/・presentation/・infra/ のどれかの下か、モジュールの公開の入口 apps/backend/features/<f>/expose/ の直下か、テストだけが使う apps/backend/test-support/ の下か、API 仕様の補助 apps/backend/spec/api/<feature>/support.ts に置く（apps/backend/shared/drizzle/drizzle.config.ts だけ例外）
     * apps/frontend_customer/ のソースファイルは app/・features/・shared/・test-support/ の下か、直下の next.config.ts・instrumentation.ts・instrumentation-node.ts・proxy.ts・next-env.d.ts だけに置く

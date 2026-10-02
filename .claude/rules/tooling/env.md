@@ -9,13 +9,13 @@ paths:
 
 # 実行環境と環境変数
 
-決定は ADR `docs/adr/architecture/20260928-env-single-entry-all-required.md`、実測（どこで止まるか、Next の `.env` の読み方、検査の限界の確かめ方など）は 2026-09-28 の work-logs。クラウドセッションは `.claude/rules/cloud-session.md`。
+決定は ADR `docs/adr/architecture/20260928-env-single-entry-all-required.md`、実測（どこで止まるか、Next の `.env` の読み方、検査の限界の確かめ方など）は 2026-09-28 の work-logs。クラウドセッションは `.claude/rules/tooling/cloud-session.md`。
 
 ## ツールの版（asdf）
 ツールの版は asdf で管理し、`.tool-versions` をコミットして全員（人間・AI）が同じ環境で動かす。
 - Node.js: 現行の **LTS** の具体的な版（例: `24.x.y`）を書く。Current（奇数メジャー・LTS 前）と `lts` のようなエイリアスは使わない（時間で解決先が変わる）。
   - 決め方: `curl -s https://nodejs.org/dist/index.json | jq -r '[.[] | select(.lts != false)][0] | .version + " " + .lts'`。`asdf nodejs resolve lts --latest-available` には頼らない（古い LTS を返した実測がある）。
-  - 新しい LTS が出たら Issue → PR で上げる。`@types/node` も同じメジャーに合わせる（`.claude/rules/dependencies.md`）。
+  - 新しい LTS が出たら Issue → PR で上げる。`@types/node` も同じメジャーに合わせる（`.claude/rules/tooling/dependencies.md`）。
 - pnpm: パッケージマネージャは pnpm だけ（npm / yarn、`package-lock.json` / `yarn.lock` は使わない）。版は latest（`asdf list all pnpm | tail -1`）。リポジトリ直下の `package.json` の `packageManager`（`pnpm@x.y.z`）にも同じ版を書く。`apps/*/package.json` には書かない（版を 1 か所で管理する）。
 - 初回・更新時: `asdf plugin add nodejs` / `asdf plugin add pnpm`（未追加なら）→ `asdf install` → `node --version && pnpm --version`。
 - `.tool-versions` を変えたら `asdf install` し、`node --version` / `pnpm --version` の一致を確かめてからコミットする。
@@ -25,7 +25,7 @@ paths:
 
 ## 環境変数
 - 入口は `apps/shared/env.ts` に一元化する。`process.env` を直接読んでよいのは `env.ts` だけ。ほかは `import { env, toolEnv } from "@repo/shared/env"` で使う（Issue #59）。
-  - 置き場所は frontend と backend で共通の workspace パッケージ `apps/shared`（`@repo/shared`。Issue #90 で `apps/backend/shared/infra/` から移した。`.claude/rules/shared.md`）。WHY: frontend 直下の `instrumentation-node.ts`・backend・`apps/e2e/`・`vitest.global-setup.ts` が共通で使い、backend の中に置くと frontend 直下から backend を参照する例外が要った。
+  - 置き場所は frontend と backend で共通の workspace パッケージ `apps/shared`（`@repo/shared`。Issue #90 で `apps/backend/shared/infra/` から移した。`.claude/rules/code/shared.md`）。WHY: frontend 直下の `instrumentation-node.ts`・backend・`apps/e2e/`・`vitest.global-setup.ts` が共通で使い、backend の中に置くと frontend 直下から backend を参照する例外が要った。
   - `env`（型 `Env`）: アプリの設定。**すべて必須で、コードに既定値を持たない**。今は `DATABASE_URL` / `DATABASE_POOL_MAX` / `DATABASE_POOL_IDLE_TIMEOUT_MS` / `DATABASE_CONNECTION_TIMEOUT_MS` / `DATABASE_STATEMENT_TIMEOUT_MS` / `DATABASE_LOCK_TIMEOUT_MS` / `DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS`（DB 側のタイムアウト。Issue #58）/ `GCP_PROJECT_ID`（リクエストログの trace に入れる GCP のプロジェクト ID。開発・CI・E2E は `local`、本番は Cloud Run の env に Terraform の `var.project_id` を渡す（`infra/modules/app/run.tf` の `app_env`。migrate の job も `env.ts` を通るので同じく渡す）。Issue #209）（値の意味と開発用の値は `.env.example`）。
   - `toolEnv`（型 `ToolEnv`）: 開発ツールの切り替え（任意）。`CI`・`PLAYWRIGHT_CHROMIUM_EXECUTABLE`・`STRYKER_MUTATOR_WORKER`・`E2E_PORT`（ツールの動かし方 = E2E のポート。未設定なら `apps/e2e/playwright.config.ts` が 3100 を使う）。ツールが設定する・ツールの動かし方を切り替えるものだけを足す。アプリの設定は必ず `env` に足して必須にする。
     - 任意でも、値があれば検証し、不正なら読み込み時にエラーにする（`E2E_PORT` は 1〜65535 の整数。黙って既定値に戻すと worktree ごとに分けたポートが 3100 に戻るため）。
@@ -42,7 +42,7 @@ paths:
   - 単体テストは無い（カバレッジの対象外）。起動時に止まることは実測で確かめた（2026-09-28 の work-logs）。
 
 ## .env
-- 作り方: リポジトリ直下で `cp .env.example .env`。`.env` はコミットしない（`.gitignore` の `.env*`、`!.env.example`）。置くのはリポジトリ直下の 1 つだけ（`apps/*/.env` は置かない。Issue #68 のユーザー判断）。worktree では WorktreeCreate フックが worktree ごとの値で `.env` を書く（`.claude/rules/worktree.md`）。
+- 作り方: リポジトリ直下で `cp .env.example .env`。`.env` はコミットしない（`.gitignore` の `.env*`、`!.env.example`）。置くのはリポジトリ直下の 1 つだけ（`apps/*/.env` は置かない。Issue #68 のユーザー判断）。worktree では WorktreeCreate フックが worktree ごとの値で `.env` を書く（`.claude/rules/tooling/worktree.md`）。
 - `.env.local`（や `.env.development` など）は使わない。残っていれば消す。WHY: Next.js は `.env.local` を `.env` より優先して読むが、`env.ts` は `.env` だけを読むので、`pnpm dev` と `pnpm test` / `pnpm db:migrate` で値がずれる。
 - 読み込み: `env.ts` が読み込み時に、カレントディレクトリから上に `pnpm-workspace.yaml` のあるディレクトリ（リポジトリ直下）を探し（`DotEnvFile.findRepoRoot`。無ければカレントディレクトリ）、そこの `.env` を Node 標準の `process.loadEnvFile` で読む（`DotEnvFile.loadFromRepoRoot`）。依存（dotenv など）は足さない。
   - WHY 上に探す: `pnpm --filter` の script はパッケージのディレクトリ（`apps/frontend_customer`・`apps/backend`）で動く。Next.js 自身は `apps/frontend_customer` の `.env` を探すので、リポジトリ直下の `.env` は `env.ts` が読む。
@@ -52,19 +52,19 @@ paths:
 - CI（`ci.yml` / `mutation.yml`）は Postgres の起動後に `cp .env.example .env` のステップで作る（ワークフローの `env:` に書かない。値を 1 か所にするため）。Stryker は `.env` もサンドボックスにコピーする。クラウドセッションはフックが `.env` が無ければコピーする。
 
 ## 直参照の検査（2 系統。どちらも CI で止まる）
-- Biome の `style/noProcessEnv`（`biome.json` で `"error"`。`overrides` で `env.ts` とテストだけ off。`.claude/rules/lint.md`）。
-- `rule-tests/architecture.test.ts` の規則 `env-direct-access`（`.claude/rules/architecture-check.md`）。
+- Biome の `style/noProcessEnv`（`biome.json` で `"error"`。`overrides` で `env.ts` とテストだけ off。`.claude/rules/quality/lint.md`）。
+- `rule-tests/architecture.test.ts` の規則 `env-direct-access`（`.claude/rules/code/architecture-check.md`）。
 - WHY 2 系統: Biome は `biome.json` の overrides の書き換えで黙って効かなくなる。テスト側で対象と例外を固定し、片方が壊れてももう片方で止める。
 - 限界（Biome 2.5.13 で実測）:
   - 両方とも見逃す（レビューで見る）: 分割代入 `const { env } = process`、別名 `const p = process; p.env`、`Reflect.get(process, "env")`、`import proc from "node:process"; proc.env`。
   - Biome だけが拾う: テンプレートリテラルの `${process.env.X}`、`import { env } from "node:process"`。
   - `rule-tests/architecture.test.ts` だけが拾う: `global.process.env`、`(process).env`。
   - `rule-tests/architecture.test.ts` 側の限界は、同ファイルの「環境変数の直参照の抽出」のテストで固定している。
-- 同じ設計（Biome のルール + `rule-tests/architecture.test.ts` の規則で、唯一の入口・出口のファイルだけを許す）を、ログの `console` にも使っている（`noConsole` と `console-direct-access`。`.claude/rules/backend.md` の「ログ」、ADR `docs/adr/architecture/20260929-logger-single-exit.md`）。
+- 同じ設計（Biome のルール + `rule-tests/architecture.test.ts` の規則で、唯一の入口・出口のファイルだけを許す）を、ログの `console` にも使っている（`noConsole` と `console-direct-access`。`.claude/rules/code/backend.md` の「ログ」、ADR `docs/adr/architecture/20260929-logger-single-exit.md`）。
 
 ## 変数を足すとき
 - `env.ts` の `Env` と `PARSERS` に足し（必須、既定値なし）、`.env.example` に開発用の値と WHAT / WHY のコメントを書き、`env.test.ts` に検証のテストを足す。CI・クラウドは `.env.example` をコピーするので、ワークフローやスクリプトは直さなくてよい。
-- worktree ごとに変える値（DB 名・ポートなど、並列の worktree でぶつかるもの）なら、`scripts/worktree-env.sh` の生成規則も足す（`.claude/rules/worktree.md`）。
+- worktree ごとに変える値（DB 名・ポートなど、並列の worktree でぶつかるもの）なら、`scripts/worktree-env.sh` の生成規則も足す（`.claude/rules/tooling/worktree.md`）。
 - テスト用の接続先（`apps/backend/test-support/database.ts`・`apps/e2e/support/database.ts`・`drizzle.config.ts`）もアプリと同じ `env.DATABASE_URL` を使う。
 
 ## compose.yaml（開発用 Postgres）

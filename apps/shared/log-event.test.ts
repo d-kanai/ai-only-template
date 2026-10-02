@@ -117,6 +117,12 @@ describe("FreeTextMask.mask / LogFieldMarks.freeText（自由文の最後の網�
       "card *** / ***",
     ],
     ["Luhn に合う 13 桁", "id 4222222222222 x", "id *** x"],
+    [
+      // WHY 後ろにハイフン・英字が続いても置き換える（有効期限が続く形など。前だけを見る理由は log-event.ts の mask の WHY）。
+      "後ろにハイフン・英字が続く Luhn に合う 16 桁",
+      "card 4111111111111111-12/25 4111111111111111_x",
+      "card ***-12/25 ***_x",
+    ],
     ["Luhn に合う 19 桁", "n 6011000000000000001 x", "n *** x"],
     [
       "複数の種類がまじっていても、すべて置き換える",
@@ -145,6 +151,17 @@ describe("FreeTextMask.mask / LogFieldMarks.freeText（自由文の最後の網�
     [
       "uuid",
       "items has no row to update: 0b9d6d4e-2f6c-4a8a-9b1e-123456789012",
+    ],
+    [
+      // WHY この値: 2〜4 番目の組が数字だけで、つなげた 15 桁（350547049400118）が Luhn に合う uuid。E2E の
+      //   request-log で /todo/<この id> のパスが *** にされて落ちた（Issue #304）。
+      "uuid の途中の、区切りを含めて Luhn に合う数字の並び",
+      "/api/todos/c98fc6d4-3505-4704-9400-118bdef4cc55",
+    ],
+    [
+      // WHY 前に英字・- が付く番号を残すのは uuid の途中と見分けないための限界（log-event.ts の mask の WHY）。
+      "前に英字・- が付く Luhn に合う 16 桁",
+      "x4111111111111111 a-4111111111111111",
     ],
     ["日本語の文", "環境変数 DATABASE_URL がありません"],
   ])("%s は残す", (_kind, input) => {

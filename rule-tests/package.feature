@@ -1,4 +1,4 @@
-# 依存の版を package.json 上でも完全固定する決まり（.claude/rules/dependencies.md）を検査するルール検査テストの仕様（Issue #282）。step の実装は対の package.test.ts。
+# 依存の版を package.json 上でも完全固定する決まり（.claude/rules/tooling/dependencies.md）を検査するルール検査テストの仕様（Issue #282）。step の実装は対の package.test.ts。
 # 規則の WHY と限界は package.test.ts の冒頭。
 Feature: package.json の依存の版
   Scenario: 版の判定（isPinnedVersion）

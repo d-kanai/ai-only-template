@@ -881,7 +881,7 @@ describe("PostgresTodoRepository", () => {
 
   // WHY 2 つの Todo の両方に複数の履歴を持たせ、履歴の行を Todo をまたいで交互・position の逆順に入れる: LEFT JOIN の行を Todo ごとに
   //   まとめる処理（toTodos）の誤り（境目で履歴が隣の Todo に混ざる・最後の Todo の履歴が落ちる・最初の Todo だけ正しい）は、
-  //   どちらかの Todo の履歴が 1 件だと起きない（.claude/rules/testing.md の「複数件を扱う処理」）。日時を Todo ごと・履歴ごとに
+  //   どちらかの Todo の履歴が 1 件だと起きない（.claude/rules/quality/testing.md の「複数件を扱う処理」）。日時を Todo ごと・履歴ごとに
   //   変え、取り違えたら値で分かるようにする。
   test("findAll は、2 つの Todo がそれぞれ複数の履歴を持つときも、履歴を Todo ごとに足した順で組み立てる", async () => {
     // given

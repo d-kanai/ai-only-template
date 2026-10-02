@@ -15,7 +15,7 @@ import { RequestLogBuilder } from "@/shared/request-log/request-log";
 //   shared/i18n/locale.ts の Locales.negotiate（純粋関数。テストで固定）に置き、ここは NextRequest の値を渡して出力し、
 //   応答に x-request-id を付け、リクエストに x-locale を足すだけにする。このファイルは next start / next dev の中でだけ動くので
 //   カバレッジの対象外にし（vitest.config.mts）、結線は E2E（apps/e2e/spec/request-log.feature）で確かめる。
-// 限界（.claude/rules/frontend.md）: 応答の前に動くので status と所要時間は取れない。
+// 限界（.claude/rules/code/frontend.md）: 応答の前に動くので status と所要時間は取れない。
 // WHY 第 2 引数（NextFetchEvent）を受け取らない: event.waitUntil を使わないため（下の logger.emit の WHY）。
 export function proxy(request: NextRequest): NextResponse {
   const log = RequestLogBuilder.build({

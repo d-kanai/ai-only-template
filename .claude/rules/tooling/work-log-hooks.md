@@ -11,7 +11,7 @@ paths:
 
 # 作業ログの強制と、フックの記録（Issue #64）
 
-作業ログ（`docs/work-logs/YYYY-MM-DD.md`）の書き方は `.claude/general/work-log.md`（常時読み込み）。このファイルの `paths:` に `docs/work-logs/**` を入れない（ログを書くたびにフックの説明が読み込まれ、書き方は `.claude/general/work-log.md` で足りるため）。ここは、記録漏れを止める仕組み（Stop フック・CI）と、compact・指示ファイルの読み込みを記録するフックの WHAT / WHY / 限界。決定は ADR `docs/adr/workflow/20260928-work-log-enforced-by-stop-hook-and-ci.md`、実測は 2026-09-28 の work-logs、公式の仕様と未確認の点は 2026-09-29 の work-logs「docs/ から移した記録」。
+作業ログ（`docs/work-logs/YYYY-MM-DD.md`）の書き方は `.claude/rules/workflow/work-log.md`（常時読み込み）。このファイルの `paths:` に `docs/work-logs/**` を入れない（ログを書くたびにフックの説明が読み込まれ、書き方は `.claude/rules/workflow/work-log.md` で足りるため）。ここは、記録漏れを止める仕組み（Stop フック・CI）と、compact・指示ファイルの読み込みを記録するフックの WHAT / WHY / 限界。決定は ADR `docs/adr/workflow/20260928-work-log-enforced-by-stop-hook-and-ci.md`、実測は 2026-09-28 の work-logs、公式の仕様と未確認の点は 2026-09-29 の work-logs「docs/ から移した記録」。
 
 WHY 機械で止める: 調査だけの依頼などでログの追記が漏れた（LEARNINGS.md。ユーザーの指摘）。文章のルールは読み落とされる（CLAUDE.md の原則 7）。
 
@@ -54,7 +54,7 @@ WHY 機械で止める: 調査だけの依頼などでログの追記が漏れ�
 - 実行環境: 判定に node を使う。このステップは setup-node より前に動くので、runner に入っている node を使う（`ubuntu-latest` = Ubuntu 24.04 の runner に Node.js 22 系が入っている。https://github.com/actions/runner-images の README と images/ubuntu/Ubuntu2404-Readme.md 、2026-09-30 に確認）。そのため `work-log-sections.mjs` は型の除去に頼らない JavaScript にしている。
 
 ## 追加した項目の `- 機械化:`（Issue #178）
-- WHAT: 作業ログの 1 項目（`## <やったこと>` から次の `## ` の前まで）に `- 機械化: <縛れる（何で）/ 縛れない（理由）/ 対象外（調査・質問のみ）>` の行を要求し、追加した項目に無ければ Stop フックと CI で止める。書き方は `.claude/general/work-log.md`。
+- WHAT: 作業ログの 1 項目（`## <やったこと>` から次の `## ` の前まで）に `- 機械化: <縛れる（何で）/ 縛れない（理由）/ 対象外（調査・質問のみ）>` の行を要求し、追加した項目に無ければ Stop フックと CI で止める。書き方は `.claude/rules/workflow/work-log.md`。
 - WHY: ルールを足す・変えるたびに「lint / 型 / テスト / フック / CI で機械的に止められないか」を必ず検討させる（CLAUDE.md の 7.。ユーザー指示「作業のたびに機械的に縛れないかの検討を必ず挟んでほしい。プロセスに」）。文章で頼むだけでは読み落とされるので、書いたかどうかを機械で止める。PR では本文の「実装経緯」の「機械化の検討」（`.github/PULL_REQUEST_TEMPLATE.md`）にも書く（こちらは reviewer が見る。機械では検査しない）。
 - 判定（`scripts/hooks/work-log-sections.mjs` の `findSectionsWithoutMechanization`。Stop フックと CI が同じものを呼ぶ。`work-log-sections.test.ts` で固定）:
   - diff の `+` の行だけを見る。`## ` で始まる追加行を項目の見出しとし、そこから次の追加された `## ` 行の前まで（ファイルの diff の境目 `diff --git` でも閉じる）の追加行に `- 機械化:` の行があるかを見る。`#` / `###` は項目ではない。

@@ -1,4 +1,4 @@
-# 画面の言語（Issue #116 / #279。.claude/rules/testing.md の「E2E（Playwright + playwright-bdd）」）。
+# 画面の言語（Issue #116 / #279。.claude/rules/quality/testing.md の「E2E（Playwright + playwright-bdd）」）。
 # step の実装は i18n.steps.ts（対の名前。rule-tests/e2e-feature.test.ts の e2e-feature-pair）。共有の step は shared.steps.ts。
 # 言語の決め方（利用者の選択 → ブラウザの言語 → 既定の日本語）は apps/frontend_customer/shared/i18n/locale.test.ts で固定している
 #   ので、ここでは本番の組み立てを通した結線（画面の言語の決定 → 画面の表示）だけを見る。

@@ -43,7 +43,7 @@ export function verifyTimeZoneAtStartup(): void {
     logger.emit({
       message: "The server time zone must be UTC; start the server with TZ=UTC",
       event: { name: "app_start_failed" },
-      // WHY snake_case: ログのキーは OTel semconv に倣って snake_case にそろえる（.claude/rules/backend.md の「ログ」）。
+      // WHY snake_case: ログのキーは OTel semconv に倣って snake_case にそろえる（.claude/rules/code/backend.md の「ログ」）。
       time_zone: timeZone,
     });
     process.exit(1);

@@ -1,6 +1,6 @@
 # Lefthook の設定（Git フックの定義）。書式: https://github.com/evilmartians/lefthook （docs/configuration）
 # フックは `pnpm install` 時に lefthook の postinstall が `lefthook install` を実行して .git/hooks に入る
-# （pnpm-workspace.yaml の allowBuilds で許可している。仕組みと緊急時の飛ばし方は .claude/rules/lint.md）。
+# （pnpm-workspace.yaml の allowBuilds で許可している。仕組みと緊急時の飛ばし方は .claude/rules/quality/lint.md）。
 
 # pre-commit: `git commit` の直前に実行され、いずれかのコマンドが非 0 で終わるとコミットを中止する。
 pre-commit:
@@ -13,7 +13,7 @@ pre-commit:
       #   コミット対象だけを検査するため、作業途中の未ステージのファイルがあってもコミットを妨げない。
       #   ステージ済みファイルがなければ Lefthook がこのコマンドをスキップする。
       # pnpm exec biome: package.json で固定した版の Biome を使う（公式レシピは npx だが、本リポジトリは pnpm のみを使うため）。
-      # --error-on-warnings: pnpm lint と同じく warn でも失敗させる（warn は放置されるため。.claude/rules/lint.md）。
+      # --error-on-warnings: pnpm lint と同じく warn でも失敗させる（warn は放置されるため。.claude/rules/quality/lint.md）。
       # --no-errors-on-unmatched: ステージ済みファイルがすべて Biome の対象外（例: .md だけ）でもエラーにしない。
       # --files-ignore-unknown=true: Biome が扱えない拡張子（.md / .yml など）を渡しても無視する。
       #   公式レシピは glob: "*.{js,ts,cjs,mjs,d.cts,d.mts,jsx,tsx,json,jsonc,css}" で拡張子を絞るが、ここでは絞らない。
@@ -26,7 +26,7 @@ pre-commit:
 commit-msg:
   commands:
     # format: メッセージの形式（1 行目のサマリ、🎯 WHY / 📝 WHAT / 🛠️ 実装経緯 / ✅ 検証内容 の 4 見出しの順、Co-Authored-By:）を検査する。
-    #   形式は .claude/general/commit.md。検査の中身・例外（マージコミット、fixup! / squash!）の WHY は .claude/rules/git-guard.md。
+    #   形式は .claude/rules/workflow/commit.md。検査の中身・例外（マージコミット、fixup! / squash!）の WHY は .claude/rules/tooling/git-guard.md。
     # {1}: Lefthook が git から受け取った 1 つ目の引数（メッセージのファイル .git/COMMIT_EDITMSG のパス）に展開するテンプレート。
     # bash で呼ぶ: スクリプトの実行権限（git の file mode）に頼らないため（.claude/settings.json のフックと同じ呼び方）。
     format:

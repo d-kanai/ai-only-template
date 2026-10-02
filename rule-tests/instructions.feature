@@ -1,16 +1,19 @@
-# 指示ファイル（CLAUDE.md・.claude/general・.claude/rules・スキル・エージェント・ADR。Issue #86）の構成と形式を検査するルール検査テストの仕様（Issue #282）。step の実装は対の instructions.test.ts。
+# 指示ファイル（CLAUDE.md・.claude/rules・スキル・エージェント・ADR。Issue #86）の構成と形式を検査するルール検査テストの仕様（Issue #282）。step の実装は対の instructions.test.ts。
 # 規則の WHY と限界は instructions.test.ts の冒頭。
 Feature: 指示ファイルの構成と形式
   Scenario: CLAUDE.md の行数と @ import の抽出
     * 行数は末尾の改行を数えない（wc -l と同じ）
-    * CLAUDE.md は 200 行まで、.claude/general は 25 行までを許し、超えたら違反にする
+    * CLAUDE.md は 200 行まで、.claude/rules/workflow は 25 行までを許し、超えたら違反にする
     * 行頭か空白の直後の @path を import として拾う（must reject 側の入力）
     * コードブロック・コードスパン・メールアドレスの @ は拾わない（must pass 側の入力）
-    * @ で読んでよいのは LEARNINGS.md と .claude/general の直下の .md だけ
+    * @ で読んでよいのは LEARNINGS.md だけ（.claude/rules/workflow は paths 無しで自動で読まれる）
     * 無いファイル・許可外のファイルへの @ を違反にし、読んだファイルの @ も辿る
     * 許可されたファイルだけを指す @ は違反にしない
-  Scenario: .claude/rules のフロントマター
+  Scenario: .claude/rules の分類とフロントマター
     * paths のリストを読み、クォートを外す
+    * .claude/rules/<分類>/<名前>.md（分類は code / quality / tooling / workflow）でなければ違反にする（must reject）（直下・分類でない・分類の下のディレクトリ・大文字）
+    * workflow/ は paths が無ければ違反にしない（must pass）
+    * workflow/ に paths があれば違反にする（must reject。常時読み込むため）
     * すべての glob がファイルに一致すれば違反にしない（must pass）
     * フロントマターの paths が無い・閉じていない・空・スカラー・コメントアウトなら違反にする（must reject）
     * どのファイルにも一致しない glob（typo）を違反にする（must reject）
@@ -23,7 +26,10 @@ Feature: 指示ファイルの構成と形式
   Scenario: 旧 rules/ への参照
     * 旧 rules/ の code と general への参照（文中・括弧の中・@ の import・コードスパン）を違反にする（must reject）
     * .claude/rules/ の下・旧 rules/ の削除の説明・名前の一部・別の rules は違反にしない（must pass）
+    * 旧 .claude/general への参照（文中・@ の import・コードスパン）を違反にする（must reject）
+    * .claude/rules/general.md のような別の名前・general の単語は違反にしない（must pass）
     * docs/work-logs/ とこのファイルは検査しない
+    * 旧 .claude/general への参照は、docs/adr/（不変の記録）も検査しない
   Scenario: ADR（docs/adr/<分類>/）の形式
     * テンプレートどおり・廃止・同じ分類や別の分類への置き換え・必須の見出しの間の別の見出しは違反にしない（must pass）
     * ファイル名が yyyymmdd-topic.md（topic は英小文字・数字の kebab-case）でなければ違反にする（must reject）（日付の書き方・区切り・大文字・下線・空の topic・連続や末尾のハイフン・拡張子・README.md）
@@ -51,10 +57,15 @@ Feature: 指示ファイルの構成と形式
     * docs/adr/ の下のディレクトリのファイル・docs/adr/README.md・docs/work-logs/ の下のファイル・docs/ の外のファイルだけなら違反にしない（must pass）
     * docs/adr/ の直下の README.md 以外のファイル（ADR・大文字違いの readme・分類名のファイルを含む）を違反にする（must reject）
     * docs/ の直下のファイル・ディレクトリ（adr / work-logs の前方一致と、その名前のファイルを含む）を 1 項目ずつ違反にする（must reject）
+  Scenario: ルール検査テストの一覧（rule-tests-index）
+    * rule-tests の直下の .feature の名前をルール検査テストとして読み、入れ子とほかの拡張子は読まない
+    * CLAUDE.md の本数と名前、.claude/rules/quality/testing.md の rule-tests/<名前>.test.ts がそろっていれば違反にしない（must pass）
+    * CLAUDE.md の本数が違う・本数の記載が無い・名前が無い、testing.md に rule-tests/<名前>.test.ts が無ければ違反にする（must reject。名前は CLAUDE.md の本数の後ろの（…。と testing.md の「今あるもの:」の行の中だけを見る）
+    * ルール検査テストが 0 件なら、この検査は違反を出さない
   Scenario: fixture のリポジトリを検査したときに検出される違反
     * 許可される構成では違反 0 件（must pass。.gitignore の中と docs/work-logs/ の旧参照は数えない）
     * 違反を入れた構成では、すべての違反を検出する（must reject）
   Scenario: リポジトリの指示ファイル
     * 列挙が空でない（対象 0 件で緑にならない）
-    * CLAUDE.md・.claude/general・.claude/rules・スキル・エージェント・ADR に違反が無く、旧 rules/ も残っていない
+    * CLAUDE.md・.claude/rules・スキル・エージェント・ADR に違反が無く、旧 rules/ と .claude/general も残っていない
     * docs/ の直下には adr/ と work-logs/ しか無い

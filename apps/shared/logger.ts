@@ -1,8 +1,8 @@
 // サーバ側のログの唯一の出口（Issue #85。環境変数の唯一の入口 env.ts と同じ位置づけ）。
 // console.* を直接書いてよいのはこのファイルだけ（テストは除く）。Biome の suspicious/noConsole（biome.json の overrides）と
-// rule-tests/architecture.test.ts の規則 console-direct-access の 2 系統で強制している（.claude/rules/backend.md・lint.md）。
+// rule-tests/architecture.test.ts の規則 console-direct-access の 2 系統で強制している（.claude/rules/code/backend.md・lint.md）。
 // 置き場所は frontend と backend で共通の workspace パッケージ apps/shared（@repo/shared/logger。Issue #90 で apps/backend/shared/infra/
-// から移した。frontend 直下の proxy.ts・instrumentation-node.ts と backend が使う。.claude/rules/shared.md）。
+// から移した。frontend 直下の proxy.ts・instrumentation-node.ts と backend が使う。.claude/rules/code/shared.md）。
 //
 // WHY 1 か所に集める:
 //   - 行の形（1 呼び出し = JSON 1 行。先頭に severity・time・message・event）をここで決め、呼び出し側ごとにずれないようにする。
@@ -30,7 +30,7 @@ import {
 import { Clock } from "./now";
 
 // WHY 型を ./log-event.ts から export し直す: 呼び出し側（とテスト）は logger から LogEvent を読み、log-event.ts は公開しない
-//   （apps/shared/package.json の exports に ./log-event を置かない。.claude/rules/shared.md）。
+//   （apps/shared/package.json の exports に ./log-event を置かない。.claude/rules/code/shared.md）。
 export type { LogEvent };
 
 // parse に失敗した（event がスキーマに合わない・event.name が一覧に無い）ときに出す文言。
@@ -55,7 +55,7 @@ class Logger {
   // WHY severity ごとに console のメソッドを分ける: INFO は stdout（console.log）、WARNING / ERROR は stderr（console.warn /
   //   console.error）。実行環境が stderr を異常の出力として扱えるようにする。
   // WHY 対応表をメソッドの中に置く（最上位の定数・static フィールドにしない）: 最上位の値は Stryker の static な変異になり、
-  //   ignoreStatic で検査から外れる（.claude/rules/testing.md の mutation testing）。クラスの static フィールドの初期化も読み込み時に
+  //   ignoreStatic で検査から外れる（.claude/rules/quality/testing.md の mutation testing）。クラスの static フィールドの初期化も読み込み時に
   //   1 回だけ評価されるので、同じく外れるおそれがある（未確認。ADR docs/adr/architecture/20261002-class-based-backend.md）。
   private static writerOf(severity: Severity): (line: string) => void {
     const writers = {
