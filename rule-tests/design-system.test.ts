@@ -111,7 +111,8 @@ import { afterAll, expect } from "vitest";
 //   atom の外の shared/ui/ を経由した再公開は見ない。ThemedComponent の union は文字列リテラルだけを読み、別の型の参照は展開しない）。
 //   部品でない値（ColorSchemeScript・mantineHtmlProps・hook）も名前が一覧に無ければ違反と数える（atom の外の shared/ui/ に置く）。
 //   design-system-mantine-boundary は参照先の文字列で見る（テンプレートリテラルに埋め込み式のある import()・変数に入れた参照先・
-//   shared/ui/ の中のファイルが Mantine をそのまま再公開する書き方は見ない。shared/ui/ の中はレビューで見る）。テストは対象外。
+//   shared/ui/ の中のファイルが Mantine をそのまま再公開する書き方は見ない。shared/ui/ の中はレビューで見る）。テストは対象外
+//   （WHY: テストは描画の器や部品の確かめに Mantine を使うことがあり、そこから見た目の口が画面のコードに漏れることはない）。
 //   atom の props の型に Mantine の props を混ぜない（見た目の口を開けない）ことは見ない（レビューで見る）。
 //   .css の import は参照先の文字列が `.css` で終わるもの（大文字小文字は区別しない）だけを見る（`?inline` などのクエリ付き・
 //   テンプレートリテラルに埋め込み式のある import()・.scss などほかの書き方は見ない）。
