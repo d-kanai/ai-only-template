@@ -7067,6 +7067,16 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/backend/shared/http/bad-handle.api.ts": lines(
     "export class RawApi { handle = async (request: Request) => new Response(null); }",
   ),
+  // presentation-with-problem-response の例外（Issue #156）: OfrepResponse.wrap は feature-flag の presentation の外では違反。
+  //   WHY fixture にも置く: 判定例（PROBLEM_RESPONSE_EXAMPLES）は findUnwrappedHandles を直接呼ぶので、列挙 → 判定へ渡すパスの
+  //   誤り（例外がどの場所でも効く）を止められない。fixture は列挙から通す。
+  "apps/backend/features/todo/internal/presentation/bad-ofrep-handle.api.ts":
+    lines(
+      'import { OfrepResponse } from "../../../../shared/http/ofrep";',
+      "export class OfrepApi {",
+      "  readonly handle = OfrepResponse.wrap(async (request: Request) => new Response(null));",
+      "}",
+    ),
   // handle-without-try-catch（Issue #332）: ProblemResponse.wrap で包んだ handle の中の try / catch（本体と、中で定義した関数）。
   //   try / finally（14 行目）と handle 以外のメンバー（17 行目）は拾わない。bad-handle.api.ts の TryCatchApi（4 行目）も違反。
   "apps/backend/features/todo/internal/presentation/bad-try-catch.api.ts":
@@ -7828,6 +7838,7 @@ const MUST_REJECT_VIOLATIONS = [
   ),
   "presentation-with-problem-response: apps/backend/features/todo/internal/presentation/nested/bad-handle.api.mts:1",
   "presentation-with-problem-response: apps/backend/shared/http/bad-handle.api.ts:1",
+  "presentation-with-problem-response: apps/backend/features/todo/internal/presentation/bad-ofrep-handle.api.ts:3",
   ...[4, 13].map(
     (line) =>
       `handle-without-try-catch: apps/backend/features/todo/internal/presentation/bad-try-catch.api.ts:${line}`,
@@ -8338,6 +8349,15 @@ const MUST_PASS_FILES: Record<string, string> = {
     "}",
     "export class Only { static run(): number { return Only.helper(); } private static helper(): number { return 1; } }",
   ),
+  // presentation-with-problem-response の例外（Issue #156）: feature-flag の presentation では OfrepResponse.wrap で包んでよい
+  //   （列挙から通す。MUST_REJECT_FILES の bad-ofrep-handle.api.ts の WHY）。
+  "apps/backend/features/feature-flag/internal/presentation/good-ofrep-handle.api.ts":
+    lines(
+      'import { OfrepResponse } from "../../../../shared/http/ofrep";',
+      "export class OfrepApi {",
+      "  readonly handle = OfrepResponse.wrap(async (request: Request) => new Response(null));",
+      "}",
+    ),
   // presentation-with-problem-response（Issue #141）: ProblemResponse.wrap で包んだ handle（ctx あり・なし）。
   //   対象外: api ファイルでない presentation のファイル、テスト、ほかの層の handle。
   "apps/backend/features/todo/internal/presentation/good-handle.api.ts": lines(
