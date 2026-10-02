@@ -944,6 +944,7 @@ describeFeature(feature, ({ Scenario }) => {
           expect.arrayContaining([
             "apps/backend/features/todo/internal/domain/todo.test.ts",
             "apps/backend/spec/api/todo/create-todo.api-spec.test.ts",
+            "rule-tests/architecture.test.ts",
           ]),
         );
         expect(violations).toEqual([]);

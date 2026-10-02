@@ -9,6 +9,8 @@
 // WHY テストファイル（*.test.ts）から export しない: rule-tests/feature-business-language.ts の冒頭と同じ（Vitest が import 先の
 //   テストも登録する・Biome の noExportsInTest）。
 // cases の各行（先頭がケース名）に toValue を当て、ケース名 → 値の object にする。
+// 注意: 実際の値と期待値の両方をこの関数で作るので、この関数が壊れて（例: 常に {} を返す）も、使う側の比較は緑のまま通る。
+//   この関数の振る舞いは rule-tests/rule-test-feature.test.ts の「ケースの表」の step が固定している（変えるときはそこも直す）。
 // WHY 同じケース名を拒否する: object のキーが重なると後の行が前の行を黙って上書きし、そのケースを検査しなくなる。
 export function casesByName<Row extends readonly [string, ...unknown[]], Value>(
   cases: readonly Row[],
