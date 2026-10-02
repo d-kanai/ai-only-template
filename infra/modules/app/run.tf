@@ -13,6 +13,11 @@ locals {
   }
   # DATABASE_STATEMENT_TIMEOUT_MS / DATABASE_LOCK_TIMEOUT_MS（DB 側の文の実行時間・ロック待ちの上限）も service / job で違うので
   #   下で個別に書く（service は .env.example と同じ 10 秒 / 3 秒、job は 0 = 送らず DB の既定（上限なし）に従う）。
+  # 限界: DB 側のタイムアウト 3 つを効かせるのはアプリのプール（apps/backend/shared/infra/database.ts の createDatabase）だけで、
+  #   job の既定の pnpm db:migrate（drizzle-kit。接続は shared/drizzle/drizzle.config.ts の DATABASE_URL だけを使う）には効かない。
+  #   job で効くのは backfill（pnpm db:backfill）だけ。WHY migrate に足さない: drizzle-kit は SQL を 1 本の接続で続けて流し、
+  #   トランザクションの途中で外部を待たない（アイドルにならない）。DDL を文の時間で打ち切るとマイグレーションが半端に止まる。
+  #   上限はジョブの timeout（600s）が持つ（Codex の指摘への判断。PR #259）。
   # DB 以外でアプリが起動時に必須とする設定（apps/shared/env.ts。.env.example に意味と WHY）。service と job で同じ値。
   # WHY job にも渡す: migrate（drizzle-kit）も設定の読み込みで env.ts を通り、必須の変数が 1 つでも欠けると止まる。
   app_env = {
