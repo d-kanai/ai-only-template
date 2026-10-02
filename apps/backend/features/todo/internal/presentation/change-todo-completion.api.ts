@@ -17,19 +17,11 @@ import { PostgresTodoRepository } from "../infra/todo-repository.postgres";
 // WHY PUT で completed の値を受け取る（POST /complete と /reopen のようなアクションにしない）: 同じ要求を何度送っても結果が
 //   同じ（冪等）で、画面のチェックボックスのトグルは次の値をそのまま送れる（ADR docs/adr/architecture/20260930-one-api-per-use-case.md）。
 
-// リクエスト本文の「形」（項目の有無と型。未知の項目は拒否）。
-// WHY completed を必須にする: この API は完了を変えるためだけにあり、completed の無い本文は誤り（「何も変えない」200 にしない）。
-// WHY 未知の項目を拒否する: title をこの API に送る誤り（名前の変更は /title）を黙って捨てずに 400 で知らせる（json-body.ts の requestBodySchema）。
-function changeTodoCompletionRequestSchema() {
-  return requestBodySchema({
-    // 型が違う・無いときのキー（request.field.notBoolean）は json-body.ts の toProblemError が決める（z.boolean に error は書かない）。
-    completed: z.boolean(),
-  });
-}
-
 // WHY 型をスキーマから導出する: 検査する形と型を 1 か所で宣言し、ずれを無くす（画面側も import type でこの型を使う）。
 export type ChangeTodoCompletionRequest = z.infer<
-  ReturnType<typeof changeTodoCompletionRequestSchema>
+  ReturnType<
+    (typeof ChangeTodoCompletionApi)["changeTodoCompletionRequestSchema"]
+  >
 >;
 
 // 同じ形の Response を各 *.api.ts に書く。
@@ -46,17 +38,9 @@ export type ChangeTodoCompletionResponse = {
 // Next 16 では動的セグメントの params が Promise で渡される（get-todo.api.ts の Context のコメント）。
 type Context = { params: Promise<{ id: string }> };
 
-function toResponse(todo: Todo): ChangeTodoCompletionResponse {
-  return {
-    id: todo.id,
-    title: todo.title,
-    completed: todo.completed,
-    createdAt: todo.createdAt.toISOString(),
-  };
-}
-
 // PUT /api/todos/:id/completion の Route Handler を持つクラス。コンストラクタで command を受け取り、handle を Route Handler として export する
-//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包むは
+//   （WHY クラスにする・Pick で execute だけを受け取る・handle をアロー関数のプロパティにする・withProblemResponse で包む・
+//   補助（リクエストのスキーマ・toResponse）を private static メソッドにするは
 //   list-todos.api.ts の ListTodosApi のコメント）。
 export class ChangeTodoCompletionApi {
   constructor(
@@ -76,13 +60,33 @@ export class ChangeTodoCompletionApi {
       const id = parseUuidParam(rawId, "todo.notFound", { id: rawId });
       const { completed } = await parseJsonBody(
         request,
-        changeTodoCompletionRequestSchema(),
+        ChangeTodoCompletionApi.changeTodoCompletionRequestSchema(),
       );
       const todo = await this.changeTodoCompletion.execute({ id, completed });
-      const body: ChangeTodoCompletionResponse = toResponse(todo);
+      const body: ChangeTodoCompletionResponse =
+        ChangeTodoCompletionApi.toResponse(todo);
       return Response.json(body);
     },
   );
+
+  // リクエスト本文の「形」（項目の有無と型。未知の項目は拒否）。
+  // WHY completed を必須にする: この API は完了を変えるためだけにあり、completed の無い本文は誤り（「何も変えない」200 にしない）。
+  // WHY 未知の項目を拒否する: title をこの API に送る誤り（名前の変更は /title）を黙って捨てずに 400 で知らせる（json-body.ts の requestBodySchema）。
+  private static changeTodoCompletionRequestSchema() {
+    return requestBodySchema({
+      // 型が違う・無いときのキー（request.field.notBoolean）は json-body.ts の toProblemError が決める（z.boolean に error は書かない）。
+      completed: z.boolean(),
+    });
+  }
+
+  private static toResponse(todo: Todo): ChangeTodoCompletionResponse {
+    return {
+      id: todo.id,
+      title: todo.title,
+      completed: todo.completed,
+      createdAt: todo.createdAt.toISOString(),
+    };
+  }
 }
 
 // app/api/todos/[id]/completion/route.ts が re-export する Route Handler。本番は常に Postgres で組み立てる。

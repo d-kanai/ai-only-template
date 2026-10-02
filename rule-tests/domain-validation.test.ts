@@ -30,7 +30,7 @@ import { afterAll, describe, expect, it } from "vitest";
 //     WHY domain だけ: presentation はリクエストのスキーマを safeParse して項目ごとの errors にする（json-body.ts）ので、zod を直接呼ぶ。
 //   - validation-error-only-in-validate（backend 全体）: `new DomainError("validation_error"`（validation_error の DomainError を
 //     作れるのは backend 全体で validate.ts だけ）。`new DomainError(` と引数の間に空白・改行を挟んでも拾う。`not_found` など
-//     ほかの種類は違反にしない（requireTodo のように domain の関数が作ってよい）。
+//     ほかの種類は違反にしない（RequiredTodo.of のように domain のクラスが作ってよい）。
 //     WHY backend 全体: application / presentation で validation_error の DomainError を作っても、同じく変換が 2 か所に分かれる。
 // 対象: apps/backend の下の *.ts（テスト・node_modules と、変換を持つ apps/backend/shared/domain/validate.ts 自身は除く）。
 //   parse の規則は apps/backend/features/*/internal/domain/ と apps/backend/shared/domain/ の下だけに当てる（rulesFor）。

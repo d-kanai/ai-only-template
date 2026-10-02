@@ -18,6 +18,10 @@ export type DatabaseConfig = {
   max: number;
   idleTimeoutMillis: number;
   connectionTimeoutMillis: number;
+  // DB 側のタイムアウト（ミリ秒。0 は送らず DB 側の既定に従う）。値の意味と WHY は .env.example の DATABASE_*_TIMEOUT_MS。
+  statementTimeoutMillis: number;
+  lockTimeoutMillis: number;
+  idleInTransactionSessionTimeoutMillis: number;
 };
 
 export type DatabaseHandle = { db: Database; pool: Pool };
@@ -30,7 +34,22 @@ export function createDatabase(
   createPool: (config: PoolConfig) => Pool = (poolConfig) =>
     new Pool(poolConfig),
 ): DatabaseHandle {
-  const pool = createPool(config);
+  // WHY DB 側のタイムアウトを Pool の設定（接続パラメータ）で渡す（クエリごとに SET しない）: node-postgres は接続を作るときに
+  //   起動メッセージで statement_timeout などを送り、その接続のセッションの既定値になる（pg 8.23.0 の client.js の
+  //   getStartupConf）。往復が増えず、トランザクションの中の文（SET LOCAL で上書きしない限り）にも効く。
+  // WHY 3 つとも置く（Issue #58。2026-10-01 の調査）: プールは 1 インスタンス数本（infra/modules/app/run.tf）しかなく、DB 側に
+  //   上限が無いと、遅い文・ロック待ち（findByIdForUpdate の FOR UPDATE）・COMMIT し忘れたトランザクションが接続を握り続け、
+  //   残りのリクエストが接続待ち（DATABASE_CONNECTION_TIMEOUT_MS）で一斉に失敗する。DB が打ち切れば接続はプールに戻る。
+  const pool = createPool({
+    connectionString: config.connectionString,
+    max: config.max,
+    idleTimeoutMillis: config.idleTimeoutMillis,
+    connectionTimeoutMillis: config.connectionTimeoutMillis,
+    statement_timeout: config.statementTimeoutMillis,
+    lock_timeout: config.lockTimeoutMillis,
+    idle_in_transaction_session_timeout:
+      config.idleInTransactionSessionTimeoutMillis,
+  });
   // WHY error を受ける: プールに置いてあるアイドル中の接続が切れる（DB の再起動・ネットワーク断）と、Pool が
   //   'error' イベントを出す。リスナーが無いと Node の EventEmitter の規則で例外になり、プロセスが落ちる
   //   （node-postgres の Pool のドキュメント）。切れた接続はプールから捨てられ、次のクエリは新しい接続を作るので、
@@ -62,6 +81,10 @@ export function getDatabase(): DatabaseHandle {
     max: env.DATABASE_POOL_MAX,
     idleTimeoutMillis: env.DATABASE_POOL_IDLE_TIMEOUT_MS,
     connectionTimeoutMillis: env.DATABASE_CONNECTION_TIMEOUT_MS,
+    statementTimeoutMillis: env.DATABASE_STATEMENT_TIMEOUT_MS,
+    lockTimeoutMillis: env.DATABASE_LOCK_TIMEOUT_MS,
+    idleInTransactionSessionTimeoutMillis:
+      env.DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS,
   });
   return holder.__appDatabase;
 }

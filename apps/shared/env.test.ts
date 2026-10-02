@@ -27,6 +27,9 @@ const VALID = {
   DATABASE_POOL_MAX: "10",
   DATABASE_POOL_IDLE_TIMEOUT_MS: "10000",
   DATABASE_CONNECTION_TIMEOUT_MS: "5000",
+  DATABASE_STATEMENT_TIMEOUT_MS: "10000",
+  DATABASE_LOCK_TIMEOUT_MS: "3000",
+  DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: "30000",
   GCP_PROJECT_ID: "my-project",
 };
 
@@ -49,6 +52,9 @@ describe("readEnv", () => {
       DATABASE_POOL_MAX: 10,
       DATABASE_POOL_IDLE_TIMEOUT_MS: 10_000,
       DATABASE_CONNECTION_TIMEOUT_MS: 5_000,
+      DATABASE_STATEMENT_TIMEOUT_MS: 10_000,
+      DATABASE_LOCK_TIMEOUT_MS: 3_000,
+      DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: 30_000,
       GCP_PROJECT_ID: "my-project",
     });
   });
@@ -71,6 +77,21 @@ describe("readEnv", () => {
     ).toMatchObject({
       DATABASE_POOL_IDLE_TIMEOUT_MS: 0,
       DATABASE_CONNECTION_TIMEOUT_MS: 0,
+    });
+  });
+
+  test("DB 側のタイムアウト（文・ロック待ち・トランザクション中のアイドル）の 0（無効）は受け付ける", () => {
+    expect(
+      readEnv({
+        ...VALID,
+        DATABASE_STATEMENT_TIMEOUT_MS: "0",
+        DATABASE_LOCK_TIMEOUT_MS: "0",
+        DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: "0",
+      }),
+    ).toMatchObject({
+      DATABASE_STATEMENT_TIMEOUT_MS: 0,
+      DATABASE_LOCK_TIMEOUT_MS: 0,
+      DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: 0,
     });
   });
 
@@ -119,6 +140,9 @@ describe("readEnv", () => {
     ["DATABASE_POOL_IDLE_TIMEOUT_MS", "1e3"],
     ["DATABASE_CONNECTION_TIMEOUT_MS", "10s"],
     ["DATABASE_CONNECTION_TIMEOUT_MS", " 5"],
+    ["DATABASE_STATEMENT_TIMEOUT_MS", "-1"],
+    ["DATABASE_LOCK_TIMEOUT_MS", "3s"],
+    ["DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS", "1.5"],
   ])(
     "%s=%s のように数として使えない値は、名前と値を含むエラーにする",
     (name, value) => {

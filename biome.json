@@ -104,6 +104,16 @@
           }
         }
       }
+    },
+    {
+      "includes": ["apps/backend/**"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noStaticOnlyClass": "off"
+          }
+        }
+      }
     }
   ],
   "assist": {

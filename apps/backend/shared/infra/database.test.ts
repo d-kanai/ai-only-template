@@ -18,6 +18,9 @@ const CONFIG: DatabaseConfig = {
   max: 3,
   idleTimeoutMillis: 1_000,
   connectionTimeoutMillis: 1_500,
+  statementTimeoutMillis: 2_000,
+  lockTimeoutMillis: 500,
+  idleInTransactionSessionTimeoutMillis: 4_000,
 };
 
 // pg.Pool の代わり。受け取った設定と、登録されたイベントハンドラ・end の呼び出しを記録する。
@@ -44,11 +47,21 @@ afterEach(async () => {
 });
 
 describe("createDatabase", () => {
-  test("設定をそのままプールに渡す", () => {
+  test("設定をプールに渡す（DB 側のタイムアウトは node-postgres の接続パラメータの名前にする）", () => {
     const pool = fakePool();
     createDatabase(CONFIG, pool.create);
 
-    expect(pool.configs).toEqual([CONFIG]);
+    expect(pool.configs).toEqual([
+      {
+        connectionString: "postgresql://u:p@db.example:5432/x",
+        max: 3,
+        idleTimeoutMillis: 1_000,
+        connectionTimeoutMillis: 1_500,
+        statement_timeout: 2_000,
+        lock_timeout: 500,
+        idle_in_transaction_session_timeout: 4_000,
+      },
+    ]);
   });
 
   test("アイドル中の接続のエラーはログに出すだけで、プロセスを落とさない（error ハンドラを登録する）", () => {
@@ -85,6 +98,44 @@ describe("createDatabase", () => {
     expect(pool.options.max).toBe(3);
     expect(pool.totalCount).toBe(0);
     await pool.end();
+  });
+
+  // WHY 実 Postgres で確かめる: node-postgres は 0 などの偽の値を接続パラメータに載せない（pg 8.23.0 の client.js の
+  //   getStartupConf）。名前の取り違えや値の落ちは、DB のセッションの設定（SHOW）を見ないと分からない。
+  test("DB 側のタイムアウトが接続ごとのセッションの設定になる", async () => {
+    const database = await createTestDatabase();
+    try {
+      const { pool } = createDatabase({
+        ...CONFIG,
+        connectionString: database.url,
+      });
+      const shown = await pool.query(
+        "select current_setting('statement_timeout') as statement, current_setting('lock_timeout') as lock, current_setting('idle_in_transaction_session_timeout') as idle",
+      );
+      expect(shown.rows).toEqual([
+        { statement: "2s", lock: "500ms", idle: "4s" },
+      ]);
+      await pool.end();
+    } finally {
+      await database.close();
+    }
+  });
+
+  test("statement_timeout を超えたクエリは DB が打ち切る（SQLSTATE 57014 query_canceled）", async () => {
+    const database = await createTestDatabase();
+    try {
+      const { pool } = createDatabase({
+        ...CONFIG,
+        connectionString: database.url,
+        statementTimeoutMillis: 100,
+      });
+      await expect(pool.query("select pg_sleep(2)")).rejects.toMatchObject({
+        code: "57014",
+      });
+      await pool.end();
+    } finally {
+      await database.close();
+    }
   });
 
   test("作った db で実際にクエリを実行できる", async () => {
@@ -161,6 +212,10 @@ describe("getDatabase / closeDatabase", () => {
       max: env.DATABASE_POOL_MAX,
       idleTimeoutMillis: env.DATABASE_POOL_IDLE_TIMEOUT_MS,
       connectionTimeoutMillis: env.DATABASE_CONNECTION_TIMEOUT_MS,
+      statement_timeout: env.DATABASE_STATEMENT_TIMEOUT_MS,
+      lock_timeout: env.DATABASE_LOCK_TIMEOUT_MS,
+      idle_in_transaction_session_timeout:
+        env.DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS,
     });
   });
 });
