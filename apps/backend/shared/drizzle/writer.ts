@@ -2,18 +2,18 @@ import { randomUUID } from "node:crypto";
 import { logger } from "@repo/shared/logger";
 import { DrizzleQueryError, eq, getTableName, type Table } from "drizzle-orm";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
-import type { Transaction } from "../application/transaction";
-import type { ChangeOperation } from "../domain/change-operation";
-import { type ChangeEntry, ChangeRecords } from "./change-log";
+import { type ChangeEntry, ChangeRecords } from "../change-log/change-log";
+import type { Changes } from "../change-log/change-log.schema";
+import type { ChangeOperation } from "../change-log/change-operation";
+import type { Transaction } from "../transaction/transaction";
 import { ColumnClassifier } from "./column-classification";
 import type { Database } from "./database";
-import type { Changes } from "./schema";
 
 // 書き込みの唯一の口（Writer。Issue #215。ADR docs/adr/architecture/20260930-transaction-from-application.md）。Repository
 //   （*.postgres.ts）は行の変換だけを書き、insert / update / delete をこの Writer に渡す。Writer は 1 文ごとに次を横断的に行う:
 //   (a) drizzle の insert / update / delete を .returning() で実行する。
 //   (b) 変更履歴（change_logs。Issue #189）の記録を change-log.ts の組み立てで作り、同じトランザクションの change_logs に書く
-//       （ChangeRecords.recordChange。文ごとに 1 回）。insert は全列の after、update は同じトランザクションで FOR UPDATE で読んだ行を before、
+//       （ChangeRecords.recordChange。文ごとに 1 回）。insert は全列の after、update は呼び出し側が渡した変える前の値（origin）を before、
 //       渡した列を after、delete は消した行（returning）の全列の before。
 //   (c) 書き込みの前後に 1 行ずつログ（event.name は db_write。Issue #205・#209）を出す。
 // WHY Repository ではなく Writer が記録する（Issue #215 のユーザー判断「AOP のように共通で記録したい」）: 以前は Repository が
@@ -22,7 +22,7 @@ import type { Changes } from "./schema";
 //   することは rule-tests/persistence.test.ts の no-change-log-in-repository が止め、書き込みが Writer を通ることは
 //   writes-through-writer が見る。
 // WHY 以前の writeInTransaction（write.ts）を置き換える: トランザクションを張るのは command（application）の runner になり
-//   （shared/infra/transaction.postgres.ts）、書き込みごとにトランザクションを張る入口は要らなくなった。
+//   （shared/drizzle/transaction.postgres.ts）、書き込みごとにトランザクションを張る入口は要らなくなった。
 // 前提: 書き込む表はすべて uuid の id 列（主キー）を持つ（Issue #213）。update / delete は id で 1 行を指す。
 
 // db.transaction のコールバックが受け取る tx の型（drizzle-orm の NodePgTransaction）。
@@ -46,10 +46,12 @@ export interface Writer {
     table: T,
     rows: readonly T["$inferInsert"][],
   ): Promise<T["$inferSelect"][]>;
-  // id の行の changes の列だけを UPDATE し、更新後の行を返す。changes が空なら何もせず undefined を返す。行が無ければ Error。
+  // id の行の changes の列だけを UPDATE し、更新後の行を返す。origin は変える前の値（変更履歴とログの before）で、changes の列を
+  //   すべて持つ（無ければ Error）。changes が空なら何もせず undefined を返す。行が無ければ Error。
   update<T extends TableWithId>(
     table: T,
     id: string,
+    origin: Readonly<Partial<T["$inferSelect"]>>,
     changes: Partial<T["$inferInsert"]>,
   ): Promise<T["$inferSelect"] | undefined>;
   // id の行を DELETE し、消した行を返す。無い id なら何もせず undefined を返す。
@@ -119,6 +121,7 @@ export class PostgresWriter implements Writer {
   async update<T extends TableWithId>(
     table: T,
     id: string,
+    origin: Readonly<Partial<T["$inferSelect"]>>,
     changes: Partial<T["$inferInsert"]>,
   ): Promise<T["$inferSelect"] | undefined> {
     // WHY 空なら何もしない（SQL もログも無し）: 空の SET は SQL にならない。Repository は差分（ChangedProps.of）をそのまま渡すので、
@@ -127,30 +130,38 @@ export class PostgresWriter implements Writer {
       return undefined;
     }
     return this.logged(table, "update", [id], async () => {
-      // WHY 同じトランザクションで FOR UPDATE で読む: 記録の before を、DB が UPDATE の直前に持っていた値にする。読んでから
-      //   UPDATE するまでの間に別のトランザクションが同じ行を変えられないよう、行をロックする（UPDATE も同じロックを取るので、
-      //   ロックの順序は変わらない）。
-      const [before] = await this.tx
-        .select()
-        .from(table as PgTable)
-        .where(eq(table.id, id))
-        .for("update");
-      // WHY Error（not_found にしない）: Repository は同じトランザクションで行を FOR UPDATE で読んでから update する（command の
-      //   findByIdForUpdate）ので、行が無いのは呼び出し側の実装ミス。英語: 開発者向けのエラー（Issue #116）。
-      if (before === undefined) {
-        throw new Error(`${getTableName(table)} has no row to update: ${id}`);
+      // WHY before に呼び出し側の origin を使う（Writer が行を読み直さない。Issue #312）: Repository は同じトランザクションで先に
+      //   行を FOR UPDATE でロックして読み込み（command の findByIdForUpdate）、その値（origin）との差分を changes に渡す。ロックが
+      //   取れているので origin は DB が UPDATE の直前に持っていた値と同じで、読み直すと update のたびに SELECT が 1 文増えるだけになる
+      //   （Issue #215 から #312 までは Writer が SELECT … FOR UPDATE で読み直していた）。
+      // WHY origin に無い列を、SQL を発行する前に Error にする: before が分からず記録が欠ける。呼び出し側の実装ミスで、UPDATE して
+      //   から気づくより書く前に止める。英語: 開発者向けのエラー（Issue #116）。
+      // WHY Object.hasOwn: "toString" のような Object.prototype の名前を「列がある」と取り違えない。
+      const missing = Object.keys(changes).find(
+        (key) => !Object.hasOwn(origin, key),
+      );
+      if (missing !== undefined) {
+        throw new Error(
+          `${getTableName(table)} origin has no column to update: ${missing}`,
+        );
       }
       const [after] = (await this.tx
         .update(table)
         .set(changes as never)
         .where(eq(table.id, id))
         .returning()) as T["$inferSelect"][];
+      // WHY Error（not_found にしない）: Repository は同じトランザクションで行を FOR UPDATE で読んでから update する（command の
+      //   findByIdForUpdate）ので、行が無いのは呼び出し側の実装ミス。行が無いことは returning が 0 行であることで分かる。
+      //   例外で logged の失敗のログになり、runner のトランザクションも ROLLBACK する。英語: 開発者向けのエラー（Issue #116）。
+      if (after === undefined) {
+        throw new Error(`${getTableName(table)} has no row to update: ${id}`);
+      }
       return {
         result: after,
         entries: ChangeRecords.updateEntries(
           table,
           id,
-          before as Readonly<Record<string, unknown>>,
+          origin as Readonly<Record<string, unknown>>,
           changes as Readonly<Record<string, unknown>>,
           this.actorId,
         ),
@@ -309,7 +320,7 @@ export class PostgresWriter implements Writer {
     );
   }
 
-  // この Writer を Transaction（shared/application/transaction の brand の型）にする（PostgresTransactionRunner が work に渡す値）。
+  // この Writer を Transaction（shared/transaction/transaction の brand の型）にする（PostgresTransactionRunner が work に渡す値）。
   // WHY cast をここに閉じる: Transaction は domain の brand の型で、infra の実体（Writer）を application・domain に見せない。
   //   作るのはこのメソッド、取り出すのは PostgresWriter.of だけにする。
   asTransaction(): Transaction {

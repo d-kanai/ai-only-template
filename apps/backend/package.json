@@ -3,7 +3,7 @@
   "private": true,
   "exports": {
     "./features/todo/internal/presentation/*.api": "./features/todo/internal/presentation/*.api.ts",
-    "./shared/presentation/problem": "./shared/presentation/problem.ts"
+    "./shared/http/problem": "./shared/http/problem.ts"
   },
   "scripts": {
     "db:generate": "drizzle-kit generate --config shared/drizzle/drizzle.config.ts",

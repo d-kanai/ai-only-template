@@ -26,7 +26,7 @@ import { casesByName } from "./case-table";
 //     WHY: 新規は素の INSERT（Repository の insert。2 回目は一意制約違反で気づく）、読み込み済みは変わった列だけの UPDATE
 //       （Repository の update）。upsert は 2 回目の insert や id の衝突を黙って通し、全列を書いて別の更新を巻き戻す（lost update）。
 //   - update-uses-changed-props（Issue #215 で save-uses-changed-props から改名）: *.postgres.ts に update のメソッド定義（行の先頭が
-//     `update(` / `async update(`。`public` などの修飾子も可）があるのに、shared/infra/changed-props を値として import していない
+//     `update(` / `async update(`。`public` などの修飾子も可）があるのに、shared/drizzle/changed-props を値として import していない
 //     （`import type` は数えない）。
 //     WHY: Repository の update は、読み込んだときの値（origin）と今の値を ChangedProps.of で比べて変わった列だけを書く。
 //       自前の比較や全列の UPDATE に戻ると lost update が再発する。
@@ -47,20 +47,20 @@ import { casesByName } from "./case-table";
 //     限界: 表を別名の変数に入れ直す（`const t = todoStatusChanges; db.delete(t)`）・ブラケット（`db["delete"](…)`）・生の SQL
 //       （sql`delete from todo_status_changes`）は見ない。表の変数名が接尾辞に従っているかは、schema.ts で宣言した表なら
 //       次の append-only-table-naming が見る。
-//   - append-only-table-naming（Issue #188）: apps/backend/features/<f>/internal/infra/schema.ts（と shared/infra/schema.ts）で、
+//   - append-only-table-naming（Issue #188）: apps/backend/features/<f>/internal/infra/schema.ts（と shared の下の schema.ts / *.schema.ts。isSchemaFile）で、
 //     `pgTable("<表名>"` の表名が `_changes` / `_events` / `_logs` で終わるのに、それを受ける変数（`const <名前> =` の直後の
 //     pgTable）の名前が `Changes` / `Events` / `Logs` で終わらない（変数で受けていない `export default pgTable(…)` も違反）。行は pgTable の行。`pgTable(` と表名の間の空白・改行は可、
 //     表名の引用符は `"` / `'` / `` ` ``。
 //     WHY: no-update-delete-on-append-only-tables は変数名の接尾辞で insert のみの表を見分けるので、
 //       `export const statusLog = pgTable("todo_status_changes", …)` のように表名と変数名がずれると素通りする。表名（DB の命名）
 //       から変数名を縛れば、insert のみの表は必ずその検査にかかる。
-//     WHY schema.ts だけ: 表の宣言の置き場所は features/<f>/internal/infra/schema.ts と、横断の表の shared/infra/schema.ts だけ
-//       （drizzle-kit の設定が読む場所。.claude/rules/code/backend.md）。
+//     WHY schema.ts だけ: 表の宣言の置き場所は features/<f>/internal/infra/schema.ts と、横断の表の shared/change-log/change-log.schema.ts だけ
+//       （drizzle-kit の設定が読む場所。.claude/rules/code/backend.md）。shared は横断の表を足す置き場所も見るよう広めに取る（isSchemaFile の WHY）。
 //     限界: 表名が `_changes` / `_events` で終わらない insert のみの表（命名の規約そのもの）、`pgSchema("s").table(…)`・
 //       pgTable を別名で import した宣言、型注釈付きの変数（`const x: T = pgTable(…)`。違反と数える）、分割代入は見ない。
 //   - writes-through-writer（Issue #215 で writes-through-write-in-transaction を置き換え。その前は Issue #189 の writes-record-change-log）:
 //     *.postgres.ts の書き込み（`.insert(` / `.update(` / `.delete(`。`.` と名前と `(` の間の空白・改行は可）が、書き込みの唯一の口
-//     Writer を通っていない。(a) shared/infra/writer を値として import していなければ、すべての書き込みが違反。(b) import していても、
+//     Writer を通っていない。(a) shared/drizzle/writer を値として import していなければ、すべての書き込みが違反。(b) import していても、
 //     書き込みの受け手が `PostgresWriter.of(` で得た変数（`const <名前> = PostgresWriter.of(`）か `PostgresWriter.of(…)` の呼び出しそのものでなければ違反。
 //     `PostgresWriter` と `.` と `of` の間の空白・改行は可。受け手が `x.PostgresWriter`（メンバー）・前方一致の別のクラス（`MyPostgresWriter.of(`）・
 //     別のメソッド（`PostgresWriter.from(`・`PostgresWriter.ofTx(`）は Writer とみなさない。Issue #262 で関数 writerOf を
@@ -75,19 +75,19 @@ import { casesByName } from "./case-table";
 //       変数に drizzle の tx を入れると見逃す）。別名への入れ直し（`const v = w;`）は違反と数える（安全側）。生の SQL
 //       （`this.db.execute(sql\`insert …\`)`）・ドライバの直接の呼び出し（`this.db.$client.query(…)`）の書き込みは `.insert(` などの形で
 //       ないので見ない。import はブロックコメント（`/* … */`）の中にあるだけでも満たしたと見なす。Writer の中身（記録とログ）は
-//       shared/infra/writer.test.ts と Repository のテストが固定する。
-//   - no-change-log-in-repository（Issue #215）: *.postgres.ts が shared/infra/change-log を import する（`import type` も、
+//       shared/drizzle/writer.test.ts と Repository のテストが固定する。
+//   - no-change-log-in-repository（Issue #215）: *.postgres.ts が shared/change-log/change-log を import する（`import type` も、
 //     `export … from` も）。行は import / export の行。
 //     WHY: 変更履歴の記録は Writer が文ごとに組み立てる（ユーザー判断「AOP のように共通で記録したい」）。Repository が記録
 //       （ChangeRecords.insertEntry など）を組み立てると、Repository ごとに同じ組み立てを書き、書き忘れた書き込みは記録されない。
 //     限界: dynamic import（`import("…/change-log")`）と、change-log の関数を別のモジュール経由で使う書き方は見ない。
 //   - no-direct-transaction（Issue #205）: *.postgres.ts に `transaction` の名前（語の境界。`db.transaction(`・`tx.transaction(`
 //     （セーブポイント）・ブラケット `db["transaction"]`・分割代入 `const { transaction } = db`・`.` の後の改行）がある。行はその名前の行。
-//     WHY: トランザクションを張るのは command（application）が受け取る runner（shared/infra/transaction.postgres.ts。Issue #215）
+//     WHY: トランザクションを張るのは command（application）が受け取る runner（shared/drizzle/transaction.postgres.ts。Issue #215）
 //       だけにする。Repository が直接張ると、command の範囲の外に別のトランザクションができ、読み込み（行ロック）と書き込みが
 //       同じトランザクションにならない。runner のファイルは Repository ではないので、この規則を含む *.postgres.ts の規則の対象外
 //       （下の REPOSITORY_RULES_EXEMPT）。
-//     WHY `/` の直後は数えない: import のパス（`…/shared/application/transaction`・`…/shared/infra/transaction.postgres`）は名前ではない。
+//     WHY `/` の直後は数えない: import のパス（`…/shared/transaction/transaction`・`…/shared/drizzle/transaction.postgres`）は名前ではない。
 //     WHY `.` と `(` を要求しない（no-upsert と同じ）: 変数に入れ直す・ブラケットで呼ぶ書き方も拾う。`transactional(`・
 //       `myTransaction(`・`transactions`・型の `Transaction`（大文字）は別の名前として通す。
 //     限界: 文字列の中の `transaction`（ログの文言など）も違反と数える（安全側）。`db["trans" + "action"]` のような組み立ては見ない。
@@ -97,7 +97,7 @@ import { casesByName } from "./case-table";
 //     名前（語の境界。呼び出し・import・別名の import の元の名前・名前空間の `changeLog.recordChange`・クラスの static メソッドの
 //     `ChangeRecords.recordChange`（Issue #262 で関数からクラスの static メソッドにした。名前を同じに保ち、この規則で拾う））がある。
 //     行はその名前の行。
-//     WHY: 変更履歴は Writer（shared/infra/writer.ts）が文ごとに同じトランザクションで書く。Repository が直接書くと、記録を 2 度書く・
+//     WHY: 変更履歴は Writer（shared/drizzle/writer.ts）が文ごとに同じトランザクションで書く。Repository が直接書くと、記録を 2 度書く・
 //       トランザクションの外で書く（記録の失敗で本体だけが残る）書き方ができる。以前の record-change-in-transaction（`recordChange(` が
 //       `transaction(` の括弧の中か）は、記録の書き込みが書き込みの口の中だけになり、要らなくなった（記録が本体と同じトランザクションで
 //       書かれることは writer.test.ts と todo-repository.postgres.test.ts が実行で固定する）。
@@ -132,7 +132,7 @@ import { casesByName } from "./case-table";
 //       overload のシグネチャ（`findForUpdate(id): Promise<X>;`）は本体が空なので、どちらも `ForUpdate` の名前として違反にする
 //       （誤検出。reviewer の probe で確認。今のコードには現れない）。
 // 変更履歴の表（change_logs。変数名 changeLogs）も insert のみ: no-update-delete-on-append-only-tables と append-only-table-naming は
-//   `Logs` / `_logs` も対象にし、append-only-table-naming は横断の表の置き場所 shared/infra/schema.ts も見る（Issue #189）。
+//   `Logs` / `_logs` も対象にし、append-only-table-naming は横断の表の置き場所 shared/change-log/change-log.schema.ts も見る（Issue #189）。
 // コメントと文字列の扱い（限界）: 各行の `//` 以降を落としてから探す（「// .onConflictDoUpdate( は使わない」を違反と数えない）。
 //   文字列の中身は解釈しない。そのため、文字列の中の `//` の後ろは見逃し、文字列の中の `.onConflictDoUpdate(` は違反と数える。
 //   ブロックコメント（`/* … */`）の中はコードと同じに扱う（upsert は安全側で違反になるが、`get origin()` と changed-props の
@@ -173,11 +173,19 @@ function matchingLines(lines: string[], pattern: RegExp): number[] {
   );
 }
 
-// shared/infra/<name> を参照する import（複数行も読む）の、import の行番号（1 始まり）。
+// apps/backend/shared/ の下のモジュール（shared/ からのパス。拡張子なし）で、import を数えるもの。
+// WHY shared/ からのパスで持つ（名前だけにしない）: Issue #310 で shared/ を層（infra など）から意味の単位（drizzle / change-log など）に
+//   分けた。名前だけで比べると、別のディレクトリに置いた同じ名前のモジュール（shared/http/writer など）も数えてしまう。
+type SharedModule =
+  | "drizzle/changed-props"
+  | "drizzle/writer"
+  | "change-log/change-log";
+
+// shared/<module> を参照する import（複数行も読む）の、import の行番号（1 始まり）。
 // valueOnly なら `import type` を数えない。そうでなければ `import type` と `export … from` も数える（no-change-log-in-repository）。
-function sharedInfraImportLines(
+function sharedImportLines(
   code: string,
-  name: string,
+  module: SharedModule,
   valueOnly: boolean,
 ): number[] {
   // WHY export は `export { … } from` / `export * from` の形だけを探す: `[^;]*?` で `export class A {}` から読むと、後ろの import の
@@ -190,20 +198,21 @@ function sharedInfraImportLines(
           /\bexport\s+(type\s+)?(?:\{[^}]*\}|\*(?:\s+as\s+[\w$]+)?)\s*from\s*(["'])([^"'\n]+)\2/g,
         )),
   ];
-  // WHY 前後を区切る: `changed-props-x` や shared/infra でない `./changed-props` は別のモジュール。
-  const module = new RegExp(`(?:^|/)shared/infra/${name}(?:\\.[cm]?[jt]s)?$`);
+  // WHY 前後を区切る: `changed-props-x`・shared/<ディレクトリ> を挟まない `./changed-props`・別のディレクトリの
+  //   `shared/http/changed-props`・Issue #310 より前の `shared/infra/changed-props` は別のモジュール。
+  const target = new RegExp(`(?:^|/)shared/${module}(?:\\.[cm]?[jt]s)?$`);
   return statements
     .flatMap(({ 1: typeOnly, 3: specifier = "", index }) =>
-      module.test(specifier) && !(valueOnly && typeOnly !== undefined)
+      target.test(specifier) && !(valueOnly && typeOnly !== undefined)
         ? [lineAt(code, index)]
         : [],
     )
     .sort((a, b) => a - b);
 }
 
-// shared/infra/<name> を値として import しているか（`import type` と `export … from` は数えない）。
-function importsSharedInfra(code: string, name: string): boolean {
-  return sharedInfraImportLines(code, name, true).length > 0;
+// shared/<module> を値として import しているか（`import type` と `export … from` は数えない）。
+function importsShared(code: string, module: SharedModule): boolean {
+  return sharedImportLines(code, module, true).length > 0;
 }
 
 // code の中の位置（0 始まり）が何行目か（1 始まり）。
@@ -454,13 +463,28 @@ function appendOnlyTableNamingViolations(lines: string[]): number[] {
   });
 }
 
+// 表を宣言するファイルか（append-only-table-naming の対象。リポジトリ相対の / 区切り）。
+// features の表は features/<f>/internal/infra/schema.ts、横断の表は shared/ の下の schema.ts / *.schema.ts（今は
+//   shared/change-log/change-log.schema.ts だけ）。
+// WHY shared は 1 ファイルに絞らず「shared の下の schema.ts / *.schema.ts」にする: Issue #310 より前は shared/infra/schema.ts の
+//   1 か所だった。shared を意味の単位のディレクトリに分けたので、横断の表を足すと別のディレクトリ（shared/<単位>/<単位>.schema.ts）に
+//   置かれうる。ファイル名を 1 つに固定すると、そこに置いた表が黙って検査から外れる。rule-tests/schema.test.ts の列挙と同じ範囲。
+function isSchemaFile(path: string): boolean {
+  return (
+    /^apps\/backend\/features\/[^/]+\/internal\/infra\/schema\.ts$/.test(
+      path,
+    ) ||
+    /^apps\/backend\/shared\/(?:[^/]+\/)*(?:[^/]+\.)?schema\.ts$/.test(path)
+  );
+}
+
 // *.postgres.ts の規則の対象外にするファイル（リポジトリ相対）。
 // WHY トランザクションの runner（Issue #215）を外す: 名前は *.postgres.ts（Postgres の実装の目印。presentation の組み立てが参照する）
 //   だが Repository ではなく、db.transaction を呼ぶ唯一の場所（no-direct-transaction の WHY）。ファイル名で 1 つだけ外し、
-//   shared/infra の下でもほかの *.postgres.ts は対象のままにする（Repository を shared/infra に置いたときに規則が外れない）。
-//   Writer（shared/infra/writer.ts）は *.postgres.ts ではないので、もともと対象外。
+//   shared/drizzle の下でもほかの *.postgres.ts は対象のままにする（Repository を shared/ に置いたときに規則が外れない）。
+//   Writer（shared/drizzle/writer.ts）は *.postgres.ts ではないので、もともと対象外。
 const REPOSITORY_RULES_EXEMPT = new Set([
-  "apps/backend/shared/infra/transaction.postgres.ts",
+  "apps/backend/shared/drizzle/transaction.postgres.ts",
 ]);
 
 // path はリポジトリ相対の / 区切り。規則ごとに対象のパスを絞り、違反を行の順に返す。
@@ -486,17 +510,19 @@ function findPersistenceViolations(
         rule: "no-update-delete-on-append-only-tables" as const,
         line,
       })),
-      ...(importsSharedInfra(code, "writer")
+      ...(importsShared(code, "drizzle/writer")
         ? writesNotThroughWriter(code)
         : writeLines(code)
       ).map((line) => ({
         rule: "writes-through-writer" as const,
         line,
       })),
-      ...sharedInfraImportLines(code, "change-log", false).map((line) => ({
-        rule: "no-change-log-in-repository" as const,
-        line,
-      })),
+      ...sharedImportLines(code, "change-log/change-log", false).map(
+        (line) => ({
+          rule: "no-change-log-in-repository" as const,
+          line,
+        }),
+      ),
       ...matchingLines(lines, /(?<!\/)\btransaction\b/).map((line) => ({
         rule: "no-direct-transaction" as const,
         line,
@@ -526,11 +552,7 @@ function findPersistenceViolations(
     );
   }
 
-  if (
-    /^apps\/backend\/(?:features\/[^/]+\/internal|shared)\/infra\/schema\.ts$/.test(
-      path,
-    )
-  ) {
+  if (isSchemaFile(path)) {
     violations.push(
       ...appendOnlyTableNamingViolations(lines).map((line) => ({
         rule: "append-only-table-naming" as const,
@@ -539,7 +561,10 @@ function findPersistenceViolations(
     );
   }
 
-  if (isRepository && !importsSharedInfra(lines.join("\n"), "changed-props")) {
+  if (
+    isRepository &&
+    !importsShared(lines.join("\n"), "drizzle/changed-props")
+  ) {
     const updateDefinitions = matchingLines(
       lines,
       /^\s*(?:(?:public|private|protected|override)\s+)*(?:async\s+)?update\s*[(<]/,
@@ -616,13 +641,13 @@ const IN_MEMORY =
   "apps/backend/features/x/internal/infra/x-repository.in-memory.ts";
 const ENTITY = "apps/backend/features/x/internal/domain/x.ts";
 const SCHEMA = "apps/backend/features/x/internal/infra/schema.ts";
-const SHARED_SCHEMA = "apps/backend/shared/infra/schema.ts";
+const SHARED_SCHEMA = "apps/backend/shared/change-log/change-log.schema.ts";
 const IMPORT_CHANGED_PROPS =
-  'import { ChangedProps } from "../../../../shared/infra/changed-props";';
+  'import { ChangedProps } from "../../../../shared/drizzle/changed-props";';
 const IMPORT_WRITER =
-  'import { PostgresWriter } from "../../../../shared/infra/writer";';
+  'import { PostgresWriter } from "../../../../shared/drizzle/writer";';
 const IMPORT_CHILD = 'import { todoStatusChanges, todos } from "./schema";';
-const RUNNER = "apps/backend/shared/infra/transaction.postgres.ts";
+const RUNNER = "apps/backend/shared/drizzle/transaction.postgres.ts";
 // 書き込み（insert / update / delete）を含む例に、writer の import と、PostgresWriter.of で得た Writer の変数 tx・writer の宣言を最後の行に
 //   足す（writes-through-writer を満たす）。
 // WHY 最後の行に足す: ほかの規則の例の行番号を変えずに、その規則だけを見る例にする（検査は import と宣言の位置を問わない）。
@@ -685,7 +710,7 @@ describeFeature(feature, ({ Scenario }) => {
               source(
                 "import {",
                 "  ChangedProps,",
-                '} from "../../../../shared/infra/changed-props.ts";',
+                '} from "../../../../shared/drizzle/changed-props.ts";',
                 "class XRepository {",
                 "  update(x: X) {}",
                 "}",
@@ -769,12 +794,12 @@ describeFeature(feature, ({ Scenario }) => {
                 "q.onConflictDoUpdate({});",
                 "static reconstruct(v) {}",
                 "await this.db.transaction(async (tx) => tx.insert(xs).values(r));",
-                'import { ChangeRecords } from "../../../../shared/infra/change-log";',
+                'import { ChangeRecords } from "../../../../shared/change-log/change-log";',
               ),
             ],
             [
-              "shared/domain の reconstruct（entity-with-reconstruct-has-origin は features の domain だけ）",
-              "apps/backend/shared/domain/x.ts",
+              "shared/error の reconstruct（entity-with-reconstruct-has-origin は features の domain だけ）",
+              "apps/backend/shared/error/x.ts",
               source("export class X {", "  static reconstruct(v: V) {}", "}"),
             ],
             [
@@ -850,7 +875,7 @@ describeFeature(feature, ({ Scenario }) => {
               ),
             ],
             [
-              "shared/infra/schema.ts の change_logs を changeLogs で受ける（横断の表の置き場所）",
+              "shared/change-log/change-log.schema.ts の change_logs を changeLogs で受ける（横断の表の置き場所）",
               SHARED_SCHEMA,
               source(
                 "export const changeLogs = pgTable(",
@@ -898,10 +923,10 @@ describeFeature(feature, ({ Scenario }) => {
               POSTGRES,
               source(
                 IMPORT_CHANGED_PROPS,
-                'import type { Transaction } from "../../../../shared/application/transaction";',
+                'import type { Transaction } from "../../../../shared/transaction/transaction";',
                 "import {",
                 "  PostgresWriter,",
-                '} from "../../../../shared/infra/writer.ts";',
+                '} from "../../../../shared/drizzle/writer.ts";',
                 "class A {",
                 "  async insert(x: X, tx: Transaction) {",
                 "    const writer = PostgresWriter.of(tx);",
@@ -921,28 +946,29 @@ describeFeature(feature, ({ Scenario }) => {
               ),
             ],
             [
-              "change-log を名前が同じ別のモジュール（./change-log・shared/infra/change-log-x）やコメントの中で読むだけ",
+              "change-log を名前が同じ別のモジュール（./change-log・shared/change-log/change-log-x・別のディレクトリの shared/drizzle/change-log）やコメントの中で読むだけ",
               POSTGRES,
               source(
                 'import { ChangeRecords } from "./change-log";',
-                'import { x } from "../../../../shared/infra/change-log-x";',
-                '// import { ChangeRecords } from "../../../../shared/infra/change-log";',
+                'import { x } from "../../../../shared/change-log/change-log-x";',
+                'import { y } from "../../../../shared/drizzle/change-log";',
+                '// import { ChangeRecords } from "../../../../shared/change-log/change-log";',
               ),
             ],
             [
-              "*.postgres.ts でない書き込みの口（shared/infra/writer.ts）と InMemory は change-log を import してよい",
-              "apps/backend/shared/infra/writer.ts",
+              "*.postgres.ts でない書き込みの口（shared/drizzle/writer.ts）と InMemory は change-log を import してよい",
+              "apps/backend/shared/drizzle/writer.ts",
               source(
                 'import { ChangeRecords } from "./change-log";',
-                'import type { ChangeEntry } from "../../shared/infra/change-log";',
+                'import type { ChangeEntry } from "../../shared/change-log/change-log";',
               ),
             ],
             [
               "transaction / recordChange で始まる・終わる・含むだけの別の名前（transactional( / myTransaction( / transactions / recordChanges( / recordChangeLater(）と型の Transaction、import のパスの transaction",
               POSTGRES,
               source(
-                'import type { Transaction } from "../../../../shared/application/transaction";',
-                'import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";',
+                'import type { Transaction } from "../../../../shared/transaction/transaction";',
+                'import { PostgresTransactionRunner } from "../../../../shared/drizzle/transaction.postgres";',
                 "await this.transactional(async (tx) => {});",
                 "await myTransaction(async (tx) => {});",
                 "const transactions = [];",
@@ -964,15 +990,15 @@ describeFeature(feature, ({ Scenario }) => {
               ),
             ],
             [
-              "書き込みの口（shared/infra/writer.ts。*.postgres.ts でない）は drizzle の tx で書き、recordChange( を呼んでよい",
-              "apps/backend/shared/infra/writer.ts",
+              "書き込みの口（shared/drizzle/writer.ts。*.postgres.ts でない）は drizzle の tx で書き、recordChange( を呼んでよい",
+              "apps/backend/shared/drizzle/writer.ts",
               source(
                 "const inserted = await this.tx.insert(table).values(rows).returning();",
                 "await ChangeRecords.recordChange(this.tx, entries);",
               ),
             ],
             [
-              "トランザクションの runner（shared/infra/transaction.postgres.ts）は *.postgres.ts でも db.transaction( を呼んでよい（Repository の規則の対象外）",
+              "トランザクションの runner（shared/drizzle/transaction.postgres.ts）は *.postgres.ts でも db.transaction( を呼んでよい（Repository の規則の対象外）",
               RUNNER,
               source(
                 'import type { Transaction } from "../application/transaction";',
@@ -1037,7 +1063,7 @@ describeFeature(feature, ({ Scenario }) => {
               "子表を import していない *.postgres.ts の from( / limit( / where は対象外（*Logs は集約の子表ではない）",
               POSTGRES,
               source(
-                'import { changeLogs } from "../../../../shared/infra/schema";',
+                'import { changeLogs } from "../../../../shared/change-log/change-log.schema";',
                 "await this.db.select().from(xs).limit(1);",
                 "await this.db.select().from(changeLogs).where(eq(changeLogs.rowId, id)).limit(10);",
                 "await this.db.select().from(todoStatusChanges);",
@@ -1193,8 +1219,8 @@ describeFeature(feature, ({ Scenario }) => {
               [{ rule: "no-upsert", line: 2 }],
             ],
             [
-              "*.postgres.ts 以外（in-memory / shared/infra / application）の upsert",
-              "apps/backend/shared/infra/x.ts",
+              "*.postgres.ts 以外（in-memory / shared/drizzle / application）の upsert",
+              "apps/backend/shared/drizzle/x.ts",
               source("q.onConflictDoUpdate({});"),
               [{ rule: "no-upsert", line: 1 }],
             ],
@@ -1245,7 +1271,7 @@ describeFeature(feature, ({ Scenario }) => {
               "changed-props を import type だけで読む（関数を呼べない）",
               POSTGRES,
               source(
-                'import type { ChangedProps } from "../../../../shared/infra/changed-props";',
+                'import type { ChangedProps } from "../../../../shared/drizzle/changed-props";',
                 "class A {",
                 "  async update(x: X) {}",
                 "}",
@@ -1253,16 +1279,18 @@ describeFeature(feature, ({ Scenario }) => {
               [{ rule: "update-uses-changed-props", line: 3 }],
             ],
             [
-              "名前が同じ別のモジュール（./changed-props / shared/infra/changed-props-x）",
+              "名前が同じ別のモジュール（./changed-props / shared/drizzle/changed-props-x / 別のディレクトリの shared/http/changed-props / Issue #310 より前の shared/infra/changed-props）",
               POSTGRES,
               source(
                 'import { ChangedProps } from "./changed-props";',
-                'import { diff } from "../../../../shared/infra/changed-props-x";',
+                'import { diff } from "../../../../shared/drizzle/changed-props-x";',
+                'import { a } from "../../../../shared/http/changed-props";',
+                'import { b } from "../../../../shared/infra/changed-props";',
                 "class A {",
                 "  async update(x: X) {}",
                 "}",
               ),
-              [{ rule: "update-uses-changed-props", line: 4 }],
+              [{ rule: "update-uses-changed-props", line: 6 }],
             ],
             [
               "Entity が static reconstruct( を持つのに get origin() が無い",
@@ -1392,19 +1420,20 @@ describeFeature(feature, ({ Scenario }) => {
               ],
             ],
             [
-              "writer を import type だけ・export だけ・コメントの中だけ・名前が同じ別のモジュール（./writer・shared/infra/writer-x・shared/infra/write）で読む",
+              "writer を import type だけ・export だけ・コメントの中だけ・名前が同じ別のモジュール（./writer・shared/drizzle/writer-x・shared/drizzle/write・別のディレクトリの shared/change-log/writer）で読む",
               POSTGRES,
               source(
-                'import type { Writer } from "../../../../shared/infra/writer";',
+                'import type { Writer } from "../../../../shared/drizzle/writer";',
                 `// ${IMPORT_WRITER}`,
                 'import { PostgresWriter } from "./writer";',
-                'import { x } from "../../../../shared/infra/writer-x";',
-                'import { y } from "../../../../shared/infra/write";',
-                'export { PostgresWriter } from "../../../../shared/infra/writer";',
+                'import { x } from "../../../../shared/drizzle/writer-x";',
+                'import { y } from "../../../../shared/drizzle/write";',
+                'import { z } from "../../../../shared/change-log/writer";',
+                'export { PostgresWriter } from "../../../../shared/drizzle/writer";',
                 "const w = PostgresWriter.of(tx);",
                 "await w.insert(xs, rows);",
               ),
-              [{ rule: "writes-through-writer", line: 8 }],
+              [{ rule: "writes-through-writer", line: 9 }],
             ],
             [
               "writer を import しても、受け手が PostgresWriter.of で得た Writer でない（drizzle の tx・メンバーの this.writer / this.dbx・別の関数の戻り値・前方一致だけの別の関数・別名への入れ直し）",
@@ -1439,12 +1468,12 @@ describeFeature(feature, ({ Scenario }) => {
               "*.postgres.ts が change-log を import する（値・import type・複数行・拡張子付き・export … from）",
               POSTGRES,
               source(
-                'import { ChangeRecords } from "../../../../shared/infra/change-log";',
-                "import type { ChangeEntry } from '../../../../shared/infra/change-log.ts';",
+                'import { ChangeRecords } from "../../../../shared/change-log/change-log";',
+                "import type { ChangeEntry } from '../../../../shared/change-log/change-log.ts';",
                 "import {",
                 "  ChangeRecords,",
-                '} from "../../../../shared/infra/change-log";',
-                'export { ChangeRecords } from "../../../../shared/infra/change-log";',
+                '} from "../../../../shared/change-log/change-log";',
+                'export { ChangeRecords } from "../../../../shared/change-log/change-log";',
               ),
               [
                 { rule: "no-change-log-in-repository", line: 1 },
@@ -1609,7 +1638,7 @@ describeFeature(feature, ({ Scenario }) => {
               ],
             ],
             [
-              "_logs の表を Logs で終わらない変数で受ける（shared/infra/schema.ts も対象）",
+              "_logs の表を Logs で終わらない変数で受ける（shared/change-log/change-log.schema.ts も対象）",
               SHARED_SCHEMA,
               source('export const changeLog = pgTable("change_logs", {});'),
               [{ rule: "append-only-table-naming", line: 1 }],
@@ -1630,8 +1659,8 @@ describeFeature(feature, ({ Scenario }) => {
               ],
             ],
             [
-              "トランザクションの runner と同じ名前でも、shared/infra の別の *.postgres.ts は Repository の規則の対象（db.transaction( を呼べない）",
-              "apps/backend/shared/infra/other.postgres.ts",
+              "トランザクションの runner と同じディレクトリでも、shared/drizzle の別の *.postgres.ts は Repository の規則の対象（db.transaction( を呼べない）",
+              "apps/backend/shared/drizzle/other.postgres.ts",
               source("return this.db.transaction((tx) => work(tx));"),
               [{ rule: "no-direct-transaction", line: 1 }],
             ],
@@ -1771,7 +1800,7 @@ describeFeature(feature, ({ Scenario }) => {
             "await this.db.delete(yChanges);",
           ),
           [IN_MEMORY]: source(updateMethod, "q.onConflictDoNothing();"),
-          "apps/backend/shared/infra/z.ts": source(
+          "apps/backend/shared/change-log/z.ts": source(
             "",
             "q.onConflictDoNothing();",
           ),
@@ -1801,31 +1830,39 @@ describeFeature(feature, ({ Scenario }) => {
               "await this.db.transaction(async (tx) => { await tx.insert(zs).values(r); });",
               "await recordChange(this.db, entries);",
               "const rows = await this.db.select().from(zs).limit(1);",
-              'import { ChangeRecords } from "../../../../shared/infra/change-log";',
+              'import { ChangeRecords } from "../../../../shared/change-log/change-log";',
             ),
           // 規則を満たす Repository（writer を import し、PostgresWriter.of(tx) で得た Writer で書き、子表を leftJoin で読む）。
           "apps/backend/features/z/internal/infra/z-writer.postgres.ts": source(
             IMPORT_WRITER,
-            'import type { Transaction } from "../../../../shared/application/transaction";',
+            'import type { Transaction } from "../../../../shared/transaction/transaction";',
             'import { zChanges, zs } from "./schema";',
             "const writer = PostgresWriter.of(tx);",
             "await writer.delete(zs, id);",
             "const rows = await this.db.select().from(zs).leftJoin(zChanges, on);",
           ),
           // 書き込みの口（*.postgres.ts でない）は change-log を import し、tx で書き、recordChange を呼んでよい。
-          "apps/backend/shared/infra/writer.ts": source(
-            'import { ChangeRecords } from "./change-log";',
+          "apps/backend/shared/drizzle/writer.ts": source(
+            'import { ChangeRecords } from "../change-log/change-log";',
             "await this.tx.insert(table).values(rows);",
             "await ChangeRecords.recordChange(this.tx, entries);",
           ),
           // トランザクションの runner（*.postgres.ts だが Repository でない）は db.transaction を呼んでよい。同じ場所の別の *.postgres.ts は
           //   対象のまま。
           [RUNNER]: source("return this.db.transaction((tx) => work(tx));"),
-          "apps/backend/shared/infra/other.postgres.ts": source(
+          "apps/backend/shared/drizzle/other.postgres.ts": source(
             "return this.db.transaction((tx) => work(tx));",
           ),
-          "apps/backend/shared/infra/schema.ts": source(
+          "apps/backend/shared/change-log/change-log.schema.ts": source(
             'export const changeLog = pgTable("change_logs", {});',
+          ),
+          // 横断の表を shared の別の意味の単位に足したとき（shared/<単位>/<単位>.schema.ts）も append-only-table-naming の対象。
+          //   schema でない shared のファイルの pgTable は対象外（表の宣言の置き場所ではない）。
+          "apps/backend/shared/audit/audit.schema.ts": source(
+            'export const auditLog = pgTable("audit_events", {});',
+          ),
+          "apps/backend/shared/audit/audit.ts": source(
+            'export const auditLog = pgTable("audit_events", {});',
           ),
           // 対象外: テスト、features でない domain の reconstruct、.ts でないファイル、backend の外、node_modules の中。
           "apps/backend/features/y/internal/infra/y-repository.postgres.test.ts":
@@ -1837,8 +1874,8 @@ describeFeature(feature, ({ Scenario }) => {
           "apps/backend/features/y/internal/infra/y-repository.in-memory.ts":
             source("this.yEvents.delete(id);", "q.update(yEvents);"),
           "apps/backend/features/y/internal/domain/y.test.ts": reconstructOnly,
-          "apps/backend/shared/domain/w.ts": reconstructOnly,
-          "apps/backend/shared/drizzle/0000_x.sql":
+          "apps/backend/shared/error/w.ts": reconstructOnly,
+          "apps/backend/shared/drizzle/migrations/0000_x.sql":
             "INSERT ... ON CONFLICT DO UPDATE;",
           "apps/frontend_customer/features/x/x.ts": source(
             "q.onConflictDoUpdate({});",
@@ -1868,12 +1905,14 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/backend/features/y/internal/infra/y-repository.postgres.ts",
             "apps/backend/features/z/internal/infra/z-repository.postgres.ts",
             "apps/backend/features/z/internal/infra/z-writer.postgres.ts",
-            "apps/backend/shared/domain/w.ts",
-            "apps/backend/shared/infra/other.postgres.ts",
-            "apps/backend/shared/infra/schema.ts",
-            "apps/backend/shared/infra/transaction.postgres.ts",
-            "apps/backend/shared/infra/writer.ts",
-            "apps/backend/shared/infra/z.ts",
+            "apps/backend/shared/audit/audit.schema.ts",
+            "apps/backend/shared/audit/audit.ts",
+            "apps/backend/shared/change-log/change-log.schema.ts",
+            "apps/backend/shared/change-log/z.ts",
+            "apps/backend/shared/drizzle/other.postgres.ts",
+            "apps/backend/shared/drizzle/transaction.postgres.ts",
+            "apps/backend/shared/drizzle/writer.ts",
+            "apps/backend/shared/error/w.ts",
           ],
           violations: [
             "no-upsert: apps/backend/features/x/internal/infra/x-repository.in-memory.ts:4",
@@ -1892,9 +1931,10 @@ describeFeature(feature, ({ Scenario }) => {
             "aggregate-loads-all-children: apps/backend/features/z/internal/infra/z-repository.postgres.ts:5",
             "aggregate-loads-all-children: apps/backend/features/z/internal/infra/z-repository.postgres.ts:5",
             "no-change-log-in-repository: apps/backend/features/z/internal/infra/z-repository.postgres.ts:6",
-            "no-direct-transaction: apps/backend/shared/infra/other.postgres.ts:1",
-            "append-only-table-naming: apps/backend/shared/infra/schema.ts:1",
-            "no-upsert: apps/backend/shared/infra/z.ts:2",
+            "append-only-table-naming: apps/backend/shared/audit/audit.schema.ts:1",
+            "append-only-table-naming: apps/backend/shared/change-log/change-log.schema.ts:1",
+            "no-upsert: apps/backend/shared/change-log/z.ts:2",
+            "no-direct-transaction: apps/backend/shared/drizzle/other.postgres.ts:1",
           ],
         });
       },
@@ -1938,7 +1978,9 @@ describeFeature(feature, ({ Scenario }) => {
         expect(files).toContain(
           "apps/backend/features/todo/internal/infra/schema.ts",
         );
-        expect(files).toContain("apps/backend/shared/infra/schema.ts");
+        expect(files).toContain(
+          "apps/backend/shared/change-log/change-log.schema.ts",
+        );
         expect(violations).toEqual([]);
       },
     );

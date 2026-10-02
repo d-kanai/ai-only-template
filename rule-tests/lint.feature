@@ -13,7 +13,7 @@ Feature: Biome と Lefthook
     * 代表ルールの許可される書き方は 0 で終わる（noUnusedVariables: 宣言した変数を使う・useTemplate: テンプレートリテラルで連結する）
     * 違反のないファイルは 0 で終わる
   Scenario: biome check の noStaticOnlyClass は apps/backend・apps/shared・apps/e2e と frontend の React 以外のモジュールだけで off（Issue #262）
-    * apps/backend・apps/shared・apps/e2e・frontend の React 以外のモジュールでは static だけのクラスが 0 で終わる（backend の shared/domain・features の infra・test-support、apps/shared、apps/e2e、frontend の features・shared・test-support の .ts と .mts）
+    * apps/backend・apps/shared・apps/e2e・frontend の React 以外のモジュールでは static だけのクラスが 0 で終わる（backend の shared/error・features の infra・test-support、apps/shared、apps/e2e、frontend の features・shared・test-support の .ts と .mts）
     * apps/backend・apps/shared・apps/e2e・frontend の React 以外のモジュールの外では static だけのクラスが非 0 で終わり、noStaticOnlyClass が出力される（前方一致だけが同じ別ディレクトリ・frontend の component と hook とテスト・frontend の app/ と直下・リポジトリ直下）
     * apps/frontend_customer の app/ でもインスタンスのメンバーを持つクラスは 0 で終わる
     * リポジトリの apps/backend/shared/drizzle/drizzle.config.ts（static だけのクラス DrizzleConfigPath）は 0 で終わる

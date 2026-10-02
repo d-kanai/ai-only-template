@@ -56,8 +56,13 @@ apps/
       notification/       # 通知のモジュール（今はログに出すだけ。Todo の完了で todo から呼ばれる）
         expose/             # 他のモジュールへ公開する入口（notifier.ts。直下のファイルだけ）。他のモジュールは expose/ だけを使い、internal/ は参照しない
         internal/           # 中身（domain/ の送信口の interface、application/ の command、infra/ のログに出す実装）
-    shared/             # API 側で feature をまたぐ共通部品（domain/ に DomainError とエラーのキー、presentation/ にエラー応答（RFC 9457 の Problem Details）と本文の読み取り、infra/ に Postgres のプールと Drizzle の db）
-      drizzle/            # drizzle.config.ts（drizzle-kit の設定）と、生成したマイグレーション（*.sql と meta/。pnpm db:generate が作る。コミットする）
+    shared/             # API 側で feature をまたぐ共通部品。層ではなく意味の単位で置く（Issue #310）
+      error/              # エラーのキー（ErrorKey）・DomainError・zod の検証をそれに変える道具
+      transaction/        # トランザクションの印と port（TransactionRunner）
+      http/               # エラー応答（RFC 9457 の Problem Details）とリクエストの読み取り
+      drizzle/            # drizzle.config.ts（drizzle-kit の設定）、Postgres のプール、トランザクションの実装、書き込みの口 Writer
+        migrations/         # 生成したマイグレーション（*.sql と meta/。pnpm db:generate が作る。コミットする）
+      change-log/         # 変更履歴（change_logs の表と記録）
   shared/               # @repo/shared。frontend と backend で共通の基盤だけ（Issue #90。.claude/rules/code/shared.md）
     package.json        # 依存なし。exports は ./env・./logger だけ
     env.ts              # 環境変数の唯一の入口（リポジトリ直下の .env を読み、必須の変数を検証する）

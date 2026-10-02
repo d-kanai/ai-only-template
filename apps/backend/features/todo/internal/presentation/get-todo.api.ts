@@ -1,6 +1,6 @@
-import { AppDatabase } from "../../../../shared/infra/database";
-import { ProblemResponse } from "../../../../shared/presentation/problem";
-import { ResourceId } from "../../../../shared/presentation/resource-id";
+import { AppDatabase } from "../../../../shared/drizzle/database";
+import { ProblemResponse } from "../../../../shared/http/problem";
+import { ResourceId } from "../../../../shared/http/resource-id";
 import { GetTodoQuery } from "../application/get-todo.query";
 import type { Todo } from "../domain/todo";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";

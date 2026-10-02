@@ -15,7 +15,7 @@ import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, expect } from "vitest";
 import { casesByName } from "./case-table";
 
-// 「domain の検証は validate（DomainValidation.validated）を通す」（.claude/rules/code/backend.md の「入力検証」の domain の項、apps/backend/shared/domain/validate.ts、
+// 「domain の検証は validate（DomainValidation.validated）を通す」（.claude/rules/code/backend.md の「入力検証」の domain の項、apps/backend/shared/error/validate.ts、
 // Issue #177）を、backend のソースで機械的に検査するテスト。
 // WHY 検査する: zod の issue → DomainError の変換（最初の issue の message をキーにする・キーの無い issue は DomainError ではない
 //   Error（500）にする）は validate の 1 か所に置いた。Entity ごとに safeParse して自分で DomainError を作ると、変換が Entity ごとに
@@ -35,8 +35,14 @@ import { casesByName } from "./case-table";
 //     作れるのは backend 全体で validate.ts だけ）。`new DomainError(` と引数の間に空白・改行を挟んでも拾う。`not_found` など
 //     ほかの種類は違反にしない（RequiredTodo.of のように domain のクラスが作ってよい）。
 //     WHY backend 全体: application / presentation で validation_error の DomainError を作っても、同じく変換が 2 か所に分かれる。
-// 対象: apps/backend の下の *.ts（テスト・node_modules と、変換を持つ apps/backend/shared/domain/validate.ts 自身は除く）。
-//   parse の規則は apps/backend/features/*/internal/domain/ と apps/backend/shared/domain/ の下だけに当てる（rulesFor）。
+// 対象: apps/backend の下の *.ts（テスト・node_modules と、変換を持つ apps/backend/shared/error/validate.ts 自身は除く）。
+//   parse の規則は apps/backend/features/*/internal/domain/ と apps/backend/shared/error/ の下だけに当てる（rulesFor）。
+//   WHY shared/error（Issue #310 より前は shared/domain）: shared/ を層から意味の単位に分けたとき、domain の部品（DomainError・
+//     エラーのキー・validate）は shared/error/ に移った。ここは features の domain が import する検証とエラーの土台で、domain と同じく
+//     zod を直接呼ばず validate を通す。shared のほかの単位は domain ではないので validation_error の規則だけを当てる: shared/http は
+//     presentation の部品でリクエストのスキーマを safeParse する（json-body.ts・resource-id.ts）。shared/drizzle・shared/change-log・
+//     shared/transaction は infra と application の部品（変更の操作の一覧 change-operation.ts は以前 shared/domain にあったが、
+//     change-log の記録の部品として change-log/ に移り、zod も使わない）。
 // 限界: 行ごとに `//` 以降を落としてから探し、文字列は見分けない。文字列リテラルの中の `//`（`"http://..."` の後ろ）は見逃し、
 //   文字列の中の `.parse(` / `new DomainError("validation_error"` は違反と数える。ブロックコメント（`/* x.parse() */`）の中も
 //   違反と数える（安全側）。JSON / Date 以外の組み込みの `.parse(`（`URL.parse(`）も違反と数える（使うときは NON_ZOD_RECEIVERS に
@@ -108,9 +114,9 @@ function rulesFor(path: string): RuleId[] {
     return [];
   }
   // validate.ts は zod の parse と validation_error の DomainError を持つ唯一の場所なので除く。
-  if (path === "apps/backend/shared/domain/validate.ts") return [];
+  if (path === "apps/backend/shared/error/validate.ts") return [];
   if (!path.endsWith(".ts") || path.endsWith(".test.ts")) return [];
-  return /^apps\/backend\/(?:features\/[^/]+\/internal|shared)\/domain\//.test(
+  return /^apps\/backend\/(?:features\/[^/]+\/internal\/domain|shared\/error)\//.test(
     path,
   )
     ? ["no-direct-zod-parse-in-domain", "validation-error-only-in-validate"]
@@ -189,7 +195,7 @@ describeFeature(feature, ({ Scenario }) => {
             [
               "DomainValidation.validated を通して検証する（Entity の完全コンストラクタ）",
               source(
-                'import { DomainValidation } from "../../../../shared/domain/validate";',
+                'import { DomainValidation } from "../../../../shared/error/validate";',
                 "const valid = DomainValidation.validated(todoPropsSchema(), props);",
                 // プロジェクトの検証は `.validated(` で、zod の `.validate(` ではない（Issue #262 で関数 validate からクラスの static メソッドにした）。
                 "return DomainValidation.validated(schema, value);",
@@ -385,17 +391,17 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("ファイルごとの規則の範囲（rulesFor）", ({ And }) => {
     And(
-      "domain のファイルには両方の規則を当てる（features の internal/domain・shared/domain・サブディレクトリ・features の validate.ts）",
+      "domain のファイルには両方の規則を当てる（features の internal/domain・shared/error・サブディレクトリ・features の validate.ts）",
       () => {
         // given
         const cases: [string][] = [
           ["apps/backend/features/todo/internal/domain/todo.ts"],
           ["apps/backend/features/todo/internal/domain/todo-repository.ts"],
           ["apps/backend/features/x/internal/domain/nested/value.ts"],
-          // 除くのは shared/domain/validate.ts だけで、features の下の validate.ts は対象。
+          // 除くのは shared/error/validate.ts だけで、features の下の validate.ts は対象。
           ["apps/backend/features/x/internal/domain/validate.ts"],
-          ["apps/backend/shared/domain/keyed-issue.ts"],
-          ["apps/backend/shared/domain/nested/other.ts"],
+          ["apps/backend/shared/error/keyed-issue.ts"],
+          ["apps/backend/shared/error/nested/other.ts"],
         ];
 
         // when
@@ -426,11 +432,15 @@ describeFeature(feature, ({ Scenario }) => {
           [
             "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
           ],
-          ["apps/backend/shared/presentation/json-body.ts"],
+          ["apps/backend/shared/http/json-body.ts"],
           ["apps/backend/shared/drizzle/drizzle.config.ts"],
-          // features の直下でない domain・domain で始まる別のディレクトリ（前方一致の境界）。
+          // shared の domain でない意味の単位（Issue #310）。change-operation.ts は以前 shared/domain にあった。
+          ["apps/backend/shared/change-log/change-operation.ts"],
+          ["apps/backend/shared/transaction/transaction.ts"],
+          // features の直下でない domain・error で始まる別のディレクトリ（前方一致の境界）・Issue #310 より前の shared/domain。
           ["apps/backend/domain/x.ts"],
-          ["apps/backend/shared/domain-x/x.ts"],
+          ["apps/backend/shared/error-x/x.ts"],
+          ["apps/backend/shared/domain/x.ts"],
           // Issue #208: feature の domain は internal/ の下だけ。internal/ を挟まない domain（Issue #208 より前の置き場所。
           //   置き場所の規則 backend-placement が違反にする）と、前方一致だけが同じ別ディレクトリ（internal-x）は domain ではない。
           ["apps/backend/features/todo/domain/todo.ts"],
@@ -453,10 +463,10 @@ describeFeature(feature, ({ Scenario }) => {
         // given
         const cases: [string][] = [
           // validate.ts は変換を持つ唯一の場所。
-          ["apps/backend/shared/domain/validate.ts"],
+          ["apps/backend/shared/error/validate.ts"],
           // テスト（zod の結果を safeParse で確かめ、期待する DomainError を作ってよい）。
           ["apps/backend/features/todo/internal/domain/todo.test.ts"],
-          ["apps/backend/shared/domain/validate.test.ts"],
+          ["apps/backend/shared/error/validate.test.ts"],
           [
             "apps/backend/features/todo/internal/presentation/rename-todo.api.test.ts",
           ],
@@ -486,7 +496,7 @@ describeFeature(feature, ({ Scenario }) => {
         // given
         const root = fixture({
           "apps/backend/features/x/internal/domain/x.ts": source(
-            'import { DomainValidation } from "../../../../shared/domain/validate";',
+            'import { DomainValidation } from "../../../../shared/error/validate";',
             "const valid = DomainValidation.validated(xSchema(), props);",
             'throw new DomainError("not_found", "x.notFound", { id });',
           ),
@@ -494,15 +504,15 @@ describeFeature(feature, ({ Scenario }) => {
             "const a = JSON.parse(text);",
             "const b = ySchema().parse(a);",
           ),
-          "apps/backend/shared/domain/validate.ts": directParse,
-          "apps/backend/shared/domain/other.ts": directParse,
+          "apps/backend/shared/error/validate.ts": directParse,
+          "apps/backend/shared/error/other.ts": directParse,
           // domain 以外の層: parse は可、validation_error の DomainError は違反。
           "apps/backend/features/x/internal/application/x.command.ts":
             directParse,
           "apps/backend/features/x/internal/presentation/x.api.ts": source(
             "const result = requestSchema().safeParse(body);",
           ),
-          "apps/backend/shared/presentation/y.ts": source(
+          "apps/backend/shared/http/y.ts": source(
             "throw new DomainError(",
             '  "validation_error",',
             '  "x.invalid",',
@@ -510,7 +520,7 @@ describeFeature(feature, ({ Scenario }) => {
           ),
           // 対象外: テスト、frontend、依存。
           "apps/backend/features/x/internal/domain/x.test.ts": directParse,
-          "apps/backend/shared/domain/validate.test.ts": directParse,
+          "apps/backend/shared/error/validate.test.ts": directParse,
           "apps/backend/features/x/internal/presentation/x.api.test.ts":
             directParse,
           "apps/frontend_customer/features/x/domain/x.ts": directParse,
@@ -530,15 +540,15 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/backend/features/x/internal/domain/x.ts",
             "apps/backend/features/x/internal/domain/y.ts",
             "apps/backend/features/x/internal/presentation/x.api.ts",
-            "apps/backend/shared/domain/other.ts",
-            "apps/backend/shared/presentation/y.ts",
+            "apps/backend/shared/error/other.ts",
+            "apps/backend/shared/http/y.ts",
           ],
           violations: [
             'validation-error-only-in-validate: apps/backend/features/x/internal/application/x.command.ts:2: throw new DomainError("validation_error", "x.invalid");',
             "no-direct-zod-parse-in-domain: apps/backend/features/x/internal/domain/y.ts:2: const b = ySchema().parse(a);",
-            "no-direct-zod-parse-in-domain: apps/backend/shared/domain/other.ts:1: const result = schema.safeParse(value);",
-            'validation-error-only-in-validate: apps/backend/shared/domain/other.ts:2: throw new DomainError("validation_error", "x.invalid");',
-            "validation-error-only-in-validate: apps/backend/shared/presentation/y.ts:1: throw new DomainError(",
+            "no-direct-zod-parse-in-domain: apps/backend/shared/error/other.ts:1: const result = schema.safeParse(value);",
+            'validation-error-only-in-validate: apps/backend/shared/error/other.ts:2: throw new DomainError("validation_error", "x.invalid");',
+            "validation-error-only-in-validate: apps/backend/shared/http/y.ts:1: throw new DomainError(",
           ],
         });
       },
@@ -577,13 +587,11 @@ describeFeature(feature, ({ Scenario }) => {
         expect(files).toContain(
           "apps/backend/features/todo/internal/domain/todo.ts",
         );
-        expect(files).toContain("apps/backend/shared/domain/keyed-issue.ts");
+        expect(files).toContain("apps/backend/shared/error/keyed-issue.ts");
         expect(files).toContain(
           "apps/backend/features/todo/internal/application/rename-todo.command.ts",
         );
-        expect(files).toContain(
-          "apps/backend/shared/presentation/json-body.ts",
-        );
+        expect(files).toContain("apps/backend/shared/http/json-body.ts");
         expect(violations).toEqual([]);
       },
     );

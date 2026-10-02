@@ -246,7 +246,7 @@ describe("FreeTextMask.mask / LogFieldMarks.freeText（自由文の最後の網�
   });
 });
 
-// db_write（apps/backend/shared/infra/writer.ts の書き込みのログ）の changes と params の形（Issue #216）。
+// db_write（apps/backend/shared/drizzle/writer.ts の書き込みのログ）の changes と params の形（Issue #216）。
 describe("db_write の changes（before / after）と params", () => {
   const done = {
     message: "db write done",
@@ -256,7 +256,7 @@ describe("db_write の changes（before / after）と params", () => {
   } as const;
 
   // WHY before / after に sensitive の印を付けない: どの列が個人情報かは表ごとに違い、このスキーマは表を知らない。マスクは
-  //   Writer が schema.ts の列の分類表（public / sensitive）で済ませてから渡す（apps/backend/shared/infra/column-classification.ts）。
+  //   Writer が schema.ts の列の分類表（public / sensitive）で済ませてから渡す（apps/backend/shared/drizzle/column-classification.ts）。
   test("changes の各要素は table・row_id・operation と、列名 → 値の before / after（insert は before が null、delete は after が null）を持ち、値はそのまま出す", () => {
     // given
     const changes = [

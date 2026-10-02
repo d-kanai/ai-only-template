@@ -1,8 +1,12 @@
 import { Clock } from "@repo/shared/now";
 import { getTableColumns, getTableName, type Table } from "drizzle-orm";
-import type { ChangeOperation } from "../domain/change-operation";
-import type { Database } from "./database";
-import { type Changes, type ChangeValue, changeLogs } from "./schema";
+import type { Database } from "../drizzle/database";
+import {
+  type Changes,
+  type ChangeValue,
+  changeLogs,
+} from "./change-log.schema";
+import type { ChangeOperation } from "./change-operation";
 
 // 変更履歴（change_logs。Issue #189）の記録の組み立てと書き込み。使うのは書き込みの唯一の口 Writer（writer.ts。Issue #215）だけで、
 //   Writer が文ごとに記録を組み立て（ChangeRecords.insertEntry など）、同じトランザクションの中で ChangeRecords.recordChange を呼ぶ。Repository（*.postgres.ts）は
@@ -77,8 +81,9 @@ export class ChangeRecords {
 
   // 変えた行の記録: changed（書き込む列と値）の列ごとに、origin（変える前の値）を before、changed の値を after に持つ。
   //   changed が空なら記録しない（空配列。差分の無い update は何も書かないので）。
-  // Writer（writer.ts）は origin に、同じトランザクションで UPDATE の直前に FOR UPDATE で読んだ行を渡す（Issue #215）。そのため
-  //   before は DB が UPDATE の直前に持っていた値になる（Issue #189〜#205 は Repository が渡す読み込んだときの値だった）。
+  // Writer（writer.ts）は origin に、Repository が渡した変える前の値（同じトランザクションで先に FOR UPDATE でロックして読み込んだ
+  //   ときの値）を渡す。ロックが取れているので、before は DB が UPDATE の直前に持っていた値と同じになる（Issue #215〜#312 は
+  //   Writer が UPDATE の直前に FOR UPDATE で読み直していた。Issue #312 で SELECT を減らすためにやめた）。
   // WHY 配列で返す: 呼び出し側が、差分の有無で分岐せずに記録の配列にまとめられる。
   // WHY origin の型を changed から決める（NoInfer）: origin は変える前の行（changed に無い列も持つ）で、比べるのは changed の key
   //   だけ。origin の key まで K に入れると、changed に無い列の型も求めてしまう。

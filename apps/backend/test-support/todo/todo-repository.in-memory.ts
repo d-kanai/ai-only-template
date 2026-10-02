@@ -3,8 +3,8 @@ import {
   RequiredTodo,
   type TodoRepository,
 } from "../../features/todo/internal/domain/todo-repository";
-import type { Transaction } from "../../shared/application/transaction";
-import { ChangedProps } from "../../shared/infra/changed-props";
+import { ChangedProps } from "../../shared/drizzle/changed-props";
+import type { Transaction } from "../../shared/transaction/transaction";
 
 // TodoRepository の InMemory 実装。プロセスが終わるとデータは消える。
 // テスト専用（本番の永続化は Postgres。features/todo/internal/infra/todo-repository.postgres.ts を api ファイルが組み立てる）。テストでは
@@ -24,7 +24,7 @@ import { ChangedProps } from "../../shared/infra/changed-props";
 // WHY tx を受け取るが使わない: interface（Postgres と同じ形）に合わせる。InMemory の runner（test-support/transaction-runner.in-memory.ts）は
 //   rollback を再現しない。
 // WHY 変更履歴（change_logs）を積まない（Issue #215。以前は Postgres と同じ記録を積んでいた。Issue #189）: 変更履歴とログは永続化の
-//   関心で、Postgres では Writer（shared/infra/writer.ts）が文ごとに書く。Repository の実装ごとに組み立てることをやめたので、
+//   関心で、Postgres では Writer（shared/drizzle/writer.ts）が文ごとに書く。Repository の実装ごとに組み立てることをやめたので、
 //   InMemory には記録が無い。変更履歴の契約は Postgres のテスト（todo-repository.postgres.test.ts・writer.test.ts）が固定する。
 // WHY 失敗は書き換える前に投げる: 失敗した insert / update（新規の 2 回目・履歴の競合・行が無い）で保持中の値を変えない
 //   （Postgres はトランザクションで戻る）。

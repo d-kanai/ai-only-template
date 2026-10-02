@@ -3,7 +3,7 @@
 Feature: ディレクトリ構成ルール（依存の向き）
   Scenario: 依存の向き（rules の code/architecture-check.md）
     * 検査の対象から参照を取り出せている（抽出が壊れて 0 件になり、すべての規則が素通りするのを防ぐ）
-    * apps/backend/ のソースファイルは apps/backend/features/<f>/internal/ か apps/backend/shared/ の domain/・application/・presentation/・infra/ のどれかの下か、モジュールの公開の入口 apps/backend/features/<f>/expose/ の直下か、テストだけが使う apps/backend/test-support/ の下か、API 仕様の補助 apps/backend/spec/api/<feature>/support.ts に置く（apps/backend/shared/drizzle/drizzle.config.ts だけ例外）
+    * apps/backend/ のソースファイルは apps/backend/features/<f>/internal/ の domain/・application/・presentation/・infra/ のどれかの下か、apps/backend/shared/ の error/・transaction/・http/・drizzle/・change-log/ のどれかの下か、モジュールの公開の入口 apps/backend/features/<f>/expose/ の直下か、テストだけが使う apps/backend/test-support/ の下か、API 仕様の補助 apps/backend/spec/api/<feature>/support.ts に置く
     * apps/frontend_customer/ のソースファイルは app/・features/・shared/・test-support/ の下か、直下の next.config.ts・instrumentation.ts・instrumentation-node.ts・proxy.ts・next-env.d.ts だけに置く
     * apps/shared/ に置いてよいのは env.ts・logger.ts・log-event.ts・now.ts とそのテスト（env.test.ts・logger.test.ts・log-event.test.ts・now.test.ts）、package.json・tsconfig.json だけ
     * apps/shared の全ファイル（ソース・テスト・package.json・tsconfig.json）を列挙できている（列挙が壊れて素通りするのを防ぐ）
@@ -14,18 +14,18 @@ Feature: ディレクトリ構成ルール（依存の向き）
     * apps/frontend_customer/ 直下のファイルは apps/backend/ を参照しない（env・logger は apps/shared から使う）
     * apps/frontend_customer/features/<f>/ の api/ 以外と apps/frontend_customer/shared/ は apps/backend/ を参照しない
     * apps/frontend_customer の app/・features/・shared/ は apps/shared/ を参照しない（env・logger をブラウザのバンドルに持ち込まない）
-    * apps/frontend_customer/features/<f>/api/ から apps/backend/ への参照は型だけで、参照先は自 feature の apps/backend/features/<f>/internal/presentation/<名前>.api か apps/backend/shared/presentation/ だけ
+    * apps/frontend_customer/features/<f>/api/ から apps/backend/ への参照は型だけで、参照先は自 feature の apps/backend/features/<f>/internal/presentation/<名前>.api か apps/backend/shared/http/ だけ
     * 別の feature を参照するときは apps/frontend_customer/features/<other>（index）だけ
     * apps/frontend_customer の features/ と shared/ は app/ を参照しない
     * apps/frontend_customer/shared/ は features/ を参照しない
-    * apps/backend/features/<f>/internal/domain/ が参照してよい自前コードは自 feature と apps/backend/shared/ の domain/ と apps/backend/shared/application/transaction（トランザクションの印の型。import type だけ）だけで、next・react も参照しない
-    * apps/backend の domain/・application/ は DB のパッケージ（drizzle-orm とそのサブパス、pg）を参照しない（型だけでも）
-    * apps/backend/features/<f>/internal/application/ が参照してよい自前コードは自 feature と apps/backend/shared/ の domain/・application/ だけで、next・react も参照しない
-    * apps/backend/features/<f>/internal/presentation/ が参照してよい自前コードは自 feature と apps/backend/shared/ の application/・domain/（feature の domain は型と UPPER_SNAKE_CASE の定数だけ）・presentation/ と自 feature の infra/<名前>-repository.postgres・apps/backend/shared/infra/database・apps/backend/shared/infra/transaction.postgres・apps/shared/logger だけで、next・react も参照しない
-    * apps/backend/features/<f>/internal/infra/ が参照してよい自前コードは自 feature と apps/backend/shared/ の domain/・infra/ と apps/backend/shared/application/transaction（infra が実装する port。import type だけ）と apps/shared/ の env・logger だけで、next・react も参照しない
+    * apps/backend/features/<f>/internal/domain/ が参照してよい自前コードは自 feature の domain/ と apps/backend/shared/ の単位（error・transaction・http・drizzle・change-log のどれも）と apps/shared/ の now だけで、next・react も参照しない
+    * apps/backend/features/<f>/internal/ の domain/・application/ は DB のパッケージ（drizzle-orm とそのサブパス、pg）を直接参照しない（型だけでも。apps/backend/shared/ を経由した参照は縛らない）
+    * apps/backend/features/<f>/internal/application/ が参照してよい自前コードは自 feature の domain/・application/ と apps/backend/shared/ の単位（どれも）と apps/shared/ の now だけで、next・react も参照しない
+    * apps/backend/features/<f>/internal/presentation/ が参照してよい自前コードは自 feature の application/・domain/（型と UPPER_SNAKE_CASE の定数だけ）・presentation/・infra/<名前>-repository.postgres と apps/backend/shared/ の単位（どれも）と他のモジュールの expose/ と apps/shared/ の logger・now だけで、next・react も参照しない
+    * apps/backend/features/<f>/internal/infra/ が参照してよい自前コードは自 feature の domain/・infra/ と apps/backend/shared/ の単位（どれも）と apps/shared/ の env・logger・now だけで、next・react も参照しない
     * apps/backend/shared/ が参照してよい自前コードは apps/backend/shared/ の中と apps/shared/ だけで、next・react も参照しない
     * apps/frontend_customer/app/（app/api 以外）が features/・apps/backend/・shared/ を参照するときは features/<f>（index）か shared/ だけ
-    * apps/frontend_customer/app/api/ は apps/backend/features/<f>/internal/presentation/<名前>.api（と apps/backend/shared/presentation/<名前>.api）だけを参照する
+    * apps/frontend_customer/app/api/ は apps/backend/features/<f>/internal/presentation/<名前>.api（と apps/backend/shared/http/<名前>.api）だけを参照する
     * apps/shared/ の中は apps/shared/ の自前コードと Node の組み込み（node:）と zod だけを参照する（backend・frontend、next・react、DB、ほかのパッケージを参照しない）
     * <名前>.messages（画面・部品の辞書）を参照してよいのは同じディレクトリのファイルだけ（apps/frontend_customer/shared/i18n/common.messages は apps/frontend_customer/ のどこからでも可）。re-export（export ... from）はどこからでも不可
     * apps/backend/features/<a>/ の下のファイルは、他のモジュール（apps/backend/features/<b>/、b ≠ a）の internal/ を参照しない（型だけ・re-export も）
@@ -38,7 +38,7 @@ Feature: ディレクトリ構成ルール（依存の向き）
     * 現在時刻の読み取りの検査は、apps/frontend_customer・apps/backend・apps/shared のソースを対象にし、テスト・テストの補助・apps/e2e/・ルート直下は対象にしない（列挙が壊れて素通りするのを防ぐ）
     * 画面（apps/frontend_customer）に文言をハードコードしない: JSX のテキスト、利用者に見える属性（aria-label・placeholder・title・alt・label・aria-description）の文字列、日本語の文字列は違反（辞書 apps/frontend_customer/<階層>/<名前>.messages.ts の defineMessages(...) の引数の中とテストは除く）
     * apps/backend と apps/shared の非テストコードは日本語のリテラルを持たない（エラーは ErrorKey と params で表し、運用者向けの文言は英語。テストは除く。例外なし）
-    * apps/backend の presentation の api ファイル（<名前>.api.ts）のクラスの handle は ProblemResponse.wrap(...) の呼び出しで初期化する（try / catch の手書き・素の async・別の関数で包むのは違反。テストは除く）
+    * apps/backend の presentation と shared/http の api ファイル（<名前>.api.ts）のクラスの handle は ProblemResponse.wrap(...) の呼び出しで初期化する（try / catch の手書き・素の async・別の関数で包むのは違反。テストは除く）
     * handle を ProblemResponse.wrap で包む規則は、本物の api ファイル 6 本を対象にし、テストは対象にしない（列挙が壊れて素通りするのを防ぐ）
     * apps/backend と apps/shared の本番コードとテストの補助（apps/backend の test-support/・spec/ の support.ts、apps/e2e の <名前>.spec.<名前> 以外）と apps/frontend_customer の features/・shared/・test-support/ の React 以外のモジュール（<名前>.tsx・<名前>.jsx・<名前>.hook.<名前> 以外）はファイルの最上位に関数を置かない（テストと E2E の <名前>.spec.<名前>、frontend の app/ と直下のファイルは除く。function 宣言・関数を入れた変数・export default の関数は違反。クラスのメソッド・クラスフィールドのアロー関数・メソッドの中の関数は可）
     * 規則 class-based の対象のファイルでは、インスタンスのメンバー（コンストラクタ・static でないメソッド・フィールド・アクセサ）を持つクラスに static のメンバーを置かない（自分のクラスか Promise<自分のクラス> を返す static のファクトリは可。static だけのクラスは対象外）

@@ -1,8 +1,8 @@
 import { asc, eq, type SQL } from "drizzle-orm";
-import type { Transaction } from "../../../../shared/application/transaction";
-import { ChangedProps } from "../../../../shared/infra/changed-props";
-import type { Database } from "../../../../shared/infra/database";
-import { PostgresWriter } from "../../../../shared/infra/writer";
+import { ChangedProps } from "../../../../shared/drizzle/changed-props";
+import type { Database } from "../../../../shared/drizzle/database";
+import { PostgresWriter } from "../../../../shared/drizzle/writer";
+import type { Transaction } from "../../../../shared/transaction/transaction";
 import { Todo, type TodoStatusChange } from "../domain/todo";
 import { RequiredTodo, type TodoRepository } from "../domain/todo-repository";
 import { todoStatusChanges, todos } from "./schema";
@@ -20,7 +20,7 @@ type Reader = Pick<Database, "select">;
 //   Repository は受け取った tx の中で読み書きする（ADR docs/adr/architecture/20260930-transaction-from-application.md）。
 //   Todo（集約）は todos の行と完了の履歴の 2 つの表にまたがるが、command の 1 つのトランザクションの中なので片方だけは残らない。
 // WHY 書き込みは Writer（PostgresWriter.of(tx)）に渡すだけ: 変更履歴（change_logs）と書き込みのログは Writer が文ごとに横断的に書く
-//   （shared/infra/writer.ts）。Repository は change-log を import せず、db.transaction・ChangeRecords.recordChange・db の insert / update / delete を
+//   （shared/drizzle/writer.ts）。Repository は change-log を import せず、db.transaction・ChangeRecords.recordChange・db の insert / update / delete を
 //   直接呼ばない（rule-tests/persistence.test.ts の no-change-log-in-repository・no-direct-transaction・no-direct-record-change・
 //   no-direct-db-write・writes-through-writer）。
 export class PostgresTodoRepository implements TodoRepository {
@@ -107,6 +107,8 @@ export class PostgresTodoRepository implements TodoRepository {
   // WHY 履歴の増分を件数で見る（ChangedProps.of で配列を比べない）: 履歴は末尾に足すだけ（Todo.changeCompletion）なので、読み込んだ
   //   ときの件数より後ろが増えた分。ChangedProps.of は配列を参照で比べるが、Todo のコンストラクタが検証するたびに zod が新しい配列を
   //   作る（zod 4.6.5 の parse は配列をコピーする）ので、rename だけでも「変わった」と判定されてしまう。
+  // WHY origin を Writer に渡す: 変更履歴の before にする。command は行を FOR UPDATE でロックしてから読むので、origin は DB が
+  //   UPDATE の直前に持っていた値と同じで、Writer は before のために行を読み直さない（Issue #312）。
   // 同じ position の履歴が既にあれば (todo_id, position) の一意制約違反（23505）で失敗し、同じ tx の UPDATE も戻る（schema.ts）。
   // 行が無ければ（ロックせずに読んだ後に消された）、Writer の update が Error、履歴だけなら外部キー違反（23503）で失敗する。
   //   command は行をロックして読むので起きない（not_found にはしない。呼び出し側の誤り）。
@@ -121,6 +123,7 @@ export class PostgresTodoRepository implements TodoRepository {
     await writer.update(
       todos,
       todo.id,
+      origin,
       ChangedProps.of(origin, { title: todo.title, completed: todo.completed }),
     );
     await writer.insert(
@@ -171,7 +174,7 @@ export class PostgresTodoRepository implements TodoRepository {
         statusChanges,
       });
     } catch (error) {
-      // reconstruct が投げるのは不変条件の違反（DomainError）だけ（shared/domain/validate.ts の DomainValidation.validated）。その message はキーと params
+      // reconstruct が投げるのは不変条件の違反（DomainError）だけ（shared/error/validate.ts の DomainValidation.validated）。その message はキーと params
       //   （例: todo.title.tooLong {"max":100}）で、どの規則に違反したかがログで分かる。
       // WHY 英語の文言: ログ（ProblemResponse.from の logger.emit の server_error）に出る開発者向けの文字列で、クライアントには返さない。
       //   apps/backend の非テストコードには自然言語の日本語を置かない（Issue #116。画面の文言は画面の辞書だけが持つ）。
@@ -243,7 +246,7 @@ export class PostgresTodoRepository implements TodoRepository {
   }
 
   // 完了の履歴のうち from 番目（0 始まり）から後ろの行（todo_status_changes に入れる値）。position は Todo.statusChanges の添字。
-  // 行の id は Writer が作る（前のログと変更履歴に、INSERT の前に id が要る。shared/infra/writer.ts）。
+  // 行の id は Writer が作る（前のログと変更履歴に、INSERT の前に id が要る。shared/drizzle/writer.ts）。
   private statusChangeRows(todo: Todo, from: number) {
     return todo.statusChanges
       .slice(from)

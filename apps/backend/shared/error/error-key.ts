@@ -2,7 +2,7 @@
 // WHY 自然言語の文言ではなくキーで表す: 文言を決めるのは画面（言語・言い回し）の仕事で、domain / API は「何が起きたか」だけを
 //   機械可読に返す。画面側（apps/frontend_customer）はキーを辞書で翻訳する。言語を足しても backend は変わらない。
 // WHY domain に置く: DomainError（domain）が使うため。presentation の Problem（problem.ts）も同じ型を使い、problem.ts から
-//   export type で再公開する（画面は @repo/backend/shared/presentation/problem だけを import できる。exports は増やさない）。
+//   export type で再公開する（画面は @repo/backend/shared/http/problem だけを import できる。exports は増やさない）。
 // キーの形: "<領域>.<対象>.<理由>" の dot 区切り（領域 = todo / request / server）。一度公開したキーは画面の辞書が
 //   参照するので、名前を変えない（変えるときは画面の辞書と同じ変更で）。
 // params: 各キーで形を固定する。文言に埋め込む値（上限の文字数・id・項目名）だけを持つ。値は JSON に載せて画面に渡すので
@@ -39,7 +39,7 @@ export type ErrorKey = keyof ErrorKeyParams;
 
 // params を持たないキー（ErrorKeyParams の値が Record<string, never>）。
 // WHY 分ける: zod の型の検査（z.string など）の issue は params を運ばない（refine の custom の issue だけが載せる。zod 4.6.5）。
-//   型の検査に付けられるキーをこれに限り、params の要るキーを付けて実行時に params が落ちるのを型で止める（shared/domain/keyed-issue.ts の KeyedIssue.of）。
+//   型の検査に付けられるキーをこれに限り、params の要るキーを付けて実行時に params が落ちるのを型で止める（shared/error/keyed-issue.ts の KeyedIssue.of）。
 export type ParamlessErrorKey = {
   [K in ErrorKey]: ErrorKeyParams[K] extends Record<string, never> ? K : never;
 }[ErrorKey];
@@ -86,7 +86,7 @@ export type ErrorParamsArgs<K extends ErrorKey> = K extends ErrorKey
 //   docs/adr/architecture/20261002-class-based-backend.md）。状態を持たない変換なので static にする。
 export class ErrorKeys {
   // 実行時の文字列が ErrorKey かを確かめる。zod の issue の message（キーを付け忘れた項目では zod の英語の文言）を
-  //   DomainError の key に戻す前に使う（shared/domain/validate.ts の DomainValidation.validated・json-body.ts）。
+  //   DomainError の key に戻す前に使う（shared/error/validate.ts の DomainValidation.validated・json-body.ts）。
   // WHY 配列の includes で判定する（オブジェクトのプロパティで引かない）: "constructor" など Object.prototype の名前を
   //   キーと取り違えない。
   static includes(value: string): value is ErrorKey {

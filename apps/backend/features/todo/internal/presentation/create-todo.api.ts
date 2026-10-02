@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { KeyedIssue } from "../../../../shared/domain/keyed-issue";
-import { AppDatabase } from "../../../../shared/infra/database";
-import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";
-import { RequestBody } from "../../../../shared/presentation/json-body";
-import { ProblemResponse } from "../../../../shared/presentation/problem";
+import { AppDatabase } from "../../../../shared/drizzle/database";
+import { PostgresTransactionRunner } from "../../../../shared/drizzle/transaction.postgres";
+import { KeyedIssue } from "../../../../shared/error/keyed-issue";
+import { RequestBody } from "../../../../shared/http/json-body";
+import { ProblemResponse } from "../../../../shared/http/problem";
 import { CreateTodoCommand } from "../application/create-todo.command";
 import { TODO_TITLE_MAX_LENGTH, type Todo } from "../domain/todo";
 import { PostgresTodoRepository } from "../infra/todo-repository.postgres";

@@ -165,7 +165,7 @@ export class RequestLogSteps {
   }
 
   // stdout のうちリクエストログの行だけを取り出す。JSON でない行（Next の起動メッセージ）と、リクエストログ以外の JSON の行
-  //   （Repository の書き込みのログ。event.name が db_write。apps/backend/shared/infra/writer.ts。Issue #205・#215）は除く。
+  //   （Repository の書き込みのログ。event.name が db_write。apps/backend/shared/drizzle/writer.ts。Issue #205・#215）は除く。
   // WHY event.name で見分ける: logger（apps/shared/logger.ts）を通るログはどれも JSON 1 行で stdout に出るので、「JSON の行」では
   //   リクエストログに絞れない。page_request / api_request はリクエストログ（request-log.ts）だけが出す種類（apps/shared/log-event.ts）。
   private loggedRequests(): LoggedRequest[] {

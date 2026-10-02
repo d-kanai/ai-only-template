@@ -1,4 +1,4 @@
-import type { ErrorKey, ErrorKeyParams } from "../domain/error-key";
+import type { ErrorKey, ErrorKeyParams } from "../error/error-key";
 
 // Problem Details（RFC 9457）の detail に入れる、開発者向けの英語の文（Issue #126。ユーザー判断）。
 // WHY 英語だけ・翻訳しない: detail は curl やログで API を読む開発者のためのもので、画面には出さない。画面に出す文言は

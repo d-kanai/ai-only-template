@@ -608,7 +608,7 @@ describe("logger.emit: error 項目", () => {
     expect(line).not.toContain(SENTINEL);
   });
 
-  // WHY { type } のオブジェクトはそのまま: Writer（apps/backend/shared/infra/writer.ts）は DB のエラーを message の無い
+  // WHY { type } のオブジェクトはそのまま: Writer（apps/backend/shared/drizzle/writer.ts）は DB のエラーを message の無い
   //   { type: <pg のエラーの name> } で渡す（message は SQL と値を含むので出さない）。
   test("type（文字列）を持つオブジェクトは、type と message だけを出す", () => {
     // given

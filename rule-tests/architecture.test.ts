@@ -533,7 +533,7 @@ function featureOf(path: string): string | undefined {
 }
 
 type BackendLayer = "domain" | "application" | "presentation" | "infra";
-// scope: apps/backend の下で層を持つ単位のディレクトリ。feature は "features/<f>/internal"、feature をまたぐものは "shared"（BACKEND_SHARED_SCOPE）。
+// scope: 層を持つ feature のディレクトリ "features/<f>/internal"。
 // WHY feature の名前ではなく "features/<f>/internal" で持つ（Issue #98・#208）: backend も frontend と同じく最初の階層を features/ と shared/ に
 //   したので、features/shared/（shared という名前の feature）と backend/shared/ は別の場所になった。名前だけで持つと、
 //   features/shared/ を backend/shared/ と取り違え、別 feature を「feature をまたぐもの」として許してしまう。
@@ -541,23 +541,51 @@ type BackendLayer = "domain" | "application" | "presentation" | "infra";
 //   feature の中だけで使う実装（internal/）に分けるため（モジュラーモノリス）。4 層は internal/ の中だけに置き、
 //   features/<f>/<層>/（Issue #208 より前の置き場所）は層に属さない（置き場所の規則 BACKEND_PLACEMENT が違反にする）。
 //   expose/ も層に属さない（層の規則の代わりに expose-imports がかかる）。
+// WHY backend/shared/ は層を持たない（Issue #310。ユーザー判断）: 以前は backend/shared/ も domain / application / presentation /
+//   infra に分け、feature の層ごとに使ってよい shared の層を決めていた。shared の中身はエラー・トランザクション・HTTP・Drizzle・
+//   変更履歴のような横断の部品で、層で分けると 1 つの関心（例: トランザクションの port と Postgres の runner）が層をまたいで
+//   散らばり、参照の例外（型だけ・名前で 1 ファイルだけ）が増えた。意味の単位（BACKEND_SHARED_UNITS）に分け、feature のどの層
+//   からもどの単位も使ってよいことにした。
 type BackendLocation = { scope: string; layer: BackendLayer };
 
-const BACKEND_SHARED_SCOPE = "shared";
-
 // "apps/backend/features/todo/internal/presentation/..." → { scope: "features/todo/internal", layer: "presentation" }
-// "apps/backend/shared/domain/..." → { scope: "shared", layer: "domain" }
-// 層を持つのは features/<f>/internal/ と shared/ の下だけ（Issue #98・#208）。features/ を挟まない apps/backend/<x>/<層>/（Issue #98
+// 層を持つのは features/<f>/internal/ の下だけ（Issue #98・#208・#310）。features/ を挟まない apps/backend/<x>/<層>/（Issue #98
 //   より前の置き場所）と、internal/ を挟まない apps/backend/features/<f>/<層>/（Issue #208 より前の置き場所）は層に属さない
-//   （置き場所の規則 BACKEND_PLACEMENT が違反にする）。
+//   （置き場所の規則 BACKEND_PLACEMENT が違反にする）。backend/shared/ も層に属さない（Issue #310。単位で分ける）。
 function backendLayerOf(path: string): BackendLocation | undefined {
   const match =
-    /^apps\/backend\/(features\/[^/]+\/internal|shared)\/(domain|application|presentation|infra)(?:\/|$)/.exec(
+    /^apps\/backend\/(features\/[^/]+\/internal)\/(domain|application|presentation|infra)(?:\/|$)/.exec(
       path,
     );
   return match === null
     ? undefined
     : { scope: match[1] ?? "", layer: (match[2] ?? "") as BackendLayer };
+}
+
+const BACKEND_SHARED_ROOT = "apps/backend/shared";
+// backend/shared/ の意味の単位（Issue #310。ユーザー判断）。apps/backend/shared/ のファイルはこのどれかのディレクトリの下だけに置く
+//   （置き場所の規則 BACKEND_PLACEMENT）。feature の層と expose はどの単位も参照してよい。
+//   error:       ErrorKey・DomainError・KeyedIssue・validate（domain の失敗の表し方と入力の検証）
+//   transaction: トランザクションの印の型 Transaction と、張る口 TransactionRunner の port
+//   http:        HTTP の境界（リクエストの本文・id の読み取り、Problem Details への変換と英語の detail）
+//   drizzle:     Drizzle / Postgres の基盤（プール・runner の実装・Writer・列の分類・差分）と drizzle-kit の設定・マイグレーション
+//   change-log:  変更履歴（change_logs の表と書き込み、操作の種類）
+// WHY 一覧に固定する: 単位を自由に足せると、shared/ が何でも置ける場所になり、feature のコードや層の関心が shared に集まる。
+//   足すときはここと .claude/rules/code/architecture-check.md・.claude/rules/code/backend.md を同じ変更で直す（足すことをレビューに出す）。
+const BACKEND_SHARED_UNITS = [
+  "error",
+  "transaction",
+  "http",
+  "drizzle",
+  "change-log",
+] as const;
+
+// backend/shared の単位の下か（単位のディレクトリそのもの = index も含む）。前方一致だけが同じ別ディレクトリ（http-x）、
+//   単位の外（shared の直下・一覧に無い単位・層に分けていたときの旧ディレクトリ）は含めない。
+function isBackendSharedUnit(path: string): boolean {
+  return BACKEND_SHARED_UNITS.some((unit) =>
+    isUnder(path, `${BACKEND_SHARED_ROOT}/${unit}`),
+  );
 }
 
 // backend のモジュール（Issue #208。モジュラーモノリス。1 つの feature = 1 つのモジュール）。
@@ -595,12 +623,12 @@ function isExposeFile(path: string): boolean {
   return /^apps\/backend\/features\/[^/]+\/expose\//.test(path);
 }
 
-// expose が参照してよい自前コード: 自モジュールの internal/ と expose/ の中、apps/backend/shared/ の全体、apps/shared の
+// expose が参照してよい自前コード: 自モジュールの internal/ と expose/ の中、apps/backend/shared/ のどの単位も、apps/shared の
 //   presentation が使えるモジュール（SHARED_MODULES_BY_LAYER.presentation。logger・now）と env。
 // WHY 自モジュールの internal はどの層でも許す: expose はモジュールの公開 API の組み立ての場所（presentation の api ファイルと
 //   同じ役割）で、application の command と infra の実装を組み立てて呼ぶ。
 // WHY backend/shared と env を許す（Issue #208 のオーケストレータの判断）: 組み立てには、api ファイルと同じく
-//   `new PostgresTodoRepository(AppDatabase.get().db)` のように backend/shared/infra/database が要る（将来 todo の expose が
+//   `new PostgresTodoRepository(AppDatabase.get().db)` のように backend/shared/drizzle/database が要る（将来 todo の expose が
 //   internal を組み立てるとき）。env も組み立ての設定として許す。
 // 禁止のまま: 他のモジュールの expose / internal、自モジュールの internal/・expose/ の外の features、test-support、画面側。
 function exposeMayUse(ref: Reference): boolean {
@@ -608,7 +636,7 @@ function exposeMayUse(ref: Reference): boolean {
   return (
     isUnder(ref.to, `apps/backend/features/${moduleName}/internal`) ||
     isUnder(ref.to, `apps/backend/features/${moduleName}/expose`) ||
-    isUnder(ref.to, "apps/backend/shared") ||
+    isBackendSharedUnit(ref.to) ||
     SHARED_MODULES_BY_LAYER.presentation.has(ref.to) ||
     ref.to === SHARED_ENV_MODULE
   );
@@ -641,10 +669,11 @@ function usesPersistence(ref: Reference): boolean {
 }
 
 // backend の api ファイル（1 API = 1 ファイル `apps/backend/features/<f>/internal/presentation/<verb>-<noun>.api.ts`。
-//   backend/shared/presentation の *.api も同じ形として扱う。Issue #98 より前は `apps/backend/<x>/presentation/`、Issue #208 より前は
-//   `apps/backend/features/<f>/presentation/` で、同じ範囲）。
+//   backend/shared の HTTP の境界 `apps/backend/shared/http/` の直下の *.api も同じ形として扱う。Issue #98 より前は
+//   `apps/backend/<x>/presentation/`、Issue #208 より前は `apps/backend/features/<f>/presentation/`、Issue #310 より前は shared 側が
+//   `apps/backend/shared/presentation/` で、同じ範囲。旧パスは許さない）。
 const PRESENTATION_API =
-  /^apps\/backend\/(?:features\/[^/]+\/internal|shared)\/presentation\/[^/]+\.api$/;
+  /^apps\/backend\/(?:features\/[^/]+\/internal\/presentation|shared\/http)\/[^/]+\.api$/;
 
 // feature の公開 API（`apps/frontend_customer/features/<f>/index.ts`）。"…/features/todo" と "…/features/todo/index" のどちらの
 //   書き方も同じファイルを指す。
@@ -679,7 +708,7 @@ const SHARED_NOW_MODULE = `${SHARED_ROOT}/now`;
 // WHY domain / application には許さない: env・logger は外の世界（環境変数・stdout）に触る基盤で、移す前も infra 層にあった。
 //   domain / application から使うと、層の規則で infra を参照させなかった意味が無くなる。
 // WHY presentation には logger だけ許す: presentation の infra は組み立てに使う Postgres の Repository の実装と
-//   backend/shared/infra/database だけ（下の presentationAllows）だが、想定外の例外をログに残すのは HTTP の境界
+//   backend/shared/drizzle/database だけ（下の presentationAllows）だが、想定外の例外をログに残すのは HTTP の境界
 //   （ProblemResponse.from）の仕事で、ログの出口をコンストラクタで渡すと全 API の組み立てに logger が入る。logger は状態を持たず、差し替えずにテストできる（console を spy する）ので、直接 import させる（Issue #85）。
 //   env は infra（接続先・プールの設定）だけが使う。
 // WHY now はすべての層に許す: now() は現在時刻の Date を返すだけで、環境変数・出力・DB に触らない。Entity の生成ルール
@@ -695,7 +724,7 @@ const SHARED_MODULES_BY_LAYER: Record<BackendLayer, ReadonlySet<string>> = {
 // features/<f>/api/ から、同じ feature の api ファイル（backend/features/<f>/internal/presentation/*.api）への参照か。
 // frontend-to-backend-specifier の例外（Issue #68 の段階 2。オーケストレータの判断）: リポジトリ直下の vitest.global-setup.ts
 //   （テスト基盤）だけは、apps/backend/test-support/database を相対パスで参照してよい（Issue #181 で
-//   apps/backend/shared/infra/database.test-support から移した）。
+//   apps/backend/shared/drizzle/database.test-support から移した）。
 // WHY: test-support/database はテストのための処理（前の実行が残したテスト用スキーマの後始末）で、パッケージの公開面（exports。
 //   frontend / e2e / 設定が使うアプリの入口だけ、というユーザー判断）に含めない（rule-tests/test-support.test.ts が exports に
 //   test-support を載せることを止める）。exports に無いので @repo/backend では解決できず、相対パスで読むしかない。例外はファイルと
@@ -720,42 +749,22 @@ function isOwnFeatureApiFile(ref: Reference): boolean {
   );
 }
 
-// 参照元の層ごとに、自 feature と backend/shared の中で参照してよい層（.claude/rules/code/backend.md の 4 層の表）。
+// 参照元の層ごとに、自 feature の中で参照してよい層（.claude/rules/code/backend.md の 4 層の表）。
 // WHY 許可の一覧で書く: 禁止の一覧だと、書き忘れた参照先（他 feature の層、画面側の shared/ など）が黙って通る。
 //   許可の一覧なら、ここに無い自前コードはすべて違反になる。
-// WHY backend/shared の中も層で縛る: backend/shared も domain / presentation などの層に分かれており、その中で
-//   domain → presentation のような逆向きの依存を作ると、feature の中と同じく依存の向きが崩れるため。
+// backend/shared はここでは見ない（Issue #310。どの層もどの単位も使ってよい。backendMayUse の isBackendSharedUnit）。
 const LAYERS_MAY_USE: Record<BackendLayer, ReadonlySet<BackendLayer>> = {
-  // application は層では許さない。トランザクションの印の型と port のモジュール（shared/application/transaction）だけを名前で、
-  //   型だけ許す（Issue #230。下の SHARED_TRANSACTION_PORT_MODULE と backendMayUse）。
   domain: new Set(["domain"]),
   application: new Set(["domain", "application"]),
-  // presentation の infra は Postgres の Repository の実装と backend/shared/infra/database・transaction.postgres だけ、feature の
-  //   domain は型だけ（presentationAllows で絞る）。
+  // presentation の infra は自 feature の Postgres の Repository の実装だけ、feature の domain は型と定数だけ
+  //   （presentationAllows で絞る）。
   presentation: new Set(["domain", "application", "presentation", "infra"]),
-  // Repository の実装が同じ infra の schema、backend/shared/infra の database（Database の型）を使うので、infra 同士の参照も許す。
-  // WHY application を層では許さない（Issue #220）: Issue #123 でコンテナを廃止してから、infra が application を参照する本番の
-  //   コードは 0 件だった。infra が application を知ると、command（ユースケース）の都合が永続化の実装に入り込む。
-  //   infra が実装する port（shared/application/transaction）だけを名前で、型だけ（import type）許す（下の SHARED_TRANSACTION_PORT_MODULE と backendMayUse。Issue #224）。
+  // Repository の実装が同じ infra の schema を使うので、infra 同士の参照も許す。
+  // WHY application を許さない（Issue #220）: Issue #123 でコンテナを廃止してから、infra が自 feature の application を参照する
+  //   本番のコードは 0 件だった。infra が application を知ると、command（ユースケース）の都合が永続化の実装に入り込む。
+  //   infra が実装する port（TransactionRunner）は backend/shared/transaction にあり、shared なので許される（Issue #310）。
   infra: new Set(["domain", "infra"]),
 };
-
-// presentation の api ファイルが本番の handler を組み立てるときに参照してよい、backend/shared の infra（プールと Drizzle の db）。
-const SHARED_DATABASE_MODULE = "apps/backend/shared/infra/database";
-// 同じく組み立てに使う、トランザクションを張る runner（PostgresTransactionRunner。Issue #215）。command のコンストラクタに渡す。
-// WHY runner だけを許す（writer は許さない）: presentation が組み立てに要るのは runner の実体だけで、書き込みの口（Writer）を
-//   presentation から使わせない（書き込みは Repository が runner の tx から取り出す）。
-const SHARED_TRANSACTION_RUNNER_MODULE =
-  "apps/backend/shared/infra/transaction.postgres";
-// トランザクションを張る口（TransactionRunner の interface）と印の型（Transaction の brand）のモジュール。Issue #220 で port を
-//   shared/domain から移して型と分け、Issue #230 で 1 ファイルに戻した（ユーザー判断）。infra が実装する port で、infra と domain が
-//   参照してよい唯一の application（shared/infra/transaction.postgres が implements し、domain の TodoRepository が Transaction を
-//   引数に取る。どちらも import type だけ。backendMayUse）。
-// WHY application に置く: トランザクションの範囲を決めるのは command（application）の関心。印の型だけのために domain に別の
-//   ファイルを置くより、型と port を 1 か所にまとめ、domain からの型だけの参照を例外にする（Issue #230）。
-// WHY 名前で 1 つだけ許す: application の層ごと許すと、infra・domain から command（ユースケース）を参照できてしまう。
-const SHARED_TRANSACTION_PORT_MODULE =
-  "apps/backend/shared/application/transaction";
 
 // 自 feature の infra の Postgres の Repository の実装（`<名前>-repository.postgres`。1 階層だけ）か。
 // WHY ファイル名の形で絞る: Issue #123 でコンテナを廃止し、api ファイルが `new XxxQuery(new PostgresTodoRepository(AppDatabase.get().db))`
@@ -773,39 +782,35 @@ function isOwnPostgresRepository(
   );
 }
 
-// presentation 固有の絞り込み。
-//   - infra は、feature の presentation から、自 feature の Postgres の Repository の実装（`*-repository.postgres`）と
-//     backend/shared/infra/database と backend/shared/infra/transaction.postgres（トランザクションの runner。Issue #215）だけ
-//     （Issue #123。api ファイルがモジュールの最下部で本番の handler を組み立てる）。
-//     backend/shared/presentation（problem など）は何も組み立てないので infra を参照しない。
+// presentation 固有の絞り込み（自 feature の中の参照だけ。backend/shared は backendMayUse が先に許す）。
+//   - infra は、自 feature の Postgres の Repository の実装（`*-repository.postgres`）だけ（Issue #123。api ファイルがモジュールの
+//     最下部で本番の handler を組み立てる）。プール（backend/shared/drizzle/database）と runner（backend/shared/drizzle/
+//     transaction.postgres。Issue #215）は shared なので、Issue #310 からは名前で絞らずに許す。
 //     ログの出口 apps/shared/logger は backend の外なので、ここではなく SHARED_MODULES_BY_LAYER で許す（Issue #90）。
 //   - feature の domain は import type と、定数（UPPER_SNAKE_CASE の名前）だけの値の import だけ（「domain（Entity の型の参照と
 //     定数のみ）」）。Entity の生成や操作は application を通す。
 //     WHY 定数を許す（Issue #144。ユーザー判断）: リクエストのスキーマが domain と同じ規則（title の上限の文字数）を重ねるとき、
 //     数値を 2 か所に書かずに domain の定数（TODO_TITLE_MAX_LENGTH）を参照させる。関数・Entity は値で使わせない。
-//     backend/shared/domain（DomainError・KeyedIssue.of）はエラーの変換（instanceof）とキーの付与に値として使うので対象外。
+//     backend/shared/error（DomainError・KeyedIssue.of）はエラーの変換（instanceof）とキーの付与に値として使うが、shared なので
+//     この絞り込みにはかからない。
 function presentationAllows(
   ref: Reference,
   self: BackendLocation,
   target: BackendLocation,
 ): boolean {
   if (target.layer === "infra") {
-    return (
-      self.scope !== BACKEND_SHARED_SCOPE &&
-      (isOwnPostgresRepository(ref, self) ||
-        ref.to === SHARED_DATABASE_MODULE ||
-        ref.to === SHARED_TRANSACTION_RUNNER_MODULE)
-    );
+    return isOwnPostgresRepository(ref, self);
   }
-  if (target.layer === "domain" && target.scope !== BACKEND_SHARED_SCOPE) {
+  if (target.layer === "domain") {
     return ref.typeOnly || ref.constantsOnly === true;
   }
   return true;
 }
 
-// backend の層にあるファイルから、自前コードへの参照が許可の一覧に入っているか。
-// 許すのは、自 feature か backend/shared の、参照元の層が参照してよい層と、参照元の層が使ってよい apps/shared のモジュール
-// （SHARED_MODULES_BY_LAYER）だけ。他 feature のどの層も、画面側（features/ app/ shared/）も、層に属さない場所も許さない。
+// feature の層にあるファイルから、自前コードへの参照が許可の一覧に入っているか。
+// 許すのは、backend/shared のどの単位と、自 feature の参照元の層が参照してよい層と、参照元の層が使ってよい apps/shared の
+// モジュール（SHARED_MODULES_BY_LAYER）だけ。他 feature のどの層も、画面側（features/ app/ shared/）も、層に属さない場所
+// （test-support・backend/shared の単位の外）も許さない。
 function backendMayUse(ref: Reference): boolean {
   const self = backendLayerOf(ref.from);
   if (self === undefined) {
@@ -814,39 +819,28 @@ function backendMayUse(ref: Reference): boolean {
   if (isUnder(ref.to, SHARED_ROOT)) {
     return SHARED_MODULES_BY_LAYER[self.layer].has(ref.to);
   }
+  // Issue #310（ユーザー判断）: feature のどの層からも backend/shared のどの単位を参照してもよい（値・型・re-export のどれも）。
+  //   以前は shared も層に分け、feature の層ごとに使ってよい shared の層を決め、トランザクションの port（shared/application/
+  //   transaction）は型だけ（Issue #224・#230）、presentation から shared の infra は database と transaction.postgres だけ
+  //   （Issue #123・#215）に絞っていた。shared は feature をまたぐ部品の置き場所で、どの単位も feature より下にある（shared から
+  //   features を参照しないことは backend-shared が見る）ので、層の向きは崩れない。domain・application が DB のパッケージを
+  //   直接 import しないことは core-to-persistence が見る（shared を経由した参照は縛らない）。
+  if (isBackendSharedUnit(ref.to)) {
+    return true;
+  }
   // Issue #208: feature の presentation（組み立ての場所）は、他のモジュールの公開の入口（expose）を使える。expose は層に属さない
-  //   ので、ここで先に許す。ほかの層・backend/shared・自モジュールの expose は下の層の判定で違反になる（参照先が層に属さない）。
+  //   ので、ここで先に許す。ほかの層・自モジュールの expose は下の層の判定で違反になる（参照先が層に属さない）。
   //   境界の意味（他のモジュールは expose だけ・expose は presentation から）は module-internal と
   //   module-expose-only-from-presentation の規則が名前付きで見る。
-  if (
-    self.layer === "presentation" &&
-    self.scope !== BACKEND_SHARED_SCOPE &&
-    isOtherModulePart(ref, "expose")
-  ) {
+  if (self.layer === "presentation" && isOtherModulePart(ref, "expose")) {
     return true;
   }
   const target = backendLayerOf(ref.to);
   if (target === undefined) {
     return false;
   }
-  const sameFeatureOrShared =
-    target.scope === self.scope || target.scope === BACKEND_SHARED_SCOPE;
-  // Issue #220: infra は application の層を許さず（LAYERS_MAY_USE）、infra が実装する port だけを名前で許す。
-  // Issue #230（ユーザー判断）: domain も同じモジュールだけを型で許す。印の型 Transaction を port と同じファイル
-  //   （shared/application/transaction）に置いたので、Repository の interface（domain）がその型を引数に取るには参照が要る。
-  //   domain の層としては application を許さない（LAYERS_MAY_USE）ので、このモジュールの型だけの例外にする。
-  // Issue #224: port は型だけ（import type / export type）。interface の実装と引数の型に型以外は要らない。値の import・
-  //   re-export・dynamic import（typeOnly が false）を許すと、port のモジュールに実行時の export が増えたときに infra・domain が
-  //   application のロジックを実行時に取り込める（Codex のレビュー、PR #223）。
-  if (
-    (self.layer === "infra" || self.layer === "domain") &&
-    ref.typeOnly &&
-    ref.to === SHARED_TRANSACTION_PORT_MODULE
-  ) {
-    return true;
-  }
   return (
-    sameFeatureOrShared &&
+    target.scope === self.scope &&
     LAYERS_MAY_USE[self.layer].has(target.layer) &&
     (self.layer !== "presentation" || presentationAllows(ref, self, target))
   );
@@ -1010,19 +1004,21 @@ const RULES: Rule[] = [
   },
   {
     // 「画面側で backend を参照してよいのは `features/<feature>/api/` だけ。参照先は
-    //   `backend/features/<feature>/internal/presentation/<name>.api.ts` と `backend/shared/presentation/` で、いずれも `import type` のみ」
+    //   `backend/features/<feature>/internal/presentation/<name>.api.ts` と `backend/shared/http/` で、いずれも `import type` のみ」
+    // WHY backend/shared は http/ だけ（Issue #310 で shared/presentation/ から読み替えた）: 画面が知ってよいのは HTTP の契約
+    //   （Problem Details の形など）だけで、エラー・トランザクション・Drizzle などの中身は画面の関心ではない。
     // WHY 型だけに限る: import type はビルド時に消えるので、サーバ専用のコードが画面のバンドルに入らない。
     // WHY 自 feature の api ファイルに限る: 別 feature の API の契約を使うなら、その feature の api/ を通すべきで、
     //   feature 同士は index 経由でしか参照しない（規則 feature-to-feature）方針と揃えるため。
     id: "feature-api-to-backend",
-    name: "apps/frontend_customer/features/<f>/api/ から apps/backend/ への参照は型だけで、参照先は自 feature の apps/backend/features/<f>/internal/presentation/*.api か apps/backend/shared/presentation/ だけ",
+    name: "apps/frontend_customer/features/<f>/api/ から apps/backend/ への参照は型だけで、参照先は自 feature の apps/backend/features/<f>/internal/presentation/*.api か apps/backend/shared/http/ だけ",
     appliesTo: isFeatureApi,
     isViolation: (ref) =>
       ownUnder(ref, BACKEND_ROOT) &&
       !(
         ref.typeOnly &&
         (isOwnFeatureApiFile(ref) ||
-          isUnder(ref.to, "apps/backend/shared/presentation"))
+          isUnder(ref.to, `${BACKEND_SHARED_ROOT}/http`))
       ),
   },
   {
@@ -1054,10 +1050,10 @@ const RULES: Rule[] = [
   {
     // 「domain は Next・React・DB に依存させない」「依存してよい先は backend/shared だけ」
     //   自 feature の domain/ の中の参照（Repository の interface が Entity を参照するなど）は許す。
-    //   application は、トランザクションの印の型と port のモジュール（apps/backend/shared/application/transaction）を
-    //   import type で参照するときだけ（Issue #230。ユーザー判断。Repository の interface が引数に Transaction を取る）。
+    //   backend/shared はどの単位も許す（Issue #310。ユーザー判断。Issue #230 までは shared の domain と、トランザクションの印の型を
+    //   型だけに限っていた）。DB のパッケージの直接の参照は core-to-persistence が止める。
     id: "domain",
-    name: "apps/backend/features/<f>/internal/domain/ が参照してよい自前コードは自 feature と apps/backend/shared/ の domain/ と apps/backend/shared/application/transaction（トランザクションの印の型。import type だけ）だけで、next・react も参照しない",
+    name: "apps/backend/features/<f>/internal/domain/ が参照してよい自前コードは自 feature の domain/ と apps/backend/shared/ の単位（error・transaction・http・drizzle・change-log のどれも）と apps/shared/ の now だけで、next・react も参照しない",
     appliesTo: (from) => backendLayerOf(from)?.layer === "domain",
     isViolation: violatesBackendLayer,
   },
@@ -1066,12 +1062,12 @@ const RULES: Rule[] = [
     // WHY 層の許可の一覧（domain / application の規則）と別の規則にする: 許可の一覧はパッケージを next / react / react-dom 以外
     //   すべて許すので、DB のパッケージはそこでは止まらない。DB への依存は infra に閉じ込める（schema.ts・Repository の実装・
     //   database.ts）という別の観点なので、1 規則 = 1 テストで独立に検査する。
-    // WHY backend/shared の domain / application も含める: feature をまたぐ型と interface（トランザクションの型 Transaction と
-    //   口 TransactionRunner は shared/application/transaction。Issue #215・#220・#230）が Drizzle の型に依存すると、domain・application
-    //   から DB が見えてしまうため。
+    // WHY backend/shared は対象にしない（Issue #310。ユーザー判断）: shared は層を持たない意味の単位（drizzle/ は DB の基盤そのもの）
+    //   になった。feature の domain・application が shared を経由して DB に触れることは縛らず、パッケージを直接 import することだけを
+    //   止める（Issue #230 までは shared の domain / application も対象だった）。
     // 型だけの参照（import type）も違反にする: 型でも DB の形が domain に入り込み、DB を差し替えると domain を直すことになる。
     id: "core-to-persistence",
-    name: "apps/backend の domain/・application/ は DB のパッケージ（drizzle-orm とそのサブパス、pg）を参照しない（型だけでも）",
+    name: "apps/backend/features/<f>/internal/ の domain/・application/ は DB のパッケージ（drizzle-orm とそのサブパス、pg）を直接参照しない（型だけでも。apps/backend/shared/ を経由した参照は縛らない）",
     appliesTo: (from) => {
       const layer = backendLayerOf(from)?.layer;
       return layer === "domain" || layer === "application";
@@ -1080,46 +1076,48 @@ const RULES: Rule[] = [
   },
   {
     // 「application の依存してよい先は domain と backend/shared」「依存の向き: presentation → application → domain」
-    //   同じ application の中の参照（ユースケースの共通処理など）は許す。
+    //   同じ application の中の参照（ユースケースの共通処理など）は許す。backend/shared はどの単位も許す（Issue #310）。
     id: "application",
-    name: "apps/backend/features/<f>/internal/application/ が参照してよい自前コードは自 feature と apps/backend/shared/ の domain/・application/ だけで、next・react も参照しない",
+    name: "apps/backend/features/<f>/internal/application/ が参照してよい自前コードは自 feature の domain/・application/ と apps/backend/shared/ の単位（どれも）と apps/shared/ の now だけで、next・react も参照しない",
     appliesTo: (from) => backendLayerOf(from)?.layer === "application",
     isViolation: violatesBackendLayer,
   },
   {
     // 「presentation の依存してよい先: application、domain（Entity の型の参照と定数のみ。定数は Issue #144）、自 feature の infra の Postgres の
-    //   Repository の実装と backend/shared/infra/database・transaction.postgres（api ファイルが本番の handler を組み立てる。Issue #123・#215）、
-    //   backend/shared、apps/shared の logger（Issue #85・#90）」
+    //   Repository の実装（api ファイルが本番の handler を組み立てる。Issue #123）、backend/shared のどの単位（プール・runner も。Issue #310）、
+    //   他のモジュールの expose（Issue #208）、apps/shared の logger・now（Issue #85・#90）」
     //   同じ presentation の中の参照（api ファイル間の re-export など）は許す。
     // WHY next も禁止する: api ファイルは Web 標準の Request / Response で書き、Next を起動せずにテストできるようにしているため
     //   （.claude/rules/quality/testing.md の「置き方と環境」）。
     id: "presentation",
-    name: "apps/backend/features/<f>/internal/presentation/ が参照してよい自前コードは自 feature と apps/backend/shared/ の application/・domain/（feature の domain は型と UPPER_SNAKE_CASE の定数だけ）・presentation/ と自 feature の infra/*-repository.postgres・apps/backend/shared/infra/database・apps/backend/shared/infra/transaction.postgres・apps/shared/logger だけで、next・react も参照しない",
+    name: "apps/backend/features/<f>/internal/presentation/ が参照してよい自前コードは自 feature の application/・domain/（型と UPPER_SNAKE_CASE の定数だけ）・presentation/・infra/*-repository.postgres と apps/backend/shared/ の単位（どれも）と他のモジュールの expose/ と apps/shared/ の logger・now だけで、next・react も参照しない",
     appliesTo: (from) => backendLayerOf(from)?.layer === "presentation",
     isViolation: violatesBackendLayer,
   },
   {
-    // 「infra: Repository の実装、Drizzle のスキーマ、プール（backend/shared/infra/database）」「依存してよい先: domain
-    //   （interface を実装する）」。Repository の実装が同じ infra の schema と backend/shared/infra/database を使うので、infra/ の
-    //   中の参照も許す。application は、infra が実装する port（apps/backend/shared/application/transaction の TransactionRunner）
-    //   だけ（Issue #220。Issue #123 でコンテナを廃止してから application の層ごとの許可は使っていなかったので狭めた）。
+    // 「infra: Repository の実装、Drizzle のスキーマ」「依存してよい先: domain（interface を実装する）」。Repository の実装が同じ
+    //   infra の schema を使うので、infra/ の中の参照も許す。自 feature の application は許さない（Issue #220）。
+    //   backend/shared はどの単位も許す（Issue #310。プール・Writer・変更履歴・トランザクションの port。Issue #224 までは port を
+    //   型だけに限っていた）。
     id: "infra",
-    name: "apps/backend/features/<f>/internal/infra/ が参照してよい自前コードは自 feature と apps/backend/shared/ の domain/・infra/ と apps/backend/shared/application/transaction（infra が実装する port。import type だけ）と apps/shared/ の env・logger だけで、next・react も参照しない",
+    name: "apps/backend/features/<f>/internal/infra/ が参照してよい自前コードは自 feature の domain/・infra/ と apps/backend/shared/ の単位（どれも）と apps/shared/ の env・logger・now だけで、next・react も参照しない",
     appliesTo: (from) => backendLayerOf(from)?.layer === "infra",
     isViolation: violatesBackendLayer,
   },
   {
     // 「backend/shared/: feature をまたいで使う型や処理」。各 feature が shared に依存するので、逆向きにすると循環する。
     //   画面側の shared/ も含め、backend/shared/ の外の自前コードは参照しない。
-    // WHY apps/shared は許す（Issue #90）: frontend と backend で共通の基盤（env・logger）で、feature ではないので循環しない。
-    //   どの層がどのモジュールを使ってよいかは層の規則（SHARED_MODULES_BY_LAYER）が見る。
+    // WHY apps/shared は許す（Issue #90）: frontend と backend で共通の基盤（env・logger・now）で、feature ではないので循環しない。
+    // WHY shared の中は単位をまたいで自由に参照してよい（Issue #310。ユーザー判断）: 以前は shared も 4 層に分けて層の規則を
+    //   当てていたが、単位（error・transaction・http・drizzle・change-log）は層ではなく関心の分け方で、向きを決める理由が無い。
+    //   apps/shared のモジュールも単位ごとには縛らない。
     id: "backend-shared",
     name: "apps/backend/shared/ が参照してよい自前コードは apps/backend/shared/ の中と apps/shared/ だけで、next・react も参照しない",
-    appliesTo: (from) => isUnder(from, "apps/backend/shared"),
+    appliesTo: (from) => isUnder(from, BACKEND_SHARED_ROOT),
     isViolation: (ref) =>
       usesFramework(ref) ||
       (ref.own &&
-        !isUnder(ref.to, "apps/backend/shared") &&
+        !isUnder(ref.to, BACKEND_SHARED_ROOT) &&
         !isUnder(ref.to, SHARED_ROOT)),
   },
   {
@@ -1143,8 +1141,9 @@ const RULES: Rule[] = [
   },
   {
     // 「`app/api/**/route.ts` は backend の api ファイルが export する HTTP メソッド名の関数を re-export するだけ」
+    //   backend/shared の api ファイルは HTTP の境界 shared/http/ の直下（Issue #310 で shared/presentation/ から読み替えた）。
     id: "app-api",
-    name: "apps/frontend_customer/app/api/ は apps/backend/features/<f>/internal/presentation/*.api（と apps/backend/shared/presentation/*.api）だけを参照する",
+    name: "apps/frontend_customer/app/api/ は apps/backend/features/<f>/internal/presentation/*.api（と apps/backend/shared/http/*.api）だけを参照する",
     appliesTo: (from) => isUnder(from, "apps/frontend_customer/app/api"),
     isViolation: (ref) => !(ref.own && PRESENTATION_API.test(ref.to)),
   },
@@ -1258,9 +1257,9 @@ const RULES: Rule[] = [
   },
 ];
 
-// backend のソースファイルは、apps/backend/features/<f>/internal/ か apps/backend/shared/ の 4 層（domain / application / presentation /
-// infra）のどれかの下か、モジュールの公開の入口 apps/backend/features/<f>/expose/ の直下（Issue #208）に置く。例外は drizzle-kit の設定
-// apps/backend/shared/drizzle/drizzle.config.<拡張子> だけ。
+// backend のソースファイルは、apps/backend/features/<f>/internal/ の 4 層（domain / application / presentation / infra）のどれかの下か、
+// apps/backend/shared/ の単位（BACKEND_SHARED_UNITS。Issue #310）のどれかの下か、モジュールの公開の入口
+// apps/backend/features/<f>/expose/ の直下（Issue #208）に置く。
 // （テストファイル・package.json・tsconfig.json・生成したマイグレーションの *.sql / meta/*.json はソースではないので、この規則は見ない。
 //   列挙は listReferencingFiles のソースだけ。）
 // WHY 置き場所そのものを規則にする: 層に属さない場所（backend/features/todo/lib/ や backend/features/todo/ 直下）のファイルは、
@@ -1273,17 +1272,15 @@ const RULES: Rule[] = [
 // WHY feature の 4 層を internal/ の下に限る（Issue #208）: feature の直下は、他のモジュールへ公開する入口（expose/）と中だけで
 //   使う実装（internal/）の 2 つに分ける。internal/ を挟まない features/<f>/<層>/（Issue #208 より前の置き場所）を許すと、
 //   公開の入口と内部の実装の区別がディレクトリで付かなくなるので違反にする。
-// WHY backend/shared/ も同じに扱う（直下を許さない）: backend/shared/ も domain / presentation の層に分けて置いており
-//   （.claude/rules/code/backend.md の「置き場所（DDD 4 層）」）、直下を許すと同じ抜け道になるため。
-// WHY 例外を shared/drizzle/drizzle.config.<拡張子> だけにする（Issue #98 で「apps/backend 直下の <name>.config.<拡張子>」から
-//   置き換えた）: drizzle-kit の設定は feature をまたぐマイグレーションの設定で、層のコードではない。生成したマイグレーション
-//   （*.sql と meta/）と同じ shared/drizzle/ に置き（ユーザー判断。shared/infra/drizzle/ のように深くしない）、apps/backend 直下を
-//   features/ と shared/ の 2 つに固定する。名前を drizzle.config に限るのは、shared/drizzle/ を層に属さないアプリのコード
-//   （shared/drizzle/app.ts）や別の設定の置き場所にさせないため。依存の規則は backend-to-frontend・backend-relative-only と、
-//   backend/shared の中なので backend-shared がかかる（feature のコードを import せず、schema は glob の文字列で指す）。
+// WHY backend/shared/ は単位の一覧に固定する（直下・一覧に無い単位を許さない。Issue #310 で層から単位に変えた）: 何でも置ける
+//   場所にすると、feature のコードや層の関心が shared に集まる。単位の意味と WHY は BACKEND_SHARED_UNITS。
+//   以前は backend/shared/ も 4 層に分け、drizzle-kit の設定 shared/drizzle/drizzle.config.<拡張子> だけを層の外の例外にしていた
+//   （Issue #98）。drizzle/ が単位になったので、drizzle.config.ts は drizzle/ の中の普通のソースとして置け、例外は無くした。
+//   依存の規則は backend-to-frontend・backend-relative-only・backend-shared がかかる（feature のコードを import せず、schema は
+//   glob の文字列で指す）。
 // 決定と採用しなかった案は ADR docs/adr/architecture/20260929-backend-features-and-shared-directories.md。
 // WHY 直下の test-support/ も許す（Issue #181。ユーザー判断「test-support が build に入らないルールは頑張って」）: テストだけが使う
-//   コード（TestDatabase.create など）の置き場所で、層のコードではない。層の下（shared/infra/）に置くと本番のコードと見分けが付かず、
+//   コード（TestDatabase.create など）の置き場所で、層のコードではない。shared の単位の下（以前の shared/infra/）に置くと本番のコードと見分けが付かず、
 //   .dockerignore の 1 行（**/test-support）でイメージから外せない。層の規則は当てない（どの層でもない）が、本番のコードから
 //   参照しないこと・イメージに入らないことは rule-tests/test-support.test.ts が見る（層のファイルから参照すると層の規則にもかかる）。
 //   直下だけに許し、features/<f>/test-support/ や shared/test-support/ は違反のままにする（置き場所を 1 か所にそろえる）。
@@ -1300,20 +1297,25 @@ const BACKEND_API_SPECS_SUPPORT =
 //   深くしたくなったら、この規則を変える。
 const BACKEND_EXPOSE_FILE = /^apps\/backend\/features\/[^/]+\/expose\/[^/]+$/;
 const BACKEND_LAYER_DIR =
-  /^apps\/backend\/(?:features\/[^/]+\/internal|shared)\/(?:domain|application|presentation|infra)\//;
-const BACKEND_DRIZZLE_CONFIG =
-  /^apps\/backend\/shared\/drizzle\/drizzle\.config\.(?:[cm]?[jt]s)$/;
+  /^apps\/backend\/features\/[^/]+\/internal\/(?:domain|application|presentation|infra)\//;
+
+// backend/shared の単位の下のファイルか（単位のディレクトリの中だけ。単位と同じ名前のファイル shared/drizzle.ts は含めない）。
+function isInBackendSharedUnitDir(file: string): boolean {
+  return BACKEND_SHARED_UNITS.some((unit) =>
+    file.startsWith(`${BACKEND_SHARED_ROOT}/${unit}/`),
+  );
+}
 
 const BACKEND_PLACEMENT = {
   id: "backend-placement",
-  name: "apps/backend/ のソースファイルは apps/backend/features/<f>/internal/ か apps/backend/shared/ の domain/・application/・presentation/・infra/ のどれかの下か、モジュールの公開の入口 apps/backend/features/<f>/expose/ の直下か、テストだけが使う apps/backend/test-support/ の下か、API 仕様の補助 apps/backend/spec/api/<feature>/support.ts に置く（apps/backend/shared/drizzle/drizzle.config.ts だけ例外）",
+  name: "apps/backend/ のソースファイルは apps/backend/features/<f>/internal/ の domain/・application/・presentation/・infra/ のどれかの下か、apps/backend/shared/ の error/・transaction/・http/・drizzle/・change-log/ のどれかの下か、モジュールの公開の入口 apps/backend/features/<f>/expose/ の直下か、テストだけが使う apps/backend/test-support/ の下か、API 仕様の補助 apps/backend/spec/api/<feature>/support.ts に置く",
   isMisplaced: (file: string) =>
     isUnder(file, BACKEND_ROOT) &&
     !BACKEND_LAYER_DIR.test(file) &&
+    !isInBackendSharedUnitDir(file) &&
     !BACKEND_EXPOSE_FILE.test(file) &&
     !BACKEND_TEST_SUPPORT_DIR.test(file) &&
-    !BACKEND_API_SPECS_SUPPORT.test(file) &&
-    !BACKEND_DRIZZLE_CONFIG.test(file),
+    !BACKEND_API_SPECS_SUPPORT.test(file),
 };
 
 // frontend のソースファイルは、apps/frontend_customer の app/・features/・shared/ の下か、直下の決まった名前のファイルだけに置く
@@ -1641,7 +1643,7 @@ function findNowViolations(root: string): string[] {
 
 // --- ハードコードの文言（規則 frontend-hardcoded-text・server-hardcoded-text。Issue #116 の i18n） ---
 // 画面の文言は辞書（apps/frontend_customer の *.messages.ts。画面・部品の隣と shared/i18n/common.messages.ts）だけに置き、画面は t("key", params) で描く。
-//   backend のエラーは ErrorKey（apps/backend/shared/domain/error-key.ts）と params で表し、自然言語を持たない。
+//   backend のエラーは ErrorKey（apps/backend/shared/error/error-key.ts）と params で表し、自然言語を持たない。
 //   この 2 つを、文言が辞書の外に書かれた時点で止める（CLAUDE.md の原則 7。レビューの目視に頼らない）。
 // 違反にするもの（frontend-hardcoded-text。apps/frontend_customer のテスト以外のソース。辞書 *.messages.ts は defineMessages(...) の
 //   引数の中だけを除く）:
@@ -1939,7 +1941,7 @@ function findHardcodedTextViolations(
 // WHY 規則にする: Next の Route Handler には共通の catch が無い（Proxy は handler の例外を捕まえず、onRequestError は記録だけ）。
 //   包み忘れると、handler が投げた DomainError・InvalidRequestError も Problem Details ではない Next の素の 500 になり、
 //   api のテストに 400 / 404 の経路が無ければ気づけない。以前は 5 本の api が try / catch を手書きしていた
-//   （apps/backend/shared/presentation/problem.ts の ProblemResponse.wrap のコメント）。
+//   （apps/backend/shared/http/problem.ts の ProblemResponse.wrap のコメント）。
 // 違反にするもの（ファイル:行。行は handle のメンバーの行）:
 //   - handle の初期化子が ProblemResponse.wrap(...) の呼び出しでない（素の async のアロー関数、try / catch を自分で書いたもの、
 //     別の関数で包んだもの・ProblemResponse.wrap を別の関数で包み直したもの、呼び出さずに ProblemResponse.wrap を代入したもの、
@@ -1954,22 +1956,25 @@ function findHardcodedTextViolations(
 //   （... as any）、ブラケット（ProblemResponse["wrap"](...)）は違反になる（多く検出する方向）。
 // WHY クラスの static メソッド（ProblemResponse.wrap）にした（Issue #262）: backend の本番コードは単独の関数を export しない（ADR
 //   docs/adr/architecture/20261002-class-based-backend.md）。以前は関数 withProblemResponse の識別子で見ていた。
-// 対象: apps/backend の下の presentation/ の下（入れ子も。置き場所の規則は presentation/nested/x.api.ts を許す）の
-//   *.api.<拡張子>（8 つの拡張子。テストは除く）。WHY 拡張子を .ts に限らない: .api.mts などにすると素通りするため。
+// 対象: apps/backend の下の presentation/ の下と、backend/shared の HTTP の境界 shared/http/ の下（どちらも入れ子も。置き場所の
+//   規則は presentation/nested/x.api.ts・shared/http/nested/x.api.ts を許す）の *.api.<拡張子>（8 つの拡張子。テストは除く）。
+//   WHY 拡張子を .ts に限らない: .api.mts などにすると素通りするため。
+//   WHY shared/http/ も対象（Issue #310）: backend/shared を層から意味の単位に分けたとき、shared/presentation/ は shared/http/ に
+//   なった。app-api（PRESENTATION_API）は shared/http/ の *.api を api ファイルとして参照させるので、同じ範囲を包むことを求める。
 // 限界（見逃す方向）: クラスの外の Route Handler（export async function GET、オブジェクトリテラルの handle）、handle 以外の
 //   名前のメンバー、計算されたプロパティ名（["handle"]）、コンストラクタの引数プロパティは見ない。api ファイルは
 //   クラス <Verb><Noun>Api と handle で書く規約（.claude/rules/code/backend.md）で、ほかの形はレビューで見る。
 const PRESENTATION_WITH_PROBLEM_RESPONSE = {
   id: "presentation-with-problem-response",
-  name: "apps/backend の presentation の api ファイル（*.api.ts）のクラスの handle は ProblemResponse.wrap(...) の呼び出しで初期化する（try / catch の手書き・素の async・別の関数で包むのは違反。テストは除く）",
+  name: "apps/backend の presentation と shared/http の api ファイル（*.api.ts）のクラスの handle は ProblemResponse.wrap(...) の呼び出しで初期化する（try / catch の手書き・素の async・別の関数で包むのは違反。テストは除く）",
   appliesTo: (file: string) =>
     isSourceNonTest(file) &&
-    /^apps\/backend\/(?:.+\/)?presentation\/(?:.+\/)?[^/]+\.api\.(?:[cm]?[jt]s|[jt]sx)$/.test(
+    /^apps\/backend\/(?:(?:.+\/)?presentation|shared\/http)\/(?:.+\/)?[^/]+\.api\.(?:[cm]?[jt]s|[jt]sx)$/.test(
       file,
     ),
 };
 
-// handle を包む static メソッド（apps/backend/shared/presentation/problem.ts の ProblemResponse.wrap）のクラス名とメソッド名。
+// handle を包む static メソッド（apps/backend/shared/http/problem.ts の ProblemResponse.wrap）のクラス名とメソッド名。
 // WHY 2 つに分ける: 初期化子の呼び出し先を `<クラス名>.<メソッド名>` の形（受け手が識別子のプロパティアクセス）で見るため。
 const PROBLEM_RESPONSE_CLASS = "ProblemResponse";
 const PROBLEM_RESPONSE_WRAP = "wrap";
@@ -2645,12 +2650,12 @@ const RULE_EXAMPLES: Record<
       ["apps/e2e/playwright.config.ts", "../backend/shared/infra/env", "value"],
       // 例外（vitest.global-setup.ts → test-support/database）は、そのファイルとその参照先の組だけ。
       //   global-setup からでも env を相対パスで参照するのは違反。別のルート直下のファイルから test-support も違反。
-      //   global-setup からでも test-support のほかのファイル・以前の置き場所（shared/infra/database.test-support）は違反。
+      //   global-setup からでも test-support のほかのファイル・以前の置き場所（shared/drizzle/database.test-support）は違反。
       ["vitest.global-setup.ts", "./apps/backend/shared/infra/env", "value"],
       ["vitest.global-setup.ts", "./apps/backend/test-support/other", "value"],
       [
         "vitest.global-setup.ts",
-        "./apps/backend/shared/infra/database.test-support",
+        "./apps/backend/shared/drizzle/database.test-support",
         "value",
       ],
       ["vitest.config.mts", "./apps/backend/test-support/database", "value"],
@@ -2671,11 +2676,7 @@ const RULE_EXAMPLES: Record<
         "@repo/backend/features/todo/internal/presentation/list-todos.api",
         "type",
       ],
-      [
-        "vitest.config.mts",
-        "@repo/backend/shared/presentation/problem",
-        "type",
-      ],
+      ["vitest.config.mts", "@repo/backend/shared/http/problem", "type"],
       // 例外: テスト基盤の vitest.global-setup.ts だけは、test-support/database を相対パスで参照してよい。
       [
         "vitest.global-setup.ts",
@@ -2762,7 +2763,7 @@ const RULE_EXAMPLES: Record<
         "value",
       ],
       [
-        "apps/backend/shared/presentation/x.ts",
+        "apps/backend/shared/http/x.ts",
         "../../../frontend_customer/app/page",
         "type",
       ],
@@ -2807,7 +2808,7 @@ const RULE_EXAMPLES: Record<
       ],
       [
         "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
-        "@repo/backend/shared/infra/database",
+        "@repo/backend/shared/drizzle/database",
         "type",
       ],
       [
@@ -2826,7 +2827,7 @@ const RULE_EXAMPLES: Record<
         "value",
       ],
       // "@/" で apps/shared を指す書き方も "@/" なので違反（Issue #90）。
-      ["apps/backend/shared/infra/database.ts", "@/../shared/env", "value"],
+      ["apps/backend/shared/drizzle/database.ts", "@/../shared/env", "value"],
       // 相対パスで apps/shared を指すのも違反（exports を経由しない。Issue #90）。
       [
         "apps/backend/shared/drizzle/drizzle.config.ts",
@@ -2834,7 +2835,7 @@ const RULE_EXAMPLES: Record<
         "value",
       ],
       [
-        "apps/backend/shared/infra/database.ts",
+        "apps/backend/shared/drizzle/database.ts",
         "../../../shared/logger",
         "value",
       ],
@@ -2847,12 +2848,8 @@ const RULE_EXAMPLES: Record<
     allowed: [
       ["apps/backend/features/todo/internal/domain/x.ts", "./todo", "value"],
       // apps/shared（別の workspace パッケージ）は "@repo/shared/..." で参照してよい（Issue #90）。
-      ["apps/backend/shared/infra/database.ts", "@repo/shared/env", "value"],
-      [
-        "apps/backend/shared/presentation/problem.ts",
-        "@repo/shared/logger",
-        "value",
-      ],
+      ["apps/backend/shared/drizzle/database.ts", "@repo/shared/env", "value"],
+      ["apps/backend/shared/http/problem.ts", "@repo/shared/logger", "value"],
       [
         "apps/backend/shared/drizzle/drizzle.config.ts",
         "@repo/shared/env",
@@ -2866,7 +2863,7 @@ const RULE_EXAMPLES: Record<
       ],
       [
         "apps/backend/features/todo/internal/infra/x.ts",
-        "../../../../shared/infra/database",
+        "../../../../shared/drizzle/database",
         "type",
       ],
       // 前方一致だけが同じ別パッケージ（@repo/backend-extra）はパッケージの参照。
@@ -2893,7 +2890,7 @@ const RULE_EXAMPLES: Record<
     violating: [
       [
         "apps/frontend_customer/instrumentation-node.ts",
-        "@repo/backend/shared/infra/database",
+        "@repo/backend/shared/drizzle/database",
         "value",
       ],
       [
@@ -2987,7 +2984,7 @@ const RULE_EXAMPLES: Record<
       ],
       [
         "apps/frontend_customer/shared/x.ts",
-        "@repo/backend/shared/presentation/problem",
+        "@repo/backend/shared/http/problem",
         "type",
       ],
     ],
@@ -3059,7 +3056,7 @@ const RULE_EXAMPLES: Record<
       // 前方一致だけが同じ別パッケージ（@repo/shared-extra）はパッケージの参照。
       ["apps/frontend_customer/app/page.tsx", "@repo/shared-extra/x", "value"],
       // backend は対象外（層の規則が見る）。
-      ["apps/backend/shared/infra/database.ts", "@repo/shared/env", "value"],
+      ["apps/backend/shared/drizzle/database.ts", "@repo/shared/env", "value"],
     ],
   },
   "feature-api-to-backend": {
@@ -3096,6 +3093,29 @@ const RULE_EXAMPLES: Record<
         "@repo/backend/features/todo/presentation/list-todos.api",
         "type",
       ],
+      // Issue #310: backend/shared で参照してよいのは http/（HTTP の境界。旧 presentation）だけ。ほかの単位、層に分けていたときの
+      //   旧パス（shared/presentation/）、前方一致だけの別ディレクトリ（http-x）は不可（下位互換を残さない）。
+      [
+        "apps/frontend_customer/features/todo/api/todo-api.ts",
+        "@repo/backend/shared/error/domain-error",
+        "type",
+      ],
+      [
+        "apps/frontend_customer/features/todo/api/todo-api.ts",
+        "@repo/backend/shared/presentation/problem",
+        "type",
+      ],
+      [
+        "apps/frontend_customer/features/todo/api/todo-api.ts",
+        "@repo/backend/shared/http-x/problem",
+        "type",
+      ],
+      //   http/ でも値の参照は不可（型だけ）。
+      [
+        "apps/frontend_customer/features/todo/api/todo-api.ts",
+        "@repo/backend/shared/http/problem",
+        "value",
+      ],
     ],
     allowed: [
       [
@@ -3110,7 +3130,12 @@ const RULE_EXAMPLES: Record<
       ],
       [
         "apps/frontend_customer/features/todo/api/todo-api.ts",
-        "@repo/backend/shared/presentation/problem",
+        "@repo/backend/shared/http/problem",
+        "type",
+      ],
+      [
+        "apps/frontend_customer/features/todo/api/todo-api.ts",
+        "../../../../backend/shared/http/problem-detail.en",
         "type",
       ],
     ],
@@ -3205,29 +3230,6 @@ const RULE_EXAMPLES: Record<
   },
   domain: {
     violating: [
-      // Issue #230: domain から backend/shared の application へは、トランザクションの印の型と口のモジュール
-      //   （shared/application/transaction）を型だけ（import type）で参照するときだけ許す。値の import・re-export と、
-      //   shared/application の別モジュール・port の下の深いパスは違反のまま（型だけでも）。
-      [
-        "apps/backend/features/todo/internal/domain/x.ts",
-        "../../../../shared/application/transaction",
-        "value",
-      ],
-      [
-        "apps/backend/shared/domain/x.ts",
-        "../application/transaction",
-        "re-export",
-      ],
-      [
-        "apps/backend/features/todo/internal/domain/x.ts",
-        "../../../../shared/application/x",
-        "type",
-      ],
-      [
-        "apps/backend/shared/domain/x.ts",
-        "../application/transaction/x",
-        "type",
-      ],
       [
         "apps/backend/features/todo/internal/domain/x.ts",
         "next/server",
@@ -3250,11 +3252,6 @@ const RULE_EXAMPLES: Record<
       ],
       [
         "apps/backend/features/todo/internal/domain/x.ts",
-        "../../../../shared/presentation/problem",
-        "value",
-      ],
-      [
-        "apps/backend/features/todo/internal/domain/x.ts",
         "@/features/todo",
         "value",
       ],
@@ -3269,7 +3266,11 @@ const RULE_EXAMPLES: Record<
         "@repo/shared/logger",
         "value",
       ],
-      ["apps/backend/shared/domain/x.ts", "@repo/shared/env", "type"],
+      [
+        "apps/backend/features/todo/internal/domain/x.ts",
+        "@repo/shared/env",
+        "type",
+      ],
       // 許すのは now だけで、前方一致だけが同じ別のモジュール（now-helper）は不可。
       [
         "apps/backend/features/todo/internal/domain/x.ts",
@@ -3281,6 +3282,34 @@ const RULE_EXAMPLES: Record<
       [
         "apps/backend/features/todo/internal/domain/x.ts",
         "../../../shared/internal/domain/domain-error",
+        "value",
+      ],
+      // Issue #310: backend/shared で許すのは単位（BACKEND_SHARED_UNITS）の下だけ。層に分けていたときの旧パス
+      //   （shared/domain/）、一覧に無い単位（shared/foo/）、単位の外（shared の直下）、前方一致だけの別ディレクトリ（shared-x）は不可。
+      [
+        "apps/backend/features/todo/internal/domain/x.ts",
+        "../../../../shared/domain/domain-error",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/domain/x.ts",
+        "../../../../shared/foo/x",
+        "type",
+      ],
+      [
+        "apps/backend/features/todo/internal/domain/x.ts",
+        "../../../../shared/x",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/domain/x.ts",
+        "../../../../shared-x/error/y",
+        "value",
+      ],
+      // テストだけが使うコード（test-support）は層に属さない。
+      [
+        "apps/backend/features/todo/internal/domain/x.ts",
+        "../../../../test-support/database",
         "value",
       ],
       // Issue #98 より前の置き場所（features/ を挟まない apps/backend/todo/）は層に属さない。
@@ -3301,14 +3330,46 @@ const RULE_EXAMPLES: Record<
       ["apps/backend/features/todo/internal/domain/x.ts", "./todo", "type"],
       [
         "apps/backend/features/todo/internal/domain/x.ts",
-        "../../../../shared/domain/domain-error",
+        "../../../../shared/error/domain-error",
         "value",
       ],
-      // shared という名前の feature も、backend/shared の domain を使ってよい（自 feature と backend/shared の区別は名前ではなく場所）。
+      // shared という名前の feature も、backend/shared を使ってよい（自 feature と backend/shared の区別は名前ではなく場所）。
       [
         "apps/backend/features/shared/internal/domain/x.ts",
-        "../../../../shared/domain/domain-error",
+        "../../../../shared/error/domain-error",
         "value",
+      ],
+      // Issue #310（ユーザー判断）: feature のどの層も backend/shared のどの単位も使ってよい。Issue #230 では
+      //   shared の application（transaction）を型だけに限り、drizzle（旧 infra）・http（旧 presentation）は不可だった。
+      [
+        "apps/backend/features/todo/internal/domain/todo-repository.ts",
+        "../../../../shared/transaction/transaction",
+        "type",
+      ],
+      [
+        "apps/backend/features/todo/internal/domain/x.ts",
+        "../../../../shared/transaction/transaction",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/domain/x.ts",
+        "../../../../shared/transaction/transaction",
+        "re-export",
+      ],
+      [
+        "apps/backend/features/todo/internal/domain/x.ts",
+        "../../../../shared/drizzle/database",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/domain/x.ts",
+        "../../../../shared/http/problem",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/domain/x.ts",
+        "../../../../shared/change-log/change-operation",
+        "type",
       ],
       [
         "apps/backend/features/todo/internal/domain/x.ts",
@@ -3321,15 +3382,6 @@ const RULE_EXAMPLES: Record<
         "@repo/shared/now",
         "value",
       ],
-      ["apps/backend/shared/domain/x.ts", "@repo/shared/now", "value"],
-      // Issue #230: トランザクションの印の型 Transaction（shared/application/transaction）は型だけ参照してよい
-      //   （Repository の interface の引数。Issue #220 では違反の例だった）。feature の domain と backend/shared の domain の両方。
-      [
-        "apps/backend/features/todo/internal/domain/todo-repository.ts",
-        "../../../../shared/application/transaction",
-        "type",
-      ],
-      ["apps/backend/shared/domain/x.ts", "../application/transaction", "type"],
       // next / react / DB 以外のパッケージは使ってよい（Todo の不変条件を zod のスキーマで宣言する。Issue #88）。
       ["apps/backend/features/todo/internal/domain/x.ts", "zod", "value"],
     ],
@@ -3348,8 +3400,11 @@ const RULE_EXAMPLES: Record<
         "value",
       ],
       ["apps/backend/features/todo/internal/application/x.ts", "pg", "type"],
-      ["apps/backend/shared/domain/x.ts", "drizzle-orm/node-postgres", "type"],
-      ["apps/backend/shared/application/x.ts", "drizzle-orm", "value"],
+      [
+        "apps/backend/features/shared/internal/domain/x.ts",
+        "drizzle-orm/node-postgres",
+        "type",
+      ],
     ],
     allowed: [
       // infra / presentation は対象外（infra は永続化の実装を持つ層）。
@@ -3358,11 +3413,20 @@ const RULE_EXAMPLES: Record<
         "drizzle-orm/pg-core",
         "value",
       ],
-      ["apps/backend/shared/infra/database.ts", "pg", "value"],
       [
         "apps/backend/features/todo/internal/presentation/x.api.ts",
         "drizzle-orm",
         "type",
+      ],
+      // Issue #310: backend/shared は層を持たないので対象外（どの単位も）。feature の domain・application が shared を経由して
+      //   DB を使うことは縛らない（パッケージの直接の参照だけを見る。ユーザー判断）。
+      ["apps/backend/shared/drizzle/database.ts", "pg", "value"],
+      ["apps/backend/shared/transaction/transaction.ts", "drizzle-orm", "type"],
+      ["apps/backend/shared/error/x.ts", "drizzle-orm/pg-core", "value"],
+      [
+        "apps/backend/features/todo/internal/domain/x.ts",
+        "../../../../shared/drizzle/database",
+        "value",
       ],
       // 名前の前方一致だけが同じ別のパッケージは対象外（パッケージ名で比べる）。
       ["apps/backend/features/todo/internal/domain/x.ts", "pg-format", "value"],
@@ -3401,12 +3465,6 @@ const RULE_EXAMPLES: Record<
         "../infra/todo-repository.postgres",
         "value",
       ],
-      // Issue #215: runner の実体（infra）は application から参照しない（backend/shared/application の TransactionRunner を受け取る。Issue #220）。
-      [
-        "apps/backend/features/todo/internal/application/x.command.ts",
-        "../../../../shared/infra/transaction.postgres",
-        "value",
-      ],
       [
         "apps/backend/features/todo/internal/application/x.ts",
         "../presentation/list-todos.api",
@@ -3435,6 +3493,17 @@ const RULE_EXAMPLES: Record<
       [
         "apps/backend/features/todo/internal/application/x.ts",
         "../../../../../frontend_customer/shared/x",
+        "value",
+      ],
+      // Issue #310: 層に分けていたときの旧パス（shared/application/）と一覧に無い単位は不可（下位互換を残さない）。
+      [
+        "apps/backend/features/todo/internal/application/x.ts",
+        "../../../../shared/application/transaction",
+        "type",
+      ],
+      [
+        "apps/backend/features/todo/internal/application/x.ts",
+        "../../../../shared/infra/database",
         "value",
       ],
       // apps/shared の env・logger は application から使わない（Issue #90。SHARED_MODULES_BY_LAYER）。
@@ -3472,14 +3541,30 @@ const RULE_EXAMPLES: Record<
       ],
       [
         "apps/backend/features/todo/internal/application/x.ts",
-        "../../../../shared/domain/domain-error",
+        "../../../../shared/error/domain-error",
         "value",
       ],
-      // Issue #220・#230: トランザクションを張る口（TransactionRunner）と印の型（Transaction）は backend/shared の application。
+      // トランザクションを張る口（TransactionRunner）と印の型（Transaction）。Issue #220・#230。
       [
         "apps/backend/features/todo/internal/application/x.command.ts",
-        "../../../../shared/application/transaction",
+        "../../../../shared/transaction/transaction",
         "type",
+      ],
+      // Issue #310（ユーザー判断）: backend/shared のどの単位も使ってよい（Issue #215 では runner の実体 transaction.postgres は不可だった）。
+      [
+        "apps/backend/features/todo/internal/application/x.command.ts",
+        "../../../../shared/drizzle/transaction.postgres",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/application/x.ts",
+        "../../../../shared/http/problem",
+        "type",
+      ],
+      [
+        "apps/backend/features/todo/internal/application/x.ts",
+        "../../../../shared/change-log/change-log",
+        "value",
       ],
       // 現在時刻の出口（now）はすべての層で使ってよい。
       [
@@ -3492,15 +3577,10 @@ const RULE_EXAMPLES: Record<
   presentation: {
     violating: [
       // Issue #208: 自モジュールの expose は presentation からでも不可（expose は自モジュールの internal を使うので循環する）。
-      //   backend/shared の presentation から feature の expose も不可。expose の前方一致だけの別ディレクトリも層に属さない。
+      //   expose の前方一致だけの別ディレクトリも層に属さない。
       [
         "apps/backend/features/todo/internal/presentation/x.api.ts",
         "../../expose/x",
-        "value",
-      ],
-      [
-        "apps/backend/shared/presentation/x.ts",
-        "../../features/notification/expose/notifier",
         "value",
       ],
       [
@@ -3508,8 +3588,8 @@ const RULE_EXAMPLES: Record<
         "../../../notification/expose-x/notifier",
         "value",
       ],
-      // reviewer の指摘（Issue #98）: feature の名前が shared でも、自 feature の domain は型だけ（backend/shared の
-      //   domain と名前で取り違えない）。
+      // reviewer の指摘（Issue #98）: feature の名前が shared でも、自 feature の domain は型だけ（backend/shared と名前で
+      //   取り違えない）。
       [
         "apps/backend/features/shared/internal/presentation/x.api.ts",
         "../domain/x",
@@ -3541,16 +3621,11 @@ const RULE_EXAMPLES: Record<
         "../domain/todo",
         "value",
       ],
-      // Issue #144: 定数だけの値の import を許すのは、自 feature の domain からだけ。他 feature の domain、backend/shared の
-      //   presentation から feature の domain、domain 以外の層（infra の schema）からは不可。
+      // Issue #144: 定数だけの値の import を許すのは、自 feature の domain からだけ。他 feature の domain、domain 以外の層
+      //   （infra の schema）からは不可。
       [
         "apps/backend/features/todo/internal/presentation/x.api.ts",
         "../../../other/internal/domain/other",
-        "constant",
-      ],
-      [
-        "apps/backend/shared/presentation/x.ts",
-        "../../features/todo/internal/domain/todo",
         "constant",
       ],
       [
@@ -3578,21 +3653,15 @@ const RULE_EXAMPLES: Record<
         "@/shared/x",
         "value",
       ],
+      // Issue #310: 層に分けていたときの旧パス（shared/presentation/・shared/infra/）は単位ではないので不可（下位互換を残さない）。
       [
-        "apps/backend/shared/presentation/x.ts",
-        "../../features/todo/internal/infra/todo-repository.postgres",
+        "apps/backend/features/todo/internal/presentation/x.api.ts",
+        "../../../../shared/presentation/problem",
         "value",
       ],
-      // Issue #123: backend/shared の infra は Repository の実装の名前でも不可（許すのは自 feature の *-repository.postgres だけ）。
       [
         "apps/backend/features/todo/internal/presentation/x.api.ts",
         "../../../../shared/infra/todo-repository.postgres",
-        "value",
-      ],
-      //   feature の名前が shared でも、backend/shared の infra を自 feature と取り違えない。
-      [
-        "apps/backend/features/shared/internal/presentation/x.api.ts",
-        "../../../../shared/infra/shared-repository.postgres",
         "value",
       ],
       //   自 feature の infra でも、InMemory の実装（上の todo-repository.in-memory）・schema・前方一致だけが同じ別ファイル・
@@ -3622,24 +3691,7 @@ const RULE_EXAMPLES: Record<
         "../infra/repository.postgres",
         "value",
       ],
-      //   backend/shared/infra は database と transaction.postgres だけ。前方一致だけが同じ別ファイル、テスト基盤（test-support/database。
-      //   層に属さない）は不可。
-      [
-        "apps/backend/features/todo/internal/presentation/x.api.ts",
-        "../../../../shared/infra/database-helper",
-        "value",
-      ],
-      //   Issue #215: 書き込みの口（writer）・InMemory の runner（test-support）・前方一致だけの別ファイルは不可。
-      [
-        "apps/backend/features/todo/internal/presentation/x.api.ts",
-        "../../../../shared/infra/writer",
-        "value",
-      ],
-      [
-        "apps/backend/features/todo/internal/presentation/x.api.ts",
-        "../../../../shared/infra/transaction.postgres-helper",
-        "value",
-      ],
+      //   テスト基盤（test-support。層に属さない。InMemory の runner も）は不可。
       [
         "apps/backend/features/todo/internal/presentation/x.api.ts",
         "../../../../test-support/transaction-runner.in-memory",
@@ -3650,39 +3702,20 @@ const RULE_EXAMPLES: Record<
         "../../../../test-support/database",
         "value",
       ],
-      //   backend/shared/presentation は何も組み立てないので、database も runner も Repository の実装の名前のファイルも不可。
-      ["apps/backend/shared/presentation/x.ts", "../infra/database", "value"],
-      [
-        "apps/backend/shared/presentation/x.ts",
-        "../infra/transaction.postgres",
-        "value",
-      ],
-      [
-        "apps/backend/shared/presentation/x.ts",
-        "../infra/x-repository.postgres",
-        "value",
-      ],
-      // infra は上の 2 種類だけ。自 feature の infra の logger、backend/shared/infra のファイル（Issue #90 で
-      //   logger を移した後の旧パスを含む）は不可（Issue #85・#90）。
+      // 自 feature の infra は Repository の実装だけ。自 feature の infra の logger は不可（Issue #85・#90）。
       [
         "apps/backend/features/todo/internal/presentation/x.api.ts",
         "../infra/logger",
         "value",
       ],
-      ["apps/backend/shared/presentation/x.ts", "../infra/database", "type"],
-      [
-        "apps/backend/shared/presentation/problem.ts",
-        "../infra/logger",
-        "value",
-      ],
-      // apps/shared で使ってよいのは logger だけ。env、前方一致だけが同じ別ファイル、パッケージ名だけ（apps/shared）は不可（Issue #90）。
+      // apps/shared で使ってよいのは logger と now だけ。env、前方一致だけが同じ別ファイル、パッケージ名だけ（apps/shared）は不可（Issue #90）。
       [
         "apps/backend/features/todo/internal/presentation/x.api.ts",
         "@repo/shared/env",
         "value",
       ],
       [
-        "apps/backend/shared/presentation/x.ts",
+        "apps/backend/features/todo/internal/presentation/x.api.ts",
         "@repo/shared/logger-helper",
         "value",
       ],
@@ -3699,7 +3732,6 @@ const RULE_EXAMPLES: Record<
         "zod",
         "value",
       ],
-      ["apps/backend/shared/presentation/x.ts", "zod", "value"],
       // Issue #123: api ファイルがモジュールの最下部で本番の handler を組み立てる（Postgres の Repository の実装とプール）。
       [
         "apps/backend/features/todo/internal/presentation/x.api.ts",
@@ -3713,20 +3745,41 @@ const RULE_EXAMPLES: Record<
       ],
       [
         "apps/backend/features/todo/internal/presentation/x.api.ts",
-        "../../../../shared/infra/database",
+        "../../../../shared/drizzle/database",
         "value",
       ],
       // Issue #215: command に渡すトランザクションの runner（PostgresTransactionRunner）の組み立て。
       [
         "apps/backend/features/todo/internal/presentation/x.api.ts",
-        "../../../../shared/infra/transaction.postgres",
+        "../../../../shared/drizzle/transaction.postgres",
         "value",
       ],
-      // Issue #220: トランザクションの口（TransactionRunner。backend/shared の application）。
       [
         "apps/backend/features/todo/internal/presentation/x.api.ts",
-        "../../../../shared/application/transaction",
+        "../../../../shared/transaction/transaction",
         "type",
+      ],
+      // Issue #310（ユーザー判断）: backend/shared のどの単位のどのファイルも使ってよい（Issue #123・#215 では shared の infra を
+      //   database と transaction.postgres だけに絞り、writer や前方一致だけの別ファイルは不可だった）。
+      [
+        "apps/backend/features/todo/internal/presentation/x.api.ts",
+        "../../../../shared/drizzle/writer",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/presentation/x.api.ts",
+        "../../../../shared/drizzle/database-helper",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/presentation/x.api.ts",
+        "../../../../shared/change-log/change-log",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/presentation/x.api.ts",
+        "../../../../shared/error/domain-error",
+        "value",
       ],
       //   feature の名前が shared でも、自 feature の infra の Repository の実装は可。
       [
@@ -3751,7 +3804,7 @@ const RULE_EXAMPLES: Record<
       ],
       [
         "apps/backend/features/todo/internal/presentation/x.api.ts",
-        "../../../../shared/presentation/problem",
+        "../../../../shared/http/problem",
         "value",
       ],
       [
@@ -3771,18 +3824,8 @@ const RULE_EXAMPLES: Record<
         "../domain/x",
         "constant",
       ],
-      [
-        "apps/backend/shared/presentation/problem.ts",
-        "../domain/domain-error",
-        "value",
-      ],
-      // ログの唯一の出口（Issue #85。Issue #90 で apps/shared に移した）。problem.ts が想定外の例外を logger.emit（server_error）で残す。
-      //   feature の presentation からも使える。相対パスで書いても参照先は同じ（書き方は backend-relative-only が見る）。
-      [
-        "apps/backend/shared/presentation/problem.ts",
-        "@repo/shared/logger",
-        "value",
-      ],
+      // ログの唯一の出口（Issue #85。Issue #90 で apps/shared に移した）。相対パスで書いても参照先は同じ（書き方は
+      //   backend-relative-only が見る）。
       [
         "apps/backend/features/todo/internal/presentation/x.api.ts",
         "@repo/shared/logger",
@@ -3835,53 +3878,33 @@ const RULE_EXAMPLES: Record<
         "next/server",
         "value",
       ],
-      // apps/shared で使ってよいのは env・logger だけ。前方一致だけが同じ別ファイル、パッケージ名だけは不可（Issue #90）。
+      // apps/shared で使ってよいのは env・logger・now だけ。前方一致だけが同じ別ファイル、パッケージ名だけは不可（Issue #90）。
       [
         "apps/backend/features/todo/internal/infra/x.ts",
         "@repo/shared/env-helper",
         "value",
       ],
-      ["apps/backend/shared/infra/x.ts", "@repo/shared", "value"],
-      // Issue #220: application で参照してよいのは、infra が実装する port（shared/application/transaction）だけ。
-      //   自 feature の application（command）、backend/shared/application の別モジュール、前方一致だけが同じ別ファイルは不可
-      //   （型だけでも）。
+      [
+        "apps/backend/features/todo/internal/infra/x.ts",
+        "@repo/shared",
+        "value",
+      ],
+      // Issue #220: 自 feature の application（command）は不可（型だけでも）。
       [
         "apps/backend/features/todo/internal/infra/x.ts",
         "../application/create-todo.command",
         "type",
       ],
-      [
-        "apps/backend/features/todo/internal/infra/x.ts",
-        "../../../../shared/application/x",
-        "type",
-      ],
-      [
-        "apps/backend/shared/infra/x.ts",
-        "../application/transaction-helper",
-        "value",
-      ],
-      // port の下の深いパス（transaction/x）も port ではない（完全一致だけを許す）。
-      [
-        "apps/backend/shared/infra/x.ts",
-        "../application/transaction/x",
-        "type",
-      ],
-      // Issue #224: port は型だけ（import type）。値の import・re-export・dynamic import（typeOnly が false）は、port のモジュールに
-      //   実行時の export が増えたときに infra が application のロジックを実行時に取り込めるので違反。
-      [
-        "apps/backend/shared/infra/transaction.postgres.ts",
-        "../application/transaction",
-        "value",
-      ],
+      // Issue #310: 層に分けていたときの旧パス（shared/application/・shared/infra/）は単位ではないので不可（下位互換を残さない）。
       [
         "apps/backend/features/todo/internal/infra/x.ts",
         "../../../../shared/application/transaction",
-        "value",
+        "type",
       ],
       [
         "apps/backend/features/todo/internal/infra/x.ts",
-        "../../../../shared/application/transaction",
-        "re-export",
+        "../../../../shared/infra/database",
+        "value",
       ],
     ],
     allowed: [
@@ -3890,20 +3913,42 @@ const RULE_EXAMPLES: Record<
         "../domain/todo",
         "value",
       ],
-      // Issue #220: infra が実装する port（TransactionRunner）。runner の実装と、feature の infra（型）から。
+      // Issue #220: infra が実装する port（TransactionRunner）。
       [
-        "apps/backend/shared/infra/transaction.postgres.ts",
-        "../application/transaction",
+        "apps/backend/features/todo/internal/infra/x.ts",
+        "../../../../shared/transaction/transaction",
         "type",
+      ],
+      // Issue #310（ユーザー判断）: backend/shared のどの単位も、値でも re-export でも使ってよい（Issue #224 では port を型だけに
+      //   限っていた）。
+      [
+        "apps/backend/features/todo/internal/infra/x.ts",
+        "../../../../shared/transaction/transaction",
+        "value",
       ],
       [
         "apps/backend/features/todo/internal/infra/x.ts",
-        "../../../../shared/application/transaction",
-        "type",
+        "../../../../shared/transaction/transaction",
+        "re-export",
+      ],
+      [
+        "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
+        "../../../../shared/drizzle/writer",
+        "value",
       ],
       [
         "apps/backend/features/todo/internal/infra/x.ts",
-        "../../../../shared/domain/domain-error",
+        "../../../../shared/http/problem",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/infra/x.ts",
+        "../../../../shared/change-log/change-log.schema",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/infra/x.ts",
+        "../../../../shared/error/domain-error",
         "value",
       ],
       [
@@ -3917,8 +3962,16 @@ const RULE_EXAMPLES: Record<
         "value",
       ],
       // 環境変数の入口とログの出口（Issue #90 で apps/shared に移した）。
-      ["apps/backend/shared/infra/database.ts", "@repo/shared/env", "value"],
-      ["apps/backend/shared/infra/database.ts", "@repo/shared/logger", "value"],
+      [
+        "apps/backend/features/todo/internal/infra/x.ts",
+        "@repo/shared/env",
+        "value",
+      ],
+      [
+        "apps/backend/features/todo/internal/infra/x.ts",
+        "@repo/shared/logger",
+        "value",
+      ],
       [
         "apps/backend/features/todo/internal/infra/x.ts",
         "@repo/shared/now",
@@ -3934,50 +3987,77 @@ const RULE_EXAMPLES: Record<
   "backend-shared": {
     violating: [
       // reviewer の指摘（Issue #98）: features/shared（shared という名前の feature）は backend/shared ではない。
-      //   層に属さない shared/drizzle/drizzle.config.ts も、この規則で features/ への参照を止める。
+      //   drizzle-kit の設定 shared/drizzle/drizzle.config.ts も、この規則で features/ への参照を止める（schema は glob の文字列で指す）。
       [
         "apps/backend/shared/drizzle/drizzle.config.ts",
         "../../features/shared/internal/infra/schema",
         "value",
       ],
       [
-        "apps/backend/shared/domain/x.ts",
+        "apps/backend/shared/error/x.ts",
         "../../features/shared/internal/domain/x",
         "type",
       ],
       [
-        "apps/backend/shared/presentation/x.ts",
+        "apps/backend/shared/http/x.ts",
         "../../features/todo/internal/domain/todo",
         "type",
       ],
+      // Issue #144 の定数だけの import でも、backend/shared から feature は不可。
       [
-        "apps/backend/shared/presentation/x.ts",
+        "apps/backend/shared/http/x.ts",
+        "../../features/todo/internal/domain/todo",
+        "constant",
+      ],
+      [
+        "apps/backend/shared/drizzle/x.ts",
         "../../features/todo/internal/infra/todo-repository.postgres",
         "value",
       ],
-      ["apps/backend/shared/presentation/x.ts", "@/features/todo", "value"],
+      // Issue #208: feature の公開の入口（expose）も feature なので不可。
+      [
+        "apps/backend/shared/change-log/x.ts",
+        "../../features/notification/expose/notifier",
+        "value",
+      ],
+      // テストだけが使うコード（test-support）も backend/shared の外。
+      [
+        "apps/backend/shared/drizzle/x.ts",
+        "../../test-support/database",
+        "value",
+      ],
+      ["apps/backend/shared/http/x.ts", "@/features/todo", "value"],
       ["apps/backend/shared/x.ts", "@/app/page", "value"],
-      ["apps/backend/shared/domain/x.ts", "@/shared/x", "value"],
-      ["apps/backend/shared/presentation/x.ts", "next/server", "value"],
-      // 前方一致だけが同じ別ディレクトリ（apps/shared-x）は apps/shared ではない（Issue #90）。
-      ["apps/backend/shared/infra/x.ts", "../../../shared-x/y", "value"],
+      ["apps/backend/shared/foo/x.ts", "@/shared/x", "value"],
+      ["apps/backend/shared/http/x.ts", "next/server", "value"],
+      ["apps/backend/shared/error/x.ts", "react", "type"],
+      // 前方一致だけが同じ別ディレクトリ（apps/shared-x・apps/backend/shared-x）は apps/shared・backend/shared ではない（Issue #90）。
+      ["apps/backend/shared/drizzle/x.ts", "../../../shared-x/y", "value"],
+      ["apps/backend/shared/drizzle/x.ts", "../../shared-x/y", "value"],
     ],
     allowed: [
+      // Issue #310: backend/shared の中は単位をまたいでどこでも参照してよい（層に分けていたときの向きの縛りは無くした）。
+      ["apps/backend/shared/http/problem.ts", "../error/domain-error", "value"],
+      ["apps/backend/shared/http/json-body.ts", "./problem", "value"],
       [
-        "apps/backend/shared/presentation/x.ts",
-        "../domain/domain-error",
+        "apps/backend/shared/drizzle/transaction.postgres.ts",
+        "../transaction/transaction",
         "value",
       ],
-      ["apps/backend/shared/presentation/json-body.ts", "./problem", "value"],
-      ["apps/backend/shared/domain/x.ts", "node:crypto", "value"],
-      ["apps/backend/shared/presentation/x.ts", "some-package/sub", "value"],
-      // apps/shared（frontend と backend で共通の基盤。Issue #90）。
-      ["apps/backend/shared/infra/database.ts", "@repo/shared/env", "value"],
+      ["apps/backend/shared/error/x.ts", "../http/problem", "value"],
       [
-        "apps/backend/shared/presentation/problem.ts",
-        "@repo/shared/logger",
-        "value",
+        "apps/backend/shared/change-log/change-log.ts",
+        "../drizzle/database",
+        "type",
       ],
+      ["apps/backend/shared/error/x.ts", "node:crypto", "value"],
+      ["apps/backend/shared/http/x.ts", "some-package/sub", "value"],
+      // DB のパッケージも単位を問わず使える（core-to-persistence は feature の domain・application だけ）。
+      ["apps/backend/shared/transaction/x.ts", "drizzle-orm", "type"],
+      // apps/shared（frontend と backend で共通の基盤。Issue #90）。単位ごとの縛りは無い（Issue #310）。
+      ["apps/backend/shared/drizzle/database.ts", "@repo/shared/env", "value"],
+      ["apps/backend/shared/http/problem.ts", "@repo/shared/logger", "value"],
+      ["apps/backend/shared/error/x.ts", "@repo/shared/env", "value"],
     ],
   },
   app: {
@@ -4049,7 +4129,7 @@ const RULE_EXAMPLES: Record<
       ["apps/shared/log-event.ts", "zod", "value"],
       ["apps/shared/logger.ts", "zod", "type"],
       // apps/shared の外のファイルは、この規則の対象外。
-      ["apps/backend/shared/infra/database.ts", "pg", "value"],
+      ["apps/backend/shared/drizzle/database.ts", "pg", "value"],
       ["apps/frontend_customer/app/page.tsx", "react", "value"],
       ["apps/shared-x/y.ts", "react", "value"],
     ],
@@ -4252,7 +4332,7 @@ const RULE_EXAMPLES: Record<
       ],
       [
         "apps/backend/features/todo/internal/domain/x.ts",
-        "../../../../shared/domain/domain-error",
+        "../../../../shared/error/domain-error",
         "value",
       ],
       // 参照元が apps/backend/features/ の外なら対象外（test-support は InMemory の実装のために internal を使う。backend/shared は
@@ -4263,7 +4343,7 @@ const RULE_EXAMPLES: Record<
         "value",
       ],
       [
-        "apps/backend/shared/infra/x.ts",
+        "apps/backend/shared/drizzle/x.ts",
         "../../features/todo/internal/infra/schema",
         "value",
       ],
@@ -4342,7 +4422,7 @@ const RULE_EXAMPLES: Record<
       ],
       // 参照元が apps/backend/features/ の外なら対象外（backend/shared は backend-shared が止める）。
       [
-        "apps/backend/shared/presentation/x.ts",
+        "apps/backend/shared/http/x.ts",
         "../../features/notification/expose/notifier",
         "value",
       ],
@@ -4425,12 +4505,12 @@ const RULE_EXAMPLES: Record<
       // 組み立ての場所として、backend/shared（database など。どの層も）と apps/shared の env も使える。
       [
         "apps/backend/features/notification/expose/notifier.ts",
-        "../../../shared/infra/database",
+        "../../../shared/drizzle/database",
         "value",
       ],
       [
         "apps/backend/features/notification/expose/notifier.ts",
-        "../../../shared/domain/domain-error",
+        "../../../shared/error/domain-error",
         "type",
       ],
       [
@@ -4481,6 +4561,23 @@ const RULE_EXAMPLES: Record<
         "@repo/backend/features/todo/presentation/list-todos.api",
         "value",
       ],
+      // Issue #310: backend/shared の api ファイルは http/ の直下だけ。層に分けていたときの旧パス（shared/presentation/）、
+      //   http/ の下の深い階層、api ファイルでない http/ のモジュールは不可。
+      [
+        "apps/frontend_customer/app/api/todos/route.ts",
+        "@repo/backend/shared/presentation/health.api",
+        "value",
+      ],
+      [
+        "apps/frontend_customer/app/api/todos/route.ts",
+        "@repo/backend/shared/http/nested/health.api",
+        "value",
+      ],
+      [
+        "apps/frontend_customer/app/api/todos/route.ts",
+        "@repo/backend/shared/http/problem",
+        "value",
+      ],
     ],
     allowed: [
       [
@@ -4497,6 +4594,11 @@ const RULE_EXAMPLES: Record<
         "apps/frontend_customer/app/api/todos/route.ts",
         "@repo/backend/features/todo/internal/presentation/create-todo.api",
         "type",
+      ],
+      [
+        "apps/frontend_customer/app/api/health/route.ts",
+        "@repo/backend/shared/http/health.api",
+        "value",
       ],
     ],
   },
@@ -4547,20 +4649,24 @@ const PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/backend/todo/domain/todo.ts",
     // 前方一致だけが同じ別ディレクトリ（features-x・shared-x）は features/・shared/ ではない。
     "apps/backend/features-x/todo/domain/x.ts",
-    "apps/backend/shared-x/domain/x.ts",
-    // Issue #98: 直下の設定ファイルの例外は無くした（shared/drizzle/ に移した）。
+    "apps/backend/shared-x/error/x.ts",
+    // Issue #98: 直下の設定ファイルの例外は無くした（drizzle-kit の設定は shared/drizzle/ に置く）。
     "apps/backend/drizzle.config.ts",
-    // shared/drizzle/ に置けるソースは drizzle-kit の設定（drizzle.config.<拡張子>）だけ。アプリのコードや meta/ の下、
-    //   ほかの名前の設定は違反。
-    "apps/backend/shared/drizzle/app.ts",
-    "apps/backend/shared/drizzle/meta/x.ts",
-    "apps/backend/shared/drizzle/other.config.ts",
-    "apps/backend/shared/drizzle/drizzle.config.ts.bak.ts",
-    // reviewer の指摘（Issue #98）: 例外は apps/backend/shared/drizzle/ 直下の設定だけ。features/shared/drizzle/（shared という
-    //   名前の feature）と、shared/drizzle/ の下の階層には広げない。
+    // Issue #310: backend/shared/ に置けるのは単位（BACKEND_SHARED_UNITS: error・transaction・http・drizzle・change-log）の下だけ。
+    //   層に分けていたときの旧ディレクトリ（domain・application・presentation・infra）、一覧に無い単位、前方一致だけが同じ
+    //   別ディレクトリ（http-x・errors）、単位と同じ名前のファイル（shared/drizzle.ts）は違反。
+    "apps/backend/shared/domain/domain-error.ts",
+    "apps/backend/shared/application/transaction.ts",
+    "apps/backend/shared/presentation/problem.ts",
+    "apps/backend/shared/infra/database.ts",
+    "apps/backend/shared/foo/x.ts",
+    "apps/backend/shared/http-x/x.ts",
+    "apps/backend/shared/errors/x.ts",
+    "apps/backend/shared/drizzle.ts",
+    // reviewer の指摘（Issue #98）: features/shared/（shared という名前の feature）は backend/shared ではない（単位の名前の
+    //   ディレクトリを置いても internal/ の外なので違反）。
     "apps/backend/features/shared/drizzle/drizzle.config.ts",
-    "apps/backend/shared/drizzle/sub/drizzle.config.ts",
-    "apps/backend/shared/drizzle/sub/x.ts",
+    "apps/backend/features/shared/error/x.ts",
     "apps/backend/features/shared/x.ts",
     // Issue #181: test-support/ は apps/backend の直下だけ。feature・shared の下（層の外）、前方一致・後方一致だけが同じ別ディレクトリ、
     //   同じ名前のファイルは違反。
@@ -4581,7 +4687,7 @@ const PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
   ],
   placed: [
     "apps/backend/features/todo/internal/domain/todo.ts",
-    "apps/backend/shared/presentation/problem.ts",
+    "apps/backend/shared/http/problem.ts",
     "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
     "apps/backend/features/todo/internal/presentation/nested/x.api.ts",
     // Issue #208: 他のモジュールへ公開する入口（features/<f>/expose/ の直下のファイル。8 つの拡張子のどれでも）。
@@ -4589,8 +4695,16 @@ const PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/backend/features/todo/expose/x.mts",
     // feature の名前が shared でも、features/ の下なら feature（backend/shared ではない）。
     "apps/backend/features/shared/internal/domain/x.ts",
+    // Issue #310: backend/shared の単位の下（入れ子も、8 つの拡張子のどれでも）。drizzle-kit の設定（drizzle.config.ts）も
+    //   drizzle/ の中の普通のソースとして置ける（Issue #98 からの例外は不要になった）。
+    "apps/backend/shared/error/domain-error.ts",
+    "apps/backend/shared/transaction/transaction.ts",
+    "apps/backend/shared/http/nested/x.mts",
+    "apps/backend/shared/drizzle/database.ts",
     "apps/backend/shared/drizzle/drizzle.config.ts",
     "apps/backend/shared/drizzle/drizzle.config.mts",
+    "apps/backend/shared/drizzle/migrations/meta/x.ts",
+    "apps/backend/shared/change-log/change-log.schema.ts",
     // Issue #181: テストだけが使うコードの置き場所（直下の test-support/。入れ子も可）。
     "apps/backend/test-support/database.ts",
     "apps/backend/test-support/nested/x.mts",
@@ -4688,7 +4802,7 @@ const SHARED_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/shared/tsconfig.json",
     // apps/shared の外は対象外（前方一致だけが同じ別ディレクトリ・backend の shared/・画面側の shared/）。
     "apps/shared-x/extra.ts",
-    "apps/backend/shared/infra/database.ts",
+    "apps/backend/shared/drizzle/database.ts",
     "apps/frontend_customer/shared/request-log/request-log.ts",
     "apps/e2e/support/database.ts",
   ],
@@ -4824,8 +4938,8 @@ const CONSOLE_ACCESS_EXAMPLES: {
       "apps/backend/features/todo/internal/presentation/x.api.ts",
       'console.log("x");',
     ],
-    ["apps/backend/shared/presentation/x.ts", "console.error(error);"],
-    ["apps/backend/shared/infra/database.ts", 'console.warn("retry");'],
+    ["apps/backend/shared/http/x.ts", "console.error(error);"],
+    ["apps/backend/shared/drizzle/database.ts", 'console.warn("retry");'],
     ["apps/backend/features/todo/internal/infra/x.ts", 'console?.info("x");'],
     ["apps/backend/features/todo/internal/infra/x.ts", 'console["log"]("x");'],
     ["apps/backend/features/todo/internal/infra/x.ts", "console\n  .log(1);"],
@@ -4950,9 +5064,9 @@ const NOW_ACCESS_EXAMPLES: {
       "apps/backend/features/todo/internal/presentation/x.api.ts",
       "String(Date());",
     ],
-    ["apps/backend/shared/infra/x.ts", "globalThis.Date.now();"],
-    ["apps/backend/shared/domain/x.ts", "new globalThis.Date();"],
-    ["apps/backend/shared/presentation/x.ts", "new global.Date ( );"],
+    ["apps/backend/shared/drizzle/x.ts", "globalThis.Date.now();"],
+    ["apps/backend/shared/error/x.ts", "new globalThis.Date();"],
+    ["apps/backend/shared/http/x.ts", "new global.Date ( );"],
     // 場所（frontend 直下・画面側・apps/shared の now.ts 以外）と拡張子。
     ["apps/frontend_customer/proxy.ts", "receivedAt: new Date(),"],
     ["apps/frontend_customer/features/todo/components/x.tsx", "new Date();"],
@@ -4963,9 +5077,9 @@ const NOW_ACCESS_EXAMPLES: {
     //   （以前の補助の目印 *.test-support.*、前方一致だけの test-support-x/、アプリの直下ではない test-support/。Issue #181）。
     ["apps/shared/now-helper.ts", "new Date();"],
     ["apps/shared/now.js", "new Date();"],
-    ["apps/backend/shared/infra/now.ts", "new Date();"],
-    ["apps/backend/shared/infra/test-support-clock.ts", "new Date();"],
-    ["apps/backend/shared/infra/database.test-support.ts", "Date.now();"],
+    ["apps/backend/shared/drizzle/now.ts", "new Date();"],
+    ["apps/backend/shared/drizzle/test-support-clock.ts", "new Date();"],
+    ["apps/backend/shared/drizzle/database.test-support.ts", "Date.now();"],
     ["apps/frontend_customer/shared/i18n/i18n.test-support.tsx", "new Date();"],
     ["apps/backend/test-support-x/x.ts", "new Date();"],
     [
@@ -5289,13 +5403,13 @@ const HARDCODED_TEXT_EXAMPLES: Record<
         "apps/backend/features/todo/internal/presentation/x.api.ts",
         'export const s = z.string().min(1, { error: "タイトルを入力してください" });',
       ],
-      ["apps/backend/shared/domain/x.ts", 'export const s = "エラー";'],
-      ["apps/backend/shared/infra/x.mts", "export const s = `保存`;"],
+      ["apps/backend/shared/error/x.ts", 'export const s = "エラー";'],
+      ["apps/backend/shared/drizzle/x.mts", "export const s = `保存`;"],
       [
         "apps/backend/shared/drizzle/drizzle.config.ts",
         'export const s = "\\u524a\\u9664";',
       ],
-      ["apps/backend/shared/domain/x.ts", 'export type M = "削除";'],
+      ["apps/backend/shared/error/x.ts", 'export type M = "削除";'],
     ],
     allowed: [
       [
@@ -5307,12 +5421,12 @@ const HARDCODED_TEXT_EXAMPLES: Record<
         "// 見つからないときは ErrorKey で表す\nexport const a = 1; /* 日本語 */",
       ],
       [
-        "apps/backend/shared/presentation/x.ts",
+        "apps/backend/shared/http/x.ts",
         'logger.emit({ message: "request failed", event: { name: "server_error" } });',
       ],
       // backend は JSX のテキスト・属性を見ない（日本語だけを見る）。
       [
-        "apps/backend/shared/presentation/x.tsx",
+        "apps/backend/shared/http/x.tsx",
         'export const C = () => <p title="x">Delete</p>;',
       ],
       // テストと、対象外の場所のファイル（画面の辞書は frontend の規則の例外）。
@@ -5391,7 +5505,7 @@ const REAL_API_FILES = [
 
 const API_FILE = "apps/backend/features/todo/internal/presentation/x.api.ts";
 const IMPORT_WITH_PROBLEM_RESPONSE =
-  'import { ProblemResponse } from "../../../../shared/presentation/problem";';
+  'import { ProblemResponse } from "../../../../shared/http/problem";';
 
 const PROBLEM_RESPONSE_EXAMPLES: {
   violating: [file: string, source: string][];
@@ -5402,7 +5516,7 @@ const PROBLEM_RESPONSE_EXAMPLES: {
     [
       API_FILE,
       lines(
-        'import { ProblemResponse } from "../../../../shared/presentation/problem";',
+        'import { ProblemResponse } from "../../../../shared/http/problem";',
         "export class XApi {",
         "  readonly handle = async (request: Request): Promise<Response> => {",
         "    try {",
@@ -5458,7 +5572,7 @@ const PROBLEM_RESPONSE_EXAMPLES: {
     [
       API_FILE,
       lines(
-        'import { ProblemResponse as P } from "../../../../shared/presentation/problem";',
+        'import { ProblemResponse as P } from "../../../../shared/http/problem";',
         "export class XApi { readonly handle = P.wrap(async (request: Request) => new Response(null)); }",
       ),
     ],
@@ -5512,9 +5626,13 @@ const PROBLEM_RESPONSE_EXAMPLES: {
         "export class BApi { readonly handle = async (request: Request) => new Response(null); }",
       ),
     ],
-    // 対象の場所の境界: backend/shared/presentation、presentation の下の入れ子、.ts 以外の拡張子。
+    // 対象の場所の境界: backend/shared/http（Issue #310。旧 shared/presentation）とその入れ子、presentation の下の入れ子、.ts 以外の拡張子。
     [
-      "apps/backend/shared/presentation/x.api.ts",
+      "apps/backend/shared/http/x.api.ts",
+      "export class XApi { readonly handle = async (request: Request) => new Response(null); }",
+    ],
+    [
+      "apps/backend/shared/http/nested/x.api.ts",
       "export class XApi { readonly handle = async (request: Request) => new Response(null); }",
     ],
     [
@@ -5573,7 +5691,7 @@ const PROBLEM_RESPONSE_EXAMPLES: {
     ],
     // 対象外のファイル: api ファイルでない presentation のファイル、ほかの層、テスト、presentation で終わらないディレクトリ、画面側。
     [
-      "apps/backend/shared/presentation/problem.ts",
+      "apps/backend/shared/http/problem.ts",
       "export class X { handle = async (request: Request) => new Response(null); }",
     ],
     [
@@ -5586,6 +5704,15 @@ const PROBLEM_RESPONSE_EXAMPLES: {
     ],
     [
       "apps/backend/features/todo/internal/presentation-x/x.api.ts",
+      "export class XApi { handle = async (request: Request) => new Response(null); }",
+    ],
+    //   Issue #310: backend/shared の http/ 以外の単位と、前方一致だけが同じ別ディレクトリ（http-x）。
+    [
+      "apps/backend/shared/error/x.api.ts",
+      "export class XApi { handle = async (request: Request) => new Response(null); }",
+    ],
+    [
+      "apps/backend/shared/http-x/x.api.ts",
       "export class XApi { handle = async (request: Request) => new Response(null); }",
     ],
     [
@@ -5615,7 +5742,7 @@ function judgeProblemResponses(examples: [string, string][]): boolean[] {
   });
 }
 
-const DOMAIN_FILE = "apps/backend/shared/domain/x.ts";
+const SHARED_ERROR_FILE = "apps/backend/shared/error/x.ts";
 
 // 規則 class-based の判定の例。違反例は 1 例 1 つの書き方にして、他の書き方の巻き添えで違反になっていないことを示す。
 const CLASS_BASED_EXAMPLES: {
@@ -5624,24 +5751,30 @@ const CLASS_BASED_EXAMPLES: {
 } = {
   violating: [
     // 0: export する function 宣言（移行前の validate・writerOf の形）。
-    [DOMAIN_FILE, lines("export function f(): number {", "  return 1;", "}")],
+    [
+      SHARED_ERROR_FILE,
+      lines("export function f(): number {", "  return 1;", "}"),
+    ],
     // 1: export しない function 宣言（ファイルの中だけの補助。移行前の toResponse の形）。
-    [DOMAIN_FILE, lines("function f(): number {", "  return 1;", "}")],
+    [SHARED_ERROR_FILE, lines("function f(): number {", "  return 1;", "}")],
     // 2: async function。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines("export async function f(): Promise<number> {", "  return 1;", "}"),
     ],
     // 3: generator。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines("export function* f(): Generator<number> {", "  yield 1;", "}"),
     ],
     // 4: アロー関数の const。
-    [DOMAIN_FILE, lines("export const f = (x: number): number => x + 1;")],
+    [
+      SHARED_ERROR_FILE,
+      lines("export const f = (x: number): number => x + 1;"),
+    ],
     // 5: function 式の const（export しない）。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "const f = function (x: number): number {",
         "  return x + 1;",
@@ -5650,32 +5783,38 @@ const CLASS_BASED_EXAMPLES: {
     ],
     // 6: export default function（名前なし）。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines("export default function (): number {", "  return 1;", "}"),
     ],
     // 7: オーバーロードの宣言（本体の無い宣言だけでも違反。declare function も同じ節）。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export function f(x: string): string;",
         "export declare function g(): void;",
       ),
     ],
     // 8: export default のアロー関数。
-    [DOMAIN_FILE, lines("export default async (): Promise<number> => 1;")],
+    [
+      SHARED_ERROR_FILE,
+      lines("export default async (): Promise<number> => 1;"),
+    ],
     // 9: 括弧・as・satisfies で包んだアロー関数の let（包んでも関数）。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "type F = () => number;",
         "export let f = ((() => 1) as F) satisfies F;",
       ),
     ],
     // 10: 1 つの文の 2 つ目の変数だけが関数。
-    [DOMAIN_FILE, lines("const a = 1, f = (): number => a;", "export { f };")],
+    [
+      SHARED_ERROR_FILE,
+      lines("const a = 1, f = (): number => a;", "export { f };"),
+    ],
     // 11: namespace（入れ子の a.b も）の中の function。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export namespace A.B {",
         "  export function f(): number {",
@@ -5694,9 +5833,9 @@ const CLASS_BASED_EXAMPLES: {
         "export default { out: path() };",
       ),
     ],
-    // 13: 拡張子 .mts と、層の入れ子のディレクトリ。
+    // 13: 拡張子 .mts と、backend/shared の単位の入れ子のディレクトリ。
     [
-      "apps/backend/shared/infra/nested/x.mts",
+      "apps/backend/shared/drizzle/nested/x.mts",
       lines("export function f(): number {", "  return 1;", "}"),
     ],
     // 14: モジュールの公開の入口 expose/。
@@ -5714,7 +5853,7 @@ const CLASS_BASED_EXAMPLES: {
     ],
     // 18: パスに test を含む本番のファイル（*.test.* ではない）。
     [
-      "apps/backend/shared/infra/test-clock.ts",
+      "apps/backend/shared/drizzle/test-clock.ts",
       lines("export function f(): void {}"),
     ],
     // 19〜21: apps/shared の本番コード（Issue #262 で対象に広げた）。env.ts・now.ts の関数と、.mts・入れ子のディレクトリ。
@@ -5786,7 +5925,7 @@ const CLASS_BASED_EXAMPLES: {
   allowed: [
     // 0: static だけのクラス（状態の無い補助。biome の noStaticOnlyClass は apps/backend で off）。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export class Validate {",
         "  static of(x: number): number {",
@@ -5798,7 +5937,7 @@ const CLASS_BASED_EXAMPLES: {
     ],
     // 1: 型と interface だけ（関数の型も値ではない）。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export type F = (x: number) => number;",
         "export interface Notifier {",
@@ -5808,7 +5947,7 @@ const CLASS_BASED_EXAMPLES: {
     ],
     // 2: 定数のオブジェクト・関数でない値の変数。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         'export const KEYS = { a: "a", b: "b" } as const;',
         "export const LIMIT = 100;",
@@ -5820,7 +5959,7 @@ const CLASS_BASED_EXAMPLES: {
     [
       "apps/backend/features/todo/internal/presentation/x.api.ts",
       lines(
-        'import { ProblemResponse } from "../../../../shared/presentation/problem";',
+        'import { ProblemResponse } from "../../../../shared/http/problem";',
         "export class XApi {",
         "  readonly handle = ProblemResponse.wrap(async (request: Request) => new Response(null));",
         "  private readonly toBody = (x: number): string => String(x);",
@@ -5830,7 +5969,7 @@ const CLASS_BASED_EXAMPLES: {
     ],
     // 4: メソッドの中の関数（function 宣言・アロー関数）。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export class A {",
         "  run(): number {",
@@ -5845,7 +5984,7 @@ const CLASS_BASED_EXAMPLES: {
     ],
     // 5: クラス式の const と、export default のクラス。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export const A = class {",
         "  static f(): number {",
@@ -5857,7 +5996,7 @@ const CLASS_BASED_EXAMPLES: {
     ],
     // 6: コメントと文字列の中の function。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "// function f() {}",
         'export const S = "export function f() {}";',
@@ -5867,7 +6006,7 @@ const CLASS_BASED_EXAMPLES: {
     // 7〜14: 対象外（テスト（test-support/・spec/ の中のテストも）・E2E のテスト *.spec.ts・リポジトリ直下の
     //   vitest.global-setup.ts・apps/shared のテスト・前方一致だけが同じ apps/shared-x と apps/e2e-x）。
     [
-      "apps/backend/shared/domain/x.test.ts",
+      "apps/backend/shared/error/x.test.ts",
       lines("function helper(): number {", "  return 1;", "}"),
     ],
     [
@@ -5983,7 +6122,7 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
   violating: [
     // 0: インスタンスのメソッドと private static の補助（移行前の PostgresTodoRepository.toTodos の形）。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export class A {",
         "  list(): number { return A.helper(); }",
@@ -5993,7 +6132,7 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
     ],
     // 1: コンストラクタだけを持つクラスの static メソッド。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export class A {",
         "  constructor(readonly x: number) {}",
@@ -6003,7 +6142,7 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
     ],
     // 2: static readonly のフィールド（移行前の RequestLogSteps.traceId の形）。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export class A {",
         "  run(): string { return A.id; }",
@@ -6013,7 +6152,7 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
     ],
     // 3: static の getter。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export class A {",
         "  run(): void {}",
@@ -6023,12 +6162,12 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
     ],
     // 4: static ブロック。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines("export class A {", "  run(): void {}", "  static {}", "}"),
     ],
     // 5: 自分のクラス以外を返す static メソッド（ファクトリではない。移行前の PostgresWriter.of の戻り値 Writer）。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export class A {",
         "  run(): void {}",
@@ -6039,7 +6178,7 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
     ],
     // 6: 戻り値の型を注釈しないファクトリ（推論に任せたものはファクトリと見なさない）。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export class A {",
         "  run(): void {}",
@@ -6049,7 +6188,7 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
     ],
     // 7: Promise<別のクラス> を返す static メソッド。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export class A {",
         "  run(): void {}",
@@ -6059,7 +6198,7 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
     ],
     // 8: 名前の無いクラス式（自分のクラスを名前で返せないのでファクトリにならない）。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export const A = class {",
         "  run(): void {}",
@@ -6069,7 +6208,7 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
     ],
     // 9: メソッドの中の入れ子のクラス。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export class Outer {",
         "  static make(): number {",
@@ -6111,7 +6250,7 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
     ],
     // 13: static のインデックスシグネチャ。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export class A {",
         "  run(): void {}",
@@ -6121,7 +6260,7 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
     ],
     // 14: 自分ではインスタンスのメンバーを書かず、継承で受け継ぐクラス（Codex の指摘）。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "class Base { run(): void {} }",
         "export class A extends Base {",
@@ -6143,7 +6282,7 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
   allowed: [
     // 0: static だけのクラス（Clock・TodoApi の形）。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export class A {",
         "  static run(): number { return A.helper(); }",
@@ -6153,7 +6292,7 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
     ],
     // 1: インスタンスのメソッドだけのクラス。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export class A {",
         "  constructor(private readonly x: number) {}",
@@ -6164,7 +6303,7 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
     ],
     // 2: 自分のクラスを返す static のファクトリ（Todo.create・TodoBuilder.of の形）。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export class A {",
         "  private constructor() {}",
@@ -6175,7 +6314,7 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
     ],
     // 3: Promise<自分のクラス> を返す static のファクトリ（TestDatabase.create・E2eLogServer.start の形）。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export class A {",
         "  private constructor() {}",
@@ -6186,7 +6325,7 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
     ],
     // 4: インデックスシグネチャと ; は static でもインスタンスのメンバーでもない（static だけのクラスのまま）。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "export class A {",
         "  [key: string]: unknown;",
@@ -6196,7 +6335,7 @@ const NO_STATIC_IN_INSTANCE_CLASS_EXAMPLES: {
     ],
     // 8: implements だけのクラスは static だけのクラスのまま（implements は型の宣言で、インスタンスを作るかを決めない）。
     [
-      DOMAIN_FILE,
+      SHARED_ERROR_FILE,
       lines(
         "interface I { }",
         "export class A implements I {",
@@ -6346,7 +6485,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   // class-based（Issue #262）: 最上位の関数（function 宣言・async・generator・オーバーロード・アロー関数と function 式の
   //   変数・export default のアロー関数・namespace の中）。クラスのメソッド・フィールド・メソッドの中の関数（8〜13 行目）は拾わない。
   //   .mts と expose/・drizzle-kit の設定も対象（前方一致だけが同じ別ディレクトリ test-support-x/ などは判定の例 CLASS_BASED_EXAMPLES）。
-  "apps/backend/shared/domain/bad-function.ts": lines(
+  "apps/backend/shared/error/bad-function.ts": lines(
     "export function a(x: string): string;",
     "export function a(x: unknown): unknown { return x; }",
     "async function b(): Promise<void> {}",
@@ -6362,21 +6501,22 @@ const MUST_REJECT_FILES: Record<string, string> = {
     "export const value = 1;",
     "export namespace N { export function i(): void {} }",
   ),
-  "apps/backend/shared/infra/bad-function.mts": lines(
+  "apps/backend/shared/drizzle/bad-function.mts": lines(
     "export default function (): void {}",
   ),
   "apps/backend/features/notification/expose/bad-notify.ts": lines(
     "export function notify(message: string): void {}",
   ),
-  // drizzle-kit の設定は例外にしない（名前は下の backend-to-frontend の fixture と重ならないよう .mts。置き場所の例外は同じ）。
+  // drizzle-kit の設定は例外にしない（名前は下の backend-to-frontend の fixture と重ならないよう .mts。drizzle/ の中なので置き場所の
+  //   違反にはならない）。
   "apps/backend/shared/drizzle/drizzle.config.mts": lines(
     'function path(): string { return "."; }',
     "export default { out: path() };",
   ),
   // presentation-with-problem-response（Issue #141）: handle を ProblemResponse.wrap で包まない（try / catch の手書き、素の async、
-  //   import だけして使わない、別の関数で包む）。.mts と入れ子のディレクトリ・backend/shared/presentation も対象。
+  //   import だけして使わない、別の関数で包む）。.mts と入れ子のディレクトリ・backend/shared/http（Issue #310。旧 shared/presentation）も対象。
   "apps/backend/features/todo/internal/presentation/bad-handle.api.ts": lines(
-    'import { ProblemResponse} from "../../../../shared/presentation/problem";',
+    'import { ProblemResponse} from "../../../../shared/http/problem";',
     "export class TryCatchApi {",
     "  readonly handle = async (request: Request): Promise<Response> => {",
     "    try {",
@@ -6400,7 +6540,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
     lines(
       "export class RawApi { handle = async (request: Request) => new Response(null); }",
     ),
-  "apps/backend/shared/presentation/bad-handle.api.ts": lines(
+  "apps/backend/shared/http/bad-handle.api.ts": lines(
     "export class RawApi { handle = async (request: Request) => new Response(null); }",
   ),
   // screen-to-backend: apps/frontend_customer/features/<f>/ の api/ 以外から backend への参照は、型でも相対でも違反。
@@ -6411,18 +6551,18 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import * as updateApi from "@repo/backend/features/todo/internal/presentation/update-todo.api";',
     'import deleteApi from "../../../../backend/features/todo/internal/presentation/delete-todo.api";',
     'export { POST } from "@repo/backend/features/todo/internal/presentation/create-todo.api";',
-    'export type { Problem } from "@repo/backend/shared/presentation/problem";',
+    'export type { Problem } from "@repo/backend/shared/http/problem";',
     // セミコロンの無い文の直後の複数行の import type も拾う。
     "export enum Kind { A }",
     "import type {",
     "  PostgresTodoRepository,",
     '} from "@repo/backend/features/todo/internal/infra/todo-repository.postgres";',
-    'const lazy = import("../../../../backend/shared/presentation/json-body");',
+    'const lazy = import("../../../../backend/shared/http/json-body");',
   ),
   // screen-to-backend / shared-to-features / screen-to-app: 画面側の shared/ から。
   "apps/frontend_customer/shared/bad-shared.tsx": lines(
     'import { GET } from "../../backend/features/todo/internal/presentation/list-todos.api";',
-    'import type { DomainError } from "@repo/backend/shared/domain/domain-error";',
+    'import type { DomainError } from "@repo/backend/shared/error/domain-error";',
     'import { TodoScreen } from "@/features/todo";',
     'import type { ListTodosResponse } from "../features/todo/api/todo-api";',
     'export { TodoItem } from "@/features/todo/components/todo-item";',
@@ -6435,9 +6575,9 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import type { Todo } from "../../../../backend/features/todo/internal/domain/todo";',
     'import type { ListOthersResponse } from "@repo/backend/features/other/internal/presentation/list-others.api";',
     'import { type GetTodoResponse, GET } from "@repo/backend/features/todo/internal/presentation/get-todo.api";',
-    'export { ProblemResponse } from "../../../../backend/shared/presentation/problem";',
+    'export { ProblemResponse } from "../../../../backend/shared/http/problem";',
     'import type { X } from "@repo/backend/features/todo/internal/presentation/list-todos";',
-    'import type { DomainError } from "@repo/backend/shared/domain/domain-error";',
+    'import type { DomainError } from "@repo/backend/shared/error/domain-error";',
     'const m = import("@repo/backend/features/todo/internal/presentation/update-todo.api");',
   ),
   // feature-to-feature: 別 feature の深いパスは、型でも re-export でも dynamic でも違反。
@@ -6458,7 +6598,8 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import { GET } from "../../../../app/api/todos/route";',
     'export type { Metadata } from "@/app/layout";',
   ),
-  // domain: フレームワークのサブパス、自 feature の外側の層、他 feature の domain、shared の presentation、画面側。
+  // domain: フレームワークのサブパス、自 feature の外側の層、他 feature の domain、backend/shared の層に分けていたときの旧パス
+  //   （Issue #310。単位ではない）、画面側。
   "apps/backend/features/todo/internal/domain/bad-domain.ts": lines(
     'import { NextResponse } from "next/server";',
     'import { jsx } from "react/jsx-runtime";',
@@ -6471,10 +6612,6 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'export type { ListTodosResponse as Dto } from "@/features/todo";',
     'const s = import("@/shared/x");',
     'import "@/app/globals.css";',
-  ),
-  // domain: backend/shared/domain から backend/shared/presentation（shared の中でも向きが逆）。
-  "apps/backend/shared/domain/bad-shared-domain.ts": lines(
-    'import { InvalidRequestError } from "../presentation/problem";',
   ),
   // application
   "apps/backend/features/todo/internal/application/bad-application.ts": lines(
@@ -6523,17 +6660,16 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import { renderToString } from "react-dom/server";',
     'const c = import("../../../other/internal/infra/other-repository.postgres");',
   ),
-  // backend-shared（presentation 層のファイルなので presentation の規則にも同時にかかるものがある）
-  "apps/backend/shared/presentation/bad-backend-shared.ts": lines(
+  // backend-shared: backend/shared から features（domain・infra、定数だけの import も）と画面側。shared は層を持たないので
+  //   層の規則は重ねてかからない（Issue #310。以前は shared/presentation/ にあり presentation の規則にも出ていた）。
+  "apps/backend/shared/http/bad-backend-shared.ts": lines(
     'import type { Todo } from "../../features/todo/internal/domain/todo";',
     'import { todoRepository } from "../../features/todo/internal/infra/todo-repository.postgres";',
     'import { TodoFactory } from "../../features/todo/internal/domain/todo-factory";',
     'export { TodoScreen } from "@/features/todo";',
     'const p = import("@/app/page");',
     'import "../../features/todo/internal/infra/todo-repository.in-memory";',
-    // Issue #123: backend/shared/presentation は database も参照しない（presentation の規則だけにかかる）。
-    'import type { Database } from "../infra/database";',
-    // Issue #144: 定数だけの import でも、backend/shared から feature の domain は不可（backend-shared と presentation の両方）。
+    // Issue #144: 定数だけの import でも、backend/shared から feature の domain は不可。
     'import { TODO_MAX } from "../../features/todo/internal/domain/todo-constants";',
   ),
   // application: 他 feature の domain / application、画面側の shared/。
@@ -6552,11 +6688,11 @@ const MUST_REJECT_FILES: Record<string, string> = {
       // Issue #144: 定数だけの import でも、他 feature の domain は不可。
       'import { OTHER_MAX } from "../../../other/internal/domain/other-constants";',
     ),
-  // domain / backend-shared: backend/shared から画面側の shared/。
-  "apps/backend/shared/domain/bad-shared-screen.ts": lines(
+  // backend-shared: backend/shared から画面側の shared/。
+  "apps/backend/shared/error/bad-shared-screen.ts": lines(
     'import { x } from "@/shared/x";',
   ),
-  // backend-placement: apps/backend/features/<f>/internal/・apps/backend/shared/ の 4 層の外のファイル（import の有無に関係なく違反）。
+  // backend-placement: apps/backend/features/<f>/internal/ の 4 層・apps/backend/shared/ の単位の外のファイル（import の有無に関係なく違反）。
   "apps/backend/features/todo/p-root.ts": lines(
     'import { x } from "@/shared/x";',
   ),
@@ -6586,7 +6722,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/backend/features/notification/expose/bad-expose.ts": lines(
     'import type { Todo } from "../../todo/internal/domain/todo";',
     'import { x } from "../../todo/expose/x";',
-    'import { AppDatabase } from "../../../shared/infra/database";',
+    'import { AppDatabase } from "../../../shared/drizzle/database";',
     'import { env } from "@repo/shared/env";',
     'import { NextResponse } from "next/server";',
     'export { y } from "../lib/y";',
@@ -6600,7 +6736,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
     "export const x = 1;",
   ),
   "apps/backend/x.ts": lines("export const x = 1;"),
-  //   Issue #98: features/ 直下のファイル、features/ を挟まない feature（以前の置き場所）、shared/drizzle/ のアプリのコード。
+  //   Issue #98: features/ 直下のファイル、features/ を挟まない feature（以前の置き場所）。
   "apps/backend/features/x.ts": lines("export const x = 1;"),
   "apps/backend/todo/domain/old.ts": lines("export const x = 1;"),
   //   Issue #208: internal/ を挟まない feature の層（Issue #208 より前の置き場所）と、internal/ の直下のファイル。
@@ -6608,7 +6744,9 @@ const MUST_REJECT_FILES: Record<string, string> = {
     "export const x = 1;",
   ),
   "apps/backend/features/todo/internal/x.ts": lines("export const x = 1;"),
-  "apps/backend/shared/drizzle/app.ts": lines("export const x = 1;"),
+  //   Issue #310: backend/shared の層に分けていたときの旧ディレクトリと、一覧に無い単位。
+  "apps/backend/shared/domain/old-layer.ts": lines("export const x = 1;"),
+  "apps/backend/shared/foo/x.ts": lines("export const x = 1;"),
   // 前方一致の境界: backend/shared-x は backend/shared ではない（features/ の下でもないので層に属さず、置き場所の違反。
   //   backend/shared の規則はかからない）。
   "apps/backend/shared-x/domain/x.ts": lines(
@@ -6631,12 +6769,12 @@ const MUST_REJECT_FILES: Record<string, string> = {
     'import { GET } from "@repo/backend/features/todo/internal/presentation/get-todo.api";',
   ),
   "apps/frontend_customer/features/todo/components/bad-ext.mjs": lines(
-    'export { x } from "../../../../backend/shared/presentation/problem";',
+    'export { x } from "../../../../backend/shared/http/problem";',
   ),
   "apps/frontend_customer/features/todo/components/bad-ext.cjs": lines(
     'import "@repo/backend/features/todo/internal/infra/todo-repository.in-memory";',
   ),
-  // backend-shared / backend-placement: 層に属さない backend/shared 直下のファイルから。
+  // backend-shared / backend-placement: 単位に属さない backend/shared 直下のファイルから。
   "apps/backend/shared/bad-root.ts": lines(
     'import { CreateTodoCommand } from "../features/todo/internal/application/create-todo.command";',
   ),
@@ -6652,63 +6790,41 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/frontend_customer/app/todo/[id]/bad.jsx": lines(
     'import { TodoItem } from "../../../features/todo/components/todo-item";',
   ),
-  // app-api: api ファイル以外（.api の付かない presentation、shared の presentation を含む）、パッケージ、画面側。
+  // app-api: api ファイル以外（.api の付かない presentation、shared/http の api ファイルでないモジュールを含む）、パッケージ、画面側。
   "apps/frontend_customer/app/api/todos/bad-route.ts": lines(
     'export { GET } from "@repo/backend/features/todo/internal/infra/todo-repository.postgres";',
     'export { POST } from "../../../../backend/features/todo/internal/application/create-todo.command";',
     'import { NextResponse } from "next/server";',
     'import { TodoScreen } from "@/features/todo";',
     'export { PUT } from "@repo/backend/features/todo/internal/presentation/update-todo";',
-    'export { DELETE } from "@repo/backend/shared/presentation/problem";',
+    'export { DELETE } from "@repo/backend/shared/http/problem";',
     'const x = import("@/shared/x");',
   ),
-  // Issue #57: backend/shared/infra（プール・Drizzle）と feature の infra（スキーマ・Postgres の実装）への参照。
+  // Issue #57: feature の infra（スキーマ・Postgres の実装）とテスト基盤（test-support。層に属さない）への参照。
   //   infra は domain / application から参照できない。presentation から参照できるのは自 feature の Postgres の Repository の
-  //   実装と backend/shared/infra/database だけ（Issue #123）。schema は不可。
+  //   実装だけ（Issue #123）。schema は不可。backend/shared（drizzle/ のプール・runner・writer も）はどの層からも許す
+  //   （Issue #310。許す例は MUST_PASS_FILES の good-shared-units-*）。
   "apps/backend/features/todo/internal/domain/bad-domain-infra.ts": lines(
-    'import type { Database } from "../../../../shared/infra/database";',
+    'import type { Database } from "../../../../shared/drizzle/database";',
     'import type { TestDatabase } from "../../../../test-support/database";',
   ),
-  "apps/backend/shared/domain/bad-shared-domain-infra.ts": lines(
-    'import type { Database } from "../infra/database";',
-  ),
-  // Issue #230: domain が参照してよい application は shared/application/transaction（印の型と port）を型だけ。値の import・
-  //   re-export、backend/shared/application の別モジュール、port の下の深いパスは違反（型だけの参照は MUST_PASS_FILES の
-  //   good-shared-domain-transaction.ts と todo-repository.ts）。
+  // Issue #310: backend/shared の層に分けていたときの旧パス（shared/application/）は単位ではないので違反（下位互換を残さない）。
   "apps/backend/features/todo/internal/domain/bad-domain-application.ts": lines(
-    'import { Transaction } from "../../../../shared/application/transaction";',
     'import type { X } from "../../../../shared/application/x";',
-    'import type { Y } from "../../../../shared/application/transaction/x";',
   ),
-  "apps/backend/shared/domain/bad-shared-domain-port-value.ts": lines(
-    'export { TransactionRunner } from "../application/transaction";',
-  ),
-  // Issue #220: infra が参照してよい application は shared/application/transaction（port）だけ。自 feature の command と
-  //   backend/shared/application の別モジュールは違反（型だけでも）。
+  // Issue #220: infra は自 feature の application（command）を参照しない（型だけでも）。旧パスの shared/application/ も違反。
   "apps/backend/features/todo/internal/infra/bad-infra-application.ts": lines(
     'import type { CreateTodoCommand } from "../application/create-todo.command";',
     'import type { X } from "../../../../shared/application/x";',
-    'import type { Y } from "../../../../shared/application/transaction/x";',
-    // Issue #224: port でも値の import は違反（型だけ）。
-    'import { TransactionRunner } from "../../../../shared/application/transaction";',
   ),
-  "apps/backend/features/todo/internal/application/bad-application-infra.ts":
-    lines(
-      'import { AppDatabase } from "../../../../shared/infra/database";',
-      // Issue #215: application は runner の実体（infra）を参照しない（backend/shared/application の TransactionRunner を受け取る。Issue #220）。
-      'import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";',
-    ),
   "apps/backend/features/todo/internal/presentation/bad-presentation-infra.api.ts":
     lines(
       // Issue #123: database と自 feature の Postgres の Repository の実装は許す（組み立てに使う）。schema とテスト基盤は違反。
-      'import { AppDatabase } from "../../../../shared/infra/database";',
+      'import { AppDatabase } from "../../../../shared/drizzle/database";',
       'import { todos } from "../infra/schema";',
       'import { PostgresTodoRepository } from "../infra/todo-repository.postgres";',
       'import { cleanupTestSchemas } from "../../../../test-support/database";',
-      // Issue #215: トランザクションの runner（PostgresTransactionRunner）は許す（command の組み立てに使う）。書き込みの口
-      //   （writer）と InMemory の runner（test-support）は違反。
-      'import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";',
-      'import { PostgresWriter } from "../../../../shared/infra/writer";',
+      // Issue #215: InMemory の runner（test-support）は違反。
       'import { InMemoryTransactionRunner } from "../../../../test-support/transaction-runner.in-memory";',
     ),
   // core-to-persistence: domain / application から DB のパッケージ（drizzle-orm とそのサブパス、pg）。型だけの参照・re-export・
@@ -6725,14 +6841,10 @@ const MUST_REJECT_FILES: Record<string, string> = {
       'const lazy = import("drizzle-orm/node-postgres");',
       'export type { PoolConfig } from "pg";',
     ),
-  "apps/backend/shared/domain/bad-shared-domain-db.ts": lines(
-    'import type { NodePgDatabase } from "drizzle-orm/node-postgres";',
-  ),
-  //   backend/shared/infra は feature の infra を参照できず、next も参照できない。backend/shared/presentation も参照できない（infra の規則）。
-  "apps/backend/shared/infra/bad-shared-infra.ts": lines(
+  //   backend/shared は feature の infra を参照できず、next も参照できない（backend-shared）。
+  "apps/backend/shared/drizzle/bad-shared-infra.ts": lines(
     'import { todos } from "../../features/todo/internal/infra/schema";',
     'import { NextResponse } from "next/server";',
-    'import { ProblemResponse } from "../presentation/problem";',
   ),
   // env-direct-access: env.ts 以外で process.env を読む。書き方ごとに 1 行ずつ置き、行番号で検出を比べる。
   //   コメント・文字列の中（7・8 行目）は拾わない。
@@ -6760,7 +6872,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "bad.config.ts": lines("export const ci = !process['env'].CI;"),
   "bad.config.mjs": lines("export default { ci: process.env.CI };"),
   "bad.config.cjs": lines("module.exports = process . env;"),
-  "apps/backend/shared/infra/env-helper.ts": lines(
+  "apps/backend/shared/drizzle/env-helper.ts": lines(
     "export const e = process.env;",
   ),
   // console-direct-access（Issue #85）: logger.ts 以外で console を書く。書き方ごとに 1 行ずつ置き、行番号で検出を比べる。
@@ -6784,7 +6896,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "scripts/bad-console.ts": lines("console.log(1);"),
   "bad-console.config.mjs": lines("console.log(1);"),
   // WHY クラスのフィールドにする: 最上位のアロー関数は class-based にも当たり、console の違反だけを置けなくなる。
-  "apps/backend/shared/infra/logger-helper.ts": lines(
+  "apps/backend/shared/drizzle/logger-helper.ts": lines(
     "export class L { static l = () => console.log(1); }",
   ),
   // frontend-hardcoded-text（Issue #116）: JSX のテキスト、利用者に見える属性の文字列、日本語の文字列。行番号で検出を比べる。
@@ -6872,25 +6984,25 @@ const MUST_REJECT_FILES: Record<string, string> = {
   "apps/backend/features/todo/internal/application/bad-alias.command.ts": lines(
     'import { Todo } from "@repo/backend/features/todo/internal/domain/todo";',
     'import type { TodoRepository } from "@repo/backend/features/todo/internal/domain/todo-repository";',
-    'export { DomainError } from "@repo/backend/shared/domain/domain-error";',
+    'export { DomainError } from "@repo/backend/shared/error/domain-error";',
     'const q = import("@repo/backend/features/todo/internal/application/list-todos.query");',
     'import "@repo/backend";',
   ),
-  // backend-to-frontend: 層に属さない drizzle-kit の設定ファイル（shared/drizzle/drizzle.config.ts）から frontend（相対パスと "@/"）。
-  //   置き場所の規則の例外なので、置き場所の違反にはならない。backend/shared の中なので backend-shared にもかかる（Issue #98）。
+  // backend-to-frontend: drizzle-kit の設定ファイル（shared/drizzle/drizzle.config.ts）から frontend（相対パスと "@/"）。
+  //   drizzle/ の中なので置き場所の違反にはならない（Issue #310）。backend/shared の中なので backend-shared にもかかる（Issue #98）。
   "apps/backend/shared/drizzle/drizzle.config.ts": lines(
     'import nextConfig from "../../../frontend_customer/next.config";',
     'import type { ListTodosResponse } from "@/features/todo/api/todo-api";',
     'export { TodoScreen } from "../../../frontend_customer/features/todo";',
   ),
-  // backend-placement: drizzle.config.ts の例外は apps/backend/shared/drizzle/ の直下だけ。feature の直下に置くと違反。
+  // backend-placement: drizzle.config.ts も置き場所の規則どおり（shared/drizzle/ の中は可）。feature の直下に置くと違反。
   "apps/backend/features/todo/drizzle.config.ts": lines("export default {};"),
   // frontend-root-to-backend: apps/frontend_customer 直下のファイルから、env 以外の backend（alias と相対、型、re-export、dynamic、
   //   名前の前方一致だけが同じ env-helper）。
   // 置き場所の規則（frontend-placement）で許される名前（next.config.ts）に置き、frontend-root-to-backend だけを確かめる。
   "apps/frontend_customer/next.config.ts": lines(
     'import { todoRepository } from "@repo/backend/features/todo/internal/infra/todo-repository.postgres";',
-    'import type { Database } from "../backend/shared/infra/database";',
+    'import type { Database } from "../backend/shared/drizzle/database";',
     'export { GET } from "@repo/backend/features/todo/internal/presentation/list-todos.api";',
     'const e = import("@repo/backend/shared/infra/env-helper");',
   ),
@@ -6935,7 +7047,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   ),
   // backend-exports（Issue #68 の段階 2）: exports の過不足。
   //   "./features/todo/internal/presentation/*.api" は上の fixture の *.api への参照で使われ、bad-presentation.api.ts などに当たる（違反なし）。
-  //   "./shared/presentation/problem" は使われるが、指すファイルが無い。"./features/todo/internal/domain/bad-domain" は使われない。
+  //   "./shared/http/problem" は使われるが、指すファイルが無い。"./features/todo/internal/domain/bad-domain" は使われない。
   //   "./mismatch" は使われるが、値が別のファイル（キーのパスのファイルも無い）。
   //   exports に無い参照（上の fixture の container・domain など）は、参照ごとに違反になる（下の MUST_REJECT_VIOLATIONS）。
   "apps/backend/package.json": JSON.stringify({
@@ -6943,7 +7055,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
     exports: {
       "./features/todo/internal/presentation/*.api":
         "./features/todo/internal/presentation/*.api.ts",
-      "./shared/presentation/problem": "./shared/presentation/problem.ts",
+      "./shared/http/problem": "./shared/http/problem.ts",
       "./features/todo/internal/domain/bad-domain":
         "./features/todo/internal/domain/bad-domain.ts",
       "./mismatch": "./features/todo/internal/domain/bad-domain.ts",
@@ -7019,7 +7131,8 @@ const MUST_REJECT_FILES: Record<string, string> = {
     },
   }),
   // 層の規則の apps/shared の許可（SHARED_MODULES_BY_LAYER）: domain / application は使えない、presentation は logger だけ
-  //   （移す前の backend/shared/infra/logger も、もう使えない）、infra は env・logger だけ。
+  //   （Issue #90 で移す前の backend/shared/infra/logger も、もう使えない。Issue #310 で shared/infra/ は単位でもなくなった）、
+  //   infra は env・logger だけ。
   "apps/backend/features/todo/internal/domain/bad-domain-shared.ts": lines(
     'import { logger } from "@repo/shared/logger";',
   ),
@@ -7031,8 +7144,9 @@ const MUST_REJECT_FILES: Record<string, string> = {
       'import { logger } from "../../../../shared/infra/logger";',
     ),
   //   backend-relative-only: "@/" と相対パスで apps/shared を指すのは違反（"@repo/shared/..." だけを許す。Issue #90）。
-  //   logger は infra で使ってよいので、相対パスの行は backend-relative-only だけにかかる。
-  "apps/backend/shared/infra/bad-shared-infra-base.ts": lines(
+  //   backend/shared は apps/shared のどのモジュールも使ってよい（Issue #310。backend-shared）ので、どの行も backend-relative-only
+  //   だけにかかる（env-helper は shared-exports にもかかる）。
+  "apps/backend/shared/drizzle/bad-shared-infra-base.ts": lines(
     'import { helper } from "@repo/shared/env-helper";',
     'import { env } from "@/../shared/env";',
     'import { logger } from "../../../shared/logger";',
@@ -7062,13 +7176,13 @@ const MUST_REJECT_FILES: Record<string, string> = {
     "export const n = Date.now();",
   ),
   "apps/shared/lib/clock.ts": lines("export const n = new Date();"),
-  "apps/backend/shared/infra/now.ts": lines(
+  "apps/backend/shared/drizzle/now.ts": lines(
     "export class Clock { static now() { return new Date(); } }",
   ),
-  "apps/backend/shared/infra/test-support-clock.ts": lines(
+  "apps/backend/shared/drizzle/test-support-clock.ts": lines(
     "export const n = Date.now();",
   ),
-  "apps/backend/shared/infra/old.test-support.ts": lines(
+  "apps/backend/shared/drizzle/old.test-support.ts": lines(
     "export const n = Date.now();",
   ),
   // class-based（Issue #262 の 2 つ目の PR）: テストの補助（test-support/・spec/ の support.ts・apps/e2e/ の spec 以外）の最上位の関数。
@@ -7098,7 +7212,7 @@ const MUST_REJECT_FILES: Record<string, string> = {
   ),
   // no-static-in-instance-class（Issue #300）: インスタンスのメンバーを持つクラスの static メソッド・フィールド（2・3 行目）と、
   //   自分のクラス以外を返す static（4 行目）。自分のクラスを返すファクトリ（5 行目）と static だけのクラス（8 行目）は拾わない。
-  "apps/backend/shared/infra/bad-static.ts": lines(
+  "apps/backend/shared/drizzle/bad-static.ts": lines(
     "export class Repo {",
     "  private static helper(): number { return 1; }",
     "  private static readonly id = 'x';",
@@ -7115,9 +7229,9 @@ const MUST_REJECT_FILES: Record<string, string> = {
 
 const MUST_REJECT_VIOLATIONS = [
   ...[1, 2, 3, 4, 5, 6, 7, 14].map(
-    (line) => `class-based: apps/backend/shared/domain/bad-function.ts:${line}`,
+    (line) => `class-based: apps/backend/shared/error/bad-function.ts:${line}`,
   ),
-  "class-based: apps/backend/shared/infra/bad-function.mts:1",
+  "class-based: apps/backend/shared/drizzle/bad-function.mts:1",
   "class-based: apps/backend/features/notification/expose/bad-notify.ts:1",
   "class-based: apps/backend/shared/drizzle/drizzle.config.mts:1",
   "class-based: apps/shared/env.ts:10",
@@ -7129,7 +7243,7 @@ const MUST_REJECT_VIOLATIONS = [
   "class-based: apps/frontend_customer/shared/i18n/bad-format.ts:1",
   ...[2, 3, 4].map(
     (line) =>
-      `no-static-in-instance-class: apps/backend/shared/infra/bad-static.ts:${line}`,
+      `no-static-in-instance-class: apps/backend/shared/drizzle/bad-static.ts:${line}`,
   ),
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(
     (line) =>
@@ -7139,9 +7253,9 @@ const MUST_REJECT_VIOLATIONS = [
   "now-single-source: apps/frontend_customer/shared/bad-now.mjs:1",
   "now-single-source: apps/shared/lib/clock.ts:1",
   "shared-placement: apps/shared/lib/clock.ts",
-  "now-single-source: apps/backend/shared/infra/now.ts:1",
-  "now-single-source: apps/backend/shared/infra/test-support-clock.ts:1",
-  "now-single-source: apps/backend/shared/infra/old.test-support.ts:1",
+  "now-single-source: apps/backend/shared/drizzle/now.ts:1",
+  "now-single-source: apps/backend/shared/drizzle/test-support-clock.ts:1",
+  "now-single-source: apps/backend/shared/drizzle/old.test-support.ts:1",
   "backend-placement: apps/backend/test-support-x/x.ts",
   "frontend-placement: apps/frontend_customer/test-support-x/x.ts",
   ...[3, 12, 15].map(
@@ -7149,7 +7263,7 @@ const MUST_REJECT_VIOLATIONS = [
       `presentation-with-problem-response: apps/backend/features/todo/internal/presentation/bad-handle.api.ts:${line}`,
   ),
   "presentation-with-problem-response: apps/backend/features/todo/internal/presentation/nested/bad-handle.api.mts:1",
-  "presentation-with-problem-response: apps/backend/shared/presentation/bad-handle.api.ts:1",
+  "presentation-with-problem-response: apps/backend/shared/http/bad-handle.api.ts:1",
   "frontend-placement: apps/frontend_customer/lib/db.ts",
   "frontend-placement: apps/frontend_customer/.lib/x.ts",
   "frontend-placement: apps/frontend_customer/next.config.mjs",
@@ -7160,7 +7274,7 @@ const MUST_REJECT_VIOLATIONS = [
   ...[
     "apps/backend/features/todo/internal/domain/todo",
     "apps/backend/features/todo/internal/domain/todo-repository",
-    "apps/backend/shared/domain/domain-error",
+    "apps/backend/shared/error/domain-error",
     "apps/backend/features/todo/internal/application/list-todos.query",
     "apps/backend",
   ].map(
@@ -7180,7 +7294,7 @@ const MUST_REJECT_VIOLATIONS = [
   "backend-placement: apps/backend/features/todo/drizzle.config.ts",
   ...[
     "apps/backend/features/todo/internal/infra/todo-repository.postgres",
-    "apps/backend/shared/infra/database",
+    "apps/backend/shared/drizzle/database",
     "apps/backend/features/todo/internal/presentation/list-todos.api",
     "apps/backend/shared/infra/env-helper",
   ].map(
@@ -7223,14 +7337,13 @@ const MUST_REJECT_VIOLATIONS = [
   "application: apps/backend/features/todo/internal/application/bad-application-shared.command.ts → apps/shared/env",
   "presentation: apps/backend/features/todo/internal/presentation/bad-presentation-shared.api.ts → apps/shared/env",
   "presentation: apps/backend/features/todo/internal/presentation/bad-presentation-shared.api.ts → apps/backend/shared/infra/logger",
-  "infra: apps/backend/shared/infra/bad-shared-infra-base.ts → apps/shared/env-helper",
-  "backend-relative-only: apps/backend/shared/infra/bad-shared-infra-base.ts → apps/shared/env",
-  "backend-relative-only: apps/backend/shared/infra/bad-shared-infra-base.ts → apps/shared/logger",
+  "backend-relative-only: apps/backend/shared/drizzle/bad-shared-infra-base.ts → apps/shared/env",
+  "backend-relative-only: apps/backend/shared/drizzle/bad-shared-infra-base.ts → apps/shared/logger",
   "backend-relative-only: apps/backend/features/todo/internal/application/bad-application-shared.command.ts → apps/shared/env",
   ...[
     "apps/frontend_customer/features/todo/components/bad-shared-base.tsx → @repo/shared/logger",
     "apps/backend/features/todo/internal/domain/bad-domain-shared.ts → @repo/shared/logger",
-    "apps/backend/shared/infra/bad-shared-infra-base.ts → @repo/shared/env-helper",
+    "apps/backend/shared/drizzle/bad-shared-infra-base.ts → @repo/shared/env-helper",
     'apps/shared/package.json の exports "./mismatch" の値 "./env.ts" は、キーのパスに .ts を付けたものではない',
     'apps/shared/package.json の exports "./mismatch" が指すファイルが無い',
     'apps/shared/package.json の exports "./unused" はどこからも参照されていない',
@@ -7240,9 +7353,9 @@ const MUST_REJECT_VIOLATIONS = [
   //   backend-to-frontend にかかる。"@/" で書いたものは backend-relative-only にもかかる（相対パスで書いたものはかからない）。
   ...[
     "apps/backend/shared-x/domain/x.ts → apps/frontend_customer/features/todo",
-    "apps/backend/shared/domain/bad-shared-screen.ts → apps/frontend_customer/shared/x",
-    "apps/backend/shared/presentation/bad-backend-shared.ts → apps/frontend_customer/app/page",
-    "apps/backend/shared/presentation/bad-backend-shared.ts → apps/frontend_customer/features/todo",
+    "apps/backend/shared/error/bad-shared-screen.ts → apps/frontend_customer/shared/x",
+    "apps/backend/shared/http/bad-backend-shared.ts → apps/frontend_customer/app/page",
+    "apps/backend/shared/http/bad-backend-shared.ts → apps/frontend_customer/features/todo",
     "apps/backend/features/todo/internal/application/bad-application.ts → apps/frontend_customer/features/todo/components/todo-item",
     "apps/backend/features/todo/internal/domain/bad-domain.ts → apps/frontend_customer/app/globals.css",
     "apps/backend/features/todo/internal/domain/bad-domain.ts → apps/frontend_customer/features/todo",
@@ -7271,7 +7384,7 @@ const MUST_REJECT_VIOLATIONS = [
   "env-direct-access: bad.config.ts:1",
   "env-direct-access: bad.config.mjs:1",
   "env-direct-access: bad.config.cjs:1",
-  "env-direct-access: apps/backend/shared/infra/env-helper.ts:1",
+  "env-direct-access: apps/backend/shared/drizzle/env-helper.ts:1",
   ...[1, 2, 3, 4, 5, 8, 9].map(
     (line) =>
       `console-direct-access: apps/backend/features/todo/internal/presentation/bad-console.api.ts:${line}`,
@@ -7280,7 +7393,7 @@ const MUST_REJECT_VIOLATIONS = [
   "console-direct-access: apps/e2e/bad-console.spec.ts:1",
   "console-direct-access: scripts/bad-console.ts:1",
   "console-direct-access: bad-console.config.mjs:1",
-  "console-direct-access: apps/backend/shared/infra/logger-helper.ts:1",
+  "console-direct-access: apps/backend/shared/drizzle/logger-helper.ts:1",
   ...[2, 2, 3, 4, 4, 4, 4, 5, 7, 13, 14].map(
     (line) =>
       `frontend-hardcoded-text: apps/frontend_customer/features/todo/components/bad-text.tsx:${line}`,
@@ -7315,15 +7428,15 @@ const MUST_REJECT_VIOLATIONS = [
     "apps/backend/features/todo/internal/presentation/update-todo.api",
     "apps/backend/features/todo/internal/presentation/delete-todo.api",
     "apps/backend/features/todo/internal/presentation/create-todo.api",
-    "apps/backend/shared/presentation/problem",
+    "apps/backend/shared/http/problem",
     "apps/backend/features/todo/internal/infra/todo-repository.postgres",
-    "apps/backend/shared/presentation/json-body",
+    "apps/backend/shared/http/json-body",
   ].map(
     (to) =>
       `screen-to-backend: apps/frontend_customer/features/todo/components/bad-backend.ts → ${to}`,
   ),
   "screen-to-backend: apps/frontend_customer/shared/bad-shared.tsx → apps/backend/features/todo/internal/presentation/list-todos.api",
-  "screen-to-backend: apps/frontend_customer/shared/bad-shared.tsx → apps/backend/shared/domain/domain-error",
+  "screen-to-backend: apps/frontend_customer/shared/bad-shared.tsx → apps/backend/shared/error/domain-error",
   "shared-to-features: apps/frontend_customer/shared/bad-shared.tsx → apps/frontend_customer/features/todo",
   "shared-to-features: apps/frontend_customer/shared/bad-shared.tsx → apps/frontend_customer/features/todo/api/todo-api",
   "shared-to-features: apps/frontend_customer/shared/bad-shared.tsx → apps/frontend_customer/features/todo/components/todo-item",
@@ -7334,9 +7447,9 @@ const MUST_REJECT_VIOLATIONS = [
     "apps/backend/features/todo/internal/domain/todo",
     "apps/backend/features/other/internal/presentation/list-others.api",
     "apps/backend/features/todo/internal/presentation/get-todo.api",
-    "apps/backend/shared/presentation/problem",
+    "apps/backend/shared/http/problem",
     "apps/backend/features/todo/internal/presentation/list-todos",
-    "apps/backend/shared/domain/domain-error",
+    "apps/backend/shared/error/domain-error",
     "apps/backend/features/todo/internal/presentation/update-todo.api",
   ].map(
     (to) =>
@@ -7372,7 +7485,6 @@ const MUST_REJECT_VIOLATIONS = [
     (to) =>
       `domain: apps/backend/features/todo/internal/domain/bad-domain.ts → ${to}`,
   ),
-  "domain: apps/backend/shared/domain/bad-shared-domain.ts → apps/backend/shared/presentation/problem",
   ...[
     "apps/backend/features/todo/internal/infra/todo-repository.postgres",
     "apps/backend/features/todo/internal/presentation/list-todos.api",
@@ -7432,20 +7544,7 @@ const MUST_REJECT_VIOLATIONS = [
     "apps/backend/features/todo/internal/domain/todo-constants",
   ].map(
     (to) =>
-      `backend-shared: apps/backend/shared/presentation/bad-backend-shared.ts → ${to}`,
-  ),
-  ...[
-    "apps/backend/features/todo/internal/domain/todo",
-    "apps/backend/features/todo/internal/infra/todo-repository.postgres",
-    "apps/backend/features/todo/internal/domain/todo-factory",
-    "apps/frontend_customer/features/todo",
-    "apps/frontend_customer/app/page",
-    "apps/backend/features/todo/internal/infra/todo-repository.in-memory",
-    "apps/backend/shared/infra/database",
-    "apps/backend/features/todo/internal/domain/todo-constants",
-  ].map(
-    (to) =>
-      `presentation: apps/backend/shared/presentation/bad-backend-shared.ts → ${to}`,
+      `backend-shared: apps/backend/shared/http/bad-backend-shared.ts → ${to}`,
   ),
   ...[
     "apps/backend/features/other/internal/domain/other",
@@ -7465,8 +7564,7 @@ const MUST_REJECT_VIOLATIONS = [
     (to) =>
       `presentation: apps/backend/features/todo/internal/presentation/bad-presentation-2.api.ts → ${to}`,
   ),
-  "domain: apps/backend/shared/domain/bad-shared-screen.ts → apps/frontend_customer/shared/x",
-  "backend-shared: apps/backend/shared/domain/bad-shared-screen.ts → apps/frontend_customer/shared/x",
+  "backend-shared: apps/backend/shared/error/bad-shared-screen.ts → apps/frontend_customer/shared/x",
   "backend-placement: apps/backend/features/todo/p-root.ts",
   "backend-placement: apps/backend/features/todo/lib/x.ts",
   // Issue #208 モジュールの境界。
@@ -7523,14 +7621,15 @@ const MUST_REJECT_VIOLATIONS = [
   "backend-placement: apps/backend/todo/domain/old.ts",
   "backend-placement: apps/backend/features/todo/domain/old-layer.ts",
   "backend-placement: apps/backend/features/todo/internal/x.ts",
-  "backend-placement: apps/backend/shared/drizzle/app.ts",
+  "backend-placement: apps/backend/shared/domain/old-layer.ts",
+  "backend-placement: apps/backend/shared/foo/x.ts",
   "backend-placement: apps/backend/shared-x/domain/x.ts",
   "app: apps/frontend_customer/app/api-x/route.ts → apps/backend/features/todo/internal/presentation/list-todos.api",
   "screen-to-backend: apps/frontend_customer/features/todo/components/test-helper.tsx → apps/backend/features/todo/internal/domain/todo",
   "screen-to-backend: apps/frontend_customer/features/todo/components/bad-ext.mts → apps/backend/features/todo/internal/domain/todo",
   "screen-to-backend: apps/frontend_customer/features/todo/components/bad-ext.mts → apps/backend/features/todo/internal/infra/todo-repository.postgres",
   "screen-to-backend: apps/frontend_customer/features/todo/components/bad-ext.cts → apps/backend/features/todo/internal/presentation/get-todo.api",
-  "screen-to-backend: apps/frontend_customer/features/todo/components/bad-ext.mjs → apps/backend/shared/presentation/problem",
+  "screen-to-backend: apps/frontend_customer/features/todo/components/bad-ext.mjs → apps/backend/shared/http/problem",
   "screen-to-backend: apps/frontend_customer/features/todo/components/bad-ext.cjs → apps/backend/features/todo/internal/infra/todo-repository.in-memory",
   "backend-shared: apps/backend/shared/bad-root.ts → apps/backend/features/todo/internal/application/create-todo.command",
   ...[
@@ -7548,39 +7647,26 @@ const MUST_REJECT_VIOLATIONS = [
     "next/server",
     "apps/frontend_customer/features/todo",
     "apps/backend/features/todo/internal/presentation/update-todo",
-    "apps/backend/shared/presentation/problem",
+    "apps/backend/shared/http/problem",
     "apps/frontend_customer/shared/x",
   ].map(
     (to) =>
       `app-api: apps/frontend_customer/app/api/todos/bad-route.ts → ${to}`,
   ),
-  "domain: apps/backend/features/todo/internal/domain/bad-domain-infra.ts → apps/backend/shared/infra/database",
   "domain: apps/backend/features/todo/internal/domain/bad-domain-infra.ts → apps/backend/test-support/database",
-  "domain: apps/backend/shared/domain/bad-shared-domain-infra.ts → apps/backend/shared/infra/database",
-  "domain: apps/backend/features/todo/internal/domain/bad-domain-application.ts → apps/backend/shared/application/transaction",
   "domain: apps/backend/features/todo/internal/domain/bad-domain-application.ts → apps/backend/shared/application/x",
-  "domain: apps/backend/features/todo/internal/domain/bad-domain-application.ts → apps/backend/shared/application/transaction/x",
-  "domain: apps/backend/shared/domain/bad-shared-domain-port-value.ts → apps/backend/shared/application/transaction",
   "infra: apps/backend/features/todo/internal/infra/bad-infra-application.ts → apps/backend/features/todo/internal/application/create-todo.command",
   "infra: apps/backend/features/todo/internal/infra/bad-infra-application.ts → apps/backend/shared/application/x",
-  "infra: apps/backend/features/todo/internal/infra/bad-infra-application.ts → apps/backend/shared/application/transaction/x",
-  "infra: apps/backend/features/todo/internal/infra/bad-infra-application.ts → apps/backend/shared/application/transaction",
-  "application: apps/backend/features/todo/internal/application/bad-application-infra.ts → apps/backend/shared/infra/database",
-  "application: apps/backend/features/todo/internal/application/bad-application-infra.ts → apps/backend/shared/infra/transaction.postgres",
   ...[
     "apps/backend/features/todo/internal/infra/schema",
     "apps/backend/test-support/database",
-    "apps/backend/shared/infra/writer",
     "apps/backend/test-support/transaction-runner.in-memory",
   ].map(
     (to) =>
       `presentation: apps/backend/features/todo/internal/presentation/bad-presentation-infra.api.ts → ${to}`,
   ),
-  "infra: apps/backend/shared/infra/bad-shared-infra.ts → apps/backend/features/todo/internal/infra/schema",
-  "backend-shared: apps/backend/shared/infra/bad-shared-infra.ts → apps/backend/features/todo/internal/infra/schema",
-  "infra: apps/backend/shared/infra/bad-shared-infra.ts → next/server",
-  "backend-shared: apps/backend/shared/infra/bad-shared-infra.ts → next/server",
-  "infra: apps/backend/shared/infra/bad-shared-infra.ts → apps/backend/shared/presentation/problem",
+  "backend-shared: apps/backend/shared/drizzle/bad-shared-infra.ts → apps/backend/features/todo/internal/infra/schema",
+  "backend-shared: apps/backend/shared/drizzle/bad-shared-infra.ts → next/server",
   ...["drizzle-orm/pg-core", "drizzle-orm", "pg"].map(
     (to) =>
       `core-to-persistence: apps/backend/features/todo/internal/domain/bad-domain-db.ts → ${to}`,
@@ -7589,23 +7675,22 @@ const MUST_REJECT_VIOLATIONS = [
     (to) =>
       `core-to-persistence: apps/backend/features/todo/internal/application/bad-application-db.command.ts → ${to}`,
   ),
-  "core-to-persistence: apps/backend/shared/domain/bad-shared-domain-db.ts → drizzle-orm/node-postgres",
   // Issue #68 の段階 2: frontend-to-backend-specifier。上の fixture のうち、frontend・apps/e2e/・リポジトリ直下から相対パス
   //   （と "@/../backend/"）で backend を指すものは、ほかの規則の結果に関係なくすべてかかる。
   ...[
     "apps/frontend_customer/app/api/todos/[id]/bad-relative.ts → apps/backend/features/todo/internal/presentation/update-todo.api",
     "apps/frontend_customer/app/api/todos/bad-route.ts → apps/backend/features/todo/internal/application/create-todo.command",
     "apps/frontend_customer/app/bad-page.tsx → apps/backend/features/todo/internal/presentation/get-todo.api",
-    "apps/frontend_customer/features/todo/api/bad-api.ts → apps/backend/shared/presentation/problem",
+    "apps/frontend_customer/features/todo/api/bad-api.ts → apps/backend/shared/http/problem",
     "apps/frontend_customer/features/todo/api/bad-api.ts → apps/backend/features/todo/internal/domain/todo",
     "apps/frontend_customer/features/todo/api/bad-specifier.ts → apps/backend/features/todo/internal/presentation/get-todo.api",
     "apps/frontend_customer/features/todo/api/bad-specifier.ts → apps/backend/features/todo/internal/presentation/list-todos.api",
-    "apps/frontend_customer/features/todo/components/bad-backend.ts → apps/backend/shared/presentation/json-body",
+    "apps/frontend_customer/features/todo/components/bad-backend.ts → apps/backend/shared/http/json-body",
     "apps/frontend_customer/features/todo/components/bad-backend.ts → apps/backend/features/todo/internal/domain/todo",
     "apps/frontend_customer/features/todo/components/bad-backend.ts → apps/backend/features/todo/internal/presentation/delete-todo.api",
-    "apps/frontend_customer/features/todo/components/bad-ext.mjs → apps/backend/shared/presentation/problem",
+    "apps/frontend_customer/features/todo/components/bad-ext.mjs → apps/backend/shared/http/problem",
     "apps/frontend_customer/instrumentation-node.ts → apps/backend/shared/infra/env",
-    "apps/frontend_customer/next.config.ts → apps/backend/shared/infra/database",
+    "apps/frontend_customer/next.config.ts → apps/backend/shared/drizzle/database",
     "apps/frontend_customer/shared/bad-shared.tsx → apps/backend/features/todo/internal/presentation/list-todos.api",
     "apps/e2e/bad-relative.ts → apps/backend/shared/infra/env",
     "vitest.global-setup.mts → apps/backend/test-support/database",
@@ -7617,7 +7702,7 @@ const MUST_REJECT_VIOLATIONS = [
     "apps/frontend_customer/app/api/todos/bad-route.ts → @repo/backend/features/todo/internal/infra/todo-repository.postgres",
     "apps/frontend_customer/app/api/todos/bad-route.ts → @repo/backend/features/todo/internal/presentation/update-todo",
     "apps/frontend_customer/features/todo/api/bad-api.ts → @repo/backend/features/other/internal/presentation/list-others.api",
-    "apps/frontend_customer/features/todo/api/bad-api.ts → @repo/backend/shared/domain/domain-error",
+    "apps/frontend_customer/features/todo/api/bad-api.ts → @repo/backend/shared/error/domain-error",
     "apps/frontend_customer/features/todo/api/bad-api.ts → @repo/backend/features/todo/internal/presentation/list-todos",
     "apps/frontend_customer/features/todo/components/bad-backend.ts → @repo/backend/features/todo/internal/infra/todo-repository.postgres",
     "apps/frontend_customer/features/todo/components/bad-ext.cjs → @repo/backend/features/todo/internal/infra/todo-repository.in-memory",
@@ -7627,12 +7712,12 @@ const MUST_REJECT_VIOLATIONS = [
     "apps/frontend_customer/lib/db.ts → @repo/backend/features/todo/internal/infra/todo-repository.postgres",
     "apps/frontend_customer/next.config.ts → @repo/backend/shared/infra/env-helper",
     "apps/frontend_customer/next.config.ts → @repo/backend/features/todo/internal/infra/todo-repository.postgres",
-    "apps/frontend_customer/shared/bad-shared.tsx → @repo/backend/shared/domain/domain-error",
+    "apps/frontend_customer/shared/bad-shared.tsx → @repo/backend/shared/error/domain-error",
     "apps/e2e/bad-exports.ts → @repo/backend",
     "apps/e2e/bad-exports.ts → @repo/backend/features/todo/internal/infra/todo-repository.postgres",
     'apps/backend/package.json の exports "./mismatch" が指すファイルが無い',
     'apps/backend/package.json の exports "./mismatch" の値 "./features/todo/internal/domain/bad-domain.ts" は、キーのパスに .ts を付けたものではない',
-    'apps/backend/package.json の exports "./shared/presentation/problem" が指すファイルが無い',
+    'apps/backend/package.json の exports "./shared/http/problem" が指すファイルが無い',
     'apps/backend/package.json の exports "./features/todo/internal/domain/bad-domain" はどこからも参照されていない',
   ].map((line) => `backend-exports: ${line}`),
 ];
@@ -7645,7 +7730,7 @@ const MUST_PASS_FILES: Record<string, string> = {
   //   型と interface・定数のオブジェクト・コメントと文字列の中の function。テスト（test-support/ の中のテストも）と
   //   E2E のテスト（*.spec.ts）の関数は対象外（apps/shared のクラスは下の now-single-source の apps/shared/now.ts、
   //   テストの関数は apps/shared/env.test.ts、E2E のテストの関数は下の apps/e2e/todo.spec.ts）。
-  "apps/backend/shared/domain/good-class.ts": lines(
+  "apps/backend/shared/error/good-class.ts": lines(
     "export type F = (x: number) => number;",
     "export interface Notifier { notify(message: string): void; }",
     'export const KEYS = { a: "a" } as const;',
@@ -7657,7 +7742,7 @@ const MUST_PASS_FILES: Record<string, string> = {
     "// export function commented(): void {}",
     'export const S = "export function inString() {}";',
   ),
-  "apps/backend/shared/domain/good-class.test.ts": lines(
+  "apps/backend/shared/error/good-class.test.ts": lines(
     "function helper(): number { return 1; }",
   ),
   "apps/backend/test-support/class-based-helper.test.ts": lines(
@@ -7668,7 +7753,7 @@ const MUST_PASS_FILES: Record<string, string> = {
   ),
   // no-static-in-instance-class（Issue #300）: インスタンスのクラスの補助はインスタンスのメソッドにし、static は自分のクラス（か
   //   Promise）を返すファクトリだけ。static だけのクラスは対象外。
-  "apps/backend/shared/infra/good-instance.ts": lines(
+  "apps/backend/shared/drizzle/good-instance.ts": lines(
     "export class Repo {",
     "  private constructor(private readonly x: number) {}",
     "  static create(): Repo { return new Repo(1); }",
@@ -7681,7 +7766,7 @@ const MUST_PASS_FILES: Record<string, string> = {
   // presentation-with-problem-response（Issue #141）: ProblemResponse.wrap で包んだ handle（ctx あり・なし）。
   //   対象外: api ファイルでない presentation のファイル、テスト、ほかの層の handle。
   "apps/backend/features/todo/internal/presentation/good-handle.api.ts": lines(
-    'import { ProblemResponse } from "../../../../shared/presentation/problem";',
+    'import { ProblemResponse } from "../../../../shared/http/problem";',
     "export class ListApi {",
     "  readonly handle = ProblemResponse.wrap(async (request: Request) => new Response(null));",
     "}",
@@ -7739,7 +7824,7 @@ const MUST_PASS_FILES: Record<string, string> = {
     'export { TodoScreen } from "./screens/todo-screen/todo-screen";',
   ),
   "apps/frontend_customer/features/todo/api/todo-api.ts": lines(
-    'import type { Problem } from "@repo/backend/shared/presentation/problem";',
+    'import type { Problem } from "@repo/backend/shared/http/problem";',
     "import type {",
     "  CreateTodoRequest,",
     "  CreateTodoResponse,",
@@ -7833,14 +7918,14 @@ const MUST_PASS_FILES: Record<string, string> = {
     "`;",
     'export const url = "https://example.com/import/from"; import { useState } from "react";',
   ),
-  "apps/backend/shared/domain/domain-error.ts": lines(
+  "apps/backend/shared/error/domain-error.ts": lines(
     "export class DomainError extends Error {}",
   ),
-  "apps/backend/shared/presentation/problem.ts": lines(
+  "apps/backend/shared/http/problem.ts": lines(
     "import {",
     "  DomainError,",
     "  type DomainErrorCode,",
-    '} from "../domain/domain-error";',
+    '} from "../error/domain-error";',
     // Issue #85: 想定外の例外はログの唯一の出口（Issue #90 で apps/shared に移した logger）で残す。
     'import { logger } from "@repo/shared/logger";',
     'logger.emit({ message: "x", event: { name: "server_error" } });',
@@ -7869,7 +7954,7 @@ const MUST_PASS_FILES: Record<string, string> = {
   "apps/frontend_customer/features/todo/components/x.test.tsx":
     lines("console.error(1);"),
   "scripts/tool.sh": lines("console.log(1)"),
-  "apps/backend/shared/presentation/json-body.ts": lines(
+  "apps/backend/shared/http/json-body.ts": lines(
     'import { z } from "zod";',
     'import { type ProblemErrorInput, InvalidRequestError } from "./problem";',
     'import { ProblemResponse } from "./problem";',
@@ -7878,32 +7963,63 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { randomUUID } from "node:crypto";',
     'import { now } from "@repo/shared/now";',
     'import { z } from "zod";',
-    'import { DomainError } from "../../../../shared/domain/domain-error";',
-    'import { DomainError as E } from "../../../../shared/domain/domain-error";',
+    'import { DomainError } from "../../../../shared/error/domain-error";',
+    'import { DomainError as E } from "../../../../shared/error/domain-error";',
   ),
   "apps/backend/features/todo/internal/domain/todo-repository.ts": lines(
     'import type { Todo } from "./todo";',
     'import { Todo as T } from "./todo";',
-    // Issue #230: Repository の interface の引数に取る印の型 Transaction は、shared/application/transaction から型だけ参照する。
-    'import type { Transaction } from "../../../../shared/application/transaction";',
+    // Issue #230: Repository の interface の引数に取る印の型 Transaction は、shared/transaction/transaction から型だけ参照する。
+    'import type { Transaction } from "../../../../shared/transaction/transaction";',
   ),
-  // Issue #230: backend/shared の domain からも、shared/application/transaction は型だけ参照できる（Issue #220 では違反の例
-  //   bad-shared-domain-application.ts だった）。
-  "apps/backend/shared/domain/good-shared-domain-transaction.ts": lines(
-    'import type { TransactionRunner } from "../application/transaction";',
-    'export type { Transaction } from "../application/transaction";',
+  // Issue #310（ユーザー判断）: feature のどの層も backend/shared のどの単位も参照してよい（値・型・re-export・dynamic import）。
+  //   以前は違反だった参照（domain から drizzle・http、application から drizzle の runner、infra から transaction の値、
+  //   presentation から writer）も通る。
+  "apps/backend/features/todo/internal/domain/good-shared-units-domain.ts":
+    lines(
+      'import { Transaction } from "../../../../shared/transaction/transaction";',
+      'import type { Database } from "../../../../shared/drizzle/database";',
+      'import { ProblemResponse } from "../../../../shared/http/problem";',
+      'export type { ChangeOperation } from "../../../../shared/change-log/change-operation";',
+      'import { ErrorKey } from "../../../../shared/error/error-key";',
+    ),
+  "apps/backend/features/todo/internal/application/good-shared-units-application.ts":
+    lines(
+      'import { PostgresTransactionRunner } from "../../../../shared/drizzle/transaction.postgres";',
+      'import { AppDatabase } from "../../../../shared/drizzle/database";',
+      'const c = import("../../../../shared/change-log/change-log");',
+      'import { JsonBody } from "../../../../shared/http/json-body";',
+    ),
+  "apps/backend/features/todo/internal/infra/good-shared-units-infra.ts": lines(
+    'import { TransactionRunner } from "../../../../shared/transaction/transaction";',
+    'export { Transaction } from "../../../../shared/transaction/transaction";',
+    'import { ProblemResponse } from "../../../../shared/http/problem";',
+    'import { changeLogs } from "../../../../shared/change-log/change-log.schema";',
+  ),
+  "apps/backend/features/todo/internal/presentation/good-shared-units-presentation.api.ts":
+    lines(
+      'import { PostgresWriter } from "../../../../shared/drizzle/writer";',
+      'import { ColumnClassifier } from "../../../../shared/drizzle/column-classification";',
+      'import { ChangeLog } from "../../../../shared/change-log/change-log";',
+      'import type { Transaction } from "../../../../shared/transaction/transaction";',
+    ),
+  // Issue #310: backend/shared の中は単位をまたいでどの向きにも参照してよい（以前の shared の層の向きの縛りは無い）。
+  "apps/backend/shared/error/good-shared-cross-unit.ts": lines(
+    'import { ProblemResponse } from "../http/problem";',
+    'import type { Database } from "../drizzle/database";',
+    'import { env } from "@repo/shared/env";',
   ),
   "apps/backend/features/todo/internal/application/create-todo.command.ts":
     lines(
-      // Issue #220・#230: トランザクションを張る口と brand の型 Transaction は、どちらも backend/shared の application。
-      'import type { Transaction, TransactionRunner } from "../../../../shared/application/transaction";',
+      // Issue #220・#230: トランザクションを張る口と brand の型 Transaction は、どちらも backend/shared/transaction（Issue #310 より前は shared の application）。
+      'import type { Transaction, TransactionRunner } from "../../../../shared/transaction/transaction";',
       'import { Todo } from "../domain/todo";',
       'import type { TodoRepository } from "../domain/todo-repository";',
     ),
   "apps/backend/features/todo/internal/application/get-todo.query.ts": lines(
-    'import { DomainError } from "../../../../shared/domain/domain-error";',
+    'import { DomainError } from "../../../../shared/error/domain-error";',
     'import type { Todo } from "../domain/todo";',
-    'import { DomainError as E } from "../../../../shared/domain/domain-error";',
+    'import { DomainError as E } from "../../../../shared/error/domain-error";',
     'import { ListTodosQuery } from "./list-todos.query";',
     'import type { TodoRepository } from "../domain/todo-repository";',
   ),
@@ -7913,37 +8029,37 @@ const MUST_PASS_FILES: Record<string, string> = {
   ),
   "apps/backend/features/todo/internal/application/update-todo.command.ts":
     lines(
-      'import { DomainError } from "../../../../shared/domain/domain-error";',
+      'import { DomainError } from "../../../../shared/error/domain-error";',
       'import type { Todo } from "../domain/todo";',
       'import type { TodoRepository } from "../domain/todo-repository";',
     ),
   "apps/backend/features/todo/internal/application/delete-todo.command.ts":
     lines(
-      'import { DomainError } from "../../../../shared/domain/domain-error";',
+      'import { DomainError } from "../../../../shared/error/domain-error";',
       'import type { TodoRepository } from "../domain/todo-repository";',
     ),
   // Issue #123: api ファイルが自分で組み立てる。自 feature の application（値）、Postgres の Repository の実装、
-  //   backend/shared/infra/database（プール）を参照する（コンテナは廃止）。
+  //   backend/shared/drizzle/database（プール）を参照する（コンテナは廃止）。
   "apps/backend/features/todo/internal/presentation/list-todos.api.ts": lines(
-    'import { AppDatabase } from "../../../../shared/infra/database";',
-    'import { ProblemResponse } from "../../../../shared/presentation/problem";',
+    'import { AppDatabase } from "../../../../shared/drizzle/database";',
+    'import { ProblemResponse } from "../../../../shared/http/problem";',
     'import { ListTodosQuery } from "../application/list-todos.query";',
     'import type { Todo } from "../domain/todo";',
     'import { PostgresTodoRepository } from "../infra/todo-repository.postgres";',
   ),
   "apps/backend/features/todo/internal/presentation/create-todo.api.ts": lines(
     'import { z } from "zod";',
-    'import { ProblemResponse } from "../../../../shared/presentation/problem";',
+    'import { ProblemResponse } from "../../../../shared/http/problem";',
     "import {",
     "  RequestBody,",
-    '} from "../../../../shared/presentation/json-body";',
-    'import { AppDatabase } from "../../../../shared/infra/database";',
+    '} from "../../../../shared/http/json-body";',
+    'import { AppDatabase } from "../../../../shared/drizzle/database";',
     'import { CreateTodoCommand } from "../application/create-todo.command";',
     'import { PostgresTodoRepository } from "../infra/todo-repository.postgres";',
-    // Issue #220: トランザクションの口（backend/shared の application）と runner の実装（組み立て）。
-    'import type { TransactionRunner } from "../../../../shared/application/transaction";',
-    'import { PostgresTransactionRunner } from "../../../../shared/infra/transaction.postgres";',
-    'import { DomainError } from "../../../../shared/domain/domain-error";',
+    // Issue #220: トランザクションの口（backend/shared/transaction）と runner の実装（backend/shared/drizzle。組み立て）。
+    'import type { TransactionRunner } from "../../../../shared/transaction/transaction";',
+    'import { PostgresTransactionRunner } from "../../../../shared/drizzle/transaction.postgres";',
+    'import { DomainError } from "../../../../shared/error/domain-error";',
     'export type { Todo } from "../domain/todo";',
     'import { type Todo as T } from "../domain/todo";',
     // Issue #144: 自 feature の domain の定数（UPPER_SNAKE_CASE）は値で import できる。型との混在・複数行・別名も可。
@@ -7958,29 +8074,29 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import type { GetTodoResponse } from "./get-todo.api";',
     'import type { ListTodosQuery } from "../application/list-todos.query";',
     'import { GetTodoQuery } from "../application/get-todo.query";',
-    'export { ProblemResponse } from "../../../../shared/presentation/problem";',
+    'export { ProblemResponse } from "../../../../shared/http/problem";',
   ),
   "apps/frontend_customer/shared/y.mts": lines(
     'import { x } from "./x";',
     'const lazy = import(`./x`, { with: { type: "json" } });',
   ),
   "apps/backend/features/todo/internal/presentation/get-todo.api.ts": lines(
-    'import { ProblemResponse } from "../../../../shared/presentation/problem";',
+    'import { ProblemResponse } from "../../../../shared/http/problem";',
     'import { GetTodoQuery } from "../application/get-todo.query";',
     'import type { Todo } from "../domain/todo";',
     'import type { PostgresTodoRepository as R } from "../infra/todo-repository.postgres";',
     'import { PostgresTodoRepository } from "../infra/todo-repository.postgres";',
-    'import { type Database, AppDatabase } from "../../../../shared/infra/database";',
+    'import { type Database, AppDatabase } from "../../../../shared/drizzle/database";',
   ),
   "apps/backend/features/todo/internal/presentation/update-todo.api.ts": lines(
     'import { z } from "zod";',
-    'import { DomainError } from "../../../../shared/domain/domain-error";',
-    'import { ProblemResponse } from "../../../../shared/presentation/problem";',
+    'import { DomainError } from "../../../../shared/error/domain-error";',
+    'import { ProblemResponse } from "../../../../shared/http/problem";',
     "import {",
     "  RequestBody,",
-    '} from "../../../../shared/presentation/json-body";',
+    '} from "../../../../shared/http/json-body";',
     'import type { Todo } from "../domain/todo";',
-    'import { AppDatabase } from "../../../../shared/infra/database";',
+    'import { AppDatabase } from "../../../../shared/drizzle/database";',
     "import {",
     "  UpdateTodoCommand,",
     "  type UpdateTodoInput,",
@@ -7988,8 +8104,8 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { PostgresTodoRepository } from "../infra/todo-repository.postgres";',
   ),
   "apps/backend/features/todo/internal/presentation/delete-todo.api.ts": lines(
-    'import { ProblemResponse } from "../../../../shared/presentation/problem";',
-    'import { AppDatabase } from "../../../../shared/infra/database";',
+    'import { ProblemResponse } from "../../../../shared/http/problem";',
+    'import { AppDatabase } from "../../../../shared/drizzle/database";',
     'import { DeleteTodoCommand } from "../application/delete-todo.command";',
     'const lazy = import("../infra/todo-repository.postgres");',
   ),
@@ -8002,7 +8118,7 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { SendNotificationCommand } from "../internal/application/send-notification.command";',
     'import { LogNotificationSender } from "../internal/infra/notification-sender.log";',
     'import type { NotificationSender } from "../internal/domain/notification-sender";',
-    'import { AppDatabase } from "../../../shared/infra/database";',
+    'import { AppDatabase } from "../../../shared/drizzle/database";',
     'import { env } from "@repo/shared/env";',
     'export type { Message } from "./message";',
   ),
@@ -8021,17 +8137,17 @@ const MUST_PASS_FILES: Record<string, string> = {
       'import { ChangeTodoCompletionCommand } from "../application/change-todo-completion.command";',
     ),
   // Issue #57: 永続化（Drizzle + Postgres）。backend の infra からパッケージ（drizzle-orm / pg）への参照、
-  //   自 feature の infra → backend/shared/infra。
-  // Issue #220・#230: runner の実装は、port と brand の型（どちらも shared/application/transaction）を型で使う。
-  "apps/backend/shared/infra/transaction.postgres.ts": lines(
-    'import type { Transaction, TransactionRunner } from "../application/transaction";',
+  //   自 feature の infra → backend/shared/drizzle。
+  // Issue #220・#230: runner の実装は、port と brand の型（どちらも shared/transaction/transaction）を型で使う。
+  "apps/backend/shared/drizzle/transaction.postgres.ts": lines(
+    'import type { Transaction, TransactionRunner } from "../transaction/transaction";',
     'import type { Database } from "./database";',
     'import { PostgresWriter } from "./writer";',
   ),
-  "apps/backend/shared/infra/database.ts": lines(
+  "apps/backend/shared/drizzle/database.ts": lines(
     'import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";',
     'import { Pool, type PoolConfig } from "pg";',
-    // Issue #59: 設定は env.ts から、ログは logger から取る（Issue #90 で apps/shared に移した。backend の infra から apps/shared）。
+    // Issue #59: 設定は env.ts から、ログは logger から取る（Issue #90 で apps/shared に移した。backend/shared/drizzle から apps/shared）。
     //   apps/shared へは "@repo/shared/..." だけ（相対パスは backend-relative-only の違反）。
     'import { env } from "@repo/shared/env";',
     'import { logger } from "@repo/shared/logger";',
@@ -8148,7 +8264,7 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { now } from "@repo/shared/now";',
     "export const at = now();",
   ),
-  "apps/backend/shared/presentation/uses-now.ts": lines(
+  "apps/backend/shared/http/uses-now.ts": lines(
     'import { now } from "@repo/shared/now";',
     "export const at = now();",
   ),
@@ -8218,7 +8334,7 @@ const MUST_PASS_FILES: Record<string, string> = {
     exports: {
       "./features/todo/internal/presentation/*.api":
         "./features/todo/internal/presentation/*.api.ts",
-      "./shared/presentation/problem": "./shared/presentation/problem.ts",
+      "./shared/http/problem": "./shared/http/problem.ts",
     },
   }),
   // テストだけが使うコード（Issue #181。直下の test-support/）。置き場所の規則で許し、層の規則は当てない（どの層でもない）。
@@ -8228,7 +8344,7 @@ const MUST_PASS_FILES: Record<string, string> = {
     'import { drizzle } from "drizzle-orm/node-postgres";',
     'import { migrate } from "drizzle-orm/node-postgres/migrator";',
     'import { Pool } from "pg";',
-    'import type { Database } from "../shared/infra/database";',
+    'import type { Database } from "../shared/drizzle/database";',
     'import { env } from "@repo/shared/env";',
     // now-single-source: テストの補助（test-support/ の下）は現在時刻を直接読んでもよい。
     "export const stamp = Date.now();",
@@ -8239,20 +8355,20 @@ const MUST_PASS_FILES: Record<string, string> = {
   "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts":
     lines(
       'import { asc, eq } from "drizzle-orm";',
-      'import type { Database } from "../../../../shared/infra/database";',
-      // Issue #220・#230: brand の型 Transaction と、infra が実装する port（どちらも shared/application/transaction）は型で参照できる。
-      'import type { Transaction } from "../../../../shared/application/transaction";',
-      'import type { TransactionRunner } from "../../../../shared/application/transaction";',
+      'import type { Database } from "../../../../shared/drizzle/database";',
+      // Issue #220・#230: brand の型 Transaction と、infra が実装する port（どちらも shared/transaction/transaction）は型で参照できる。
+      'import type { Transaction } from "../../../../shared/transaction/transaction";',
+      'import type { TransactionRunner } from "../../../../shared/transaction/transaction";',
       'import { Todo } from "../domain/todo";',
       'import type { TodoRepository } from "../domain/todo-repository";',
       'import { todos } from "./schema";',
       'import { todos as t } from "./schema";',
     ),
   // InMemory の実装（Issue #191 で features/todo/internal/infra/ から test-support/<feature>/ に移した）。test-support は層の規則の外なので、
-  //   feature の domain・infra の schema・backend/shared/infra を値で参照してよい（本番のコードからの参照は test-support.test.ts が止める）。
+  //   feature の domain・infra の schema・backend/shared/drizzle を値で参照してよい（本番のコードからの参照は test-support.test.ts が止める）。
   "apps/backend/test-support/todo/todo-repository.in-memory.ts": lines(
     'import { now } from "@repo/shared/now";',
-    'import { ChangedProps } from "../../shared/infra/changed-props";',
+    'import { ChangedProps } from "../../shared/drizzle/changed-props";',
     'import { Todo } from "../../features/todo/internal/domain/todo";',
     'import type { TodoRepository } from "../../features/todo/internal/domain/todo-repository";',
     'import { todos } from "../../features/todo/internal/infra/schema";',
@@ -8585,9 +8701,9 @@ describeFeature(feature, ({ Scenario }) => {
         // then
         expect(files).toEqual(
           expect.arrayContaining([
-            "apps/backend/shared/domain/validate.ts",
-            "apps/backend/shared/infra/writer.ts",
-            "apps/backend/shared/presentation/problem.ts",
+            "apps/backend/shared/error/validate.ts",
+            "apps/backend/shared/drizzle/writer.ts",
+            "apps/backend/shared/http/problem.ts",
             "apps/backend/shared/drizzle/drizzle.config.ts",
             "apps/backend/features/notification/expose/notifier.ts",
             "apps/backend/features/todo/internal/domain/todo.ts",
@@ -8737,8 +8853,8 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/backend/features/notification/expose/notifier.ts",
             "apps/backend/features/notification/internal/infra/notification-sender.log.ts",
             "apps/backend/shared/drizzle/drizzle.config.ts",
-            "apps/backend/shared/infra/database.ts",
-            "apps/backend/shared/presentation/problem.ts",
+            "apps/backend/shared/drizzle/database.ts",
+            "apps/backend/shared/http/problem.ts",
             "apps/e2e/support/database.ts",
             "apps/e2e/playwright.config.ts",
             "vitest.global-setup.ts",
@@ -8759,7 +8875,7 @@ describeFeature(feature, ({ Scenario }) => {
           expect.arrayContaining([
             "apps/shared/env.ts",
             "apps/shared/logger.ts",
-            "apps/backend/shared/infra/database.ts",
+            "apps/backend/shared/drizzle/database.ts",
             "apps/backend/test-support/database.ts",
             "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
             "apps/backend/shared/drizzle/drizzle.config.ts",
@@ -8799,8 +8915,8 @@ describeFeature(feature, ({ Scenario }) => {
           expect.arrayContaining([
             "apps/shared/logger.ts",
             "apps/shared/env.ts",
-            "apps/backend/shared/infra/database.ts",
-            "apps/backend/shared/presentation/problem.ts",
+            "apps/backend/shared/drizzle/database.ts",
+            "apps/backend/shared/http/problem.ts",
             "apps/backend/features/todo/internal/presentation/list-todos.api.ts",
             "apps/backend/shared/drizzle/drizzle.config.ts",
             "apps/frontend_customer/proxy.ts",
@@ -8875,8 +8991,8 @@ describeFeature(feature, ({ Scenario }) => {
         // then
         expect(backend).toEqual(
           expect.arrayContaining([
-            "apps/backend/shared/domain/domain-error.ts",
-            "apps/backend/shared/presentation/problem.ts",
+            "apps/backend/shared/error/domain-error.ts",
+            "apps/backend/shared/http/problem.ts",
             "apps/backend/features/todo/internal/infra/todo-repository.postgres.ts",
             "apps/backend/features/notification/expose/notifier.ts",
             "apps/backend/shared/drizzle/drizzle.config.ts",
@@ -9773,8 +9889,8 @@ describeFeature(feature, ({ Scenario }) => {
 
         // when
         const topLevelFunctions = findTopLevelFunctions(
-          parseSourceFiles({ [DOMAIN_FILE]: source }).get(
-            DOMAIN_FILE,
+          parseSourceFiles({ [SHARED_ERROR_FILE]: source }).get(
+            SHARED_ERROR_FILE,
           ) as SourceFile,
         );
 
@@ -10050,7 +10166,10 @@ describeFeature(feature, ({ Scenario }) => {
             exports,
             [
               ref("apps/frontend_customer/proxy.ts", "@repo/shared/logger"),
-              ref("apps/backend/shared/infra/database.ts", "@repo/shared/env"),
+              ref(
+                "apps/backend/shared/drizzle/database.ts",
+                "@repo/shared/env",
+              ),
               ref("apps/e2e/support/database.ts", "@repo/shared/env"),
               ref("vitest.global-setup.ts", "@repo/shared/env"),
               // apps/shared の中の参照と、前方一致だけが同じ別パッケージ・@repo/backend の参照は数えない。
@@ -10083,9 +10202,12 @@ describeFeature(feature, ({ Scenario }) => {
             },
             [
               ref("apps/frontend_customer/proxy.ts", "@repo/shared/logger"),
-              ref("apps/backend/shared/infra/database.ts", "@repo/shared/env"),
               ref(
-                "apps/backend/shared/infra/database.ts",
+                "apps/backend/shared/drizzle/database.ts",
+                "@repo/shared/env",
+              ),
+              ref(
+                "apps/backend/shared/drizzle/database.ts",
                 "@repo/shared/database",
               ),
               ref("apps/e2e/a.ts", "@repo/shared"),
@@ -10096,7 +10218,7 @@ describeFeature(feature, ({ Scenario }) => {
 
           // then
           expect(violations).toEqual([
-            "apps/backend/shared/infra/database.ts → @repo/shared/database",
+            "apps/backend/shared/drizzle/database.ts → @repo/shared/database",
             "apps/e2e/a.ts → @repo/shared",
             'apps/shared/package.json の exports "./unused" はどこからも参照されていない',
             'apps/shared/package.json の exports "./unused" が指すファイルが無い',

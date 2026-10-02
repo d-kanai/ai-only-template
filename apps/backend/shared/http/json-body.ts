@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { type ErrorKey, ErrorKeys } from "../domain/error-key";
+import { type ErrorKey, ErrorKeys } from "../error/error-key";
 import {
   type InvalidRequestArgs,
   InvalidRequestError,
@@ -83,7 +83,7 @@ export class RequestBody {
     const path = issue.path.join(".");
     if (ErrorKeys.includes(issue.message)) {
       // WHY as: zod の issue の params は refine の custom の issue だけが持ち（Record<string, any>）、キーとの対応を型で持たない。
-      //   キーと params の組は KeyedIssue.of / KeyedIssue.refine が型で縛って作ったので、ここではそのまま返す（shared/domain/validate.ts の DomainValidation.validated と同じ）。
+      //   キーと params の組は KeyedIssue.of / KeyedIssue.refine が型で縛って作ったので、ここではそのまま返す（shared/error/validate.ts の DomainValidation.validated と同じ）。
       const { params } = issue as { params?: ProblemErrorInput["params"] };
       return { pointer, key: issue.message, params };
     }

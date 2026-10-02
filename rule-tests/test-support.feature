@@ -18,7 +18,7 @@ Feature: test-support の置き場所と除外
     * exports のキーか値の test-support は違反（キー・値・両方・条件付きの入れ子の値・文字列だけの exports・以前の置き方の名前）
   Scenario: InMemory の実装の置き場所（isMisplacedInMemory）
     * apps/backend/test-support/ の下の .in-memory のソースと、.in-memory のソースでないものは違反なし（名前の一部だけが in-memory・テスト・.md・frontend・apps/backend の外）
-    * apps/backend/test-support/ の外の apps/backend の .in-memory のソースは違反（features の infra・shared の infra・application・features の下の test-support・前方一致の test-support-x など）
+    * apps/backend/test-support/ の外の apps/backend の .in-memory のソースは違反（features の infra・shared の drizzle・application・features の下の test-support・前方一致の test-support-x など）
   Scenario: 列挙と検査（fixture）
     * 違反の無いツリーは違反 0 件（列挙は test-support/ のファイル・本番のソース・apps/<app>/package.json）
     * すべての規則の違反を「規則: パス」で返す
