@@ -423,10 +423,16 @@ const readDirectory: ReadDirectory = (absolutePath) =>
   readdirSync(absolutePath, { withFileTypes: true });
 
 // symlink は先がディレクトリならディレクトリとして扱う（先が無い symlink はファイルとして返す）。
-// WHY 循環しても無限には再帰しない: 循環する symlink をたどり続けると、パスに含まれる symlink が 40 段を超えたところで
-//   statSync が ELOOP を投げ、列挙が例外で止まる（throwIfNoEntry: false が握りつぶすのは ENOENT だけ。reviewer の実測
-//   2026-09-29、Issue #142 の「ファイルの列挙」のテストで固定）。以前の列挙（readdirSync の recursive: true）は ELOOP を黙って
-//   握りつぶし、途中までの一覧を返していた。
+// WHY 循環しても無限には再帰しない: 循環する symlink をたどり続けると、パスに含まれる symlink が 40 段（Linux の MAXSYMLINKS）
+//   前後で statSync か readdirSync が ELOOP を投げ、列挙が例外で止まる（throwIfNoEntry: false が握りつぶすのは ENOENT と
+//   ENOTDIR だけ。reviewer の実測 2026-09-29、Issue #142 の「ファイルの列挙」のテストで固定）。以前の列挙（readdirSync の
+//   recursive: true）は ELOOP を黙って握りつぶし、途中までの一覧を返していた。
+// WHY どちらの syscall が投げるか・何段目で止まるかは決まらない（Issue #346）: Linux はパスの解決を RCU で試し、途中で並行する
+//   変更（どこかの mount・umount など）を検知すると最初から解決し直すが、たどった symlink の数（total_link_count）を 0 に
+//   戻さない（fs/namei.c の __set_nameidata で 1 回だけ初期化し、filename_lookup・do_filp_open の再試行で引き継ぐ）。
+//   そのため再試行が起きると 40 段より手前で ELOOP になり、statSync ではなく後の readdirSync（syscall: scandir）が投げることも
+//   ある（直した後の列挙を、並列で mount を繰り返しながら 2000 回実行し、stat 1376 回・scandir 624 回。何もしなくても 2000 回中 4 回は scandir。
+//   2026-10-03 に実測）。CI の並列実行で同じことが起き、syscall まで比べたテストが落ちた。
 function isDirectoryEntry(absolutePath: string, entry: Dirent): boolean {
   if (entry.isDirectory()) {
     return true;
@@ -443,6 +449,9 @@ function isDirectoryEntry(absolutePath: string, entry: Dirent): boolean {
 //   .next/standalone/ は pnpm の symlink を複製するため、その中を列挙するだけで heap を使い切った（#130 で 463 秒かけて OOM、
 //   #137 で手元の node_modules/node_modules の自己参照 symlink が複製されて SIGABRT。詳細は「ファイルの列挙」のテスト）。
 //   除外のディレクトリは中に入る前に飛ばす（EXCLUDED_DIRS に足すだけでは直らない）。
+// WHY 有無を existsSync で見ない（Issue #346）: existsSync はどの例外でも false を返すので、ELOOP のディレクトリを「無い」として
+//   空を返し、循環が途中までの一覧で黙って終わる（上の再試行で 40 段より手前の有無の確かめが ELOOP になると、例外なしで返る）。
+//   statSync の throwIfNoEntry: false なら、無いとき（ENOENT・ENOTDIR）だけ undefined を返し、ELOOP は投げる。
 // WHY 除外しないディレクトリの symlink はたどる: 以前の列挙（recursive: true）と同じ範囲を検査し、symlink で置いたディレクトリの
 //   コードを素通りさせないため。
 // WHY read を引数で受け取る: 除外のディレクトリを「読まない」ことは結果の一覧からは見えない（後で除いても同じ一覧になる）ので、
@@ -453,7 +462,7 @@ function walkFiles(
   read: ReadDirectory = readDirectory,
 ): string[] {
   const absoluteDir = join(root, dir);
-  if (!existsSync(absoluteDir)) {
+  if (statSync(absoluteDir, { throwIfNoEntry: false }) === undefined) {
     return [];
   }
   return read(absoluteDir).flatMap((entry) => {
@@ -11202,8 +11211,8 @@ describeFeature(feature, ({ Scenario }) => {
         },
       );
 
-      // WHY 例外で止まることを固定する: 除外の外で循環すると、statSync が ELOOP（symlink 40 段）を投げて列挙が失敗する（無限には
-      //   再帰しない）。以前の列挙（readdirSync の recursive: true）は ELOOP を黙って握りつぶし、途中までの一覧を返していた
+      // WHY 例外で止まることを固定する: 除外の外で循環すると、statSync か readdirSync が ELOOP（symlink 40 段前後）を投げて列挙が
+      //   失敗する（無限には再帰しない）。WHY code だけを比べる: どちらの syscall が投げるかは決まらない（isDirectoryEntry の WHY）。以前の列挙（readdirSync の recursive: true）は ELOOP を黙って握りつぶし、途中までの一覧を返していた
       //   （検査が一部だけで緑になりうる）。今は音を立てて失敗する。
       And(
         "除外の外に置いた循環する symlink（apps/backend/loop -> ..）は、ELOOP の例外で止まる（無限に回らない）",
@@ -11226,7 +11235,32 @@ describeFeature(feature, ({ Scenario }) => {
           });
 
           // then
-          expect(thrown).toMatchObject({ code: "ELOOP", syscall: "stat" });
+          expect(thrown).toMatchObject({ code: "ELOOP" });
+        },
+      );
+
+      // WHY 有無の確かめで ELOOP を握りつぶさないことを固定する: existsSync はどの例外でも false を返すので、列挙するディレクトリの
+      //   有無を existsSync で見ると、ELOOP のディレクトリを「無い」として空の一覧を返し、検査が黙って一部だけで緑になる（Issue #346）。
+      //   循環の途中のディレクトリでも、kernel の再試行（上の isDirectoryEntry の WHY）で 40 段より手前で ELOOP になると同じことが起きる
+      //   （並列で mount を繰り返しながら 2000 回列挙し、269 回は例外なしで返った。2026-10-03 に実測）。
+      //   apps/backend 自体を循環させると、1 回目の有無の確かめで決定的に ELOOP になる。
+      And(
+        "列挙するディレクトリ自体が循環する symlink（apps/backend -> backend）なら、空を返さずに ELOOP の例外で止まる",
+        () => {
+          // given
+          const symlinks = { "apps/backend": "backend" };
+
+          // when
+          const thrown = withTree({}, symlinks, (root) => {
+            try {
+              return walkFiles(root, BACKEND_ROOT);
+            } catch (error) {
+              return error;
+            }
+          });
+
+          // then
+          expect(thrown).toMatchObject({ code: "ELOOP" });
         },
       );
 

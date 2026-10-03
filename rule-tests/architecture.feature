@@ -215,6 +215,7 @@ Feature: ディレクトリ構成ルール（依存の向き）
     * listSourceFiles・listAllFiles は、除外するディレクトリの中に自分を指す symlink があっても、その外のファイルだけを返す
     * 除外しないディレクトリの symlink は、先のディレクトリの中も列挙し、ファイルへの symlink もファイルとして返す
     * 除外の外に置いた循環する symlink（apps/backend/loop -> ..）は、ELOOP の例外で止まる（無限に回らない）
+    * 列挙するディレクトリ自体が循環する symlink（apps/backend -> backend）なら、空を返さずに ELOOP の例外で止まる
     * ディレクトリが無ければ空を返す
   Scenario: fixture のツリーを検査したときに検出される違反
     * must-reject: 置いた違反がすべて、置いたとおりの規則で検出され、それ以外は検出されない
