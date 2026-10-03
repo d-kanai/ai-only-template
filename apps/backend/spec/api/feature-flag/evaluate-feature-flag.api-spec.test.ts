@@ -29,7 +29,7 @@ const feature = await loadFeature("./evaluate-feature-flag.feature");
 describeFeature(feature, ({ Scenario }) => {
   Scenario("レスポンス", ({ And }) => {
     // WHY 別のフラグを 1 つ置く: 指定した key を評価すること（一覧の先頭を返す誤り）を見分ける。
-    And("使えるように用意した機能は、使えると返る", async () => {
+    And("オンにしたフィーチャーフラグは、オンと返る", async () => {
       // given
       const flags = { "other-flag": false, "detail-screen": true };
 
@@ -45,7 +45,7 @@ describeFeature(feature, ({ Scenario }) => {
       } satisfies EvaluateFeatureFlagResponse);
     });
 
-    And("使えないように用意した機能は、使えないと返る", async () => {
+    And("オフにしたフィーチャーフラグは、オフと返る", async () => {
       // given
       const flags = { "other-flag": true, "detail-screen": false };
 
@@ -61,8 +61,8 @@ describeFeature(feature, ({ Scenario }) => {
       } satisfies EvaluateFeatureFlagResponse);
     });
 
-    // 利用者の情報 = OFREP の評価の文脈（targetingKey と属性）。今は属性ごとの出し分けをしない（Issue #156）。
-    And("利用者の情報を添えても、用意したとおりに返る", async () => {
+    // 評価コンテキスト = OFREP の評価の文脈（targetingKey と属性）。今は属性ごとの出し分けをしない（Issue #156）。
+    And("評価コンテキストを付けても、設定どおりに返る", async () => {
       // given
       const flags = { "detail-screen": false };
       const body = JSON.stringify({
@@ -83,21 +83,24 @@ describeFeature(feature, ({ Scenario }) => {
   });
 
   Scenario("異常系", ({ And }) => {
-    And("用意していない機能は、存在しないと伝えられる", async () => {
-      // given
-      const flags = { "detail-screen": true };
+    And(
+      "定義されていないフィーチャーフラグは、存在しないと伝えられる",
+      async () => {
+        // given
+        const flags = { "detail-screen": true };
 
-      // when
-      const response = await evaluate(flags, "missing", "{}");
+        // when
+        const response = await evaluate(flags, "missing", "{}");
 
-      // then
-      expect(response.status).toBe(404);
-      await expect(response.json()).resolves.toStrictEqual({
-        key: "missing",
-        errorCode: "FLAG_NOT_FOUND",
-        errorDetails: "Feature flag missing was not found.",
-      });
-    });
+        // then
+        expect(response.status).toBe(404);
+        await expect(response.json()).resolves.toStrictEqual({
+          key: "missing",
+          errorCode: "FLAG_NOT_FOUND",
+          errorDetails: "Feature flag missing was not found.",
+        });
+      },
+    );
 
     And("送った内容が読めないときは、読めないと伝えられる", async () => {
       // given
@@ -116,7 +119,7 @@ describeFeature(feature, ({ Scenario }) => {
     });
 
     And(
-      "利用者の情報の形が正しくないときは、正しくないと伝えられる",
+      "評価コンテキストの形が正しくないときは、正しくないと伝えられる",
       async () => {
         // given
         const flags = { "detail-screen": true };

@@ -33,7 +33,7 @@ import { PostgresTransactionRunner } from "../../shared/drizzle/transaction.post
 import { ApiCoverage } from "../../test-support/api-coverage";
 import { TestDatabase } from "../../test-support/database";
 
-// API ジャーニーテスト（Issue #156）: Todo の詳細画面の出し分けという業務の流れに沿って、フィーチャーフラグの評価（OFREP の
+// API ジャーニーテスト（Issue #156）: Todo の詳細画面のフィーチャーフラグという業務の流れに沿って、フィーチャーフラグの評価（OFREP の
 //   一括・1 件）と Todo の作成・詳細の API を、実 Postgres の上で本番と同じ組み立てで順に呼ぶ。WHY（API ジャーニーという層・本番の
 //   export を使わずここで組み立てる・テストダブル無し・変更系の後に DB を読む・step 間の値を変数で渡す・技術の検証をここに閉じる・
 //   Stryker で実行しない）は todo-lifecycle.api-journey.test.ts の冒頭と同じ。
@@ -115,7 +115,7 @@ describeFeature(feature, ({ Background, Scenario }) => {
       let changeLogCount: number;
 
       // 画面の OFREP の web provider は context が無いと本文 {} を送る（evaluate-feature-flags.api.ts の requestSchema）。
-      When("画面を開くときに機能の出し分けをまとめて読む", async () => {
+      When("画面を開くときにフィーチャーフラグをまとめて評価する", async () => {
         response = await handlers.postEvaluateFlags(
           jsonRequest("/api/ofrep/v1/evaluate/flags", {}),
         );
@@ -131,7 +131,7 @@ describeFeature(feature, ({ Background, Scenario }) => {
         });
       });
 
-      And("出し分けを読んでも Todo は増えない", async () => {
+      And("フィーチャーフラグを評価しても Todo は増えない", async () => {
         await expect(database.db.select().from(todos)).resolves.toStrictEqual(
           [],
         );
