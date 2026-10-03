@@ -3,8 +3,8 @@ import { type ErrorKey, ErrorKeys } from "../error/error-key";
 import {
   type InvalidRequestArgs,
   InvalidRequestError,
-  type ProblemErrorInput,
-} from "./problem";
+} from "./invalid-request-error";
+import type { ProblemErrorInput } from "./problem";
 
 // リクエスト本文のスキーマの土台（schema）と、本文の読み取り・検査（parse）。
 // WHY クラスの static メソッドにする: backend の本番コードは単独の関数を export しない（ADR

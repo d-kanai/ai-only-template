@@ -1,10 +1,11 @@
 import { logger } from "@repo/shared/logger";
-import type { z } from "zod";
 import { DomainError } from "../error/domain-error";
+import { OfrepError } from "./ofrep-error";
 import { EnglishProblemDetail } from "./problem-detail.en";
 import { SameOrigin } from "./same-origin";
 
-// OFREP（OpenFeature Remote Evaluation Protocol）の要求の読み取りと、失敗の応答（Issue #156）。
+// OFREP（OpenFeature Remote Evaluation Protocol）の失敗の応答（Issue #156）。下の WHY は OFREP の要求の読み取り（ofrep-request.ts）と
+//   失敗（ofrep-error.ts）にも共通する。
 // 一次情報: https://github.com/open-feature/protocol の service/openapi.yaml（info.version 0.4.0。2026-10-02 に取得）。
 // WHY Problem Details（problem.ts）にしない: OFREP のクライアント（@openfeature/ofrep-web-provider 0.4.3 が使う
 //   @openfeature/ofrep-core 2.3.0 の OFREPApi）は、失敗の本文の errorCode を読んで OpenFeature のエラー（FLAG_NOT_FOUND など）に
@@ -14,82 +15,8 @@ import { SameOrigin } from "./same-origin";
 // WHY shared/http に置く: Route Handler の入口と出口（problem.ts・json-body.ts と同じ単位）。OFREP の api ファイルの handle は
 //   ProblemResponse.wrap ではなく OfrepResponse.wrap で包む（rule-tests/architecture.test.ts の presentation-with-problem-response が
 //   features/feature-flag/internal/presentation/ だけに許す例外）。
-
-// OFREP の失敗の errorCode（openapi.yaml の evaluationFailure の enum と、flagNotFound の FLAG_NOT_FOUND）のうち、この API が返すもの。
-// WHY TARGETING_KEY_MISSING を持たない: targetingKey の要る規則（利用者ごとの出し分け）がまだ無い。足すときに増やす。
-export type OfrepErrorCode =
-  | "PARSE_ERROR"
-  | "INVALID_CONTEXT"
-  | "FLAG_NOT_FOUND"
-  | "GENERAL";
-
-// クライアントの誤りによる OFREP の失敗（400）。OfrepResponse.wrap が本文にする。
-// key: 1 件の評価（evaluationFailure は key が必須）なら評価しようとした key、一括の評価（bulkEvaluationFailure は key を持たない）
-//   なら undefined。
-// WHY 404（FLAG_NOT_FOUND）をここで作らない: フラグが無いことは domain が DomainError(not_found, featureFlag.notFound) で表し、
-//   wrap が OFREP の形に変える（domain は OFREP を知らない）。
-export class OfrepError extends Error {
-  constructor(
-    readonly status: 400,
-    readonly errorCode: Exclude<OfrepErrorCode, "FLAG_NOT_FOUND" | "GENERAL">,
-    readonly errorDetails: string,
-    readonly key: string | undefined,
-  ) {
-    super(`${errorCode} ${errorDetails}`);
-    this.name = "OfrepError";
-  }
-}
-
-// OFREP の評価の要求の本文を読む。
-// WHY クラスの static メソッド: backend の本番コードは単独の関数を export しない（ADR docs/adr/architecture/20261002-class-based-backend.md）。
-export class OfrepRequest {
-  // 本文を JSON として読み、schema（各 api ファイルの requestSchema）で parse した値を返す。誤りは OfrepError（400）にする。
-  //   - JSON として読めない（空の本文も）→ PARSE_ERROR
-  //   - 本文がオブジェクトでない（配列・null・文字列）→ PARSE_ERROR（評価の要求として読めない）
-  //   - context（とその中）の誤り → INVALID_CONTEXT（openapi.yaml の 400 の例が INVALID_CONTEXT）
-  // WHY RequestBody.parse（json-body.ts）を使わない: あちらは Problem Details の InvalidRequestError と ErrorKey に変える。OFREP の
-  //   errorCode は別の語彙で、errorCode は画面の辞書（ErrorKey）に載せない（provider が errorCode を OpenFeature のエラーに変える）。
-  // WHY errorDetails は英語の固定の文か zod の説明: openapi.yaml の errorDetails は人が読むための任意の文（ログ・デバッグ用）で、
-  //   provider は分岐に使わない。ErrorKey のある誤りは problem-detail.en.ts の同じ文を使い、英語の文を 2 か所に書かない。
-  static async parse<Schema extends z.ZodType>(
-    request: Request,
-    schema: Schema,
-    key: string | undefined,
-  ): Promise<z.output<Schema>> {
-    let body: unknown;
-    try {
-      body = await request.json();
-    } catch {
-      throw new OfrepError(
-        400,
-        "PARSE_ERROR",
-        EnglishProblemDetail.of("request.body.notJson", undefined),
-        key,
-      );
-    }
-    const result = schema.safeParse(body);
-    if (result.success) {
-      return result.data;
-    }
-    // WHY 最初の issue だけを見る: OFREP の失敗の本文は errorCode を 1 つだけ持つ。失敗した safeParse の issues は 1 件以上ある。
-    const [issue] = result.error.issues;
-    if (issue.path.length === 0) {
-      throw new OfrepError(
-        400,
-        "PARSE_ERROR",
-        EnglishProblemDetail.of("request.body.notObject", undefined),
-        key,
-      );
-    }
-    // WHY path が空でなければ context の誤り: スキーマの項目は context だけで、未知の項目は z.object が捨てる（誤りにならない）。
-    throw new OfrepError(
-      400,
-      "INVALID_CONTEXT",
-      `Invalid evaluation context at ${issue.path.join(".")}: ${issue.message}.`,
-      key,
-    );
-  }
-}
+// WHY 1 ファイル 1 クラスに分ける（Issue #384。Biome の style/noExcessiveClassesPerFile）: 失敗の errorCode と例外は ofrep-error.ts、
+//   要求の本文の読み取りは ofrep-request.ts、失敗の応答（OfrepResponse）はこのファイル。
 
 // OFREP の api の handle を包み、handler が投げた例外を OFREP の失敗の応答にする（ProblemResponse.wrap の OFREP 版）。
 // WHY 包む口にする: Next の Route Handler には共通の catch が無く、包み忘れると Next の素の 500 が漏れる（problem.ts の

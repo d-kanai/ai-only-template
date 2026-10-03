@@ -27,6 +27,11 @@
       "preset": "recommended",
       "complexity": {
         "noExcessiveCognitiveComplexity": "error",
+        "noExcessiveLinesPerFunction": {
+          "level": "error",
+          "options": { "maxLines": 50 }
+        },
+        "useMaxParams": { "level": "error", "options": { "max": 4 } },
         "noExtraBooleanCast": "error",
         "noFlatMapIdentity": "error",
         "noUselessCatch": "error",
@@ -58,6 +63,14 @@
         "useGoogleFontPreconnect": "error"
       },
       "style": {
+        "noExcessiveClassesPerFile": {
+          "level": "error",
+          "options": { "maxClasses": 1 }
+        },
+        "noExcessiveLinesPerFile": {
+          "level": "error",
+          "options": { "maxLines": 300 }
+        },
         "noParameterAssign": "error",
         "useArrayLiterals": "error",
         "useExponentiationOperator": "error",
@@ -85,6 +98,29 @@
     }
   },
   "overrides": [
+    {
+      "includes": [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "rule-tests/**",
+        "apps/e2e/**",
+        "apps/backend/spec/**",
+        "apps/backend/test-support/**",
+        "apps/frontend_customer/test-support/**"
+      ],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveLinesPerFunction": "off",
+            "useMaxParams": "off"
+          },
+          "style": {
+            "noExcessiveClassesPerFile": "off",
+            "noExcessiveLinesPerFile": "off"
+          }
+        }
+      }
+    },
     {
       "includes": ["apps/shared/env.ts", "**/*.test.ts", "**/*.test.tsx"],
       "linter": {

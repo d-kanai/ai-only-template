@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "@types/react": "19.3.0",
-    "@types/react-dom": "19.3.0"
+    "@types/react-dom": "19.3.0",
+    "csp_evaluator": "1.1.8"
   }
 }
