@@ -1,6 +1,7 @@
 // 応答に付けるセキュリティヘッダの値を決める（Issue #106）。付けるのは next.config.ts（すべての応答に付ける common）と
 //   proxy.ts（画面の応答に、要求ごとの nonce を入れた Content-Security-Policy）。
 // 決定と採用しなかった案は ADR docs/adr/architecture/20261003-security-headers-and-same-origin-api.md。
+//   CORP・COEP と CSP Evaluator での評価は ADR docs/adr/quality/20261003-csp-evaluator-and-cross-origin-isolation.md（Issue #379）。
 // WHY 値をここに集める（next.config.ts・proxy.ts に直接書かない）: 2 つの規約ファイルは単体テストのカバレッジの外
 //   （vitest.config.mts）で、値を変えても気づけない。ここなら値をテストで丸ごと固定でき、付いていることは E2E
 //   （apps/e2e/spec/security-headers.feature）が本番のビルドで確かめる。
@@ -67,6 +68,13 @@ export class SecurityHeaders {
   // - X-Frame-Options: DENY: CSP の frame-ancestors を解さない古いブラウザ向け。CSP の無い API・静的ファイルの応答にも効く。
   // - Permissions-Policy: 使わない機能（カメラ・マイク・位置情報）を止め、差し込まれたスクリプトや iframe にも使わせない。
   // - Cross-Origin-Opener-Policy: same-origin: 別のサイトから window.open で開かれても、開いた側から window を触らせない。
+  // - Cross-Origin-Resource-Policy: same-origin: ほかのサイトのページから画面・JS・API の応答を <script> / <img> などで読み込ませない
+  //   （Spectre のような side channel で別のオリジンの応答を読む攻撃の入口を塞ぐ）。今は画面も API も同じオリジンからしか使わない
+  //   （ADR docs/adr/architecture/20261003-security-headers-and-same-origin-api.md）。Issue #379。
+  // - Cross-Origin-Embedder-Policy: require-corp: 画面が読み込むほかのオリジンのものは、CORP か CORS で許可したものだけにする
+  //   （COOP と合わせて crossOriginIsolated になる）。読み込むのは同じオリジンだけ（CSP も 'self' に絞っている）なので、画面は
+  //   壊れない（E2E の security-headers.feature が止めた読み込み 0 件を確かめる）。外部の画像・フォントを足すときは、相手が CORP を
+  //   返すかを確かめる（返さないと読み込みが止まる）。Issue #379。
   static common(): { key: string; value: string }[] {
     return [
       {
@@ -81,6 +89,8 @@ export class SecurityHeaders {
         value: "camera=(), microphone=(), geolocation=()",
       },
       { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+      { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
+      { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
     ];
   }
 }

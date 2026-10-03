@@ -127,6 +127,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-10-03 | 依存パッケージのライセンスを、pnpm licenses list と許可リストのルール検査テストで CI に止めさせる | 採用 | [20261003-dependency-license-allow-list.md](quality/20261003-dependency-license-allow-list.md) |
 | 2026-10-03 | セキュリティの検査は gitleaks・actionlint・zizmor・hadolint・Trivy・Semgrep を digest で固定した Docker イメージで、コミットフックと CI で動かす | 採用 | [20261003-security-scan-tools.md](quality/20261003-security-scan-tools.md) |
 | 2026-10-03 | 動いているアプリのセキュリティの検査は、E2E を ZAP のプロキシ経由で流し、受け身の検査の警告で CI を落とす | 採用 | [20261003-zap-passive-scan-via-e2e.md](quality/20261003-zap-passive-scan-via-e2e.md) |
+| 2026-10-03 | CSP は単体テストで CSP Evaluator に評価させ、すべての応答に CORP と COEP を足す | 採用 | [20261003-csp-evaluator-and-cross-origin-isolation.md](quality/20261003-csp-evaluator-and-cross-origin-isolation.md) |
 
 ### workflow/
 開発プロセス・環境・AI エージェントの運用
