@@ -1375,6 +1375,14 @@ const SHARED_FILES = new Set(
     "log-event.ts",
     // Issue #216: log-event.ts に種類ごとのスキーマとマスクの印（正規表現）が入り、その仕様を隣のテストに置く。
     "log-event.test.ts",
+    // Issue #384: 1 ファイル 1 クラス（Biome の noExcessiveClassesPerFile）にするため log-event.ts / env.ts のクラスを分けた。
+    //   どれも exports に置かない内部のファイルで、env.ts・log-event.ts・logger.ts から相対パスで読む。テストは分けず、
+    //   今までどおり env.test.ts・log-event.test.ts が固定する。process.env を読むコードは env.ts に残す（env-direct-access）。
+    "env-reader.ts",
+    "log-field-marks.ts",
+    "free-text-mask.ts",
+    "request-log-schema.ts",
+    "log-severity.ts",
     "now.ts",
     "now.test.ts",
     "package.json",
@@ -1384,7 +1392,7 @@ const SHARED_FILES = new Set(
 
 const SHARED_PLACEMENT = {
   id: "shared-placement",
-  name: "apps/shared/ に置いてよいのは env.ts・logger.ts・log-event.ts・now.ts とそのテスト（env.test.ts・logger.test.ts・log-event.test.ts・now.test.ts）、package.json・tsconfig.json だけ",
+  name: "apps/shared/ に置いてよいのは env.ts・logger.ts・log-event.ts・now.ts とそのテスト（env.test.ts・logger.test.ts・log-event.test.ts・now.test.ts）、env.ts と log-event.ts から分けたクラスのファイル（env-reader.ts・log-field-marks.ts・free-text-mask.ts・request-log-schema.ts・log-severity.ts）、package.json・tsconfig.json だけ",
   isMisplaced: (file: string) =>
     isUnder(file, SHARED_ROOT) && !SHARED_FILES.has(file),
 };
@@ -4963,6 +4971,9 @@ const SHARED_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/shared/now.test-support.ts",
     "apps/shared/log-events.ts",
     "apps/shared/log-events.test.ts",
+    // Issue #384 で足した名前の前方一致だけが同じ別ファイルと、分けたクラスのテストだけのファイル（テストは分けていない）。
+    "apps/shared/env-readers.ts",
+    "apps/shared/log-severity.test.ts",
     // Issue #181: backend・frontend の直下で許した test-support/ も、apps/shared では決めた名前の外。
     "apps/shared/test-support/now.ts",
     "apps/shared/env.js",
@@ -4980,6 +4991,12 @@ const SHARED_PLACEMENT_EXAMPLES: { misplaced: string[]; placed: string[] } = {
     "apps/shared/log-event.ts",
     // Issue #216: スキーマとマスクの印の仕様（Issue #209 では logger.test.ts に置き、一覧に無かった）。
     "apps/shared/log-event.test.ts",
+    // Issue #384: log-event.ts / env.ts から分けたクラスのファイル。
+    "apps/shared/env-reader.ts",
+    "apps/shared/log-field-marks.ts",
+    "apps/shared/free-text-mask.ts",
+    "apps/shared/request-log-schema.ts",
+    "apps/shared/log-severity.ts",
     "apps/shared/now.ts",
     "apps/shared/now.test.ts",
     "apps/shared/package.json",
