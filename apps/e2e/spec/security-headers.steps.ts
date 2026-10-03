@@ -34,6 +34,12 @@ export class SecurityHeadersSteps {
         this.violations.push(message.text());
       }
     });
+    // WHY 失敗した読み込みも数える（Issue #379）: Cross-Origin-Embedder-Policy / Cross-Origin-Resource-Policy が止めた読み込みは
+    //   CSP の違反ではなく、securitypolicyviolation にもコンソールの CSP の文言にも出ない（ネットワークの失敗
+    //   net::ERR_BLOCKED_BY_RESPONSE になる）。
+    this.page.on("requestfailed", (request) => {
+      this.violations.push(`${request.failure()?.errorText} ${request.url()}`);
+    });
     await this.page.exposeFunction("__recordCspViolation", (text: string) => {
       this.violations.push(text);
     });
@@ -84,6 +90,11 @@ export class SecurityHeadersSteps {
     // 要求ごとに nonce が変わる（固定の値なら、一度見た値で差し込んだスクリプトが動く）。
     const again = await this.page.request.get(this.page.url());
     expect(again.headers()["content-security-policy"]).not.toBe(policy);
+
+    // COOP と COEP がブラウザで効いている（両方が付いた文書だけが crossOriginIsolated になる。Issue #379）。
+    //   WHY ヘッダの値に加えて見る: 値が正しくても、ブラウザが解さない書き方・付く応答の取り違えでは効かない。
+    const isolated = await this.page.evaluate(() => window.crossOriginIsolated);
+    expect(isolated).toBe(true);
 
     // JS（Proxy の matcher の外。next.config.ts の headers() だけが付ける）。
     const scriptPath = /src="(\/_next\/static\/[^"]+\.js)"/.exec(html)?.[1];
@@ -141,6 +152,8 @@ export class SecurityHeadersSteps {
       "x-frame-options": "DENY",
       "permissions-policy": "camera=(), microphone=(), geolocation=()",
       "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "same-origin",
+      "cross-origin-embedder-policy": "require-corp",
     });
     expect(headers["x-powered-by"]).toBeUndefined();
     expect(headers["access-control-allow-origin"]).toBeUndefined();
