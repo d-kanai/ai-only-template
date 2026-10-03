@@ -45,7 +45,7 @@ npm パッケージの版は `package.json` と `pnpm-lock.yaml` の両方で固
 - Renovate の GitHub App が `.github/renovate.json5` を読み、週 1 回、公開から 5 日経った版への更新の PR を作る。決定と Dependabot を採らなかった理由は ADR `docs/adr/tech-stack/20261003-renovate-for-dependency-updates.md`、人との分担と PR の確かめ方はスキル `dependency-update` の 0.。
 - Renovate の待つ日数（`minimumReleaseAge`）は `pnpm-workspace.yaml` の `minimumReleaseAge` と同じ日数にし、`internalChecksFilter: strict` で待つ間は PR を作らせない。pnpm patch を当てた依存は Renovate で更新しない（`enabled: false`）。担保: `rule-tests/pnpm-workspace.test.ts`。WHY: 5 日未満の版の PR は PR の中の install が `minimumReleaseAgeStrict` で落ちる。パッチのキーは版まで固定で、版が変わるとパッチが当たらなくなる。
 - 作業ログの CI は、作者が `renovate[bot]` で依存のファイルだけを変えた PR を通す（`.claude/rules/tooling/work-log-hooks.md`）。
-- patch / minor は CI が緑なら自動マージ、メジャーと Next.js / React は人が確かめる（Issue #375、ADR `docs/adr/tech-stack/20261003-renovate-automerge-patch-minor.md`）。メジャーに automerge が付かないことは `rule-tests/pnpm-workspace.test.ts` が検査する。
+- patch / minor は CI が緑なら自動マージ、メジャー・0.x の依存・Next.js / React は人が確かめる（Issue #375、ADR `docs/adr/tech-stack/20261003-renovate-automerge-patch-minor.md`）。メジャーに automerge が付かないことは `rule-tests/pnpm-workspace.test.ts` が検査する。
 
 ## 例外の版
 - フレームワークが版を固定して要求するものは、それに従い、理由をここに書く。

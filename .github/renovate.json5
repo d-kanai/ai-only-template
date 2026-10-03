@@ -108,7 +108,11 @@
       // patch / minor（と版の固定・GitHub Actions の commit SHA だけの更新）は、CI が緑なら自動でマージする。メジャーは人が
       //   リリースノートを読んで確かめてからマージする（daiki の判断。Issue #375、ADR docs/adr/tech-stack/20261003-renovate-automerge-patch-minor.md）。
       //   rule-tests/pnpm-workspace.test.ts が、automerge の規則にメジャーが入らないことを検査する。
+      // matchCurrentVersion: 0.x の依存（drizzle-orm・drizzle-kit など）は外す。WHY: semver では 0.x の minor も破壊的な変更に
+      //   あたるが、Renovate は major の数字だけでメジャーかを決めるので 0.45 → 0.46 を minor にする（renovate 44.132.2 で確認）。
+      //   Renovate のプリセット :automergeStableNonMajor と同じ形。
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "matchCurrentVersion": "!/^0/",
       "automerge": true
     },
     {
