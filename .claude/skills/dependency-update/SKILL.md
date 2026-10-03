@@ -12,12 +12,12 @@ Node / pnpm 本体の版（`.tool-versions`・`packageManager`）は `.claude/ru
 - Renovate（GitHub App。設定は `.github/renovate.json5`、決定は ADR `docs/adr/tech-stack/20261003-renovate-for-dependency-updates.md`）が、週 1 回（月曜の朝）に、公開から 5 日経った版への更新の PR を作る。グループは Next.js / React・Biome・Vitest・型定義・pnpm・GitHub Actions で、メジャーは別の PR。依存の一覧は Issue「Dependency Dashboard」。
 - bot に任せる: npm の依存の patch / minor / major、`packageManager` と `.tool-versions` の pnpm、GitHub Actions の action（commit SHA と `# vX.Y.Z`）。
 - 人（この手順）が行う: 依存の追加・移動・削除、Stryker（pnpm patch を当てている。5.）、Node.js（`.tool-versions`・Dockerfile・`@types/node` のメジャー）、lockfile の作り直し（4.）、Renovate の PR が CI で落ちたときの修正。
-- Renovate の PR をマージする前に見ること:
+- 自動マージ（Issue #375、ADR `docs/adr/tech-stack/20261003-renovate-automerge-patch-minor.md`）: patch / minor と commit SHA だけの更新は、CI が緑なら GitHub の auto-merge（merge commit）で入る。メジャー・0.x の依存・Next.js / React の PR は自動マージしないので、下を見てからマージする。
+- Renovate の PR をマージする前に見ること（自動マージしない PR）:
   - CI の `ci` ジョブが緑（作業ログの検査は、作者が `renovate[bot]` で依存のファイルだけの PR なら通る。`scripts/hooks/check-work-logs-diff.sh`）。
-  - メジャー: リリースノートの破壊的な変更を読み、使っている API に当たるかを確かめる。
+  - メジャーと 0.x の依存の minor: リリースノートの破壊的な変更を読み、使っている API に当たるかを確かめる。
   - Next.js / React: React の版が create-next-app の生成する版と合っているか（`.claude/rules/tooling/dependencies.md` の「例外の版」）。合っていなければ React を PR から外す。
-  - Vitest: Stryker のパッチ（Vitest 5.0.1 との組み合わせの不具合を直す）の要否が変わりうる。マージ後の日次の Mutation ジョブを確かめる（スキル `mutation-testing`）。
-  - 自動マージはしない（ADR）。
+  - Vitest: Stryker のパッチ（Vitest 5.0.1 との組み合わせの不具合を直す）の要否が変わりうる。マージ後（自動マージを含む）の日次の Mutation ジョブを確かめる（スキル `mutation-testing`）。
 - Renovate の PR が CI で落ちたら、その PR のブランチに直す commit を足すのではなく、Issue を立ててこの手順で直す（コードの変更が混ざると作業ログが要り、Renovate も以後そのブランチを更新しなくなる）。
 
 ## 1. 版を決める
