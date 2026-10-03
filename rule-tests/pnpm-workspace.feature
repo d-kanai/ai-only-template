@@ -1,4 +1,4 @@
-# pnpm-workspace.yaml のサプライチェーン保護と版の書き方の設定（.claude/rules/tooling/dependencies.md）を検査するルール検査テストの仕様（Issue #282）。step の実装は対の pnpm-workspace.test.ts。
+# pnpm-workspace.yaml のサプライチェーン保護と版の書き方の設定（.claude/rules/tooling/dependencies.md）と、それと食い違わない Renovate の設定（Issue #111）を検査するルール検査テストの仕様（Issue #282）。step の実装は対の pnpm-workspace.test.ts。
 # 規則の WHY と限界は pnpm-workspace.test.ts の冒頭。
 Feature: pnpm-workspace.yaml の設定
   Scenario: 設定の読み取りと判定（must pass）
@@ -13,3 +13,11 @@ Feature: pnpm-workspace.yaml の設定
   Scenario: pnpm-workspace.yaml の実ファイル
     * 違反を含む pnpm-workspace.yaml からは、違反の設定と実際の値をすべて検出する
     * サプライチェーン保護と版の書き方の設定が期待どおり
+  Scenario: Renovate の設定の判定（must pass）
+    * pnpm と同じ日数を待ち、待つ間は PR を作らず、パッチを当てた依存を更新しない設定は違反なし（パッケージ名そのもの・スコープのワイルドカード・パッチが無い）
+    * 行頭の // のコメントは読まない
+  Scenario: Renovate の設定の判定（must reject）
+    * 待つ日数が pnpm と違う・日数で書いていない・無い、待つ間に PR を作る、パッチを当てた依存を更新すると、その設定のキーで違反になる
+    * JSON に行頭の // のコメントだけを足した形でなければ例外にする（値の後ろのコメント・末尾のカンマ）
+  Scenario: Renovate の設定の実ファイル
+    * .github/renovate.json5 は pnpm-workspace.yaml の minimumReleaseAge と同じ日数を待ち、パッチを当てた依存を更新しない

@@ -99,6 +99,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-28 | TypeScript は 7 系（7.0.2）を使う | 採用 | [20260928-typescript-7.md](tech-stack/20260928-typescript-7.md) |
 | 2026-09-30 | 本番は GCP の Cloud Run + Cloud SQL にし、Terraform は器だけを、イメージの入れ替えは GitHub Actions の gcloud を受け持つ | 採用 | [20260930-gcp-cloud-run-and-cloud-sql.md](tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md) |
 | 2026-10-02 | migrate ジョブはアプリの runtime イメージをコマンド違いで動かし、マイグレーションは drizzle-orm の migrator を束ねた入口で当てる | 採用 | [20261002-migrate-job-same-runtime-image.md](tech-stack/20261002-migrate-job-same-runtime-image.md) |
+| 2026-10-03 | 依存の自動更新は Renovate（GitHub App）で行い、Dependabot は使わない | 採用 | [20261003-renovate-for-dependency-updates.md](tech-stack/20261003-renovate-for-dependency-updates.md) |
 
 ### quality/
 品質ゲートとテストの方針

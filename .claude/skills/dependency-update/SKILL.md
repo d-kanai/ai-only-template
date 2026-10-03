@@ -8,6 +8,18 @@ description: npm パッケージの追加・更新・移動と lockfile の作�
 方針（完全固定、`workspace:*` だけ例外、どのパッケージに置くか、現状の例外の版）は `.claude/rules/tooling/dependencies.md`。ここは手順。
 Node / pnpm 本体の版（`.tool-versions`・`packageManager`）は `.claude/rules/tooling/env.md`。
 
+## 0. Renovate（bot）との分担（Issue #111）
+- Renovate（GitHub App。設定は `.github/renovate.json5`、決定は ADR `docs/adr/tech-stack/20261003-renovate-for-dependency-updates.md`）が、週 1 回（月曜の朝）に、公開から 5 日経った版への更新の PR を作る。グループは Next.js / React・Biome・Vitest・型定義・pnpm・GitHub Actions で、メジャーは別の PR。依存の一覧は Issue「Dependency Dashboard」。
+- bot に任せる: npm の依存の patch / minor / major、`packageManager` と `.tool-versions` の pnpm、GitHub Actions の action（commit SHA と `# vX.Y.Z`）。
+- 人（この手順）が行う: 依存の追加・移動・削除、Stryker（pnpm patch を当てている。5.）、Node.js（`.tool-versions`・Dockerfile・`@types/node` のメジャー）、lockfile の作り直し（4.）、Renovate の PR が CI で落ちたときの修正。
+- Renovate の PR をマージする前に見ること:
+  - CI の `ci` ジョブが緑（作業ログの検査は、作者が `renovate[bot]` で依存のファイルだけの PR なら通る。`scripts/hooks/check-work-logs-diff.sh`）。
+  - メジャー: リリースノートの破壊的な変更を読み、使っている API に当たるかを確かめる。
+  - Next.js / React: React の版が create-next-app の生成する版と合っているか（`.claude/rules/tooling/dependencies.md` の「例外の版」）。合っていなければ React を PR から外す。
+  - Vitest: Stryker のパッチ（Vitest 5.0.1 との組み合わせの不具合を直す）の要否が変わりうる。マージ後の日次の Mutation ジョブを確かめる（スキル `mutation-testing`）。
+  - 自動マージはしない（ADR）。
+- Renovate の PR が CI で落ちたら、その PR のブランチに直す commit を足すのではなく、Issue を立ててこの手順で直す（コードの変更が混ざると作業ログが要り、Renovate も以後そのブランチを更新しなくなる）。
+
 ## 1. 版を決める
 1. 原則 **latest**。npm レジストリの dist-tags を 1 次情報にする: `curl -s https://registry.npmjs.org/<pkg> | jq -r '.["dist-tags"].latest'`
 2. 公開日時を見る: `curl -s https://registry.npmjs.org/<pkg> | jq '.time'`。**公開から 5 日以上経った版のうち最新**を選ぶ。
@@ -57,4 +69,4 @@ lockfile にポリシー（5 日）を満たさないエントリがあると、
 
 ## 注意
 - `package.json` の依存の版を書き換えた後（戻した直後も）に `pnpm exec` を実行すると install が走り、lockfile と共有フック `.git/hooks/pre-commit` が書き換わる（LEARNINGS.md）。worktree では `CI=true` を付ける。
-- 更新は Issue → PR で行う（`pr-flow`）。
+- 人が行う更新は Issue → PR で行う（`pr-flow`）。Renovate の PR は 0. のとおり。
