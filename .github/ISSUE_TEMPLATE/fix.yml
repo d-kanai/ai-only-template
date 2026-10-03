@@ -1,0 +1,39 @@
+# Issue forms（GitHub の Issue テンプレート。https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/syntax-for-issue-forms ）。
+# 項目と labels の決まりは rule-tests/issue-template.test.ts が検査する（WHY もその冒頭）。5 つのテンプレートは labels と name / description だけが違う。
+# API で Issue を作るときも同じ見出し（### 目的 / ### 内容 / ### 完了条件 / ### 前提）で書く（スキル pr-flow の手順 1）。
+# name / description: 「New issue」の選択肢に出る名前と説明。
+name: "fix: 不具合の修正"
+description: 仕様どおりに動かないものを直す
+# labels: この Issue に付く type ラベル（1 Issue に 1 つ。.claude/rules/workflow/issue-pr.md）。ブランチ名と PR のラベルも同じ type にする。
+labels: [fix]
+# body: 入力欄。label が Issue の本文の見出し（### <label>）になる。required は必須の入力欄（書かないと任意になるので明示する）。
+body:
+  - type: textarea
+    id: why
+    attributes:
+      label: 目的
+      description: なぜ必要か（WHY）。背景と、やらないと何が困るか。
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: 内容
+      description: 何を変えるか（WHAT）。決まっていない点は「未定」と書く。
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: 完了条件
+      description: どうなれば完了か。テスト = 仕様（CLAUDE.md の 2.）なので、通るべきテストや確かめ方で書く。
+    validations:
+      required: true
+  - type: textarea
+    id: depends
+    attributes:
+      label: 前提
+      description: 先に終わっている必要のある Issue / PR（#番号）。無ければ空のままでよい。
+    # WHY 任意: 依存の無い Issue が多い。
+    validations:
+      required: false

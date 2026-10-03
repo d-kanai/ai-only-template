@@ -137,9 +137,14 @@ describe("ChangeRecords.updateEntries", () => {
     // when
     const entries = ChangeRecords.updateEntries(
       items,
-      ROW.id,
-      ROW,
-      { itemName: "豆乳", createdAt: new Date("2026-10-01T00:00:00.000Z") },
+      {
+        rowId: ROW.id,
+        origin: ROW,
+        changed: {
+          itemName: "豆乳",
+          createdAt: new Date("2026-10-01T00:00:00.000Z"),
+        },
+      },
       ACTOR_ID,
     );
 
@@ -167,9 +172,7 @@ describe("ChangeRecords.updateEntries", () => {
     // when
     const entries = ChangeRecords.updateEntries(
       items,
-      ROW.id,
-      ROW,
-      {},
+      { rowId: ROW.id, origin: ROW, changed: {} },
       ACTOR_ID,
     );
 
@@ -185,9 +188,7 @@ describe("ChangeRecords.updateEntries", () => {
     // when
     const entries = ChangeRecords.updateEntries(
       items,
-      ROW.id,
-      origin,
-      { done: true },
+      { rowId: ROW.id, origin, changed: { done: true } },
       null,
     );
 
@@ -227,9 +228,7 @@ describe("組み立てられない入力", () => {
     const action = () =>
       ChangeRecords.updateEntries(
         items,
-        ROW.id,
-        ROW,
-        { toString: "x" } as never,
+        { rowId: ROW.id, origin: ROW, changed: { toString: "x" } as never },
         null,
       );
 
@@ -286,9 +285,7 @@ describe("ChangeRecords.recordChange", () => {
     const inserted = ChangeRecords.insertEntry(items, ROW, ACTOR_ID);
     const updated = ChangeRecords.updateEntries(
       items,
-      ROW.id,
-      ROW,
-      { count: 3 },
+      { rowId: ROW.id, origin: ROW, changed: { count: 3 } },
       null,
     );
 

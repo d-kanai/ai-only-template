@@ -75,7 +75,7 @@ export class ColumnClassifier {
     );
   }
 
-  // マスクした値。apps/shared/log-event.ts の MASK と同じ "***"。
+  // マスクした値。apps/shared/free-text-mask.ts の MASK と同じ "***"。
   // WHY ここに書く（MASK を import しない）: @repo/shared の exports は env・logger・now だけで、log-event を backend に公開すると
   //   ログのスキーマを logger を通さずに使える口が増える（rule-tests/architecture.test.ts の SHARED_MODULES_BY_LAYER も広げることになる）。
   // WHY メソッドにする（最上位の定数・static フィールドにしない）: 最上位の値と static フィールドの初期化は読み込み時に 1 回だけ

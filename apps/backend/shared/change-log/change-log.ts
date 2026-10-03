@@ -38,6 +38,17 @@ type Row = { readonly id: string } & Readonly<Record<string, unknown>>;
 // WHY insert だけ: 記録は insert のみ（change_logs を UPDATE / DELETE しない）。
 type Writer = Pick<Database, "insert">;
 
+// update の記録の対象: 変えた行の id（rowId）と、変える前の値（origin）と、書き込む列と値（changed）。
+// WHY 1 つの値にまとめる（Issue #384。Biome の complexity/useMaxParams）: updateEntries の引数が 5 個になっていた。3 つはどれも
+//   「どの行をどう変えたか」で、insertEntry / deleteEntry が行（row）1 つを受け取るのと同じ位置に置ける。
+// WHY origin の型を changed から決める（NoInfer）: origin は変える前の行（changed に無い列も持つ）で、比べるのは changed の key
+//   だけ。origin の key まで K に入れると、changed に無い列の型も求めてしまう。
+type RowUpdate<K extends string> = {
+  readonly rowId: string;
+  readonly origin: Readonly<Record<NoInfer<K>, unknown>>;
+  readonly changed: Readonly<Partial<Record<K, unknown>>>;
+};
+
 // 変更履歴の記録の組み立て（insertEntry / updateEntries / deleteEntry）と書き込み（recordChange）。
 // WHY クラスの static メソッドにする: backend の本番コードは単独の関数を export しない（ADR
 //   docs/adr/architecture/20261002-class-based-backend.md）。状態を持たない組み立てと、受け取った writer への書き込みだけなので static にする。
@@ -85,13 +96,10 @@ export class ChangeRecords {
   //   ときの値）を渡す。ロックが取れているので、before は DB が UPDATE の直前に持っていた値と同じになる（Issue #215〜#312 は
   //   Writer が UPDATE の直前に FOR UPDATE で読み直していた。Issue #312 で SELECT を減らすためにやめた）。
   // WHY 配列で返す: 呼び出し側が、差分の有無で分岐せずに記録の配列にまとめられる。
-  // WHY origin の型を changed から決める（NoInfer）: origin は変える前の行（changed に無い列も持つ）で、比べるのは changed の key
-  //   だけ。origin の key まで K に入れると、changed に無い列の型も求めてしまう。
+  // origin の型を changed から決める WHY は RowUpdate の型のコメント。
   static updateEntries<K extends string>(
     table: Table,
-    rowId: string,
-    origin: Readonly<Record<NoInfer<K>, unknown>>,
-    changed: Readonly<Partial<Record<K, unknown>>>,
+    { rowId, origin, changed }: RowUpdate<K>,
     actorId: string | null,
   ): ChangeEntry[] {
     const keys = Object.keys(changed) as K[];
