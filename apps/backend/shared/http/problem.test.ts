@@ -2,8 +2,8 @@
 import { DrizzleQueryError } from "drizzle-orm";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { DomainError } from "../error/domain-error";
+import { InvalidRequestError } from "./invalid-request-error";
 import {
-  InvalidRequestError,
   type Problem,
   type ProblemErrorInput,
   ProblemResponse,
