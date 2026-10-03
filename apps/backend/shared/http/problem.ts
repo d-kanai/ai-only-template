@@ -1,11 +1,7 @@
 import { logger } from "@repo/shared/logger";
 import { DomainError, type DomainErrorCode } from "../error/domain-error";
-import {
-  type ErrorKey,
-  type ErrorKeyParams,
-  ErrorKeys,
-  type ErrorParamsArgs,
-} from "../error/error-key";
+import type { ErrorKey, ErrorKeyParams } from "../error/error-key";
+import { InvalidRequestError } from "./invalid-request-error";
 import { EnglishProblemDetail } from "./problem-detail.en";
 import { SameOrigin } from "./same-origin";
 
@@ -51,7 +47,7 @@ export type ProblemError = {
   detail: string;
 };
 
-// InvalidRequestError が持つ項目ごとの誤り。detail は ProblemResponse.from が足す。
+// InvalidRequestError（invalid-request-error.ts）が持つ項目ごとの誤り。detail は ProblemResponse.from が足す。
 // WHY detail を後で足す: 英語の文を作る場所を ProblemResponse.from の 1 か所にし、例外を作る側（json-body.ts）に
 //   英語の文言の都合を持ち込まない。
 export type ProblemErrorInput = Omit<ProblemError, "detail">;
@@ -85,41 +81,18 @@ export type Problem = {
   errors?: ProblemError[];
 };
 
-// InvalidRequestError のコンストラクタの key の後ろの引数: キーごとの params（無いキーは省略）と、項目ごとの誤り。
-//   例: new InvalidRequestError("request.body.notJson") / new InvalidRequestError("request.field.notString", { path }, errors)
-// WHY export する: key が実行時に決まるとき（json-body.ts が zod の issue から作るとき）に、この型へ as で合わせるため。
-export type InvalidRequestArgs<K extends ErrorKey> = [
-  ...ErrorParamsArgs<K>,
-  errors?: ProblemErrorInput[],
-];
-
-// リクエストの誤り（JSON でない、項目の型が違う、未知の項目がある、presentation で重ねた必須・長さの違反など）を表す例外。
-// WHY DomainError と分ける: 形の誤りは HTTP の入力の問題で、ドメインのルール違反ではない。
-//   domain 層にリクエストの都合を持ち込まないよう、presentation 層の中で閉じた例外にする。
-//   クライアントから見れば「入力が不正」で同じなので、レスポンスは /problems/validation-error・400 にそろえる。
-// WHY errors を持てるようにする（zod の ZodError をそのまま投げない）: ProblemResponse.from が zod を知らずに済み、
-//   JSON として読めない誤り（zod を通らない）も同じ例外で表せる。
-// WHY K を型引数にする: DomainError と同じく、key から params の型を決める（domain-error.ts のコメント）。
-export class InvalidRequestError<K extends ErrorKey = ErrorKey> extends Error {
-  readonly key: K;
-  readonly params: ErrorKeyParams[K] | undefined;
-  readonly errors: ProblemErrorInput[] | undefined;
-
-  constructor(key: K, ...rest: InvalidRequestArgs<K>) {
-    // WHY as: rest の形は K が決まるまで分からない（domain-error.ts と同じ）。先頭は params か undefined、2 番目は errors。
-    const params = rest[0] as ErrorKeyParams[K] | undefined;
-    const errors = rest[1] as ProblemErrorInput[] | undefined;
-    super(ErrorKeys.describe(key, params));
-    this.name = "InvalidRequestError";
-    this.key = key;
-    this.params = params;
-    this.errors = errors;
-  }
-}
-
 // 応答の種類。DomainError の code と、別のオリジンからの書き込みの拒否（forbidden。Issue #106）と、想定外の例外（internal_error）。
 // WHY forbidden を DomainErrorCode に足さない: オリジンは HTTP の要求の性質で、domain の規則ではない（InvalidRequestError と同じ理由）。
 type ProblemCategory = DomainErrorCode | "forbidden" | "internal_error";
+
+// 応答の本文に入れる、何が起きたか（key と params）と項目ごとの誤り（errors）。ProblemResponse の respond が受け取る。
+// WHY 1 つの値にまとめる（Issue #384。Biome の complexity/useMaxParams）: respond の引数が 5 個になっていた。key・params・errors は
+//   どれも例外（DomainError・InvalidRequestError）が持つ「何が起きたか」の中身で、種類（category）と要求（request）とは役割が違う。
+type ProblemContent = {
+  key: ErrorKey;
+  params?: ErrorParams;
+  errors?: ProblemErrorInput[];
+};
 
 // 例外を Problem Details の Response にする変換（from）と、api の handle を包む口（wrap）。
 // WHY クラスの static メソッドにする: backend の本番コードは単独の関数を export しない（ADR
@@ -169,9 +142,7 @@ export class ProblemResponse {
   private static respond(
     category: ProblemCategory,
     request: Request,
-    key: ErrorKey,
-    params: ErrorParams | undefined,
-    errors: ProblemErrorInput[] | undefined,
+    { key, params, errors }: ProblemContent,
   ): Response {
     const kind = ProblemResponse.problemKindOf(category);
     const problem: Problem = {
@@ -196,22 +167,17 @@ export class ProblemResponse {
   // WHY request を受け取る: instance（この発生を指す URI 参照）にリクエストのパスを入れるため。
   static from(error: unknown, request: Request): Response {
     if (error instanceof DomainError) {
-      return ProblemResponse.respond(
-        error.code,
-        request,
-        error.key,
-        error.params,
-        undefined,
-      );
+      return ProblemResponse.respond(error.code, request, {
+        key: error.key,
+        params: error.params,
+      });
     }
     if (error instanceof InvalidRequestError) {
-      return ProblemResponse.respond(
-        "validation_error",
-        request,
-        error.key,
-        error.params,
-        error.errors,
-      );
+      return ProblemResponse.respond("validation_error", request, {
+        key: error.key,
+        params: error.params,
+        errors: error.errors,
+      });
     }
     // WHY ログに残す: 想定外の例外は原因を調べる必要がある。レスポンスでは詳細を隠すので、
     //   サーバのログ（stderr の 1 行の JSON）にだけ残す。ログはすべて logger を通す（.claude/rules/code/backend.md の「ログ」）。
@@ -225,13 +191,9 @@ export class ProblemResponse {
       error,
     });
     // WHY 固定のキーと detail にする: 例外の message には内部の情報（接続先、SQL など）が含まれうるため、クライアントに返さない。
-    return ProblemResponse.respond(
-      "internal_error",
-      request,
-      "server.internalError",
-      undefined,
-      undefined,
-    );
+    return ProblemResponse.respond("internal_error", request, {
+      key: "server.internalError",
+    });
   }
 
   // presentation の各 api の handle（Route Handler）を包み、handler が投げた例外を ProblemResponse.from で Problem Details の
@@ -260,13 +222,9 @@ export class ProblemResponse {
       //   できる。Proxy（apps/frontend_customer/proxy.ts）は単体テストのカバレッジの外で、backend の Problem の形も持たない。
       //   判定と WHY は same-origin.ts、決定は ADR docs/adr/architecture/20261003-security-headers-and-same-origin-api.md。
       if (SameOrigin.rejects(args[0])) {
-        return ProblemResponse.respond(
-          "forbidden",
-          args[0],
-          "request.origin.forbidden",
-          undefined,
-          undefined,
-        );
+        return ProblemResponse.respond("forbidden", args[0], {
+          key: "request.origin.forbidden",
+        });
       }
       try {
         return await handler(...args);

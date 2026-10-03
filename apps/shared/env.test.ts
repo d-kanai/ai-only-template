@@ -11,7 +11,8 @@ import {
   test,
   vi,
 } from "vitest";
-import { DotEnvFile, EnvReader, env, toolEnv } from "./env";
+import { DotEnvFile, env, toolEnv } from "./env";
+import { EnvReader } from "./env-reader";
 
 // 必須の変数がすべて正しい値で揃った source。各テストはここから 1 つずつ崩して使う。
 const VALID = {
