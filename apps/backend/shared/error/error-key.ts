@@ -34,6 +34,8 @@ export type ErrorKeyParams = {
   // path: 誤りのある項目（入れ子は . 区切り。json-body.ts が組み立てる。機械が項目を指すのは Problem の errors の pointer）。
   "request.field.notString": { path: string };
   "request.field.notBoolean": { path: string };
+  // 別のオリジンのページからの書き込み（CSRF）を拒否した（Issue #106。shared/http/same-origin.ts）。403。
+  "request.origin.forbidden": Record<string, never>;
   // 想定外の例外（500）。内部の情報は返さない（problem.ts）。
   "server.internalError": Record<string, never>;
 };
@@ -68,6 +70,7 @@ export const ERROR_KEYS = [
   "request.body.unknownKeys",
   "request.field.notString",
   "request.field.notBoolean",
+  "request.origin.forbidden",
   "server.internalError",
 ] as const satisfies readonly ErrorKey[];
 

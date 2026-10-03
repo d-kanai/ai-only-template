@@ -2,6 +2,7 @@ import { logger } from "@repo/shared/logger";
 import type { z } from "zod";
 import { DomainError } from "../error/domain-error";
 import { EnglishProblemDetail } from "./problem-detail.en";
+import { SameOrigin } from "./same-origin";
 
 // OFREP（OpenFeature Remote Evaluation Protocol）の要求の読み取りと、失敗の応答（Issue #156）。
 // 一次情報: https://github.com/open-feature/protocol の service/openapi.yaml（info.version 0.4.0。2026-10-02 に取得）。
@@ -100,6 +101,23 @@ export class OfrepResponse {
     handler: (...args: Args) => Promise<Response>,
   ): (...args: Args) => Promise<Response> {
     return async (...args) => {
+      // WHY 別のオリジンからの要求をここでも拒否する（Issue #106）: OFREP の評価は読み取りだが POST で、API は同じオリジンの画面
+      //   からだけ呼ぶ前提（GET / HEAD / OPTIONS 以外は Origin を確かめる）を ProblemResponse.wrap と同じく全 API で守る。
+      //   形は OFREP の失敗の本文にそろえる（errorCode は evaluationFailure の enum にある GENERAL。openapi.yaml に 403 の定義は無い）。
+      //   判定と WHY は same-origin.ts、決定は ADR docs/adr/architecture/20261003-security-headers-and-same-origin-api.md。
+      if (SameOrigin.rejects(args[0])) {
+        return Response.json(
+          {
+            errorCode: "GENERAL",
+            // WHY problem-detail.en.ts から取る: 英語の文はキーごとに 1 か所（ProblemResponse の 403 と同じ文）。
+            errorDetails: EnglishProblemDetail.of(
+              "request.origin.forbidden",
+              undefined,
+            ),
+          },
+          { status: 403 },
+        );
+      }
       try {
         return await handler(...args);
       } catch (error) {

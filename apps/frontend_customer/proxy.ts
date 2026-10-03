@@ -1,15 +1,20 @@
-import { env } from "@repo/shared/env";
+import { env, toolEnv } from "@repo/shared/env";
 import { logger } from "@repo/shared/logger";
 import { Clock } from "@repo/shared/now";
 import { type NextRequest, NextResponse } from "next/server";
 import { LOCALE_COOKIE, LOCALE_HEADER, Locales } from "@/shared/i18n/locale";
 import { RequestLogBuilder } from "@/shared/request-log/request-log";
+import {
+  NONCE_HEADER,
+  SecurityHeaders,
+} from "@/shared/security/security-headers";
 
 // Next.js の規約ファイル（Proxy。旧 middleware）。ルート（app/ と同じ階層）に置き、matcher に一致するリクエストごとに、
 // ルーティングの前に Node.js runtime で 1 回呼ばれる（Next.js 16.3.6 同梱
 // node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md）。
 // ここでは画面アクセスとブラウザからの API route 呼び出しを、1 リクエスト = JSON 1 行（stdout）で出す（Issue #80）。
 // あわせて、画面アクセスのロケールを決めてリクエストヘッダ x-locale に載せ、app/layout.tsx に渡す（Issue #116。withLocale）。
+// あわせて、画面の応答に要求ごとの nonce を入れた Content-Security-Policy を付ける（Issue #106。withContentSecurityPolicy）。
 // 出力はサーバ側のログの唯一の出口 logger（apps/shared/logger.ts。Issue #85。Issue #90 で apps/shared に移した）を通す。
 // WHY 薄く保つ: 1 行の中身の決め方は shared/request-log/request-log.ts（純粋関数。テストで固定）に、ロケールの決め方は
 //   shared/i18n/locale.ts の Locales.negotiate（純粋関数。テストで固定）に置き、ここは NextRequest の値を渡して出力し、
@@ -43,12 +48,44 @@ export function proxy(request: NextRequest): NextResponse {
   // WHY 応答ヘッダに x-request-id: ブラウザの開発者ツールや呼び出し側から、応答と stdout の行を突き合わせられるようにする。
   //   NextResponse.next({ headers }) ではなく、応答を作ってから set する（next-response.md の next()）。
   // WHY /api/** にはロケールを載せない: API は画面の文言を返さず（Problem Details の key と params を画面が翻訳する。detail は翻訳しない英語）、ロケールを使わない（Issue #116・#126）。
-  const response =
-    log.event.name === "api_request"
-      ? NextResponse.next()
-      : NextResponse.next({ request: { headers: withLocale(request) } });
+  if (log.event.name === "api_request") {
+    const response = NextResponse.next();
+    response.headers.set("x-request-id", log.http.request.id);
+    return response;
+  }
+  // WHY 画面だけに CSP を付ける（/api/** には付けない）: CSP は文書（HTML）の中のスクリプト・スタイルの読み込みを縛るもので、JSON の
+  //   応答には効く相手が無い（Next の CSP の文書の matcher の例も api を除く）。全応答に共通のヘッダは next.config.ts の headers()。
+  const nonce = SecurityHeaders.nonce(() => crypto.randomUUID());
+  const policy = SecurityHeaders.contentSecurityPolicy(
+    nonce,
+    // WHY toolEnv から読む: process.env を読んでよいのは apps/shared/env.ts だけ（規則 env-direct-access）。
+    toolEnv.NODE_ENV === "development",
+  );
+  const response = NextResponse.next({
+    request: {
+      headers: withContentSecurityPolicy(withLocale(request), policy, nonce),
+    },
+  });
   response.headers.set("x-request-id", log.http.request.id);
+  response.headers.set("content-security-policy", policy);
   return response;
+}
+
+// 後段（Next の描画と app/layout.tsx）に CSP と nonce を渡すリクエストヘッダを足す（Issue #106）。
+// WHY リクエストヘッダにも CSP を載せる: Next は描画のときにリクエストの Content-Security-Policy ヘッダから nonce を読み、
+//   自分のスクリプトに付ける（Next.js 16.3.6 同梱 node_modules/next/dist/docs/01-app/02-guides/content-security-policy.md の
+//   「How nonces work in Next.js」）。応答ヘッダだけではブラウザに届くだけで、Next の描画は nonce を知らない。
+// WHY x-nonce にも載せる: Next が自動で付けない自前のインラインスクリプト（Mantine の配色のスクリプト）に、layout が同じ nonce を
+//   付けるため（Next の CSP の文書の例と同じヘッダ名）。layout が CSP の文字列から取り出し直さずに済む。
+// WHY 常に set する: クライアントが送った値を残さない（withLocale と同じ）。
+function withContentSecurityPolicy(
+  headers: Headers,
+  policy: string,
+  nonce: string,
+): Headers {
+  headers.set("content-security-policy", policy);
+  headers.set(NONCE_HEADER, nonce);
+  return headers;
 }
 
 // 画面アクセスのリクエストヘッダに、決めたロケール（x-locale）を足したものを返す。
@@ -71,9 +108,12 @@ function withLocale(request: NextRequest): Headers {
 }
 
 // matcher: Proxy を動かすパス。Next はビルド時に静的に読むので、定数で書く（proxy.md の「Matcher」）。
-//   負の先読みで、Next の静的ファイル（/_next/static）、画像の最適化（/_next/image）、favicon.ico、拡張子の付いた静的ファイル
-//   （.*\..*。public/ のファイルなど）を除く。画面（/・/todo/<id>）と /api/** は対象になる。
+//   負の先読みで、Next の静的ファイル（/_next/static）、画像の最適化（/_next/image）、favicon.ico を除く。画面（/・/todo/<id>）と
+//   /api/** は対象になる。
 //   WHY 除く: 画面 1 回の表示で JS・CSS・画像のリクエストが多数あり、ログが「画面アクセス」と「API 呼び出し」だけにならない。
+//   WHY 拡張子の付いたパス（.*\..*）を除かない（Issue #106 で外した）: 以前は public/ のファイル向けに除いていたが、/todo/abc.x の
+//   ように末尾にドットを足した URL も画面として描かれ、CSP の付かない画面を開かせられた（reviewer の実測）。public/ は今は無く、
+//   JS・CSS は /_next/static の下にある。public/ を足すときは、そのファイルのパスだけを除く。
 //   missing: next/link のプリフェッチ（next-router-prefetch ヘッダ付きの RSC の取得）と、ブラウザのプリフェッチ（purpose: prefetch）
 //   では Proxy を動かさない（proxy.md の「Negative matching」の例と同じ書き方。purpose の方は例に合わせただけで未実測）。
 //   WHY: 一覧に表示されたリンクごとに /todo/<id> の page の行が 2 つずつ（segment の _tree と本体）出て、利用者が開いていない
@@ -84,7 +124,7 @@ function withLocale(request: NextRequest): Headers {
 export const config = {
   matcher: [
     {
-      source: "/((?!_next/static|_next/image|favicon\\.ico|.*\\..*$).*)",
+      source: "/((?!_next/static|_next/image|favicon\\.ico).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },

@@ -39,6 +39,8 @@ export class EnglishProblemDetail {
         `Request body has unknown fields: ${keys}.`,
       "request.field.notString": ({ path }) => `${path} must be a string.`,
       "request.field.notBoolean": ({ path }) => `${path} must be a boolean.`,
+      "request.origin.forbidden": () =>
+        "Requests from other origins are not allowed.",
       "server.internalError": () => "Internal server error.",
     };
   }
