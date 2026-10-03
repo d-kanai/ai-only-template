@@ -476,4 +476,58 @@ describe("ProblemResponse.wrap", () => {
       instance: "/api/todos/x",
     });
   });
+
+  // Issue #106: 別のオリジンのページからの書き込み（CSRF）は handler に届く前に拒否する（判定は same-origin.ts）。
+  //   wrap で行う WHY は same-origin.ts と ADR docs/adr/architecture/20261003-security-headers-and-same-origin-api.md。
+  test("別のオリジンのページからの書き込みは、handler を呼ばずに 403 の /problems/forbidden を返す", async () => {
+    // given
+    const called: Request[] = [];
+    const handle = ProblemResponse.wrap(async (req: Request) => {
+      called.push(req);
+      return new Response(null, { status: 201 });
+    });
+
+    // when
+    const response = await handle(
+      new Request("http://app.example.com/api/todos?q=1", {
+        method: "POST",
+        headers: {
+          host: "app.example.com",
+          origin: "https://evil.example.com",
+        },
+      }),
+    );
+
+    // then
+    await expectProblem(response, {
+      type: "/problems/forbidden",
+      title: "Forbidden",
+      status: 403,
+      detail: "Requests from other origins are not allowed.",
+      instance: "/api/todos",
+      key: "request.origin.forbidden",
+    });
+    expect(called).toEqual([]);
+  });
+
+  test("同じオリジンの画面からの書き込みは、handler に渡す", async () => {
+    // given
+    const ok = new Response(null, { status: 201 });
+    const handle = ProblemResponse.wrap(async (_request: Request) => ok);
+
+    // when
+    const response = handle(
+      new Request("http://app.example.com/api/todos", {
+        method: "POST",
+        headers: {
+          host: "app.example.com",
+          origin: "https://app.example.com",
+          "x-forwarded-proto": "https",
+        },
+      }),
+    );
+
+    // then
+    await expect(response).resolves.toBe(ok);
+  });
 });

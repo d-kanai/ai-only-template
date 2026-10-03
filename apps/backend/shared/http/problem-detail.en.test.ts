@@ -51,6 +51,11 @@ describe("EnglishProblemDetail.of", () => {
       { path: "completed" },
       "completed must be a boolean.",
     ],
+    [
+      "request.origin.forbidden",
+      undefined,
+      "Requests from other origins are not allowed.",
+    ],
     ["server.internalError", undefined, "Internal server error."],
   ])("%s は params を埋め込んだ英語の文にする", (key, params, expected) => {
     // given: 前提なし
