@@ -154,6 +154,66 @@ const STATIC_ONLY_CLASS = [
   "}",
 ];
 
+const SIZE_RULES = [
+  "noExcessiveLinesPerFunction",
+  "useMaxParams",
+  "noExcessiveLinesPerFile",
+  "noExcessiveClassesPerFile",
+];
+
+type SizedShape = {
+  classes: number;
+  params: number;
+  bodyLines: number;
+  fileLines: number;
+};
+
+// 上限ちょうど（biome.json の options）と、それぞれ 1 つ超えたもの。
+const AT_LIMIT: SizedShape = {
+  classes: 1,
+  params: 4,
+  bodyLines: 50,
+  fileLines: 300,
+};
+const OVER_LIMIT: SizedShape = {
+  classes: 2,
+  params: 5,
+  bodyLines: 51,
+  fileLines: 301,
+};
+
+// 指定した形のソース（Biome の format に沿った行）を作る。最初のクラスのメソッドが引数 params 個・本体 bodyLines 行
+//   （Biome は `{` と `}` の間の行を数える。2026-10-03 に一時ディレクトリで実測）、残りのクラスは小さなメソッドを 1 つ持つ。
+//   ファイルの先頭をコメント行で埋めて fileLines 行にする（Biome はコメント行も数える。同日に実測）。
+// WHY 引数を 1 行に書く: 5 個でも 80 桁に収まり、Biome の format が 1 行にする（複数行に書くと format の違反が混ざる）。
+// WHY インスタンスのメソッドにする: static だけのクラスは noStaticOnlyClass（置き場所で on / off が変わる）に触れ、結果が混ざる。
+function sizedSource(shape: SizedShape): string[] {
+  const params = Array.from({ length: shape.params }, (_, i) => `a${i}`);
+  const firstClass = [
+    "export class Sized0 {",
+    `  sum(${params.map((param) => `${param}: number`).join(", ")}): number {`,
+    `    let total = ${params.join(" + ")};`,
+    ...Array.from({ length: shape.bodyLines - 2 }, () => "    total += 1;"),
+    "    return total;",
+    "  }",
+    "}",
+  ];
+  const otherClasses = Array.from({ length: shape.classes - 1 }, (_, i) => [
+    "",
+    `export class Sized${i + 1} {`,
+    "  value(): number {",
+    "    return 1;",
+    "  }",
+    "}",
+  ]).flat();
+  const code = [...firstClass, ...otherClasses];
+  const padding = Array.from(
+    { length: shape.fileLines - code.length },
+    () => "// padding",
+  );
+  return [...padding, ...code];
+}
+
 const feature = await loadFeature("./lint.feature");
 
 describeFeature(feature, ({ Scenario }) => {
@@ -757,6 +817,88 @@ describeFeature(feature, ({ Scenario }) => {
 
             // then
             expect(status, `${path}（${reason}）\n${output}`).toBe(0);
+          }
+        },
+      );
+    },
+  );
+
+  // 関数の行数・引数の数・ファイルの行数・1 ファイルのクラス数（Issue #384）: 本番コードだけで error にし、テスト（*.test.ts(x)・rule-tests/**・
+  //   apps/e2e/**・apps/backend/spec/**・apps/backend/test-support/**・apps/frontend_customer/test-support/**）は off にする（daiki 判断 2026-10-03。
+  //   WHY は .claude/rules/quality/lint.md の「recommended 外で追加したルール」）。
+  // WHY 4 つの違反を 1 ファイルにまとめて、出力に 4 つのルール名がすべて出ることを見る: 置き場所ごとに 4 回ずつ Biome を起動すると遅い。
+  //   ルール名ごとに含むかを見るので、どれか 1 つが効かなくなれば落ちる。境界（50 行・4 個・300 行・1 クラス）は別の step で 0 を確かめる。
+  // 一時ディレクトリの置き方（リポジトリの biome.json を写す）は noStaticOnlyClass と同じ（モジュールの最上位の staticOnlyClassDir の前の
+  //   コメント）。
+  Scenario(
+    "biome check は本番コードの関数の行数・引数の数・ファイルの行数・1 ファイルのクラス数を縛り、テストは対象外にする（Issue #384）",
+    ({ And }) => {
+      And(
+        "本番コードで 51 行の関数・引数 5 個の関数・301 行のファイル・クラス 2 つのファイルは非 0 で終わり、noExcessiveLinesPerFunction・useMaxParams・noExcessiveLinesPerFile・noExcessiveClassesPerFile が出力される（backend・shared・frontend の .ts と .tsx と hook・前方一致だけがテストの置き場所と同じ別ディレクトリ・リポジトリ直下）",
+        () => {
+          // given
+          const cases: [string][] = [
+            ["apps/backend/features/todo/internal/domain/sized.ts"],
+            ["apps/backend/shared/http/sized.ts"],
+            ["apps/shared/sized.ts"],
+            ["apps/frontend_customer/features/todo/api/sized.ts"],
+            ["apps/frontend_customer/features/todo/components/sized.tsx"],
+            ["apps/frontend_customer/features/todo/screens/x/sized.hook.ts"],
+            ["apps/backend/spec-x/sized.ts"],
+            ["apps/backend/test-support-x/sized.ts"],
+            ["apps/e2e-x/sized.ts"],
+            ["rule-tests-x/sized.ts"],
+            ["sized.ts"],
+          ];
+
+          for (const [path] of cases) {
+            // when
+            const { status, output } = checkAt(path, sizedSource(OVER_LIMIT));
+
+            // then
+            expect(status, `${path}\n${output}`).not.toBe(0);
+            for (const rule of SIZE_RULES) {
+              expect(output, `${path}: ${rule}`).toContain(rule);
+            }
+          }
+        },
+      );
+
+      And(
+        "本番コードでも 50 行の関数・引数 4 個の関数・300 行のファイル・クラス 1 つのファイルは 0 で終わる",
+        () => {
+          // given
+          const path = "apps/backend/shared/http/sized.ts";
+
+          // when
+          const { status, output } = checkAt(path, sizedSource(AT_LIMIT));
+
+          // then
+          expect(status, output).toBe(0);
+        },
+      );
+
+      And(
+        "テスト（x.test.ts・x.test.tsx・rule-tests・apps/e2e・backend の spec と test-support・frontend の test-support）では 51 行の関数・引数 5 個の関数・301 行のファイル・クラス 2 つのファイルでも 0 で終わる",
+        () => {
+          // given
+          const cases: [string][] = [
+            ["apps/backend/features/todo/internal/domain/sized.test.ts"],
+            ["apps/frontend_customer/features/todo/components/sized.test.tsx"],
+            ["scripts/sized.test.ts"],
+            ["rule-tests/sized.ts"],
+            ["apps/e2e/support/sized.ts"],
+            ["apps/backend/spec/api/todo/sized.ts"],
+            ["apps/backend/test-support/todo/sized.ts"],
+            ["apps/frontend_customer/test-support/sized.ts"],
+          ];
+
+          for (const [path] of cases) {
+            // when
+            const { status, output } = checkAt(path, sizedSource(OVER_LIMIT));
+
+            // then
+            expect(status, `${path}\n${output}`).toBe(0);
           }
         },
       );

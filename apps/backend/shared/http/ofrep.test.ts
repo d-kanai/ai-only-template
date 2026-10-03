@@ -2,7 +2,9 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { DomainError } from "../error/domain-error";
-import { OfrepError, OfrepRequest, OfrepResponse } from "./ofrep";
+import { OfrepResponse } from "./ofrep";
+import { OfrepError } from "./ofrep-error";
+import { OfrepRequest } from "./ofrep-request";
 
 // OFREP（OpenFeature Remote Evaluation Protocol。https://github.com/open-feature/protocol の service/openapi.yaml、info.version 0.4.0）の
 //   要求の読み取り（OfrepRequest.parse）と、失敗の応答（OfrepResponse.wrap）のテスト。

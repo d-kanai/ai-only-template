@@ -110,7 +110,7 @@ export class TodoApi {
 
   // errors の要素 1 件: pointer（文字列）、key（共通の辞書のキー）、params（省略かオブジェクト）。本文の key・params と同じ検査。
   // WHY pointer の中身（"#" で始まるか）までは確かめない: 画面は "#/<項目名>" と完全一致で比べ、一致しない pointer は
-  //   フォーム全体の文言にする（api-error.ts の ApiErrorMessage.toMessages）ので、形が違っても文言は失われない。
+  //   フォーム全体の文言にする（api-error-message.ts の ApiErrorMessage.toMessages）ので、形が違っても文言は失われない。
   private static isProblemError(value: unknown): boolean {
     return (
       TodoApi.isRecord(value) &&
