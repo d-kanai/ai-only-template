@@ -14,7 +14,7 @@
 - `pnpm test` の中で動くので、CI の `ci` ジョブ（required status check）で毎回止まる。ワークフローは変えない。日次のジョブは置かない。
 
 ## 理由
-- `pnpm licenses list` は pnpm の標準のコマンドで、道具を足さず、レジストリにも接続しない（インストール済みの node_modules を読むだけで約 0.2 秒。2026-10-03 実測）。CI と手元で同じ結果になる。
+- `pnpm licenses list` は pnpm の標準のコマンドで、道具を足さず、レジストリにも接続しない（インストール済みの node_modules を読むだけで0.05〜0.2 秒。2026-10-03 実測）。CI と手元で同じ結果になる。
 - ルール検査テストにすれば、must pass / must reject と fixture（一時ディレクトリに GPL の依存をインストールすると違反になる）で検査が効くことを固定でき、ほかの規則と同じ形で読める。
 - 日次のジョブが要らない: npm は公開済みの `<名前>@<版>` を差し替えられない（https://docs.npmjs.com/policies/unpublish ）。lockfile が版と integrity を固定するので、lockfile が変わらなければライセンスも変わらない。lockfile が変わる PR では必ずこのテストが動く。
 - 許可リスト方式: 拒否リストだと、知らないライセンス・書き間違い・ライセンス無しが黙って通る。

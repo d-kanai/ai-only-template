@@ -2,7 +2,13 @@
 // WHY: vitest.config.mts の既定環境は jsdom（コンポーネントテスト用）。このテストは pnpm の出力（JSON）を読むだけで
 //   DOM を使わないため、node 環境で動かす。
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
@@ -15,7 +21,7 @@ import { casesByName } from "./case-table";
 //   推移的に入っても気づけない。人が lockfile の差分を読んで止めるのは続かないので、機械で止める（CLAUDE.md の原則 7。daiki の希望 2026-10-03）。
 // WHY pnpm test（ルール検査テスト）で行う: CI の ci ジョブ（Ruleset protect-main の required status check）が pnpm test を実行するので、
 //   lockfile を変えた PR は必ずここを通る（変えていない PR も通るが、pnpm licenses list はインストール済みの node_modules を読むだけで
-//   0.2 秒ほど。2026-10-03 実測）。手元の pnpm test でも同じ結果になり、CI のワークフローを変えずに済む。
+//   0.05〜0.2 秒。2026-10-03 実測）。手元の pnpm test でも同じ結果になり、CI のワークフローを変えずに済む。
 // 違反にするもの（規則）:
 //   - license-not-allowed: `pnpm -r licenses list --json` が返す依存のうち、ライセンスが許可リスト ALLOWED_LICENSES に無く、
 //     例外 LICENSE_EXCEPTIONS（名前とライセンスの組）にも無いもの。違反は `<名前>@<版>` とライセンスで返す。
@@ -160,7 +166,7 @@ function findLicenseViolations(
 
 // ---- 実際の依存の読み取り ----
 
-// WHY -r: ルートで実行すると、ルートの package.json の依存しか返さない（2026-10-03 実測。-r なしは 277 件、-r ありは 381 件）。
+// WHY -r: ルートで実行すると、ルートの package.json の依存しか返さない（2026-10-03 実測。名前@版の数で -r なしは 285 件、-r ありは 381 件）。
 //   apps/*（next・drizzle-orm などの本番の依存）を含めるため、ワークスペースのすべてのパッケージを対象にする。
 // WHY --prod / --dev で絞らない: devDependencies もこのリポジトリの中で動き、ビルドの成果物に入るものもある（daiki の希望
 //   「全体的にチェック」2026-10-03）。
@@ -195,6 +201,10 @@ afterAll(() => {
 function fixture(files: Record<string, unknown>): string {
   const root = mkdtempSync(join(tmpdir(), "licenses-"));
   roots.push(root);
+  // WHY .tool-versions を置く: 手元の asdf の shim は cwd から上へ .tool-versions を探して pnpm / node の版を決める。OS の一時ディレクトリには
+  //   無いので、~/.tool-versions に版が無い手元では pnpm が起動できず、あれば別の版の pnpm で動く（reviewer の指摘。asdf での実測は未確認）。
+  //   リポジトリと同じ版で動かすため、リポジトリの .tool-versions を写す。
+  copyFileSync(join(repoRoot, ".tool-versions"), join(root, ".tool-versions"));
   for (const [path, content] of Object.entries(files)) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(
@@ -207,8 +217,8 @@ function fixture(files: Record<string, unknown>): string {
 
 // fixture の依存をインストールする。依存は fixture の中のディレクトリ（file:）だけなので、レジストリに取りに行かない。
 // --offline: レジストリに接続しない（つながらない環境でも動き、誤って外の同名のパッケージを取らない）。
-// --no-frozen-lockfile: lockfile の無い fixture に lockfile を作らせる（CI=true のとき pnpm は既定で --frozen-lockfile になり、
-//   lockfile が無いと失敗する）。
+// --no-frozen-lockfile: lockfile の無い fixture に lockfile を作らせることを明示する（pnpm 12.7.0 は CI=true でも lockfile が無ければ
+//   作って exit 0 で終わった（2026-10-03 実測）。--frozen-lockfile が既定になる設定や版でも同じに動くよう、念のため付ける）。
 function install(root: string): void {
   const result = spawnSync(
     "pnpm",
