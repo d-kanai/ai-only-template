@@ -9,7 +9,7 @@ Feature: Issue テンプレート
     * labels が無い・空・別のラベル・2 つ以上・コメントアウト・body の下にだけある・引用符で囲んだ一覧なら違反にする
   Scenario: テンプレートの項目（issue-template-fields）
     * 項目が 目的・内容・完了条件・前提 の順で、前提だけ任意なら違反なし
-    * 項目が足りない・順が違う・見出しが違う・必須の指定が違う・必須の指定が無い（validations の外・引用符の文字列を含む）なら違反にする
+    * 項目が足りない・順が違う・見出しが違う・見出しが attributes の外・必須の指定が違う・必須の指定が無い（validations の外・引用符の文字列を含む）なら違反にする
   Scenario: 空の Issue（issue-template-blank）
     * config.yml が blank_issues_enabled を false にしていれば違反なし
     * config.yml が無い・true・指定が無い・コメントアウト・引用符の文字列なら違反にする

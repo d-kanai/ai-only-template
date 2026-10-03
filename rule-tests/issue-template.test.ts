@@ -41,8 +41,8 @@ import { casesByName } from "./case-table";
 // 限界（字句で読む。YAML のパーサを依存に足さない。rule-tests/github-actions.test.ts と同じ理由）:
 //   - labels はトップレベル（行頭）の `labels:` の 1 行だけを読む。値はフロー形式（`[feat]`）か 1 つのスカラー（`feat`）。
 //     ブロック形式の一覧（次の行の `- feat`）は読まず、空として違反にする（見逃しにはならない）。
-//   - body の項目は「`- type:` で始まる行から次の `- type:` の行まで」として読み、その中の最初の `label:` と、`validations:` の行より後の最初の
-//     `required:` の値を取る（validations の下の階層かはインデントで見ない。validations の後ろに別のキーを置いてその下に required を
+//   - body の項目は「`- type:` で始まる行から次の `- type:` の行まで」として読み、その中の `attributes:` の行より後（`validations:` の前）の最初の `label:` と、`validations:` の行より後の最初の
+//     `required:` の値を取る（validations の下の階層かはインデントで見ない。validations・attributes の後ろに別のキーを置いてその下に required / label を
 //     書くと読み違える）。真偽値は引用符の無い `true` / `false` だけを真偽値として読む。
 //     項目の type（textarea / input）、description・placeholder の中身、id は見ない（reviewer が見る）。
 //   - テンプレートの name / description（選ぶときに見える説明）が type に合っているかは見ない。
@@ -140,6 +140,16 @@ function firstValue(lines: string[], key: string): string | undefined {
   return line === undefined ? undefined : plain(pattern.exec(line)?.[1] ?? "");
 }
 
+// 項目の `attributes:` の行より後で、`validations:` の行より前の行。WHY: 公式の構文では見出しは attributes.label で、
+//   項目の直下などに書いた label は見出しにならない（Codex の指摘）。
+function attributeLines(item: string[]): string[] {
+  const start = item.findIndex((text) => /^\s+attributes\s*:/.test(text));
+  if (start === -1) return [];
+  const rest = item.slice(start + 1);
+  const end = rest.findIndex((text) => /^\s+validations\s*:/.test(text));
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
 // 項目の `validations:` の行より後の行。WHY: 公式の構文では必須の指定は validations.required で、attributes の下などに
 //   書いた required は必須にならない（reviewer の指摘）。
 function validationLines(item: string[]): string[] {
@@ -156,7 +166,7 @@ function toRequired(value: string | undefined): boolean | undefined {
 // body の項目の見出し（label）と必須の指定（required）を、書いた順に返す。
 function readFields(yaml: string): Field[] {
   return bodyItems(bodyLines(yaml)).map((item) => ({
-    label: scalar(firstValue(item, "label") ?? ""),
+    label: scalar(firstValue(attributeLines(item), "label") ?? ""),
     required: toRequired(firstValue(validationLines(item), "required")),
   }));
 }
@@ -405,7 +415,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And(
-      "項目が足りない・順が違う・見出しが違う・必須の指定が違う・必須の指定が無い（validations の外・引用符の文字列を含む）なら違反にする",
+      "項目が足りない・順が違う・見出しが違う・見出しが attributes の外・必須の指定が違う・必須の指定が無い（validations の外・引用符の文字列を含む）なら違反にする",
       () => {
         // given
         const valid = validTemplate("feat");
@@ -454,6 +464,14 @@ describeFeature(feature, ({ Scenario }) => {
               "      required: true",
             ),
             "目的（必須の指定なし） / 内容（必須） / 完了条件（必須） / 前提（任意）",
+          ],
+          [
+            "label が attributes の下に無い",
+            valid.replace(
+              "    attributes:\n      label: 内容",
+              "    label: 内容\n    attributes:",
+            ),
+            "目的（必須） / （必須） / 完了条件（必須） / 前提（任意）",
           ],
           [
             "required が引用符の文字列",
