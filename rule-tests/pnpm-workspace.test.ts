@@ -186,7 +186,9 @@ type RenovatePackageRule = Record<string, unknown> & {
   matchPackageNames?: string[];
   enabled?: boolean;
 };
-type RenovateConfig = {
+type RenovateConfig = Record<string, unknown> & {
+  extends?: string[];
+  automerge?: unknown;
   minimumReleaseAge?: unknown;
   internalChecksFilter?: unknown;
   packageRules?: RenovatePackageRule[];
@@ -253,6 +255,62 @@ function findRenovateViolations(
     if (stopAt === -1 || reenabled) {
       violations.push(`patchedDependencies:${name}`);
     }
+  }
+  violations.push(...findMajorAutomerge(config));
+  return violations;
+}
+
+// WHY メジャーを自動マージさせない: patch / minor だけを CI が緑なら自動でマージし、メジャーは破壊的な変更を人が確かめてから
+//   マージする（daiki の判断。Issue #375、ADR docs/adr/tech-stack/20261003-renovate-automerge-patch-minor.md）。
+// WHY 0.x の依存も外す: semver では 0.x の minor（0.45 → 0.46）も破壊的な変更にあたるが、Renovate は npm の版の major の数字だけで
+//   メジャーかを決めるので minor に分類する（renovate 44.132.2 の workers/repository/process/lookup/update-type.js。reviewer の実測）。
+//   drizzle-orm・drizzle-kit などが 0.x。Renovate のプリセット :automergeStableNonMajor と同じく matchCurrentVersion: "!/^0/" で外す。
+// 違反: 全体の automerge: true、automerge: true の規則で matchUpdateTypes が無い・空・メジャー以外の種類（AUTOMERGE_UPDATE_TYPES）を
+//   含む・matchCurrentVersion が "!/^0/" でないもの、更新の種類ごとの設定（全体の major などのオブジェクト）と vulnerabilityAlerts の
+//   automerge: true、extends に自動マージのプリセット（名前に automerge を含む。:automergeAll など）。
+// 限界: automerge: true の規則に一致した更新を、後ろの規則が別の更新の種類に変えることは無いので見ない。プリセットは名前でだけ見る。
+//   packageRules の中の入れ子（規則の中の major: { automerge } など）は見ない。
+const AUTOMERGE_UPDATE_TYPES = ["minor", "patch", "pin", "digest", "pinDigest"];
+const STABLE_ONLY = "!/^0/";
+// 全体に書くと、その種類の更新に設定が重なるキー（renovate 44.132.2 の workers/repository/updates/flatten.js の mergeChildConfig）と、
+//   脆弱性の更新の設定。
+const NESTED_AUTOMERGE_KEYS = [
+  "major",
+  "minor",
+  "patch",
+  "pin",
+  "digest",
+  "pinDigest",
+  "lockFileMaintenance",
+  "vulnerabilityAlerts",
+];
+
+function findMajorAutomerge(config: RenovateConfig): string[] {
+  const violations: string[] = [];
+  if (config.automerge === true) violations.push("automerge");
+  (config.packageRules ?? []).forEach((rule, index) => {
+    if (rule.automerge !== true) return;
+    const types = rule.matchUpdateTypes;
+    const onlyNonMajor =
+      Array.isArray(types) &&
+      types.length > 0 &&
+      types.every((type) => AUTOMERGE_UPDATE_TYPES.includes(type));
+    if (!onlyNonMajor || rule.matchCurrentVersion !== STABLE_ONLY) {
+      violations.push(`packageRules[${index}].automerge`);
+    }
+  });
+  for (const key of NESTED_AUTOMERGE_KEYS) {
+    const nested = config[key];
+    if (
+      typeof nested === "object" &&
+      nested !== null &&
+      (nested as { automerge?: unknown }).automerge === true
+    ) {
+      violations.push(`${key}.automerge`);
+    }
+  }
+  if ((config.extends ?? []).some((preset) => /automerge/i.test(preset))) {
+    violations.push("extends");
   }
   return violations;
 }
@@ -707,6 +765,24 @@ describeFeature(feature, ({ Scenario }) => {
       },
     );
 
+    And(
+      "自動マージを patch と minor などメジャー以外の更新の種類に絞った規則は違反なし",
+      () => {
+        // given
+        const json = replaceOnce(
+          VALID_RENOVATE,
+          '    { "matchPackageNames": ["@biomejs/**"], "groupName": "Biome" },\n',
+          '    { "matchPackageNames": ["@biomejs/**"], "groupName": "Biome" },\n    { "matchUpdateTypes": ["minor", "patch", "pin", "digest", "pinDigest"], "matchCurrentVersion": "!/^0/", "automerge": true },\n',
+        );
+
+        // when
+        const violations = renovateViolationsOf(json);
+
+        // then
+        expect(violations).toEqual([]);
+      },
+    );
+
     And("行頭の // のコメントは読まない", () => {
       // given
       const json = replaceOnce(
@@ -897,6 +973,99 @@ describeFeature(feature, ({ Scenario }) => {
 
         // then
         expect(result).toEqual(casesByName(cases, () => "SyntaxError"));
+      },
+    );
+    And(
+      "メジャーの更新を自動マージしうる設定は違反になる（全体の automerge・更新の種類の無い規則・メジャーを含む規則・自動マージのプリセット）",
+      () => {
+        // given
+        const biome =
+          '    { "matchPackageNames": ["@biomejs/**"], "groupName": "Biome" },\n';
+        const withRule = (rule: string) =>
+          replaceOnce(VALID_RENOVATE, biome, `${biome}    ${rule},\n`);
+        const cases: [string, string, string[]][] = [
+          [
+            "全体の automerge: true",
+            replaceOnce(
+              VALID_RENOVATE,
+              '  "internalChecksFilter": "strict",\n',
+              '  "internalChecksFilter": "strict",\n  "automerge": true,\n',
+            ),
+            ["automerge"],
+          ],
+          [
+            "更新の種類の無い規則",
+            withRule(
+              '{ "matchPackageNames": ["@biomejs/**"], "automerge": true }',
+            ),
+            ["packageRules[1].automerge"],
+          ],
+          [
+            "メジャーを含む規則",
+            withRule(
+              '{ "matchUpdateTypes": ["minor", "major"], "matchCurrentVersion": "!/^0/", "automerge": true }',
+            ),
+            ["packageRules[1].automerge"],
+          ],
+          [
+            "更新の種類が空の規則",
+            withRule(
+              '{ "matchUpdateTypes": [], "matchCurrentVersion": "!/^0/", "automerge": true }',
+            ),
+            ["packageRules[1].automerge"],
+          ],
+          [
+            "0.x の依存を外していない規則（matchCurrentVersion が無い）",
+            withRule(
+              '{ "matchUpdateTypes": ["minor", "patch"], "automerge": true }',
+            ),
+            ["packageRules[1].automerge"],
+          ],
+          [
+            "0.x の依存を外していない規則（別の matchCurrentVersion）",
+            withRule(
+              '{ "matchUpdateTypes": ["patch"], "matchCurrentVersion": "!/^1/", "automerge": true }',
+            ),
+            ["packageRules[1].automerge"],
+          ],
+          [
+            "更新の種類ごとの設定（全体の major）で自動マージする",
+            replaceOnce(
+              VALID_RENOVATE,
+              '  "internalChecksFilter": "strict",\n',
+              '  "internalChecksFilter": "strict",\n  "major": { "automerge": true },\n',
+            ),
+            ["major.automerge"],
+          ],
+          [
+            "脆弱性の更新（vulnerabilityAlerts）を自動マージする",
+            replaceOnce(
+              VALID_RENOVATE,
+              '  "internalChecksFilter": "strict",\n',
+              '  "internalChecksFilter": "strict",\n  "vulnerabilityAlerts": { "automerge": true },\n',
+            ),
+            ["vulnerabilityAlerts.automerge"],
+          ],
+          [
+            "自動マージのプリセット（:automergeAll）",
+            replaceOnce(
+              VALID_RENOVATE,
+              '"extends": ["config:recommended"]',
+              '"extends": ["config:recommended", ":automergeAll"]',
+            ),
+            ["extends"],
+          ],
+        ];
+
+        // when
+        const result = casesByName(cases, ([, json]) =>
+          renovateViolationsOf(json),
+        );
+
+        // then
+        expect(result).toEqual(
+          casesByName(cases, ([, , expected]) => expected),
+        );
       },
     );
   });
