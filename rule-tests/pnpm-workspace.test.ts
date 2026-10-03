@@ -12,6 +12,7 @@ import { casesByName } from "./case-table";
 // pnpm-workspace.yaml のサプライチェーン保護と版の書き方の設定（.claude/rules/tooling/dependencies.md）を仕様として固定するテスト。
 // ルール検査テスト（.claude/rules/quality/testing.md）なので、読み取り（readTopLevelSettings）と判定（findWorkspaceSettingViolations）を
 // 関数に切り出し、許可される例（must pass）と違反の例（must reject）の両方で固定する。
+// あわせて、Renovate の設定（.github/renovate.json5）が pnpm-workspace.yaml と食い違わないことも検査する（Issue #111。下の readRenovateConfig）。
 // .feature（pnpm-workspace.feature）と step の実装（このファイル）に分けた（Issue #282）。
 
 const repoRoot = join(import.meta.dirname, "..");
@@ -166,6 +167,103 @@ function violationsOf(yaml: string): string[] {
   );
 }
 
+// Renovate（依存の自動更新の bot。.github/renovate.json5）の設定を、pnpm-workspace.yaml の設定と食い違わないように検査する（Issue #111）。
+// WHY 待つ日数を pnpm の minimumReleaseAge と同じにする: Renovate が 5 日未満の版で PR を作ると、PR の中の pnpm install が
+//   minimumReleaseAgeStrict で失敗し、赤い PR が並ぶ。Renovate の minimumReleaseAge で同じ日数を待たせる。片方だけ変えると食い違う。
+// WHY internalChecksFilter を strict にする: strict でないと、待つ日数に達していない更新でも PR を作り、待つ間は保留の状態で置く
+//   （Renovate の configuration-options の minimumReleaseAge・internalChecksFilter）。待つ間は PR を作らせない。
+// WHY パッチを当てた依存（patchedDependencies）を更新させない: キーが「パッケージ@版」で固定なので、版が変わるとパッチが
+//   当たらなくなる。パッチの要否は人が見直す（スキル dependency-update の 5.）。enabled: false の packageRules で止める。
+// 読み取りの仕様: JSON に行頭の `//` のコメント行だけを足した形に限る（コメント行を除いて JSON.parse する）。JSON5 のほかの書き方
+//   （値の後ろのコメント・末尾のカンマ・引用符の無いキー）は例外にする。WHY: JSON5 のパーサを依存に足さない（上の yaml と同じ）。
+// 止めている規則として数えるのは、キーが matchPackageNames と enabled: false だけの規則（matchUpdateTypes などで絞ると一部の更新が
+//   止まらず、否定のパターン `!<名前>` で外すと止まらない）。その規則より後ろに、同じパッケージに一致して enabled: true に戻す規則が
+//   あれば止めていない（packageRules は後ろの規則が上書きする）。
+// 限界: matchPackageNames はパッケージ名そのものと `<スコープ>/**` だけを見る（Renovate の glob・正規表現のほかの書き方は「止めていない」
+//   と判定する）。後ろの規則が matchPackageNames 以外（matchDepNames など）で一致して enabled: true に戻すものは見ない。
+//   待つ日数は `<n> days` の形だけを読む。
+type RenovatePackageRule = Record<string, unknown> & {
+  matchPackageNames?: string[];
+  enabled?: boolean;
+};
+type RenovateConfig = {
+  minimumReleaseAge?: unknown;
+  internalChecksFilter?: unknown;
+  packageRules?: RenovatePackageRule[];
+};
+
+const MINUTES_PER_DAY = 1440;
+
+function readRenovateConfig(text: string): RenovateConfig {
+  const json = text
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*\/\//.test(line))
+    .join("\n");
+  return JSON.parse(json);
+}
+
+function minutesOf(age: unknown): number | undefined {
+  const days = typeof age === "string" ? age.match(/^(\d+) days$/) : null;
+  return days ? Number(days[1]) * MINUTES_PER_DAY : undefined;
+}
+
+// `@scope/pkg@1.0.0` → `@scope/pkg`（版の前の @ で切る。スコープの先頭の @ は残す）。
+function packageNameOf(patchKey: string): string {
+  return patchKey.slice(0, patchKey.lastIndexOf("@"));
+}
+
+function matchesPackage(pattern: string, name: string): boolean {
+  if (pattern.endsWith("/**")) return name.startsWith(pattern.slice(0, -2));
+  return pattern === name;
+}
+
+function isPureDisable(rule: RenovatePackageRule): boolean {
+  const keys = Object.keys(rule).sort();
+  return (
+    isDeepStrictEqual(keys, ["enabled", "matchPackageNames"]) &&
+    rule.enabled === false &&
+    !(rule.matchPackageNames ?? []).some((p) => p.startsWith("!"))
+  );
+}
+
+function findRenovateViolations(
+  config: RenovateConfig,
+  settings: Settings,
+): string[] {
+  const violations: string[] = [];
+  const age = minutesOf(config.minimumReleaseAge);
+  if (age === undefined || age !== settings.minimumReleaseAge) {
+    violations.push("minimumReleaseAge");
+  }
+  if (config.internalChecksFilter !== "strict") {
+    violations.push("internalChecksFilter");
+  }
+  const patched = settings.patchedDependencies;
+  const rules = config.packageRules ?? [];
+  for (const key of typeof patched === "object" ? Object.keys(patched) : []) {
+    const name = packageNameOf(key);
+    const matches = (rule: RenovatePackageRule) =>
+      (rule.matchPackageNames ?? []).some((p) => matchesPackage(p, name));
+    const stopAt = rules.findLastIndex(
+      (rule) => isPureDisable(rule) && matches(rule),
+    );
+    const reenabled = rules
+      .slice(stopAt + 1)
+      .some((rule) => rule.enabled === true && matches(rule));
+    if (stopAt === -1 || reenabled) {
+      violations.push(`patchedDependencies:${name}`);
+    }
+  }
+  return violations;
+}
+
+function renovateViolationsOf(json: string, yaml = VALID_YAML): string[] {
+  return findRenovateViolations(
+    readRenovateConfig(json),
+    readTopLevelSettings(yaml),
+  );
+}
+
 // 本物の pnpm-workspace.yaml と同じ形（コメント、他の設定、クォートしたキー）を持つ、許可される設定の例。
 const VALID_YAML = [
   "# pnpm の設定ファイル",
@@ -193,6 +291,22 @@ function replaceOnce(text: string, from: string, to: string): string {
   expect(text.split(from)).toHaveLength(2);
   return text.replace(from, to);
 }
+
+// 本物の .github/renovate.json5 と同じ形（行頭のコメント、他の設定）を持つ、VALID_YAML に対して許可される設定の例。
+const VALID_RENOVATE = [
+  "// Renovate の設定",
+  "{",
+  '  "extends": ["config:recommended"],',
+  "  // 5 日 = pnpm の 7200 分",
+  '  "minimumReleaseAge": "5 days",',
+  '  "internalChecksFilter": "strict",',
+  '  "packageRules": [',
+  '    { "matchPackageNames": ["@biomejs/**"], "groupName": "Biome" },',
+  '    { "matchPackageNames": ["@scope/pkg"], "enabled": false }',
+  "  ]",
+  "}",
+  "",
+].join("\n");
 
 let dir: string;
 
@@ -554,5 +668,255 @@ describeFeature(feature, ({ Scenario }) => {
       // 失敗時にどの設定がどの値かが出力に出るよう、違反の一覧を空配列と比較する。
       expect(violations).toEqual([]);
     });
+  });
+
+  Scenario("Renovate の設定の判定（must pass）", ({ And }) => {
+    And(
+      "pnpm と同じ日数を待ち、待つ間は PR を作らず、パッチを当てた依存を更新しない設定は違反なし（パッケージ名そのもの・スコープのワイルドカード・パッチが無い）",
+      () => {
+        // given
+        const cases: [string, string, string][] = [
+          ["パッケージ名そのもの", VALID_RENOVATE, VALID_YAML],
+          [
+            "スコープのワイルドカード",
+            replaceOnce(VALID_RENOVATE, '["@scope/pkg"]', '["@scope/**"]'),
+            VALID_YAML,
+          ],
+          [
+            "パッチが無い",
+            replaceOnce(
+              VALID_RENOVATE,
+              '"groupName": "Biome" },\n    { "matchPackageNames": ["@scope/pkg"], "enabled": false }\n',
+              '"groupName": "Biome" }\n',
+            ),
+            replaceOnce(
+              VALID_YAML,
+              "patchedDependencies:\n  '@scope/pkg@1.0.0': patches/@scope__pkg@1.0.0.patch\n",
+              "",
+            ),
+          ],
+        ];
+
+        // when
+        const result = casesByName(cases, ([, json, yaml]) =>
+          renovateViolationsOf(json, yaml),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => []));
+      },
+    );
+
+    And("行頭の // のコメントは読まない", () => {
+      // given
+      const json = replaceOnce(
+        VALID_RENOVATE,
+        '  "internalChecksFilter": "strict",\n',
+        '  "internalChecksFilter": "strict",\n    // "minimumReleaseAge": "1 days",\n',
+      );
+
+      // when
+      const violations = renovateViolationsOf(json);
+
+      // then
+      expect(violations).toEqual([]);
+    });
+  });
+
+  Scenario("Renovate の設定の判定（must reject）", ({ And }) => {
+    And(
+      "待つ日数が pnpm と違う・日数で書いていない・無い、待つ間に PR を作る、パッチを当てた依存を更新すると、その設定のキーで違反になる",
+      () => {
+        // given
+        const age = '"minimumReleaseAge": "5 days",';
+        const filter = '"internalChecksFilter": "strict",';
+        const stop =
+          '{ "matchPackageNames": ["@scope/pkg"], "enabled": false }';
+        const cases: [string, string, string[]][] = [
+          [
+            "待つ日数が pnpm と違う（3 日）",
+            replaceOnce(VALID_RENOVATE, age, '"minimumReleaseAge": "3 days",'),
+            ["minimumReleaseAge"],
+          ],
+          [
+            "日数で書いていない（120 hours）",
+            replaceOnce(
+              VALID_RENOVATE,
+              age,
+              '"minimumReleaseAge": "120 hours",',
+            ),
+            ["minimumReleaseAge"],
+          ],
+          [
+            "日数が数でない（five days）",
+            replaceOnce(
+              VALID_RENOVATE,
+              age,
+              '"minimumReleaseAge": "five days",',
+            ),
+            ["minimumReleaseAge"],
+          ],
+          [
+            "待つ日数が無い",
+            replaceOnce(VALID_RENOVATE, `  ${age}\n`, ""),
+            ["minimumReleaseAge"],
+          ],
+          [
+            "待つ日数が文字列でない（5）",
+            replaceOnce(VALID_RENOVATE, age, '"minimumReleaseAge": 5,'),
+            ["minimumReleaseAge"],
+          ],
+          [
+            "待つ間に PR を作る（flexible）",
+            replaceOnce(
+              VALID_RENOVATE,
+              filter,
+              '"internalChecksFilter": "flexible",',
+            ),
+            ["internalChecksFilter"],
+          ],
+          [
+            "internalChecksFilter が無い",
+            replaceOnce(VALID_RENOVATE, `  ${filter}\n`, ""),
+            ["internalChecksFilter"],
+          ],
+          [
+            "パッチを当てた依存の規則が enabled: true",
+            replaceOnce(VALID_RENOVATE, stop, stop.replace("false", "true")),
+            ["patchedDependencies:@scope/pkg"],
+          ],
+          [
+            "パッチを当てた依存の規則に enabled が無い",
+            replaceOnce(
+              VALID_RENOVATE,
+              stop,
+              '{ "matchPackageNames": ["@scope/pkg"] }',
+            ),
+            ["patchedDependencies:@scope/pkg"],
+          ],
+          [
+            "止めているのが別のパッケージ",
+            replaceOnce(VALID_RENOVATE, '["@scope/pkg"]', '["@scope/other"]'),
+            ["patchedDependencies:@scope/pkg"],
+          ],
+          [
+            "止めているのが別のスコープのワイルドカード",
+            replaceOnce(VALID_RENOVATE, '["@scope/pkg"]', '["@other/**"]'),
+            ["patchedDependencies:@scope/pkg"],
+          ],
+          [
+            "止めているのが名前の前方一致だけ（@scope/pk）",
+            replaceOnce(VALID_RENOVATE, '["@scope/pkg"]', '["@scope/pk"]'),
+            ["patchedDependencies:@scope/pkg"],
+          ],
+          [
+            "止める規則を update の種類（major）で絞る",
+            replaceOnce(
+              VALID_RENOVATE,
+              stop,
+              '{ "matchPackageNames": ["@scope/pkg"], "matchUpdateTypes": ["major"], "enabled": false }',
+            ),
+            ["patchedDependencies:@scope/pkg"],
+          ],
+          [
+            "止める規則で否定のパターンで外す",
+            replaceOnce(
+              VALID_RENOVATE,
+              '["@scope/pkg"]',
+              '["@scope/**", "!@scope/pkg"]',
+            ),
+            ["patchedDependencies:@scope/pkg"],
+          ],
+          [
+            "後ろの規則で enabled: true に戻す",
+            replaceOnce(
+              VALID_RENOVATE,
+              `${stop}\n`,
+              `${stop},\n    { "matchPackageNames": ["@scope/pkg"], "enabled": true }\n`,
+            ),
+            ["patchedDependencies:@scope/pkg"],
+          ],
+          [
+            "packageRules が無い",
+            replaceOnce(
+              VALID_RENOVATE,
+              VALID_RENOVATE.slice(
+                VALID_RENOVATE.indexOf('  "internalChecksFilter"'),
+                VALID_RENOVATE.lastIndexOf("}"),
+              ),
+              '  "internalChecksFilter": "strict"\n',
+            ),
+            ["patchedDependencies:@scope/pkg"],
+          ],
+        ];
+
+        // when
+        const result = casesByName(cases, ([, json]) =>
+          renovateViolationsOf(json),
+        );
+
+        // then
+        expect(result).toEqual(
+          casesByName(cases, ([, , expected]) => expected),
+        );
+      },
+    );
+
+    And(
+      "JSON に行頭の // のコメントだけを足した形でなければ例外にする（値の後ろのコメント・末尾のカンマ）",
+      () => {
+        // given
+        const cases: [string, string][] = [
+          [
+            "値の後ろのコメント",
+            replaceOnce(
+              VALID_RENOVATE,
+              '"internalChecksFilter": "strict",',
+              '"internalChecksFilter": "strict", // 待つ間は作らない',
+            ),
+          ],
+          [
+            "末尾のカンマ",
+            replaceOnce(
+              VALID_RENOVATE,
+              '"enabled": false }\n',
+              '"enabled": false },\n',
+            ),
+          ],
+        ];
+
+        // when
+        const result = casesByName(cases, ([, json]) => {
+          try {
+            readRenovateConfig(json);
+            return "読めた";
+          } catch (error) {
+            return error instanceof SyntaxError ? "SyntaxError" : "別の例外";
+          }
+        });
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => "SyntaxError"));
+      },
+    );
+  });
+
+  Scenario("Renovate の設定の実ファイル", ({ And }) => {
+    And(
+      ".github/renovate.json5 は pnpm-workspace.yaml の minimumReleaseAge と同じ日数を待ち、パッチを当てた依存を更新しない",
+      () => {
+        // given: 実ファイル（repoRoot の .github/renovate.json5 と pnpm-workspace.yaml）
+        // when
+        const violations = findRenovateViolations(
+          readRenovateConfig(
+            readFileSync(join(repoRoot, ".github/renovate.json5"), "utf8"),
+          ),
+          readWorkspaceSettings(join(repoRoot, "pnpm-workspace.yaml")),
+        );
+
+        // then
+        expect(violations).toEqual([]);
+      },
+    );
   });
 });

@@ -1,0 +1,4 @@
+# Issue の作成画面の設定（https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/configuring-issue-templates-for-your-repository ）。
+# blank_issues_enabled: false で、テンプレートを選ばない空の Issue を「New issue」から作れなくする。
+# WHY: 空の Issue は見出し（目的 / 内容 / 完了条件）も type ラベルも無いまま作られる。検査は rule-tests/issue-template.test.ts。
+blank_issues_enabled: false

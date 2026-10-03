@@ -156,6 +156,36 @@ describe("OfrepResponse.wrap", () => {
     vi.restoreAllMocks();
   });
 
+  // Issue #106: OFREP の評価も POST なので、ProblemResponse.wrap と同じく別のオリジンのページからの要求を handler の前に拒否する
+  //   （判定は same-origin.ts）。形は OFREP の失敗の本文（errorCode・errorDetails）にそろえる。
+  test("別のオリジンのページからの要求は、handler を呼ばずに 403 と GENERAL の失敗を返す", async () => {
+    // given
+    const called: Request[] = [];
+    const handle = OfrepResponse.wrap(async (req: Request) => {
+      called.push(req);
+      return Response.json({ flags: [] });
+    });
+
+    // when
+    const response = await handle(
+      new Request("http://app.example.com/api/ofrep/v1/evaluate/flags", {
+        method: "POST",
+        headers: {
+          host: "app.example.com",
+          origin: "https://evil.example.com",
+        },
+      }),
+    );
+
+    // then
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toStrictEqual({
+      errorCode: "GENERAL",
+      errorDetails: "Requests from other origins are not allowed.",
+    });
+    expect(called).toEqual([]);
+  });
+
   test("handler が返した Response を、そのまま（同じオブジェクトで）返し、引数もそのまま渡す", async () => {
     // given
     const ok = Response.json({ flags: [] });

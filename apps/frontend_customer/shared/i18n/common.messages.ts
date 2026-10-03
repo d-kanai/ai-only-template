@@ -26,6 +26,7 @@ export const commonMessages = defineMessages({
     "request.body.unknownKeys": "リクエストに不明な項目があります: {keys}",
     "request.field.notString": "{path} は文字列で指定してください",
     "request.field.notBoolean": "{path} は true か false で指定してください",
+    "request.origin.forbidden": "別のサイトからの操作は受け付けていません",
     "server.internalError": "サーバでエラーが発生しました",
 
     // 画面側だけのエラー
@@ -49,6 +50,7 @@ export const commonMessages = defineMessages({
     "request.body.unknownKeys": "The request has unknown fields: {keys}",
     "request.field.notString": "{path} must be a string",
     "request.field.notBoolean": "{path} must be true or false",
+    "request.origin.forbidden": "Requests from other sites are not accepted",
     "server.internalError": "A server error occurred",
 
     "error.unknown": "The request failed (HTTP {status})",

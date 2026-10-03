@@ -87,6 +87,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-10-02 | Writer の update は変更履歴の before に呼び出し側の origin を使い、before のために行を読み直さない | 採用 | [20261002-update-before-from-origin.md](architecture/20261002-update-before-from-origin.md) |
 | 2026-10-02 | インスタンスで使うクラスに static を置かない（自分を返すファクトリは除く） | 採用 | [20261002-no-static-in-instance-class.md](architecture/20261002-no-static-in-instance-class.md) |
 | 2026-10-02 | フィーチャーフラグは backend の 1 feature とし、一覧をコードにハードコードして boolean だけを OFREP の形で返す | 採用 | [20261002-feature-flag-ofrep-hardcoded.md](architecture/20261002-feature-flag-ofrep-hardcoded.md) |
+| 2026-10-03 | セキュリティヘッダを next.config と Proxy で付け、CSP は nonce にし、API は同じオリジンの画面からだけ書き込める形にする | 採用 | [20261003-security-headers-and-same-origin-api.md](architecture/20261003-security-headers-and-same-origin-api.md) |
 
 ### tech-stack/
 言語・ツール・ライブラリの選定
@@ -98,6 +99,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-28 | TypeScript は 7 系（7.0.2）を使う | 採用 | [20260928-typescript-7.md](tech-stack/20260928-typescript-7.md) |
 | 2026-09-30 | 本番は GCP の Cloud Run + Cloud SQL にし、Terraform は器だけを、イメージの入れ替えは GitHub Actions の gcloud を受け持つ | 採用 | [20260930-gcp-cloud-run-and-cloud-sql.md](tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md) |
 | 2026-10-02 | migrate ジョブはアプリの runtime イメージをコマンド違いで動かし、マイグレーションは drizzle-orm の migrator を束ねた入口で当てる | 採用 | [20261002-migrate-job-same-runtime-image.md](tech-stack/20261002-migrate-job-same-runtime-image.md) |
+| 2026-10-03 | 依存の自動更新は Renovate（GitHub App）で行い、Dependabot は使わない | 採用 | [20261003-renovate-for-dependency-updates.md](tech-stack/20261003-renovate-for-dependency-updates.md) |
 
 ### quality/
 品質ゲートとテストの方針
