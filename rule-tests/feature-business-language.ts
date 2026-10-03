@@ -12,9 +12,13 @@
 //   must reject が固定する。
 
 // .feature に書かない言葉（大文字小文字は区別しない）。
-// WHY 正規表現の配列: 語ごとに境界（\b）の要否が違う。英語の短い語（id・title・DB・API・HTTP のメソッド）は語の一部（idea・
-//   subtitle・MongoDB）で止めないよう境界を付け、長い語・日本語は含まれるだけで止める（PostgreSQL の SQL・HTTPS の HTTP も技術の言葉）。
-// 限界: 複数形（ids・APIs）・綴りの揺れ・全角の数字と英字（２０１・ＤＢ）・ここに無い技術の言葉は見ない。語を足すときは、使う側の
+// WHY 正規表現の配列: 語ごとに境界（\b）の要否が違う。英語の短い語（id・title・DB・HTTP のメソッド）は語の一部（idea・
+//   subtitle・MongoDB）で止めないよう境界を付け、長い語・日本語は含まれるだけで止める（PostgreSQL の SQL も技術の言葉）。
+// WHY API・HTTP・リクエスト・レスポンス・エンドポイントを載せない（Issue #417 で外した。ユーザー判断 2026-10-03）: 誰でも分かる
+//   言葉で、無理に言い換えるほうが読みにくい（例: API を「画面が使う窓口」と書くと、かえって意味が取りにくい）。HTTP のメソッド名
+//   （GET など）・状態コード・Problem Details などの、仕組みの細部の言葉は残す。外した語を書いても通ることは
+//   rule-tests/api-journey.test.ts の must pass（誰でも分かる言葉）が固定する。
+// 限界: 複数形（ids）・綴りの揺れ・全角の数字と英字（２０１・ＤＢ）・ここに無い技術の言葉は見ない。語を足すときは、使う側の
 //   テストの must reject の例も足す。
 export const FORBIDDEN_WORDS_IN_FEATURE: readonly RegExp[] = [
   /\bDB\b/i,
@@ -24,7 +28,6 @@ export const FORBIDDEN_WORDS_IN_FEATURE: readonly RegExp[] = [
   /カラム/i,
   /返り値/i,
   /戻り値/i,
-  /レスポンス/i,
   /ステータス/i,
   /状態\s*\d{3}/i,
   // HTTP の状態コード（3 桁の 1xx〜5xx）。後ろに業務の数の助数詞（文字・件・行）が続くものは除く。
@@ -55,11 +58,7 @@ export const FORBIDDEN_WORDS_IN_FEATURE: readonly RegExp[] = [
   // 業務の言葉は「タイトル」。
   /\btitle\b/i,
   /\bcompleted\b/i,
-  /\bAPI\b/i,
-  /HTTP/i,
   /\b(?:GET|POST|PUT|PATCH|DELETE)\b/i,
-  /エンドポイント/i,
-  /リクエスト/i,
   /レコード/i,
   /バリデーション/i,
   /状態コード/i,

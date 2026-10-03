@@ -14,10 +14,10 @@ Feature: API ジャーニーテスト
     * .feature と同じ名前の step があるもの・対象外のファイルは違反なし
     * .feature か step の片方だけ・名前の違い・旧名の step・サブディレクトリの対は違反
   Scenario: .feature の業務の言葉と仕切り（findApiJourneyViolations）: must pass
-    * 業務の言葉だけで、API を呼ぶ step の直前ごとに仕切りのある .feature は違反なし（コメント行と空行・語の一部・仕切りの後の空行とコメントなど）
+    * 業務の言葉だけで、API を呼ぶ step の直前ごとに仕切りのある .feature は違反なし（コメント行と空行・語の一部・誰でも分かる API やリクエストの言葉・仕切りの後の空行とコメントなど）
     * spec/journey/ の外の .feature は置き場所の違反だけを返す（中身は見ない）
   Scenario: .feature の業務の言葉（api-journey-business-language）: must reject
-    * step（Then）に DB・SQL・表名・API や HTTP の言葉（返り値・状態コード・Problem Details・JSON など）があれば違反
+    * step（Then）に DB・SQL・表名・技術の言葉（返り値・状態コード・Problem Details・JSON・HTTP のメソッドなど）があれば違反
     * 見出し（Feature / Background / Scenario / Rule / Scenario Outline / Example）と各 step（Given / When / And / But / 星印）・説明の行・表の行も見る（1 行 1 件、行番号付き）
     * 仕切りの見出しに禁止語があれば、仕切りの行を違反にする
     * 禁止語と仕切りの違反が同じ When の行にあれば、両方を行の順に返す

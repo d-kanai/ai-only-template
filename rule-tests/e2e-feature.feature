@@ -4,7 +4,7 @@ Feature: E2E の置き場所と .feature の書き方
   Scenario: .feature の中身の判定（must pass）
     * 業務の言葉だけで When の前に仕切りがある .feature は違反なし（許すタグ付きのシナリオ・Background の中の When・助数詞付きの 3 桁の数）
   Scenario: .feature の中身の判定（must reject）
-    * 技術の言葉・状態コード・許さないタグを足した行は、その行の違反になる（API・400・skip・許すタグと同じ行の only）
+    * 技術の言葉・状態コード・許さないタグを足した行は、その行の違反になる（DB・400・skip・許すタグと同じ行の only）
     * 仕切りの無い When・形の違う仕切り（─ が 4 つ）の後の When は、When の行の違反
     * 仕切りの見出しの技術の言葉は、仕切りの行の違反（コメントでも読者が読む行）
   Scenario: 置き場所と対の判定

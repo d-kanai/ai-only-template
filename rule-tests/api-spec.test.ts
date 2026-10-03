@@ -79,7 +79,9 @@ import { containsForbiddenWord } from "./feature-business-language";
 //     説明の行・表の行・ほかのキーワードの行）に、FORBIDDEN_WORDS_IN_FEATURE（rule-tests/feature-business-language.ts。API ジャーニーの
 //     api-journey-business-language と共有）の禁止語のどれかが含まれると違反（1 行 1 件）。3 桁の数（1xx〜5xx）の扱いも共有する。
 //     WHY: .feature は業務の仕様として開発者でない人も読む（API ジャーニーと同じ。Issue #217）。
-//     WHY Scenario の見出しを見ない: 見出しは固定の一覧（api-spec-scenario-heading）で、一覧の「レスポンス」が禁止語に当たる。
+//     WHY Scenario の見出しを見ない: 見出しは固定の一覧（api-spec-scenario-heading）が言葉を決めている（一覧の「レスポンス」が禁止語に
+//       当たったため。Issue #417 で「レスポンス」は禁止語から外したが、一覧に無い見出しは api-spec-scenario-heading が止めるので
+//       重ねて見る意味が無い）。
 //     WHY Feature の見出しを見ない: Issue #219 の指定（対象は Feature / Scenario の見出し以外）。
 //   以下は step の実装（spec/api/<feature>/ の直下の <api>.api-spec.test.ts）の中身の規則:
 //   - api-spec-no-vi: `vitest` から `vi`（と同じものの別名 `vitest`）を import しない。別名・名前空間・既定の import・dynamic
@@ -450,7 +452,7 @@ function findFeatureContentViolations(source: string): ApiSpecViolation[] {
     if (kind === "star" && scenario !== undefined) {
       scenario.stars += 1;
     }
-    // WHY Scenario の見出し・language の行を見ない: 見出しは固定の一覧（レスポンスが禁止語に当たる）、language はコメント。
+    // WHY Scenario の見出し・language の行を見ない: 見出しは固定の一覧が言葉を決める（冒頭の api-spec-business-language）、language はコメント。
     if (!LINE_KINDS_WITHOUT_WORDING.has(kind) && containsForbiddenWord(line)) {
       violations.push({ rule: "api-spec-business-language", line: lineNumber });
     }
@@ -1360,7 +1362,7 @@ describeFeature(feature, ({ Scenario }) => {
         // given
         const cases: [string, string][] = [
           [
-            "固定の見出しを一覧の順に並べた Scenario と `*` の step（見出しの レスポンス は禁止語でも可）",
+            "固定の見出しを一覧の順に並べた Scenario と `*` の step（見出しの レスポンス は禁止語でない。Issue #417）",
             source(
               "Feature: Todo を作る",
               "",
@@ -1629,7 +1631,7 @@ describeFeature(feature, ({ Scenario }) => {
               "見出し以外のキーワードの行・Given の行も禁止語を見る（同じ行なら規則の順）",
               source(
                 "Feature: x",
-                "  Rule: レスポンス",
+                "  Rule: JSON の形",
                 "  Scenario: 異常系",
                 "    * a",
                 "    Given DB が空",

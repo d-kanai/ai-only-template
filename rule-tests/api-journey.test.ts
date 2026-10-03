@@ -92,7 +92,7 @@ import {
 //       キーワードにすると When を見分けられない）。
 //     限界（両方の規則）: 行ごとに見るので、docstring（`"""` で囲んだ複数行の値）の中も行の種類を区別しない（中の `#` の行は
 //       コメントとして禁止語を見ず、`When` で始まる行は When として仕切りを求める）。全角の数字・英字（`２０１`・`ＤＢ`）は禁止語として
-//       見ない（正規表現は半角だけ）。複数形（ids・APIs）・一覧に無い技術の言葉も見ない。
+//       見ない（正規表現は半角だけ）。複数形（ids）・一覧に無い技術の言葉も見ない。
 //   - api-journey-tag（Issue #219 の reviewer の指摘）: `@` で始まる行（タグ。字下げの後）は違反。
 //     WHY: vitest-cucumber は既定の excludeTags（`@ignore` など）が付いた Scenario を skip にし、流れが黙って外れたまま緑になる
 //       （reviewer の実測）。タグで流れを分ける場面は無いので、タグそのものを使わない。
@@ -1372,7 +1372,7 @@ describeFeature(feature, ({ Scenario }) => {
     ".feature の業務の言葉と仕切り（findApiJourneyViolations）: must pass",
     ({ And }) => {
       And(
-        "業務の言葉だけで、API を呼ぶ step の直前ごとに仕切りのある .feature は違反なし（コメント行と空行・語の一部・仕切りの後の空行とコメントなど）",
+        "業務の言葉だけで、API を呼ぶ step の直前ごとに仕切りのある .feature は違反なし（コメント行と空行・語の一部・誰でも分かる API やリクエストの言葉・仕切りの後の空行とコメントなど）",
         () => {
           // given
           const cases: [string, string][] = [
@@ -1418,12 +1418,24 @@ describeFeature(feature, ({ Scenario }) => {
               ),
             ],
             [
-              "禁止語を語の一部に含むだけの言葉（Todo・MongoDB・idea・subtitle・APIs でない API 風の語・completely）",
+              "禁止語を語の一部に含むだけの言葉（Todo・MongoDB・idea・subtitle・completely）",
               source(
                 ...FEATURE_HEAD,
                 DIVIDER,
                 '    When Todo "idea を MongoDB に書く subtitle" を作る',
-                "    Then completely な Todo と APIary の Todo が並ぶ",
+                "    Then completely な Todo が並ぶ",
+              ),
+            ],
+            // WHY 禁止語から外した（Issue #417。ユーザー判断 2026-10-03）: 誰でも分かる言葉で、無理に言い換えるほうが読みにくい
+            //   （例:「画面が使う窓口」= API）。HTTP を外したので HTTPS も通る。HTTP のメソッド名（GET など）は禁止語のまま。
+            [
+              "誰でも分かる言葉（API・HTTP・HTTPS・リクエスト・レスポンス・エンドポイント。大文字小文字によらない）",
+              source(
+                ...FEATURE_HEAD,
+                DIVIDER,
+                "    When Api に Todo を作るリクエストを送る",
+                "    Then レスポンスに Todo が入る",
+                "    And http と HTTPS のエンドポイントで同じ Todo が見える",
               ),
             ],
             [
@@ -1498,7 +1510,7 @@ describeFeature(feature, ({ Scenario }) => {
     ({ And }) => {
       // 禁止語を 1 つだけ含む step（When の直前には仕切りを置き、仕切りの違反と混ざらないようにする）。行は 9 行目の Then。
       And(
-        "step（Then）に DB・SQL・表名・API や HTTP の言葉（返り値・状態コード・Problem Details・JSON など）があれば違反",
+        "step（Then）に DB・SQL・表名・技術の言葉（返り値・状態コード・Problem Details・JSON・HTTP のメソッドなど）があれば違反",
         () => {
           // given
           const cases: [string, string][] = [
@@ -1513,7 +1525,6 @@ describeFeature(feature, ({ Scenario }) => {
             ["カラム", "Then カラムが 1 つ変わる"],
             ["返り値", "Then 返り値は Todo になる"],
             ["戻り値", "Then 戻り値は Todo になる"],
-            ["レスポンス", "Then レスポンスに Todo がある"],
             ["ステータス", "Then ステータスは成功になる"],
             ["状態 \\d{3}（空白なし）", "Then 状態201 で作られる"],
             ["HTTP の状態コード（3 桁の 1xx〜5xx）", "Then 201 で作られる"],
@@ -1551,15 +1562,11 @@ describeFeature(feature, ({ Scenario }) => {
             ["not found（空白なし）", "Then NotFound と伝えられる"],
             ["title（業務の言葉はタイトル）", "Then Title が空と伝えられる"],
             ["completed", "Then completed が真になる"],
-            ["API", "Then Api が Todo を返す"],
-            ["HTTP（HTTPS も）", "Then HTTPS で Todo が届く"],
             ["HTTP のメソッド（GET）", "Then get で Todo を読む"],
             [
               "HTTP のメソッド（POST・PUT・PATCH）",
               "Then Post と Put と Patch で送る",
             ],
-            ["エンドポイント", "Then エンドポイントが Todo を返す"],
-            ["リクエスト", "Then リクエストが拒否される"],
             ["レコード", "Then レコードが 1 件ある"],
             ["バリデーション", "Then バリデーションで拒否される"],
             ["状態コード", "Then 状態コードで成功が分かる"],
@@ -1602,7 +1609,7 @@ describeFeature(feature, ({ Scenario }) => {
           const violations = findApiJourneyViolations(
             FEATURE,
             source(
-              "Feature: Todo の API",
+              "Feature: Todo の JSON",
               "  Todo の DB を説明する行",
               "  Background: 空の todos",
               "    Given DB が空",

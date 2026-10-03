@@ -304,13 +304,13 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario(".feature の中身の判定（must reject）", ({ And }) => {
     And(
-      "技術の言葉・状態コード・許さないタグを足した行は、その行の違反になる（API・400・skip・許すタグと同じ行の only）",
+      "技術の言葉・状態コード・許さないタグを足した行は、その行の違反になる（DB・400・skip・許すタグと同じ行の only）",
       () => {
         // given: GOOD_FEATURE（10 行）の後に 11 行目として足す
         const cases: [string, string, E2eFeatureRuleId][] = [
           [
-            "step に技術の言葉（API）",
-            "    Then API が呼ばれる",
+            "step に技術の言葉（DB）",
+            "    Then DB に保存される",
             "e2e-feature-business-language",
           ],
           [
