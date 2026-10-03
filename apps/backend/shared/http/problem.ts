@@ -7,6 +7,7 @@ import {
   type ErrorParamsArgs,
 } from "../error/error-key";
 import { EnglishProblemDetail } from "./problem-detail.en";
+import { SameOrigin } from "./same-origin";
 
 // エラー応答を RFC 9457（Problem Details for HTTP APIs。https://www.rfc-editor.org/rfc/rfc9457.html ）の形にする（Issue #126）。
 // WHY RFC 9457 に準拠する（ユーザー判断）: HTTP API のエラー本文の標準で、Spring の ProblemDetail・ASP.NET Core の
@@ -34,6 +35,7 @@ type ErrorParams = Record<string, string | number>;
 export type ProblemType =
   | "/problems/validation-error"
   | "/problems/not-found"
+  | "/problems/forbidden"
   | "/problems/internal-error";
 
 // 項目ごとの誤り 1 件（RFC 9457 の 3 節の例の errors の要素と同じ形。拡張メンバー）。
@@ -115,8 +117,9 @@ export class InvalidRequestError<K extends ErrorKey = ErrorKey> extends Error {
   }
 }
 
-// 応答の種類。DomainError の code と、想定外の例外（internal_error）。
-type ProblemCategory = DomainErrorCode | "internal_error";
+// 応答の種類。DomainError の code と、別のオリジンからの書き込みの拒否（forbidden。Issue #106）と、想定外の例外（internal_error）。
+// WHY forbidden を DomainErrorCode に足さない: オリジンは HTTP の要求の性質で、domain の規則ではない（InvalidRequestError と同じ理由）。
+type ProblemCategory = DomainErrorCode | "forbidden" | "internal_error";
 
 // 例外を Problem Details の Response にする変換（from）と、api の handle を包む口（wrap）。
 // WHY クラスの static メソッドにする: backend の本番コードは単独の関数を export しない（ADR
@@ -143,6 +146,11 @@ export class ProblemResponse {
         type: "/problems/not-found",
         title: "Not found",
         status: 404,
+      },
+      forbidden: {
+        type: "/problems/forbidden",
+        title: "Forbidden",
+        status: 403,
       },
       internal_error: {
         type: "/problems/internal-error",
@@ -246,6 +254,20 @@ export class ProblemResponse {
     handler: (...args: Args) => Promise<Response>,
   ): (...args: Args) => Promise<Response> {
     return async (...args) => {
+      // WHY 別のオリジンからの書き込みをここで拒否する（Proxy にしない。Issue #106）: wrap は OFREP 以外のすべての api の handle が
+      //   通る 1 か所で（包み忘れは規則 presentation-with-problem-response が止める。OFREP の api は ofrep.ts の OfrepResponse.wrap が
+      //   同じ判定をする）、拒否の応答をほかの誤りと同じ Problem Details に
+      //   できる。Proxy（apps/frontend_customer/proxy.ts）は単体テストのカバレッジの外で、backend の Problem の形も持たない。
+      //   判定と WHY は same-origin.ts、決定は ADR docs/adr/architecture/20261003-security-headers-and-same-origin-api.md。
+      if (SameOrigin.rejects(args[0])) {
+        return ProblemResponse.respond(
+          "forbidden",
+          args[0],
+          "request.origin.forbidden",
+          undefined,
+          undefined,
+        );
+      }
       try {
         return await handler(...args);
       } catch (error) {

@@ -6,7 +6,7 @@
 # WHY --diff-filter=AM（追加 A と変更 M だけ）: ログを削除しただけ（D）の PR は、記録を足していないので通さない。
 # WHY --no-renames: 名前の変更を常に「削除 + 追加」として扱い、利用者の diff.renames の設定に結果が左右されないようにする
 #   （rename の検出が効くと R になり、AM で外れる）。限界: ログの名前を変えただけの PR は「追加」があるので通る。
-# WHY: 作業ログ（docs/work-logs/YYYY-MM-DD.md）の追記漏れを CI で止める（Issue #64 のユーザー判断。文書だけの PR も含めて例外なし）。
+# WHY: 作業ログ（docs/work-logs/YYYY-MM-DD.md）の追記漏れを CI で止める（Issue #64 のユーザー判断。文書だけの PR も含める。例外は下の Renovate の依存更新の PR だけ）。
 #   Stop フック（scripts/hooks/require-work-log.sh）はセッションの中の漏れを止め、こちらは PR 単位で止める。
 # WHY 三点（...）: base-ref と HEAD の分岐点から HEAD までの差分（= PR の変更）だけを見る。二点（..）だと、PR の後に
 #   base 側で入った作業ログの変更まで数えてしまう。分岐点を求めるので、CI の checkout は履歴を全部取る（fetch-depth: 0）。
@@ -25,6 +25,31 @@ if [ $# -ne 1 ] || [ -z "$1" ]; then
   exit 2
 fi
 base=$1
+
+# Renovate（bot）の依存更新の PR は、依存のファイルだけを変えているなら作業ログを求めずに通す（Issue #111）。
+# WHY: bot は作業ログを書けない。依存の更新の記録は PR そのもの（どの版からどの版へ・リリースノート）に残る。
+#   人間がやった依存の更新（手動・調査を伴う）は今までどおり作業ログを求める（スキル dependency-update）。
+# WHY 作者を GITHUB_EVENT_PATH の pull_request.user.login で見る: GitHub Actions が書くイベントの JSON で、PR を作った
+#   アカウント（Renovate の GitHub App なら renovate[bot]）が入る。ci.yml のステップを変えずに読める
+#   （rule-tests/work-logs-check.test.ts がステップの run と if をそのままの形で検査している）。github.actor は
+#   再実行した人に変わりうるので使わない。手元の実行（GITHUB_EVENT_PATH が無い・読めない）では除外しない。
+# WHY 依存のファイルだけに限る: 人が Renovate のブランチにコードを push すると作者は renovate[bot] のまま変わらない。
+#   コードの変更が混ざった PR は通常どおり作業ログを求める。数えるのは Renovate が触る
+#   package.json（リポジトリ直下・apps/<パッケージ>/）・pnpm-lock.yaml・.tool-versions・.github/workflows/*.yml（renovate.json5）。
+renovate_files='^(package\.json|apps/[^/]+/package\.json|pnpm-lock\.yaml|\.tool-versions|\.github/workflows/[^/]+\.ya?ml)$'
+pr_author=""
+if [ -n "${GITHUB_EVENT_PATH:-}" ]; then
+  # JSON でない・キーが無いときは空のまま（除外しない）。
+  pr_author=$(node -e 'try { const e = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); process.stdout.write(String(e?.pull_request?.user?.login ?? "")); } catch {}' "$GITHUB_EVENT_PATH" 2>/dev/null || true)
+fi
+if [ "$pr_author" = "renovate[bot]" ]; then
+  # 変更が無い PR は、printf が空の 1 行を出し、それが依存のファイルに一致しないので通さない。
+  if all_changed=$(git diff --name-only --no-renames "${base}...HEAD") &&
+    ! printf '%s\n' "$all_changed" | grep -Evq "$renovate_files"; then
+    echo "check-work-logs-diff: renovate[bot] の PR で、依存のファイルだけの変更なので作業ログを求めない（Issue #111）"
+    exit 0
+  fi
+fi
 
 # git diff の失敗（base-ref が無い・分岐点が無いなど）は通さない（差分が取れないまま exit 0 にしない）。
 if ! changed=$(git diff --name-only --no-renames --diff-filter=AM "${base}...HEAD"); then
