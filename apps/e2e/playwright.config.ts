@@ -34,9 +34,9 @@ const baseURL = `http://localhost:${port}`;
 const chromiumExecutable = toolEnv.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
 
 // ブラウザ（page）と API の呼び出し（request）の通信を通すプロキシ（toolEnv.E2E_PROXY。無いのが正常）。
-// WHY: CI は scripts/security/scan.sh zap-e2e が ZAP をプロキシとして起動し、この変数を渡して E2E を流す。E2E が実際に触った
-//   画面と API の応答を ZAP の受け身の検査（passive scan）にかけ、E2E を流すことをセキュリティの検査にする（Issue #364。
-//   ADR docs/adr/quality/20261003-zap-passive-scan-via-e2e.md）。未設定なら use.proxy を付けず、プロキシを通さない。
+// WHY: main の日次（.github/workflows/zap.yml）の scripts/security/scan.sh zap-e2e が ZAP をプロキシとして起動し、この変数を渡して
+//   E2E を流す。E2E が実際に触った画面と API の応答を ZAP の受け身の検査にかけ、その記録を active scan の起点にする（Issue #364 / #405。
+//   ADR docs/adr/quality/20261003-zap-daily-active-scan.md）。未設定なら use.proxy を付けず、プロキシを通さない。
 // localhost も通る: Playwright 1.63.0 は proxy を渡すと Chromium に --proxy-bypass-list=<-loopback> を足し、Chromium が既定で
 //   プロキシを飛ばす localhost の通信もプロキシに送る（playwright-core の coreBundle.js の shouldProxyLoopback。2026-10-03 に
 //   ZAP の記録で webServer と記録用のサーバの両方の通信が載ることを確かめた）。

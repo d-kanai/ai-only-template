@@ -35,9 +35,17 @@ import {
 //     決まった run と glob だけを持つ（skip・only・exclude などを足さない）。フックには commands 以外のキー（skip など）を書かず、
 //     トップレベルにはフックのほか（extends・rc・remotes など、別のファイルから設定を足すもの）を書かない（ALLOWED_LEFTHOOK_KEYS）。
 //     WHY 完全に一致させる: `|| true`・`skip: true`・glob を狭めるなど、どれも検査を黙って効かなくする（効いているかは見て分からない）。
-//   - ci-scan: ci.yml の ci job（required status check）の steps が 7 つの検査（6 つと、E2E を兼ねる zap-e2e。Issue #364）を、`run` だけのステップで実行し、job に if・
+//   - ci-scan: ci.yml の ci job（required status check）の steps が 6 つの検査を、`run` だけのステップで実行し、job に if・
 //     continue-on-error を付けず、ワークフローと job に defaults（run の shell の差し替え）を書かない。WHY ci job: 別の job だと赤でもマージできる（rule-tests/github-actions.test.ts の auditsDependencies と同じ）。
 //     WHY フックと CI の両方: フックは `--no-verify` や Docker の止まった手元で飛ばされうる。CI が最後の砦。
+//     WHY zap-e2e を ci job に入れない（Issue #405）: ZAP の active scan は数分かかり PR のマージを待たせるので、PR では
+//       ZAP を通さない pnpm test:e2e を流し、ZAP は下の zap-daily のジョブで main を毎日検査する（daiki の判断 2026-10-03
+//       「PR は普通の E2E、main の daily で ZAP」）。
+//   - zap-daily: zap.yml の `on:` に schedule があり、zap job の steps が `scan.sh zap-e2e`（E2E を ZAP 経由で流す受け身の検査と、
+//     攻撃を送る active scan）を `run` だけのステップで 1 つ実行し、job に if・continue-on-error を付けず、ワークフローと job に
+//     defaults を書かない。WHY: 日次のジョブは PR の required status check ではなく、赤でも誰かが見に行くまで気づかれにくい。
+//     if・continue-on-error・defaults・step の shell / env で検査を黙って効かなくしても、ジョブは緑のまま「検査した」ことになる。
+//     WHY schedule: schedule が無いと日次で動かず、workflow_dispatch で手で動かさない限り ZAP の検査が一度も走らない。
 //   - deploy-image-scan: deploy.yml の deploy job が `scan.sh trivy-image "$IMAGE"` を、マイグレーションとデプロイ（gcloud run）より前に、
 //     ほかのステップと同じ if（steps.config.outputs.ready == 'true'）か if なしで、if・name・run のほかのキー（env・shell・
 //     continue-on-error など）なしで実行し、ワークフローと job に defaults を書かない。
@@ -49,6 +57,10 @@ import {
 //   - ci.yml が PR と push の両方で動くことは rule-tests/github-actions.test.ts の auditsDependencies が見る（同じ ci job）。
 //   - デプロイの検査が、イメージをビルドして push した後にあることは見ない（前にあると、まだ無いイメージを検査して失敗するので気づく）。
 //   - 検査の中身（ツールの引数・しきい値）は scan.sh に書き、ここでは見ない（scan.sh のコメントと reviewer が見る）。
+//   - zap.yml の schedule の cron の値（毎日か・書式が正しいか）、workflow_dispatch の有無、checkout の `ref: main`、zap job の
+//     timeout-minutes の値、zap-e2e の前の準備のステップ（install・Postgres・migrate・Playwright）は見ない（準備が欠けると zap-e2e が
+//     失敗して気づく。cron と ref は reviewer が見る）。schedule が `on: schedule` のような 1 行の書き方だと読まず違反になる（ブロックで書く）。
+//   - 日次のジョブが赤になったときに誰が気づくか（通知）は見ない（GitHub の通知の設定で、repo に無い）。
 
 const repoRoot = join(import.meta.dirname, "..");
 const SCAN_SCRIPT = "scripts/security/scan.sh";
@@ -288,8 +300,6 @@ const CI_SCANS = [
   "hadolint",
   "trivy-config",
   "semgrep",
-  // zap-e2e: E2E（pnpm test:e2e）を ZAP 経由で流し、受け身の検査の警告で失敗する（Issue #364）。E2E のステップを兼ねる。
-  "zap-e2e",
 ].map(scan);
 
 const isEnforced = (properties: Step) =>
@@ -357,6 +367,46 @@ function findCiViolations(yaml: string): string[] {
     ).map(
       (command) =>
         `ci-scan: ci.yml の ci job の steps に「${command}」が run だけのステップで無い`,
+    ),
+  ];
+}
+
+const ZAP_SCAN = scan("zap-e2e");
+
+// トップレベルの `on:`（引用符の `"on":` も）の直下のイベント名（rule-tests/github-actions.test.ts の readEvents と同じ読み方）。
+//   `on: schedule` のような 1 行の書き方は読まない（イベントが無いことになり、違反になる）。
+function readEvents(yaml: string): string[] {
+  const block = topLevelBlock(yaml, `(["']?)on\\1`);
+  const eventIndent = block[0] === undefined ? 0 : indentOf(block[0]);
+  return block
+    .filter((text) => indentOf(text) === eventIndent)
+    .map((text) => text.trim().replace(/\s*:.*$/, ""));
+}
+
+function findZapDailyViolations(yaml: string): string[] {
+  const zap = readJobs(yaml).find((job) => job.name === "zap");
+  const schedule = unless(
+    readEvents(yaml).includes("schedule"),
+    "zap-daily: zap.yml の on に schedule が無い（日次で動かない）",
+  );
+  if (zap === undefined)
+    return [...schedule, "zap-daily: zap.yml に zap job が無い"];
+  const steps = readSteps(stepsBlock(zap.body));
+  return [
+    ...schedule,
+    ...defaultsViolations("zap-daily", "zap.yml", yaml, "zap", zap.body),
+    ...settingViolations(
+      "zap-daily",
+      "zap.yml の zap job ",
+      jobProperties(zap.body),
+    ),
+    // WHY run だけのステップ: ci-scan と同じ（shell・env・if・continue-on-error で、同じ run の文字列のまま効かなくできる）。
+    // WHY 1 つ: 2 つあると片方だけ書き換えても気づきにくく、検査が 2 回走る理由も無い。
+    ...unless(
+      steps.filter(
+        (step) => step.run === ZAP_SCAN && Object.keys(step).length === 1,
+      ).length === 1,
+      `zap-daily: zap.yml の zap job の steps に「${ZAP_SCAN}」が run だけのステップで 1 つ無い`,
     ),
   ];
 }
@@ -503,6 +553,24 @@ const ciYaml = (steps: string[] = CI_STEPS, jobLines: string[] = []) =>
     "      # セキュリティの検査",
     ...steps,
     "      - run: pnpm lint",
+  ].join("\n");
+
+const ZAP_STEP = `      - run: ${ZAP_SCAN}`;
+const zapYaml = (steps: string[] = [ZAP_STEP], jobLines: string[] = []) =>
+  [
+    "on:",
+    "  schedule:",
+    '    - cron: "45 23 * * *"',
+    "  workflow_dispatch:",
+    "jobs:",
+    "  zap:",
+    "    runs-on: ubuntu-latest",
+    "    timeout-minutes: 45",
+    ...jobLines,
+    "    steps:",
+    `      - uses: actions/checkout@${COMMIT}`,
+    "      - run: pnpm install --frozen-lockfile",
+    ...steps,
   ].join("\n");
 
 const DEPLOY_STEP = [
@@ -844,7 +912,7 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("CI の組み込み（findCiViolations）", ({ And }) => {
     And(
-      "ci.yml の ci job の steps が 7 つの検査をそのまま実行すれば違反なし",
+      "ci.yml の ci job の steps が 6 つの検査をそのまま実行すれば違反なし",
       () => {
         // given
         const yaml = ciYaml();
@@ -933,6 +1001,134 @@ describeFeature(feature, ({ Scenario }) => {
             "ci-scan: ci.yml のトップレベルに defaults がある",
           ],
           "ci job が無い": ["ci-scan: ci.yml に ci job が無い"],
+        });
+      },
+    );
+  });
+
+  Scenario("日次の ZAP の組み込み（findZapDailyViolations）", ({ And }) => {
+    And(
+      "zap.yml が schedule で動き、zap job の steps が zap-e2e をそのまま実行すれば違反なし",
+      () => {
+        // given
+        const cases: [string, string][] = [
+          ["schedule と workflow_dispatch", zapYaml()],
+          [
+            "引用符の on と schedule だけ",
+            replaceOnce(
+              replaceOnce(zapYaml(), "on:\n  schedule", '"on":\n  schedule'),
+              "  workflow_dispatch:\n",
+              "",
+            ),
+          ],
+          [
+            "ほかの job がある",
+            `${zapYaml()}\n  notify:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: echo done`,
+          ],
+        ];
+
+        // when
+        const result = casesByName(cases, ([, yaml]) =>
+          findZapDailyViolations(yaml),
+        );
+
+        // then
+        expect(result).toEqual(casesByName(cases, () => []));
+      },
+    );
+
+    And(
+      "ステップが無い・if で飛ばす・continue-on-error で無視する・step の shell や env・job の if や continue-on-error・job やワークフローの defaults・schedule が無い・zap job が無いと違反になる",
+      () => {
+        // given
+        const zapStep = (...lines: string[]) => zapYaml([ZAP_STEP, ...lines]);
+        const cases: [string, string][] = [
+          ["ステップが無い", zapYaml([])],
+          ["コメントアウト", zapYaml([`      # - run: ${ZAP_SCAN}`])],
+          ["2 つある", zapYaml([ZAP_STEP, ZAP_STEP])],
+          ["if で飛ばす", zapStep("        if: false")],
+          [
+            "continue-on-error で無視する",
+            zapStep("        continue-on-error: true"),
+          ],
+          ["次の行の || true", zapStep("          || true")],
+          ["step の shell", zapStep("        shell: true {0}")],
+          ["step の env", zapStep("        env:", "          PATH: /x")],
+          ["job の if", zapYaml([ZAP_STEP], ["    if: false"])],
+          [
+            "job の continue-on-error",
+            zapYaml([ZAP_STEP], ["    continue-on-error: true"]),
+          ],
+          [
+            "job の defaults",
+            zapYaml(
+              [ZAP_STEP],
+              ["    defaults:", "      run:", "        shell: true {0}"],
+            ),
+          ],
+          [
+            "ワークフローの defaults",
+            `defaults:\n  run:\n    shell: true {0}\n${zapYaml()}`,
+          ],
+          [
+            "schedule が無い",
+            replaceOnce(
+              zapYaml(),
+              '  schedule:\n    - cron: "45 23 * * *"\n',
+              "",
+            ),
+          ],
+          [
+            "schedule をコメントアウト",
+            replaceOnce(
+              zapYaml(),
+              '  schedule:\n    - cron: "45 23 * * *"\n',
+              '  # schedule:\n  #   - cron: "45 23 * * *"\n',
+            ),
+          ],
+          [
+            "schedule が別のキーの下",
+            replaceOnce(
+              zapYaml(),
+              '  schedule:\n    - cron: "45 23 * * *"\n  workflow_dispatch:\n',
+              "  workflow_dispatch:\n    schedule:\n",
+            ),
+          ],
+          ["zap job が無い", replaceOnce(zapYaml(), "  zap:", "  scan:")],
+        ];
+
+        // when
+        const result = casesByName(cases, ([, yaml]) =>
+          findZapDailyViolations(yaml),
+        );
+
+        // then
+        const missing = `zap-daily: zap.yml の zap job の steps に「${ZAP_SCAN}」が run だけのステップで 1 つ無い`;
+        const noSchedule =
+          "zap-daily: zap.yml の on に schedule が無い（日次で動かない）";
+        expect(result).toEqual({
+          ステップが無い: [missing],
+          コメントアウト: [missing],
+          "2 つある": [missing],
+          "if で飛ばす": [missing],
+          "continue-on-error で無視する": [missing],
+          "次の行の || true": [missing],
+          "step の shell": [missing],
+          "step の env": [missing],
+          "job の if": ["zap-daily: zap.yml の zap job に if がある: false"],
+          "job の continue-on-error": [
+            "zap-daily: zap.yml の zap job に continue-on-error がある",
+          ],
+          "job の defaults": [
+            "zap-daily: zap.yml の zap job に defaults がある",
+          ],
+          "ワークフローの defaults": [
+            "zap-daily: zap.yml のトップレベルに defaults がある",
+          ],
+          "schedule が無い": [noSchedule],
+          "schedule をコメントアウト": [noSchedule],
+          "schedule が別のキーの下": [noSchedule],
+          "zap job が無い": ["zap-daily: zap.yml に zap job が無い"],
         });
       },
     );
@@ -1059,7 +1255,7 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("セキュリティの検査の組み込み（実ファイル）", ({ And }) => {
     And(
-      "リポジトリの scan.sh・zizmor のイメージ・lefthook.yml・ci.yml・deploy.yml は上の規則の違反が無い",
+      "リポジトリの scan.sh・zizmor のイメージ・lefthook.yml・ci.yml・zap.yml・deploy.yml は上の規則の違反が無い",
       () => {
         // given
         const read = (path: string) =>
@@ -1074,6 +1270,7 @@ describeFeature(feature, ({ Scenario }) => {
           }),
           ...findHookViolations(read("lefthook.yml")),
           ...findCiViolations(read(".github/workflows/ci.yml")),
+          ...findZapDailyViolations(read(".github/workflows/zap.yml")),
           ...findDeployViolations(read(".github/workflows/deploy.yml")),
         ];
 

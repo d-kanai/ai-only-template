@@ -1,8 +1,8 @@
 // @vitest-environment node
 // WHY: vitest.config.mts の既定環境は jsdom だが、このテストは bash を子プロセスで起動するだけで DOM を使わない。
 //
-// scripts/security/scan.sh の zap-alerts（ZAP の警告の判定。Issue #364）の仕様。CI の zap-e2e が E2E を ZAP 経由で流した後、
-//   ZAP の API（/JSON/core/view/alerts/）から取った警告をこの判定に渡し、CI を落とすかを決める。
+// scripts/security/scan.sh の zap-alerts（ZAP の警告の判定。Issue #364）の仕様。main の日次の zap-e2e（.github/workflows/zap.yml。Issue #405）が E2E を ZAP 経由で流して active scan をかけた後、
+//   ZAP の API（/JSON/core/view/alerts/）から取った警告をこの判定に渡し、ジョブを落とすかを決める。
 // 判定:
 //   - 危険度（risk）が Low / Medium / High の警告が 1 件でもあれば失敗（終了コード 1）。Informational は表示だけで落とさない。
 //     WHY Informational は落とさない: 「Modern Web Application」（SPA だと知らせるだけ）のように、直すものの無い知らせが毎回出る
@@ -12,7 +12,7 @@
 //       unsafe-inline など）があり、pluginId で外すと許容していない問題まで黙って通る。
 //     WHY 理由の無い行は誤り（終了コード 2）: 理由の無い除外は、後から見て外してよいかを判断できない（.claude/rules/tooling/security-scan.md
 //       の「抑えるときは WHY を書く」を、ここでは機械で止める）。
-// ZAP を起動して E2E を流す部分（zap-e2e）は Docker とブラウザが要るので、ここでは動かさない（CI の ci ジョブが毎回動かす）。
+// ZAP を起動して E2E を流す部分（zap-e2e）は Docker とブラウザが要るので、ここでは動かさない（zap.yml が毎日動かす）。
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

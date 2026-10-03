@@ -11,7 +11,8 @@
 #   trivy-image <img> ビルドしたイメージの OS パッケージの脆弱性（直せる HIGH / CRITICAL で失敗。deploy.yml）
 #   semgrep           コードの脆弱性のパターン（semgrep-rules の javascript / typescript の security の ERROR の規則）
 #   zap-e2e           ZAP をプロキシにして E2E（pnpm test:e2e）を流し、E2E が触った画面と API の通信を ZAP の受け身の検査
-#                     （passive scan）にかける（Low 以上の警告で失敗。CI。Issue #364）
+#                     （passive scan）にかけ、続けて記録した URL に攻撃を送る検査（active scan）をかける（Low 以上の警告で失敗。
+#                     main の日次の .github/workflows/zap.yml。Issue #364 / #405）
 #   zap-alerts <alerts.json> [ignore.tsv]
 #                     ZAP の警告（/JSON/core/view/alerts/ の応答）の判定だけ（zap-e2e の中で使う。テストは scan.test.ts）
 # 決定と採用しなかった案は ADR docs/adr/quality/20261003-security-scan-tools.md、規則と誤検知の抑え方は
@@ -185,10 +186,13 @@ case "$tool" in
     ;;
   zap-e2e)
     # ZAP をプロキシ（daemon）として起動し、E2E のブラウザと API の呼び出しを通す（apps/e2e/playwright.config.ts の E2E_PROXY）。
-    #   E2E が通った後、受け身の検査が済むのを待って警告を取り、zap_alerts で判定する。決定は
-    #   ADR docs/adr/quality/20261003-zap-passive-scan-via-e2e.md。
-    # WHY 受け身の検査だけ（攻撃を送る active scan をしない）: E2E の通信を見るだけなので E2E の結果と時間をほとんど変えない
-    #   （2026-10-03 の実測で E2E 11 件が ZAP なしと同じく通った）。active scan は時間がかかり、DB を荒らして E2E と干渉する。
+    #   E2E が通った後、受け身の検査が済むのを待ち、アプリを起動し直して active scan をかけ、警告を取って zap_alerts で判定する。
+    #   決定は ADR docs/adr/quality/20261003-zap-passive-scan-via-e2e.md（E2E を ZAP に通す）と
+    #   docs/adr/quality/20261003-zap-daily-active-scan.md（main の日次で active scan まで流す。Issue #405）。
+    # WHY E2E の通信から始める: ZAP は E2E が開いた画面と呼んだ API（本文の形を含む）を記録し、active scan はその記録を攻撃の起点に
+    #   する。spider で辿るより、実際の使われ方に沿った URL とパラメータが攻撃の対象になる。
+    # WHY active scan を E2E の後に分ける: active scan は DB に攻撃の値を書き込むので、E2E と同時に流すと E2E の前提（件数など）を壊す。
+    #   DB は CI の中で起動した使い捨てのもので、書き込みは外に影響しない（daiki の判断 2026-10-03）。
     # --network host: ZAP から E2E のサーバ（localhost:<E2E_PORT> と記録用のサーバのランダムなポート）にそのまま届くようにする。
     #   ブラウザは localhost の URL のまま ZAP に送るので、ZAP のコンテナの localhost がホストと同じである必要がある
     #   （Linux の Docker の host network。CI の ubuntu-latest とクラウドセッションで動く。Docker Desktop（Mac）で動くかは未確認）。
@@ -202,7 +206,10 @@ case "$tool" in
     docker run -d --rm --name "$zap_container" --network host "$ZAP_IMAGE" \
       zap.sh -daemon -silent -host 127.0.0.1 -port "$zap_port" -config api.disablekey=true >/dev/null
     alerts_file="$(mktemp)"
-    trap 'docker rm -f "$zap_container" >/dev/null 2>&1 || true; rm -f "$alerts_file"' EXIT
+    app_log="$(mktemp)"
+    app_pid=""
+    # app_pid: active scan のために起動し直したアプリ（setsid で起こしたプロセスグループ）。pnpm → next の子まで止めるためグループごと送る。
+    trap 'docker rm -f "$zap_container" >/dev/null 2>&1 || true; if [[ -n "$app_pid" ]]; then kill -TERM -- "-$app_pid" 2>/dev/null || true; fi; rm -f "$alerts_file" "$app_log"' EXIT
     # 起動を待つ（手元で約 10 秒。上限 120 秒）。
     for _ in $(seq 1 120); do
       if curl -sf "$zap_api/JSON/core/view/version/" >/dev/null; then break; fi
@@ -237,6 +244,40 @@ case "$tool" in
       echo "ZAP recorded no E2E traffic (is E2E_PROXY reaching apps/e2e/playwright.config.ts?)" >&2
       exit 1
     fi
+
+    # active scan。E2E の webServer は E2E の後にアプリを止めるので、E2E が build した .next のまま同じポートで起動し直す。
+    #   ポートは E2E と同じ（環境変数か .env の E2E_PORT、無ければ 3100。apps/e2e/playwright.config.ts と同じ既定）。
+    #   WHY 同じポート: ZAP の記録は http://localhost:<E2E_PORT> の URL なので、同じ URL に攻撃を送る。
+    app_port="${E2E_PORT:-$(sed -n 's/^E2E_PORT=//p' "$repo_root/.env" 2>/dev/null | tail -n 1)}"
+    app_port="${app_port:-3100}"
+    app_url="http://localhost:$app_port"
+    # そのポートが空いていることを先に確かめる。WHY: 手元で別のサーバ（古いビルド。E2E の reuseExistingServer が使ったもの）が
+    #   残っていると、起動し直したアプリはポートの衝突で終わり、残っていたサーバを検査してしまう（2026-10-03 の手元の実行で起きた）。
+    if curl -s -o /dev/null "$app_url/"; then
+      echo "port $app_port is in use; stop the server on it so the active scan targets a fresh app" >&2
+      exit 1
+    fi
+    (cd "$repo_root" && exec setsid pnpm start -p "$app_port") >"$app_log" 2>&1 &
+    app_pid=$!
+    for _ in $(seq 1 60); do
+      if curl -s -o /dev/null "$app_url/"; then break; fi
+      sleep 1
+    done
+    curl -s -o /dev/null "$app_url/" || { echo "the app did not start on $app_url for the active scan" >&2; cat "$app_log" >&2; exit 1; }
+
+    # recurse=true: E2E が記録したこのサイトの URL をすべて対象にする。inScopeOnly=false: コンテキスト（スコープ）を設定していないので、
+    #   スコープで絞らない。scan の戻り値は scanId（数）。数でなければ（ZAP がエラーを返した）始まっていないので失敗にする。
+    scan_id="$(curl -sf "$zap_api/JSON/ascan/action/scan/?url=$app_url&recurse=true&inScopeOnly=false" | jq -r .scan)"
+    [[ "$scan_id" =~ ^[0-9]+$ ]] || { echo "ZAP active scan did not start on $app_url: $scan_id" >&2; exit 1; }
+    # 済むのを待つ（status が 100）。WHY 上限 20 分: 2026-10-03 の手元の実測（URL 34 件）で 150 秒。画面と API が増えても余裕のある上限で、
+    #   止まったときに zap.yml の job の timeout（45 分）より先に、原因の分かるメッセージで止める。
+    progress=""
+    for _ in $(seq 1 1200); do
+      progress="$(curl -sf "$zap_api/JSON/ascan/view/status/?scanId=$scan_id" | jq -r .status)"
+      [[ "$progress" == "100" ]] && break
+      sleep 1
+    done
+    [[ "$progress" == "100" ]] || { echo "ZAP active scan did not finish within 20 minutes (status $progress%)" >&2; exit 1; }
 
     curl -sf "$zap_api/JSON/core/view/alerts/" >"$alerts_file"
     zap_alerts "$alerts_file" "$repo_root/scripts/security/zap-ignore.tsv"

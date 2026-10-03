@@ -1,0 +1,83 @@
+# OWASP ZAP の検査を main ブランチで毎日実行する（Issue #405）。scripts/security/scan.sh zap-e2e が次を行う:
+#   1. ZAP をプロキシとして起動し、E2E（pnpm test:e2e）を ZAP 経由で流して、E2E が触った画面と API の応答を受け身の検査
+#      （passive scan）にかける。
+#   2. E2E の後にアプリを起動し直し、ZAP が記録した URL に攻撃を送る検査（active scan）をかける。
+#   3. Low 以上の警告（scripts/security/zap-ignore.tsv で理由を書いて外したものを除く）か E2E の失敗で、このジョブが赤になる。
+# WHY PR ごとではなく日次: active scan は数分かかり（2026-10-03 の手元の実測で 150 秒）、PR のマージを待たせる
+#   （daiki の判断 2026-10-03「PR は普通の E2E、main の daily で ZAP」）。PR の ci.yml は ZAP を通さない pnpm test:e2e を流す。
+# WHY active scan の書き込みを気にしない: Postgres はこのジョブの中で起動した使い捨てのもので、外の環境に触れない（daiki の判断 2026-10-03）。
+# 決定と採用しなかった案は ADR docs/adr/quality/20261003-zap-daily-active-scan.md。rule-tests/security-scan.test.ts の zap-daily が
+#   このジョブが scan.sh zap-e2e を run だけのステップで実行することを検査する。
+name: ZAP
+
+on:
+  schedule:
+    # 毎日 UTC 23:45 = 08:45 JST。cron は UTC で解釈される。
+    # WHY 毎時 0 分を避ける: GitHub の schedule は 0 分が混みやすく、遅れたり落とされたりする（GitHub Docs「Events that trigger
+    #   workflows」の schedule）。mutation.yml（23:55）と 10 分ずらし、同じ時刻に 2 つのジョブを積まない。
+    # schedule は既定ブランチ（main）の最新コミットで動く。
+    - cron: "45 23 * * *"
+  # Actions の画面から手動でも実行できるようにする（設定を変えた直後の確認など）。
+  workflow_dispatch:
+
+# 読み取りだけにする。ZAP の検査はリポジトリに書き込まない（最小権限）。
+permissions:
+  contents: read
+
+jobs:
+  zap:
+    runs-on: ubuntu-latest
+    # WHY 45 分: build と E2E（ci.yml の ci job で数分）、ZAP の起動・受け身の検査の待ち（上限 120 秒）、active scan（手元の実測 150 秒。
+    #   上限は scan.sh の 20 分）を足しても余裕のある上限。止まったときに既定の 360 分まで待たないようにする。
+    timeout-minutes: 45
+    # GitHub Actions は CI=true を既定で設定するので、pnpm install の lefthook postinstall はフックを入れない（.claude/rules/quality/lint.md）。
+    # CI=true で E2E の reuseExistingServer も無効になり、webServer が必ずこのコードを build してサーバを起動する（apps/e2e/playwright.config.ts）。
+    #   active scan のときに scan.sh がアプリを起動し直すのも、その build（.next）を使う。
+    steps:
+      # ref: main: schedule は既定ブランチで動くが、workflow_dispatch で別ブランチを選んだときも main を検査するように明示する。
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          # persist-credentials: false: checkout が GITHUB_TOKEN を .git/config に残さない（以降のステップは git で push / fetch しない）。
+          #   WHY: 残すと後のステップ・アーティファクトから読まれうる（zizmor の artipacked。Issue #362）。
+          persist-credentials: false
+
+      # Node / pnpm の版の取り方は ci.yml と同じ（.claude/rules/tooling/env.md）。
+      # Node の版は .tool-versions が正。ワークフローに直書きせず、nodejs 行から読む。
+      - name: Read Node.js version from .tool-versions
+        run: echo "NODE_VERSION=$(awk '$1 == "nodejs" { print $2 }' .tool-versions)" >> "$GITHUB_ENV"
+
+      # pnpm の版は package.json の packageManager から取る（version を省略すると pnpm/action-setup が packageManager を読む）。
+      # setup-node の cache: pnpm より先に pnpm を入れておく必要がある。
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      # --frozen-lockfile: lockfile と package.json がずれていたら更新せず失敗させる（.claude/rules/tooling/dependencies.md）。
+      - run: pnpm install --frozen-lockfile
+
+      # 開発用の PostgreSQL を compose.yaml で起動する（ci.yml と同じ手順。WHY の詳細は ci.yml のコメント）。
+      # -d: バックグラウンドで起動する。--wait: healthcheck（pg_isready）が healthy になるまで待つ。--wait-timeout 120: 待つ上限（秒）。
+      - name: Start Postgres
+        run: docker compose up -d --wait --wait-timeout 120
+
+      # 起動した Postgres に psql で接続できることを確かめる（-T: TTY を割り当てない。psql はコンテナ内のもの）。
+      - name: Check Postgres connection
+        run: docker compose exec -T db psql -U app -d app -c 'select 1'
+
+      # .env を .env.example から作る（ci.yml と同じ。E2E のサーバ・テストと scan.sh が読む DATABASE_URL・E2E_PORT はここから）。
+      - name: Create .env from .env.example
+        run: cp .env.example .env
+
+      # apps/backend/shared/drizzle/migrations/ のマイグレーションを当てる（ci.yml と同じ）。E2E の webServer は当てないため。
+      - name: Apply database migrations
+        run: pnpm db:migrate
+
+      # Playwright の Chromium を OS の依存ごと入れる（ci.yml と同じ。WHY は ci.yml のコメント）。
+      - run: pnpm --filter @repo/e2e exec playwright install --with-deps chromium
+
+      # ZAP の検査。中身はファイル冒頭と scripts/security/scan.sh の zap-e2e。
+      - run: bash scripts/security/scan.sh zap-e2e

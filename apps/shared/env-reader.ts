@@ -60,8 +60,8 @@ export type ToolEnv = {
   // WHY Env（必須）でなくここ: 値を決めるのはツール（Next）で、.env に書く設定ではない（.env に書くと next dev でも production になる）。
   NODE_ENV: string | undefined;
   // E2E のブラウザと API の通信を通すプロキシ（例: http://127.0.0.1:8090）。空なら未設定と同じで、プロキシを通さない。
-  //   CI では scripts/security/scan.sh zap-e2e が ZAP を起動してこの値を渡し、E2E が実際に触った画面と API の通信を ZAP の
-  //   受け身の検査（passive scan）にかける（Issue #364。apps/e2e/playwright.config.ts）。
+  //   main の日次の scripts/security/scan.sh zap-e2e（.github/workflows/zap.yml）が ZAP を起動してこの値を渡し、E2E が実際に触った
+  //   画面と API の通信を ZAP の検査にかける（Issue #364 / #405。apps/e2e/playwright.config.ts）。
   // WHY Env（必須）でなくここ: E2E の動かし方の切り替えで、アプリは使わない。手元のふだんの E2E は ZAP なしで動かす。
   E2E_PROXY: string | undefined;
 };

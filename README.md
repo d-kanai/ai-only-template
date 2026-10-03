@@ -44,8 +44,8 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 | テスト | [Vitest](https://vitest.dev/) | 単体・API ジャーニーのテスト。カバレッジは 4 指標すべて 100% を下回ると失敗 | CI（`pnpm test`） |
 | ルール検査テスト | Vitest（`rule-tests/`） | 依存の向き・命名・置き場所・設定値など、規則が守られていることを検査する。依存パッケージのライセンスの許可リスト（`licenses`）もここ | CI（`pnpm test` に含む） |
 | CSP の評価 | [CSP Evaluator](https://csp-evaluator.withgoogle.com/)（npm `csp_evaluator`） | セキュリティヘッダの CSP を Google の検査で評価する（`security-headers.test.ts`） | CI（`pnpm test` に含む） |
-| E2E | [Playwright](https://playwright.dev/) + [playwright-bdd](https://vitalets.github.io/playwright-bdd/) | 本番ビルドをブラウザで操作して業務の流れを検証する（`apps/e2e/spec/*.feature`） | CI（下の ZAP の中で流す）・手元（`pnpm test:e2e`） |
-| 動的検査（DAST） | [ZAP](https://www.zaproxy.org/) | E2E の通信をプロキシで受け、受け身の検査（passive scan）にかける。Low 以上の警告で失敗 | CI（`scan.sh zap-e2e`） |
+| E2E | [Playwright](https://playwright.dev/) + [playwright-bdd](https://vitalets.github.io/playwright-bdd/) | 本番ビルドをブラウザで操作して業務の流れを検証する（`apps/e2e/spec/*.feature`） | CI・手元（`pnpm test:e2e`） |
+| 動的検査（DAST） | [ZAP](https://www.zaproxy.org/) | E2E の通信をプロキシで受けて受け身の検査（passive scan）にかけ、その記録に攻撃を送る検査（active scan）もかける。Low 以上の警告で失敗 | main の日次（`zap.yml` の `scan.sh zap-e2e`） |
 | mutation testing | [Stryker](https://stryker-mutator.io/) | テストが変異（コードの一部を壊したもの）を検出できるかを測り、レポートを artifact に残す（スキル `mutation-testing`） | 毎日（`mutation.yml`。08:55 JST）・手元（`pnpm test:mutation`） |
 | 秘密情報 | [gitleaks](https://github.com/gitleaks/gitleaks) | API キー・トークンなどの混入を検出する | commit（ステージ済みの変更）・CI（全履歴） |
 | コードの脆弱性（SAST） | [Semgrep](https://semgrep.dev/) | JavaScript / TypeScript の脆弱性のパターン（security の ERROR の規則） | push・CI |

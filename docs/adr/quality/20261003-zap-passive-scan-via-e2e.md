@@ -1,7 +1,7 @@
 # 動いているアプリのセキュリティの検査は、E2E を ZAP のプロキシ経由で流し、受け身の検査の警告で CI を落とす
 
 - 日付: 2026-10-03
-- 状態: 採用
+- 状態: 置き換え（→ quality/20261003-zap-daily-active-scan.md）
 - 関連: Issue #364 / Issue #106 / `scripts/security/scan.sh`（`zap-e2e` / `zap-alerts`）/ `scripts/security/zap-ignore.tsv` / `apps/e2e/playwright.config.ts` / `.github/workflows/ci.yml` / `rule-tests/security-scan.test.ts` / quality/20261003-security-scan-tools.md
 
 ## 背景
