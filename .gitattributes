@@ -1,0 +1,21 @@
+# PR の「Files changed」で最初から畳むファイル（Issue #411）。
+# linguist-generated を付けたファイルは、GitHub が PR の差分で最初から畳む（「Load diff」で開ける）。言語の統計からも外れる。
+#   https://docs.github.com/en/repositories/working-with-files/managing-files/customizing-how-changed-files-appear-on-github
+# WHY: lockfile・生成物・文書の大きな差分が、人が読むべき変更（ソース・テスト・.feature の仕様）を埋めないようにする。
+# どのファイルを畳むかの仕様と検査は rule-tests/gitattributes.test.ts（行を足す・消すときはそこの COLLAPSED も直す）。
+
+# lockfile。版の変更は package.json の差分で読む。
+pnpm-lock.yaml linguist-generated
+# terraform init が書くプロバイダの lockfile（infra/envs/<環境>/）。
+**/.terraform.lock.hcl linguist-generated
+
+# drizzle-kit generate が書くスナップショットと journal。マイグレーションの SQL（migrations/*.sql）は読んで確かめるので畳まない（スキル db-migration）。
+apps/backend/shared/drizzle/migrations/meta/** linguist-generated
+
+# docs/ の下のすべて（ADR・作業ログ・構成図）。PR では読まず、必要なときに開く（daiki の判断 2026-10-03）。
+# テストと .feature は仕様として読むので畳まない（daiki の判断 2026-10-03）。
+docs/** linguist-generated
+
+# .claude/ の下すべて（ルール・スキル・エージェント・設定）。PR では読まず、必要なときに開く（daiki の判断 2026-10-03）。
+# 直下の CLAUDE.md・LEARNINGS.md は .claude/ の外なので畳まない。
+.claude/** linguist-generated
