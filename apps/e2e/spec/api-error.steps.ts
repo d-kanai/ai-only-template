@@ -6,7 +6,7 @@ import {
 import { Fixture, Then, When } from "playwright-bdd/decorators";
 import type { test } from "../support/fixtures";
 
-// api-error.feature（入力の誤りの伝え方）の step（Issue #126 / #144 / #279。以前の api-error.spec.ts）。
+// api-error.feature（入力エラー）の step（Issue #126 / #144 / #279。以前の api-error.spec.ts）。
 // API のエラー応答が、本番ビルド（next start）を通っても RFC 9457 の Problem Details（application/problem+json）で返ることを確かめる。
 //   本文の形は apps/backend の problem.test.ts と各 api のテストで固定しているので、ここでは Route Handler（app/api/**/route.ts の
 //   re-export）から Next の応答までの結線だけを見る: Next が Content-Type を書き換えないこと、本文の type・status・key・errors の
@@ -20,14 +20,14 @@ export class ApiErrorSteps {
 
   constructor(private readonly request: APIRequestContext) {}
 
-  @When("タイトルを数にして Todo を作ろうとする")
+  @When("タイトルを数値にして Todo を作ろうとする")
   async postNumberTitle(): Promise<void> {
     this.response = await this.request.post("/api/todos", {
       data: { title: 1 },
     });
   }
 
-  @Then("タイトルが文字でないという理由で、タイトルの項目を指して拒否される")
+  @Then("タイトルの項目に、文字列でないというエラーが返る")
   async rejectedAsNotString(): Promise<void> {
     const response = this.lastResponse();
     expect(response.status()).toBe(400);
@@ -49,7 +49,7 @@ export class ApiErrorSteps {
     });
   }
 
-  @Then("タイトルが空という理由で、タイトルの項目を指して拒否される")
+  @Then("タイトルの項目に、空だというエラーが返る")
   async rejectedAsEmpty(): Promise<void> {
     const response = this.lastResponse();
     expect(response.status()).toBe(400);
@@ -68,9 +68,7 @@ export class ApiErrorSteps {
   }
 
   // 上限は params に載る（画面が「100 文字まで」のように出すため）。
-  @Then(
-    "タイトルが長すぎるという理由で、上限の {int} 文字とともに、タイトルの項目を指して拒否される",
-  )
+  @Then("タイトルの項目に、長すぎるというエラーが上限の {int} 文字とともに返る")
   async rejectedAsTooLong(max: number): Promise<void> {
     const response = this.lastResponse();
     expect(response.status()).toBe(400);

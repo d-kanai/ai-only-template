@@ -8,7 +8,7 @@ import { Fixture, Given, Then, When } from "playwright-bdd/decorators";
 import { E2eDatabase } from "../support/database";
 import type { test } from "../support/fixtures";
 
-// security-headers.feature（ほかのサイトからの悪用を防ぐ）の step（Issue #106）。
+// security-headers.feature（セキュリティヘッダと CSRF 対策）の step（Issue #106）。
 // 値の正は apps/frontend_customer/shared/security/security-headers.ts（SecurityHeaders）と apps/backend/shared/http/same-origin.ts
 //   の単体テスト。ここでは本番のビルドを通ったときに付いていること・効いていることだけを見る。状態コード・ヘッダの名前は技術の検証
 //   なので、.feature には書かずここに閉じる（api-error.steps.ts と同じ）。
@@ -27,7 +27,7 @@ export class SecurityHeadersSteps {
   // WHY 画面を開く前に見張る: CSP が最初の読み込み（Next のスクリプト・Mantine の配色のスクリプト）を止めると、画面は描かれても
   //   hydration されず、操作が効かない。止めたことはブラウザのコンソールに出るので、開く前から拾う。
   // WHY securitypolicyviolation もページに仕込む: コンソールの文言はブラウザの版で変わりうる。イベントは CSP の仕様の決まった口。
-  @Given("画面が止めた読み込みを数えておく")
+  @Given("ブラウザがブロックした読み込みを数えておく")
   async watchViolations(): Promise<void> {
     this.page.on("console", (message) => {
       if (message.text().includes("Content Security Policy")) {
@@ -38,7 +38,7 @@ export class SecurityHeadersSteps {
     //   CSP の違反ではなく、securitypolicyviolation にもコンソールの CSP の文言にも出ない（ネットワークの失敗
     //   net::ERR_BLOCKED_BY_RESPONSE になる）。
     // WHY net::ERR_ABORTED は数えない（reviewer の指摘、PR #397）: next/link のプリフェッチや描き直しで、ブラウザが読み込みを
-    //   途中で取りやめても ERR_ABORTED になる。守りが止めた読み込みではないので、数えると守りと関係なく落ちうる。
+    //   途中で取りやめても ERR_ABORTED になる。セキュリティヘッダが止めた読み込みではないので、数えるとヘッダと関係なく落ちうる。
     this.page.on("requestfailed", (request) => {
       const errorText = request.failure()?.errorText;
       if (errorText !== "net::ERR_ABORTED") {
@@ -62,9 +62,7 @@ export class SecurityHeadersSteps {
   // 画面（文書）・画面が読み込む JS（/_next/static）・API の 3 種類の応答のヘッダを見る。
   // WHY 開いている画面を読み直す（page.goto の応答を使わない）: 「Todo の一覧を開く」は共有の step（shared.steps.ts）で応答を
   //   返さない。同じ URL を同じブラウザの context で取り直し、ヘッダと本文の nonce を突き合わせる。
-  @Then(
-    "画面と、画面が読み込むファイルと、画面が使う窓口に、悪用を防ぐ守りが付いている",
-  )
+  @Then("ページ・JS ファイル・API のレスポンスにセキュリティヘッダが付いている")
   async protectedResponses(): Promise<void> {
     const documentResponse = await this.page.request.get(this.page.url());
     const html = await documentResponse.text();
@@ -115,14 +113,14 @@ export class SecurityHeadersSteps {
     expect(apiResponse.headers()["content-security-policy"]).toBeUndefined();
   }
 
-  @Then("画面が止めた読み込みは 1 件も無い")
+  @Then("ブラウザがブロックした読み込みは 1 件も無い")
   async noViolations(): Promise<void> {
     expect(this.violations).toEqual([]);
   }
 
   // ブラウザが別のサイトのページから送る書き込みと同じく、Origin を別のオリジンにして送る（Host は baseURL のまま）。
-  // WHY 画面ではなく request で送る: ほかのサイトのページを用意せずに、ブラウザが付ける Origin を再現する。
-  @When("ほかのサイトのページから Todo {string} を作ろうとする")
+  // WHY 画面ではなく request で送る: 別オリジンのページを用意せずに、ブラウザが付ける Origin を再現する。
+  @When("別オリジンのページから Todo {string} を作ろうとする")
   async postFromOtherSite(title: string): Promise<void> {
     this.response = await this.request.post("/api/todos", {
       data: { title },
@@ -130,7 +128,7 @@ export class SecurityHeadersSteps {
     });
   }
 
-  @Then("ほかのサイトからの操作は受け付けないと伝えられる")
+  @Then("別オリジンからの書き込みとして拒否される")
   async rejectedAsOtherSite(): Promise<void> {
     const response = this.lastResponse();
     expect(response.status()).toBe(403);

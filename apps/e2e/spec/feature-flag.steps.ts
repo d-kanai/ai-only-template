@@ -51,7 +51,7 @@ export class FeatureFlagSteps {
 
   // WHY 一覧の全体ではなく todo-detail-screen の 1 件を見る（toContainEqual）: フラグが増えてもこのシナリオを直さずに済む。
   //   一覧の全体の形は API 仕様（apps/backend/spec/api/feature-flag/）が固定している。
-  @Then("詳細画面は使えるとサーバから受け取る")
+  @Then("サーバから詳細画面のフラグがオンで届く")
   async receivedDetailScreenEnabled(): Promise<void> {
     expect(this.evaluation?.status()).toBe(200);
     const body = (await this.evaluation?.json()) as {
@@ -66,7 +66,7 @@ export class FeatureFlagSteps {
 
   // WHY href まで見る: フィーチャーフラグが off のときは title を文字だけで出す（リンクにしない）。on の値が画面に届いたことを、
   //   その Todo の詳細の URL へのリンクで確かめる。provider の準備ができるまでは off で描くので、toBeVisible の自動リトライで待つ。
-  @Then("一覧の {string} は詳細へのリンクになる")
+  @Then("一覧の {string} が詳細画面へのリンクになる")
   async linkedToDetail(title: string): Promise<void> {
     const link = this.page.getByRole("link", { name: title });
     await expect(link).toBeVisible();

@@ -65,8 +65,8 @@ export const test = base.extend<
   securityHeadersSteps: async ({ page, request }, use) => {
     await use(new SecurityHeadersSteps(page, request));
   },
-  // WHY 記録を取るサーバを worker の fixture にする: 起動（next start）に数秒かかるので、シナリオごとではなく worker で 1 回にする
-  //   （以前の request-log.spec.ts の beforeAll / afterAll と同じ）。fixture は使う step があるときだけ作られるので、アクセスの記録
+  // WHY ログ確認用のサーバを worker の fixture にする: 起動（next start）に数秒かかるので、シナリオごとではなく worker で 1 回にする
+  //   （以前の request-log.spec.ts の beforeAll / afterAll と同じ）。fixture は使う step があるときだけ作られるので、リクエストログ
   //   以外の .feature だけを実行するときは起動しない。
   logServer: [
     // biome-ignore lint/correctness/noEmptyPattern: Playwright は fixture の第 1 引数の分割代入から依存を読む。依存が無いので空にする。

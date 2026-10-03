@@ -6,7 +6,7 @@ import {
 import { Fixture, Then, When } from "playwright-bdd/decorators";
 import type { test } from "../support/fixtures";
 
-// health.feature（サービスの稼働の確認）の step（Issue #107）。
+// health.feature（ヘルスチェック）の step（Issue #107）。
 // GET /api/health が、本番ビルド（next start）を通っても 200 と { status: "ok", checks: { database: "ok" } } を返すことを確かめる。
 //   本文の形と 503 の経路は apps/backend の get-health.api.test.ts と API 仕様で固定しているので、ここでは Route Handler（app/api/health/route.ts
 //   の re-export）から Next の応答までの結線と、Next が応答のヘッダ（cache-control）を書き換えないことだけを見る。状態コード・本文は
@@ -19,14 +19,14 @@ export class HealthSteps {
 
   constructor(private readonly request: APIRequestContext) {}
 
-  @When("サービスが使えるかを確かめる")
+  @When("ヘルスチェックを呼ぶ")
   async getHealth(): Promise<void> {
     this.response = await this.request.get("/api/health");
   }
 
   // WHY cache-control も見る: Next のビルドが Route Handler を静的に prerender すると、ビルド時の結果が固定され、Next が自分の
   //   cache-control（s-maxage など）を付ける。no-store のまま届くことで、毎回実行されていることも確かめる。
-  @Then("サービスは使えると返り、確かめた結果は途中に残さないよう伝えられる")
+  @Then("正常と返り、レスポンスはキャッシュしないよう指定されている")
   async available(): Promise<void> {
     const response = this.lastResponse();
     expect(response.status()).toBe(200);

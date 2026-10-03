@@ -9,7 +9,7 @@ import { Fixture, Given, Then, When } from "playwright-bdd/decorators";
 import type { test } from "../support/fixtures";
 import type { E2eLogServer } from "../support/log-server";
 
-// request-log.feature（アクセスの記録）の step（Issue #80 / #209 / #279。以前の request-log.spec.ts）。
+// request-log.feature（リクエストログ）の step（Issue #80 / #209 / #279。以前の request-log.spec.ts）。
 // リクエストログ（apps/frontend_customer/proxy.ts）が、本番ビルドの next start の stdout に 1 リクエスト = JSON 1 行で出ることを
 //   確かめる。1 行の中身の決め方は apps/frontend_customer/shared/request-log/request-log.test.ts で固定しているので、ここでは
 //   proxy.ts の結線（規約の場所で呼ばれる・matcher・logger 経由で stdout への 1 行・応答ヘッダ x-request-id）だけを見る。
@@ -42,7 +42,7 @@ export class RequestLogSteps {
   private readonly traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
   private readonly secretValue = "secret-value";
 
-  // step の間で渡す値（作った Todo の id・追跡の番号・応答）。
+  // step の間で渡す値（作った Todo の id・x-request-id の値・応答）。
   private todoId = "";
   private requestId = "";
   private response: APIResponse | undefined;
@@ -54,7 +54,7 @@ export class RequestLogSteps {
   ) {}
 
   // 一覧に Todo を 1 件置き、詳細へのリンク（next/link）のプリフェッチが起きる状態にする。
-  @Given("記録を取るサーバで Todo {string} が作られている")
+  @Given("ログ確認用のサーバで Todo {string} が作られている")
   async createTodo(title: string): Promise<void> {
     const created = await this.request.post(
       `${this.server.baseURL}/api/todos`,
@@ -64,8 +64,8 @@ export class RequestLogSteps {
     this.todoId = ((await created.json()) as { id: string }).id;
   }
 
-  // WHY 一覧のリンクが出るまで待つ: 画面の hook が呼ぶ GET /api/todos の記録が出そろってから Then で比べる。
-  @When("記録を取るサーバで Todo の一覧を開く")
+  // WHY 一覧のリンクが出るまで待つ: 画面の hook が呼ぶ GET /api/todos のログが出そろってから Then で比べる。
+  @When("ログ確認用のサーバで Todo の一覧を開く")
   async openList(): Promise<void> {
     await this.page.goto(`${this.server.baseURL}/`);
     await expect(this.page.getByRole("listitem")).toHaveCount(1);
@@ -76,7 +76,7 @@ export class RequestLogSteps {
   //   FeatureFlagProvider の useEffect）は互いに待たずに送られ、サーバに届く順は決まらない。順番は残りの 3 行で比べ、
   //   フィーチャーフラグの行は 1 行だけあることを比べる。
   @Then(
-    "作成・一覧の画面の表示・一覧の取得の順に 1 行ずつ記録され、フィーチャーフラグの取得も 1 行記録される",
+    "Todo の作成・一覧のページ・一覧の取得のリクエストがこの順に 1 行ずつログに出て、フィーチャーフラグの取得も 1 行出る",
   )
   async listLogged(): Promise<void> {
     await expect
@@ -102,7 +102,7 @@ export class RequestLogSteps {
   // WHY referer は *** : ブラウザが付けた referer（画面の URL。クエリを含みうる）は logger がマスクする（Issue #216。
   //   apps/shared/log-event.ts）。値があったこと（null でないこと）だけが行に残る。
   @Then(
-    "画面の表示の記録には受け取れる形式が、一覧の取得の記録には伏せた参照元が残る",
+    "ページのログには Accept ヘッダが、一覧の取得のログにはマスクした Referer ヘッダが残る",
   )
   async headersLogged(): Promise<void> {
     // WHY フィーチャーフラグの行を除いてから取り出す: フィーチャーフラグの行がどこに入るかは決まらない（上の listLogged）。
@@ -119,7 +119,7 @@ export class RequestLogSteps {
   //   非同期で飛ぶので、一覧の Then の時点ではまだ届いていないことがある。詳細の画面を開いた後の行の一覧を丸ごと比べ、
   //   プリフェッチの行が無いことを確かめる。4 行は一覧の Then（listLogged）が出そろうまで待ってから詳細を開くので、詳細の行より前に並ぶ。
   //   クライアント遷移では root layout が描き直されないので、フィーチャーフラグを取り直す行も出ない（出たらこの比較で落ちる）。
-  @Then("詳細の画面の表示と詳細の取得だけが記録され、先読みは記録されない")
+  @Then("詳細のページと詳細の取得だけがログに出て、プリフェッチは出ない")
   async detailLogged(): Promise<void> {
     await expect(this.page).toHaveURL(
       `${this.server.baseURL}/todo/${this.todoId}`,
@@ -143,7 +143,7 @@ export class RequestLogSteps {
   // WHY traceparent も付ける: trace の値のプロジェクト ID は proxy.ts が env.GCP_PROJECT_ID から渡す（Issue #209）。proxy.ts は
   //   カバレッジの対象外なので、その結線（env の値が行に入ること）はここで確かめる。解析の規則は request-log.test.ts が固定する。
   @When(
-    "記録を取るサーバから追跡の番号と秘密の値を付けて Todo の一覧を取得する",
+    "ログ確認用のサーバから、トレース用のヘッダと秘密のクエリパラメータを付けて Todo の一覧を取得する",
   )
   async getWithTrace(): Promise<void> {
     this.requestId = `e2e-${Date.now()}`;
@@ -158,14 +158,16 @@ export class RequestLogSteps {
     );
   }
 
-  @Then("一覧を取得でき、応答に同じ追跡の番号が付く")
+  @Then("一覧を取得でき、レスポンスのヘッダに同じトレースの値が返る")
   async tracedResponse(): Promise<void> {
     expect(this.response?.status()).toBe(200);
     expect(this.response?.headers()["x-request-id"]).toBe(this.requestId);
   }
 
   // logger を通っていること: 先頭が severity・time・message・event の順で、time は受信時刻の RFC 3339（UTC）のまま。
-  @Then("取得が 1 行で記録され、追跡の番号が入り、秘密の値は伏せてある")
+  @Then(
+    "取得が 1 行でログに出て、トレースの値が入り、秘密のクエリパラメータはマスクされている",
+  )
   async tracedLogged(): Promise<void> {
     await expect.poll(() => this.loggedRequests()).toHaveLength(1);
     const [line] = this.loggedRequests();

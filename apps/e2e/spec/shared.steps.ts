@@ -24,7 +24,7 @@ export class SharedSteps {
     await this.page.goto("/");
   }
 
-  // WHY 詳細の画面が開いたことまで確かめる: 後続の Then は詳細の画面の中身（完了・言語・記録）を見るので、遷移が終わる前に
+  // WHY 詳細の画面が開いたことまで確かめる: 後続の Then は詳細画面の中身（完了・言語・ログ）を見るので、遷移が終わる前に
   //   探し始めないようにする。見出しはどの言語でも Todo のタイトルなので、言語によらずに使える。
   @When("{string} の詳細を開く")
   async openDetail(title: string): Promise<void> {

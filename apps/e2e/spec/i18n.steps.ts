@@ -31,13 +31,13 @@ export class I18nSteps {
   // x-locale は Proxy が layout に渡すためのリクエストヘッダ（shared/i18n/locale.ts の LOCALE_HEADER）。クライアントが同名のヘッダを
   //   送っても、Proxy が Cookie と Accept-Language から決めた値で上書きする（proxy.ts の withLocale）。上書きしないと、ヘッダ 1 つで
   //   Accept-Language と Cookie の決め方を迂回できる。ヘッダはページのナビゲーションを含むすべてのリクエストに付く。
-  @Given("画面の言語の受け渡しを英語に偽って送る")
+  @Given("画面の言語を渡す内部のヘッダを英語に偽って送る")
   async spoofLocaleHeader(): Promise<void> {
     await this.page.context().setExtraHTTPHeaders({ "x-locale": "en" });
   }
 
   // Cookie NEXT_LOCALE（shared/i18n/locale.ts の LOCALE_COOKIE）は Accept-Language より優先する（利用者が選んだ言語）。
-  @Given("利用者が英語を選んである")
+  @Given("利用者が英語を選んでいる")
   async chooseEnglish(): Promise<void> {
     await this.page
       .context()
@@ -66,7 +66,7 @@ export class I18nSteps {
     await this.page.getByRole("button", { name: "Add" }).click();
   }
 
-  @Then("一覧に {string} が英語の完了の操作とともに表示される")
+  @Then("一覧に {string} が英語の完了のチェックボックスとともに表示される")
   async addedInEnglish(title: string): Promise<void> {
     await expect(
       this.page.getByRole("checkbox", { name: `Mark “${title}” as completed` }),
@@ -76,7 +76,7 @@ export class I18nSteps {
   // 作成日時は、ブラウザのタイムゾーン（playwright.config.ts の timezoneId: "Asia/Tokyo"。サーバは UTC）で出る。
   // WHY datetime 属性から期待値を作る: 作成した時刻は実行のたびに変わるので、表示の元の値（API の createdAt）を読んで
   //   同じ書式・タイムゾーンで組み立てた文字列と比べる。サーバのタイムゾーン（UTC）で出していれば 9 時間ずれて一致しない。
-  @Then("{string} の作成日時がブラウザの地域の時刻で表示される")
+  @Then("{string} の作成日時がブラウザのタイムゾーンで表示される")
   async createdAtInBrowserTimeZone(title: string): Promise<void> {
     const time = this.page
       .getByRole("listitem")
@@ -94,7 +94,7 @@ export class I18nSteps {
   }
 
   // クライアント遷移（リンクを押す）でも英語のまま（root layout の LocaleProvider が残る）。
-  @Then("詳細の画面も英語で表示される")
+  @Then("詳細画面も英語で表示される")
   async detailInEnglish(): Promise<void> {
     await expect(
       this.page.getByRole("link", { name: "Back to list" }),

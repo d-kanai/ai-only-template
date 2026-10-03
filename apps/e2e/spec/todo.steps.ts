@@ -7,10 +7,10 @@ import type { test } from "../support/fixtures";
 //   DATABASE_URL を渡す）で動く。
 // WHY getByRole / getByLabel: 利用者が見る役割と名前（aria-label・label・見出し）で要素を探し、CSS クラスや DOM 構造の変更で
 //   テストが壊れないようにする。
-// WHY .feature に書いた値（Todo の名前）を固定値で書かない: 値は step の引数（{string}）で受け取る（API ジャーニーと同じ）。
+// WHY .feature に書いた値（Todo のタイトル）を固定値で書かない: 値は step の引数（{string}）で受け取る（API ジャーニーと同じ）。
 //   .feature の値を書き換えても、step の実装を直さずに通る。
 // WHY タイトルに実行ごとの番号を付けない（以前の todo.spec.ts は Date.now() を付けていた）: .feature の値をそのまま画面に出して
-//   確かめるため。前のデータと名前が重ならないことは、Background の「Todo が 1 件も無い」（Postgres の表を空にする）で担保する。
+//   確かめるため。前のデータとタイトルが重ならないことは、Background の「Todo が 1 件も無い」（Postgres の表を空にする）で担保する。
 @Fixture<typeof test>("todoSteps")
 export class TodoSteps {
   constructor(private readonly page: Page) {}
@@ -81,7 +81,7 @@ export class TodoSteps {
     await this.page.getByRole("link", { name: "一覧へ戻る" }).click();
   }
 
-  @Then("一覧に {string} が表示され、元の名前 {string} は表示されない")
+  @Then("一覧に {string} が表示され、元のタイトル {string} は表示されない")
   async listedWithNewName(title: string, oldTitle: string): Promise<void> {
     await expect(this.page).toHaveURL(/\/$/);
     await expect(this.page.getByRole("link", { name: title })).toBeVisible();
@@ -95,7 +95,7 @@ export class TodoSteps {
     await this.page.getByRole("button", { name: `「${title}」を削除` }).click();
   }
 
-  @Then("一覧から {string} が消え、保存からも消えている")
+  @Then("一覧から {string} が消え、保存先からも消えている")
   async deleted(title: string): Promise<void> {
     await expect(this.page.getByRole("link", { name: title })).toHaveCount(0);
     expect(await E2eDatabase.countTodosWithTitle(title)).toBe(0);
