@@ -37,6 +37,15 @@ SEMGREP_RULES_COMMIT="a84ff9cc2453ca91d581380de4b8b3f272f6f4be"
 repo_root="$(git rev-parse --show-toplevel)"
 cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/ai-only-template"
 
+# git のリポジトリとして読む検査（gitleaks・Semgrep）は、作業ツリーと git の共通ディレクトリ（.git）を、ホストと同じ絶対パスで
+#   コンテナに見せる。WHY: git worktree の作業ツリーの .git は「gitdir: <本体>/.git/worktrees/<名前>」を指すファイルで、
+#   作業ツリーだけを /repo に載せると指す先がコンテナに無い。gitleaks は git のエラーを出しても終了コード 0 で「0 commits
+#   scanned」になり、秘密情報を入れたコミットを通した（2026-10-03 実測。Codex の指摘、PR #386）。同じ絶対パスにすれば
+#   .git のファイルの中の絶対パスがそのまま読める。worktree でなければ共通ディレクトリは作業ツリーの .git で、重ねて載せても同じ。
+git_common_dir="$(cd "$repo_root" && cd "$(git rev-parse --git-common-dir)" && pwd)"
+git_mounts_ro=(-v "$repo_root:$repo_root:ro" -v "$git_common_dir:$git_common_dir:ro" -w "$repo_root")
+git_mounts_rw=(-v "$repo_root:$repo_root" -v "$git_common_dir:$git_common_dir" -w "$repo_root")
+
 # 手元のユーザーで動かす（作られるファイルの持ち主を合わせ、git の dubious ownership で止まらないようにする）。
 as_user=(--user "$(id -u):$(id -g)")
 
@@ -75,11 +84,12 @@ shift || true
 case "$tool" in
   gitleaks-staged)
     # --redact: 見つけた値を出力に出さない（ターミナル・CI のログに秘密情報を残さない）。
-    docker run --rm "${as_user[@]}" -v "$repo_root:/repo" -w /repo "$GITLEAKS_IMAGE" \
+    # rw: --staged の差分を取る git が index を読み書きしうる（ro で動くかは未確認なので、元の rw のままにする）。
+    docker run --rm "${as_user[@]}" "${git_mounts_rw[@]}" "$GITLEAKS_IMAGE" \
       git --pre-commit --staged --redact --no-banner .
     ;;
   gitleaks-history)
-    docker run --rm "${as_user[@]}" -v "$repo_root:/repo:ro" -w /repo "$GITLEAKS_IMAGE" \
+    docker run --rm "${as_user[@]}" "${git_mounts_ro[@]}" "$GITLEAKS_IMAGE" \
       git --redact --no-banner .
     ;;
   actionlint)
@@ -129,7 +139,7 @@ case "$tool" in
     )
     # --metrics=off / --disable-version-check: semgrep.dev に送らない・問い合わせない（クラウドセッションでは 403 で、版の確認の
     #   待ちで 99 秒かかった。2026-10-03 実測）。--error: 検出があれば終了コード 1。
-    docker run --rm "${as_user[@]}" -e HOME=/tmp -v "$repo_root:/src:ro" -v "$rules:/rules:ro" -w /src "$SEMGREP_IMAGE" \
+    docker run --rm "${as_user[@]}" -e HOME=/tmp "${git_mounts_ro[@]}" -v "$rules:/rules:ro" "$SEMGREP_IMAGE" \
       semgrep scan --metrics=off --disable-version-check --severity ERROR --error --quiet "${configs[@]}" .
     ;;
   *)
