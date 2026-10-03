@@ -11,7 +11,8 @@ main は常にマージ可能に保つ。main への直接コミット・push �
 コマンドは `gh` で書く。クラウドセッション（`gh` が無い）での読み替えは最後の節。GitHub 側の設定（Projects・Ruleset）の詳細は `${CLAUDE_SKILL_DIR}/github-settings.md`。
 
 ## 手順
-1. **Issue**: 無ければ作る（目的・完了条件を書く）。type ラベルを 1 つ付ける: `gh issue create --label <type>`（`feat` / `fix` / `docs` / `chore` / `refactor`）。
+1. **Issue**: 無ければ作る。type ラベルを 1 つ付ける: `gh issue create --label <type>`（`feat` / `fix` / `docs` / `chore` / `refactor`）。
+   - 本文は Issue テンプレート `.github/ISSUE_TEMPLATE/<type>.yml`（Issue forms）と同じ見出しで書く: `### 目的`（WHY）/ `### 内容`（WHAT）/ `### 完了条件`（通るべきテスト・確かめ方）/ `### 前提`（依存する Issue。無ければ「なし」）。WHY: GitHub の画面からテンプレートで作った Issue と、API（`gh issue create`・`issue_write`）で作った Issue の形をそろえる（API はテンプレートを通らない）。テンプレートの形は `rule-tests/issue-template.test.ts` が検査する（Issue #113）。
    - 1 Issue = 1 PR。大きければ Issue を分ける。WHY: PR の差分とレビューを小さく保つ。スレッド（セッション）の分け方は `.claude/rules/workflow/orchestration.md`（ADR `docs/adr/workflow/20261001-project-threads-per-task.md`）。
    - Projects への追加と Status の変更は GitHub 側のワークフローが行う。Projects の API は呼ばない（`github-settings.md`）。
 2. **ブランチ**: main の最新から切る。`git checkout main && git pull && git checkout -b <type>/<Issue番号>-<内容>`（例: `feat/12-branch-rules`）。type は Issue のラベルと同じ。
