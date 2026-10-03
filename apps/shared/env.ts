@@ -68,6 +68,11 @@ export type ToolEnv = {
   //   画面の Content-Security-Policy に、開発のときだけ 'unsafe-eval' を足すのに使う（apps/frontend_customer/proxy.ts。Issue #106）。
   // WHY Env（必須）でなくここ: 値を決めるのはツール（Next）で、.env に書く設定ではない（.env に書くと next dev でも production になる）。
   NODE_ENV: string | undefined;
+  // E2E のブラウザと API の通信を通すプロキシ（例: http://127.0.0.1:8090）。空なら未設定と同じで、プロキシを通さない。
+  //   CI では scripts/security/scan.sh zap-e2e が ZAP を起動してこの値を渡し、E2E が実際に触った画面と API の通信を ZAP の
+  //   受け身の検査（passive scan）にかける（Issue #364。apps/e2e/playwright.config.ts）。
+  // WHY Env（必須）でなくここ: E2E の動かし方の切り替えで、アプリは使わない。手元のふだんの E2E は ZAP なしで動かす。
+  E2E_PROXY: string | undefined;
 };
 
 // 必須の変数の検証。欠けていれば "未設定"、値が不正なら理由を返し、正しければ値を返す。
@@ -138,6 +143,7 @@ export class EnvReader {
         EnvReader.nonEmpty(source.STRYKER_MUTATOR_WORKER) !== undefined,
       E2E_PORT: e2ePort,
       NODE_ENV: EnvReader.nonEmpty(source.NODE_ENV),
+      E2E_PROXY: EnvReader.nonEmpty(source.E2E_PROXY),
     };
   }
 
