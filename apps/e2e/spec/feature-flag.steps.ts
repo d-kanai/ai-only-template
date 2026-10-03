@@ -64,7 +64,7 @@ export class FeatureFlagSteps {
     });
   }
 
-  // WHY href まで見る: 出し分けが off のときは title を文字だけで出す（リンクにしない）。on の値が画面に届いたことを、
+  // WHY href まで見る: フィーチャーフラグが off のときは title を文字だけで出す（リンクにしない）。on の値が画面に届いたことを、
   //   その Todo の詳細の URL へのリンクで確かめる。provider の準備ができるまでは off で描くので、toBeVisible の自動リトライで待つ。
   @Then("一覧の {string} は詳細へのリンクになる")
   async linkedToDetail(title: string): Promise<void> {

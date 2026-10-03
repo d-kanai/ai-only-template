@@ -43,7 +43,7 @@ import { TestDatabase } from "../../test-support/database";
 // WHY フラグの一覧は本番の FEATURE_FLAGS: 本番と同じ組み立てで、画面が実際に受け取る値の流れを確かめる。値の組み合わせ（off など）は
 //   API 仕様（spec/api/feature-flag）と単体テストが確かめる。
 
-// 画面が出し分けに使うフラグ（一覧から詳細へのリンク）。
+// 画面がリンクの表示の切り替えに使うフィーチャーフラグ（一覧から詳細へのリンク）。
 // WHY 型で縛る: 本番の一覧に無い key を書くと型エラーにする（画面と同じく FeatureFlagKey で受ける）。
 const DETAIL_SCREEN: FeatureFlagKey = "todo-detail-screen";
 
