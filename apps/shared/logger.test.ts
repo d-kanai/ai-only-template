@@ -244,6 +244,24 @@ const CASES: Record<
       error: { type: "TypeError", message: "x is not a function" },
     },
   },
+  health_check: {
+    input: withExtra(
+      {
+        message: "health check failed: database unavailable",
+        event: { name: "health_check", phase: "failed" },
+        error: new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+      },
+      { params: [SENTINEL] },
+    ),
+    method: "error",
+    expected: {
+      severity: "ERROR",
+      time: NOW,
+      message: "health check failed: database unavailable",
+      event: { name: "health_check", phase: "failed" },
+      error: { type: "Error", message: "connect ECONNREFUSED 127.0.0.1:5432" },
+    },
+  },
   app_start_failed: {
     input: withExtra(
       {

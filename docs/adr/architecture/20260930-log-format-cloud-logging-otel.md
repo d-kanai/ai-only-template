@@ -16,8 +16,8 @@
 | `severity` | `INFO`（info）/ `WARNING`（warn）/ `ERROR`（error） | Cloud Logging の特別フィールド・LogSeverity |
 | `time` | RFC 3339（`toISOString()`）。event に `time` があればそれ（リクエストの受信時刻） | Cloud Logging の特別フィールド |
 | `message` | 人が読む英語の 1 文（Logs Explorer の一覧の行） | Cloud Logging の特別フィールド |
-| `event.name` | `page_request` / `api_request` / `db_write` / `db_pool_error` / `server_error` / `app_start_failed` / `notification` / `logger_error` | OTel Logs Data Model の EventName |
-| `event.phase` | `db_write` の `start` / `done` / `failed`、`notification` の失敗の `failed` | 独自 |
+| `event.name` | `page_request` / `api_request` / `db_write` / `db_pool_error` / `server_error` / `app_start_failed` / `notification` / `health_check` / `logger_error` | OTel Logs Data Model の EventName |
+| `event.phase` | `db_write` の `start` / `done` / `failed`、`notification` と `health_check`（Issue #107）の失敗の `failed` | 独自 |
 | `event.duration_ms` | `db_write` の done / failed の所要時間（ミリ秒の整数） | 独自 |
 | `error` | `{ type, message }`（Error の name と message。DB のエラーは `{ type }` だけ） | OTel の exception.type / exception.message、ECS の error.type / error.message |
 | `http.request.id` / `.method` / `.header.{referer, accept, content-type}` / `.body.size` | リクエストログ | OTel semconv の HTTP（id は `x-request-id`。規格の名前ではない） |

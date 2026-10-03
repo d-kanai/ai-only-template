@@ -13,5 +13,9 @@ pnpm-lock.yaml linguist-generated
 apps/backend/shared/drizzle/migrations/meta/** linguist-generated
 
 # docs/ の下のすべて（ADR・作業ログ・構成図）。PR では読まず、必要なときに開く（daiki の判断 2026-10-03）。
-# 指示ファイル（CLAUDE.md・LEARNINGS.md・.claude/**）とテスト・.feature は仕様として読むので畳まない。
+# テストと .feature は仕様として読むので畳まない（daiki の判断 2026-10-03）。
 docs/** linguist-generated
+
+# .claude/ の下すべて（ルール・スキル・エージェント・設定）。PR では読まず、必要なときに開く（daiki の判断 2026-10-03）。
+# 直下の CLAUDE.md・LEARNINGS.md は .claude/ の外なので畳まない。
+.claude/** linguist-generated

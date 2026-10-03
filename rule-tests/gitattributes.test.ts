@@ -39,6 +39,10 @@ const COLLAPSED: readonly { pattern: RegExp; why: string }[] = [
     pattern: /^docs\//,
     why: "docs/ の下の文書（ADR・作業ログ・構成図）。PR では読まず、必要なときに開く（daiki の判断 2026-10-03）",
   },
+  {
+    pattern: /^\.claude\//,
+    why: ".claude/ の下（ルール・スキル・エージェント・設定）。PR では読まず、必要なときに開く（daiki の判断 2026-10-03）",
+  },
 ];
 
 function shouldCollapse(path: string): boolean {
@@ -99,7 +103,7 @@ const feature = await loadFeature("./gitattributes.feature");
 describeFeature(feature, ({ Scenario }) => {
   Scenario("畳むファイルの判定", ({ And }) => {
     And(
-      "lockfile・drizzle-kit の生成物（meta）・docs の下の文書（ADR・作業ログ・構成図）は畳む",
+      "lockfile・drizzle-kit の生成物（meta）・docs の下の文書（ADR・作業ログ・構成図）・.claude の下（ルール・スキル・設定）は畳む",
       () => {
         // given
         const cases: [string, string][] = [
@@ -117,6 +121,9 @@ describeFeature(feature, ({ Scenario }) => {
           ["ADR", "docs/adr/quality/20261003-dependency-license-allow-list.md"],
           ["ADR の一覧", "docs/adr/README.md"],
           ["構成図の説明", "docs/diagrams/README.md"],
+          ["ルール", ".claude/rules/quality/testing.md"],
+          ["スキル", ".claude/skills/pr-flow/SKILL.md"],
+          ["Claude Code の設定", ".claude/settings.json"],
           ["構成図の mermaid", "docs/diagrams/system.mmd"],
           ["構成図の画像", "docs/diagrams/system.png"],
         ];
@@ -130,7 +137,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And(
-      "手で書くファイル（ソース・テスト・.feature・マイグレーションの SQL・指示ファイル・設定）は畳まない",
+      "手で書くファイル（ソース・テスト・.feature・マイグレーションの SQL・直下の CLAUDE.md と LEARNINGS.md・package.json などの設定）は畳まない",
       () => {
         // given
         const cases: [string, string][] = [
@@ -142,8 +149,9 @@ describeFeature(feature, ({ Scenario }) => {
           ["ルール検査テスト", "rule-tests/gitattributes.test.ts"],
           ["仕様", "rule-tests/gitattributes.feature"],
           ["指示ファイル", "CLAUDE.md"],
-          ["ルール", ".claude/rules/quality/testing.md"],
+          ["指示ファイル（直下）", "LEARNINGS.md"],
           ["ルートの README", "README.md"],
+          ["名前が .claude で始まる別のディレクトリ", ".claude-old/a.md"],
           ["E2E の仕様", "apps/e2e/spec/api-error.feature"],
           ["package.json", "package.json"],
           ["Terraform のソース", "infra/envs/stg/main.tf"],
