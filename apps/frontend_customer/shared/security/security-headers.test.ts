@@ -101,15 +101,29 @@ describe("SecurityHeaders.common", () => {
 //   Next の CSP の文書の例と同じ。どれも置いていない。
 // - UNSAFE_INLINE_FALLBACK・ALLOWLIST_FALLBACK（古いブラウザ向けに 'unsafe-inline'・https: を足せという勧め）: nonce と
 //   'strict-dynamic' を解するブラウザは無視する値で、足しても対応ブラウザでは何も変わらず、値を読む人には弱く見える。
-const ACCEPTED_FINDINGS: readonly { type: Type; value?: string }[] = [
-  { type: Type.SCRIPT_ALLOWLIST_BYPASS, value: "'self'" },
+// WHY 'self' の除外は script-src に 'strict-dynamic' があるときだけ（reviewer の指摘、PR #397）: 'self' が無視されるのは
+//   'strict-dynamic' の下だけ。条件を付けないと、'strict-dynamic' を消して CSP を弱めても評価器のテストが緑のままになる。
+//   UNSAFE_INLINE_FALLBACK・ALLOWLIST_FALLBACK は、評価器が nonce / hash と 'strict-dynamic' のあるときにしか出さないので条件は要らない。
+const ACCEPTED_FINDINGS: readonly {
+  type: Type;
+  value?: string;
+  onlyWithStrictDynamic?: true;
+}[] = [
+  {
+    type: Type.SCRIPT_ALLOWLIST_BYPASS,
+    value: "'self'",
+    onlyWithStrictDynamic: true,
+  },
   { type: Type.UNSAFE_INLINE_FALLBACK },
   { type: Type.ALLOWLIST_FALLBACK },
 ];
 
 // 重大度 MEDIUM_MAYBE 以上で、除く指摘に当たらないものを [種類, 値] で返す（toEqual で丸ごと比べるため）。
 function seriousFindings(policy: string): [Type, string | undefined][] {
-  const findings = new CspEvaluator(new CspParser(policy).csp).evaluate(
+  const csp = new CspParser(policy).csp;
+  const strictDynamic =
+    csp.directives["script-src"]?.includes("'strict-dynamic'") === true;
+  const findings = new CspEvaluator(csp).evaluate(
     DEFAULT_CHECKS,
     STRICTCSP_CHECKS,
   );
@@ -119,7 +133,9 @@ function seriousFindings(policy: string): [Type, string | undefined][] {
       (finding) =>
         !ACCEPTED_FINDINGS.some(
           (accepted) =>
-            accepted.type === finding.type && accepted.value === finding.value,
+            accepted.type === finding.type &&
+            accepted.value === finding.value &&
+            (accepted.onlyWithStrictDynamic !== true || strictDynamic),
         ),
     )
     .map((finding) => [finding.type, finding.value]);
@@ -164,6 +180,18 @@ describe("SecurityHeaders.contentSecurityPolicy を CSP Evaluator で評価す�
 
     // then
     expect(findings).toEqual([[Type.SCRIPT_UNSAFE_INLINE, "'unsafe-inline'"]]);
+  });
+
+  test("'strict-dynamic' を外した CSP は、script-src の 'self' を指摘される（'self' を除くのは 'strict-dynamic' の下だけ）", () => {
+    // given: 'strict-dynamic' が無いと、どのブラウザも 'self' を読み、同じオリジンに置いたスクリプトが抜け道になる
+    const policy =
+      "default-src 'self'; script-src 'self' 'nonce-bm9uY2UxMjM0NTY3OA=='; object-src 'none'; base-uri 'self'";
+
+    // when
+    const findings = seriousFindings(policy);
+
+    // then
+    expect(findings).toEqual([[Type.SCRIPT_ALLOWLIST_BYPASS, "'self'"]]);
   });
 
   test("除く指摘と同じ種類でも、値が 'self' でなければ止める（script-src のほかのホスト）", () => {

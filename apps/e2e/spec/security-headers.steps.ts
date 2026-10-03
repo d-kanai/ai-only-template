@@ -37,8 +37,13 @@ export class SecurityHeadersSteps {
     // WHY 失敗した読み込みも数える（Issue #379）: Cross-Origin-Embedder-Policy / Cross-Origin-Resource-Policy が止めた読み込みは
     //   CSP の違反ではなく、securitypolicyviolation にもコンソールの CSP の文言にも出ない（ネットワークの失敗
     //   net::ERR_BLOCKED_BY_RESPONSE になる）。
+    // WHY net::ERR_ABORTED は数えない（reviewer の指摘、PR #397）: next/link のプリフェッチや描き直しで、ブラウザが読み込みを
+    //   途中で取りやめても ERR_ABORTED になる。守りが止めた読み込みではないので、数えると守りと関係なく落ちうる。
     this.page.on("requestfailed", (request) => {
-      this.violations.push(`${request.failure()?.errorText} ${request.url()}`);
+      const errorText = request.failure()?.errorText;
+      if (errorText !== "net::ERR_ABORTED") {
+        this.violations.push(`${errorText} ${request.url()}`);
+      }
     });
     await this.page.exposeFunction("__recordCspViolation", (text: string) => {
       this.violations.push(text);
