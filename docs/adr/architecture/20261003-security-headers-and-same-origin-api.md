@@ -13,15 +13,15 @@
 - すべての応答に共通のヘッダ（HSTS 2 年 + includeSubDomains・nosniff・Referrer-Policy strict-origin-when-cross-origin・X-Frame-Options DENY・Permissions-Policy・COOP same-origin）を `next.config.ts` の `headers()` で付け、`X-Powered-By` を消す。
 - 画面の応答にだけ、要求ごとの nonce を入れた Content-Security-Policy を `proxy.ts` で付ける。script-src は `'self' 'nonce-…' 'strict-dynamic'`（開発のときだけ `'unsafe-eval'`）、style-src は `'self' 'unsafe-inline'`、外への送信先（img / font / connect）は `'self'`、`frame-ancestors 'none'`。
 - 値は `shared/security/security-headers.ts`（`SecurityHeaders`）に集め、単体テストで固定する。付いていることと CSP の下で画面が動くことは E2E（`apps/e2e/spec/security-headers.feature`）が確かめる。
-- CORS: API は同じオリジンの画面からだけ呼ぶ前提にし、`Access-Control-Allow-*` は返さない。書き込み（GET / HEAD / OPTIONS 以外）で `Origin` のホストが `Host` と違えば、`ProblemResponse.wrap` が handler の前に 403（`/problems/forbidden`・`request.origin.forbidden`）を返す。OFREP の api（評価は読み取りだが POST）は `OfrepResponse.wrap` が同じ判定で 403（OFREP の失敗の形）を返す。`Origin` の無い要求は通す。
-- Proxy の matcher から拡張子の付いたパスの除外（`.*\..*`）を外す。`/todo/abc.x` のような URL も画面として描かれ、除外したままでは CSP の無い画面を開かせられる（reviewer の実測）。
+- CORS: API は同じオリジンの画面からだけ呼ぶ前提にし、`Access-Control-Allow-*` は返さない。書き込み（GET / HEAD / OPTIONS 以外）で `Origin` のスキーム・ホストが、前段が受けたスキーム（`X-Forwarded-Proto`。無ければ要求の URL）と `Host` と違えば、`ProblemResponse.wrap` が handler の前に 403（`/problems/forbidden`・`request.origin.forbidden`）を返す。OFREP の api（評価は読み取りだが POST）は `OfrepResponse.wrap` が同じ判定で 403（OFREP の失敗の形）を返す。`Origin` の無い要求は通す。
+- Proxy の matcher から拡張子の付いたパスの除外（`.*\..*`）を外す。`/todo/abc.x` のような URL も画面として描かれ、除外したままでは CSP の無い画面を開かせられる（reviewer の実測）。同じ理由で、除いたままの `/favicon.ico` には実物（`app/favicon.ico`）を置き、404 の画面として描かせない（Codex の指摘）。
 
 ## 理由
 - CSP は nonce にする: Next 16 は要求の CSP ヘッダから nonce を読み、自分のスクリプトに自動で付ける（Next.js 16.3.6 同梱 `node_modules/next/dist/docs/01-app/02-guides/content-security-policy.md`）。nonce の要る動的レンダリングは i18n ですでに受け入れている。hash は、Next が描くインラインスクリプト（RSC の payload の `self.__next_f.push`）の中身がデータで変わるので事前に決められない（コードの読みからの推定で、実測していない）。
 - style-src を nonce にしない: CSP の nonce は style 属性には効かず、nonce を書くと `'unsafe-inline'` が無視されて Mantine の style 属性が止まる（https://www.w3.org/TR/CSP3/#allow-all-inline ）。CSS の差し込みでできる外への送信は img / font / connect を `'self'` に絞って塞ぐ。
 - 共通のヘッダを next.config に置く: Proxy の matcher は静的ファイル（`/_next/static`）を除くので、JS・CSS の応答に nosniff・HSTS を付けられない。
 - オリジンの検査を Proxy でなく `ProblemResponse.wrap` と `OfrepResponse.wrap` に置く: 2 つの wrap はすべての api の handle が通る口で（包み忘れは規則 `presentation-with-problem-response`）、拒否をほかの誤りと同じ Problem Details にでき、単体テストのカバレッジの中にある。CORS は応答を読ませないだけで、フォームの POST や text/plain の fetch はプリフライト無しで届くので、書き込みはサーバで止める必要がある（https://fetch.spec.whatwg.org/#origin-header 、OWASP CSRF Prevention Cheat Sheet の「Verifying Origin With Standard Headers」）。
-- Origin と Host のホストだけを比べる: Cloud Run は前段で TLS を終えるので、アプリから見たスキームはブラウザの Origin（https）と合わない。
+- Origin を、前段が受けたスキーム（X-Forwarded-Proto）と Host と比べる: Cloud Run は前段で TLS を終えるので、アプリの要求の URL のスキーム（http）はブラウザの Origin（https）と合わない。ただしホストだけだと、同じホストの http のページ（HSTS が効く前の最初の訪問など）からの書き込みを通す（Codex の指摘、PR #366）。スキームは `X-Forwarded-Proto` と比べる（ブラウザのページは別のオリジンへの要求にこのヘッダを付けるとプリフライトになり送れないので、CSRF では偽れない）。
 
 ## 採用しなかった案
 - CSP を next.config の静的なヘッダにして `'unsafe-inline'` で script を許す: インラインスクリプトの差し込み（XSS）を止められず、CSP の主な効き目が無くなる。

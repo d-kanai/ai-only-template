@@ -22,8 +22,53 @@ describe("SameOrigin.rejects", () => {
     },
   );
 
-  test("Origin のホストが Host と同じなら拒否しない（スキームは見ない）", () => {
-    // given: Cloud Run の前段で TLS が終わり、アプリには http で届いても、ブラウザの Origin は https になる
+  test("前段が https で受けた要求は、Origin が https で同じホストなら拒否しない", () => {
+    // given: Cloud Run の前段で TLS が終わり、アプリには http で届く。前段が受けたスキームは X-Forwarded-Proto に載る
+    const request = apiRequest("POST", {
+      host: "app.example.com",
+      origin: "https://app.example.com",
+      "x-forwarded-proto": "https",
+    });
+
+    // when
+    const rejected = SameOrigin.rejects(request);
+
+    // then
+    expect(rejected).toBe(false);
+  });
+
+  test("前段が https で受けた要求に、同じホストの http のページの Origin が付いていたら拒否する", () => {
+    // given: http と https は別のオリジン。HSTS が効く前の最初の訪問などで http のページから送られうる
+    const request = apiRequest("POST", {
+      host: "app.example.com",
+      origin: "http://app.example.com",
+      "x-forwarded-proto": "https",
+    });
+
+    // when
+    const rejected = SameOrigin.rejects(request);
+
+    // then
+    expect(rejected).toBe(true);
+  });
+
+  test("X-Forwarded-Proto が複数の値なら、最初の値（利用者に近い前段が受けたスキーム）と比べる", () => {
+    // given
+    const request = apiRequest("POST", {
+      host: "app.example.com",
+      origin: "https://app.example.com",
+      "x-forwarded-proto": "https, http",
+    });
+
+    // when
+    const rejected = SameOrigin.rejects(request);
+
+    // then
+    expect(rejected).toBe(false);
+  });
+
+  test("X-Forwarded-Proto が無ければ、要求の URL のスキームと比べる", () => {
+    // given: 要求の URL は http（apiRequest）
     const request = apiRequest("POST", {
       host: "app.example.com",
       origin: "https://app.example.com",
@@ -33,7 +78,7 @@ describe("SameOrigin.rejects", () => {
     const rejected = SameOrigin.rejects(request);
 
     // then
-    expect(rejected).toBe(false);
+    expect(rejected).toBe(true);
   });
 
   test("ホスト名とポートが Host と同じなら拒否しない（ポート付き）", () => {

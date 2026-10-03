@@ -76,6 +76,11 @@ export class SecurityHeadersSteps {
     const dotted = await this.page.request.get("/todo/abc.x");
     expect(dotted.headers()["content-type"]).toContain("text/html");
     expect(dotted.headers()["content-security-policy"]).toContain("'nonce-");
+    // /favicon.ico は Proxy の matcher の外なので、画面（404 の画面）として描かれると CSP が付かない。アイコンの実物
+    //   （app/favicon.ico）を置き、画像として返ることを確かめる（Codex の指摘、PR #366）。
+    const favicon = await this.page.request.get("/favicon.ico");
+    expect(favicon.ok()).toBe(true);
+    expect(favicon.headers()["content-type"]).toBe("image/x-icon");
     // 要求ごとに nonce が変わる（固定の値なら、一度見た値で差し込んだスクリプトが動く）。
     const again = await this.page.request.get(this.page.url());
     expect(again.headers()["content-security-policy"]).not.toBe(policy);

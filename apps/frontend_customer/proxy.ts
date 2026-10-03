@@ -114,6 +114,8 @@ function withLocale(request: NextRequest): Headers {
 //   WHY 拡張子の付いたパス（.*\..*）を除かない（Issue #106 で外した）: 以前は public/ のファイル向けに除いていたが、/todo/abc.x の
 //   ように末尾にドットを足した URL も画面として描かれ、CSP の付かない画面を開かせられた（reviewer の実測）。public/ は今は無く、
 //   JS・CSS は /_next/static の下にある。public/ を足すときは、そのファイルのパスだけを除く。
+//   WHY favicon.ico は除いたままでよい: 実物（app/favicon.ico）を置いているので画像として返り、画面として描かれない。実物が無いと
+//   404 の画面が CSP 無しで描かれる（Codex の指摘、PR #366）。消すときは除外も外す（E2E security-headers が画像で返ることを見る）。
 //   missing: next/link のプリフェッチ（next-router-prefetch ヘッダ付きの RSC の取得）と、ブラウザのプリフェッチ（purpose: prefetch）
 //   では Proxy を動かさない（proxy.md の「Negative matching」の例と同じ書き方。purpose の方は例に合わせただけで未実測）。
 //   WHY: 一覧に表示されたリンクごとに /todo/<id> の page の行が 2 つずつ（segment の _tree と本体）出て、利用者が開いていない

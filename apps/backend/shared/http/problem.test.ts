@@ -522,6 +522,7 @@ describe("ProblemResponse.wrap", () => {
         headers: {
           host: "app.example.com",
           origin: "https://app.example.com",
+          "x-forwarded-proto": "https",
         },
       }),
     );
