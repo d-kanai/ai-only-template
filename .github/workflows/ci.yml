@@ -70,7 +70,7 @@ jobs:
       # --audit-level high: high と critical があれば失敗する（moderate / low は表示もしない）。WHY high: 2026-10-03 の実測で moderate が
       #   4 件（Stryker の推移的依存の qs など、開発時だけ使うもの）あり、moderate で止めると修正できるまで全 PR が止まる。
       #   決定と minimumReleaseAge（5 日）との関係・誤検知の抑え方（pnpm-workspace.yaml の auditConfig.ignoreGhsas）は
-      #   ADR docs/adr/quality/20261003-security-scan-in-ci.md。
+      #   ADR docs/adr/quality/20261003-pnpm-audit-in-ci.md。
       # WHY ci ジョブの中: Ruleset protect-main の required status check は ci だけなので、ここに置けば high が残る PR はマージできない。
       # WHY --ignore-registry-errors を付けない: レジストリが落ちたときに検査を飛ばして緑にしない（検査できないなら赤にする）。
       # rule-tests/github-actions.test.ts の auditsDependencies がこの形（ci ジョブ・コマンドの完全一致・if と continue-on-error なし）を検査する。

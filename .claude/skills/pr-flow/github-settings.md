@@ -29,7 +29,7 @@ pr-flow の手順から参照する。設定を変えたらこのファイルを
 - GitHub Actions は `CI=true` を既定で設定するので、lefthook の postinstall はフックを入れない。
 
 ## セキュリティ（Issue #112）
-- CodeQL: `.github/workflows/codeql.yml`（advanced setup）。Settings → Code security の「CodeQL analysis」の default setup は有効にしない（advanced setup と同時に使えず、結果のアップロードが失敗する）。結果は Security タブの Code scanning。required status check には入れていない（ADR `docs/adr/quality/20261003-security-scan-in-ci.md`）。
+- CodeQL（code scanning）は使わない。本番の repo は private にする予定で、private では有料の GitHub Code Security が要るため（daiki の判断 2026-10-03。ADR `docs/adr/quality/20261003-pnpm-audit-in-ci.md`）。
 - Secret scanning と push protection: Settings → Code security で有効にする（ユーザーが UI で行う。クラウドセッションの `GH_TOKEN` では `security_and_analysis` が読めず（2026-10-03 実測、レスポンスに項目が無い）、状態は未確認）。
 
 ## クラウドセッションでの GitHub App

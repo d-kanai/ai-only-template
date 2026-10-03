@@ -34,10 +34,9 @@ import { casesByName } from "./case-table";
 //       （Claude Code の GitHub Actions のドキュメント https://code.claude.com/docs/en/github-actions もコスト管理として
 //       workflow の timeout を挙げる）。step の timeout-minutes は job 全体を止めないので数えない。
 //     WHY 正の整数の文字だけ: 式（`${{ }}`）は値を静的に確かめられず、0 はすぐ失敗する設定で意図した上限にならない。
-//   - セキュリティスキャン（Issue #112。違反の一覧ではなく、ci.yml と codeql.yml をそれぞれ真偽で判定する）:
-//     - auditsDependencies: ci.yml の ci job が `pnpm audit --audit-level high` を if・continue-on-error なしで実行する。
-//     - scansWithCodeQL: codeql.yml が CodeQL の init（languages に javascript-typescript と actions）と analyze を使う。
-//     どちらも PR と push の両方で動くこと。WHY と限界は各関数のコメント、決定は ADR docs/adr/quality/20261003-security-scan-in-ci.md。
+//   - 依存の脆弱性の検査（Issue #112。違反の一覧ではなく、ci.yml を真偽で判定する）: auditsDependencies は、ci.yml の ci job が
+//     `pnpm audit --audit-level high` を if・continue-on-error なしで、PR と push の両方で実行するか。WHY と限界は関数のコメント、
+//     決定は ADR docs/adr/quality/20261003-pnpm-audit-in-ci.md。
 // 限界（字句で読む。YAML のパーサを依存に足さない。rule-tests/typecheck.test.ts / work-logs-check.test.ts と同じ理由）:
 //   - uses は「行頭（`- ` の後を含む）の `uses:` キー」として行ごとに読む。`run: |` のブロックの中に `uses:` で始まる行があると
 //     uses として読む（違反を多く出す方向で、見逃しにはならない）。フロー形式（`{ uses: x }`）は読まない（今は使っていない）。
@@ -167,8 +166,8 @@ function findViolations(path: string, yaml: string): string[] {
   ];
 }
 
-// ---- セキュリティスキャン（Issue #112。WHY と値の決め方は .claude/rules/tooling/github-actions.md と
-//   ADR docs/adr/quality/20261003-security-scan-in-ci.md） ----
+// ---- 依存の脆弱性の検査（Issue #112。WHY と値の決め方は .claude/rules/tooling/github-actions.md と
+//   ADR docs/adr/quality/20261003-pnpm-audit-in-ci.md） ----
 
 // トップレベルの `on:`（引用符の `"on":` も）の直下のイベント名。ワークフローが PR と main への push の両方で動くかを見る。
 //   限界: `on: [push, pull_request]` や `on: push` の 1 行の書き方は読まない（拒否になる。今のワークフローはブロックで書く）。
@@ -181,70 +180,80 @@ function readEvents(yaml: string): string[] {
     .map((text) => text.trim().replace(/\s*:.*$/, ""));
 }
 
+// PR と push の両方で動き、`paths` / `paths-ignore` で変更のファイルによって飛ばされないか。
+//   WHY paths を拒否する: 飛ばされた実行は required status check を満たし、依存を変えた PR でも audit が動かないことがある（reviewer の指摘）。
 const runsOnPullRequestAndPush = (yaml: string) =>
-  ["pull_request", "push"].every((event) => readEvents(yaml).includes(event));
+  ["pull_request", "push"].every((event) => readEvents(yaml).includes(event)) &&
+  !topLevelBlock(yaml, `(["']?)on\\1`).some((text) =>
+    /^\s*paths(?:-ignore)?\s*:/.test(text),
+  );
 
 type Step = Record<string, string>;
 
-// job の中身の行から steps を順に取り出す。1 ステップは `- ` で始まる行から次の `- ` の行まで。その中の `キー: 値` を平たく集める
-//   （`with:` の下のキーも同じステップのキーとして入る。rule-tests/work-logs-check.test.ts と同じ読み方）。
-//   限界: 複数行の値（`run: |`）の中身は読まない（値は "|" になり、下の判定では拒否になる）。
+// job の中身の行から steps を順に取り出す。1 ステップは `- ` で始まる行から次の `- ` の行まで。step の直下のキー（`- ` の後の
+//   最初のキーと同じ列）の `キー: 値` だけを集める。
+//   WHY 直下のキーだけ: `with:` / `env:` の下のキーを平たく集めると、`with:` の下の `run:` を実行するコマンドと取り違え、
+//     `env:` の下の `continue-on-error: false` が step の `continue-on-error: true` を上書きした（reviewer の実測）。
+//   WHY 継続行をつなぐ: 値の書いてある直下のキーより深い行は、YAML では値（plain scalar）の続き。読まないと、次の行に書いた
+//     `|| true` を見逃した（`run: pnpm audit --audit-level high` の次の行の `|| true` は、YAML では 1 つの値の
+//     `pnpm audit --audit-level high || true`。reviewer の実測）。値の無いキー（`with:`）の下の深い行は入れ子のマップなので、つながない。
+//   限界: 複数行の値（`run: |`）の中身は読まない（値は "|" になり、下の判定では拒否になる）。継続行は空白 1 つでつなぐ。
 function readSteps(body: string[]): Step[] {
-  const steps: Step[] = [];
+  const chunks: string[][] = [];
   for (const text of body) {
-    const trimmed = text.trim();
-    const isNewStep = trimmed.startsWith("- ");
-    if (isNewStep) steps.push({});
-    const current = steps.at(-1);
-    if (current === undefined) continue;
-    const pair = /^([\w-]+)\s*:\s*(.*)$/.exec(
-      isNewStep ? trimmed.slice(2) : trimmed,
-    );
-    if (pair?.[1] !== undefined)
-      current[pair[1]] = (pair[2] ?? "").replace(/\s+#.*$/, "").trim();
+    if (text.trim().startsWith("- ")) chunks.push([]);
+    chunks.at(-1)?.push(text);
   }
-  return steps;
+  return chunks.map(readStep);
+}
+
+const stripComment = (raw: string) => raw.replace(/\s+#.*$/, "").trim();
+
+// 1 ステップの行（最初の行が `- `）から、直下のキーの値を集める（継続行は直前のキーの値につなぐ）。
+function readStep(lines: string[]): Step {
+  const propertyIndent = indentOf(lines[0] ?? "") + 2;
+  const step: Step = {};
+  let lastKey: string | undefined;
+  lines.forEach((text, index) => {
+    const trimmed = index === 0 ? text.trim().slice(2) : text.trim();
+    if (index > 0 && indentOf(text) > propertyIndent) {
+      if (lastKey !== undefined)
+        step[lastKey] = `${step[lastKey]} ${stripComment(trimmed)}`;
+      return;
+    }
+    const pair = /^([\w-]+)\s*:\s*(.*)$/.exec(trimmed);
+    if (pair?.[1] === undefined) return;
+    const value = stripComment(pair[2] ?? "");
+    step[pair[1]] = value;
+    lastKey = value === "" ? undefined : pair[1];
+  });
+  return step;
+}
+
+// job の直下のキー（job の中身の最初の行と同じインデント）の名前。
+function jobProperties(body: string[]): string[] {
+  const propertyIndent = body[0] === undefined ? 0 : indentOf(body[0]);
+  return body
+    .filter((text) => indentOf(text) === propertyIndent)
+    .map((text) => text.trim().replace(/\s*:.*$/, ""));
 }
 
 const AUDIT_COMMAND = "pnpm audit --audit-level high";
 
 // ci.yml の ci job（required status check）が、pnpm audit を high 以上で失敗する形で、PR と main への push の両方で実行するか。
 //   WHY ci job: Ruleset protect-main の required status check は ci だけで、別の job に置くと赤でもマージできる。
-//   WHY if と continue-on-error を拒否する: 飛ばす・無視すると、high の脆弱性があっても緑になる。
+//   WHY if と continue-on-error を拒否する: 飛ばす・無視すると、high の脆弱性があっても緑になる。job の if も拒否する（skipped の
+//     job は required status check を満たす。reviewer の指摘）。
 //   WHY コマンドを完全一致で見る: `|| true` や `; exit 0` を足すと失敗が打ち消され、`--audit-level critical` では high を見逃す。
 function auditsDependencies(yaml: string): boolean {
   const ci = readJobs(yaml).find((job) => job.name === "ci");
   if (ci === undefined || !runsOnPullRequestAndPush(yaml)) return false;
+  if (jobProperties(ci.body).includes("if")) return false;
   return readSteps(ci.body).some(
     (step) =>
       step.run === AUDIT_COMMAND &&
       !("if" in step) &&
       (step["continue-on-error"] ?? "false") === "false",
-  );
-}
-
-// CODEQL_LANGUAGES: 解析する CodeQL の言語。javascript-typescript はアプリ・テスト・設定の TS / JS、actions は
-//   .github/workflows のワークフロー（スクリプトインジェクションなど。CodeQL のドキュメントの対応言語）。
-const CODEQL_LANGUAGES = ["javascript-typescript", "actions"];
-
-// ワークフローが CodeQL の init と analyze を使い、CODEQL_LANGUAGES をすべて解析し、PR と main への push で動くか。
-//   languages は init の with の `languages:` の値を `,` で区切って読む（1 行の書き方だけ。matrix の式は読まず拒否になる）。
-function scansWithCodeQL(yaml: string): boolean {
-  const steps = readJobs(yaml).flatMap((job) => readSteps(job.body));
-  const init = steps.find((step) =>
-    (step.uses ?? "").startsWith("github/codeql-action/init@"),
-  );
-  const analyzes = steps.some((step) =>
-    (step.uses ?? "").startsWith("github/codeql-action/analyze@"),
-  );
-  const languages = (init?.languages ?? "")
-    .replace(/^(["'])(.*)\1$/, "$2")
-    .split(",")
-    .map((language) => language.trim());
-  return (
-    analyzes &&
-    CODEQL_LANGUAGES.every((language) => languages.includes(language)) &&
-    runsOnPullRequestAndPush(yaml)
   );
 }
 
@@ -664,6 +673,19 @@ describeFeature(feature, ({ Scenario }) => {
               ),
             ],
             [
+              "with と env を持つ step の後の audit",
+              ciWith(
+                "      - uses: some/action@v1",
+                "        with:",
+                "          run: echo",
+                "        env:",
+                "          A: b",
+                `      - run: ${AUDIT_COMMAND}`,
+                "        env:",
+                "          continue-on-error: true",
+              ),
+            ],
+            [
               "引用符の on と、ci の前に別の job",
               [
                 '"on":',
@@ -750,6 +772,55 @@ describeFeature(feature, ({ Scenario }) => {
                 "  workflow_dispatch:\n",
               ),
             ],
+            [
+              "継続行の || true",
+              ciWith(`      - run: ${AUDIT_COMMAND}`, "          || true"),
+            ],
+            [
+              "別の step の with の下の run",
+              ciWith(
+                "      - uses: some/action@v1",
+                "        with:",
+                `          run: ${AUDIT_COMMAND}`,
+              ),
+            ],
+            [
+              "env の下の continue-on-error: false で上書き",
+              ciWith(
+                `      - run: ${AUDIT_COMMAND}`,
+                "        continue-on-error: true",
+                "        env:",
+                "          continue-on-error: false",
+              ),
+            ],
+            [
+              "job の if",
+              ciWith(`      - run: ${AUDIT_COMMAND}`).replace(
+                "    timeout-minutes: 30\n",
+                "    if: false\n    timeout-minutes: 30\n",
+              ),
+            ],
+            [
+              "PR の paths",
+              ciWith(`      - run: ${AUDIT_COMMAND}`).replace(
+                "  pull_request:\n    branches: [main]\n",
+                "  pull_request:\n    branches: [main]\n    paths: ['apps/**']\n",
+              ),
+            ],
+            [
+              "push の paths-ignore",
+              ciWith(`      - run: ${AUDIT_COMMAND}`).replace(
+                "  push:\n    branches: [main]\n",
+                "  push:\n    branches: [main]\n    paths-ignore: ['docs/**']\n",
+              ),
+            ],
+            [
+              "push が入れ子のキーにだけある",
+              ciWith(`      - run: ${AUDIT_COMMAND}`).replace(
+                "  push:\n    branches: [main]\n",
+                "  workflow_dispatch:\n    push:\n",
+              ),
+            ],
             ["空文字", ""],
           ];
 
@@ -765,94 +836,19 @@ describeFeature(feature, ({ Scenario }) => {
     },
   );
 
-  Scenario("コードの静的解析（scansWithCodeQL。Issue #112）", ({ And }) => {
-    const codeql = (languages: string, ...extra: string[]) =>
-      [
-        "on:",
-        "  pull_request:",
-        "    branches: [main]",
-        "  push:",
-        "    branches: [main]",
-        "  schedule:",
-        "    - cron: '0 0 * * 1'",
-        "jobs:",
-        "  analyze:",
-        "    timeout-minutes: 30",
-        "    steps:",
-        `      - uses: actions/checkout@${SHA}`,
-        `      - uses: github/codeql-action/init@${SHA} # v4.38.2`,
-        "        with:",
-        `          languages: ${languages}`,
-        "          build-mode: none",
-        `      - uses: github/codeql-action/analyze@${SHA} # v4.38.2`,
-        ...extra,
-      ].join("\n");
+  Scenario("リポジトリの依存の脆弱性の検査（Issue #112）", ({ And }) => {
+    And("リポジトリの ci.yml は pnpm audit を上の形で実行する", () => {
+      // given
+      const yaml = readFileSync(
+        join(repoRoot, WORKFLOWS_DIR, "ci.yml"),
+        "utf8",
+      );
 
-    And(
-      "CodeQL の init と analyze を使い、javascript-typescript と actions を解析し、PR と main への push で動くワークフローは許可する",
-      () => {
-        // given
-        const cases: [string, string][] = [
-          ["カンマ区切り", codeql("javascript-typescript, actions")],
-          ["空白なし・逆順", codeql("actions,javascript-typescript")],
-          ["引用符", codeql('"javascript-typescript, actions"')],
-          ["ほかの言語も", codeql("javascript-typescript, actions, python")],
-        ];
+      // when
+      const result = auditsDependencies(yaml);
 
-        // when
-        const result = casesByName(cases, ([, yaml]) => scansWithCodeQL(yaml));
-
-        // then
-        expect(result).toEqual(casesByName(cases, () => true));
-      },
-    );
-
-    And(
-      "init か analyze が無い・解析する言語が足りない・PR か push で動かないワークフローは拒否する",
-      () => {
-        // given
-        const full = codeql("javascript-typescript, actions");
-        const cases: [string, string][] = [
-          ["analyze が無い", full.replace(/\n.*codeql-action\/analyze.*$/, "")],
-          ["init が無い", full.replace("github/codeql-action/init@", "x/y@")],
-          ["actions が無い", codeql("javascript-typescript")],
-          ["javascript-typescript が無い", codeql("actions")],
-          ["javascript だけ", codeql("javascript, actions")],
-          ["matrix の式", codeql(`${EXPRESSION_OPEN} matrix.language }}`)],
-          ["push で動かない", full.replace("  push:\n", "  merge_group:\n")],
-          [
-            "PR で動かない",
-            full.replace("  pull_request:\n", "  workflow_dispatch:\n"),
-          ],
-          ["空文字", ""],
-        ];
-
-        // when
-        const result = casesByName(cases, ([, yaml]) => scansWithCodeQL(yaml));
-
-        // then
-        expect(result).toEqual(casesByName(cases, () => false));
-      },
-    );
-  });
-
-  Scenario("リポジトリのセキュリティスキャン（Issue #112）", ({ And }) => {
-    And(
-      "リポジトリの ci.yml は pnpm audit を、codeql.yml は CodeQL を、上の形で実行する",
-      () => {
-        // given
-        const read = (name: string) =>
-          readFileSync(join(repoRoot, WORKFLOWS_DIR, name), "utf8");
-
-        // when
-        const result = {
-          audit: auditsDependencies(read("ci.yml")),
-          codeql: scansWithCodeQL(read("codeql.yml")),
-        };
-
-        // then
-        expect(result).toEqual({ audit: true, codeql: true });
-      },
-    );
+      // then
+      expect(result).toBe(true);
+    });
   });
 });
