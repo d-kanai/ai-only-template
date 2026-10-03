@@ -42,7 +42,8 @@ jobs:
           fetch-depth: 0
 
       # PR の差分に作業ログ（docs/work-logs/*.md）の変更が無ければ失敗させる（Issue #64。置き場所は Issue #101。.claude/rules/tooling/work-log-hooks.md）。
-      # WHY: 調査だけの依頼などで作業ログの追記が漏れた。文書だけの PR も例外にしない（ユーザー判断）。
+      # WHY: 調査だけの依頼などで作業ログの追記が漏れた。文書だけの PR も例外にしない（ユーザー判断）。例外は、作者が renovate[bot] で
+      #   依存のファイルだけを変えた PR だけ（スクリプトがイベントの JSON から判定する。Issue #111）。
       # WHY pull_request のときだけ: main への push では github.base_ref が空で、比べる base が無い。
       # WHY 最初に置く: install も Postgres も要らない検査（runner にある node だけを使う。Issue #178）なので、準備より先に、原因の分かる
       #   メッセージで止める。rule-tests/work-logs-check.test.ts が「pnpm lint より前」「if・continue-on-error・失敗を打ち消す書き方が無い」を検査する。

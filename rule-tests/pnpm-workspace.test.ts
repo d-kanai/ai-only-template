@@ -176,9 +176,16 @@ function violationsOf(yaml: string): string[] {
 //   当たらなくなる。パッチの要否は人が見直す（スキル dependency-update の 5.）。enabled: false の packageRules で止める。
 // 読み取りの仕様: JSON に行頭の `//` のコメント行だけを足した形に限る（コメント行を除いて JSON.parse する）。JSON5 のほかの書き方
 //   （値の後ろのコメント・末尾のカンマ・引用符の無いキー）は例外にする。WHY: JSON5 のパーサを依存に足さない（上の yaml と同じ）。
+// 止めている規則として数えるのは、キーが matchPackageNames と enabled: false だけの規則（matchUpdateTypes などで絞ると一部の更新が
+//   止まらず、否定のパターン `!<名前>` で外すと止まらない）。その規則より後ろに、同じパッケージに一致して enabled: true に戻す規則が
+//   あれば止めていない（packageRules は後ろの規則が上書きする）。
 // 限界: matchPackageNames はパッケージ名そのものと `<スコープ>/**` だけを見る（Renovate の glob・正規表現のほかの書き方は「止めていない」
-//   と判定する。見逃す方向ではなく、多く検出する方向に倒れる）。待つ日数は `<n> days` の形だけを読む。
-type RenovatePackageRule = { matchPackageNames?: string[]; enabled?: boolean };
+//   と判定する）。後ろの規則が matchPackageNames 以外（matchDepNames など）で一致して enabled: true に戻すものは見ない。
+//   待つ日数は `<n> days` の形だけを読む。
+type RenovatePackageRule = Record<string, unknown> & {
+  matchPackageNames?: string[];
+  enabled?: boolean;
+};
 type RenovateConfig = {
   minimumReleaseAge?: unknown;
   internalChecksFilter?: unknown;
@@ -210,6 +217,15 @@ function matchesPackage(pattern: string, name: string): boolean {
   return pattern === name;
 }
 
+function isPureDisable(rule: RenovatePackageRule): boolean {
+  const keys = Object.keys(rule).sort();
+  return (
+    isDeepStrictEqual(keys, ["enabled", "matchPackageNames"]) &&
+    rule.enabled === false &&
+    !(rule.matchPackageNames ?? []).some((p) => p.startsWith("!"))
+  );
+}
+
 function findRenovateViolations(
   config: RenovateConfig,
   settings: Settings,
@@ -223,15 +239,20 @@ function findRenovateViolations(
     violations.push("internalChecksFilter");
   }
   const patched = settings.patchedDependencies;
-  const disabled = (config.packageRules ?? []).filter(
-    (rule) => rule.enabled === false,
-  );
+  const rules = config.packageRules ?? [];
   for (const key of typeof patched === "object" ? Object.keys(patched) : []) {
     const name = packageNameOf(key);
-    const stopped = disabled.some((rule) =>
-      (rule.matchPackageNames ?? []).some((p) => matchesPackage(p, name)),
+    const matches = (rule: RenovatePackageRule) =>
+      (rule.matchPackageNames ?? []).some((p) => matchesPackage(p, name));
+    const stopAt = rules.findLastIndex(
+      (rule) => isPureDisable(rule) && matches(rule),
     );
-    if (!stopped) violations.push(`patchedDependencies:${name}`);
+    const reenabled = rules
+      .slice(stopAt + 1)
+      .some((rule) => rule.enabled === true && matches(rule));
+    if (stopAt === -1 || reenabled) {
+      violations.push(`patchedDependencies:${name}`);
+    }
   }
   return violations;
 }
@@ -786,6 +807,33 @@ describeFeature(feature, ({ Scenario }) => {
           [
             "止めているのが名前の前方一致だけ（@scope/pk）",
             replaceOnce(VALID_RENOVATE, '["@scope/pkg"]', '["@scope/pk"]'),
+            ["patchedDependencies:@scope/pkg"],
+          ],
+          [
+            "止める規則を update の種類（major）で絞る",
+            replaceOnce(
+              VALID_RENOVATE,
+              stop,
+              '{ "matchPackageNames": ["@scope/pkg"], "matchUpdateTypes": ["major"], "enabled": false }',
+            ),
+            ["patchedDependencies:@scope/pkg"],
+          ],
+          [
+            "止める規則で否定のパターンで外す",
+            replaceOnce(
+              VALID_RENOVATE,
+              '["@scope/pkg"]',
+              '["@scope/**", "!@scope/pkg"]',
+            ),
+            ["patchedDependencies:@scope/pkg"],
+          ],
+          [
+            "後ろの規則で enabled: true に戻す",
+            replaceOnce(
+              VALID_RENOVATE,
+              `${stop}\n`,
+              `${stop},\n    { "matchPackageNames": ["@scope/pkg"], "enabled": true }\n`,
+            ),
             ["patchedDependencies:@scope/pkg"],
           ],
           [

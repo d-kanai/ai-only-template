@@ -593,6 +593,7 @@ describe("check-work-logs-diff.sh", () => {
       ["apps の下の深い階層の package.json", "apps/backend/src/package.json"],
       ["別のディレクトリの pnpm-lock.yaml", "docs/pnpm-lock.yaml"],
       ["workflows の下のディレクトリ", ".github/workflows/sub/ci.yml"],
+      ["名前の後ろに続きがある", "package.json.bak"],
     ])(
       "依存のファイルに似た名前（%s: %s）は依存のファイルとして数えず 1 で終わる",
       (_, path) => {

@@ -26,7 +26,8 @@
   //   WHY: 5 日未満の版で PR を作ると、PR の中の pnpm install が minimumReleaseAgeStrict で失敗する。片方だけ変えないこと
   //   （rule-tests/pnpm-workspace.test.ts が同じ日数かを検査する）。
   "minimumReleaseAge": "5 days",
-  // strict: 待つ日数に達していない更新は PR を作らない（strict でないと、PR を作って保留の状態で置く）。
+  // strict: 待つ日数に達していない更新は PR を作らない（flexible だと、PR を作って保留の状態で置く）。renovate 44.132.2 の既定も
+  //   strict だが、既定が変わっても効くように明示する（rule-tests/pnpm-workspace.test.ts が検査する）。
   "internalChecksFilter": "strict",
   // packageRules は上から順に当て、後の規則が前の規則を上書きする（@types/react は「型定義」より後の「Next.js / React」に入る）。
   // groupName: 同じ名前の更新を 1 つの PR にまとめる（PR のタイトルに出る）。groupSlug: ブランチ名（renovate/<groupSlug>）。
@@ -71,6 +72,8 @@
       //   （pnpm-workspace.yaml の patchedDependencies。キーは版まで固定）、版が変わるとパッチが当たらなくなる。パッチの要否は
       //   人が見直す（スキル dependency-update の 5.）。@stryker-mutator/core と vitest-runner は同じ版で使うのでスコープごと止める。
       //   rule-tests/pnpm-workspace.test.ts が、パッチを当てた依存がここで止まっていることを検査する。
+      //   検査が通る形は matchPackageNames と enabled: false だけの規則（update の種類や否定のパターンで絞らない。後ろの規則で
+      //   enabled: true に戻さない）。
       "matchPackageNames": ["@stryker-mutator/**"],
       "enabled": false
     },
@@ -85,7 +88,9 @@
       // Node.js（.tool-versions の nodejs）は Renovate で更新しない。WHY: LTS の版を選び、Dockerfile の Node のイメージと
       //   @types/node のメジャーを一緒に上げる必要がある（.claude/rules/tooling/env.md）。人が Issue で上げる。
       "matchManagers": ["asdf"],
-      "matchDepNames": ["nodejs"],
+      // WHY node（nodejs ではない）: Renovate の asdf の読み取りは .tool-versions の nodejs を depName「node」として扱う
+      //   （renovate 44.132.2 の dist/modules/manager/asdf/upgradeable-tooling.js。nodejs と書くと止まらないことを試走で確認）。
+      "matchDepNames": ["node"],
       "enabled": false
     },
     {
