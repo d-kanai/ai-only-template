@@ -27,7 +27,7 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 
 ### 品質ツール（役割と実行タイミング）
 
-どれも設定ファイルが正（`lefthook.yml`・`.github/workflows/*.yml`・`biome.json`・`vitest.config.mts`・`.github/renovate.json5`・`scripts/security/scan.sh`）。セキュリティの検査は `scripts/security/scan.sh` が digest で固定した Docker イメージで動かし、フック・CI・デプロイが同じスクリプトを呼ぶ（`.claude/rules/tooling/security-scan.md`）。
+どれも設定ファイルが正（`lefthook.yml`・`.github/workflows/*.yml`・`biome.json`・`vitest.config.mts`・`.github/renovate.json5`・`scripts/security/scan.sh`）。セキュリティの検査は `scripts/security/scan.sh` が Docker イメージで動かし（イメージは digest で固定。zizmor だけは版を固定した Dockerfile から手元でビルドしたイメージ）、フック・CI・デプロイが同じスクリプトを呼ぶ（`.claude/rules/tooling/security-scan.md`）。
 
 タイミングの凡例:
 * commit: `git commit` のとき（lefthook の pre-commit / commit-msg）
@@ -53,7 +53,7 @@ AI（Claude Code）が Issue → ブランチ → PR → マージ の流れで�
 | ワークフローの検査 | [actionlint](https://github.com/rhysd/actionlint) | GitHub Actions の構文・式・`run` の shellcheck | commit（ワークフローを変えたとき）・CI |
 | ワークフローの検査 | [zizmor](https://github.com/zizmorcore/zizmor) | GitHub Actions のセキュリティ（スクリプトインジェクション・資格情報の残留など） | commit（ワークフローを変えたとき）・CI |
 | Dockerfile の lint | [hadolint](https://github.com/hadolint/hadolint) | Dockerfile の書き方。warning 以上で失敗 | commit（Dockerfile を変えたとき）・CI |
-| 設定・イメージの脆弱性 | [Trivy](https://trivy.dev/) | Dockerfile と Terraform（`infra/`）の設定ミス、ビルドしたイメージの OS パッケージの脆弱性。HIGH / CRITICAL で失敗 | commit（Dockerfile か `infra/` を変えたとき）・CI（設定）・デプロイ（イメージ） |
+| 設定・イメージの脆弱性 | [Trivy](https://trivy.dev/) | Dockerfile と Terraform（`infra/`）の設定ミス、ビルドしたイメージの OS パッケージの脆弱性。HIGH / CRITICAL で失敗（イメージは直した版があるものだけ） | commit（Dockerfile か `infra/` を変えたとき）・CI（設定）・デプロイ（イメージ） |
 | AI のセキュリティレビュー | [Claude Code Action](https://github.com/anthropics/claude-code-action) | 前回から main に入った差分を Claude がレビューし、見つかったものを private の security advisory にする | 毎日（`security-review.yml`。08:47 JST） |
 | ルールのレビュー | Claude Code のスキル `rule-review` | 機械で止めていないコード・設計ルール（`.claude/rules/code` の表の「レビュー」の行）で差分をレビューし、結果を PR に残す | 手元（PR を作った後、マージの前） |
 | 依存の更新 | [Renovate](https://docs.renovatebot.com/) | npm・asdf・GitHub Actions の更新 PR を作る。公開から 5 日経った版だけ。minor / patch は CI が緑なら自動マージ（0.x と Next.js / React を除く） | 毎週月曜 00:00〜08:59 JST |
