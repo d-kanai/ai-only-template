@@ -3,6 +3,6 @@
 Feature: 作業ログの CI の検査
   Scenario: ワークフローの判定（checksLogsInPullRequests）
     * PR のときだけ失敗で止まる形で lint より前に検査し、checkout が履歴を全部取るワークフローは許可する（checkout → 検査 → lint・if を式の括弧で囲む・continue-on-error: false・間に別のステップ）
-    * 検査が無い・効かない・push でも動く・lint の後・履歴が浅いワークフローは拒否する（コメントアウト・|| true・; exit 0・continue-on-error: true・if が無い / push / false・base の固定・fetch-depth が無い / 1・checkout が無い・空文字など）
+    * 検査が無い・効かない・push でも動く・lint の後・履歴が浅いワークフローは拒否する（コメントアウト・|| true・; exit 0・continue-on-error: true・if が無い / push / false・base の固定・env の BASE_REF が無い / 違う・式の直接の埋め込み・fetch-depth が無い / 1・checkout が無い・空文字など）
   Scenario: 作業ログの CI の検査（実ファイル）
     * .github/workflows/ci.yml は PR のときだけ check-work-logs-diff.sh を失敗で止まる形で pnpm lint より前に実行し、checkout は fetch-depth: 0

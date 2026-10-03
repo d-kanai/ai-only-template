@@ -24,6 +24,9 @@ paths:
   - 止まったら: 直った版に上げる（`dependency-update`）。直った版が minimumReleaseAge（5 日）でまだ入らない・影響が無いときは、`pnpm-workspace.yaml` の `auditConfig.ignoreGhsas` に GHSA の ID を足し、行のコメントに WHY といつ外すかを書く。
 - 機械化: `rule-tests/github-actions.test.ts` の `auditsDependencies`。push の branches が main を含むかと、ignoreGhsas の WHY のコメントは縛れない（reviewer が見る）。
 
+## セキュリティの検査（Issue #362）
+`ci.yml` の `ci` ジョブと `deploy.yml` は `scripts/security/scan.sh` で gitleaks・actionlint・zizmor・hadolint・Trivy・Semgrep を動かす。ワークフローは actionlint と zizmor が見るので、`run:` に式（`${{ }}`）を埋め込まず `env:` で渡し、checkout には `persist-credentials: false` を付ける（zizmor の template-injection / artipacked）。規則・抑え方は `.claude/rules/tooling/security-scan.md`、組み込みの検査は `rule-tests/security-scan.test.ts`。
+
 ## Claude Code を Actions で動かすとき（Issue #354）
 今は `security-review.yml`（main に前回のレビュー以降に入った差分の日次セキュリティレビュー。決定は ADR `docs/adr/workflow/20261002-daily-security-review-in-actions.md`）だけ。
 - 認証は repo の Secret `CLAUDE_CODE_OAUTH_TOKEN`（daiki が `claude setup-token` で作る。サブスクの枠）。モデルは `--model` で明示する（`.claude/settings.json` の model はオーケストレータ用）。
