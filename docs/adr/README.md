@@ -123,6 +123,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-10-02 | ルール検査テストを .feature（`*` の箇条書き）と step の実装に分ける | 採用 | [20261002-rule-tests-in-feature.md](quality/20261002-rule-tests-in-feature.md) |
 | 2026-10-02 | コード・設計ルールのレビューは rules の表の「レビュー」の行を観点にし、検出 → 1 件ずつ検証 → 重大度で報告するスキルで行う | 採用 | [20261002-rule-review-from-rules-tables.md](quality/20261002-rule-review-from-rules-tables.md) |
 | 2026-10-03 | 依存の脆弱性は ci ジョブの pnpm audit（high 以上で失敗）で検査し、CodeQL は入れない | 採用 | [20261003-pnpm-audit-in-ci.md](quality/20261003-pnpm-audit-in-ci.md) |
+| 2026-10-03 | 依存パッケージのライセンスを、pnpm licenses list と許可リストのルール検査テストで CI に止めさせる | 採用 | [20261003-dependency-license-allow-list.md](quality/20261003-dependency-license-allow-list.md) |
 | 2026-10-03 | セキュリティの検査は gitleaks・actionlint・zizmor・hadolint・Trivy・Semgrep を digest で固定した Docker イメージで、コミットフックと CI で動かす | 採用 | [20261003-security-scan-tools.md](quality/20261003-security-scan-tools.md) |
 
 ### workflow/
