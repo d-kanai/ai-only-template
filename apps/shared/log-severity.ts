@@ -10,6 +10,8 @@ import type { LogEventName, ParsedLogEvent, Severity } from "./log-event";
 //   一部の行を拾わない（Issue #216）。
 // WHY db_write の失敗は WARNING: 500 になる想定外の例外は presentation の ProblemResponse.from が server_error（ERROR）で別に残す。
 //   書き込みの失敗の多くは制約違反など想定内（409 / 400 にする）もの。
+// WHY health_check の失敗は ERROR（phase: failed で下の分岐が決める）: DB に問い合わせられないと、DB を使う API はすべて失敗する。
+//   db_pool_error と同じく DB 側を見る合図で、監視の結果（503）と一緒に重大度でも拾えるようにする。
 // WHY notification の失敗は ERROR: 通知の失敗は応答を 500 にしないので server_error の行が出ず、この行が唯一の手がかり。
 // WHY 対応表をメソッドの中に置く（最上位の定数・static フィールドにしない）: 最上位の値は Stryker の static な変異になり、
 //   ignoreStatic で検査から外れる。static フィールドも同じく外れるおそれがある（未確認）。
@@ -22,6 +24,7 @@ export class LogSeverity {
       db_write: "INFO",
       db_pool_error: "ERROR",
       server_error: "ERROR",
+      health_check: "ERROR",
       app_start_failed: "ERROR",
       notification: "INFO",
       logger_error: "ERROR",
