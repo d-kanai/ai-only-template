@@ -41,7 +41,9 @@ import { casesByName } from "./case-table";
 // 限界（字句で読む。YAML のパーサを依存に足さない。rule-tests/github-actions.test.ts と同じ理由）:
 //   - labels はトップレベル（行頭）の `labels:` の 1 行だけを読む。値はフロー形式（`[feat]`）か 1 つのスカラー（`feat`）。
 //     ブロック形式の一覧（次の行の `- feat`）は読まず、空として違反にする（見逃しにはならない）。
-//   - body の項目は「`- type:` で始まる行から次の `- type:` の行まで」として読み、その中の最初の `label:` と `required:` の値を取る。
+//   - body の項目は「`- type:` で始まる行から次の `- type:` の行まで」として読み、その中の最初の `label:` と、`validations:` の行より後の最初の
+//     `required:` の値を取る（validations の下の階層かはインデントで見ない。validations の後ろに別のキーを置いてその下に required を
+//     書くと読み違える）。真偽値は引用符の無い `true` / `false` だけを真偽値として読む。
 //     項目の type（textarea / input）、description・placeholder の中身、id は見ない（reviewer が見る）。
 //   - テンプレートの name / description（選ぶときに見える説明）が type に合っているかは見ない。
 //   - GitHub が実際にフォームとして読めるか（YAML の構文の誤り）は見ない。PR の後に「New issue」の画面で確かめる。
@@ -80,19 +82,23 @@ function findFileViolations(names: string[]): string[] {
   return [...missing, ...unexpected];
 }
 
-// 行末のコメント（空白の後の `#`）と前後の空白・引用符を外す。
+// 行末のコメント（空白の後の `#`）と前後の空白を外す（引用符は残す）。
+// WHY 引用符を残す口を分ける: YAML では `"false"` は文字列、`"[feat]"` は一覧でなく 1 つの文字列なので、真偽値とフロー形式の
+//   判定は引用符を外す前の値で行う（reviewer の指摘）。
+function plain(text: string): string {
+  return text.replace(/\s+#.*$/, "").trim();
+}
+
+// plain に加えて、前後の引用符を外す（文字列の値）。
 function scalar(text: string): string {
-  return text
-    .replace(/\s+#.*$/, "")
-    .trim()
-    .replace(/^(["'])(.*)\1$/, "$2");
+  return plain(text).replace(/^(["'])(.*)\1$/, "$2");
 }
 
 // トップレベルの labels の値。無ければ undefined。
 function readLabels(yaml: string): string[] | undefined {
   const line = yaml.split(/\r?\n/).find((text) => /^labels\s*:/.test(text));
   if (line === undefined) return undefined;
-  const value = scalar(line.replace(/^labels\s*:/, ""));
+  const value = plain(line.replace(/^labels\s*:/, ""));
   const flow = /^\[(.*)\]$/.exec(value);
   const items = flow === null ? [value] : (flow[1] ?? "").split(",");
   return items.map(scalar).filter((item) => item !== "");
@@ -127,11 +133,18 @@ function bodyItems(lines: string[]): string[][] {
   return items;
 }
 
-// 項目の中で最初に現れるキーの値（無ければ undefined）。
-function firstValue(item: string[], key: string): string | undefined {
+// 行の中で最初に現れるキーの値（plain。無ければ undefined）。
+function firstValue(lines: string[], key: string): string | undefined {
   const pattern = new RegExp(`^\\s+${key}\\s*:(.*)$`);
-  const line = item.find((text) => pattern.test(text));
-  return line === undefined ? undefined : scalar(pattern.exec(line)?.[1] ?? "");
+  const line = lines.find((text) => pattern.test(text));
+  return line === undefined ? undefined : plain(pattern.exec(line)?.[1] ?? "");
+}
+
+// 項目の `validations:` の行より後の行。WHY: 公式の構文では必須の指定は validations.required で、attributes の下などに
+//   書いた required は必須にならない（reviewer の指摘）。
+function validationLines(item: string[]): string[] {
+  const start = item.findIndex((text) => /^\s+validations\s*:/.test(text));
+  return start === -1 ? [] : item.slice(start + 1);
 }
 
 function toRequired(value: string | undefined): boolean | undefined {
@@ -143,8 +156,8 @@ function toRequired(value: string | undefined): boolean | undefined {
 // body の項目の見出し（label）と必須の指定（required）を、書いた順に返す。
 function readFields(yaml: string): Field[] {
   return bodyItems(bodyLines(yaml)).map((item) => ({
-    label: firstValue(item, "label") ?? "",
-    required: toRequired(firstValue(item, "required")),
+    label: scalar(firstValue(item, "label") ?? ""),
+    required: toRequired(firstValue(validationLines(item), "required")),
   }));
 }
 
@@ -172,7 +185,7 @@ function findBlankViolations(config: string | undefined): string[] {
   const value =
     line === undefined
       ? undefined
-      : scalar(line.replace(/^blank_issues_enabled\s*:/, ""));
+      : plain(line.replace(/^blank_issues_enabled\s*:/, ""));
   if (value === "false") return [];
   return [
     `issue-template-blank: ${TEMPLATE_DIR}/${CONFIG} が blank_issues_enabled: false でない`,
@@ -335,7 +348,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And(
-      "labels が無い・空・別のラベル・2 つ以上・コメントアウト・body の下にだけあるなら違反にする",
+      "labels が無い・空・別のラベル・2 つ以上・コメントアウト・body の下にだけある・引用符で囲んだ一覧なら違反にする",
       () => {
         // given
         const cases: [string, string, string][] = [
@@ -343,6 +356,11 @@ describeFeature(feature, ({ Scenario }) => {
           ["空の一覧", "labels: []\n", ""],
           ["値が空", "labels:\n", ""],
           ["ブロック形式の一覧", "labels:\n  - feat\n", ""],
+          [
+            "引用符で囲んだ一覧（1 つの文字列）",
+            'labels: "[feat]"\n',
+            "[feat]",
+          ],
           ["別のラベル", "labels: [fix]\n", "fix"],
           ["2 つ以上", "labels: [feat, docs]\n", "feat, docs"],
           ["コメントアウト", "# labels: [feat]\n", ""],
@@ -387,7 +405,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And(
-      "項目が足りない・順が違う・見出しが違う・必須の指定が違う・必須の指定が無いなら違反にする",
+      "項目が足りない・順が違う・見出しが違う・必須の指定が違う・必須の指定が無い（validations の外・引用符の文字列を含む）なら違反にする",
       () => {
         // given
         const valid = validTemplate("feat");
@@ -427,6 +445,20 @@ describeFeature(feature, ({ Scenario }) => {
               "      label: 内容",
             ),
             "目的（必須） / 内容（必須の指定なし） / 完了条件（必須） / 前提（任意）",
+          ],
+          [
+            "required が validations の下に無い",
+            // 最初の validations（目的）を外し、required を attributes の下に置く。
+            valid.replace(
+              "    validations:\n      required: true",
+              "      required: true",
+            ),
+            "目的（必須の指定なし） / 内容（必須） / 完了条件（必須） / 前提（任意）",
+          ],
+          [
+            "required が引用符の文字列",
+            valid.replace("required: true", 'required: "true"'),
+            "目的（必須の指定なし） / 内容（必須） / 完了条件（必須） / 前提（任意）",
           ],
           ["body が無い", "name: x\nlabels: [feat]\n", ""],
           [
@@ -477,7 +509,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And(
-      "config.yml が無い・true・指定が無い・コメントアウトなら違反にする",
+      "config.yml が無い・true・指定が無い・コメントアウト・引用符の文字列なら違反にする",
       () => {
         // given
         const cases: [string, string | undefined][] = [
@@ -485,6 +517,7 @@ describeFeature(feature, ({ Scenario }) => {
           ["true", "blank_issues_enabled: true\n"],
           ["指定が無い", "contact_links: []\n"],
           ["コメントアウト", "# blank_issues_enabled: false\n"],
+          ["引用符の文字列", 'blank_issues_enabled: "false"\n'],
         ];
 
         // when
