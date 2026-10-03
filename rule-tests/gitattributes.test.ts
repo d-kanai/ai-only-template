@@ -11,7 +11,7 @@ import { casesByName } from "./case-table";
 // PR の差分で最初から畳むファイル（ルート の .gitattributes の linguist-generated）を検査するテスト（Issue #411）。
 // WHY 畳む: GitHub は linguist-generated のファイルを PR の「Files changed」で最初から畳む（"hidden by default in diffs"。
 //   https://docs.github.com/en/repositories/working-with-files/managing-files/customizing-how-changed-files-appear-on-github）。
-//   lockfile や生成物の大きな差分が、人が読むべき変更（ソース・テスト・.feature の仕様）を埋めないようにする。
+//   lockfile・生成物・文書の大きな差分が、人が読むべき変更（ソース・テスト・.feature の仕様）を埋めないようにする。
 //   畳んだファイルも「Load diff」で開けるので、見えなくなるわけではない。
 // WHY 判定（shouldCollapse）を .gitattributes と別に持つ: .gitattributes は glob の一覧で、どのファイルに効くかは git が決める。
 //   ここで「畳むファイル」を仕様として書き、`git check-attr` の結果と全ファイルで比べることで、
@@ -36,12 +36,8 @@ const COLLAPSED: readonly { pattern: RegExp; why: string }[] = [
     why: "drizzle-kit generate が書くスナップショットと journal。読むのは同じディレクトリの SQL（スキル db-migration）",
   },
   {
-    pattern: /^docs\/work-logs\//,
-    why: "作業ログ。PR ごとに CI が差分を必須にしていて毎回載るが、PR の「実装経緯」から見出しで辿れる",
-  },
-  {
-    pattern: /^docs\/diagrams\/[^/]+\.(mmd|png)$/,
-    why: "スキル infra-diagram が Terraform と deploy.yml から生成する構成図（.mmd と .png）。README.md は図の説明で人が直すので畳まない",
+    pattern: /^docs\//,
+    why: "docs/ の下の文書（ADR・作業ログ・構成図）。PR では読まず、必要なときに開く（daiki の判断 2026-10-03）",
   },
 ];
 
@@ -103,7 +99,7 @@ const feature = await loadFeature("./gitattributes.feature");
 describeFeature(feature, ({ Scenario }) => {
   Scenario("畳むファイルの判定", ({ And }) => {
     And(
-      "lockfile・drizzle-kit の生成物（meta）・作業ログ・構成図は畳む",
+      "lockfile・drizzle-kit の生成物（meta）・docs の下の文書（ADR・作業ログ・構成図）は畳む",
       () => {
         // given
         const cases: [string, string][] = [
@@ -118,6 +114,9 @@ describeFeature(feature, ({ Scenario }) => {
             "apps/backend/shared/drizzle/migrations/meta/_journal.json",
           ],
           ["作業ログ", "docs/work-logs/2026-10-03.md"],
+          ["ADR", "docs/adr/quality/20261003-dependency-license-allow-list.md"],
+          ["ADR の一覧", "docs/adr/README.md"],
+          ["構成図の説明", "docs/diagrams/README.md"],
           ["構成図の mermaid", "docs/diagrams/system.mmd"],
           ["構成図の画像", "docs/diagrams/system.png"],
         ];
@@ -131,7 +130,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And(
-      "手で書くファイル（ソース・テスト・マイグレーションの SQL・ADR・構成図の説明・設定）は畳まない",
+      "手で書くファイル（ソース・テスト・.feature・マイグレーションの SQL・指示ファイル・設定）は畳まない",
       () => {
         // given
         const cases: [string, string][] = [
@@ -142,12 +141,14 @@ describeFeature(feature, ({ Scenario }) => {
           ["ソース", "apps/backend/shared/drizzle/writer.ts"],
           ["ルール検査テスト", "rule-tests/gitattributes.test.ts"],
           ["仕様", "rule-tests/gitattributes.feature"],
-          ["ADR", "docs/adr/README.md"],
-          ["構成図の説明（人が直す）", "docs/diagrams/README.md"],
+          ["指示ファイル", "CLAUDE.md"],
+          ["ルール", ".claude/rules/quality/testing.md"],
+          ["ルートの README", "README.md"],
+          ["E2E の仕様", "apps/e2e/spec/api-error.feature"],
           ["package.json", "package.json"],
           ["Terraform のソース", "infra/envs/stg/main.tf"],
           ["名前に lock を含む別のファイル", "pnpm-lock.yaml.md"],
-          ["docs の直下", "docs/work-logs.md"],
+          ["名前が docs で始まる別のディレクトリ", "docs-old/a.md"],
           ["meta の名前の別のディレクトリ", "apps/backend/meta/x.json"],
         ];
 

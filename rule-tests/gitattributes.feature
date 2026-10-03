@@ -2,8 +2,8 @@
 # 規則の WHY と限界は gitattributes.test.ts の冒頭。
 Feature: PR で畳むファイル
   Scenario: 畳むファイルの判定
-    * lockfile・drizzle-kit の生成物（meta）・作業ログ・構成図は畳む
-    * 手で書くファイル（ソース・テスト・マイグレーションの SQL・ADR・構成図の説明・設定）は畳まない
+    * lockfile・drizzle-kit の生成物（meta）・docs の下の文書（ADR・作業ログ・構成図）は畳む
+    * 手で書くファイル（ソース・テスト・.feature・マイグレーションの SQL・指示ファイル・設定）は畳まない
   Scenario: git の属性の読み方（fixture）
     * linguist-generated を付けた・true にしたファイルだけを畳むと読み、外した・false・指定なしは畳まないと読む
   Scenario: 実ファイル
