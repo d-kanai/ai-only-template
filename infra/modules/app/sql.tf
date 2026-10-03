@@ -86,6 +86,9 @@ resource "google_sql_database_instance" "main" {
       #   （https://docs.cloud.google.com/looker/docs/studio/connect-to-postgresql 「doesn't use the Cloud SQL proxy」）。
       #   Cloud Run の組み込み接続と Metabase の Auth Proxy も公開 IP の経路を使う（どちらも IAM で認可し、TLS で暗号化される）。
       #   Private IP（VPC）は Data Studio が「段階的に展開中」で、VPC コネクタ / Direct VPC egress の設定と費用が増えるので使わない。
+      # 次の行の trivy:ignore: Trivy の GCP-0017（Cloud SQL を公開 IP に出さない）を、上の理由で意図した設定としてこの行だけ外す
+      #   （TLS の強制と authorized_networks で絞っている。Issue #362。書き方は .claude/rules/tooling/security-scan.md）。
+      #trivy:ignore:GCP-0017
       ipv4_enabled = true
       # 暗号化されていない接続を拒否する（クライアント証明書は求めない）。WHY: 公開 IP に直接つなぐ Data Studio の経路を
       #   平文にしない。Data Studio は TLS 1.2 に対応している（上の URL）。Cloud Run の組み込み接続と Auth Proxy は常に暗号化される。
@@ -95,6 +98,8 @@ resource "google_sql_database_instance" "main" {
         # Data Studio（旧 Looker Studio）のサーバーの IPv4 の範囲（上の URL の「IP addresses」。データ所在地を有効にした
         #   Data Studio Pro は 142.251.56.0/24 に変わる）。
         name  = "data-studio"
+        # 次の行の trivy:ignore: Data Studio の範囲を許すこと自体が GCP-0017 に当たる。ipv4_enabled の行と同じ理由で外す。
+        #trivy:ignore:GCP-0017
         value = "142.251.74.0/23"
       }
     }

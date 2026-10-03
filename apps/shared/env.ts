@@ -64,6 +64,10 @@ export type ToolEnv = {
   // WHY 任意でも不正な値はエラーにする: 0 や範囲外を黙って既定値にすると、worktree ごとに分けたつもりのポートが
   //   3100 に戻り、reuseExistingServer で別の worktree のサーバを検証してしまう（.claude/rules/tooling/worktree.md）。
   E2E_PORT: number | undefined;
+  // Next が起動のしかたで決める実行のモード（next dev は "development"、next build / next start は "production"）。空なら未設定と同じ。
+  //   画面の Content-Security-Policy に、開発のときだけ 'unsafe-eval' を足すのに使う（apps/frontend_customer/proxy.ts。Issue #106）。
+  // WHY Env（必須）でなくここ: 値を決めるのはツール（Next）で、.env に書く設定ではない（.env に書くと next dev でも production になる）。
+  NODE_ENV: string | undefined;
 };
 
 // 必須の変数の検証。欠けていれば "未設定"、値が不正なら理由を返し、正しければ値を返す。
@@ -133,6 +137,7 @@ export class EnvReader {
       STRYKER_MUTATOR_WORKER:
         EnvReader.nonEmpty(source.STRYKER_MUTATOR_WORKER) !== undefined,
       E2E_PORT: e2ePort,
+      NODE_ENV: EnvReader.nonEmpty(source.NODE_ENV),
     };
   }
 

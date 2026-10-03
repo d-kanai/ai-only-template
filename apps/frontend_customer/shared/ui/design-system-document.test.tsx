@@ -31,3 +31,16 @@ test("<head> に置くスクリプトは、配色を light に固定する", () 
     "document.documentElement.setAttribute(\"data-mantine-color-scheme\", 'light');",
   );
 });
+
+// Issue #106: 画面の CSP（script-src の nonce）でインラインのスクリプトが止まらないよう、proxy.ts が作った nonce を付ける。
+test("<head> に置くスクリプトには、渡した nonce を付ける", () => {
+  // given
+  const nonce = "bm9uY2U=";
+
+  // when
+  const { container } = render(<DesignSystemHead nonce={nonce} />);
+
+  // then
+  const script = container.querySelector("script");
+  expect(script?.nonce).toBe(nonce);
+});

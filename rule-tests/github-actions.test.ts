@@ -14,6 +14,15 @@ import { join } from "node:path";
 import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { afterAll, beforeAll, expect } from "vitest";
 import { casesByName } from "./case-table";
+import {
+  indentOf,
+  type Job,
+  jobProperties,
+  readJobs,
+  readSteps,
+  stepsBlock,
+  topLevelBlock,
+} from "./workflow-yaml";
 
 // GitHub Actions のワークフロー（.github/workflows/*.yml / *.yaml）の決まりを検査するルール検査テスト（Issue #351）。
 //   規則・更新の手順は .claude/rules/tooling/github-actions.md。
@@ -34,6 +43,9 @@ import { casesByName } from "./case-table";
 //       （Claude Code の GitHub Actions のドキュメント https://code.claude.com/docs/en/github-actions もコスト管理として
 //       workflow の timeout を挙げる）。step の timeout-minutes は job 全体を止めないので数えない。
 //     WHY 正の整数の文字だけ: 式（`${{ }}`）は値を静的に確かめられず、0 はすぐ失敗する設定で意図した上限にならない。
+//   - 依存の脆弱性の検査（Issue #112。違反の一覧ではなく、ci.yml を真偽で判定する）: auditsDependencies は、ci.yml の ci job が
+//     `pnpm audit --audit-level high` を if・continue-on-error なしで、PR と push の両方で実行するか。WHY と限界は関数のコメント、
+//     決定は ADR docs/adr/quality/20261003-pnpm-audit-in-ci.md。
 // 限界（字句で読む。YAML のパーサを依存に足さない。rule-tests/typecheck.test.ts / work-logs-check.test.ts と同じ理由）:
 //   - uses は「行頭（`- ` の後を含む）の `uses:` キー」として行ごとに読む。`run: |` のブロックの中に `uses:` で始まる行があると
 //     uses として読む（違反を多く出す方向で、見逃しにはならない）。フロー形式（`{ uses: x }`）は読まない（今は使っていない）。
@@ -80,64 +92,6 @@ function readUses(yaml: string): Uses[] {
   });
 }
 
-type Job = { name: string; timeout: string | undefined };
-
-const indentOf = (text: string) => text.length - text.trimStart().length;
-const isBlankOrComment = (text: string) => /^\s*(?:#.*)?$/.test(text);
-
-// トップレベルの `jobs:` の下の行（コメント・空行を除く。次のトップレベルのキーの手前まで）。
-function jobsBlock(yaml: string): string[] {
-  const block: string[] = [];
-  let inJobs = false;
-  for (const text of yaml.split(/\r?\n/)) {
-    if (isBlankOrComment(text)) continue;
-    if (indentOf(text) === 0) {
-      inJobs = /^jobs\s*:\s*(?:#.*)?$/.test(text);
-    } else if (inJobs) {
-      block.push(text);
-    }
-  }
-  return block;
-}
-
-// job の見出しの後の行（job の中身）から、job の直下のキーの timeout-minutes の値を返す。直下のキーのインデントは中身の
-//   最初の行のインデント（steps の下の step の timeout-minutes を job のものと取り違えないため）。
-function jobTimeout(body: string[]): string | undefined {
-  const propertyIndent = body[0] === undefined ? 0 : indentOf(body[0]);
-  return body
-    .filter((text) => indentOf(text) === propertyIndent)
-    .map(
-      (text) => /^\s*timeout-minutes\s*:\s*(.*?)\s*(?:#.*)?$/.exec(text)?.[1],
-    )
-    .find((value) => value !== undefined);
-}
-
-// トップレベルの `jobs:` の下の job と、job の直下の timeout-minutes の値（無ければ undefined）を返す。
-//   job の見出しは、jobs の下の最初の行と同じインデントのすべての行。名前は最初の `:` の手前（前後の引用符を外す）。
-//   WHY 同じインデントの行をすべて見出しにする: `<名前>:` の形に限ると、引用符の名前（`"b":`）・アンカー（`b: &x`）・
-//     フロー形式（`b: { ... }`）の行が前の job の中身に混ざり、timeout の無い job を見逃した（reviewer の実測）。
-//     見出しとして読めば、中身を読めないフロー形式は timeout 無しの違反になる（見逃しを余計な検出に倒す）。
-function readJobs(yaml: string): Job[] {
-  const block = jobsBlock(yaml);
-  const jobIndent = block[0] === undefined ? 0 : indentOf(block[0]);
-  const headings = block.flatMap((text, index) =>
-    indentOf(text) === jobIndent ? [{ name: jobName(text), index }] : [],
-  );
-  return headings.map(({ name, index }, position) => ({
-    name,
-    timeout: jobTimeout(
-      block.slice(index + 1, headings[position + 1]?.index ?? block.length),
-    ),
-  }));
-}
-
-function jobName(heading: string): string {
-  return heading
-    .trim()
-    .replace(/\s*:.*$/, "")
-    .replace(/^(["'])(.*)\1$/, "$2");
-}
-
 function hasJobTimeout(job: Job): boolean {
   return job.timeout !== undefined && /^[1-9]\d*$/.test(job.timeout);
 }
@@ -157,6 +111,50 @@ function findViolations(path: string, yaml: string): string[] {
           `job-timeout: ${path} の job ${job.name} に timeout-minutes（正の整数）が無い`,
       ),
   ];
+}
+
+// ---- 依存の脆弱性の検査（Issue #112。WHY と値の決め方は .claude/rules/tooling/github-actions.md と
+//   ADR docs/adr/quality/20261003-pnpm-audit-in-ci.md） ----
+
+// トップレベルの `on:`（引用符の `"on":` も）の直下のイベント名。ワークフローが PR と main への push の両方で動くかを見る。
+//   限界: `on: [push, pull_request]` や `on: push` の 1 行の書き方は読まない（拒否になる。今のワークフローはブロックで書く）。
+//   push の branches が main を含むかは見ない（ci.yml と同じ形で書く。reviewer が見る）。
+function readEvents(yaml: string): string[] {
+  const block = topLevelBlock(yaml, `(["']?)on\\1`);
+  const eventIndent = block[0] === undefined ? 0 : indentOf(block[0]);
+  return block
+    .filter((text) => indentOf(text) === eventIndent)
+    .map((text) => text.trim().replace(/\s*:.*$/, ""));
+}
+
+// PR と push の両方で動き、`paths` / `paths-ignore` で変更のファイルによって飛ばされないか。
+//   WHY paths を拒否する: 飛ばされた実行は required status check を満たし、依存を変えた PR でも audit が動かないことがある（reviewer の指摘）。
+const runsOnPullRequestAndPush = (yaml: string) =>
+  ["pull_request", "push"].every((event) => readEvents(yaml).includes(event)) &&
+  !topLevelBlock(yaml, `(["']?)on\\1`).some((text) =>
+    /^\s*paths(?:-ignore)?\s*:/.test(text),
+  );
+
+const AUDIT_COMMAND = "pnpm audit --audit-level high";
+
+// ci.yml の ci job（required status check）が、pnpm audit を high 以上で失敗する形で、PR と main への push の両方で実行するか。
+//   WHY ci job: Ruleset protect-main の required status check は ci だけで、別の job に置くと赤でもマージできる。
+//   WHY if と continue-on-error を拒否する: 飛ばす・無視すると、high の脆弱性があっても緑になる。job の if も拒否する（skipped の
+//     job は required status check を満たす。reviewer の指摘）。job の continue-on-error も拒否する（job が失敗してもワークフローの
+//     実行を失敗にしない。Codex の指摘、https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idcontinue-on-error ）。
+//   WHY コマンドを完全一致で見る: `|| true` や `; exit 0` を足すと失敗が打ち消され、`--audit-level critical` では high を見逃す。
+function auditsDependencies(yaml: string): boolean {
+  const ci = readJobs(yaml).find((job) => job.name === "ci");
+  if (ci === undefined || !runsOnPullRequestAndPush(yaml)) return false;
+  const job = jobProperties(ci.body);
+  if ("if" in job || (job["continue-on-error"] ?? "false") !== "false")
+    return false;
+  return readSteps(stepsBlock(ci.body)).some(
+    (step) =>
+      step.run === AUDIT_COMMAND &&
+      !("if" in step) &&
+      (step["continue-on-error"] ?? "false") === "false",
+  );
 }
 
 // root の .github/workflows の直下の .yml / .yaml（リポジトリ相対。名前の順）。
@@ -403,7 +401,14 @@ describeFeature(feature, ({ Scenario }) => {
       const result = readJobs(yaml);
 
       // then
-      expect(result).toEqual([{ name: "build", timeout: "30" }]);
+      // body（job の中身）に jobs の外の concurrency が混ざらないことも見る（steps の検査が body を読むため）。
+      expect(result).toEqual([
+        {
+          name: "build",
+          timeout: "30",
+          body: ["    timeout-minutes: 30", "    env:", "      nested: x"],
+        },
+      ]);
     });
   });
 
@@ -530,5 +535,253 @@ describeFeature(feature, ({ Scenario }) => {
         expect(result).toEqual([]);
       },
     );
+  });
+
+  Scenario(
+    "依存の脆弱性の検査（auditsDependencies。Issue #112）",
+    ({ And }) => {
+      const triggers = [
+        "on:",
+        "  pull_request:",
+        "    branches: [main]",
+        "  push:",
+        "    branches: [main]",
+      ];
+      const ciWith = (...steps: string[]) =>
+        [
+          ...triggers,
+          "jobs:",
+          "  ci:",
+          "    timeout-minutes: 30",
+          "    steps:",
+          "      - run: pnpm install --frozen-lockfile",
+          ...steps,
+        ].join("\n");
+
+      And(
+        "ci.yml の ci job が pnpm audit --audit-level high を、PR と main への push の両方で失敗で止まる形で実行するワークフローは許可する",
+        () => {
+          // given
+          const cases: [string, string][] = [
+            ["run だけのステップ", ciWith(`      - run: ${AUDIT_COMMAND}`)],
+            [
+              "name と行末のコメントと continue-on-error: false",
+              ciWith(
+                "      - name: Audit dependencies",
+                `        run: ${AUDIT_COMMAND} # high 以上で失敗`,
+                "        continue-on-error: false",
+              ),
+            ],
+            [
+              "with と env を持つ step の後の audit",
+              ciWith(
+                "      - uses: some/action@v1",
+                "        with:",
+                "          run: echo",
+                "        env:",
+                "          A: b",
+                `      - run: ${AUDIT_COMMAND}`,
+                "        env:",
+                "          continue-on-error: true",
+              ),
+            ],
+            [
+              "steps と同じインデントの - と、job の continue-on-error: false",
+              [
+                "on:",
+                "  pull_request:",
+                "  push:",
+                "jobs:",
+                "  ci:",
+                "    continue-on-error: false",
+                "    steps:",
+                "    - run: pnpm install --frozen-lockfile",
+                `    - run: ${AUDIT_COMMAND}`,
+                "    timeout-minutes: 30",
+              ].join("\n"),
+            ],
+            [
+              "引用符の on と、ci の前に別の job",
+              [
+                '"on":',
+                "  push:",
+                "  pull_request:",
+                "jobs:",
+                "  other:",
+                "    steps:",
+                "      - run: echo",
+                "  ci:",
+                "    steps:",
+                `      - run: ${AUDIT_COMMAND}`,
+              ].join("\n"),
+            ],
+          ];
+
+          // when
+          const result = casesByName(cases, ([, yaml]) =>
+            auditsDependencies(yaml),
+          );
+
+          // then
+          expect(result).toEqual(casesByName(cases, () => true));
+        },
+      );
+
+      And(
+        "pnpm audit が無い・しきい値が high でない・失敗を打ち消す・if で飛ばす・continue-on-error で無視するワークフローは拒否する",
+        () => {
+          // given
+          const cases: [string, string][] = [
+            ["pnpm audit が無い", ciWith("      - run: pnpm lint")],
+            ["コメントアウト", ciWith(`      # - run: ${AUDIT_COMMAND}`)],
+            ["しきい値が無い", ciWith("      - run: pnpm audit")],
+            [
+              "しきい値が critical",
+              ciWith("      - run: pnpm audit --audit-level critical"),
+            ],
+            ["|| true", ciWith(`      - run: ${AUDIT_COMMAND} || true`)],
+            ["; exit 0", ciWith(`      - run: ${AUDIT_COMMAND}; exit 0`)],
+            [
+              "registry のエラーを無視",
+              ciWith(`      - run: ${AUDIT_COMMAND} --ignore-registry-errors`),
+            ],
+            [
+              "複数行の run",
+              ciWith("      - run: |", `          ${AUDIT_COMMAND}`),
+            ],
+            [
+              "if で PR のときだけ",
+              ciWith(
+                "      - if: github.event_name == 'pull_request'",
+                `        run: ${AUDIT_COMMAND}`,
+              ),
+            ],
+            [
+              "continue-on-error: true",
+              ciWith(
+                `      - run: ${AUDIT_COMMAND}`,
+                "        continue-on-error: true",
+              ),
+            ],
+            [
+              "ci でない job",
+              [
+                ...triggers,
+                "jobs:",
+                "  audit:",
+                "    steps:",
+                `      - run: ${AUDIT_COMMAND}`,
+              ].join("\n"),
+            ],
+            [
+              "push で動かない",
+              ciWith(`      - run: ${AUDIT_COMMAND}`).replace(
+                "  push:\n    branches: [main]\n",
+                "",
+              ),
+            ],
+            [
+              "PR で動かない",
+              ciWith(`      - run: ${AUDIT_COMMAND}`).replace(
+                "  pull_request:\n",
+                "  workflow_dispatch:\n",
+              ),
+            ],
+            [
+              "継続行の || true",
+              ciWith(`      - run: ${AUDIT_COMMAND}`, "          || true"),
+            ],
+            [
+              "別の step の with の下の run",
+              ciWith(
+                "      - uses: some/action@v1",
+                "        with:",
+                `          run: ${AUDIT_COMMAND}`,
+              ),
+            ],
+            [
+              "env の下の continue-on-error: false で上書き",
+              ciWith(
+                `      - run: ${AUDIT_COMMAND}`,
+                "        continue-on-error: true",
+                "        env:",
+                "          continue-on-error: false",
+              ),
+            ],
+            [
+              "job の if",
+              ciWith(`      - run: ${AUDIT_COMMAND}`).replace(
+                "    timeout-minutes: 30\n",
+                "    if: false\n    timeout-minutes: 30\n",
+              ),
+            ],
+            [
+              "PR の paths",
+              ciWith(`      - run: ${AUDIT_COMMAND}`).replace(
+                "  pull_request:\n    branches: [main]\n",
+                "  pull_request:\n    branches: [main]\n    paths: ['apps/**']\n",
+              ),
+            ],
+            [
+              "push の paths-ignore",
+              ciWith(`      - run: ${AUDIT_COMMAND}`).replace(
+                "  push:\n    branches: [main]\n",
+                "  push:\n    branches: [main]\n    paths-ignore: ['docs/**']\n",
+              ),
+            ],
+            [
+              "push が入れ子のキーにだけある",
+              ciWith(`      - run: ${AUDIT_COMMAND}`).replace(
+                "  push:\n    branches: [main]\n",
+                "  workflow_dispatch:\n    push:\n",
+              ),
+            ],
+            [
+              "job の continue-on-error: true",
+              ciWith(`      - run: ${AUDIT_COMMAND}`).replace(
+                "    timeout-minutes: 30\n",
+                "    continue-on-error: true\n    timeout-minutes: 30\n",
+              ),
+            ],
+            [
+              "matrix の include の要素の run",
+              ciWith("      - run: pnpm lint").replace(
+                "    timeout-minutes: 30\n",
+                `    timeout-minutes: 30\n    strategy:\n      matrix:\n        include:\n          - run: ${AUDIT_COMMAND}\n`,
+              ),
+            ],
+            [
+              "steps の後の別のキーの下の run",
+              `${ciWith("      - run: pnpm lint")}\n    services:\n      - run: ${AUDIT_COMMAND}`,
+            ],
+            ["空文字", ""],
+          ];
+
+          // when
+          const result = casesByName(cases, ([, yaml]) =>
+            auditsDependencies(yaml),
+          );
+
+          // then
+          expect(result).toEqual(casesByName(cases, () => false));
+        },
+      );
+    },
+  );
+
+  Scenario("リポジトリの依存の脆弱性の検査（Issue #112）", ({ And }) => {
+    And("リポジトリの ci.yml は pnpm audit を上の形で実行する", () => {
+      // given
+      const yaml = readFileSync(
+        join(repoRoot, WORKFLOWS_DIR, "ci.yml"),
+        "utf8",
+      );
+
+      // when
+      const result = auditsDependencies(yaml);
+
+      // then
+      expect(result).toBe(true);
+    });
   });
 });

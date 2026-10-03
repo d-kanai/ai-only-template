@@ -37,6 +37,7 @@ pnpm format   # biome format --write .                  … format だけを適�
 ## pre-commit（Lefthook）
 - 仕組み: `pnpm install` すると lefthook パッケージの postinstall が `lefthook install -f` を実行し、`.git/hooks/pre-commit` を Lefthook のスクリプトに置き換える（`pnpm-workspace.yaml` の `allowBuilds` で `lefthook: true` にして許可している。postinstall の中身とその判断は同ファイルのコメント）。以後 `git commit` のたびに `lefthook.yml` の pre-commit が実行される。
 - 検査内容: ステージ済みファイルだけを `pnpm exec biome check --error-on-warnings ...` で検査し、違反があればコミットを中止する。自動修正はしない（`pnpm check` で直してステージし直す）。
+- pre-commit にはセキュリティの検査（gitleaks など）、pre-push には Semgrep もある。Docker が要る。中身と止まったときの抑え方は `.claude/rules/tooling/security-scan.md`。
 - 環境変数 `CI` が有効（`"0"` / `"false"` 以外）なときは postinstall がフックを入れない（lefthook@2.1.12 の `postinstall.js` で確認）。CI ではフックは不要で、`pnpm lint` を直接実行する。
 - フックが入っているかの確認: `git rev-parse --git-path hooks` の場所にある `pre-commit` が Lefthook のスクリプト（`call_lefthook run "pre-commit"` を含む）になっていること。入っていなければ `pnpm exec lefthook install` を実行する。
 - git worktree の注意: フックのディレクトリ（`.git/hooks`）はメインの作業ツリーと全 worktree で共有される。worktree で `pnpm install` や `lefthook run`（設定が変わっていると自動で `lefthook install` する）を実行すると、共有のフックが書き換わる。WorktreeCreate フック（`scripts/hooks/worktree-create.sh`）と SubagentStop フック（`scripts/hooks/subagent-stop.sh`）が共有のフックを修復する（LEARNINGS.md）。
