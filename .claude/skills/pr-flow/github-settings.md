@@ -19,6 +19,7 @@ pr-flow の手順から参照する。設定を変えたらこのファイルを
 
 ## Ruleset `protect-main`（main の保護）
 - https://github.com/d-kanai/ai-only-template/rules/24101231 。main への直接 push を禁止し、`required_status_checks` に `ci` を入れている（CI が赤ではマージできない）。
+- `pull_request` の `required_review_thread_resolution` は `true`（Require conversation resolution before merging。2026-10-03 に daiki が ON にし、API の GET で確認）。未解決のレビューのスレッドが残る PR はマージできない。WHY: rule-review の指摘（`pr-flow` の手順 8）を処理せずにマージするのを機械で止める（Issue #341 の続き）。承認数（`required_approving_review_count`）は 0 のまま。PR の作成者が daiki のアカウントで、自分の PR は承認できないため、1 以上にするとすべての PR が止まる。
 - `strict_required_status_checks_policy` は `false`（PR ブランチが main の最新を取り込んでいなくてもマージできる）。理由: 有効にすると main が進むたびに取り込み直して CI を待つ必要があり、AI が並行して複数 PR を進める運用で待ち時間が増える。main との競合が無いことはマージ条件で別に確かめる。
 - Ruleset の変更はユーザーが行う。UI（上の URL → Edit → 「Require status checks to pass」）か、手元の `gh api -X PUT repos/d-kanai/ai-only-template/rulesets/24101231 --input <json>`（rules は PUT で丸ごと置き換わるので、先に GET で現在の rules を取り、変更した配列を送る）。
 - クラウドセッションからは、`GH_TOKEN` を付けた `curl` で GET は 200 で読めるが、PUT はプロキシが 403「Write access to this GitHub API path is not permitted through this proxy」で拒否する（2026-09-28 実測。GitHub MCP ツールにも Ruleset の操作は無い）。

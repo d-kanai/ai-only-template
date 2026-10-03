@@ -49,7 +49,7 @@ main は常にマージ可能に保つ。main への直接コミット・push �
      | python3 -c 'import sys,json; rs=[r for r in json.load(sys.stdin)["check_runs"] if r["name"]=="ci"]; print(rs[0]["status"], rs[0]["conclusion"]) if rs else print("no ci yet")'
    ```
    - 赤なら原因をこのブランチで直して push する。テストの skip や無効化で緑にしない（Biome の `noSkippedTests` でも止まる）。
-10. **マージ条件（すべて満たす）**: (1) reviewer の検証で問題なし、(2) rule-review の結果が PR にあり、🔴 のスレッドがすべて resolve 済み（手順 8）、(3) CI の `ci` ジョブが緑（`protect-main` の required status check。赤ではマージできない）、(4) main との競合がない。
+10. **マージ条件（すべて満たす）**: (1) reviewer の検証で問題なし、(2) rule-review の結果が PR にあり、レビューのスレッドがすべて resolve 済み（手順 8。未解決のスレッドは Ruleset の conversation resolution が止める。`github-settings.md`）、(3) CI の `ci` ジョブが緑（`protect-main` の required status check。赤ではマージできない）、(4) main との競合がない。
    - `ci` の中身: Postgres の起動と接続確認 → `pnpm db:migrate` → `pnpm lint` → `pnpm typecheck` → `pnpm test` → `pnpm build` → `pnpm test:e2e`（`.github/workflows/ci.yml`）。
    - main の最新を取り込んでいなくてもマージできる設定（strict は false）なので、競合が無いことは自分で確かめる。
 11. **マージ**: merge commit で行う。squash / rebase は使わない。`gh pr merge <PR番号> --merge`。マージはオーケストレータが行う（人間の承認は不要）。サブエージェントは PR 作成・マージをしない。
