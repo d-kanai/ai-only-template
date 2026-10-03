@@ -58,7 +58,7 @@
 | `docs/adr/` | 読み込まれない（必要なら自分で読む） | ADR（決定の記録。1 決定 1 ファイル、不変。命名 `<分類>/yyyymmdd-<topic>.md`、分類は `architecture`（構造・境界・設計パターン）/ `tech-stack`（言語・ツールの選定）/ `quality`（品質ゲート・テスト方針）/ `workflow`（開発プロセス・環境・エージェント運用）、形式は `rule-tests/instructions.test.ts` が検査する。一覧は `docs/adr/README.md`） |
 | `docs/work-logs/` | 読み込まれない | 日ごとの作業ログ |
 | `docs/diagrams/` | 読み込まれない | Terraform と GitHub Actions から起こした構成図（`.mmd` と `.png`。作り直しはスキル `infra-diagram`） |
-| `rule-tests/` | 読み込まれない | ルール検査テスト 27 本（`api-journey` / `api-request` / `api-spec` / `architecture` / `design-system` / `domain-spec` / `domain-validation` / `e2e-feature` / `github-actions` / `instructions` / `issue-template` / `lint` / `migration` / `package` / `persistence` / `pnpm-workspace` / `rule-test-feature` / `rules-table` / `schema` / `screen-outline` / `settings` / `test-doubles` / `test-phases` / `test-support` / `typecheck` / `use-case` / `work-logs-check`。それぞれ仕様の `*.feature` と step の実装の `*.test.ts` の対。Issue #86、`schema` は Issue #145、`api-request` は Issue #175、`domain-validation` / `persistence` / `test-doubles` / `use-case` は Issue #177、`test-support` は Issue #181、`api-journey` は Issue #187、`api-spec` は Issue #219、`migration` は Issue #194（#247 で backfill の規則を外し、Issue #192 の `public` の修飾の検査だけが残る）、`test-phases` は Issue #273、`e2e-feature` は Issue #279、`rule-test-feature` と .feature の対は Issue #282、`design-system` と `screen-outline` は Issue #292、`domain-spec` は Issue #318、`rules-table` は Issue #322、`github-actions` は Issue #351、`issue-template` は Issue #113。本数と一覧は `instructions` が検査する） |
+| `rule-tests/` | 読み込まれない | ルール検査テスト 29 本（`api-journey` / `api-request` / `api-spec` / `architecture` / `design-system` / `domain-spec` / `domain-validation` / `e2e-feature` / `github-actions` / `instructions` / `issue-template` / `licenses` / `lint` / `migration` / `package` / `persistence` / `pnpm-workspace` / `rule-test-feature` / `rules-table` / `schema` / `screen-outline` / `security-scan` / `settings` / `test-doubles` / `test-phases` / `test-support` / `typecheck` / `use-case` / `work-logs-check`。それぞれ仕様の `*.feature` と step の実装の `*.test.ts` の対。Issue #86、`schema` は Issue #145、`api-request` は Issue #175、`domain-validation` / `persistence` / `test-doubles` / `use-case` は Issue #177、`test-support` は Issue #181、`api-journey` は Issue #187、`api-spec` は Issue #219、`migration` は Issue #194（#247 で backfill の規則を外し、Issue #192 の `public` の修飾の検査だけが残る）、`test-phases` は Issue #273、`e2e-feature` は Issue #279、`rule-test-feature` と .feature の対は Issue #282、`design-system` と `screen-outline` は Issue #292、`domain-spec` は Issue #318、`rules-table` は Issue #322、`github-actions` は Issue #351、`issue-template` は Issue #113、`licenses` は Issue #368、`security-scan` は Issue #362。本数と一覧は `instructions` が検査する） |
 
 ### .claude/rules（パス依存。分類のディレクトリの下）
 | ファイル | 触ったときに読まれる主なファイル | 内容 |
@@ -74,7 +74,8 @@
 | `tooling/git-guard.md` | `.claude/settings.json`・`lefthook.yml`・`scripts/hooks/guard-git*` など | git 操作の権限・フック・commit-msg |
 | `tooling/work-log-hooks.md` | `scripts/hooks/require-work-log*`・`check-work-logs-diff*`・`ci.yml` など | 作業ログの強制（Stop フック・CI） |
 | `tooling/worktree.md` | worktree のフックと生成規則 | worktree ごとの `.env`・DB・ポート |
-| `tooling/github-actions.md` | `.github/workflows/**`・`rule-tests/github-actions.test.ts` | action の commit SHA での固定、job の `timeout-minutes`、SHA の引き方 |
+| `tooling/github-actions.md` | `.github/workflows/**`・`rule-tests/github-actions.test.ts` | action の commit SHA での固定、job の `timeout-minutes`、依存の脆弱性の検査（`pnpm audit`）、SHA の引き方 |
+| `tooling/security-scan.md` | `scripts/security/**`・`lefthook.yml`・`ci.yml`・`deploy.yml`・Dockerfile・`infra/**/*.tf` | セキュリティの検査ツール 6 つ（どこで何を見るか）、誤検知の抑え方、版の上げ方 |
 | `code/shared.md` | `apps/shared/**` | frontend と backend で共通の基盤（env / logger）だけを置く、exports、`@repo/shared/...` の書き方 |
 
 ### スキル（手順。`/<name>` でも呼べる）
@@ -89,7 +90,8 @@
 - `infra-diagram`: Terraform（`infra/`）と GitHub Actions（`deploy.yml`）から構成図を起こし、`docs/diagrams/` の `.mmd` と `.png` を一括で最新にする。
 
 ### 機械的な強制（原則 7）
-- git: PreToolUse フック `scripts/hooks/guard-git.sh`（サブエージェントの commit / push / PR、main への commit / push、force push、`--no-verify` を拒否）、lefthook の pre-commit（Biome）と commit-msg（形式）。
+- git: PreToolUse フック `scripts/hooks/guard-git.sh`（サブエージェントの commit / push / PR、main への commit / push、force push、`--no-verify` を拒否）、lefthook の pre-commit（Biome とセキュリティの検査）・pre-push（Semgrep）と commit-msg（形式）。
+- セキュリティ: `scripts/security/scan.sh`（gitleaks・actionlint・zizmor・hadolint・Trivy・Semgrep）を lefthook と CI の `ci` ジョブとデプロイで動かす（`.claude/rules/tooling/security-scan.md`）。
 - 作業ログ: Stop フック `scripts/hooks/require-work-log.sh` と CI の `scripts/hooks/check-work-logs-diff.sh`。
 - worktree: WorktreeCreate フック `scripts/hooks/worktree-create.sh`、SubagentStop フック `scripts/hooks/subagent-stop.sh`（共有フックの修復）。
 - コード: `pnpm lint` / `pnpm typecheck` / `pnpm test`（カバレッジ 100%・ルール検査テスト `rule-tests/`）/ CI の `ci` ジョブ（required status check）。

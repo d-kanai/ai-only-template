@@ -24,9 +24,13 @@ pr-flow の手順から参照する。設定を変えたらこのファイルを
 - クラウドセッションからは、`GH_TOKEN` を付けた `curl` で GET は 200 で読めるが、PUT はプロキシが 403「Write access to this GitHub API path is not permitted through this proxy」で拒否する（2026-09-28 実測。GitHub MCP ツールにも Ruleset の操作は無い）。
 
 ## CI（`.github/workflows/ci.yml`）
-- main 宛の PR と main への push で、ジョブ `ci` が `pnpm install --frozen-lockfile` → Postgres の起動（`docker compose up -d --wait --wait-timeout 120`）→ psql での接続確認 → `cp .env.example .env` → `pnpm db:migrate` → `pnpm lint` → `pnpm typecheck` → `pnpm test` → `pnpm build` → Chromium の導入（`pnpm --filter @repo/e2e exec playwright install --with-deps chromium`）→ `pnpm test:e2e` を実行する。ステップはすべてリポジトリ直下で実行する。
+- main 宛の PR と main への push で、ジョブ `ci` が セキュリティの検査 6 つ（`scripts/security/scan.sh` の gitleaks の全履歴・actionlint・zizmor・hadolint・Trivy config・Semgrep。Issue #362。`.claude/rules/tooling/security-scan.md`）→ `pnpm install --frozen-lockfile` → `pnpm audit --audit-level high`（依存の脆弱性。Issue #112）→ Postgres の起動（`docker compose up -d --wait --wait-timeout 120`）→ psql での接続確認 → `cp .env.example .env` → `pnpm db:migrate` → `pnpm lint` → `pnpm typecheck` → `pnpm test` → `pnpm build` → Chromium の導入（`pnpm --filter @repo/e2e exec playwright install --with-deps chromium`）→ `pnpm test:e2e` を実行する。ステップはすべてリポジトリ直下で実行する。
 - Node の版は `.tool-versions`、pnpm の版は `package.json` の `packageManager` から取る（ワークフローに版を直書きしない）。
 - GitHub Actions は `CI=true` を既定で設定するので、lefthook の postinstall はフックを入れない。
+
+## セキュリティ（Issue #112）
+- CodeQL（code scanning）は使わない。本番の repo は private にする予定で、private では有料の GitHub Code Security が要るため（daiki の判断 2026-10-03。ADR `docs/adr/quality/20261003-pnpm-audit-in-ci.md`）。コードの脆弱性のパターンは代わりに Semgrep（無料の規則）で止める（ADR `docs/adr/quality/20261003-security-scan-tools.md`）。
+- Secret scanning と push protection: Settings → Code security で有効にする（ユーザーが UI で行う。クラウドセッションの `GH_TOKEN` では `security_and_analysis` が読めず（2026-10-03 実測、レスポンスに項目が無い）、状態は未確認）。
 
 ## クラウドセッションでの GitHub App
 - 前提: Claude GitHub App がこのリポジトリにインストールされていること（https://github.com/apps/claude/installations/select_target からユーザーがインストールする）。未インストールだと読み取りだけ通り、Issue 作成が 403「Resource not accessible by integration」、`git push` が 403「Claude doesn't have GitHub access to ...」になる（2026-09-28 実測）。

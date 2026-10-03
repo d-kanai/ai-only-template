@@ -39,6 +39,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+          # persist-credentials: false: checkout が GITHUB_TOKEN を .git/config に残さない（以降のステップは git で push / fetch しない）。
+          #   WHY: 残すと後のステップ・アーティファクトから読まれうる（zizmor の artipacked。Issue #362）。
+          persist-credentials: false
 
       # 起点（前回の成功した実行が見た main の先頭）と、それ以降に main に入ったコミットの数を出す。
       # WHY 前回の実行から続ける: 「実行した時刻から 24 時間前」で区切ると、schedule の遅れが日によって違うとき、その差の時間に

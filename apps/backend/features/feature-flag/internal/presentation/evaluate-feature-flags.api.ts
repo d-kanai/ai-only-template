@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { OfrepRequest, OfrepResponse } from "../../../../shared/http/ofrep";
+import { OfrepResponse } from "../../../../shared/http/ofrep";
+import { OfrepRequest } from "../../../../shared/http/ofrep-request";
 import { EvaluateFeatureFlagsQuery } from "../application/evaluate-feature-flags.query";
 import {
   FEATURE_FLAGS,
