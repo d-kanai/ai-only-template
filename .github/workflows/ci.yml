@@ -167,4 +167,10 @@ jobs:
       #   apps/e2e/playwright.config.ts が .env の DATABASE_URL（env.ts）を webServer に渡し、Postgres で動かす。
       #   上の pnpm build の成果物を使い回さず build し直すが、ローカルと同じコマンドで動かすことを優先する（単純さのため）。
       # CI=true（GitHub Actions の既定）なので reuseExistingServer は無効になり、必ずこのコードでサーバを新しく起動する。
-      - run: pnpm test:e2e
+      # WHY scan.sh zap-e2e から流す（Issue #364）: E2E を流すことをセキュリティの検査にする（daiki の判断 2026-10-03）。scan.sh が
+      #   ZAP（digest で固定した Docker イメージ）をプロキシとして起動し、E2E_PROXY を渡して pnpm test:e2e を実行する。E2E が実際に
+      #   触った画面と API の応答を ZAP の受け身の検査（passive scan）にかけ、Low 以上の警告（scripts/security/zap-ignore.tsv で
+      #   理由を書いて外したものを除く）か E2E の失敗で、このステップが赤になる。E2E は 1 回だけ流れる。
+      #   決定は ADR docs/adr/quality/20261003-zap-passive-scan-via-e2e.md。rule-tests/security-scan.test.ts の ci-scan が、
+      #   このステップが ci job に run だけの形であることを検査する。
+      - run: bash scripts/security/scan.sh zap-e2e

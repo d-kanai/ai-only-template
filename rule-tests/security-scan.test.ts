@@ -22,7 +22,7 @@ import {
 //   ADR docs/adr/quality/20261003-security-scan-tools.md。
 // 違反にするもの（違反の文字列の先頭が規則の名前）:
 //   - scan-image-pinned: scripts/security/scan.sh の `<ツール>_IMAGE="..."` は `<名前>:<タグ>@sha256:<64 桁>` で書く（zizmor を除く）。
-//     5 つのツールの変数がそろっていること。
+//     6 つのツール（ZAP を含む。Issue #364）の変数がそろっていること。
 //     WHY digest: イメージのタグは差し替えられる（Trivy は 2026-03 に Docker Hub のタグと Action のタグを乗っ取られた。
 //       GHSA-69fq-xp46-6x23）。Actions の SHA 固定（rule-tests/github-actions.test.ts の actions-pinned-sha）と同じ考え。
 //     WHY タグも要る: digest だけではどの版か読めず、版の上げ下げを差分で追えない（docker はタグと digest があると digest で取る）。
@@ -35,7 +35,7 @@ import {
 //     決まった run と glob だけを持つ（skip・only・exclude などを足さない）。フックには commands 以外のキー（skip など）を書かず、
 //     トップレベルにはフックのほか（extends・rc・remotes など、別のファイルから設定を足すもの）を書かない（ALLOWED_LEFTHOOK_KEYS）。
 //     WHY 完全に一致させる: `|| true`・`skip: true`・glob を狭めるなど、どれも検査を黙って効かなくする（効いているかは見て分からない）。
-//   - ci-scan: ci.yml の ci job（required status check）の steps が 6 つの検査を、`run` だけのステップで実行し、job に if・
+//   - ci-scan: ci.yml の ci job（required status check）の steps が 7 つの検査（6 つと、E2E を兼ねる zap-e2e。Issue #364）を、`run` だけのステップで実行し、job に if・
 //     continue-on-error を付けず、ワークフローと job に defaults（run の shell の差し替え）を書かない。WHY ci job: 別の job だと赤でもマージできる（rule-tests/github-actions.test.ts の auditsDependencies と同じ）。
 //     WHY フックと CI の両方: フックは `--no-verify` や Docker の止まった手元で飛ばされうる。CI が最後の砦。
 //   - deploy-image-scan: deploy.yml の deploy job が `scan.sh trivy-image "$IMAGE"` を、マイグレーションとデプロイ（gcloud run）より前に、
@@ -65,7 +65,14 @@ function isPinnedImage(value: string): boolean {
   return PINNED_IMAGE.test(value);
 }
 
-const PINNED_TOOLS = ["GITLEAKS", "ACTIONLINT", "HADOLINT", "TRIVY", "SEMGREP"];
+const PINNED_TOOLS = [
+  "GITLEAKS",
+  "ACTIONLINT",
+  "HADOLINT",
+  "TRIVY",
+  "SEMGREP",
+  "ZAP",
+];
 const ZIZMOR_IMAGE_NAME = "ai-only-template/zizmor";
 
 // scan.sh の行頭の `NAME="値"` の代入（コメント・関数の中の local は読まない）。
@@ -281,6 +288,8 @@ const CI_SCANS = [
   "hadolint",
   "trivy-config",
   "semgrep",
+  // zap-e2e: E2E（pnpm test:e2e）を ZAP 経由で流し、受け身の検査の警告で失敗する（Issue #364）。E2E のステップを兼ねる。
+  "zap-e2e",
 ].map(scan);
 
 const isEnforced = (properties: Step) =>
@@ -412,6 +421,7 @@ const SCRIPT = [
   `HADOLINT_IMAGE="hadolint/hadolint:v2.15.1@sha256:${HASH}"`,
   `TRIVY_IMAGE="aquasec/trivy:0.75.0@sha256:${HASH}"`,
   `SEMGREP_IMAGE="semgrep/semgrep:1.179.0@sha256:${HASH}"`,
+  `ZAP_IMAGE="zaproxy/zap-stable:2.17.0@sha256:${HASH}"`,
   'ZIZMOR_IMAGE="ai-only-template/zizmor:1.30.1"',
   `SEMGREP_RULES_COMMIT="${COMMIT}"`,
 ].join("\n");
@@ -834,7 +844,7 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("CI の組み込み（findCiViolations）", ({ And }) => {
     And(
-      "ci.yml の ci job の steps が 6 つの検査をそのまま実行すれば違反なし",
+      "ci.yml の ci job の steps が 7 つの検査をそのまま実行すれば違反なし",
       () => {
         // given
         const yaml = ciYaml();
