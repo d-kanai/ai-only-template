@@ -5,7 +5,7 @@ import { defineMessages } from "./i18n";
 //   - サーバのエラー: backend の ErrorKey と同じ文字列のキー（<対象>.<項目>.<理由>。例 "todo.title.tooLong"）。
 //     backend の ErrorKey がすべてここにあることは、features/todo/api/api-error.ts の ApiErrorKey の型の制約で止める。
 //   - 画面側だけのエラー: error.<理由>（例 "error.unknown"）。
-// WHY ここだけ shared/ に置く: API のエラーは、どの画面の操作でも同じキーで返り（api-error.ts の ApiErrorMessage.toMessage が翻訳する）、
+// WHY ここだけ shared/ に置く: API のエラーは、どの画面の操作でも同じキーで返り（api-error-message.ts の ApiErrorMessage.toMessage が翻訳する）、
 //   特定の画面の辞書に置くと、ほかの画面から別ディレクトリの *.messages.ts を import することになる（規則 messages-colocation）。
 // placeholder は {name}（name は英数字と _）。キー・placeholder の型と en の検査は defineMessages（i18n.tsx）。
 export const commonMessages = defineMessages({

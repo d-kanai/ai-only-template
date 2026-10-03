@@ -3,7 +3,8 @@ import type {
   ErrorKeyParams,
 } from "@repo/backend/shared/http/problem";
 import { describe, expect, expectTypeOf, test } from "vitest";
-import { ApiError, ApiErrorMessage } from "@/features/todo/api/api-error";
+import { ApiError } from "@/features/todo/api/api-error";
+import { ApiErrorMessage } from "@/features/todo/api/api-error-message";
 import { commonMessages } from "@/shared/i18n/common.messages";
 import type { MessageKey, MessageParams } from "@/shared/i18n/i18n";
 import { tJa } from "@/test-support/i18n";

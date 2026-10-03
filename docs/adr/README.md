@@ -100,6 +100,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-30 | 本番は GCP の Cloud Run + Cloud SQL にし、Terraform は器だけを、イメージの入れ替えは GitHub Actions の gcloud を受け持つ | 採用 | [20260930-gcp-cloud-run-and-cloud-sql.md](tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md) |
 | 2026-10-02 | migrate ジョブはアプリの runtime イメージをコマンド違いで動かし、マイグレーションは drizzle-orm の migrator を束ねた入口で当てる | 採用 | [20261002-migrate-job-same-runtime-image.md](tech-stack/20261002-migrate-job-same-runtime-image.md) |
 | 2026-10-03 | 依存の自動更新は Renovate（GitHub App）で行い、Dependabot は使わない | 採用 | [20261003-renovate-for-dependency-updates.md](tech-stack/20261003-renovate-for-dependency-updates.md) |
+| 2026-10-03 | Renovate の patch / minor の更新は CI が緑なら自動マージし、メジャーと Next.js / React は人が確かめる | 採用 | [20261003-renovate-automerge-patch-minor.md](tech-stack/20261003-renovate-automerge-patch-minor.md) |
 
 ### quality/
 品質ゲートとテストの方針
@@ -123,6 +124,8 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-10-02 | ルール検査テストを .feature（`*` の箇条書き）と step の実装に分ける | 採用 | [20261002-rule-tests-in-feature.md](quality/20261002-rule-tests-in-feature.md) |
 | 2026-10-02 | コード・設計ルールのレビューは rules の表の「レビュー」の行を観点にし、検出 → 1 件ずつ検証 → 重大度で報告するスキルで行う | 採用 | [20261002-rule-review-from-rules-tables.md](quality/20261002-rule-review-from-rules-tables.md) |
 | 2026-10-03 | 依存の脆弱性は ci ジョブの pnpm audit（high 以上で失敗）で検査し、CodeQL は入れない | 採用 | [20261003-pnpm-audit-in-ci.md](quality/20261003-pnpm-audit-in-ci.md) |
+| 2026-10-03 | 依存パッケージのライセンスを、pnpm licenses list と許可リストのルール検査テストで CI に止めさせる | 採用 | [20261003-dependency-license-allow-list.md](quality/20261003-dependency-license-allow-list.md) |
+| 2026-10-03 | セキュリティの検査は gitleaks・actionlint・zizmor・hadolint・Trivy・Semgrep を digest で固定した Docker イメージで、コミットフックと CI で動かす | 採用 | [20261003-security-scan-tools.md](quality/20261003-security-scan-tools.md) |
 
 ### workflow/
 開発プロセス・環境・AI エージェントの運用

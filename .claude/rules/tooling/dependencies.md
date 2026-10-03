@@ -8,6 +8,7 @@ paths:
   - "rule-tests/package.test.ts"
   - "rule-tests/pnpm-workspace.test.ts"
   - ".github/renovate.json5"
+  - "rule-tests/licenses.test.ts"
 ---
 
 # 依存パッケージ
@@ -44,6 +45,7 @@ npm パッケージの版は `package.json` と `pnpm-lock.yaml` の両方で固
 - Renovate の GitHub App が `.github/renovate.json5` を読み、週 1 回、公開から 5 日経った版への更新の PR を作る。決定と Dependabot を採らなかった理由は ADR `docs/adr/tech-stack/20261003-renovate-for-dependency-updates.md`、人との分担と PR の確かめ方はスキル `dependency-update` の 0.。
 - Renovate の待つ日数（`minimumReleaseAge`）は `pnpm-workspace.yaml` の `minimumReleaseAge` と同じ日数にし、`internalChecksFilter: strict` で待つ間は PR を作らせない。pnpm patch を当てた依存は Renovate で更新しない（`enabled: false`）。担保: `rule-tests/pnpm-workspace.test.ts`。WHY: 5 日未満の版の PR は PR の中の install が `minimumReleaseAgeStrict` で落ちる。パッチのキーは版まで固定で、版が変わるとパッチが当たらなくなる。
 - 作業ログの CI は、作者が `renovate[bot]` で依存のファイルだけを変えた PR を通す（`.claude/rules/tooling/work-log-hooks.md`）。
+- patch / minor は CI が緑なら自動マージ、メジャー・0.x の依存・Next.js / React は人が確かめる（Issue #375、ADR `docs/adr/tech-stack/20261003-renovate-automerge-patch-minor.md`）。メジャーに automerge が付かないことは `rule-tests/pnpm-workspace.test.ts` が検査する。
 
 ## 例外の版
 - フレームワークが版を固定して要求するものは、それに従い、理由をここに書く。
@@ -55,3 +57,9 @@ npm パッケージの版は `package.json` と `pnpm-lock.yaml` の両方で固
 - パッチは `patches/<pkg>@<版>.patch`、対応は `pnpm-workspace.yaml` の `patchedDependencies`。何を・なぜ直したかは `pnpm-workspace.yaml` と、そのパッケージを使う設定ファイルのコメントに書く。`patches/`・`pnpm-workspace.yaml`・`pnpm-lock.yaml` は同じコミットに入れる（lockfile にパッチのハッシュが入る）。
 - 上流が直した版が出たら、その版に上げてパッチを消す（キーは版まで固定なので、版を上げるたびに要否を見直す）。
 - 現在のパッチ: `@stryker-mutator/vitest-runner@10.0.0`（Issue #52）: テスト名の連結を ` > ` にする（Vitest 5.0.1 との組み合わせの不具合）。上流の Issue / PR の有無は未確認（GitHub の Issue 検索がこの環境から 403）。詳細は `stryker.config.mjs` と ADR `docs/adr/tech-stack/20260928-patch-stryker-vitest-runner.md`。
+
+## ライセンス（Issue #368）
+- 依存（推移的な依存・devDependencies を含む）のライセンスは許可リストで止める。許可リストは許容型（MIT・ISC・Apache-2.0・BSD など）だけで、それ以外は名前とライセンスの組と理由を例外に書いたものだけを許す。強制は `rule-tests/licenses.test.ts`（`pnpm -r licenses list --json` を読む。`pnpm test` の中で動くので CI の `ci` ジョブで止まる。許可リスト・例外・限界はテストの冒頭、決定は ADR `docs/adr/quality/20261003-dependency-license-allow-list.md`）。
+  - WHY: GPL / AGPL のような強いコピーレフト・商用の制限付き・ライセンス無しの依存が、依存の追加や更新で推移的に入っても気づけない（daiki の希望 2026-10-03）。
+  - 落ちたら: そのパッケージのライセンスの中身と使われ方（`pnpm why -r <名前>`）を確かめ、使ってよければ許可リスト（許容型のとき）か例外（名前を限るとき）に理由を書いて足す。使えなければ別のパッケージにする。
+  - 日次のジョブは置かない（公開済みの版は差し替えられず、lockfile が変わらなければライセンスも変わらない。lockfile が変わる PR では毎回動く）。
