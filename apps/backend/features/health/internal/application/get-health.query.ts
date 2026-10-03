@@ -14,7 +14,7 @@ export type HealthReport =
 // WHY DB の不通を例外ではなく報告（unavailable）で返す: ヘルスチェックの役目は「使えない」と伝えることで、DB の不通は想定内の
 //   結果（503）。例外のまま投げると、handler を包む ProblemResponse.wrap が想定外の例外（500 の server_error）にする。
 // liveness と readiness を分けない（1 本で DB まで見る）理由は presentation/get-health.api.ts の冒頭。
-export class CheckHealthQuery {
+export class GetHealthQuery {
   constructor(private readonly repository: HealthRepository) {}
 
   async execute(): Promise<HealthReport> {

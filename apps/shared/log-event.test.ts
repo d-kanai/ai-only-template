@@ -30,7 +30,7 @@ describe("LOG_EVENT_NAMES（event.name の一覧）", () => {
       "db_write",
       "db_pool_error",
       "server_error",
-      "health_check_failed",
+      "health_check",
       "app_start_failed",
       "notification",
       "logger_error",

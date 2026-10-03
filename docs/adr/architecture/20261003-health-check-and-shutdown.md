@@ -10,7 +10,7 @@
 
 ## 決定
 - `GET /api/health` を 1 本だけ置き、DB に `select 1` を問い合わせられるかまで見る。通れば 200 `{ status: "ok", checks: { database: "ok" } }`、問い合わせられなければ 503 `{ status: "unavailable", checks: { database: "unavailable" } }`。`cache-control: no-store` を付ける。
-- 置き場所は backend の feature `features/health/`（domain の `HealthRepository`・infra の `PostgresHealthRepository`・application の `CheckHealthQuery`・presentation の `GetHealthApi`）。ほかの API と同じ層と組み立て（`AppDatabase.get().db`）にそろえる。
+- 置き場所は backend の feature `features/health/`（domain の `HealthRepository`・infra の `PostgresHealthRepository`・application の `GetHealthQuery`・presentation の `GetHealthApi`）。ほかの API と同じ層と組み立て（`AppDatabase.get().db`）にそろえる。
 - liveness（プロセスが生きているか）と readiness（DB に届くか）は分けない。
 - リクエストログ（`proxy.ts`）の matcher からは除外しない。
 - グレースフルシャットダウンは自前のシグナルハンドラを足さず、Next.js の `startServer`（`next start` と standalone の `server.js` の両方が使う）の標準の処理に任せる。プールは明示的に閉じず、プロセスの終了で接続が切れる。

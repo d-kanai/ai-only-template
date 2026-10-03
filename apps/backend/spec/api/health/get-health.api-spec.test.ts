@@ -54,7 +54,7 @@ describeFeature(feature, ({ Scenario }) => {
   });
 
   Scenario("異常系", ({ And }) => {
-    // 原因 = node-postgres の例外（health-repository.postgres.ts が drizzle の包みを外したもの）。ログの 1 行（health_check_failed。
+    // 原因 = node-postgres の例外（health-repository.postgres.ts が drizzle の包みを外したもの）。ログの 1 行（health_check（phase: failed）。
     //   ERROR なので console.error）に type と message が入る。
     // WHY console.error を差し替える: 行を確かめ、テストの出力を汚さない（rule-tests/api-spec.test.ts の api-spec-no-vi の例外。
     //   後始末は mockRestore）。
@@ -88,7 +88,7 @@ describeFeature(feature, ({ Scenario }) => {
             severity: "ERROR",
             time: expect.any(String),
             message: "health check failed: database unavailable",
-            event: { name: "health_check_failed" },
+            event: { name: "health_check", phase: "failed" },
             error: {
               type: "Error",
               message: "Cannot use a pool after calling end on the pool",

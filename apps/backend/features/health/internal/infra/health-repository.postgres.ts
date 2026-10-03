@@ -11,7 +11,7 @@ export class PostgresHealthRepository implements HealthRepository {
 
   // WHY select 1: 表を読まずに、プールから接続を取り出して Postgres と 1 往復できるかだけを見る。表を読むと、マイグレーションの
   //   当て忘れや表のロックでも失敗し、「DB に問い合わせられない」と区別できない。
-  // WHY 失敗を握りつぶさずに投げる: 失敗をどう扱うか（unavailable にしてログに残す）は呼び出し側（CheckHealthQuery・GetHealthApi）が決める。
+  // WHY 失敗を握りつぶさずに投げる: 失敗をどう扱うか（unavailable にしてログに残す）は呼び出し側（GetHealthQuery・GetHealthApi）が決める。
   // WHY drizzle の DrizzleQueryError を外し、原因（cause。node-postgres の例外）を投げる: drizzle-orm 0.45.3 は失敗を
   //   「Failed query: select 1\nparams: 」の message の DrizzleQueryError で包む（errors.js）。logger はクエリを抱えた例外の message を
   //   *** にする（apps/shared/log-event.ts の holdsQueryParameters）ので、包んだままではログの 1 行から原因（接続の拒否・プールの終了・

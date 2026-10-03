@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { CheckHealthQuery } from "../application/check-health.query";
+import { GetHealthQuery } from "../application/get-health.query";
 import type { HealthRepository } from "../domain/health-repository";
 import { PostgresHealthRepository } from "../infra/health-repository.postgres";
 import {
@@ -9,7 +9,7 @@ import {
   GET as productionGet,
 } from "./get-health.api";
 
-// ping の結果を決めた Repository（check-health.query.test.ts と同じく、状態を持たないのでその場で作る）。
+// ping の結果を決めた Repository（get-health.query.test.ts と同じく、状態を持たないのでその場で作る）。
 class Repositories {
   static reachable(): HealthRepository {
     return { ping: () => Promise.resolve() };
@@ -23,7 +23,7 @@ class Repositories {
 // handle をインスタンスから取り出して呼ぶ: 本番（`export const GET = new GetHealthApi(...).handle`）と同じ渡し方にし、
 //   this が外れても動くこと（handle がアロー関数のプロパティであること）も確かめる。
 function handlerWith(repository: HealthRepository) {
-  return new GetHealthApi(new CheckHealthQuery(repository)).handle;
+  return new GetHealthApi(new GetHealthQuery(repository)).handle;
 }
 
 function healthRequest(): Request {
@@ -60,7 +60,7 @@ describe("GET /api/health", () => {
   // WHY 本文に原因（例外の message）を出さない: 接続先のホスト・ポートなど内部の情報を含みうる。原因はログの 1 行にだけ残す。
   test("DB に問い合わせられなければ、503 と status・database が unavailable の本文を返し、原因の例外をログに 1 行残す", async () => {
     // given
-    // logger.emit（health_check_failed は ERROR なので中で console.error）が 1 行出す。テストの出力を汚さないよう抑制し、行を確かめる
+    // logger.emit（health_check の失敗は ERROR なので中で console.error）が 1 行出す。テストの出力を汚さないよう抑制し、行を確かめる
     //   （行の形は apps/shared/logger.test.ts で固定している）。
     const consoleError = vi
       .spyOn(console, "error")
@@ -86,7 +86,7 @@ describe("GET /api/health", () => {
     expect(JSON.parse(line)).toMatchObject({
       severity: "ERROR",
       message: "health check failed: database unavailable",
-      event: { name: "health_check_failed" },
+      event: { name: "health_check", phase: "failed" },
       error: {
         type: "Error",
         message: "connect ECONNREFUSED db.internal:5432",

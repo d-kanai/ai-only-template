@@ -2,7 +2,7 @@
 import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, expect, type TestContext } from "vitest";
-import { CheckHealthQuery } from "../../features/health/internal/application/check-health.query";
+import { GetHealthQuery } from "../../features/health/internal/application/get-health.query";
 import { PostgresHealthRepository } from "../../features/health/internal/infra/health-repository.postgres";
 import {
   GetHealthApi,
@@ -55,7 +55,7 @@ function api() {
   return {
     getHealth: ApiCoverage.track(
       new GetHealthApi(
-        new CheckHealthQuery(new PostgresHealthRepository(database.db)),
+        new GetHealthQuery(new PostgresHealthRepository(database.db)),
       ),
     ),
     postTodo: ApiCoverage.track(

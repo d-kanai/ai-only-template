@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
 import type { HealthRepository } from "../domain/health-repository";
-import { CheckHealthQuery } from "./check-health.query";
+import { GetHealthQuery } from "./get-health.query";
 
 // WHY InMemory の実装を test-support に置かず、ping の結果を決めたオブジェクトを渡す: HealthRepository は状態を持たず、
 //   「問い合わせられる / られない」の 2 通りしかない。list-todos.api.test.ts の failingRepository と同じく、その場で作る。
@@ -15,10 +15,10 @@ class Repositories {
   }
 }
 
-describe("CheckHealthQuery", () => {
+describe("GetHealthQuery", () => {
   test("DB に問い合わせられれば、database が ok の報告を返す", async () => {
     // given
-    const query = new CheckHealthQuery(Repositories.reachable());
+    const query = new GetHealthQuery(Repositories.reachable());
 
     // when
     const report = await query.execute();
@@ -34,7 +34,7 @@ describe("CheckHealthQuery", () => {
   test("DB に問い合わせられなければ、例外を投げずに database が unavailable の報告を、原因の例外と一緒に返す", async () => {
     // given
     const cause = new Error("connect ECONNREFUSED 127.0.0.1:5432");
-    const query = new CheckHealthQuery(Repositories.unreachable(cause));
+    const query = new GetHealthQuery(Repositories.unreachable(cause));
 
     // when
     const report = await query.execute();

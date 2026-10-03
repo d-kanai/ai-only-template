@@ -2,9 +2,9 @@ import { logger } from "@repo/shared/logger";
 import { AppDatabase } from "../../../../shared/drizzle/database";
 import { ProblemResponse } from "../../../../shared/http/problem";
 import {
-  CheckHealthQuery,
+  GetHealthQuery,
   type HealthReport,
-} from "../application/check-health.query";
+} from "../application/get-health.query";
 import { PostgresHealthRepository } from "../infra/health-repository.postgres";
 
 // GET /api/health: ヘルスチェック（Issue #107）。アプリが応答でき、DB に問い合わせられるかを返す。
@@ -27,23 +27,21 @@ export type GetHealthResponse = {
 // GET /api/health の Route Handler を持つクラス。形（コンストラクタで query を受け取る・handle をアロー関数のプロパティにして
 //   ProblemResponse.wrap で包む・型を Pick<..., "execute"> にする）と WHY は list-todos.api.ts の ListTodosApi と同じ。
 export class GetHealthApi {
-  constructor(
-    private readonly checkHealth: Pick<CheckHealthQuery, "execute">,
-  ) {}
+  constructor(private readonly getHealth: Pick<GetHealthQuery, "execute">) {}
 
   // WHY ProblemResponse.wrap で包む: DB の不通は query が報告（unavailable）で返すので、ここに例外は来ない。それ以外の想定外の
   //   例外（実装の誤り）は、ほかの API と同じく 500 の Problem Details とログ（server_error）にする（規則
   //   presentation-with-problem-response）。
   readonly handle = ProblemResponse.wrap(
     async (_request: Request): Promise<Response> => {
-      const report = await this.checkHealth.execute();
+      const report = await this.getHealth.execute();
       if (report.database === "unavailable") {
         // WHY ここ（presentation）でログに出す: application は logger を使えない（rule-tests/architecture.test.ts の
         //   SHARED_MODULES_BY_LAYER）。原因は query が報告に載せて渡す。
         // WHY 本文ではなくログに原因を出す: 例外の message は接続先のホスト・ポートなど内部の情報を含みうる。
         logger.emit({
           message: "health check failed: database unavailable",
-          event: { name: "health_check_failed" },
+          event: { name: "health_check", phase: "failed" },
           error: report.cause,
         });
       }
@@ -70,5 +68,5 @@ export class GetHealthApi {
 // WHY ここで組み立てる・AppDatabase.get().db を渡す: list-todos.api.ts の GET と同じ（プールはプロセスで 1 つ）。アプリの API が
 //   実際に使うプールに問い合わせるので、プールの枯渇（接続待ちのタイムアウト）も unavailable として見える。
 export const GET = new GetHealthApi(
-  new CheckHealthQuery(new PostgresHealthRepository(AppDatabase.get().db)),
+  new GetHealthQuery(new PostgresHealthRepository(AppDatabase.get().db)),
 ).handle;

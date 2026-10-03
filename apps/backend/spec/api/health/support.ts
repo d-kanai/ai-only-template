@@ -1,4 +1,4 @@
-import { CheckHealthQuery } from "../../../features/health/internal/application/check-health.query";
+import { GetHealthQuery } from "../../../features/health/internal/application/get-health.query";
 import { PostgresHealthRepository } from "../../../features/health/internal/infra/health-repository.postgres";
 import { GetHealthApi } from "../../../features/health/internal/presentation/get-health.api";
 import type { Database } from "../../../shared/drizzle/database";
@@ -12,7 +12,7 @@ import type { Database } from "../../../shared/drizzle/database";
 export class GetHealthApiAssembly {
   static handler(db: Database) {
     return new GetHealthApi(
-      new CheckHealthQuery(new PostgresHealthRepository(db)),
+      new GetHealthQuery(new PostgresHealthRepository(db)),
     ).handle;
   }
 }

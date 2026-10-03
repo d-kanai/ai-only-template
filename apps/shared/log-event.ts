@@ -19,7 +19,7 @@ import { z } from "zod";
 //   db_write          Repository の書き込みの 1 文ごとの前後（apps/backend/shared/drizzle/writer.ts。event.phase が start / done / failed）
 //   db_pool_error     アイドル中の Postgres の接続のエラー（apps/backend/shared/drizzle/database.ts）
 //   server_error      API の想定外の例外（500。apps/backend/shared/http/problem.ts）
-//   health_check_failed  ヘルスチェック（/api/health）で DB に問い合わせられなかった（503。
+//   health_check      ヘルスチェック（/api/health）で DB に問い合わせられなかった（503。event.phase が failed。
 //                     apps/backend/features/health/internal/presentation/get-health.api.ts）
 //   app_start_failed  起動時の検証の失敗（apps/frontend_customer/instrumentation-node.ts）
 //   notification      通知の送信（notification モジュール。失敗は event.phase が failed）
@@ -30,7 +30,7 @@ export const LOG_EVENT_NAMES = [
   "db_write",
   "db_pool_error",
   "server_error",
-  "health_check_failed",
+  "health_check",
   "app_start_failed",
   "notification",
   "logger_error",
@@ -331,9 +331,14 @@ export const LOG_EVENT_SCHEMAS = {
   // ヘルスチェックで DB に問い合わせられなかった（Issue #107）。error は ping が投げた例外。
   // WHY server_error と分ける: 応答は 500 ではなく 503 で、例外は ProblemResponse.from を通らない（handler が捕まえずに報告で
   //   受け取る）。監視が DB の不通を「API の想定外の例外」と別の種類で引けるようにする。
-  health_check_failed: z.object({
+  // WHY phase を必須にする: 行を出すのは失敗のときだけ（成功のたびに出すと監視の回数だけ行が増える）。名前に段階を入れない
+  //   （冒頭）ので、notification と同じく失敗は phase: failed で表す。
+  health_check: z.object({
     message: LogFieldMarks.freeText(),
-    event: z.object({ name: z.literal("health_check_failed") }),
+    event: z.object({
+      name: z.literal("health_check"),
+      phase: z.literal("failed"),
+    }),
     error: LogFieldMarks.error(),
   }),
   // 起動時の検証の失敗。環境変数の検証の失敗は error（欠けた変数の名前が message に入る）、タイムゾーンは time_zone。
@@ -385,7 +390,7 @@ export type Severity = "INFO" | "WARNING" | "ERROR";
 //   一部の行を拾わない（Issue #216）。
 // WHY db_write の失敗は WARNING: 500 になる想定外の例外は presentation の ProblemResponse.from が server_error（ERROR）で別に残す。
 //   書き込みの失敗の多くは制約違反など想定内（409 / 400 にする）もの。
-// WHY health_check_failed は ERROR: DB に問い合わせられないと、DB を使う API はすべて失敗する。db_pool_error と同じく DB 側を
+// WHY health_check の失敗は ERROR（phase: failed で下の分岐が決める）: DB に問い合わせられないと、DB を使う API はすべて失敗する。db_pool_error と同じく DB 側を
 //   見る合図で、監視の結果（503）と一緒に重大度でも拾えるようにする。
 // WHY notification の失敗は ERROR: 通知の失敗は応答を 500 にしないので server_error の行が出ず、この行が唯一の手がかり。
 // WHY 対応表をメソッドの中に置く（最上位の定数・static フィールドにしない）: 最上位の値は Stryker の static な変異になり、
@@ -399,7 +404,7 @@ export class LogSeverity {
       db_write: "INFO",
       db_pool_error: "ERROR",
       server_error: "ERROR",
-      health_check_failed: "ERROR",
+      health_check: "ERROR",
       app_start_failed: "ERROR",
       notification: "INFO",
       logger_error: "ERROR",
