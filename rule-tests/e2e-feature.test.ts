@@ -222,7 +222,7 @@ const source = (...lines: string[]) => lines.join("\n");
 const DIVIDER = "    # ───── 一覧を開く ─────";
 // 業務の言葉だけで、When の前に仕切りのある .feature（must reject の例は、これに違反を 1 つ足す）。
 const GOOD_FEATURE = [
-  "# 冒頭のコメントは技術の言葉（DB・API）があってもよい",
+  "# 冒頭のコメントは技術の言葉（DB・SQL）があってもよい",
   "Feature: 画面での Todo の管理",
   "",
   "  Background: 空の Todo 一覧",

@@ -2,7 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { expect } from "@playwright/test";
 
-// アクセスの記録（request-log.feature）を確かめるための、標準出力を読める本番ビルドのサーバ（Issue #80 / #279。以前の
+// リクエストログ（request-log.feature）を確かめるための、標準出力を読める本番ビルドのサーバ（Issue #80 / #279。以前の
 //   request-log.spec.ts の beforeAll / afterAll）。fixtures.ts が worker の fixture logServer として起動・停止する。
 // WHY playwright.config.ts の webServer を使わず、next start を子プロセスで起動する:
 //   webServer の stdout はテストから読めない（Playwright 1.63.0 の webServer.stdout は "pipe" にしてもランナーのプロセスの

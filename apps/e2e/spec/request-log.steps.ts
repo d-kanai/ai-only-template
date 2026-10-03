@@ -158,7 +158,7 @@ export class RequestLogSteps {
     );
   }
 
-  @Then("一覧を取得でき、レスポンスのヘッダに同じトレースの値が返る")
+  @Then("一覧を取得でき、レスポンスのヘッダに同じリクエスト番号が返る")
   async tracedResponse(): Promise<void> {
     expect(this.response?.status()).toBe(200);
     expect(this.response?.headers()["x-request-id"]).toBe(this.requestId);
