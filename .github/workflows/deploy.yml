@@ -104,6 +104,10 @@ jobs:
 
       - if: steps.config.outputs.ready == 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # persist-credentials: false: checkout が GITHUB_TOKEN を .git/config に残さない（以降のステップは git で push / fetch しない）。
+          #   WHY: 残すと後のステップ・アーティファクトから読まれうる（zizmor の artipacked。Issue #362）。
+          persist-credentials: false
 
       # WIF で deployer のサービスアカウントになりすます（infra/modules/app/github_wif.tf）。以降の gcloud / docker はこの資格情報を使う。
       - if: steps.config.outputs.ready == 'true'
@@ -173,6 +177,16 @@ jobs:
             echo "::error::test-support が runtime のイメージに含まれている（app/api/test-support/ と本番のコードの import を確かめる）"
             exit 1
           fi
+
+      # 今回のイメージの OS パッケージに、直した版のある HIGH / CRITICAL の脆弱性が無いかを Trivy で見る（Issue #362）。あれば失敗し、
+      #   以降（マイグレーションとデプロイ）は実行されない。イメージは上のステップが pull 済み（scan.sh がホストの docker から読む）。
+      # WHY ここ（PR の CI でなく）: イメージをビルドするのはデプロイだけで、PR の CI でビルドすると数分延びる。ベースのイメージ
+      #   （mirror.gcr.io/library/node:24.21.0-slim）は 2026-10-03 の実測で 0 件。
+      # WHY push の後: build-push-action は push と load を同時にできない（上のステップのコメント）。push 済みでも、トラフィックを移す
+      #   前に止まれば利用者には出ない。rule-tests/security-scan.test.ts がこのステップを検査する。
+      - if: steps.config.outputs.ready == 'true'
+        name: Scan runtime image for OS vulnerabilities
+        run: bash scripts/security/scan.sh trivy-image "$IMAGE"
 
       # migrate ジョブのイメージを今回のもの（service と同じイメージ）にし、コマンドをマイグレーションの入口にする。
       # --command node --args migrate/migrate.mjs: イメージの CMD（server.js の起動）を置き換え、Dockerfile が /app/migrate に置いた
