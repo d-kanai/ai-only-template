@@ -45,7 +45,9 @@ WHY 機械で止める: 調査だけの依頼などでログの追記が漏れ�
 
 ## CI `scripts/hooks/check-work-logs-diff.sh`（`ci.yml` の「Check docs/work-logs in PR diff」）
 - WHAT: `git diff --name-only --no-renames --diff-filter=AM origin/<base>...HEAD` に `^docs/work-logs/.*\.md$` が 1 件以上なければ失敗する。PR のときだけ（`if: github.event_name == 'pull_request'`）、準備より前（`pnpm lint` より前）に動く。`actions/checkout` は `fetch-depth: 0`（三点 diff の分岐点を求めるのに base ブランチと履歴が要る）。
-- **例外なし**: 文書だけの PR も作業ログを要求する（Issue #64 のユーザー判断）。
+- **例外は Renovate の依存更新の PR だけ**: 文書だけの PR も作業ログを要求する（Issue #64 のユーザー判断）。作者（`GITHUB_EVENT_PATH` のイベントの `pull_request.user.login`）が `renovate[bot]` で、変えたファイルがすべて依存のファイル（リポジトリ直下と `apps/<パッケージ>/` の `package.json`・`pnpm-lock.yaml`・`.tool-versions`・`.github/workflows/*.yml`）の PR だけは通す（Issue #111。bot は作業ログを書けず、更新の記録は PR に残る。ADR `docs/adr/tech-stack/20261003-renovate-for-dependency-updates.md`）。
+  - `github.actor` を使わないのは、再実行した人に変わりうるため。ci.yml のステップは変えない（`rule-tests/work-logs-check.test.ts` がステップの形を検査している）。手元の実行（`GITHUB_EVENT_PATH` が無い・JSON でない）では除外しない。
+  - 限界: 人が Renovate のブランチに依存のファイルだけを push すると、作者は `renovate[bot]` のままなので作業ログ無しで通る。
 - 検査（ルール検査テスト）: スクリプトの判定は `scripts/hooks/check-work-logs-diff.test.ts`、ci.yml への組み込み（ステップの有無・`if`・`continue-on-error`・`|| true` などの打ち消し・順序・`fetch-depth: 0`）は `rule-tests/work-logs-check.test.ts`。
 - 数えるのは追加・変更（`--diff-filter=AM`）だけ。ログを削除しただけの PR は通さない。
 - `--no-renames`: 名前の変更を常に「削除 + 追加」として扱い、利用者の `diff.renames` の設定に結果が左右されないようにする。限界: そのため、ログの名前を変えただけの PR は「追加」があるので通る（`check-work-logs-diff.test.ts` で固定）。

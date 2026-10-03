@@ -1,0 +1,98 @@
+// Renovate（依存の自動更新の bot。GitHub App「Renovate」が読む）の設定（Issue #111）。
+// Dependabot ではなく Renovate にした理由・採用しなかった案は ADR docs/adr/tech-stack/20261003-renovate-for-dependency-updates.md。
+// 人の作業（版の決め方・パッチ・lockfile の作り直し）との分担はスキル dependency-update。
+//
+// 書き方: JSON に行頭の // のコメント行だけを足した形にする（値の後ろのコメント・末尾のカンマ・引用符の無いキーは書かない）。
+//   WHY: rule-tests/pnpm-workspace.test.ts がコメント行を除いて JSON.parse で読み、pnpm-workspace.yaml と食い違わないかを検査する
+//   （JSON5 のパーサを依存に足さないため）。
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  // config:recommended: Renovate の推奨の既定（依存の一覧の Issue「Dependency Dashboard」、同じ monorepo のパッケージ
+  //   （Mantine・Playwright など）を 1 つの PR にまとめる、PR の作成を 1 時間 2 件までにするなど）。
+  "extends": ["config:recommended"],
+  // 週 1 回: 月曜の 0〜9 時（日本時間）だけ PR を作る・更新する（cron の形。分 時 日 月 曜日）。
+  //   WHY: PR ごとに CI が動き、レビューとマージの手間がかかるので、まとめて週 1 回にする（Issue #111）。
+  "timezone": "Asia/Tokyo",
+  "schedule": ["* 0-8 * * 1"],
+  // 見る依存: npm（package.json と pnpm-lock.yaml。packageManager の pnpm も含む）・asdf（.tool-versions）・
+  //   github-actions（.github/workflows の uses。commit SHA と行末の # vX.Y.Z をそろえて更新する）。
+  //   WHY ほか（Dockerfile・compose.yaml のイメージ・Terraform）を見ない: Node のイメージは .tool-versions と一緒に人が上げ
+  //   （.claude/rules/tooling/env.md）、Postgres・Terraform の更新はデプロイを伴うので、Issue を立てて人が行う。
+  "enabledManagers": ["npm", "asdf", "github-actions"],
+  // pin: 依存の版は x.y.z の完全固定（.claude/rules/tooling/dependencies.md。rule-tests/package.test.ts が検査）。更新でも
+  //   範囲（^ / ~）を書かせない。
+  "rangeStrategy": "pin",
+  // 公開から 5 日経った版だけで PR を作る。pnpm-workspace.yaml の minimumReleaseAge（7200 分 = 5 日、strict）と同じ日数にする。
+  //   WHY: 5 日未満の版で PR を作ると、PR の中の pnpm install が minimumReleaseAgeStrict で失敗する。片方だけ変えないこと
+  //   （rule-tests/pnpm-workspace.test.ts が同じ日数かを検査する）。
+  "minimumReleaseAge": "5 days",
+  // strict: 待つ日数に達していない更新は PR を作らない（strict でないと、PR を作って保留の状態で置く）。
+  "internalChecksFilter": "strict",
+  // packageRules は上から順に当て、後の規則が前の規則を上書きする（@types/react は「型定義」より後の「Next.js / React」に入る）。
+  // groupName: 同じ名前の更新を 1 つの PR にまとめる（PR のタイトルに出る）。groupSlug: ブランチ名（renovate/<groupSlug>）。
+  //   WHY groupSlug を明示する: 日本語の groupName（型定義）からはブランチ名が作れず、ブランチが「renovate」だけになった
+  //   （renovate 44.132.2 の --platform=local の試走で確認。2026-10-03 の work-logs）。ほかのグループも、groupName を変えても
+  //   ブランチ名が変わらないように明示する。
+  // メジャーの更新は、同じグループでも別の PR になる（Renovate の既定
+  //   separateMajorMinor: true）。WHY: メジャーは破壊的な変更があり、読む量も戻す単位も違う（Issue #111）。
+  "packageRules": [
+    {
+      // 型定義（@types/*）をまとめる。
+      "matchPackageNames": ["@types/**"],
+      "groupName": "型定義",
+      "groupSlug": "types"
+    },
+    {
+      // @types/node は .tool-versions の Node のメジャー（24）に合わせる（.claude/rules/tooling/dependencies.md の「例外の版」）。
+      //   WHY: 実行環境より新しい Node の API の型が使えると、実行時に無い API を呼ぶコードが型チェックを通る。
+      //   Node のメジャーを上げるときは、ここの上限も一緒に上げる。
+      "matchPackageNames": ["@types/node"],
+      "allowedVersions": "<25"
+    },
+    {
+      // Next.js と React（と型）をまとめる。React の版は create-next-app が生成する版に合わせる例外がある
+      //   （.claude/rules/tooling/dependencies.md）ので、この PR はマージ前にその版と合っているかを人が確かめる。
+      "matchPackageNames": ["next", "react", "react-dom", "@types/react", "@types/react-dom"],
+      "groupName": "Next.js / React",
+      "groupSlug": "nextjs-react"
+    },
+    {
+      "matchPackageNames": ["@biomejs/**"],
+      "groupName": "Biome",
+      "groupSlug": "biome"
+    },
+    {
+      "matchPackageNames": ["vitest", "@vitest/**"],
+      "groupName": "Vitest",
+      "groupSlug": "vitest"
+    },
+    {
+      // Stryker は Renovate で更新しない。WHY: @stryker-mutator/vitest-runner に pnpm patch を当てており
+      //   （pnpm-workspace.yaml の patchedDependencies。キーは版まで固定）、版が変わるとパッチが当たらなくなる。パッチの要否は
+      //   人が見直す（スキル dependency-update の 5.）。@stryker-mutator/core と vitest-runner は同じ版で使うのでスコープごと止める。
+      //   rule-tests/pnpm-workspace.test.ts が、パッチを当てた依存がここで止まっていることを検査する。
+      "matchPackageNames": ["@stryker-mutator/**"],
+      "enabled": false
+    },
+    {
+      // pnpm の版は .tool-versions と package.json の packageManager の 2 か所に同じ版を書く（.claude/rules/tooling/env.md）。
+      //   asdf と npm の 2 つの更新を 1 つの PR にまとめ、片方だけ上がらないようにする。
+      "matchDepNames": ["pnpm"],
+      "groupName": "pnpm",
+      "groupSlug": "pnpm"
+    },
+    {
+      // Node.js（.tool-versions の nodejs）は Renovate で更新しない。WHY: LTS の版を選び、Dockerfile の Node のイメージと
+      //   @types/node のメジャーを一緒に上げる必要がある（.claude/rules/tooling/env.md）。人が Issue で上げる。
+      "matchManagers": ["asdf"],
+      "matchDepNames": ["nodejs"],
+      "enabled": false
+    },
+    {
+      // GitHub Actions の action をまとめる（commit SHA で固定。.claude/rules/tooling/github-actions.md）。
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions",
+      "groupSlug": "github-actions"
+    }
+  ]
+}

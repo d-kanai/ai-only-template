@@ -38,12 +38,19 @@ describe("check-work-logs-diff.sh", () => {
     git(["commit", "-q", "-m", message]);
   }
 
-  function run(args: string[]) {
+  function run(args: string[], env: Record<string, string> = {}) {
     return spawnSync("bash", [scriptPath, ...args], {
       cwd: repo,
-      env: gitEnv,
+      env: { ...gitEnv, ...env },
       encoding: "utf8",
     });
+  }
+
+  // GitHub Actions が GITHUB_EVENT_PATH に置く pull_request のイベントの JSON（必要な pull_request.user.login だけ）を作る。
+  function pullRequestEvent(login: string) {
+    const path = join(tmp, "event.json");
+    writeFileSync(path, JSON.stringify({ pull_request: { user: { login } } }));
+    return { GITHUB_EVENT_PATH: path };
   }
 
   beforeEach(() => {
@@ -493,5 +500,111 @@ describe("check-work-logs-diff.sh", () => {
       // then
       expect(result.status).toBe(0);
     });
+  });
+
+  // Renovate（bot）の依存更新の PR は作業ログを書けないので、依存のファイルだけを変えた Renovate の PR は通す（Issue #111）。
+  describe("Renovate の依存更新の PR（Issue #111）", () => {
+    it("作者が renovate[bot] で、依存のファイルだけを変えた PR は作業ログが無くても 0 で終わり、通した理由を出す", () => {
+      // given
+      commitFiles({
+        "package.json": "{}\n",
+        "apps/backend/package.json": "{}\n",
+        "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+        ".tool-versions": "nodejs 24.21.1\n",
+        ".github/workflows/ci.yml": "name: CI\n",
+      });
+
+      // when
+      const result = run(["main"], pullRequestEvent("renovate[bot]"));
+
+      // then
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("renovate[bot]");
+    });
+
+    it("作者が renovate[bot] でも、依存以外のファイルを変えた PR は 1 で終わる", () => {
+      // given
+      commitFiles({ "package.json": "{}\n", "src.ts": "x\n" });
+
+      // when
+      const result = run(["main"], pullRequestEvent("renovate[bot]"));
+
+      // then
+      expect(result.status).toBe(1);
+    });
+
+    it("作者が renovate[bot] でも、変更が無い PR は 1 で終わる", () => {
+      // given: 何も変えていない（work ブランチは main と同じ）
+
+      // when
+      const result = run(["main"], pullRequestEvent("renovate[bot]"));
+
+      // then
+      expect(result.status).toBe(1);
+    });
+
+    it("作者が人間なら、依存のファイルだけでも作業ログが無ければ 1 で終わる", () => {
+      // given
+      commitFiles({ "pnpm-lock.yaml": "lockfileVersion: '9.0'\n" });
+
+      // when
+      const result = run(["main"], pullRequestEvent("d-kanai"));
+
+      // then
+      expect(result.status).toBe(1);
+    });
+
+    it("作者の名前が renovate[bot] に似ているだけ（renovate）なら 1 で終わる", () => {
+      // given
+      commitFiles({ "pnpm-lock.yaml": "lockfileVersion: '9.0'\n" });
+
+      // when
+      const result = run(["main"], pullRequestEvent("renovate"));
+
+      // then
+      expect(result.status).toBe(1);
+    });
+
+    it("GITHUB_EVENT_PATH が無い（手元での実行）なら、依存のファイルだけでも 1 で終わる", () => {
+      // given
+      commitFiles({ "pnpm-lock.yaml": "lockfileVersion: '9.0'\n" });
+
+      // when
+      const result = run(["main"]);
+
+      // then
+      expect(result.status).toBe(1);
+    });
+
+    it("GITHUB_EVENT_PATH のファイルが JSON でなければ、依存のファイルだけでも 1 で終わる", () => {
+      // given
+      commitFiles({ "pnpm-lock.yaml": "lockfileVersion: '9.0'\n" });
+      const path = join(tmp, "broken.json");
+      writeFileSync(path, "not json");
+
+      // when
+      const result = run(["main"], { GITHUB_EVENT_PATH: path });
+
+      // then
+      expect(result.status).toBe(1);
+    });
+
+    it.each([
+      ["apps の下の深い階層の package.json", "apps/backend/src/package.json"],
+      ["別のディレクトリの pnpm-lock.yaml", "docs/pnpm-lock.yaml"],
+      ["workflows の下のディレクトリ", ".github/workflows/sub/ci.yml"],
+    ])(
+      "依存のファイルに似た名前（%s: %s）は依存のファイルとして数えず 1 で終わる",
+      (_, path) => {
+        // given
+        commitFiles({ [path]: "x\n" });
+
+        // when
+        const result = run(["main"], pullRequestEvent("renovate[bot]"));
+
+        // then
+        expect(result.status).toBe(1);
+      },
+    );
   });
 });
