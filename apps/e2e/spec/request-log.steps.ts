@@ -16,7 +16,7 @@ import type { E2eLogServer } from "../support/log-server";
 //   行の先頭の severity / time は logger（apps/shared/logger.ts。Issue #85・#90・#209）が付ける（形は logger.test.ts で固定）。
 // サーバは webServer ではなく、stdout を読める E2eLogServer（log-server.ts）。画面もそのサーバの URL で開く。
 
-// 画面（app/layout.tsx の FeatureFlagProvider）の OFREP の web provider が、画面を開いた直後に送る機能の出し分けの一括の評価
+// 画面（app/layout.tsx の FeatureFlagProvider）の OFREP の web provider が、画面を開いた直後に送るフィーチャーフラグの一括の評価
 //   （Issue #156。features/feature-flag/api/feature-flag-api.ts）。/api/** なので api_request の 1 行になる。
 const FLAGS_PATH = "/api/ofrep/v1/evaluate/flags";
 
@@ -71,12 +71,12 @@ export class RequestLogSteps {
     await expect(this.page.getByRole("listitem")).toHaveCount(1);
   }
 
-  // 作成の POST と、画面の表示（document の GET /）と、画面の hook が呼ぶ GET /api/todos と、機能の出し分けの POST。
-  // WHY 機能の出し分けの行を順番の比較から分ける: 一覧の取得（画面の hook の useEffect）と出し分けの取得（root layout の
+  // 作成の POST と、画面の表示（document の GET /）と、画面の hook が呼ぶ GET /api/todos と、フィーチャーフラグの POST。
+  // WHY フィーチャーフラグの行を順番の比較から分ける: 一覧の取得（画面の hook の useEffect）とフィーチャーフラグの取得（root layout の
   //   FeatureFlagProvider の useEffect）は互いに待たずに送られ、サーバに届く順は決まらない。順番は残りの 3 行で比べ、
-  //   出し分けの行は 1 行だけあることを比べる。
+  //   フィーチャーフラグの行は 1 行だけあることを比べる。
   @Then(
-    "作成・一覧の画面の表示・一覧の取得の順に 1 行ずつ記録され、機能の出し分けの取得も 1 行記録される",
+    "作成・一覧の画面の表示・一覧の取得の順に 1 行ずつ記録され、フィーチャーフラグの取得も 1 行記録される",
   )
   async listLogged(): Promise<void> {
     await expect
@@ -105,7 +105,7 @@ export class RequestLogSteps {
     "画面の表示の記録には受け取れる形式が、一覧の取得の記録には伏せた参照元が残る",
   )
   async headersLogged(): Promise<void> {
-    // WHY 出し分けの行を除いてから取り出す: 出し分けの行がどこに入るかは決まらない（上の listLogged）。
+    // WHY フィーチャーフラグの行を除いてから取り出す: フィーチャーフラグの行がどこに入るかは決まらない（上の listLogged）。
     const [, pageLine, apiLine] = this.loggedRequests().filter(
       (request) => request.url.path !== FLAGS_PATH,
     );
@@ -115,10 +115,10 @@ export class RequestLogSteps {
 
   // リンクを押したときのクライアント遷移（RSC の取得）は page_request の行になる。表示されたリンクのプリフェッチ
   //   （next-router-prefetch ヘッダ付き）は proxy.ts の matcher の missing で除くので、/todo/<id> の行はクライアント遷移の 1 つだけ。
-  // WHY 一覧の 4 行（作成・画面の表示・一覧の取得・機能の出し分けの取得）より後を丸ごと比べる: プリフェッチはリンクの表示後に
+  // WHY 一覧の 4 行（作成・画面の表示・一覧の取得・フィーチャーフラグの取得）より後を丸ごと比べる: プリフェッチはリンクの表示後に
   //   非同期で飛ぶので、一覧の Then の時点ではまだ届いていないことがある。詳細の画面を開いた後の行の一覧を丸ごと比べ、
   //   プリフェッチの行が無いことを確かめる。4 行は一覧の Then（listLogged）が出そろうまで待ってから詳細を開くので、詳細の行より前に並ぶ。
-  //   クライアント遷移では root layout が描き直されないので、出し分けを取り直す行も出ない（出たらこの比較で落ちる）。
+  //   クライアント遷移では root layout が描き直されないので、フィーチャーフラグを取り直す行も出ない（出たらこの比較で落ちる）。
   @Then("詳細の画面の表示と詳細の取得だけが記録され、先読みは記録されない")
   async detailLogged(): Promise<void> {
     await expect(this.page).toHaveURL(
