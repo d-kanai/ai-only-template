@@ -104,7 +104,7 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("ソート", ({ And }) => {
     // WHY 新しいものから表に入れる: 入れた順のまま返す実装でも通らないように、入れた順と作成日時の順を逆にする。
-    And("作成した順（古いものが先）に並ぶ", async () => {
+    And("作成日時の古い順に並ぶ", async () => {
       // given
       const newest = await uncompletedTodo(
         "00000000-0000-4000-8000-000000000001",
@@ -175,7 +175,7 @@ describeFeature(feature, ({ Scenario }) => {
     // WHY 正しい Todo も 1 件置く: 壊れた 1 件を黙って外して残りを返す実装を通さない。
     // 例外は ProblemResponse.from が logger.emit（server_error。ERROR なので console.error）で標準エラーに 1 行出す（vi を使わないので抑えない）。
     And(
-      "壊れた Todo（完了の履歴の日時が、作られた日時より前のもの）が 1 件でもあると、一覧は取得できず、サーバの誤りとして伝えられる",
+      "壊れた Todo（完了の履歴の日時が作成日時より前のもの）が 1 件でもあると、一覧は取得できず、サーバエラーになる",
       async () => {
         // given
         const createdAt = new Date("2026-09-01T00:00:00.000Z");

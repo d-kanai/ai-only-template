@@ -214,7 +214,7 @@ describeFeature(feature, ({ Scenario }) => {
   Scenario("記録", ({ And }) => {
     // 変更の記録は、todos の completed の update と、完了の履歴の insert（全列）の 2 件だけ（前提はビルダーで入れたので記録を残さない。
     //   .feature には書かない。create-todo.api-spec.test.ts の冒頭）。
-    And("完了にすると、完了の履歴に「完了」が 1 件足される", async () => {
+    And("完了にすると、完了の履歴に「完了」が 1 件追加される", async () => {
       // given
       const milk = await uncompletedTodo("牛乳を買う");
 
@@ -238,7 +238,7 @@ describeFeature(feature, ({ Scenario }) => {
       );
     });
 
-    And("未完了に戻すと、完了の履歴に「未完了」が 1 件足される", async () => {
+    And("未完了に戻すと、完了の履歴に「未完了」が 1 件追加される", async () => {
       // given
       const milk = await completedTodo("牛乳を買う");
 
@@ -281,7 +281,7 @@ describeFeature(feature, ({ Scenario }) => {
   Scenario("副作用", ({ And }) => {
     // 通知の本文は id だけの英語（Issue #208）。同じ要求をもう一度送っても（既に完了）通知は増えない。
     And(
-      "未完了から完了に変わったときだけ、どの Todo が完了したかを知らせる通知が 1 件送られる",
+      "未完了から完了に変わったときだけ、完了した Todo の通知が 1 件送られる",
       async () => {
         // given
         const milk = await uncompletedTodo("牛乳を買う");
@@ -322,7 +322,7 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("異常系", ({ And }) => {
     // WHY 別の Todo を 1 件置く: 空のときだけ「無い」と返す実装を通さない。無い Todo への要求は通知もしない。
-    And("存在しない Todo は、存在しないと伝えられる", async () => {
+    And("存在しない Todo は、存在しないというエラーが返る", async () => {
       // given
       await uncompletedTodo("牛乳を買う");
 
@@ -342,7 +342,7 @@ describeFeature(feature, ({ Scenario }) => {
 
     // 文字列の "true" も拒否する（型の違い。json-body.ts の toProblemError の request.field.notBoolean）。
     And(
-      "完了かどうかが真偽値でないと、形が違うという理由で拒否され、何も変わらない",
+      "完了かどうかが真偽値でないと、型が違うという理由で拒否され、何も変わらない",
       async () => {
         // given
         const milk = await uncompletedTodo("牛乳を買う");

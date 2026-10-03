@@ -368,7 +368,7 @@ describeFeature(feature, ({ Background, Scenario }) => {
     );
 
     When(
-      "作成日時が進むのを待って Todo {string} を作る",
+      "作成日時がずれるよう少し待ってから Todo {string} を作る",
       async (_ctx: TestContext, title: string) => {
         await waitUntilAfter(milk.createdAt);
         response = await handlers.postTodo(
@@ -506,7 +506,7 @@ describeFeature(feature, ({ Background, Scenario }) => {
 
     // 完了の日時は API が now() で決めるので、値は作成日時以上であることだけを見る。
     // 変更の記録に、1 件目の completed の update と完了の履歴の insert が足される。
-    And("完了の履歴に 1 件目の完了が 1 件足される", async () => {
+    And("完了の履歴に 1 件目の完了が 1 件追加される", async () => {
       const rows = (
         await database.db.select(STATUS_CHANGE_COLUMNS).from(todoStatusChanges)
       ).sort(byTodoAndPosition);
@@ -626,7 +626,7 @@ describeFeature(feature, ({ Background, Scenario }) => {
     });
 
     // 存在しないことは 404 の Problem Details（not found）で伝わる。
-    Then("削除した 1 件目は存在しないと伝えられる", async () => {
+    Then("削除した 1 件目は存在しないというエラーが返る", async () => {
       await expectProblem(
         response,
         notFoundProblem(milk.id, `/api/todos/${milk.id}`),
@@ -721,7 +721,7 @@ describeFeature(feature, ({ Background, Scenario }) => {
     );
 
     // 存在しないことは 404 の Problem Details（not found。要求した id）で伝わる。
-    Then("改名しようとした Todo は存在しないと伝えられる", async () => {
+    Then("改名しようとした Todo は存在しないというエラーが返る", async () => {
       await expectProblem(
         response,
         notFoundProblem(missingId, `/api/todos/${missingId}/title`),

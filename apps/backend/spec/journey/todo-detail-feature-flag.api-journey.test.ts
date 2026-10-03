@@ -107,7 +107,7 @@ describeFeature(feature, ({ Background, Scenario }) => {
   });
 
   Scenario(
-    "詳細画面が使えるかを確かめてから詳細を見る",
+    "詳細画面のフィーチャーフラグを評価してから詳細を見る",
     ({ When, Then, And }) => {
       let response: Response;
       let milk: CreateTodoResponse;
@@ -121,7 +121,7 @@ describeFeature(feature, ({ Background, Scenario }) => {
         );
       });
 
-      Then("詳細画面は使えると返る", async () => {
+      Then("詳細画面のフィーチャーフラグはオンと返る", async () => {
         expect(response.status).toBe(200);
         const body = (await response.json()) as EvaluateFeatureFlagsResponse;
         expect(body.flags).toContainEqual({
@@ -159,8 +159,8 @@ describeFeature(feature, ({ Background, Scenario }) => {
         },
       );
 
-      // 画面のほか、サーバ側で 1 つのフラグだけを確かめる使い方（OFREP の 1 件の評価）。
-      When("詳細画面が使えるかを 1 つだけ確かめる", async () => {
+      // 画面のほか、サーバ側で 1 つのフラグだけを評価する使い方（OFREP の 1 件の評価）。
+      When("詳細画面のフィーチャーフラグだけを評価する", async () => {
         response = await handlers.postEvaluateFlag(
           jsonRequest(`/api/ofrep/v1/evaluate/flags/${DETAIL_SCREEN}`, {
             context: { targetingKey: "user-123" },
@@ -169,7 +169,7 @@ describeFeature(feature, ({ Background, Scenario }) => {
         );
       });
 
-      Then("詳細画面は使えると 1 つだけ返る", async () => {
+      Then("詳細画面のフィーチャーフラグだけがオンと返る", async () => {
         expect(response.status).toBe(200);
         await expect(response.json()).resolves.toStrictEqual({
           key: DETAIL_SCREEN,
@@ -179,7 +179,7 @@ describeFeature(feature, ({ Background, Scenario }) => {
       });
 
       And(
-        "確かめても Todo は {string} の 1 件のまま変わらない",
+        "評価しても Todo は {string} の 1 件のまま変わらない",
         async (_ctx: TestContext, title: string) => {
           await expect(database.db.select().from(todos)).resolves.toStrictEqual(
             [rowOf({ ...milk, title })],

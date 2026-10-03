@@ -109,7 +109,7 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("異常系", ({ And }) => {
     // WHY 別の Todo を 1 件置く: 空のときだけ「無い」と返す実装を通さない。
-    And("存在しない Todo は、存在しないと伝えられる", async () => {
+    And("存在しない Todo は、存在しないというエラーが返る", async () => {
       // given
       await TodoBuilder.of(database.db).title("牛乳を買う").build();
 
@@ -125,7 +125,7 @@ describeFeature(feature, ({ Scenario }) => {
 
     // uuid の形でない id は、無い Todo と同じ 404（画面から見て「無い Todo」。get-todo.api.ts の ResourceId.parseUuid）。
     And(
-      "Todo を指す値の形が正しくないときも、存在しないと伝えられる",
+      "Todo を指定する値の形式が正しくないときも、存在しないというエラーが返る",
       async () => {
         // given: beforeEach で Todo を空にしてある
         // when
@@ -140,7 +140,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     // 削除の後の状態（行が無い）を、削除の API を通さずに作る（support.ts の TodoSpecRows.remove）。
-    And("削除した Todo は、存在しないと伝えられる", async () => {
+    And("削除した Todo は、存在しないというエラーが返る", async () => {
       // given
       const milk = await TodoBuilder.of(database.db)
         .title("牛乳を買う")
@@ -162,7 +162,7 @@ describeFeature(feature, ({ Scenario }) => {
     //   （Repository は補わない。Issue #260）。
     // 例外は ProblemResponse.from が logger.emit（server_error。ERROR なので console.error）で標準エラーに 1 行出す（vi を使わないので抑えない）。
     And(
-      "壊れた Todo（完了の履歴の日時が、作られた日時より前のもの）は、サーバの誤りとして伝えられる",
+      "壊れた Todo（完了の履歴の日時が作成日時より前のもの）は、サーバエラーになる",
       async () => {
         // given
         const { id } = await TodoBuilder.of(database.db)

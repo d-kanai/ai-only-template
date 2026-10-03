@@ -219,7 +219,7 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("異常系", ({ And }) => {
     // WHY 別の Todo を 1 件置く: 空のときだけ「無い」と返す実装を通さない。
-    And("存在しない Todo は、存在しないと伝えられる", async () => {
+    And("存在しない Todo は、存在しないというエラーが返る", async () => {
       // given
       const milk = await TodoBuilder.of(database.db)
         .title("牛乳を買う")
@@ -241,7 +241,7 @@ describeFeature(feature, ({ Scenario }) => {
     // WHY 形の正しくない値だけ: uuid の形で存在しない Todo は、内容を読んだ後に command が探すので、内容の誤りが先に 400 になる
     //   （2026-09-30 に、uuid の形の値で書いたこの step が 400 で失敗して確かめた）。
     And(
-      "Todo を指す値の形が正しくないときは、送った内容に誤りがあっても、存在しないと伝えられる",
+      "Todo を指定する値の形式が正しくないときは、本文に誤りがあっても、存在しないというエラーが返る",
       async () => {
         // given: beforeEach で Todo を空にしてある
         // when

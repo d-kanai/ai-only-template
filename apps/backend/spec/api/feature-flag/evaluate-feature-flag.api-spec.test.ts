@@ -84,7 +84,7 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("異常系", ({ And }) => {
     And(
-      "定義されていないフィーチャーフラグは、存在しないと伝えられる",
+      "定義されていないフィーチャーフラグは、存在しないというエラーが返る",
       async () => {
         // given
         const flags = { "detail-screen": true };
@@ -102,24 +102,27 @@ describeFeature(feature, ({ Scenario }) => {
       },
     );
 
-    And("送った内容が読めないときは、読めないと伝えられる", async () => {
-      // given
-      const flags = { "detail-screen": true };
+    And(
+      "リクエストの本文が読めないときは、読めないというエラーが返る",
+      async () => {
+        // given
+        const flags = { "detail-screen": true };
 
-      // when
-      const response = await evaluate(flags, "detail-screen", "{");
+        // when
+        const response = await evaluate(flags, "detail-screen", "{");
 
-      // then
-      expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toStrictEqual({
-        key: "detail-screen",
-        errorCode: "PARSE_ERROR",
-        errorDetails: "Request body must be valid JSON.",
-      });
-    });
+        // then
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toStrictEqual({
+          key: "detail-screen",
+          errorCode: "PARSE_ERROR",
+          errorDetails: "Request body must be valid JSON.",
+        });
+      },
+    );
 
     And(
-      "評価コンテキストの形が正しくないときは、正しくないと伝えられる",
+      "評価コンテキストの形式が正しくないときは、形式が不正というエラーが返る",
       async () => {
         // given
         const flags = { "detail-screen": true };

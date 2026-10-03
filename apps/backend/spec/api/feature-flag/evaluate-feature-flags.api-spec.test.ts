@@ -103,23 +103,26 @@ describeFeature(feature, ({ Scenario }) => {
   });
 
   Scenario("異常系", ({ And }) => {
-    And("送った内容が読めないときは、読めないと伝えられる", async () => {
-      // given
-      const flags = { "detail-screen": true };
+    And(
+      "リクエストの本文が読めないときは、読めないというエラーが返る",
+      async () => {
+        // given
+        const flags = { "detail-screen": true };
 
-      // when
-      const response = await evaluateAll(flags, "{");
+        // when
+        const response = await evaluateAll(flags, "{");
 
-      // then
-      expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toStrictEqual({
-        errorCode: "PARSE_ERROR",
-        errorDetails: "Request body must be valid JSON.",
-      });
-    });
+        // then
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toStrictEqual({
+          errorCode: "PARSE_ERROR",
+          errorDetails: "Request body must be valid JSON.",
+        });
+      },
+    );
 
     And(
-      "評価コンテキストの形が正しくないときは、正しくないと伝えられる",
+      "評価コンテキストの形式が正しくないときは、形式が不正というエラーが返る",
       async () => {
         // given
         const flags = { "detail-screen": true };

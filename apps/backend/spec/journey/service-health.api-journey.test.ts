@@ -25,12 +25,12 @@ import { PostgresTransactionRunner } from "../../shared/drizzle/transaction.post
 import { ApiCoverage } from "../../test-support/api-coverage";
 import { TestDatabase } from "../../test-support/database";
 
-// API ジャーニーテスト（Issue #107）: 外からの監視がサービスの稼働を確かめる間に、利用者が Todo を作って一覧を見るという流れに沿って、
+// API ジャーニーテスト（Issue #107）: 外からの監視がヘルスチェックをする間に、利用者が Todo を作って一覧を見るという流れに沿って、
 //   ヘルスチェックと Todo の作成・一覧の API を、実 Postgres の上で本番と同じ組み立てで順に呼ぶ。WHY（API ジャーニーという層・本番の
 //   export を使わずここで組み立てる・テストダブル無し・変更系の後に DB を読む・step 間の値を変数で渡す・技術の検証をここに閉じる・
 //   Stryker で実行しない）は todo-lifecycle.api-journey.test.ts の冒頭と同じ。
 // WHY ヘルスチェックの後にも DB を読む: ヘルスチェックは GET なので規則（rule-tests/api-journey.test.ts）は DB の読み取りを求めないが、
-//   稼働の確認が何も書かない（Todo も変更の記録も増えない）ことを、業務の流れの中で確かめる。
+//   ヘルスチェックが何も書かない（Todo も変更の記録も増えない）ことを、業務の流れの中で確かめる。
 // WHY ヘルスチェックを Todo と同じ db で組み立てる: 本番も同じプール（AppDatabase.get().db）を使う。Todo を書いた接続と同じ保存先に
 //   問い合わせられることを確かめる。DB に問い合わせられない場合（503）は API 仕様（spec/api/health）と単体テストが確かめる。
 
@@ -73,7 +73,7 @@ function healthRequest(): Request {
   return new Request(`${BASE_URL}/api/health`);
 }
 
-// 使えるときの応答の本文（200）。
+// 正常のときの応答の本文（200）。
 const AVAILABLE: GetHealthResponse = {
   status: "ok",
   checks: { database: "ok" },
@@ -96,23 +96,23 @@ describeFeature(feature, ({ Background, Scenario }) => {
     });
   });
 
-  Scenario("稼働を確かめながら Todo を使う", ({ When, Then, And }) => {
+  Scenario("ヘルスチェックをしながら Todo を使う", ({ When, Then, And }) => {
     let response: Response;
     let milk: CreateTodoResponse;
-    // 変更の記録の件数（Todo を作った後の値）。稼働の確認で増えないことを確かめる。
+    // 変更の記録の件数（Todo を作った後の値）。ヘルスチェックで増えないことを確かめる。
     let changeLogCount: number;
 
-    When("サービスが使えるかを確かめる", async () => {
+    When("ヘルスチェックをする", async () => {
       response = await handlers.getHealth(healthRequest());
     });
 
-    Then("サービスは使えると返る", async () => {
+    Then("正常と返る", async () => {
       expect(response.status).toBe(200);
       expect(response.headers.get("cache-control")).toBe("no-store");
       await expect(response.json()).resolves.toStrictEqual(AVAILABLE);
     });
 
-    And("確かめても Todo は増えない", async () => {
+    And("ヘルスチェックをしても Todo は増えない", async () => {
       await expect(database.db.select().from(todos)).resolves.toStrictEqual([]);
       await expect(
         database.db.select().from(changeLogs),
@@ -142,20 +142,17 @@ describeFeature(feature, ({ Background, Scenario }) => {
       },
     );
 
-    When(
-      "Todo を作った後に、もう一度サービスが使えるかを確かめる",
-      async () => {
-        response = await handlers.getHealth(healthRequest());
-      },
-    );
+    When("Todo を作った後に、もう一度ヘルスチェックをする", async () => {
+      response = await handlers.getHealth(healthRequest());
+    });
 
-    Then("作った後もサービスは使えると返る", async () => {
+    Then("Todo を作った後も正常と返る", async () => {
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toStrictEqual(AVAILABLE);
     });
 
     And(
-      "確かめても Todo は {string} の 1 件のまま変わらない",
+      "ヘルスチェックをしても Todo は {string} の 1 件のまま変わらない",
       async (_ctx: TestContext, title: string) => {
         await expect(database.db.select().from(todos)).resolves.toStrictEqual([
           rowOf({ ...milk, title }),

@@ -90,7 +90,7 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("レスポンス", ({ And }) => {
     // 削除の後に返す内容は無い（204 で本文が空）。
-    And("Todo を削除すると、何も返さずに成功を伝える", async () => {
+    And("Todo を削除すると、本文の無い成功のレスポンスが返る", async () => {
       // given
       const milk = await TodoBuilder.of(database.db)
         .title("牛乳を買う")
@@ -130,7 +130,7 @@ describeFeature(feature, ({ Scenario }) => {
 
   Scenario("異常系", ({ And }) => {
     // WHY 別の Todo を 1 件置く: 空のときだけ「無い」と返す実装・無い id で別の Todo を消す誤りを通さない。
-    And("存在しない Todo は、存在しないと伝えられる", async () => {
+    And("存在しない Todo は、存在しないというエラーが返る", async () => {
       // given
       const milk = await TodoBuilder.of(database.db)
         .title("牛乳を買う")
@@ -150,7 +150,7 @@ describeFeature(feature, ({ Scenario }) => {
     });
 
     And(
-      "削除済みの Todo をもう一度削除すると、存在しないと伝えられる",
+      "削除済みの Todo をもう一度削除すると、存在しないというエラーが返る",
       async () => {
         // given
         const milk = await TodoBuilder.of(database.db)

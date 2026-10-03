@@ -65,7 +65,7 @@ describeFeature(feature, ({ Scenario }) => {
     // id と作成日時は API が決める（randomUUID と now()）ので、形と範囲を確かめる。作成日時は要求の前後の時刻の間。
     // 変更の記録も、Todo と完了の履歴の作成（insert）の 2 件だけが残る（冒頭の WHY のとおり .feature には書かない。作る操作の
     //   結果を確かめるこの step に置く）。
-    And("タイトルを渡すと、未完了の Todo が作られる", async () => {
+    And("タイトルを指定すると、未完了の Todo が作られる", async () => {
       // given
       const before = Date.now();
 
@@ -125,7 +125,7 @@ describeFeature(feature, ({ Scenario }) => {
     // 応答の全項目（id・タイトル・完了かどうか・作成日時）が保存された行と同じ。作成日時は応答では ISO 8601 の文字列、行では Date
     //   （schema.ts の mode "date"）。
     // WHY 前後に空白のあるタイトルで作る: 要求のタイトルを（空白を除く前のまま）返す誤りを、保存された行との違いで見分ける。
-    And("作った Todo が、保存された内容のとおりに返る", async () => {
+    And("作った Todo が、保存された内容で返る", async () => {
       // given: beforeEach で Todo を空にしてある
       // when
       const response = await postTodo({ title: " 牛乳を買う\t" });
@@ -221,7 +221,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And(
-      "タイトルが文字列でないと、形が違うという理由で拒否され、何も保存されない",
+      "タイトルが文字列でないと、型が違うという理由で拒否され、何も保存されない",
       async () => {
         // given: beforeEach で Todo を空にしてある
         // when
@@ -249,54 +249,54 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     // 作成で完了かどうかは受け付けない（作った Todo は常に未完了）。黙って捨てずに拒否する（json-body.ts の RequestBody.schema）。
-    And(
-      "決められていない項目があると、拒否され、何も保存されない",
-      async () => {
-        // given: beforeEach で Todo を空にしてある
-        // when
-        const response = await postTodo({
-          title: "牛乳を買う",
-          completed: true,
-        });
-
-        // then
-        await TodoSpecProblems.expectResponse(
-          response,
-          TodoSpecProblems.validation("/api/todos", {
-            detail: "Request body has unknown fields: completed.",
-            key: "request.body.unknownKeys",
-            params: { keys: "completed" },
-            errors: [
-              {
-                pointer: "#",
-                key: "request.body.unknownKeys",
-                params: { keys: "completed" },
-                detail: "Request body has unknown fields: completed.",
-              },
-            ],
-          }),
-        );
-        await expectNothingStored();
-      },
-    );
-
-    // JSON として読めない本文。項目が無いので errors は付かない。
-    And("内容が読み取れない形式だと、拒否され、何も保存されない", async () => {
+    And("想定外の項目があると、拒否され、何も保存されない", async () => {
       // given: beforeEach で Todo を空にしてある
       // when
-      const response = await handler(
-        TodoSpecRequests.raw("POST", "/api/todos", "{title:"),
-      );
+      const response = await postTodo({
+        title: "牛乳を買う",
+        completed: true,
+      });
 
       // then
       await TodoSpecProblems.expectResponse(
         response,
         TodoSpecProblems.validation("/api/todos", {
-          detail: "Request body must be valid JSON.",
-          key: "request.body.notJson",
+          detail: "Request body has unknown fields: completed.",
+          key: "request.body.unknownKeys",
+          params: { keys: "completed" },
+          errors: [
+            {
+              pointer: "#",
+              key: "request.body.unknownKeys",
+              params: { keys: "completed" },
+              detail: "Request body has unknown fields: completed.",
+            },
+          ],
         }),
       );
       await expectNothingStored();
     });
+
+    // JSON として読めない本文。項目が無いので errors は付かない。
+    And(
+      "リクエストの本文が読み取れない形式だと、拒否され、何も保存されない",
+      async () => {
+        // given: beforeEach で Todo を空にしてある
+        // when
+        const response = await handler(
+          TodoSpecRequests.raw("POST", "/api/todos", "{title:"),
+        );
+
+        // then
+        await TodoSpecProblems.expectResponse(
+          response,
+          TodoSpecProblems.validation("/api/todos", {
+            detail: "Request body must be valid JSON.",
+            key: "request.body.notJson",
+          }),
+        );
+        await expectNothingStored();
+      },
+    );
   });
 });

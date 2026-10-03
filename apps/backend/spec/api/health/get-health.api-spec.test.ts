@@ -26,7 +26,7 @@ const feature = await loadFeature("./get-health.feature");
 
 describeFeature(feature, ({ Scenario }) => {
   Scenario("レスポンス", ({ And }) => {
-    And("保存先に問い合わせられれば、使えると返る", async () => {
+    And("データの保存先に問い合わせできれば、正常と返る", async () => {
       // given
       const handler = GetHealthApiAssembly.handler(database.db);
 
@@ -41,7 +41,7 @@ describeFeature(feature, ({ Scenario }) => {
       } satisfies GetHealthResponse);
     });
 
-    And("確かめた結果は、途中に残さないよう伝えられる", async () => {
+    And("レスポンスはキャッシュしないよう指定される", async () => {
       // given
       const handler = GetHealthApiAssembly.handler(database.db);
 
@@ -59,7 +59,7 @@ describeFeature(feature, ({ Scenario }) => {
     // WHY console.error を差し替える: 行を確かめ、テストの出力を汚さない（rule-tests/api-spec.test.ts の api-spec-no-vi の例外。
     //   後始末は mockRestore）。
     And(
-      "保存先に問い合わせられないときは、使えないと返り、原因が記録に残る",
+      "データの保存先に問い合わせできないときは、異常と返り、原因がログに残る",
       async () => {
         // given
         const closed = await TestDatabase.create();
