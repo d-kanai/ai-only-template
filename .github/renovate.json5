@@ -1,6 +1,7 @@
 // Renovate（依存の自動更新の bot。GitHub App「Renovate」が読む）の設定（Issue #111）。
 // Dependabot ではなく Renovate にした理由・採用しなかった案は ADR docs/adr/tech-stack/20261003-renovate-for-dependency-updates.md。
-// 人の作業（版の決め方・パッチ・lockfile の作り直し）との分担はスキル dependency-update。
+// 人の作業（版の決め方・パッチ・lockfile の作り直し）との分担はスキル dependency-update。自動マージは ADR
+//   docs/adr/tech-stack/20261003-renovate-automerge-patch-minor.md（patch / minor だけ。Issue #375）。
 //
 // 書き方: JSON に行頭の // のコメント行だけを足した形にする（値の後ろのコメント・末尾のカンマ・引用符の無いキーは書かない）。
 //   WHY: rule-tests/pnpm-workspace.test.ts がコメント行を除いて JSON.parse で読み、pnpm-workspace.yaml と食い違わないかを検査する
@@ -29,6 +30,10 @@
   // strict: 待つ日数に達していない更新は PR を作らない（flexible だと、PR を作って保留の状態で置く）。renovate 44.132.2 の既定も
   //   strict だが、既定が変わっても効くように明示する（rule-tests/pnpm-workspace.test.ts が検査する）。
   "internalChecksFilter": "strict",
+  // 自動マージの入れ方: GitHub の auto-merge（platformAutomerge。Renovate の既定 true）を merge commit で付ける。CI の ci ジョブ
+  //   （main の Ruleset の required status check）が緑になった時点で GitHub がマージする。squash / rebase は使わない
+  //   （.claude/rules/workflow/issue-pr.md）。どの更新を自動マージするかは下の packageRules。
+  "automergeStrategy": "merge-commit",
   // packageRules は上から順に当て、後の規則が前の規則を上書きする（@types/react は「型定義」より後の「Next.js / React」に入る）。
   // groupName: 同じ名前の更新を 1 つの PR にまとめる（PR のタイトルに出る）。groupSlug: ブランチ名（renovate/<groupSlug>）。
   //   WHY groupSlug を明示する: 日本語の groupName（型定義）からはブランチ名が作れず、ブランチが「renovate」だけになった
@@ -98,6 +103,19 @@
       "matchManagers": ["github-actions"],
       "groupName": "GitHub Actions",
       "groupSlug": "github-actions"
+    },
+    {
+      // patch / minor（と版の固定・GitHub Actions の commit SHA だけの更新）は、CI が緑なら自動でマージする。メジャーは人が
+      //   リリースノートを読んで確かめてからマージする（daiki の判断。Issue #375、ADR docs/adr/tech-stack/20261003-renovate-automerge-patch-minor.md）。
+      //   rule-tests/pnpm-workspace.test.ts が、automerge の規則にメジャーが入らないことを検査する。
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "automerge": true
+    },
+    {
+      // Next.js / React は patch / minor でも自動マージしない。WHY: React の版を create-next-app が生成する版に合わせる例外があり
+      //   （.claude/rules/tooling/dependencies.md の「例外の版」）、合っているかを人が確かめる。上の規則より後ろに置いて上書きする。
+      "matchPackageNames": ["next", "react", "react-dom", "@types/react", "@types/react-dom"],
+      "automerge": false
     }
   ]
 }
