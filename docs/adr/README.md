@@ -99,6 +99,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-28 | TypeScript は 7 系（7.0.2）を使う | 採用 | [20260928-typescript-7.md](tech-stack/20260928-typescript-7.md) |
 | 2026-09-30 | 本番は GCP の Cloud Run + Cloud SQL にし、Terraform は器だけを、イメージの入れ替えは GitHub Actions の gcloud を受け持つ | 採用 | [20260930-gcp-cloud-run-and-cloud-sql.md](tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md) |
 | 2026-10-02 | migrate ジョブはアプリの runtime イメージをコマンド違いで動かし、マイグレーションは drizzle-orm の migrator を束ねた入口で当てる | 採用 | [20261002-migrate-job-same-runtime-image.md](tech-stack/20261002-migrate-job-same-runtime-image.md) |
+| 2026-10-03 | 依存の自動更新は Renovate（GitHub App）で行い、Dependabot は使わない | 採用 | [20261003-renovate-for-dependency-updates.md](tech-stack/20261003-renovate-for-dependency-updates.md) |
 
 ### quality/
 品質ゲートとテストの方針
@@ -121,6 +122,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-10-02 | API ジャーニーの実行で全 API が 1 回は呼ばれることを API 網羅率として測り、100% を CI のゲートにする | 採用 | [20261002-api-journey-coverage-gate.md](quality/20261002-api-journey-coverage-gate.md) |
 | 2026-10-02 | ルール検査テストを .feature（`*` の箇条書き）と step の実装に分ける | 採用 | [20261002-rule-tests-in-feature.md](quality/20261002-rule-tests-in-feature.md) |
 | 2026-10-02 | コード・設計ルールのレビューは rules の表の「レビュー」の行を観点にし、検出 → 1 件ずつ検証 → 重大度で報告するスキルで行う | 採用 | [20261002-rule-review-from-rules-tables.md](quality/20261002-rule-review-from-rules-tables.md) |
+| 2026-10-03 | 依存の脆弱性は ci ジョブの pnpm audit（high 以上で失敗）で検査し、CodeQL は入れない | 採用 | [20261003-pnpm-audit-in-ci.md](quality/20261003-pnpm-audit-in-ci.md) |
 
 ### workflow/
 開発プロセス・環境・AI エージェントの運用
