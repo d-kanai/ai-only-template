@@ -74,7 +74,7 @@
 | `tooling/git-guard.md` | `.claude/settings.json`・`lefthook.yml`・`scripts/hooks/guard-git*` など | git 操作の権限・フック・commit-msg |
 | `tooling/work-log-hooks.md` | `scripts/hooks/require-work-log*`・`check-work-logs-diff*`・`ci.yml` など | 作業ログの強制（Stop フック・CI） |
 | `tooling/worktree.md` | worktree のフックと生成規則 | worktree ごとの `.env`・DB・ポート |
-| `tooling/github-actions.md` | `.github/workflows/**`・`rule-tests/github-actions.test.ts` | action の commit SHA での固定、job の `timeout-minutes`、SHA の引き方 |
+| `tooling/github-actions.md` | `.github/workflows/**`・`rule-tests/github-actions.test.ts` | action の commit SHA での固定、job の `timeout-minutes`、依存の脆弱性の検査（`pnpm audit`）、SHA の引き方 |
 | `code/shared.md` | `apps/shared/**` | frontend と backend で共通の基盤（env / logger）だけを置く、exports、`@repo/shared/...` の書き方 |
 
 ### スキル（手順。`/<name>` でも呼べる）

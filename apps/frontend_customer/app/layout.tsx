@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { FeatureFlagProvider } from "@/features/feature-flag";
 import { LocaleProvider } from "@/shared/i18n/i18n";
 import { LOCALE_HEADER, Locales } from "@/shared/i18n/locale";
+import { NONCE_HEADER } from "@/shared/security/security-headers";
 import {
   DesignSystemHead,
   designSystemHtmlProps,
@@ -29,12 +30,16 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const locale = Locales.fromHeader((await headers()).get(LOCALE_HEADER));
+  const requestHeaders = await headers();
+  const locale = Locales.fromHeader(requestHeaders.get(LOCALE_HEADER));
+  // CSP の nonce（Issue #106）: proxy.ts が要求ごとに作り、リクエストヘッダ x-nonce に載せた値。Next が自動で nonce を付けない
+  //   自前のインラインスクリプト（DesignSystemHead の配色のスクリプト）に付ける。
+  const nonce = requestHeaders.get(NONCE_HEADER) ?? undefined;
   return (
     // デザインシステム（Issue #292）が <html> と <head> に要るもの（中身と WHY は shared/ui/design-system-document.tsx）。
     <html lang={locale} {...designSystemHtmlProps}>
       <head>
-        <DesignSystemHead />
+        <DesignSystemHead nonce={nonce} />
       </head>
       <body>
         <DesignSystemProvider>

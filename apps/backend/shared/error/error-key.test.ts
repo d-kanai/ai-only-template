@@ -61,6 +61,7 @@ describe("ParamlessErrorKey", () => {
       | "todo.statusChanges.invalid"
       | "request.body.notJson"
       | "request.body.notObject"
+      | "request.origin.forbidden"
       | "server.internalError"
     >();
   });

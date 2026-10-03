@@ -42,7 +42,8 @@ jobs:
           fetch-depth: 0
 
       # PR の差分に作業ログ（docs/work-logs/*.md）の変更が無ければ失敗させる（Issue #64。置き場所は Issue #101。.claude/rules/tooling/work-log-hooks.md）。
-      # WHY: 調査だけの依頼などで作業ログの追記が漏れた。文書だけの PR も例外にしない（ユーザー判断）。
+      # WHY: 調査だけの依頼などで作業ログの追記が漏れた。文書だけの PR も例外にしない（ユーザー判断）。例外は、作者が renovate[bot] で
+      #   依存のファイルだけを変えた PR だけ（スクリプトがイベントの JSON から判定する。Issue #111）。
       # WHY pull_request のときだけ: main への push では github.base_ref が空で、比べる base が無い。
       # WHY 最初に置く: install も Postgres も要らない検査（runner にある node だけを使う。Issue #178）なので、準備より先に、原因の分かる
       #   メッセージで止める。rule-tests/work-logs-check.test.ts が「pnpm lint より前」「if・continue-on-error・失敗を打ち消す書き方が無い」を検査する。
@@ -65,6 +66,16 @@ jobs:
 
       # --frozen-lockfile: lockfile と package.json がずれていたら更新せず失敗させる（.claude/rules/tooling/dependencies.md）。
       - run: pnpm install --frozen-lockfile
+
+      # 依存（lockfile のすべてのパッケージ。devDependencies を含む）の既知の脆弱性を、npm レジストリの advisory で検査する（Issue #112）。
+      # --audit-level high: high と critical があれば失敗する（moderate / low は表示もしない）。WHY high: 2026-10-03 の実測で moderate が
+      #   4 件（Stryker の推移的依存の qs など、開発時だけ使うもの）あり、moderate で止めると修正できるまで全 PR が止まる。
+      #   決定と minimumReleaseAge（5 日）との関係・誤検知の抑え方（pnpm-workspace.yaml の auditConfig.ignoreGhsas）は
+      #   ADR docs/adr/quality/20261003-pnpm-audit-in-ci.md。
+      # WHY ci ジョブの中: Ruleset protect-main の required status check は ci だけなので、ここに置けば high が残る PR はマージできない。
+      # WHY --ignore-registry-errors を付けない: レジストリが落ちたときに検査を飛ばして緑にしない（検査できないなら赤にする）。
+      # rule-tests/github-actions.test.ts の auditsDependencies がこの形（ci ジョブ・コマンドの完全一致・if と continue-on-error なし）を検査する。
+      - run: pnpm audit --audit-level high
 
       # 開発用の PostgreSQL を compose.yaml で起動する（Issue #51）。
       # WHY GitHub Actions の services: を使わないか: 手元・クラウドセッションと同じ compose.yaml を使い、
