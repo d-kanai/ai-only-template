@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { OfrepRequest, OfrepResponse } from "../../../../shared/http/ofrep";
+import { OfrepResponse } from "../../../../shared/http/ofrep";
+import { OfrepRequest } from "../../../../shared/http/ofrep-request";
 import { EvaluateFeatureFlagQuery } from "../application/evaluate-feature-flag.query";
 import {
   FEATURE_FLAGS,

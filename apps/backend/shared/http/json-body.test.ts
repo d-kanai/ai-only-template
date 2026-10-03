@@ -3,8 +3,9 @@ import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import type { ErrorKey } from "../error/error-key";
 import { KeyedIssue } from "../error/keyed-issue";
+import { InvalidRequestError } from "./invalid-request-error";
 import { RequestBody } from "./json-body";
-import { InvalidRequestError, type ProblemErrorInput } from "./problem";
+import type { ProblemErrorInput } from "./problem";
 
 function postRequest(body: string): Request {
   return new Request("http://localhost/api/test", {
