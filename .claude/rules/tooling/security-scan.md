@@ -26,7 +26,9 @@ gitleaks・actionlint・zizmor・hadolint・Trivy・Semgrep を、`scripts/secur
 
 - 依存（npm）の脆弱性は `pnpm audit`（`.claude/rules/tooling/github-actions.md`）が見る。Trivy と Semgrep には npm の依存を見させない（同じ指摘が 2 か所に出る）。
 - WHY フックと CI の両方: フックは手元ですぐ気づくため、CI は `--no-verify` や Docker の止まった環境で飛ばされたときの最後の砦（required status check の `ci` ジョブ）。
-- WHY Semgrep は pre-push: 1 回 10〜20 秒かかる（2026-10-03 実測）。
+- WHY Semgrep は pre-push: 1 回 18〜28 秒かかる（2026-10-03 実測。規則の取得済みの 2 つの環境）。
+- `lefthook.yml` のトップレベルにはフック（`pre-commit` / `pre-push` / `commit-msg`）のほかを書かない。WHY: `extends:` で読む別のファイルに `skip: true` を書くと本体の検査が黙って飛ばされ（lefthook 2.1.12 で実測）、`rc:` は hook のスクリプトが source するファイルで、検査を止める環境変数を入れられる。フックを足すときは `rule-tests/security-scan.test.ts` の `ALLOWED_LEFTHOOK_KEYS` にも足す。
+- CI の検査のステップは `run` だけにし、ワークフローと job に `defaults:` を書かない（shell や env で、同じ run のまま実行の仕方を変えられるため）。
 - 機械化: 組み込みの形（イメージの digest・zizmor のハッシュ・semgrep-rules のコミット・フックのコマンドの run と glob・CI の 6 つのステップ・デプロイのステップの順序）は `rule-tests/security-scan.test.ts`（仕様は対の `.feature`、限界はテストの冒頭）。
 
 ## 前提

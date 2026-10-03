@@ -9,12 +9,12 @@ Feature: セキュリティの検査の組み込み
     * タグだけのイメージ・zizmor のタグと requirements の版のずれ・digest の無い FROM・ハッシュの無い requirements・--require-hashes の無い pip・短いコミットの semgrep-rules は、規則ごとの違反になる
   Scenario: コミットフックの組み込み（findHookViolations）
     * pre-commit の gitleaks・actionlint・zizmor・hadolint・trivy-config と pre-push の semgrep が、決まった run と glob だけを持てば違反なし（ほかのコマンドがあってもよい）
-    * コマンドが無い・コメントアウト・run の変更や || true・glob を狭める・skip や only を足す・フックに skip を足す・別のフックに移すと違反になる
+    * コマンドが無い・コメントアウト・run の変更や || true・glob を狭める・skip や only を足す・フックに skip を足す・トップレベルに extends や rc を足す・別のフックに移すと違反になる
   Scenario: CI の組み込み（findCiViolations）
     * ci.yml の ci job の steps が 6 つの検査をそのまま実行すれば違反なし
-    * 検査のステップが無い・if で飛ばす・continue-on-error で無視する・次の行の || true・job の if や continue-on-error・steps の外にだけある検査は違反になる
+    * 検査のステップが無い・if で飛ばす・continue-on-error で無視する・次の行の || true・job の if や continue-on-error・steps の外にだけある検査・step の shell や env・job やワークフローの defaults は違反になる
   Scenario: デプロイのイメージの検査（findDeployViolations）
     * deploy.yml の deploy job が、今回のイメージを trivy-image で検査してからマイグレーションとデプロイをすれば違反なし
-    * 検査が無い・デプロイの後・別の条件の if・continue-on-error で無視すると違反になる
+    * 検査が無い・デプロイの後・別の条件の if・continue-on-error で無視する・検査のステップの shell や env・ワークフローの defaults は違反になる
   Scenario: セキュリティの検査の組み込み（実ファイル）
     * リポジトリの scan.sh・zizmor のイメージ・lefthook.yml・ci.yml・deploy.yml は上の規則の違反が無い

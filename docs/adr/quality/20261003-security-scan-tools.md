@@ -19,7 +19,7 @@ Issue #112 では、依存の脆弱性を `pnpm audit` で止めることにし�
 - Docker で動かすのは、手元（Mac）・クラウドセッション・CI で同じ版を、Postgres のために既にある Docker 以外に何も入れずに動かせるため。クラウドセッションのプロキシは github.com の releases と ghcr.io の blob を 403 で拒否し、バイナリを直接落とす方式は使えなかった（2026-10-03 実測）。
 - digest で固定するのは、タグが差し替えられるため。Trivy は 2026-03 に Docker Hub のタグと trivy-action / setup-trivy の Action のタグを乗っ取られた（GHSA-69fq-xp46-6x23）。同じ理由で Trivy と gitleaks の Action を使わず、CLI をイメージで動かす（gitleaks-action は組織の repo ではライセンスキーも要る）。
 - Semgrep の規則を repo に入れないのは、Semgrep Rules License v1.0 が規則の配布を禁じるため。コミットで固定するのは、レジストリ（`p/...`）の規則が日々変わり、同じコードで結果が変わるため。ERROR だけにしたのは、WARNING 以下が 2026-10-03 の実測で 28 件出て、どれもテストや rule-tests の正規表現など攻撃者の入力が届かない箇所だったため。
-- Semgrep を pre-push にしたのは、1 回 10〜20 秒かかり（2026-10-03 実測）、コミットのたびには重いため。
+- Semgrep を pre-push にしたのは、1 回 18〜28 秒かかり（2026-10-03 実測。規則の取得済みの 2 つの環境）、コミットのたびには重いため。
 - CI でも動かすのは、フックが `--no-verify` や Docker の止まった環境で飛ばされうるため。`ci` ジョブに置くのは required status check が `ci` だけのため（pnpm audit と同じ）。
 - イメージの検査をデプロイに置くのは、イメージをビルドするのがデプロイだけで、PR の CI でビルドすると数分延びるため。push の後でも、トラフィックを移す前に止まれば利用者には出ない。
 

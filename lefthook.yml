@@ -44,17 +44,19 @@ pre-commit:
         - "**/Dockerfile"
       run: bash scripts/security/scan.sh hadolint {staged_files}
     # trivy-config: Dockerfile か Terraform（infra/）を変えたコミットだけ。設定の検査はリポジトリ全体を見る（モジュールは互いに参照する）。
+    #   "infra/*.tf" も並べる: hadolint と同じく "**/" は 1 階層以上にだけ一致し、infra/ 直下の .tf だけのコミットで飛ばされた（reviewer の実測）。
     trivy-config:
       glob:
         - "Dockerfile"
         - "**/Dockerfile"
+        - "infra/*.tf"
         - "infra/**/*.tf"
       run: bash scripts/security/scan.sh trivy-config
 
 # pre-push: `git push` の直前に実行され、非 0 で終わると push を中止する。
 pre-push:
   commands:
-    # semgrep: コードの脆弱性のパターン（Issue #362）。WHY pre-commit でなく pre-push: 規則を読むだけで 1 回 10〜20 秒かかり
+    # semgrep: コードの脆弱性のパターン（Issue #362）。WHY pre-commit でなく pre-push: 規則を読むだけで 1 回 18〜28 秒かかり
     #   （2026-10-03 実測）、コミットのたびには重い。push は 1 ラウンドに 1 回（.claude/rules/workflow/issue-pr.md）なので待てる。
     semgrep:
       run: bash scripts/security/scan.sh semgrep

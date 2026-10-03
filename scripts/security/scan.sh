@@ -65,6 +65,8 @@ ensure_zizmor_image() {
   docker build --quiet ${secret[@]+"${secret[@]}"} -t "$ZIZMOR_IMAGE" "$repo_root/scripts/security/zizmor" >/dev/null
 }
 
+# 取得した規則のディレクトリを変数 rules に入れる。WHY 変数で返す（`$(...)` で受けない）: コマンド置換の中では set -e が効かず、
+#   git fetch が失敗しても .complete まで進み、空の取得が「済み」として残って以後の push がずっと失敗した（reviewer の実測）。
 ensure_semgrep_rules() {
   local dir="$cache_dir/semgrep-rules/$SEMGREP_RULES_COMMIT"
   if [[ ! -f "$dir/.complete" ]]; then
@@ -76,7 +78,7 @@ ensure_semgrep_rules() {
     # .complete: 取得が最後まで済んだ印。途中で止まった取得を使わない。
     touch "$dir/.complete"
   fi
-  printf '%s\n' "$dir"
+  rules="$dir"
 }
 
 tool="${1:-}"
@@ -108,7 +110,8 @@ case "$tool" in
       while IFS= read -r file; do files+=("$file"); done < <(git -C "$repo_root" ls-files 'Dockerfile' '**/Dockerfile')
     fi
     # --failure-threshold warning: info（DL3066 など）では失敗にしない。warning 以上で失敗する。
-    for file in "${files[@]}"; do
+    # ${files[@]+...}: Dockerfile が 0 件のとき、macOS の bash 3.2 は set -u の下で空の配列の展開を unbound variable にする。
+    for file in ${files[@]+"${files[@]}"}; do
       docker run --rm -i "$HADOLINT_IMAGE" hadolint --failure-threshold warning - <"$repo_root/$file"
     done
     ;;
@@ -129,7 +132,7 @@ case "$tool" in
       --scanners vuln --pkg-types os --quiet "$image"
     ;;
   semgrep)
-    rules="$(ensure_semgrep_rules)"
+    ensure_semgrep_rules
     configs=()
     # javascript / typescript の security のディレクトリの規則のうち、ERROR の規則を含むファイルだけを読む。
     #   WHY ERROR だけ: WARNING 以下は 2026-10-03 の実測でテストと rule-tests の正規表現の組み立てなど 28 件が出て、どれも

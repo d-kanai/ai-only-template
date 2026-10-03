@@ -32,16 +32,20 @@ import {
 //     版と同じにする（WHY タグをそろえる: scan.sh は同じタグのイメージがあれば作り直さないので、版を上げてもタグが同じだと古い版で動く）。
 //   - semgrep-rules-pinned: scan.sh の SEMGREP_RULES_COMMIT は 40 桁の commit SHA（規則が日々変わり、同じコードで結果が変わるのを防ぐ）。
 //   - hook-command / hook-settings: lefthook.yml の pre-commit の gitleaks・actionlint・zizmor・hadolint・trivy-config と pre-push の semgrep が、
-//     決まった run と glob だけを持つ（skip・only・exclude などを足さない）。フックには commands 以外のキー（skip など）を書かない。
+//     決まった run と glob だけを持つ（skip・only・exclude などを足さない）。フックには commands 以外のキー（skip など）を書かず、
+//     トップレベルにはフックのほか（extends・rc・remotes など、別のファイルから設定を足すもの）を書かない（ALLOWED_LEFTHOOK_KEYS）。
 //     WHY 完全に一致させる: `|| true`・`skip: true`・glob を狭めるなど、どれも検査を黙って効かなくする（効いているかは見て分からない）。
-//   - ci-scan: ci.yml の ci job（required status check）の steps が 6 つの検査を、step にも job にも if・continue-on-error を付けずに
-//     そのまま実行する。WHY ci job: 別の job だと赤でもマージできる（rule-tests/github-actions.test.ts の auditsDependencies と同じ）。
+//   - ci-scan: ci.yml の ci job（required status check）の steps が 6 つの検査を、`run` だけのステップで実行し、job に if・
+//     continue-on-error を付けず、ワークフローと job に defaults（run の shell の差し替え）を書かない。WHY ci job: 別の job だと赤でもマージできる（rule-tests/github-actions.test.ts の auditsDependencies と同じ）。
 //     WHY フックと CI の両方: フックは `--no-verify` や Docker の止まった手元で飛ばされうる。CI が最後の砦。
 //   - deploy-image-scan: deploy.yml の deploy job が `scan.sh trivy-image "$IMAGE"` を、マイグレーションとデプロイ（gcloud run）より前に、
-//     ほかのステップと同じ if（steps.config.outputs.ready == 'true'）か if なしで、continue-on-error なしで実行する。
+//     ほかのステップと同じ if（steps.config.outputs.ready == 'true'）か if なしで、if・name・run のほかのキー（env・shell・
+//     continue-on-error など）なしで実行し、ワークフローと job に defaults を書かない。
 // 限界（字句で読む。YAML のパーサを依存に足さない。rule-tests/workflow-yaml.ts）:
 //   - scan.sh の中でイメージを変数を通さずに書く（`docker run alpine`）ことは見ない。版の変数の定義だけを見る（reviewer が見る）。
 //   - lefthook-local.yml（手元だけの上書き）と環境変数 LEFTHOOK=0 は見ない（手元の設定で、repo に入らない。CI が最後の砦）。
+//   - ワークフローと job の env（PATH を変えるなど）は見ない（ci.yml の ci job は env で DB の接続先などを渡しているので一律に
+//     拒否できない。reviewer が見る）。
 //   - ci.yml が PR と push の両方で動くことは rule-tests/github-actions.test.ts の auditsDependencies が見る（同じ ci job）。
 //   - デプロイの検査が、イメージをビルドして push した後にあることは見ない（前にあると、まだ無いイメージを検査して失敗するので気づく）。
 //   - 検査の中身（ツールの引数・しきい値）は scan.sh に書き、ここでは見ない（scan.sh のコメントと reviewer が見る）。
@@ -151,7 +155,8 @@ const EXPECTED_HOOKS: Record<string, Record<string, HookCommand>> = {
       run: [scan("hadolint {staged_files}")],
     },
     "trivy-config": {
-      glob: [...DOCKERFILE_GLOBS, "infra/**/*.tf"],
+      // WHY infra/*.tf も: "**/" は 1 階層以上にだけ一致し、infra/ 直下の .tf を変えたコミットで飛ばされる（reviewer の実測）。
+      glob: [...DOCKERFILE_GLOBS, "infra/*.tf", "infra/**/*.tf"],
       run: [scan("trivy-config")],
     },
   },
@@ -222,27 +227,49 @@ function readHook(yaml: string, hook: string): Hook | undefined {
   };
 }
 
+// トップレベルのキー（インデント 0 の、コメントでない行の `:` の手前）。
+const topLevelKeys = (yaml: string) =>
+  yaml
+    .split(/\r?\n/)
+    .filter((text) => /^[^\s#]/.test(text))
+    .map((text) => scalar(keyOf(text)));
+
+// lefthook.yml のトップレベルに書いてよいキー（フックの名前）。WHY 許可リスト: `extends:` で読み込む別のファイルに
+//   `skip: true` を書くと、本体の検査は黙って飛ばされ（lefthook 2.1.12 で `(skip) by condition`、exit 0。reviewer の実測）、
+//   `rc:` は hook のスクリプトが source するファイルで、`LEFTHOOK=0` を export すれば全部止められる。どちらもこのファイルを
+//   読むだけでは分からないので書かせない。フックを足すときはここに足す。
+const ALLOWED_LEFTHOOK_KEYS = ["pre-commit", "pre-push", "commit-msg"];
+
 function findHookViolations(yaml: string): string[] {
-  return Object.entries(EXPECTED_HOOKS).flatMap(([hook, expected]) => {
-    const actual = readHook(yaml, hook);
-    return [
-      ...(actual?.keys ?? [])
-        .filter((key) => key !== "commands")
-        .map(
-          (key) =>
-            `hook-settings: lefthook.yml の ${hook} に ${key} がある（commands 以外を書かない）`,
-        ),
-      ...Object.entries(expected).flatMap(([name, command]) => {
-        const actualCommand = actual?.commands[name];
-        if (actualCommand === undefined)
-          return [`hook-command: lefthook.yml の ${hook} に ${name} が無い`];
-        return unless(
-          isDeepStrictEqual(actualCommand, command),
-          `hook-command: lefthook.yml の ${hook} の ${name} が決まった形でない: ${JSON.stringify(actualCommand)}`,
-        );
-      }),
-    ];
-  });
+  const topLevel = topLevelKeys(yaml)
+    .filter((key) => !ALLOWED_LEFTHOOK_KEYS.includes(key))
+    .map(
+      (key) =>
+        `hook-settings: lefthook.yml のトップレベルに ${key} がある（フックのほかを書かない）`,
+    );
+  return [
+    ...topLevel,
+    ...Object.entries(EXPECTED_HOOKS).flatMap(([hook, expected]) => {
+      const actual = readHook(yaml, hook);
+      return [
+        ...(actual?.keys ?? [])
+          .filter((key) => key !== "commands")
+          .map(
+            (key) =>
+              `hook-settings: lefthook.yml の ${hook} に ${key} がある（commands 以外を書かない）`,
+          ),
+        ...Object.entries(expected).flatMap(([name, command]) => {
+          const actualCommand = actual?.commands[name];
+          if (actualCommand === undefined)
+            return [`hook-command: lefthook.yml の ${hook} に ${name} が無い`];
+          return unless(
+            isDeepStrictEqual(actualCommand, command),
+            `hook-command: lefthook.yml の ${hook} の ${name} が決まった形でない: ${JSON.stringify(actualCommand)}`,
+          );
+        }),
+      ];
+    }),
+  ];
 }
 
 // ---- CI（ci.yml）とデプロイ（deploy.yml） ----
@@ -278,24 +305,49 @@ function settingViolations(
   ];
 }
 
+// ワークフローと job の `defaults:`（run の shell を変えられる）の違反。WHY: `defaults: run: shell: true {0}` のように shell を
+//   差し替えると、run の文字列は同じのまま検査が実行されない（step の shell も同じ。step は run 以外のキーを許さないことで止める）。
+//   reviewer の指摘。shell の差し替えの実行時の挙動は未確認（Actions の custom shell の仕様からの推測）だが、検査の step の実行の
+//   仕方を変える書き方は、正否を確かめずに一律に拒否する。
+function defaultsViolations(
+  rule: string,
+  path: string,
+  yaml: string,
+  job: string,
+  jobBody: string[],
+): string[] {
+  return [
+    ...unless(
+      !topLevelKeys(yaml).includes("defaults"),
+      `${rule}: ${path} のトップレベルに defaults がある`,
+    ),
+    ...unless(
+      !("defaults" in jobProperties(jobBody)),
+      `${rule}: ${path} の ${job} job に defaults がある`,
+    ),
+  ];
+}
+
 function findCiViolations(yaml: string): string[] {
   const ci = readJobs(yaml).find((job) => job.name === "ci");
   if (ci === undefined) return ["ci-scan: ci.yml に ci job が無い"];
   const steps = readSteps(stepsBlock(ci.body));
   return [
+    ...defaultsViolations("ci-scan", "ci.yml", yaml, "ci", ci.body),
     ...settingViolations(
       "ci-scan",
       "ci.yml の ci job ",
       jobProperties(ci.body),
     ),
+    // WHY run だけのステップ: shell・env（PATH など）・working-directory などで、同じ run の文字列のまま実行の仕方を変えられる。
     ...CI_SCANS.filter(
       (command) =>
         !steps.some(
-          (step) => step.run === command && !("if" in step) && isEnforced(step),
+          (step) => step.run === command && Object.keys(step).length === 1,
         ),
     ).map(
       (command) =>
-        `ci-scan: ci.yml の ci job の steps に「${command}」が if・continue-on-error なしで無い`,
+        `ci-scan: ci.yml の ci job の steps に「${command}」が run だけのステップで無い`,
     ),
   ];
 }
@@ -317,12 +369,29 @@ function findDeployViolations(yaml: string): string[] {
       `deploy-image-scan: deploy.yml の deploy job の steps に「${DEPLOY_SCAN}」が無い`,
     ];
   return [
+    ...defaultsViolations(
+      "deploy-image-scan",
+      "deploy.yml",
+      yaml,
+      "deploy",
+      deploy?.body ?? [],
+    ),
     ...settingViolations(
       "deploy-image-scan",
       "deploy.yml のイメージの検査のステップ",
       scanStep,
       DEPLOY_READY,
     ),
+    // WHY if・name・run のほかを書かない: env で IMAGE を別のイメージにする・shell を差し替えると、検査が今回のイメージを見ない
+    //   （reviewer の指摘）。continue-on-error は上で別の違反にする。
+    ...Object.keys(scanStep)
+      .filter(
+        (key) => !["if", "name", "run", "continue-on-error"].includes(key),
+      )
+      .map(
+        (key) =>
+          `deploy-image-scan: deploy.yml のイメージの検査のステップに ${key} がある（if・name・run のほかを書かない）`,
+      ),
     // WHY リリースのステップが無いのも違反: 「より前」を確かめる相手が無いと、順序の検査が黙って効かなくなる。
     ...unless(
       releaseIndex !== -1 && scanIndex < releaseIndex,
@@ -386,6 +455,7 @@ const LEFTHOOK = [
   "      glob:",
   "        - Dockerfile",
   "        - '**/Dockerfile'",
+  '        - "infra/*.tf"',
   '        - "infra/**/*.tf"',
   "      run: bash scripts/security/scan.sh trivy-config",
   "",
@@ -627,7 +697,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And(
-      "コマンドが無い・コメントアウト・run の変更や || true・glob を狭める・skip や only を足す・フックに skip を足す・別のフックに移すと違反になる",
+      "コマンドが無い・コメントアウト・run の変更や || true・glob を狭める・skip や only を足す・フックに skip を足す・トップレベルに extends や rc を足す・別のフックに移すと違反になる",
       () => {
         // given
         const cases: [string, string][] = [
@@ -683,6 +753,8 @@ describeFeature(feature, ({ Scenario }) => {
             "フックに skip を足す",
             replaceOnce(LEFTHOOK, "pre-push:\n", "pre-push:\n  skip: true\n"),
           ],
+          ["extends を足す", `extends:\n  - extra.yml\n${LEFTHOOK}`],
+          ["rc を足す", `rc: .lefthookrc\n${LEFTHOOK}`],
           [
             "別のフックに移す",
             replaceOnce(
@@ -710,7 +782,12 @@ describeFeature(feature, ({ Scenario }) => {
           ],
           "run の || true": [
             shape("pre-commit", "trivy-config", {
-              glob: ["Dockerfile", "**/Dockerfile", "infra/**/*.tf"],
+              glob: [
+                "Dockerfile",
+                "**/Dockerfile",
+                "infra/*.tf",
+                "infra/**/*.tf",
+              ],
               run: [`${scan("trivy-config")} || true`],
             }),
           ],
@@ -741,6 +818,12 @@ describeFeature(feature, ({ Scenario }) => {
           "フックに skip を足す": [
             "hook-settings: lefthook.yml の pre-push に skip がある（commands 以外を書かない）",
           ],
+          "extends を足す": [
+            "hook-settings: lefthook.yml のトップレベルに extends がある（フックのほかを書かない）",
+          ],
+          "rc を足す": [
+            "hook-settings: lefthook.yml のトップレベルに rc がある（フックのほかを書かない）",
+          ],
           別のフックに移す: [
             "hook-command: lefthook.yml の pre-push に semgrep が無い",
           ],
@@ -765,7 +848,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And(
-      "検査のステップが無い・if で飛ばす・continue-on-error で無視する・次の行の || true・job の if や continue-on-error・steps の外にだけある検査は違反になる",
+      "検査のステップが無い・if で飛ばす・continue-on-error で無視する・次の行の || true・job の if や continue-on-error・steps の外にだけある検査・step の shell や env・job やワークフローの defaults は違反になる",
       () => {
         // given
         const semgrep = scan("semgrep");
@@ -800,6 +883,20 @@ describeFeature(feature, ({ Scenario }) => {
               `          - run: ${semgrep}`,
             ]),
           ],
+          ["step の shell", semgrepStep("        shell: true {0}")],
+          ["step の env", semgrepStep("        env:", "          PATH: /x")],
+          [
+            "job の defaults",
+            ciYaml(CI_STEPS, [
+              "    defaults:",
+              "      run:",
+              "        shell: true {0}",
+            ]),
+          ],
+          [
+            "ワークフローの defaults",
+            `defaults:\n  run:\n    shell: true {0}\n${ciYaml()}`,
+          ],
           ["ci job が無い", replaceOnce(ciYaml(), "  ci:", "  test:")],
         ];
 
@@ -807,7 +904,7 @@ describeFeature(feature, ({ Scenario }) => {
         const result = casesByName(cases, ([, yaml]) => findCiViolations(yaml));
 
         // then
-        const missing = `ci-scan: ci.yml の ci job の steps に「${semgrep}」が if・continue-on-error なしで無い`;
+        const missing = `ci-scan: ci.yml の ci job の steps に「${semgrep}」が run だけのステップで無い`;
         expect(result).toEqual({
           検査のステップが無い: [missing],
           コメントアウト: [missing],
@@ -819,6 +916,12 @@ describeFeature(feature, ({ Scenario }) => {
             "ci-scan: ci.yml の ci job に continue-on-error がある",
           ],
           "steps の外にだけある検査": [missing],
+          "step の shell": [missing],
+          "step の env": [missing],
+          "job の defaults": ["ci-scan: ci.yml の ci job に defaults がある"],
+          "ワークフローの defaults": [
+            "ci-scan: ci.yml のトップレベルに defaults がある",
+          ],
           "ci job が無い": ["ci-scan: ci.yml に ci job が無い"],
         });
       },
@@ -856,7 +959,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And(
-      "検査が無い・デプロイの後・別の条件の if・continue-on-error で無視すると違反になる",
+      "検査が無い・デプロイの後・別の条件の if・continue-on-error で無視する・検査のステップの shell や env・ワークフローの defaults は違反になる",
       () => {
         // given
         const cases: [string, string][] = [
@@ -878,6 +981,27 @@ describeFeature(feature, ({ Scenario }) => {
               "        continue-on-error: true",
               ...RELEASE_STEPS,
             ]),
+          ],
+          [
+            "検査のステップの shell",
+            deployYaml([
+              ...DEPLOY_STEP,
+              "        shell: true {0}",
+              ...RELEASE_STEPS,
+            ]),
+          ],
+          [
+            "検査のステップの env",
+            deployYaml([
+              ...DEPLOY_STEP,
+              "        env:",
+              "          IMAGE: alpine:3.0",
+              ...RELEASE_STEPS,
+            ]),
+          ],
+          [
+            "ワークフローの defaults",
+            `defaults:\n  run:\n    shell: true {0}\n${deployYaml([...DEPLOY_STEP, ...RELEASE_STEPS])}`,
           ],
           [
             "deploy job が無い",
@@ -907,6 +1031,15 @@ describeFeature(feature, ({ Scenario }) => {
           ],
           "continue-on-error で無視する": [
             "deploy-image-scan: deploy.yml のイメージの検査のステップに continue-on-error がある",
+          ],
+          "検査のステップの shell": [
+            "deploy-image-scan: deploy.yml のイメージの検査のステップに shell がある（if・name・run のほかを書かない）",
+          ],
+          "検査のステップの env": [
+            "deploy-image-scan: deploy.yml のイメージの検査のステップに env がある（if・name・run のほかを書かない）",
+          ],
+          "ワークフローの defaults": [
+            "deploy-image-scan: deploy.yml のトップレベルに defaults がある",
           ],
           "deploy job が無い": [missing],
         });
