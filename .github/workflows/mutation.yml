@@ -36,6 +36,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: main
+          # persist-credentials: false: checkout が GITHUB_TOKEN を .git/config に残さない（以降のステップは git で push / fetch しない）。
+          #   WHY: 残すと後のステップ・アーティファクトから読まれうる（zizmor の artipacked。Issue #362）。
+          persist-credentials: false
 
       # Node / pnpm の版の取り方は ci.yml と同じ（.claude/rules/tooling/env.md）。
       # Node の版は .tool-versions が正。ワークフローに直書きせず、nodejs 行から読む。

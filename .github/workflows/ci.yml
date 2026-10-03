@@ -40,6 +40,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+          # persist-credentials: false: checkout が GITHUB_TOKEN を .git/config に残さない（以降のステップは git で push / fetch しない）。
+          #   WHY: 残すと後のステップ・アーティファクトから読まれうる（zizmor の artipacked。Issue #362）。
+          persist-credentials: false
 
       # PR の差分に作業ログ（docs/work-logs/*.md）の変更が無ければ失敗させる（Issue #64。置き場所は Issue #101。.claude/rules/tooling/work-log-hooks.md）。
       # WHY: 調査だけの依頼などで作業ログの追記が漏れた。文書だけの PR も例外にしない（ユーザー判断）。例外は、作者が renovate[bot] で
@@ -47,9 +50,28 @@ jobs:
       # WHY pull_request のときだけ: main への push では github.base_ref が空で、比べる base が無い。
       # WHY 最初に置く: install も Postgres も要らない検査（runner にある node だけを使う。Issue #178）なので、準備より先に、原因の分かる
       #   メッセージで止める。rule-tests/work-logs-check.test.ts が「pnpm lint より前」「if・continue-on-error・失敗を打ち消す書き方が無い」を検査する。
+      # WHY base_ref を env で渡す: run に式を直接書くと、式の値がシェルのコードとして展開される（zizmor の template-injection。
+      #   Issue #362）。env の値はシェルの変数として読まれ、コードにならない。
       - name: Check docs/work-logs in PR diff
         if: github.event_name == 'pull_request'
-        run: bash scripts/hooks/check-work-logs-diff.sh origin/${{ github.base_ref }}
+        run: bash scripts/hooks/check-work-logs-diff.sh "origin/$BASE_REF"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+
+      # セキュリティの検査（Issue #362）。手元の lefthook のフック（pre-commit / pre-push）と同じ scripts/security/scan.sh を、
+      #   最後の砦としてここでも動かす（フックは --no-verify や Docker の止まった環境で飛ばされうる）。どれも digest で固定した Docker
+      #   イメージで動く（ubuntu-latest のランナーには Docker がある）。WHY install より前: Node も依存も要らないので、原因の分かる
+      #   メッセージで早く止める。WHY ci ジョブの中: required status check は ci だけ（pnpm audit と同じ理由）。
+      #   rule-tests/security-scan.test.ts が、この 6 つのステップがあり if・continue-on-error・失敗を打ち消す書き方が無いことを検査する。
+      #   規則・誤検知の抑え方は .claude/rules/tooling/security-scan.md。
+      # gitleaks-history: 全履歴の秘密情報（PR の途中のコミットで入れて後で消したものも見る。上の checkout は fetch-depth: 0）。
+      - run: bash scripts/security/scan.sh gitleaks-history
+      - run: bash scripts/security/scan.sh actionlint
+      - run: bash scripts/security/scan.sh zizmor
+      # hadolint: 引数なしで、git が追跡しているすべての Dockerfile（node_modules などの追跡外は見ない）。
+      - run: bash scripts/security/scan.sh hadolint
+      - run: bash scripts/security/scan.sh trivy-config
+      - run: bash scripts/security/scan.sh semgrep
 
       # Node の版は .tool-versions が正（.claude/rules/tooling/env.md）。ワークフローに直書きせず、nodejs 行から読む。
       - name: Read Node.js version from .tool-versions

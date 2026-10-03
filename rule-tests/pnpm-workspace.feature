@@ -16,8 +16,10 @@ Feature: pnpm-workspace.yaml の設定
   Scenario: Renovate の設定の判定（must pass）
     * pnpm と同じ日数を待ち、待つ間は PR を作らず、パッチを当てた依存を更新しない設定は違反なし（パッケージ名そのもの・スコープのワイルドカード・パッチが無い）
     * 行頭の // のコメントは読まない
+    * 自動マージを patch と minor などメジャー以外の更新の種類に絞った規則は違反なし
   Scenario: Renovate の設定の判定（must reject）
     * 待つ日数が pnpm と違う・日数で書いていない・無い、待つ間に PR を作る、パッチを当てた依存を更新すると、その設定のキーで違反になる
     * JSON に行頭の // のコメントだけを足した形でなければ例外にする（値の後ろのコメント・末尾のカンマ）
+    * メジャーの更新を自動マージしうる設定は違反になる（全体の automerge・更新の種類の無い規則・メジャーを含む規則・自動マージのプリセット）
   Scenario: Renovate の設定の実ファイル
     * .github/renovate.json5 は pnpm-workspace.yaml の minimumReleaseAge と同じ日数を待ち、パッチを当てた依存を更新しない

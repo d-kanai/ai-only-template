@@ -12,8 +12,9 @@ import { casesByName } from "./case-table";
 //   ステップが消える・失敗を打ち消す書き方になる・push でも動いて main の CI を壊す・履歴が浅くて差分を取れない、
 //   のどれでも検査は黙って効かなくなるか、関係のない失敗になる。
 // 検査すること（checksLogsInPullRequests）:
-//   - `bash scripts/hooks/check-work-logs-diff.sh origin/${{ github.base_ref }}` をそのまま実行するステップがある
-//     （`|| true` / `; exit 0` などを足すと一致しない）。
+//   - `bash scripts/hooks/check-work-logs-diff.sh "origin/$BASE_REF"` をそのまま実行し、`env:` の `BASE_REF` が
+//     `${{ github.base_ref }}` のステップがある（`|| true` / `; exit 0` などを足すと一致しない）。
+//     WHY env: run に式を直接埋め込むと値がシェルのコードとして展開される（zizmor の template-injection。Issue #362）。
 //   - そのステップの if が `github.event_name == 'pull_request'`（`${{ }}` で囲んでもよい）。
 //     WHY: push（main への push）では github.base_ref が空で、差分を取る相手が無い。PR だけで動かす。
 //   - continue-on-error が無い（false は可）。
@@ -24,7 +25,11 @@ import { casesByName } from "./case-table";
 
 const repoRoot = join(import.meta.dirname, "..");
 
-const CHECK_COMMAND = `bash scripts/hooks/check-work-logs-diff.sh origin/\${{ github.base_ref }}`;
+// WHY base_ref を env で渡す: run に `\${{ github.base_ref }}` を直接埋め込むと、式の値がシェルのコードとして展開される
+//   （zizmor の template-injection。Issue #362）。env の値はシェルの変数として読まれ、コードにならない。
+const CHECK_COMMAND =
+  'bash scripts/hooks/check-work-logs-diff.sh "origin/$BASE_REF"';
+const BASE_REF_EXPRESSION = `\${{ github.base_ref }}`;
 const PULL_REQUEST_CONDITION = "github.event_name == 'pull_request'";
 
 type WorkflowStep = Record<string, string>;
@@ -64,6 +69,7 @@ function checksLogsInPullRequests(yaml: string): boolean {
   if (unwrapExpression(step.if ?? "") !== PULL_REQUEST_CONDITION) return false;
   if ("continue-on-error" in step && step["continue-on-error"] !== "false")
     return false;
+  if (step.BASE_REF !== BASE_REF_EXPRESSION) return false;
   const lint = steps.findIndex((s) => s.run === "pnpm lint");
   if (lint !== -1 && lint < check) return false;
   const checkout = steps.findIndex((s) =>
@@ -87,6 +93,8 @@ const checkStep = [
   "      - name: Check work log",
   "        if: github.event_name == 'pull_request'",
   `        run: ${CHECK_COMMAND}`,
+  "        env:",
+  `          BASE_REF: ${BASE_REF_EXPRESSION}`,
 ];
 const lint = ["      - run: pnpm lint"];
 
@@ -109,6 +117,8 @@ describeFeature(feature, ({ Scenario }) => {
               ...checkout,
               `      - if: \${{ github.event_name == 'pull_request' }}`,
               `        run: ${CHECK_COMMAND}`,
+              "        env:",
+              `          BASE_REF: ${BASE_REF_EXPRESSION}`,
               ...lint,
             ),
           ],
@@ -144,7 +154,7 @@ describeFeature(feature, ({ Scenario }) => {
     );
 
     And(
-      "検査が無い・効かない・push でも動く・lint の後・履歴が浅いワークフローは拒否する（コメントアウト・|| true・; exit 0・continue-on-error: true・if が無い / push / false・base の固定・fetch-depth が無い / 1・checkout が無い・空文字など）",
+      "検査が無い・効かない・push でも動く・lint の後・履歴が浅いワークフローは拒否する（コメントアウト・|| true・; exit 0・continue-on-error: true・if が無い / push / false・base の固定・env の BASE_REF が無い / 違う・式の直接の埋め込み・fetch-depth が無い / 1・checkout が無い・空文字など）",
       () => {
         // given
         const cases: [string, string][] = [
@@ -164,6 +174,8 @@ describeFeature(feature, ({ Scenario }) => {
               ...checkout,
               "      - if: github.event_name == 'pull_request'",
               `        run: ${CHECK_COMMAND} || true`,
+              "        env:",
+              `          BASE_REF: ${BASE_REF_EXPRESSION}`,
               ...lint,
             ),
           ],
@@ -173,6 +185,8 @@ describeFeature(feature, ({ Scenario }) => {
               ...checkout,
               "      - if: github.event_name == 'pull_request'",
               `        run: ${CHECK_COMMAND}; exit 0`,
+              "        env:",
+              `          BASE_REF: ${BASE_REF_EXPRESSION}`,
               ...lint,
             ),
           ],
@@ -195,6 +209,8 @@ describeFeature(feature, ({ Scenario }) => {
               ...checkout,
               "      - if: github.event_name == 'push'",
               `        run: ${CHECK_COMMAND}`,
+              "        env:",
+              `          BASE_REF: ${BASE_REF_EXPRESSION}`,
               ...lint,
             ),
           ],
@@ -204,6 +220,8 @@ describeFeature(feature, ({ Scenario }) => {
               ...checkout,
               "      - if: false",
               `        run: ${CHECK_COMMAND}`,
+              "        env:",
+              `          BASE_REF: ${BASE_REF_EXPRESSION}`,
               ...lint,
             ),
           ],
@@ -213,6 +231,8 @@ describeFeature(feature, ({ Scenario }) => {
               ...checkout,
               "      - if: github.event_name == 'pull_request' && false",
               `        run: ${CHECK_COMMAND}`,
+              "        env:",
+              `          BASE_REF: ${BASE_REF_EXPRESSION}`,
               ...lint,
             ),
           ],
@@ -222,6 +242,37 @@ describeFeature(feature, ({ Scenario }) => {
               ...checkout,
               "      - if: github.event_name == 'pull_request'",
               "        run: bash scripts/hooks/check-work-logs-diff.sh origin/main",
+              "        env:",
+              `          BASE_REF: ${BASE_REF_EXPRESSION}`,
+              ...lint,
+            ),
+          ],
+          [
+            "env の BASE_REF が無い",
+            workflow(
+              ...checkout,
+              "      - if: github.event_name == 'pull_request'",
+              `        run: ${CHECK_COMMAND}`,
+              ...lint,
+            ),
+          ],
+          [
+            "env の BASE_REF が base_ref でない",
+            workflow(
+              ...checkout,
+              "      - if: github.event_name == 'pull_request'",
+              `        run: ${CHECK_COMMAND}`,
+              "        env:",
+              "          BASE_REF: main",
+              ...lint,
+            ),
+          ],
+          [
+            "run に base_ref の式を直接埋め込む（template-injection）",
+            workflow(
+              ...checkout,
+              "      - if: github.event_name == 'pull_request'",
+              `        run: bash scripts/hooks/check-work-logs-diff.sh origin/${BASE_REF_EXPRESSION}`,
               ...lint,
             ),
           ],
