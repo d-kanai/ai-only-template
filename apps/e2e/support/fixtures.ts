@@ -1,6 +1,7 @@
 import { test as base } from "playwright-bdd";
 import { ApiErrorSteps } from "../spec/api-error.steps";
 import { FeatureFlagSteps } from "../spec/feature-flag.steps";
+import { HealthSteps } from "../spec/health.steps";
 import { I18nSteps } from "../spec/i18n.steps";
 import { RequestLogSteps } from "../spec/request-log.steps";
 import { SecurityHeadersSteps } from "../spec/security-headers.steps";
@@ -27,6 +28,7 @@ export const test = base.extend<
     i18nSteps: I18nSteps;
     apiErrorSteps: ApiErrorSteps;
     featureFlagSteps: FeatureFlagSteps;
+    healthSteps: HealthSteps;
     requestLogSteps: RequestLogSteps;
     securityHeadersSteps: SecurityHeadersSteps;
   },
@@ -56,6 +58,9 @@ export const test = base.extend<
   },
   featureFlagSteps: async ({ page, request }, use) => {
     await use(new FeatureFlagSteps(page, request));
+  },
+  healthSteps: async ({ request }, use) => {
+    await use(new HealthSteps(request));
   },
   securityHeadersSteps: async ({ page, request }, use) => {
     await use(new SecurityHeadersSteps(page, request));
