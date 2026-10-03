@@ -120,6 +120,7 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-10-02 | API ジャーニーの実行で全 API が 1 回は呼ばれることを API 網羅率として測り、100% を CI のゲートにする | 採用 | [20261002-api-journey-coverage-gate.md](quality/20261002-api-journey-coverage-gate.md) |
 | 2026-10-02 | ルール検査テストを .feature（`*` の箇条書き）と step の実装に分ける | 採用 | [20261002-rule-tests-in-feature.md](quality/20261002-rule-tests-in-feature.md) |
 | 2026-10-02 | コード・設計ルールのレビューは rules の表の「レビュー」の行を観点にし、検出 → 1 件ずつ検証 → 重大度で報告するスキルで行う | 採用 | [20261002-rule-review-from-rules-tables.md](quality/20261002-rule-review-from-rules-tables.md) |
+| 2026-10-03 | 依存の脆弱性は ci ジョブの pnpm audit（high 以上で失敗）で、コードの脆弱性は CodeQL の advanced setup で検査する | 採用 | [20261003-security-scan-in-ci.md](quality/20261003-security-scan-in-ci.md) |
 
 ### workflow/
 開発プロセス・環境・AI エージェントの運用

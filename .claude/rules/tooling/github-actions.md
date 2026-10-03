@@ -6,7 +6,7 @@ paths:
 
 # GitHub Actions のワークフロー（Issue #351）
 
-`.github/workflows/*.yml`（`ci.yml` / `deploy.yml` / `mutation.yml` / `security-review.yml`）の書き方の決まり。強制は `rule-tests/github-actions.test.ts`（`pnpm test`。仕様は対の `rule-tests/github-actions.feature`、判定の細部と限界はテストの冒頭）。
+`.github/workflows/*.yml`（`ci.yml` / `codeql.yml` / `deploy.yml` / `mutation.yml` / `security-review.yml`）の書き方の決まり。強制は `rule-tests/github-actions.test.ts`（`pnpm test`。仕様は対の `rule-tests/github-actions.feature`、判定の細部と限界はテストの冒頭）。
 
 ## 規則
 - `actions-pinned-sha`: `uses:` は action のリポジトリの full-length（40 桁）の commit SHA で固定し、行末のコメントにそのコミットのタグを書く（`uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0`）。
@@ -15,7 +15,17 @@ paths:
   - 例外: `./` で始まる同じリポジトリの action・再利用ワークフロー（ワークフローと同じコミットのファイルが使われる）。`docker://` は `@sha256:<64 桁>` の digest で固定したものだけ許す（イメージのタグもタグと同じく差し替えられる。今は使っていない）。
 - `job-timeout`: すべての job に、job の直下の `timeout-minutes: <正の整数>` を書き、直前のコメントに WHY（実測の所要時間か、未確認ならその旨）を書く（コメントの有無はテストで見ない）。フロー形式の job（`b: { ... }`）は中身を読まず違反にする。再利用ワークフローを呼ぶ job が `timeout-minutes` を受け付けるかは未確認で、使い始めて書けなければ例外を足す。
   - WHY: 書かないと GitHub の既定の 360 分まで止まらず、テストの無限ループや待ちの固まりで Actions の分数を食う（Claude Code の GitHub Actions のドキュメント https://code.claude.com/docs/en/github-actions もコスト管理として workflow の timeout を挙げる）。step の `timeout-minutes` は job 全体の上限にならないので数えない。
-  - 今の値: `ci` 30 分（直近 100 回の成功の最長は約 3.5 分）、`deploy` 30 分（実際のデプロイの所要時間は未確認）、`mutation` 30 分（ローカルの実測で約 3.5 分）。根拠は各ワークフローのコメント。
+  - 今の値: `ci` 30 分（直近 100 回の成功の最長は約 3.5 分）、`codeql` の `analyze` 30 分（所要時間は未確認）、`deploy` 30 分（実際のデプロイの所要時間は未確認）、`mutation` 30 分（ローカルの実測で約 3.5 分）。根拠は各ワークフローのコメント。
+
+## セキュリティスキャン（Issue #112）
+決定と採用しなかった案は ADR `docs/adr/quality/20261003-security-scan-in-ci.md`。
+- `audit-in-ci`: `ci.yml` の `ci` ジョブで `pnpm audit --audit-level high` を、`if` と `continue-on-error` を付けずにそのまま実行する（`|| true` などを足さない）。ワークフローは PR と main への push の両方で動く。
+  - WHY `ci` ジョブ: required status check は `ci` だけで、別のジョブだと赤でもマージされる。WHY high: moderate は開発時の依存に 4 件あり（2026-10-03 の work-logs）、止めると全 PR が止まる。
+  - 止まったら: 直った版に上げる（`dependency-update`）。直った版が minimumReleaseAge（5 日）でまだ入らない・影響が無いときは、`pnpm-workspace.yaml` の `auditConfig.ignoreGhsas` に GHSA の ID を足し、行のコメントに WHY といつ外すかを書く。
+- `codeql`: `codeql.yml` で CodeQL の `init` と `analyze` を使い、`languages` に `javascript-typescript` と `actions` を入れ、PR と main への push で動かす（週 1 回の定期実行も）。default setup（Settings で有効にするだけの方式）は使わない（同時に使えず、設定がファイルに残らない）。
+  - 誤検知は GitHub の Security タブ（Code scanning）で理由を付けて dismiss する。
+  - required status check には入れていない（入れるかは ADR のとおり CI の実績を見て決める）。
+- 機械化: 上の 2 つは `rule-tests/github-actions.test.ts`（`auditsDependencies` / `scansWithCodeQL`）。push の branches が main を含むかと、ignoreGhsas の WHY のコメントは縛れない（reviewer が見る）。
 
 ## Claude Code を Actions で動かすとき（Issue #354）
 今は `security-review.yml`（main に前回のレビュー以降に入った差分の日次セキュリティレビュー。決定は ADR `docs/adr/workflow/20261002-daily-security-review-in-actions.md`）だけ。

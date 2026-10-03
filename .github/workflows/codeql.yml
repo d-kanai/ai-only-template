@@ -1,0 +1,55 @@
+# CodeQL（GitHub の静的解析。code scanning）で、コードとワークフローの脆弱性のパターンを検査する（Issue #112）。
+#   結果は repo の Security タブ（Code scanning）と、PR の該当行への注釈に出る。
+#   WHY: CI（ci.yml）は lint / typecheck / test / build / E2E だけで、外部入力が SQL・HTML・パス・コマンドにそのまま流れる
+#     ような脆弱性のパターンを検査していなかった。日次の Claude のセキュリティレビュー（security-review.yml）は文脈を読んで
+#     見つける検査で、CodeQL は決まったパターンを毎回同じに止める機械の検査（原則 7）。両方を使う。
+#   WHY advanced setup（このワークフロー）で、GitHub の default setup（Settings で有効にするだけ）にしない:
+#     action の SHA 固定・timeout・言語・権限をリポジトリのファイルで管理し、rule-tests/github-actions.test.ts で検査できるため。
+#     default setup と advanced setup は同時に使えない（default setup が有効だと、このワークフローの結果のアップロードが失敗する）。
+#   決定と結果の扱いは ADR docs/adr/quality/20261003-security-scan-in-ci.md、規則は .claude/rules/tooling/github-actions.md。
+name: CodeQL
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # 毎週月曜 UTC 23:50 = 火曜 08:50 JST。WHY 定期実行: コードが変わらなくても CodeQL のクエリは更新され、新しい種類の
+    #   問題が見つかる。WHY 毎時 0 分を避ける: GitHub の schedule は 0 分が混みやすく遅れる・落ちることがある（mutation.yml と同じ）。
+    - cron: "50 23 * * 1"
+
+# 同じブランチで push が続いたら、古い実行を止めて最新だけを動かす（ci.yml と同じ）。
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+# 最小権限。security-events: write は解析結果（SARIF）を code scanning にアップロードするのに要る（codeql-action の README）。
+#   contents: read は checkout に、actions: read は private リポジトリでワークフローの実行の情報を読むのに要る（public の今は無くても
+#   動くが、codeql-action の README の例に合わせる）。
+permissions:
+  contents: read
+  actions: read
+  security-events: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    # timeout-minutes: job 全体の上限（分）。WHY 30 分: CodeQL の解析の所要時間はこのリポジトリでは未確認（この PR の CI で測る）。
+    #   ci（約 3.5 分）と同じ上限にし、解析が固まったときに既定の 360 分まで Actions の分数を食わないようにする（Issue #351）。
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # languages: javascript-typescript はアプリ・テスト・設定の TS / JS、actions は .github/workflows のワークフロー
+      #   （`${{ }}` のスクリプトインジェクション・権限の過剰など）。rule-tests/github-actions.test.ts の scansWithCodeQL が両方あることを検査する。
+      # build-mode: none: どちらもビルドの要らない言語（interpreted languages は none だけ。codeql-action の README）。
+      #   WHY pnpm install をしない: none はソースだけを解析し、依存（node_modules）を読まない。
+      # queries を指定しない（既定のクエリ）: security-extended は誤検知が増える。まず既定で始め、見逃しが分かったら足す。
+      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          languages: javascript-typescript, actions
+          build-mode: none
+
+      # 解析し、結果を code scanning にアップロードする。category は言語ごとに自動で付く。
+      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2

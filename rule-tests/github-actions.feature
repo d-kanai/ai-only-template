@@ -17,3 +17,11 @@ Feature: GitHub Actions のワークフロー
     * 一時ディレクトリの .github/workflows の yml と yaml から、規則ごとの違反をすべて検出する
     * リポジトリの .github/workflows のワークフローを ci・deploy・mutation を含めて列挙し、uses と job を 1 件以上取り出せる
     * リポジトリのワークフローの uses はすべて commit SHA で固定し、すべての job に timeout-minutes がある
+  Scenario: 依存の脆弱性の検査（auditsDependencies。Issue #112）
+    * ci.yml の ci job が pnpm audit --audit-level high を、PR と main への push の両方で失敗で止まる形で実行するワークフローは許可する
+    * pnpm audit が無い・しきい値が high でない・失敗を打ち消す・if で飛ばす・continue-on-error で無視するワークフローは拒否する
+  Scenario: コードの静的解析（scansWithCodeQL。Issue #112）
+    * CodeQL の init と analyze を使い、javascript-typescript と actions を解析し、PR と main への push で動くワークフローは許可する
+    * init か analyze が無い・解析する言語が足りない・PR か push で動かないワークフローは拒否する
+  Scenario: リポジトリのセキュリティスキャン（Issue #112）
+    * リポジトリの ci.yml は pnpm audit を、codeql.yml は CodeQL を、上の形で実行する
