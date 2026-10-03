@@ -230,12 +230,37 @@ function readStep(lines: string[]): Step {
   return step;
 }
 
-// job の直下のキー（job の中身の最初の行と同じインデント）の名前。
-function jobProperties(body: string[]): string[] {
-  const propertyIndent = body[0] === undefined ? 0 : indentOf(body[0]);
-  return body
-    .filter((text) => indentOf(text) === propertyIndent)
-    .map((text) => text.trim().replace(/\s*:.*$/, ""));
+// job の直下のキー（job の中身の最初の行と同じインデント）の `キー: 値`。
+function jobProperties(body: string[]): Step {
+  const propertyIndent = indentOf(body[0] ?? "");
+  return Object.fromEntries(
+    body
+      .filter((text) => indentOf(text) === propertyIndent)
+      .flatMap((text) => {
+        const pair = /^\s*([\w-]+)\s*:\s*(.*)$/.exec(text);
+        return pair?.[1] === undefined
+          ? []
+          : [[pair[1], stripComment(pair[2] ?? "")]];
+      }),
+  );
+}
+
+// job の直下の `steps:` の値の行（次の直下のキーの手前まで）。
+//   WHY steps に限る: job の中身のすべての `- ` の行を step として読むと、`strategy.matrix.include` の要素の `run:` を
+//     実行するコマンドと取り違えた（Codex の指摘）。step の `- ` は `steps:` と同じインデントにも書ける（YAML のブロックの列）。
+function stepsBlock(body: string[]): string[] {
+  const propertyIndent = indentOf(body[0] ?? "");
+  const start = body.findIndex(
+    (text) => indentOf(text) === propertyIndent && /^\s*steps\s*:/.test(text),
+  );
+  if (start === -1) return [];
+  const rest = body.slice(start + 1);
+  const end = rest.findIndex(
+    (text) =>
+      indentOf(text) < propertyIndent ||
+      (indentOf(text) === propertyIndent && !text.trim().startsWith("- ")),
+  );
+  return end === -1 ? rest : rest.slice(0, end);
 }
 
 const AUDIT_COMMAND = "pnpm audit --audit-level high";
@@ -243,13 +268,16 @@ const AUDIT_COMMAND = "pnpm audit --audit-level high";
 // ci.yml の ci job（required status check）が、pnpm audit を high 以上で失敗する形で、PR と main への push の両方で実行するか。
 //   WHY ci job: Ruleset protect-main の required status check は ci だけで、別の job に置くと赤でもマージできる。
 //   WHY if と continue-on-error を拒否する: 飛ばす・無視すると、high の脆弱性があっても緑になる。job の if も拒否する（skipped の
-//     job は required status check を満たす。reviewer の指摘）。
+//     job は required status check を満たす。reviewer の指摘）。job の continue-on-error も拒否する（job が失敗してもワークフローの
+//     実行を失敗にしない。Codex の指摘、https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idcontinue-on-error ）。
 //   WHY コマンドを完全一致で見る: `|| true` や `; exit 0` を足すと失敗が打ち消され、`--audit-level critical` では high を見逃す。
 function auditsDependencies(yaml: string): boolean {
   const ci = readJobs(yaml).find((job) => job.name === "ci");
   if (ci === undefined || !runsOnPullRequestAndPush(yaml)) return false;
-  if (jobProperties(ci.body).includes("if")) return false;
-  return readSteps(ci.body).some(
+  const job = jobProperties(ci.body);
+  if ("if" in job || (job["continue-on-error"] ?? "false") !== "false")
+    return false;
+  return readSteps(stepsBlock(ci.body)).some(
     (step) =>
       step.run === AUDIT_COMMAND &&
       !("if" in step) &&
@@ -686,6 +714,21 @@ describeFeature(feature, ({ Scenario }) => {
               ),
             ],
             [
+              "steps と同じインデントの - と、job の continue-on-error: false",
+              [
+                "on:",
+                "  pull_request:",
+                "  push:",
+                "jobs:",
+                "  ci:",
+                "    continue-on-error: false",
+                "    steps:",
+                "    - run: pnpm install --frozen-lockfile",
+                `    - run: ${AUDIT_COMMAND}`,
+                "    timeout-minutes: 30",
+              ].join("\n"),
+            ],
+            [
               "引用符の on と、ci の前に別の job",
               [
                 '"on":',
@@ -820,6 +863,24 @@ describeFeature(feature, ({ Scenario }) => {
                 "  push:\n    branches: [main]\n",
                 "  workflow_dispatch:\n    push:\n",
               ),
+            ],
+            [
+              "job の continue-on-error: true",
+              ciWith(`      - run: ${AUDIT_COMMAND}`).replace(
+                "    timeout-minutes: 30\n",
+                "    continue-on-error: true\n    timeout-minutes: 30\n",
+              ),
+            ],
+            [
+              "matrix の include の要素の run",
+              ciWith("      - run: pnpm lint").replace(
+                "    timeout-minutes: 30\n",
+                `    timeout-minutes: 30\n    strategy:\n      matrix:\n        include:\n          - run: ${AUDIT_COMMAND}\n`,
+              ),
+            ],
+            [
+              "steps の後の別のキーの下の run",
+              `${ciWith("      - run: pnpm lint")}\n    services:\n      - run: ${AUDIT_COMMAND}`,
             ],
             ["空文字", ""],
           ];

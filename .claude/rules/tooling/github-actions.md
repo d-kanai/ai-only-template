@@ -19,7 +19,7 @@ paths:
 
 ## 依存の脆弱性の検査（Issue #112）
 決定と採用しなかった案（CodeQL を入れない理由を含む）は ADR `docs/adr/quality/20261003-pnpm-audit-in-ci.md`。
-- `audit-in-ci`: `ci.yml` の `ci` ジョブで `pnpm audit --audit-level high` を、step にも `ci` ジョブにも `if` を付けず、`continue-on-error` も付けずにそのまま実行する（`|| true` などを、次の行に書く形も含めて足さない）。ワークフローは PR と main への push の両方で、`paths` / `paths-ignore` なしで動く。
+- `audit-in-ci`: `ci.yml` の `ci` ジョブで `pnpm audit --audit-level high` を、`steps:` の中で、step にも `ci` ジョブにも `if` と `continue-on-error` を付けずにそのまま実行する（`|| true` などを、次の行に書く形も含めて足さない）。ワークフローは PR と main への push の両方で、`paths` / `paths-ignore` なしで動く。
   - WHY `ci` ジョブ: required status check は `ci` だけで、別のジョブだと赤でもマージされる。WHY high: moderate は開発時の依存に 4 件あり（2026-10-03 の work-logs）、止めると全 PR が止まる。
   - 止まったら: 直った版に上げる（`dependency-update`）。直った版が minimumReleaseAge（5 日）でまだ入らない・影響が無いときは、`pnpm-workspace.yaml` の `auditConfig.ignoreGhsas` に GHSA の ID を足し、行のコメントに WHY といつ外すかを書く。
 - 機械化: `rule-tests/github-actions.test.ts` の `auditsDependencies`。push の branches が main を含むかと、ignoreGhsas の WHY のコメントは縛れない（reviewer が見る）。
