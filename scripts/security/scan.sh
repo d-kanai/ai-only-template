@@ -266,18 +266,29 @@ case "$tool" in
     curl -s -o /dev/null "$app_url/" || { echo "the app did not start on $app_url for the active scan" >&2; cat "$app_log" >&2; exit 1; }
 
     # recurse=true: E2E が記録したこのサイトの URL をすべて対象にする。inScopeOnly=false: コンテキスト（スコープ）を設定していないので、
-    #   スコープで絞らない。scan の戻り値は scanId（数）。数でなければ（ZAP がエラーを返した）始まっていないので失敗にする。
-    scan_id="$(curl -sf "$zap_api/JSON/ascan/action/scan/?url=$app_url&recurse=true&inScopeOnly=false" | jq -r .scan)"
-    [[ "$scan_id" =~ ^[0-9]+$ ]] || { echo "ZAP active scan did not start on $app_url: $scan_id" >&2; exit 1; }
+    #   スコープで絞らない。scan の戻り値は {"scan":"<scanId>"}。ZAP のエラー（記録に無い URL の url_not_found など）は HTTP 400 と
+    #   エラーの本文で返る（reviewer の実測）。curl -f だと本文を捨てて set -e で黙って止まるので、-s で本文を取り、scanId が数で
+    #   なければ本文ごと出して失敗にする。
+    scan_response="$(curl -s "$zap_api/JSON/ascan/action/scan/?url=$app_url&recurse=true&inScopeOnly=false" || true)"
+    scan_id="$(jq -r '.scan // empty' <<<"$scan_response" 2>/dev/null || true)"
+    [[ "$scan_id" =~ ^[0-9]+$ ]] || { echo "ZAP active scan did not start on $app_url: $scan_response" >&2; exit 1; }
     # 済むのを待つ（status が 100）。WHY 上限 20 分: 2026-10-03 の手元の実測（URL 34 件）で 150 秒。画面と API が増えても余裕のある上限で、
     #   止まったときに zap.yml の job の timeout（45 分）より先に、原因の分かるメッセージで止める。
     progress=""
     for _ in $(seq 1 1200); do
-      progress="$(curl -sf "$zap_api/JSON/ascan/view/status/?scanId=$scan_id" | jq -r .status)"
+      progress="$(curl -s "$zap_api/JSON/ascan/view/status/?scanId=$scan_id" | jq -r '.status // empty' 2>/dev/null || true)"
       [[ "$progress" == "100" ]] && break
       sleep 1
     done
     [[ "$progress" == "100" ]] || { echo "ZAP active scan did not finish within 20 minutes (status $progress%)" >&2; exit 1; }
+    # active scan の間アプリが生きていたことを確かめる。WHY: 相手が落ちていても ZAP は要求を送り切って 100% で終わり、active scan が
+    #   何も検査しないまま、受け身の検査の警告だけで緑になる（reviewer の実測。止めたサーバへの ascan が 12 秒で FINISHED になった）。
+    #   落ちた後に別のプロセスがポートを取る場合までは見ない（このジョブの中では起きない）。
+    if ! kill -0 "$app_pid" 2>/dev/null || ! curl -s -o /dev/null "$app_url/"; then
+      echo "the app on $app_url stopped during the active scan, so the scan did not reach it" >&2
+      cat "$app_log" >&2
+      exit 1
+    fi
 
     curl -sf "$zap_api/JSON/core/view/alerts/" >"$alerts_file"
     zap_alerts "$alerts_file" "$repo_root/scripts/security/zap-ignore.tsv"

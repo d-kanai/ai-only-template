@@ -14,7 +14,7 @@ on:
   schedule:
     # 毎日 UTC 23:45 = 08:45 JST。cron は UTC で解釈される。
     # WHY 毎時 0 分を避ける: GitHub の schedule は 0 分が混みやすく、遅れたり落とされたりする（GitHub Docs「Events that trigger
-    #   workflows」の schedule）。mutation.yml（23:55）と 10 分ずらし、同じ時刻に 2 つのジョブを積まない。
+    #   workflows」の schedule）。security-review.yml（23:47）・mutation.yml（23:55）より前にずらし、同じ時刻にジョブを積まない。
     # schedule は既定ブランチ（main）の最新コミットで動く。
     - cron: "45 23 * * *"
   # Actions の画面から手動でも実行できるようにする（設定を変えた直後の確認など）。
@@ -30,6 +30,10 @@ jobs:
     # WHY 45 分: build と E2E（ci.yml の ci job で数分）、ZAP の起動・受け身の検査の待ち（上限 120 秒）、active scan（手元の実測 150 秒。
     #   上限は scan.sh の 20 分）を足しても余裕のある上限。止まったときに既定の 360 分まで待たないようにする。
     timeout-minutes: 45
+    env:
+      # next build（E2E の webServer）と next start（active scan の前に起動し直すアプリ）が Vercel に匿名テレメトリを送るのを止める
+      #   （ci.yml と同じ。CI から外部に送る必要がない）。
+      NEXT_TELEMETRY_DISABLED: "1"
     # GitHub Actions は CI=true を既定で設定するので、pnpm install の lefthook postinstall はフックを入れない（.claude/rules/quality/lint.md）。
     # CI=true で E2E の reuseExistingServer も無効になり、webServer が必ずこのコードを build してサーバを起動する（apps/e2e/playwright.config.ts）。
     #   active scan のときに scan.sh がアプリを起動し直すのも、その build（.next）を使う。

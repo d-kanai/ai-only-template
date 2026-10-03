@@ -12,7 +12,7 @@ quality/20261003-zap-passive-scan-via-e2e.md（Issue #364）で、PR の CI の 
 - 新しいワークフロー `.github/workflows/zap.yml` が、main を毎日（UTC 23:45）と手動（workflow_dispatch）で `bash scripts/security/scan.sh zap-e2e` を実行する。
 - `zap-e2e` は、E2E を ZAP 経由で流して受け身の検査を済ませた後、E2E が build したアプリを同じポートで起動し直し、ZAP が記録したそのサイトの URL すべてに active scan をかけ（上限 20 分）、受け身と active の両方の警告をまとめて判定する。
 - 判定の仕組み（Low 以上で失敗・Informational は表示だけ・`zap-ignore.tsv` に alertRef と理由を書いて外す）は Issue #364 のまま。
-- active scan で出た Low の 40014-2（持続型 XSS の弱点。JSON の応答）は、応答が JSON と nosniff で、画面が名前をエスケープして描くので外す（理由は `zap-ignore.tsv`）。
+- active scan で出た Low の 40014-2（持続型 XSS の弱点。JSON の応答）は、応答が JSON と nosniff で、画面が名前（title）をエスケープして描くので外す（理由は `zap-ignore.tsv`）。
 
 ## 理由
 - active scan は時間がかかる（2026-10-03 のクラウドセッションの実測で、E2E が記録した 34 件の URL に 150 秒）。PR ごとに流すとマージを待たせる。
