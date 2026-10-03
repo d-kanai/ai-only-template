@@ -1,5 +1,8 @@
 import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
+// WHY 相対パス（@/ にしない）: next.config.ts は Next が tsconfig の paths を解決する前に読み込む設定ファイルで、@/ が解決される
+//   保証が無い（未確認のため、確実に解決される相対パスにする）。
+import { SecurityHeaders } from "./shared/security/security-headers";
 
 // create-next-app@16.3.6 が生成した空の設定をベースにしている。
 // 最小構成の方針により、必要になるまでデフォルト挙動から変えない（変える時は理由をここに書く）。
@@ -34,6 +37,16 @@ const nextConfig: NextConfig = {
   //   WHY import.meta.url から求めるか（process.cwd() にしないか）: next build を実行するディレクトリに依らず、このファイルの場所で
   //   決まるようにする。
   outputFileTracingRoot: fileURLToPath(new URL("../..", import.meta.url)),
+  // poweredByHeader: false … 応答の X-Powered-By: Next.js を付けない（Issue #106）。
+  //   WHY: 使っているフレームワークを外に知らせても利用者の得は無く、版ごとの脆弱性を狙う攻撃の手がかりになるだけ。
+  poweredByHeader: false,
+  // headers … すべての応答（画面・API・静的ファイル。source の "/:path*" はすべてのパス）に共通のセキュリティヘッダを付ける（Issue #106）。
+  //   値と WHY は shared/security/security-headers.ts の SecurityHeaders.common（テストで固定）。
+  //   WHY ここ（Proxy でなく）: Proxy の matcher は静的ファイル（/_next/static など）を除くので、そこに付けられない。nosniff・HSTS は
+  //   JS・CSS の応答にも要る。要求ごとに値の変わる Content-Security-Policy（nonce）だけは proxy.ts で付ける。
+  async headers() {
+    return [{ source: "/:path*", headers: SecurityHeaders.common() }];
+  },
 };
 
 export default nextConfig;

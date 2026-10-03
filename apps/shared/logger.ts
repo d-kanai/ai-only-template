@@ -23,10 +23,10 @@ import {
   LOG_EVENT_SCHEMAS,
   type LogEvent,
   type LogEventName,
-  LogSeverity,
   type ParsedLogEvent,
   type Severity,
 } from "./log-event";
+import { LogSeverity } from "./log-severity";
 import { Clock } from "./now";
 
 // WHY 型を ./log-event.ts から export し直す: 呼び出し側（とテスト）は logger から LogEvent を読み、log-event.ts は公開しない

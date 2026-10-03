@@ -5,7 +5,7 @@ import { defineMessages } from "./i18n";
 //   - サーバのエラー: backend の ErrorKey と同じ文字列のキー（<対象>.<項目>.<理由>。例 "todo.title.tooLong"）。
 //     backend の ErrorKey がすべてここにあることは、features/todo/api/api-error.ts の ApiErrorKey の型の制約で止める。
 //   - 画面側だけのエラー: error.<理由>（例 "error.unknown"）。
-// WHY ここだけ shared/ に置く: API のエラーは、どの画面の操作でも同じキーで返り（api-error.ts の ApiErrorMessage.toMessage が翻訳する）、
+// WHY ここだけ shared/ に置く: API のエラーは、どの画面の操作でも同じキーで返り（api-error-message.ts の ApiErrorMessage.toMessage が翻訳する）、
 //   特定の画面の辞書に置くと、ほかの画面から別ディレクトリの *.messages.ts を import することになる（規則 messages-colocation）。
 // placeholder は {name}（name は英数字と _）。キー・placeholder の型と en の検査は defineMessages（i18n.tsx）。
 export const commonMessages = defineMessages({
@@ -19,12 +19,14 @@ export const commonMessages = defineMessages({
     "todo.createdAt.invalid": "作成日時が不正です",
     "todo.statusChanges.invalid": "完了の履歴が不正です",
     "todo.notFound": "Todo（id: {id}）が見つかりません",
+    "featureFlag.notFound": "フィーチャーフラグ（{key}）が見つかりません",
     "request.body.notJson": "リクエスト本文が JSON ではありません",
     "request.body.notObject":
       "リクエスト本文は JSON のオブジェクトで指定してください",
     "request.body.unknownKeys": "リクエストに不明な項目があります: {keys}",
     "request.field.notString": "{path} は文字列で指定してください",
     "request.field.notBoolean": "{path} は true か false で指定してください",
+    "request.origin.forbidden": "別のサイトからの操作は受け付けていません",
     "server.internalError": "サーバでエラーが発生しました",
 
     // 画面側だけのエラー
@@ -42,11 +44,13 @@ export const commonMessages = defineMessages({
     "todo.createdAt.invalid": "The creation date is invalid",
     "todo.statusChanges.invalid": "The completion history is invalid",
     "todo.notFound": "Todo (id: {id}) was not found",
+    "featureFlag.notFound": "Feature flag ({key}) was not found",
     "request.body.notJson": "The request body is not JSON",
     "request.body.notObject": "The request body must be a JSON object",
     "request.body.unknownKeys": "The request has unknown fields: {keys}",
     "request.field.notString": "{path} must be a string",
     "request.field.notBoolean": "{path} must be true or false",
+    "request.origin.forbidden": "Requests from other sites are not accepted",
     "server.internalError": "A server error occurred",
 
     "error.unknown": "The request failed (HTTP {status})",

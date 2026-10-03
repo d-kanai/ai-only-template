@@ -32,12 +32,15 @@ export class EnglishProblemDetail {
       "todo.statusChanges.invalid": () =>
         "Completion history is inconsistent with the Todo.",
       "todo.notFound": ({ id }) => `Todo ${id} was not found.`,
+      "featureFlag.notFound": ({ key }) => `Feature flag ${key} was not found.`,
       "request.body.notJson": () => "Request body must be valid JSON.",
       "request.body.notObject": () => "Request body must be a JSON object.",
       "request.body.unknownKeys": ({ keys }) =>
         `Request body has unknown fields: ${keys}.`,
       "request.field.notString": ({ path }) => `${path} must be a string.`,
       "request.field.notBoolean": ({ path }) => `${path} must be a boolean.`,
+      "request.origin.forbidden": () =>
+        "Requests from other origins are not allowed.",
       "server.internalError": () => "Internal server error.",
     };
   }

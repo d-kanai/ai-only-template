@@ -25,7 +25,7 @@ paths:
 | feature | `hooks/`: 画面をまたぐ hook | - | 説明 |
 | feature | `api/`: `/api/...` を fetch する薄いラッパー。feature の中で backend を参照してよいのはここだけ | - | `rule-tests/architecture.test.ts` の `screen-to-backend` |
 | feature | `index.ts`: 公開 API。feature の外（`app/`・他の feature）から import してよいのはここだけ | 内部の構成を変えても外の import を直さずに済む | `rule-tests/architecture.test.ts` の `feature-to-feature`・`app` |
-| shared | `apps/frontend_customer/shared/<name>/`: feature をまたぐ部品。今あるのは `request-log/`（リクエストログの 1 行を組み立てる純粋な処理。`RequestLogBuilder.build`）と `i18n/`（翻訳の仕組み・共通の辞書・ロケール・日時の表示。下の「i18n」）と `ui/`（デザインシステム。下の「デザインシステム」） | - | 説明 |
+| shared | `apps/frontend_customer/shared/<name>/`: feature をまたぐ部品。今あるのは `request-log/`（リクエストログの 1 行を組み立てる純粋な処理。`RequestLogBuilder.build`）と `security/`（応答のセキュリティヘッダの値。`SecurityHeaders`。下の「セキュリティヘッダ」）と `i18n/`（翻訳の仕組み・共通の辞書・ロケール・日時の表示。下の「i18n」）と `ui/`（デザインシステム。下の「デザインシステム」） | - | 説明 |
 | shared | 画面をまたぐ見た目の部品は `ui/atoms/` の atom にし、`shared/components/` は作らない（feature の中で画面をまたぐ部品は `features/<f>/components/`） | 以前は「`components/` は使うものが出るまで作らない」だったが、Issue #292 で画面をまたぐ部品（Mantine を包むもの）が出て、置き場所を `ui/atoms/` にした。Mantine を import してよいのは `shared/ui/` の中だけ（規則 `design-system-mantine-boundary`）なので、Mantine を包む部品は `shared/components/` には置けない。限界: `shared/components/` を作ること自体と、Mantine を使わない部品を置くことは止めない | `rule-tests/design-system.test.ts` の `design-system-mantine-boundary` |
 | shared | `shared/components/` を作らない・`hooks/` は使うものが出るまで作らない（Mantine を使わない部品の置き場所） | `design-system-mantine-boundary` は Mantine の参照だけを見る | レビュー |
 | shared | `apps/frontend_customer/shared/`（画面側の部品）と `apps/shared/`（frontend と backend で共通のサーバ側の基盤。`.claude/rules/code/shared.md`）は別のもの | - | 説明 |
@@ -140,7 +140,7 @@ export function TodoScreen() {
 | 型 | placeholder の名前は英数字と `_` だけ（`{max}`・`{max_1}`）。実行時の置換（`formatMessage` の `/\{(\w+)\}/`）と同じ規則を型でも強制し、`{a-b}`・`{}`・`{ max }` のような `{...}` を含む文言はコンパイルエラーになる（対にならない `{` や `}` は書ける） | 実行時の置換と同じ規則にそろえる | `pnpm typecheck` |
 | 型 | `t(key, params)` の params は ja の文言の `{name}` から型で導く（`i18n.tsx` の `MessageParams`）。placeholder が無いキーは params を渡せず、あるキーは必須で、名前の違いもコンパイルエラーになる | - | `pnpm typecheck` |
 | 型 | 使い方: 画面・部品では `const t = useT(todoScreenMessages);`（その辞書のキーだけを受け付ける `t`。別の画面の辞書のキーはコンパイルエラー） | - | `pnpm typecheck` |
-| 型 | キーが実行時の値（サーバの Problem Details の `key`）のときだけ `formatMessage(commonMessages, locale, key, params)` を使う（`features/todo/api/api-error.ts` の `ApiErrorMessage.toMessage`） | - | レビュー |
+| 型 | キーが実行時の値（サーバの Problem Details の `key`）のときだけ `formatMessage(commonMessages, locale, key, params)` を使う（`features/todo/api/api-error-message.ts` の `ApiErrorMessage.toMessage`） | - | レビュー |
 | ロケールの決め方 | `proxy.ts` が Cookie `NEXT_LOCALE` → Accept-Language（q 値の高い順、言語の部分で照合）→ 既定の ja で決め（`Locales.negotiate`）、リクエストヘッダ `x-locale` に載せる（`/api/**` には載せない）。`app/layout.tsx` が `headers()` で読み、`<html lang>` と `LocaleProvider` に渡す | - | 説明 |
 | ロケールの決め方 | URL のパスは変えない（`app/[lang]` にしない） | - | レビュー |
 | ロケールの決め方 | 限界: `headers()` を読むので全画面が動的レンダリングになり、ビルド時の静的な prerender は無い。matcher が除く `next/link` のプリフェッチには `x-locale` が付かないが、root layout はクライアント遷移で描き直されないので表示は変わらない（E2E `apps/e2e/spec/i18n.feature`） | 限界（この方式で失うもの） | 説明 |
@@ -158,7 +158,7 @@ export function TodoScreen() {
 | Problem Details | backend の `ErrorKey` がすべて共通の辞書にあること・params の名前が placeholder と同じことは、`api-error.ts` の `ApiErrorKey` の型の制約と `api-error.test.ts` の型の検査で止める | `shared/` は backend を参照できないので、`api/` で突き合わせる | `apps/frontend_customer/features/todo/api/api-error.test.ts` の `ErrorKey`、`pnpm typecheck` |
 | 項目ごとの誤り | 項目ごとの誤り（Issue #144）: 400 の本文の `errors`（`{ pointer, key, params?, detail }[]`。`pointer` は RFC 6901 の JSON Pointer の fragment の形で、本文全体は `#`）を `ApiError` の `errors`（`pointer`・`key`・`params`。本文に無ければ `[]`、`detail` は持たない）に載せる | - | 説明 |
 | 項目ごとの誤り | `isProblem` は `errors` が省略か配列で、各要素の `pointer` が文字列・`key` が共通の辞書のキー・`params` が省略か配列でないオブジェクトであることを確かめ、1 件でも崩れていれば本文全体を Problem Details とみなさない（`error.unknown`） | 崩れた要素だけを捨てると、捨てた誤りが出ないまま残りだけを直せばよいように見える | レビュー |
-| 項目ごとの誤り | 表示は `api-error.ts` の `ApiErrorMessage.toMessages(reason, locale, fields)` で、フォーム全体の文言（`form`）と入力の下の文言（`fields`）に分ける。`fields` はその画面が入力を描く項目の名前（本文の最上位のキー）で、`pointer` が `#/<項目名>` と完全一致する誤りをその項目に、それ以外（`#`・描いていない項目・入れ子の位置）を `form` に出す。項目・`form` とも最初の 1 件。`errors` が無い失敗（404・500・JSON でない応答・fetch の失敗）は今までどおり `form` だけ | - | 説明 |
+| 項目ごとの誤り | 表示は `api-error-message.ts` の `ApiErrorMessage.toMessages(reason, locale, fields)` で、フォーム全体の文言（`form`）と入力の下の文言（`fields`）に分ける。`fields` はその画面が入力を描く項目の名前（本文の最上位のキー）で、`pointer` が `#/<項目名>` と完全一致する誤りをその項目に、それ以外（`#`・描いていない項目・入れ子の位置）を `form` に出す。項目・`form` とも最初の 1 件。`errors` が無い失敗（404・500・JSON でない応答・fetch の失敗）は今までどおり `form` だけ | - | 説明 |
 | 項目ごとの誤り | 項目の誤りも全体の文言も、入力を編集しても消えず、次の送信の成功・失敗で置き換わる（hook の `setFailure`。既存の全体のエラーと同じ扱い） | 編集で消すと「まだ直っていない」状態で文言が消え、送信するまで結果が分からない。項目の誤りだけのときは `role="alert"` が無いのでスクリーンリーダーは自動では読み上げない（入力にフォーカスしたときに説明として読まれる。変えるなら入力にフォーカスを移す）。方針の ADR は `docs/adr/architecture/20260930-presentation-overlaps-domain-validation.md` | レビュー |
 | 項目ごとの誤り | 項目の誤りがあるときは、本文の `key`（全体の文言）を重ねて出さない | 本文の `key` は `errors` の最初の 1 件と同じ（backend の `Problem`）で、両方出すと同じ文言が 2 回出る | レビュー |
 | 項目ごとの誤り | hook は `error`（`form`）と `fieldErrors`（`fields`）を返し、画面は項目の文言を atom の `TextInput` の `error` に渡す。入力の下（`label` の外）に出し、`aria-invalid` と `aria-describedby`（Mantine が振る id）で入力と結び付けるのは Mantine（`shared/ui/atoms/text-input.tsx`）。`role="alert"` はフォーム全体の文言（atom の `Alert`）だけに付く | `label` の外: `label` の中の文字はすべて入力の名前（accessible name）になる。DOM の組み立ては Mantine が決めるので、画面のテスト（`todo-screen.test.tsx`）が説明の要素が入力より後ろ・`label` の外にあることを確かめる | レビュー |
@@ -180,12 +180,28 @@ export function TodoScreen() {
 | リクエストログ | 認可・リダイレクトなどのロジックは置かない | - | レビュー |
 | リクエストログ | 限界: status と所要時間は取れない（Proxy は応答の前に動く）、プリフェッチは matcher で除く、ブラウザの戻る・進むで Next のルーターのキャッシュが使われると画面の行は出ない（出るのは画面が呼ぶ API の行だけ）、`client.address` は `x-forwarded-for` を信じる値でクライアントが偽装できるので、信頼できるリバースプロキシがヘッダを付け直す前提で使う | 限界（ログに出ないもの・信頼できない値） | 説明 |
 
+## セキュリティヘッダ
+
+| カテゴリ | WHAT | WHY | 強制 |
+| --- | --- | --- | --- |
+| 値 | 応答に付けるセキュリティヘッダの値は `shared/security/security-headers.ts` の `SecurityHeaders` にだけ書く（`next.config.ts`・`proxy.ts` に値を直接書かない） | 2 つの規約ファイルは単体テストのカバレッジの外で、値を変えても気づけない（値そのものは `security-headers.test.ts` が固定する）。決定と採用しなかった案は ADR `docs/adr/architecture/20261003-security-headers-and-same-origin-api.md`（Issue #106） | レビュー |
+| 共通 | すべての応答（画面・API・静的ファイル）に `next.config.ts` の `headers()` で `SecurityHeaders.common()`（HSTS・nosniff・Referrer-Policy・X-Frame-Options・Permissions-Policy・COOP・CORP・COEP）を付け、`poweredByHeader: false` で `X-Powered-By` を消す | Proxy の matcher は静的ファイルを除くので、JS・CSS の応答には next.config でしか付けられない | `apps/e2e/spec/security-headers.feature` |
+| 共通 | CORP は `same-origin`、COEP は `require-corp`（COOP と合わせて画面が `crossOriginIsolated` になる）。外部の画像・フォント・スクリプトを足すときは、相手が CORP か CORS を返すかを確かめる | ほかのサイトから応答を読み込ませない（Spectre の入口を塞ぐ）。返さない外部のものは COEP で止まる。決定は ADR `docs/adr/quality/20261003-csp-evaluator-and-cross-origin-isolation.md`（Issue #379） | `apps/e2e/spec/security-headers.feature` |
+| CSP | 画面の応答（`page_request`）にだけ、`proxy.ts` が要求ごとの nonce（`SecurityHeaders.nonce`）を入れた `Content-Security-Policy` を付け、同じ値をリクエストヘッダにも載せる（Next が nonce を読んで自分のスクリプトに付ける）。`/api/**` には付けない。matcher で画面を除かない（拡張子の付いたパスも画面として描かれる。除くのは `/_next/static`・`/_next/image`・`favicon.ico` とプリフェッチだけ。`favicon.ico` は実物の `app/favicon.ico` を置き、404 の画面として描かせない） | 決まった値の nonce や `'unsafe-inline'` の script では、差し込まれたスクリプトが動く。matcher で除いた画面には CSP が付かない（`/todo/abc.x` で実測） | `apps/e2e/spec/security-headers.feature` |
+| CSP | 限界: ブラウザの文書の先読み（`purpose: prefetch`）は matcher の `missing` で除くので CSP が付かない（今の画面は出さない。未実測）。ビルド時に静的に出力される `_global-error` の画面の `<script>` は nonce を持たない（返る条件は未確認） | 限界（CSP が効かない経路） | 説明 |
+| CSP | 自前のインラインスクリプト（`DesignSystemHead` の配色のスクリプト）には、`app/layout.tsx` がリクエストヘッダ `x-nonce`（`NONCE_HEADER`）の nonce を渡して付ける | Next が自動で nonce を付けるのは自分のスクリプトだけで、付け忘れたスクリプトは CSP で止まる（E2E が止めた読み込みを数える） | `apps/e2e/spec/security-headers.feature` |
+| CSP | style-src は `'unsafe-inline'`（nonce にしない）。外へ送る先（img / font / connect）は `'self'` に絞る | Mantine は style 属性で見た目を付け、style-src に nonce を書くと style 属性が止まる | 説明 |
+| CSP | 外部のスクリプト・画像・フォントを足すときは、`SecurityHeaders.contentSecurityPolicy` の該当の行に送り先を足し、ADR の「見直す条件」に照らす | 送り先を広げると、差し込まれた CSS やスクリプトが外へ値を送れる先が増える | レビュー |
+| CSP | 本番の CSP は CSP Evaluator（npm `csp_evaluator`。既定と strict CSP の検査）で重大度 MEDIUM_MAYBE 以上の指摘を 0 件にする。除くのは古いブラウザ向けの 3 つ（`'self'` の SCRIPT_ALLOWLIST_BYPASS・UNSAFE_INLINE_FALLBACK・ALLOWLIST_FALLBACK）を種類と値で名指ししたものだけ。Trusted Types は入れない | 値の固定（toBe）は弱くなったかを判定しない。除く理由・Trusted Types を見送る理由は ADR `docs/adr/quality/20261003-csp-evaluator-and-cross-origin-isolation.md`。動いているアプリの受け身の検査は ZAP が分担する | `apps/frontend_customer/shared/security/security-headers.test.ts` |
+| 開発 | `'unsafe-eval'` は開発（`toolEnv.NODE_ENV` が `development`。`next dev`）のときだけ足す | React が開発時に eval を使う（Next の CSP の文書）。本番は使わない | `apps/frontend_customer/shared/security/security-headers.test.ts` |
+| CORS | API は同じオリジンの画面からだけ呼ぶ。`Access-Control-Allow-*` を返さず、別のオリジンのページからの書き込みは backend の `ProblemResponse.wrap` が 403 にする（`.claude/rules/code/backend.md` の「エラー応答」の表の「オリジン」） | CORS は応答を読ませないだけで、書き込みの要求そのものは届く（CSRF） | `apps/backend/shared/http/same-origin.test.ts` |
+
 ## クラスと命名
 
 | カテゴリ | WHAT | WHY | 強制 |
 | --- | --- | --- | --- |
 | クラス | `features/`・`shared/`・`test-support/` の React 以外のモジュール（`.ts` など。`*.tsx`・`*.jsx`・`*.hook.*` 以外）は、ファイルの最上位に関数を置かず、クラスのメソッド（状態が無ければ static だけのクラス。インスタンスで使うクラスには自分を返すファクトリ以外の static を置かない。規則 `no-static-in-instance-class`、Issue #300）にする。検査は `rule-tests/architecture.test.ts` の `class-based` | daiki の判断（2026-10-02「クラス必須でルールにして」）。backend・apps/shared と同じ形にそろえ、画面のテストの差し替えも `vi.mocked(TodoApi.list)` の形になる（`vi.mocked(Clock.now)` と同じ）。ADR `docs/adr/architecture/20261002-class-based-frontend-modules.md` | `rule-tests/architecture.test.ts` の `class-based`・`no-static-in-instance-class` |
-| クラス | 今あるもの: `TodoApi`（`list`・`get`・`create`・`rename`・`changeCompletion`・`delete`）・`ApiError`（`Error` を継承した例外のインスタンス。`status`・`type`・`key`・`params`・`errors`）・`ApiErrorMessage`（`toMessage`・`toMessages`）・`Locales`（`is`・`negotiate`・`fromHeader`）・`DateTimeFormatter`（`format`）・`RequestLogBuilder`（`build`）。定数（`SUPPORTED_LOCALES`・`LOCALE_HEADER` など）と型はクラスの外の値のまま | - | 説明 |
+| クラス | 今あるもの: `TodoApi`（`list`・`get`・`create`・`rename`・`changeCompletion`・`delete`）・`ApiError`（`Error` を継承した例外のインスタンス。`status`・`type`・`key`・`params`・`errors`）・`ApiErrorMessage`（`toMessage`・`toMessages`）・`Locales`（`is`・`negotiate`・`fromHeader`）・`DateTimeFormatter`（`format`）・`RequestLogBuilder`（`build`）・`SecurityHeaders`（`contentSecurityPolicy`・`nonce`・`common`）。定数（`SUPPORTED_LOCALES`・`LOCALE_HEADER` など）と型はクラスの外の値のまま | - | 説明 |
 | クラス | static だけのクラスの許可は `biome.json` の override（`.claude/rules/quality/lint.md`） | - | `biome.json` の `noStaticOnlyClass`、`rule-tests/lint.test.ts` の `noStaticOnlyClass` |
 | クラス | 対象外（関数のまま）: React の component（`*.tsx`・`*.jsx`。JSX を含むファイルの補助 `i18n.tsx` の `defineMessages`・`formatMessage` なども、ファイルごと外す）、hook（`*.hook.*`）、`app/` の下（Next の規約）、直下のファイル（`proxy.ts`・`instrumentation.ts`・`instrumentation-node.ts`・`next.config.ts`）。対象外の範囲を広げない | React と Next が関数の形を求める（クラスの component は非推奨、hook は Rules of Hooks、`proxy`・`register`・`page` の default export は規約）。`instrumentation-node.ts` は Vitest のカバレッジの対象外で、形を変えても単体テストで確かめられない | 説明 |
 | 命名 | ディレクトリ・ファイルは kebab-case（`todo-screen/`） | - | レビュー |

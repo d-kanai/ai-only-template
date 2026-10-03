@@ -1,0 +1,59 @@
+%% IAM（だれが・どの役割で・何に）。元: infra/modules/app/iam.tf・github_wif.tf・run.tf（作り直しはスキル infra-diagram）
+flowchart TB
+  classDef who fill:#eef1f4,stroke:#7b8794,color:#1d2622
+  classDef sa fill:#f3e8fd,stroke:#8430ce,color:#33134f
+  classDef res fill:#e3edfd,stroke:#1a73e8,color:#0b2a5b
+  classDef sec fill:#fef7e0,stroke:#e3a008,color:#4a3500
+  classDef data fill:#e6f4ea,stroke:#1e8e3e,color:#0d3b1e
+
+  subgraph L1["① デプロイ（GitHub Actions）"]
+    direction LR
+    gh(["deploy.yml の job<br/>repo・main・Environment が一致<br/>（repo id は設定したときだけ）"]):::who
+    wif{{"WIF<br/>pool github / provider github-actions"}}:::sa
+    deployer["SA github-deployer"]:::sa
+    ar1[("Artifact Registry app")]:::res
+    run1["Cloud Run の service / job<br/>（プロジェクト単位）"]:::res
+    rc1["SA run-frontend-customer"]:::sa
+    gh -- "OIDC トークン交換" --> wif
+    wif -- "iam.workloadIdentityUser" --> deployer
+    deployer -- "artifactregistry.writer" --> ar1
+    deployer -- "run.developer" --> run1
+    deployer -- "iam.serviceAccountUser（actAs）" --> rc1
+  end
+
+  subgraph L2["② アプリの実行"]
+    direction LR
+    rc["SA run-frontend-customer"]:::sa
+    customer["service frontend-customer"]:::res
+    migrate["job migrate"]:::res
+    s1["Secret database-url"]:::sec
+    sql2[("Cloud SQL<br/>（プロジェクト単位）")]:::data
+    rc -. "実行 ID" .-> customer & migrate
+    rc -- "secretmanager.secretAccessor" --> s1
+    rc -- "cloudsql.client" --> sql2
+  end
+
+  subgraph L3["③ Metabase の実行"]
+    direction LR
+    rm["SA run-metabase"]:::sa
+    metabase["service metabase<br/>+ Auth Proxy"]:::res
+    s23["Secret metabase-db-uri<br/>Secret metabase-encryption-key"]:::sec
+    sql3[("Cloud SQL<br/>（プロジェクト単位）")]:::data
+    rm -. "実行 ID" .-> metabase
+    rm -- "secretmanager.secretAccessor" --> s23
+    rm -- "cloudsql.client" --> sql3
+  end
+
+  subgraph L4["④ 外からのアクセス"]
+    direction LR
+    anyone(["allUsers"]):::who
+    pub["service frontend-customer<br/>service metabase"]:::res
+    human(["sql_iam_users<br/>Google アカウント"]):::who
+    sql4[("Cloud SQL app-db")]:::data
+    dsw(["Data Studio<br/>142.251.74.0/23"]):::who
+    anyone -- "run.invoker" --> pub
+    human -- "mcp.toolUser・cloudsql.studioUser<br/>cloudsql.viewer・cloudsql.instanceUser<br/>+ IAM の DB ユーザー" --> sql4
+    dsw -- "authorized network<br/>読み取り専用ユーザーは psql で作成" --> sql4
+  end
+
+  L1 ~~~ L2 ~~~ L3 ~~~ L4

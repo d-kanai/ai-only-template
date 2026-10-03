@@ -1,8 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type Dispatch,
+  type RefObject,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { useFeatureFlag } from "@/features/feature-flag";
 import {
   ApiErrorMessage,
   type ErrorMessages,
-} from "@/features/todo/api/api-error";
+} from "@/features/todo/api/api-error-message";
 import { type Todo, TodoApi } from "@/features/todo/api/todo-api";
 import { useLocale } from "@/shared/i18n/i18n";
 
@@ -11,16 +20,63 @@ import { useLocale } from "@/shared/i18n/i18n";
 //   翻訳に使う locale を useCallback の依存に入れずに済み、コールバックが作り直されない（下の依存配列の Stryker のコメントの前提）。
 type Failure = { reason: unknown };
 
+type SetFailure = Dispatch<SetStateAction<Failure | null>>;
+
+// WHY 一覧画面の hook を useTodoList・useReloadOnMount・useTodoMutations・useAddTodo に分ける（Issue #384）: 1 関数 50 行以内
+//   （Biome の complexity/noExcessiveLinesPerFunction）に収めるため。画面のディレクトリには hook のファイルを 1 つしか置けない
+//   （rule-tests/screen-outline.test.ts の screen-outline-placement）ので、同じファイルの中で分け、export するのは useTodoScreen だけにする。
+
 // 一覧画面の状態とイベント。見た目（todo-screen.tsx）はこの戻り値を描くだけにし、ロジックは renderHook で単体テストする。
 export function useTodoScreen() {
+  const locale = useLocale();
+  // 一覧から詳細画面へのリンクを出すか（フィーチャーフラグ todo-detail-screen。Issue #156）。
+  // WHY フラグで出し分ける: 詳細画面を出す・隠すを、コードを戻さずに backend の一覧（FEATURE_FLAGS）の切り替えだけで行えるようにする。
+  //   フラグの読み方（準備ができるまでは off で描く）は features/feature-flag/hooks/use-feature-flag.hook.ts。
+  const showsDetailLink = useFeatureFlag("todo-detail-screen");
+  const { todos, isLoading, failure, setFailure, reloadTodos } = useTodoList();
+  const { mutateAndReload, toggleTodo, removeTodo } = useTodoMutations(
+    reloadTodos,
+    setFailure,
+  );
+  const { newTitle, setNewTitle, addTodo } = useAddTodo(mutateAndReload);
+
+  // 失敗を、フォーム全体の文言（error。role="alert" で出す）と、入力の下に出す項目ごとの文言（fieldErrors）に分ける（Issue #144）。
+  // WHY 項目は "title" だけ: この画面の追加のフォームが描く入力は title だけ。ほかの項目の誤りは error に出る（api-error-message.ts の
+  //   ApiErrorMessage.toMessages）。
+  const errorMessages: ErrorMessages<"title"> =
+    failure === null
+      ? { form: null, fields: {} }
+      : ApiErrorMessage.toMessages(failure.reason, locale, ["title"]);
+
+  return {
+    todos,
+    isLoading,
+    showsDetailLink,
+    error: errorMessages.form,
+    fieldErrors: errorMessages.fields,
+    newTitle,
+    setNewTitle,
+    addTodo,
+    toggleTodo,
+    deleteTodo: removeTodo,
+  };
+}
+
+// 一覧と、その取得の状態（読み込み中・失敗）。reloadTodos で取り直す。
+//
+// mutation testing（Stryker）で、reloadTodos・effect・mutateAndReload・toggleTodo・removeTodo の依存配列の変異
+// （ArrayDeclaration）は、それぞれの依存配列の行だけ数えない（disable next-line）。
+// WHY: reloadTodos は依存が無い useCallback なので作り直されず、それを依存に持つ effect・mutateAndReload（と、
+//   mutateAndReload を依存に持つ toggleTodo・removeTodo）も作り直されない。依存配列を [] や別の定数に変えても
+//   挙動が変わらない（等価な変異。Issue #55）。依存配列の直前にコメントを置くため、配列を別の行に書いている。
+//   hook を分けたことで依存配列に入った latestListRequestRef（useRef）と setFailure（useState の setter）も作り直されない。
+function useTodoList() {
   const [todos, setTodos] = useState<Todo[]>([]);
   // 初回の取得が終わるまでは「空の一覧」と区別したいので true から始める。
   const [isLoading, setIsLoading] = useState(true);
-  const locale = useLocale();
   // todo-api は失敗時に ApiError を投げるが、fetch 自体の失敗（ネットワーク断）なども含め、catch には何が来るか型で保証されない。
-  // 画面には翻訳した文字列だけを渡す（ApiError 以外は固定の文言。api-error.ts の ApiErrorMessage.toMessages）。
+  // 画面には翻訳した文字列だけを渡す（ApiError 以外は固定の文言。api-error-message.ts の ApiErrorMessage.toMessages）。
   const [failure, setFailure] = useState<Failure | null>(null);
-  const [newTitle, setNewTitle] = useState("");
   // 一覧の GET の連番。最後に送った GET の応答だけを反映する。
   // WHY: 初回の GET と操作後の再取得は並行しうる（初回が遅いうちに追加する、など）。応答は送った順に返るとは限らず、
   //   先に送った初回の GET（追加前の一覧）が後から返ると、追加後の一覧を古い一覧で上書きしてしまう。
@@ -31,12 +87,6 @@ export function useTodoScreen() {
   // 後から別の GET を送っていた（この応答が古い）場合は、成功も失敗も反映せず true を返す。
   // 表示は新しい GET の結果に任せ、この取得の失敗を「操作の失敗」として扱わない（追加の入力を残す判断などに使うため）。
   // 成功したら前の操作のエラー表示は古い情報なので消す。
-  //
-  // mutation testing（Stryker）で、reloadTodos・effect・mutateAndReload・toggleTodo・removeTodo の依存配列の変異
-  // （ArrayDeclaration）は、それぞれの依存配列の行だけ数えない（disable next-line）。
-  // WHY: reloadTodos は依存が無い useCallback なので作り直されず、それを依存に持つ effect・mutateAndReload（と、
-  //   mutateAndReload を依存に持つ toggleTodo・removeTodo）も作り直されない。依存配列を [] や別の定数に変えても
-  //   挙動が変わらない（等価な変異。Issue #55）。依存配列の直前にコメントを置くため、配列を別の行に書いている。
   const reloadTodos = useCallback(
     async (): Promise<boolean> => {
       latestListRequestRef.current += 1;
@@ -60,7 +110,16 @@ export function useTodoScreen() {
     // Stryker disable next-line ArrayDeclaration: 依存の無い useCallback は、依存配列を別の定数にしても同じ（等価な変異）
     [],
   );
+  useReloadOnMount(reloadTodos, latestListRequestRef);
 
+  return { todos, isLoading, failure, setFailure, reloadTodos };
+}
+
+// 表示したときに一覧を取得し、unmount（や隠す）ときに送信中の GET を古い扱いにする。
+function useReloadOnMount(
+  reloadTodos: () => Promise<boolean>,
+  latestListRequestRef: RefObject<number>,
+) {
   useEffect(
     () => {
       void reloadTodos();
@@ -73,10 +132,16 @@ export function useTodoScreen() {
         latestListRequestRef.current += 1;
       };
     },
-    // Stryker disable next-line ArrayDeclaration: reloadTodos は作り直されないので [] でも同じ（等価な変異）
-    [reloadTodos],
+    // Stryker disable next-line ArrayDeclaration: reloadTodos と latestListRequestRef は作り直されないので [] でも同じ（等価な変異）
+    [reloadTodos, latestListRequestRef],
   );
+}
 
+// 変更系の操作（完了の切り替え・削除）と、その共通処理 mutateAndReload。
+function useTodoMutations(
+  reloadTodos: () => Promise<boolean>,
+  setFailure: SetFailure,
+) {
   // 変更系の操作の共通処理。操作の後は一覧を取り直す。
   // 変更のレスポンスで手元の一覧を書き換えることもできるが、並び順や他の変更の反映まで画面側で再現することになる。
   // サーバの一覧を正とし、画面側に一覧の組み立てロジックを持たせないため、毎回 GET で取り直す。
@@ -90,18 +155,9 @@ export function useTodoScreen() {
       }
       return reloadTodos();
     },
-    // Stryker disable next-line ArrayDeclaration: reloadTodos は作り直されないので [] でも同じ（等価な変異）
-    [reloadTodos],
+    // Stryker disable next-line ArrayDeclaration: reloadTodos と setFailure は作り直されないので [] でも同じ（等価な変異）
+    [reloadTodos, setFailure],
   );
-
-  const addTodo = useCallback(async () => {
-    // 空白だけの title はサーバで弾かれる入力なので、リクエストを送らずに止める。前後の空白は保存しない。
-    const title = newTitle.trim();
-    if (title === "") return;
-    const succeeded = await mutateAndReload(() => TodoApi.create({ title }));
-    // 失敗したときは入力を残し、直して再送できるようにする。
-    if (succeeded) setNewTitle("");
-  }, [newTitle, mutateAndReload]);
 
   const toggleTodo = useCallback(
     async (id: string, completed: boolean) => {
@@ -119,23 +175,23 @@ export function useTodoScreen() {
     [mutateAndReload],
   );
 
-  // 失敗を、フォーム全体の文言（error。role="alert" で出す）と、入力の下に出す項目ごとの文言（fieldErrors）に分ける（Issue #144）。
-  // WHY 項目は "title" だけ: この画面の追加のフォームが描く入力は title だけ。ほかの項目の誤りは error に出る（api-error.ts の
-  //   ApiErrorMessage.toMessages）。
-  const errorMessages: ErrorMessages<"title"> =
-    failure === null
-      ? { form: null, fields: {} }
-      : ApiErrorMessage.toMessages(failure.reason, locale, ["title"]);
+  return { mutateAndReload, toggleTodo, removeTodo };
+}
 
-  return {
-    todos,
-    isLoading,
-    error: errorMessages.form,
-    fieldErrors: errorMessages.fields,
-    newTitle,
-    setNewTitle,
-    addTodo,
-    toggleTodo,
-    deleteTodo: removeTodo,
-  };
+// 追加のフォームの入力と送信。
+function useAddTodo(
+  mutateAndReload: (mutate: () => Promise<unknown>) => Promise<boolean>,
+) {
+  const [newTitle, setNewTitle] = useState("");
+
+  const addTodo = useCallback(async () => {
+    // 空白だけの title はサーバで弾かれる入力なので、リクエストを送らずに止める。前後の空白は保存しない。
+    const title = newTitle.trim();
+    if (title === "") return;
+    const succeeded = await mutateAndReload(() => TodoApi.create({ title }));
+    // 失敗したときは入力を残し、直して再送できるようにする。
+    if (succeeded) setNewTitle("");
+  }, [newTitle, mutateAndReload]);
+
+  return { newTitle, setNewTitle, addTodo };
 }

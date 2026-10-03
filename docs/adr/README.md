@@ -86,6 +86,8 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-10-02 | backend/shared は層ではなく意味の単位（error / transaction / http / drizzle / change-log）で置き、feature からの参照を縛らない | 採用 | [20261002-backend-shared-colocated-by-meaning.md](architecture/20261002-backend-shared-colocated-by-meaning.md) |
 | 2026-10-02 | Writer の update は変更履歴の before に呼び出し側の origin を使い、before のために行を読み直さない | 採用 | [20261002-update-before-from-origin.md](architecture/20261002-update-before-from-origin.md) |
 | 2026-10-02 | インスタンスで使うクラスに static を置かない（自分を返すファクトリは除く） | 採用 | [20261002-no-static-in-instance-class.md](architecture/20261002-no-static-in-instance-class.md) |
+| 2026-10-02 | フィーチャーフラグは backend の 1 feature とし、一覧をコードにハードコードして boolean だけを OFREP の形で返す | 採用 | [20261002-feature-flag-ofrep-hardcoded.md](architecture/20261002-feature-flag-ofrep-hardcoded.md) |
+| 2026-10-03 | セキュリティヘッダを next.config と Proxy で付け、CSP は nonce にし、API は同じオリジンの画面からだけ書き込める形にする | 採用 | [20261003-security-headers-and-same-origin-api.md](architecture/20261003-security-headers-and-same-origin-api.md) |
 
 ### tech-stack/
 言語・ツール・ライブラリの選定
@@ -97,6 +99,8 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-09-28 | TypeScript は 7 系（7.0.2）を使う | 採用 | [20260928-typescript-7.md](tech-stack/20260928-typescript-7.md) |
 | 2026-09-30 | 本番は GCP の Cloud Run + Cloud SQL にし、Terraform は器だけを、イメージの入れ替えは GitHub Actions の gcloud を受け持つ | 採用 | [20260930-gcp-cloud-run-and-cloud-sql.md](tech-stack/20260930-gcp-cloud-run-and-cloud-sql.md) |
 | 2026-10-02 | migrate ジョブはアプリの runtime イメージをコマンド違いで動かし、マイグレーションは drizzle-orm の migrator を束ねた入口で当てる | 採用 | [20261002-migrate-job-same-runtime-image.md](tech-stack/20261002-migrate-job-same-runtime-image.md) |
+| 2026-10-03 | 依存の自動更新は Renovate（GitHub App）で行い、Dependabot は使わない | 採用 | [20261003-renovate-for-dependency-updates.md](tech-stack/20261003-renovate-for-dependency-updates.md) |
+| 2026-10-03 | Renovate の patch / minor の更新は CI が緑なら自動マージし、メジャーと Next.js / React は人が確かめる | 採用 | [20261003-renovate-automerge-patch-minor.md](tech-stack/20261003-renovate-automerge-patch-minor.md) |
 
 ### quality/
 品質ゲートとテストの方針
@@ -119,6 +123,11 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-10-02 | API ジャーニーの実行で全 API が 1 回は呼ばれることを API 網羅率として測り、100% を CI のゲートにする | 採用 | [20261002-api-journey-coverage-gate.md](quality/20261002-api-journey-coverage-gate.md) |
 | 2026-10-02 | ルール検査テストを .feature（`*` の箇条書き）と step の実装に分ける | 採用 | [20261002-rule-tests-in-feature.md](quality/20261002-rule-tests-in-feature.md) |
 | 2026-10-02 | コード・設計ルールのレビューは rules の表の「レビュー」の行を観点にし、検出 → 1 件ずつ検証 → 重大度で報告するスキルで行う | 採用 | [20261002-rule-review-from-rules-tables.md](quality/20261002-rule-review-from-rules-tables.md) |
+| 2026-10-03 | 依存の脆弱性は ci ジョブの pnpm audit（high 以上で失敗）で検査し、CodeQL は入れない | 採用 | [20261003-pnpm-audit-in-ci.md](quality/20261003-pnpm-audit-in-ci.md) |
+| 2026-10-03 | 依存パッケージのライセンスを、pnpm licenses list と許可リストのルール検査テストで CI に止めさせる | 採用 | [20261003-dependency-license-allow-list.md](quality/20261003-dependency-license-allow-list.md) |
+| 2026-10-03 | セキュリティの検査は gitleaks・actionlint・zizmor・hadolint・Trivy・Semgrep を digest で固定した Docker イメージで、コミットフックと CI で動かす | 採用 | [20261003-security-scan-tools.md](quality/20261003-security-scan-tools.md) |
+| 2026-10-03 | 動いているアプリのセキュリティの検査は、E2E を ZAP のプロキシ経由で流し、受け身の検査の警告で CI を落とす | 採用 | [20261003-zap-passive-scan-via-e2e.md](quality/20261003-zap-passive-scan-via-e2e.md) |
+| 2026-10-03 | CSP は単体テストで CSP Evaluator に評価させ、すべての応答に CORP と COEP を足す | 採用 | [20261003-csp-evaluator-and-cross-origin-isolation.md](quality/20261003-csp-evaluator-and-cross-origin-isolation.md) |
 
 ### workflow/
 開発プロセス・環境・AI エージェントの運用
@@ -143,3 +152,5 @@ ADR は分類ごとのディレクトリに置く。分類は次の 4 つだけ�
 | 2026-10-02 | 常時読み込む要点を .claude/general から .claude/rules/workflow に移し、rules を分類のサブディレクトリに分ける | 採用 | [20261002-always-loaded-rules-in-rules-workflow.md](workflow/20261002-always-loaded-rules-in-rules-workflow.md) |
 | 2026-10-02 | .claude/rules/code の規則はカテゴリ・WHAT・WHY・強制の 4 列の表で書き、何が止めるかを行ごとに示す | 採用 | [20261002-code-rules-as-tables.md](workflow/20261002-code-rules-as-tables.md) |
 | 2026-10-02 | rule-review は PR を作った後に回し、結果を PR のレビュー（行コメントとまとめ）に残してから直す | 採用 | [20261002-rule-review-results-on-pr.md](workflow/20261002-rule-review-results-on-pr.md) |
+| 2026-10-02 | main に前回のレビュー以降に入った差分を、GitHub Actions の Claude Code で日次セキュリティレビューする | 採用 | [20261002-daily-security-review-in-actions.md](workflow/20261002-daily-security-review-in-actions.md) |
+| 2026-10-03 | ヘルスチェックは DB まで見る 1 本の GET /api/health にし、停止は Next.js の標準のシグナル処理に任せる | 採用 | [20261003-health-check-and-shutdown.md](architecture/20261003-health-check-and-shutdown.md) |

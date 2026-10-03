@@ -1,0 +1,5 @@
+# ZAP の警告のうち、許容するもの（scripts/security/scan.sh の zap-alerts が読む。Issue #364）。
+# 1 行 = alertRef<TAB>WHY（なぜ問題でないか）。WHY の無い行は zap-alerts が誤りにする。
+# alertRef は ZAP の出力の 2 列目（例: 10055-6）。pluginId（10055）で外さない（同じ規則の別の問題まで通るため）。
+# 規則の一覧と説明: https://www.zaproxy.org/docs/alerts/<alertRef>/
+10055-6	CSP の style-src の 'unsafe-inline'。Mantine（デザインシステム）は部品の見た目を style 属性で付けるので、止めると画面が崩れる。style-src に nonce を書くと 'unsafe-inline' が無視されて style 属性が止まる（CSP Level 3）。script-src は nonce と 'strict-dynamic' で守っている（apps/frontend_customer/shared/security/security-headers.ts。Issue #106）。

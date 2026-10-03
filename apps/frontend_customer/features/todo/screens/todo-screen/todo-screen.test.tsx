@@ -6,6 +6,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { useFeatureFlag } from "@/features/feature-flag";
 import { TodoScreen } from "@/features/todo";
 import { ApiError } from "@/features/todo/api/api-error";
 import { TodoApi } from "@/features/todo/api/todo-api";
@@ -18,12 +19,16 @@ import { todoScreenMessages } from "./todo-screen.messages";
 // 画面は「hook の状態を描き、操作を hook に渡す」ことを検証する。API は差し替え、操作の結果として呼ばれたかで見る。
 // 再取得などの細かいロジックは todo-screen.hook.test.ts で固定している。
 vi.mock("@/features/todo/api/todo-api");
+// フィーチャーフラグ（Issue #156）は feature-flag feature の公開 API（index）で差し替える（WHY は todo-screen.hook.test.ts の同じ箇所）。
+vi.mock("@/features/feature-flag");
 
 // globals 無効のため Testing Library の自動 cleanup が働かない。テストごとに DOM を片付ける。
 afterEach(cleanup);
 
 beforeEach(() => {
   vi.resetAllMocks();
+  // 本番の一覧と同じく詳細画面のフラグは on を前提にする（off は「詳細画面のフラグが off なら」のテスト）。
+  vi.mocked(useFeatureFlag).mockReturnValue(true);
 });
 
 const milk = {
@@ -147,6 +152,19 @@ test("一覧の行の title は、詳細画面 /todo/<id> へのリンクとし�
       "href",
     ),
   ).toBe("/todo/todo-1");
+});
+
+test("詳細画面のフラグが off なら、一覧の行の title はリンクにせず文字だけで表示する", async () => {
+  // given
+  vi.mocked(TodoApi.list).mockResolvedValue({ todos: [milk] });
+  vi.mocked(useFeatureFlag).mockReturnValue(false);
+
+  // when
+  render(<TodoScreen />, { wrapper: JaLocale });
+
+  // then
+  expect(await screen.findByText("牛乳を買う")).toBeDefined();
+  expect(screen.queryByRole("link")).toBeNull();
 });
 
 test("一覧の行の完了チェックボックスは、Todo の completed を反映する", async () => {

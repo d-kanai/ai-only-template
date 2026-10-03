@@ -2,6 +2,8 @@
   "name": "@repo/backend",
   "private": true,
   "exports": {
+    "./features/feature-flag/internal/presentation/*.api": "./features/feature-flag/internal/presentation/*.api.ts",
+    "./features/health/internal/presentation/*.api": "./features/health/internal/presentation/*.api.ts",
     "./features/todo/internal/presentation/*.api": "./features/todo/internal/presentation/*.api.ts",
     "./shared/http/problem": "./shared/http/problem.ts"
   },

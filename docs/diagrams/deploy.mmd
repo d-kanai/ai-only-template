@@ -1,0 +1,32 @@
+%% デプロイの流れ。元: .github/workflows/deploy.yml と ci.yml（作り直しはスキル infra-diagram）
+flowchart TB
+  classDef trig fill:#eef1f4,stroke:#7b8794,color:#1d2622
+  classDef step fill:#e3edfd,stroke:#1a73e8,color:#0b2a5b
+  classDef gcp fill:#e6f4ea,stroke:#1e8e3e,color:#0d3b1e
+  classDef stop fill:#fce8e6,stroke:#d93025,color:#5c0f0a
+
+  pr(["PR"]):::trig --> ci["ci.yml<br/>lint・typecheck・test（required check）"]:::step
+  ci -- "緑なら merge" --> main(["main へ push"]):::trig
+  manual(["手動実行 workflow_dispatch<br/>stg か prod を選ぶ"]):::trig
+
+  main -- "stg" --> cfg
+  manual -- "stg / prod（prod は required reviewers を付けたら承認待ち）" --> cfg
+  main -. "同時に走る" .-> ci2["ci.yml（main）"]:::step
+
+  subgraph DEPLOY["deploy.yml の job deploy（main のときだけ）"]
+    cfg{"Environment に<br/>GCP_WIF_PROVIDER がある？"}
+    skip["スキップして成功扱い"]:::stop
+    auth["WIF で github-deployer になる"]:::step
+    b1["runtime イメージ（アプリと migrate で共用）を build & push"]:::step
+    v1["test-support が入っていないか検査"]:::step
+    j1["gcloud run jobs update<br/>job を同じ image + node migrate/migrate.mjs に"]:::step
+    j2["gcloud run jobs execute --wait<br/>= マイグレーション"]:::gcp
+    d1["gcloud run deploy<br/>新しいリビジョン"]:::gcp
+    d2["update-traffic --to-latest"]:::gcp
+    fail["止まる（どの step の失敗でも同じ）<br/>service は古いまま"]:::stop
+
+    cfg -- no --> skip
+    cfg -- yes --> auth --> b1 --> v1 --> j1 --> j2
+    j2 -- 成功 --> d1 --> d2
+    j2 -- 失敗 --> fail
+  end

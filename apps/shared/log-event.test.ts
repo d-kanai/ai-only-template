@@ -1,12 +1,9 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import {
-  FreeTextMask,
-  LOG_EVENT_NAMES,
-  LOG_EVENT_SCHEMAS,
-  LogFieldMarks,
-} from "./log-event";
+import { FreeTextMask } from "./free-text-mask";
+import { LOG_EVENT_NAMES, LOG_EVENT_SCHEMAS } from "./log-event";
+import { LogFieldMarks } from "./log-field-marks";
 
 // ログの種類（event.name）ごとのスキーマと、マスクの印（sensitive / freeText）の仕様（Issue #216）。
 // 行の出力（logger.emit を通した 1 行。番兵の値が出ないこと・一覧に無いキーが落ちること・parse の失敗）は logger.test.ts。
@@ -30,6 +27,7 @@ describe("LOG_EVENT_NAMES（event.name の一覧）", () => {
       "db_write",
       "db_pool_error",
       "server_error",
+      "health_check",
       "app_start_failed",
       "notification",
       "logger_error",

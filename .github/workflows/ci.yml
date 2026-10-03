@@ -22,6 +22,12 @@ permissions:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    # timeout-minutes: job 全体の上限（分）。超えると GitHub が job を止めて失敗にする。書かないと既定の 360 分まで止まらない。
+    # WHY 30 分: 直近 100 回の実行（2026-10-02、`gh run list --workflow ci.yml --limit 100`）の成功 93 回の所要時間は
+    #   最短 101 秒・中央値 145 秒・最長 207 秒（約 3.5 分）。テストや E2E が増えても余裕のある上限にし、テストの無限ループや
+    #   Postgres・サーバの待ちの固まりで Actions の分数を食い続けないようにする（Issue #351。.claude/rules/tooling/github-actions.md）。
+    #   rule-tests/github-actions.test.ts の job-timeout がすべての job にあることを検査する。
+    timeout-minutes: 30
     env:
       # next build が Vercel に匿名テレメトリを送るのを止める（CI から外部に送る必要がない）。
       NEXT_TELEMETRY_DISABLED: "1"
@@ -31,18 +37,41 @@ jobs:
       # WHY: 下の作業ログの検査（check-work-logs-diff.sh）が `origin/<base>...HEAD` の三点 diff で PR の変更だけを見るため、
       #   base ブランチ（origin/main）と、HEAD との分岐点（merge-base）までの履歴が要る。浅い履歴では分岐点が求まらず失敗する。
       #   rule-tests/work-logs-check.test.ts がこの値を検査する。
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+          # persist-credentials: false: checkout が GITHUB_TOKEN を .git/config に残さない（以降のステップは git で push / fetch しない）。
+          #   WHY: 残すと後のステップ・アーティファクトから読まれうる（zizmor の artipacked。Issue #362）。
+          persist-credentials: false
 
       # PR の差分に作業ログ（docs/work-logs/*.md）の変更が無ければ失敗させる（Issue #64。置き場所は Issue #101。.claude/rules/tooling/work-log-hooks.md）。
-      # WHY: 調査だけの依頼などで作業ログの追記が漏れた。文書だけの PR も例外にしない（ユーザー判断）。
+      # WHY: 調査だけの依頼などで作業ログの追記が漏れた。文書だけの PR も例外にしない（ユーザー判断）。例外は、作者が renovate[bot] で
+      #   依存のファイルだけを変えた PR だけ（スクリプトがイベントの JSON から判定する。Issue #111）。
       # WHY pull_request のときだけ: main への push では github.base_ref が空で、比べる base が無い。
       # WHY 最初に置く: install も Postgres も要らない検査（runner にある node だけを使う。Issue #178）なので、準備より先に、原因の分かる
       #   メッセージで止める。rule-tests/work-logs-check.test.ts が「pnpm lint より前」「if・continue-on-error・失敗を打ち消す書き方が無い」を検査する。
+      # WHY base_ref を env で渡す: run に式を直接書くと、式の値がシェルのコードとして展開される（zizmor の template-injection。
+      #   Issue #362）。env の値はシェルの変数として読まれ、コードにならない。
       - name: Check docs/work-logs in PR diff
         if: github.event_name == 'pull_request'
-        run: bash scripts/hooks/check-work-logs-diff.sh origin/${{ github.base_ref }}
+        run: bash scripts/hooks/check-work-logs-diff.sh "origin/$BASE_REF"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+
+      # セキュリティの検査（Issue #362）。手元の lefthook のフック（pre-commit / pre-push）と同じ scripts/security/scan.sh を、
+      #   最後の砦としてここでも動かす（フックは --no-verify や Docker の止まった環境で飛ばされうる）。どれも digest で固定した Docker
+      #   イメージで動く（ubuntu-latest のランナーには Docker がある）。WHY install より前: Node も依存も要らないので、原因の分かる
+      #   メッセージで早く止める。WHY ci ジョブの中: required status check は ci だけ（pnpm audit と同じ理由）。
+      #   rule-tests/security-scan.test.ts が、この 6 つのステップがあり if・continue-on-error・失敗を打ち消す書き方が無いことを検査する。
+      #   規則・誤検知の抑え方は .claude/rules/tooling/security-scan.md。
+      # gitleaks-history: 全履歴の秘密情報（PR の途中のコミットで入れて後で消したものも見る。上の checkout は fetch-depth: 0）。
+      - run: bash scripts/security/scan.sh gitleaks-history
+      - run: bash scripts/security/scan.sh actionlint
+      - run: bash scripts/security/scan.sh zizmor
+      # hadolint: 引数なしで、git が追跡しているすべての Dockerfile（node_modules などの追跡外は見ない）。
+      - run: bash scripts/security/scan.sh hadolint
+      - run: bash scripts/security/scan.sh trivy-config
+      - run: bash scripts/security/scan.sh semgrep
 
       # Node の版は .tool-versions が正（.claude/rules/tooling/env.md）。ワークフローに直書きせず、nodejs 行から読む。
       - name: Read Node.js version from .tool-versions
@@ -50,15 +79,25 @@ jobs:
 
       # pnpm の版は package.json の packageManager から取る（version を省略すると pnpm/action-setup が packageManager を読む）。
       # setup-node の cache: pnpm より先に pnpm を入れておく必要がある。
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
       # --frozen-lockfile: lockfile と package.json がずれていたら更新せず失敗させる（.claude/rules/tooling/dependencies.md）。
       - run: pnpm install --frozen-lockfile
+
+      # 依存（lockfile のすべてのパッケージ。devDependencies を含む）の既知の脆弱性を、npm レジストリの advisory で検査する（Issue #112）。
+      # --audit-level high: high と critical があれば失敗する（moderate / low は表示もしない）。WHY high: 2026-10-03 の実測で moderate が
+      #   4 件（Stryker の推移的依存の qs など、開発時だけ使うもの）あり、moderate で止めると修正できるまで全 PR が止まる。
+      #   決定と minimumReleaseAge（5 日）との関係・誤検知の抑え方（pnpm-workspace.yaml の auditConfig.ignoreGhsas）は
+      #   ADR docs/adr/quality/20261003-pnpm-audit-in-ci.md。
+      # WHY ci ジョブの中: Ruleset protect-main の required status check は ci だけなので、ここに置けば high が残る PR はマージできない。
+      # WHY --ignore-registry-errors を付けない: レジストリが落ちたときに検査を飛ばして緑にしない（検査できないなら赤にする）。
+      # rule-tests/github-actions.test.ts の auditsDependencies がこの形（ci ジョブ・コマンドの完全一致・if と continue-on-error なし）を検査する。
+      - run: pnpm audit --audit-level high
 
       # 開発用の PostgreSQL を compose.yaml で起動する（Issue #51）。
       # WHY GitHub Actions の services: を使わないか: 手元・クラウドセッションと同じ compose.yaml を使い、
@@ -128,4 +167,10 @@ jobs:
       #   apps/e2e/playwright.config.ts が .env の DATABASE_URL（env.ts）を webServer に渡し、Postgres で動かす。
       #   上の pnpm build の成果物を使い回さず build し直すが、ローカルと同じコマンドで動かすことを優先する（単純さのため）。
       # CI=true（GitHub Actions の既定）なので reuseExistingServer は無効になり、必ずこのコードでサーバを新しく起動する。
-      - run: pnpm test:e2e
+      # WHY scan.sh zap-e2e から流す（Issue #364）: E2E を流すことをセキュリティの検査にする（daiki の判断 2026-10-03）。scan.sh が
+      #   ZAP（digest で固定した Docker イメージ）をプロキシとして起動し、E2E_PROXY を渡して pnpm test:e2e を実行する。E2E が実際に
+      #   触った画面と API の応答を ZAP の受け身の検査（passive scan）にかけ、Low 以上の警告（scripts/security/zap-ignore.tsv で
+      #   理由を書いて外したものを除く）か E2E の失敗で、このステップが赤になる。E2E は 1 回だけ流れる。
+      #   決定は ADR docs/adr/quality/20261003-zap-passive-scan-via-e2e.md。rule-tests/security-scan.test.ts の ci-scan が、
+      #   このステップが ci job に run だけの形であることを検査する。
+      - run: bash scripts/security/scan.sh zap-e2e

@@ -29,6 +29,11 @@ describe("EnglishProblemDetail.of", () => {
       { id: "8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e" },
       "Todo 8d0f4f39-6f0b-4a39-9d53-0a3f8b1c2d4e was not found.",
     ],
+    [
+      "featureFlag.notFound",
+      { key: "todo-detail-screen" },
+      "Feature flag todo-detail-screen was not found.",
+    ],
     ["request.body.notJson", undefined, "Request body must be valid JSON."],
     [
       "request.body.notObject",
@@ -45,6 +50,11 @@ describe("EnglishProblemDetail.of", () => {
       "request.field.notBoolean",
       { path: "completed" },
       "completed must be a boolean.",
+    ],
+    [
+      "request.origin.forbidden",
+      undefined,
+      "Requests from other origins are not allowed.",
     ],
     ["server.internalError", undefined, "Internal server error."],
   ])("%s は params を埋め込んだ英語の文にする", (key, params, expected) => {

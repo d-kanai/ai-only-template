@@ -31,6 +31,7 @@ export function TodoScreen() {
   const {
     todos,
     isLoading,
+    showsDetailLink,
     error,
     fieldErrors,
     newTitle,
@@ -52,6 +53,7 @@ export function TodoScreen() {
       <TodoListSection
         todos={todos}
         isLoading={isLoading}
+        showsDetailLink={showsDetailLink}
         onToggle={(id, completed) => void toggleTodo(id, completed)}
         onDelete={(id) => void deleteTodo(id)}
       />
@@ -102,6 +104,7 @@ function ErrorSection({ error }: { error: string | null }) {
 type TodoListSectionProps = {
   todos: Todo[];
   isLoading: boolean;
+  showsDetailLink: boolean;
   onToggle: (id: string, completed: boolean) => void;
   onDelete: (id: string) => void;
 };
@@ -109,6 +112,7 @@ type TodoListSectionProps = {
 function TodoListSection({
   todos,
   isLoading,
+  showsDetailLink,
   onToggle,
   onDelete,
 }: TodoListSectionProps) {
@@ -123,6 +127,7 @@ function TodoListSection({
           <TodoItem
             key={todo.id}
             todo={todo}
+            showsDetailLink={showsDetailLink}
             onToggle={onToggle}
             onDelete={onDelete}
           />
@@ -134,6 +139,8 @@ function TodoListSection({
 
 type TodoItemProps = {
   todo: Todo;
+  // 詳細画面へのリンクを出すか（フィーチャーフラグ todo-detail-screen。false なら title を文字だけで出す）。
+  showsDetailLink: boolean;
   // 切り替え後の値を渡す。呼び出し側が現在値を反転する処理を持たずに済み、PUT の body にそのまま使える。
   onToggle: (id: string, completed: boolean) => void;
   onDelete: (id: string) => void;
@@ -147,7 +154,12 @@ type TodoItemProps = {
 // 各コントロールには title を含む aria-label を付ける。一覧では同じ「削除」ボタンが行の数だけ並ぶため、
 // スクリーンリーダーでもテストでも、どの Todo の操作かを名前で区別できるようにする。
 // （<label htmlFor> で結び付けると固定 id が必要になり、同じ部品を複数回描くと id が重複するため使わない）
-function TodoItem({ todo, onToggle, onDelete }: TodoItemProps) {
+function TodoItem({
+  todo,
+  showsDetailLink,
+  onToggle,
+  onDelete,
+}: TodoItemProps) {
   const t = useT(todoScreenMessages);
   const locale = useLocale();
   // 作成日時はブラウザ（利用者）のタイムゾーンで出す。サーバは UTC で動く（package.json の TZ=UTC）ので、サーバで決めると
@@ -162,7 +174,11 @@ function TodoItem({ todo, onToggle, onDelete }: TodoItemProps) {
         checked={todo.completed}
         onChange={(completed) => onToggle(todo.id, completed)}
       />
-      <Link href={`/todo/${encodeURIComponent(todo.id)}`}>{todo.title}</Link>
+      {showsDetailLink ? (
+        <Link href={`/todo/${encodeURIComponent(todo.id)}`}>{todo.title}</Link>
+      ) : (
+        <Text>{todo.title}</Text>
+      )}
       <Time dateTime={todo.createdAt}>
         {DateTimeFormatter.format(todo.createdAt, locale, timeZone)}
       </Time>

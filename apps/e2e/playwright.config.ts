@@ -33,6 +33,16 @@ const baseURL = `http://localhost:${port}`;
 //   CI では未設定にし、playwright install で入れた、版の合ったブラウザを使う。
 const chromiumExecutable = toolEnv.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
 
+// ブラウザ（page）と API の呼び出し（request）の通信を通すプロキシ（toolEnv.E2E_PROXY。無いのが正常）。
+// WHY: CI は scripts/security/scan.sh zap-e2e が ZAP をプロキシとして起動し、この変数を渡して E2E を流す。E2E が実際に触った
+//   画面と API の応答を ZAP の受け身の検査（passive scan）にかけ、E2E を流すことをセキュリティの検査にする（Issue #364。
+//   ADR docs/adr/quality/20261003-zap-passive-scan-via-e2e.md）。未設定なら use.proxy を付けず、プロキシを通さない。
+// localhost も通る: Playwright 1.63.0 は proxy を渡すと Chromium に --proxy-bypass-list=<-loopback> を足し、Chromium が既定で
+//   プロキシを飛ばす localhost の通信もプロキシに送る（playwright-core の coreBundle.js の shouldProxyLoopback。2026-10-03 に
+//   ZAP の記録で webServer と記録用のサーバの両方の通信が載ることを確かめた）。
+// webServer の起動待ち（url への問い合わせ）はテストのランナーが直接行い、プロキシを通らない。
+const proxy = toolEnv.E2E_PROXY;
+
 // サーバ（next start）とテスト（apps/e2e/support/database.ts）が使う Postgres の接続先。env.ts が .env / 環境変数から読んで検証した値で、
 // 欠けていれば env.ts の読み込み（この設定ファイルの読み込み）で、サーバを起動する前に失敗する。
 // WHY webServer に明示的に渡す: next start は自分でも .env を読むが、コマンドの前に付けた DATABASE_URL（環境変数）で
@@ -92,6 +102,8 @@ export default defineConfig({
     //   WHY サーバ（UTC）と違う Asia/Tokyo にする: 日時はブラウザのタイムゾーンで表示する（todo-screen.tsx の TodoItem）。サーバと同じ UTC だと、
     //   サーバのタイムゾーンで表示してしまう誤りを見逃す。
     timezoneId: "Asia/Tokyo",
+    // proxy: E2E_PROXY があるときだけ付ける（上の WHY）。
+    ...(proxy === undefined ? {} : { proxy: { server: proxy } }),
   },
   projects: [
     {

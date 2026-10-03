@@ -11,7 +11,8 @@ import {
   test,
   vi,
 } from "vitest";
-import { DotEnvFile, EnvReader, env, toolEnv } from "./env";
+import { DotEnvFile, env, toolEnv } from "./env";
+import { EnvReader } from "./env-reader";
 
 // 必須の変数がすべて正しい値で揃った source。各テストはここから 1 つずつ崩して使う。
 const VALID = {
@@ -240,6 +241,8 @@ describe("EnvReader.readTool", () => {
       PLAYWRIGHT_CHROMIUM_EXECUTABLE: undefined,
       STRYKER_MUTATOR_WORKER: false,
       E2E_PORT: undefined,
+      NODE_ENV: undefined,
+      E2E_PROXY: undefined,
     });
   });
 
@@ -341,6 +344,31 @@ describe("EnvReader.readTool", () => {
 
     // then
     expect(flags.STRYKER_MUTATOR_WORKER).toBe(expected);
+  });
+
+  test.each([
+    ["development", "development"],
+    ["production", "production"],
+    ["", undefined],
+  ])("NODE_ENV=%s なら %s", (value, expected) => {
+    // given: 前提なし（value は test.each の引数）
+    // when
+    const flags = EnvReader.readTool({ NODE_ENV: value });
+
+    // then
+    expect(flags.NODE_ENV).toBe(expected);
+  });
+
+  test.each([
+    ["http://127.0.0.1:8090", "http://127.0.0.1:8090"],
+    ["", undefined],
+  ])("E2E_PROXY=%s なら %s", (value, expected) => {
+    // given: 前提なし（value は test.each の引数）
+    // when
+    const flags = EnvReader.readTool({ E2E_PROXY: value });
+
+    // then
+    expect(flags.E2E_PROXY).toBe(expected);
   });
 });
 
@@ -535,6 +563,8 @@ describe("env / toolEnv（モジュールを読み込んだ時点の値）", () 
     vi.stubEnv("STRYKER_MUTATOR_WORKER", "1");
     vi.stubEnv("PLAYWRIGHT_CHROMIUM_EXECUTABLE", "/opt/pw-browsers/chromium");
     vi.stubEnv("E2E_PORT", "3456");
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("E2E_PROXY", "http://127.0.0.1:8090");
     vi.resetModules();
 
     // when
@@ -546,6 +576,8 @@ describe("env / toolEnv（モジュールを読み込んだ時点の値）", () 
       PLAYWRIGHT_CHROMIUM_EXECUTABLE: "/opt/pw-browsers/chromium",
       STRYKER_MUTATOR_WORKER: true,
       E2E_PORT: 3456,
+      NODE_ENV: "development",
+      E2E_PROXY: "http://127.0.0.1:8090",
     });
   });
 

@@ -1,7 +1,10 @@
 import { test as base } from "playwright-bdd";
 import { ApiErrorSteps } from "../spec/api-error.steps";
+import { FeatureFlagSteps } from "../spec/feature-flag.steps";
+import { HealthSteps } from "../spec/health.steps";
 import { I18nSteps } from "../spec/i18n.steps";
 import { RequestLogSteps } from "../spec/request-log.steps";
+import { SecurityHeadersSteps } from "../spec/security-headers.steps";
 import { SharedSteps } from "../spec/shared.steps";
 import { TodoSteps } from "../spec/todo.steps";
 import { E2eLogServer } from "./log-server";
@@ -24,7 +27,10 @@ export const test = base.extend<
     todoSteps: TodoSteps;
     i18nSteps: I18nSteps;
     apiErrorSteps: ApiErrorSteps;
+    featureFlagSteps: FeatureFlagSteps;
+    healthSteps: HealthSteps;
     requestLogSteps: RequestLogSteps;
+    securityHeadersSteps: SecurityHeadersSteps;
   },
   { logServer: E2eLogServer }
 >({
@@ -49,6 +55,15 @@ export const test = base.extend<
   },
   apiErrorSteps: async ({ request }, use) => {
     await use(new ApiErrorSteps(request));
+  },
+  featureFlagSteps: async ({ page, request }, use) => {
+    await use(new FeatureFlagSteps(page, request));
+  },
+  healthSteps: async ({ request }, use) => {
+    await use(new HealthSteps(request));
+  },
+  securityHeadersSteps: async ({ page, request }, use) => {
+    await use(new SecurityHeadersSteps(page, request));
   },
   // WHY 記録を取るサーバを worker の fixture にする: 起動（next start）に数秒かかるので、シナリオごとではなく worker で 1 回にする
   //   （以前の request-log.spec.ts の beforeAll / afterAll と同じ）。fixture は使う step があるときだけ作られるので、アクセスの記録

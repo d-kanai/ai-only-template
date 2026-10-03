@@ -33,9 +33,12 @@ jobs:
     # GitHub Actions は CI=true を既定で設定するので、pnpm install の lefthook postinstall はフックを入れない（.claude/rules/quality/lint.md）。
     steps:
       # ref: main: schedule は既定ブランチで動くが、workflow_dispatch で別ブランチを選んだときも main を検査するように明示する。
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: main
+          # persist-credentials: false: checkout が GITHUB_TOKEN を .git/config に残さない（以降のステップは git で push / fetch しない）。
+          #   WHY: 残すと後のステップ・アーティファクトから読まれうる（zizmor の artipacked。Issue #362）。
+          persist-credentials: false
 
       # Node / pnpm の版の取り方は ci.yml と同じ（.claude/rules/tooling/env.md）。
       # Node の版は .tool-versions が正。ワークフローに直書きせず、nodejs 行から読む。
@@ -44,9 +47,9 @@ jobs:
 
       # pnpm の版は package.json の packageManager から取る（version を省略すると pnpm/action-setup が packageManager を読む）。
       # setup-node の cache: pnpm より先に pnpm を入れておく必要がある。
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -88,7 +91,7 @@ jobs:
       # retention-days: 30: 1 か月分の推移を見られる程度に残し、それより古いものは自動で消す。
       # if-no-files-found: warn（既定）: Stryker が起動前に失敗してレポートが無いときは、このステップでは失敗させない
       #   （失敗は pnpm test:mutation のステップで分かる）。
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: mutation-report
